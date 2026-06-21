@@ -3,6 +3,8 @@ import type { ValidationIssue } from "./types";
 export type FrameworkErrorCode =
   | "DOCTYPE_NOT_FOUND"
   | "DOCTYPE_DUPLICATE"
+  | "JOB_NOT_FOUND"
+  | "JOB_DUPLICATE"
   | "DOCUMENT_NOT_FOUND"
   | "DOCUMENT_CONFLICT"
   | "DOCUMENT_DELETED"

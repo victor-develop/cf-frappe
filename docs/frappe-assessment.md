@@ -33,13 +33,15 @@ That model is powerful, but it is not event-sourcing first. cf-frappe keeps the 
 | Audit trail | document versioning/activity | append-only events plus model-declared domain commands |
 | Current reads | SQL document tables | D1/in-memory projections plus metadata-planned D1 indexes |
 | Workflow | Workflow DocType | metadata transitions and transition events |
+| Background jobs | scheduler and queue workers | basic `JobRegistry`, queue dispatch/consume, and Cron mapping |
 | Cloudflare runtime | not native | Worker, D1, Durable Object command routing |
 
 ## Current Gaps
 
 - Generated Desk UI now covers basic list/form pages. Report builder, print views, richer admin tools, saved filters, and client scripting are not implemented.
 - DocType metadata currently plans D1 projection indexes, but does not yet manage a full migration lifecycle.
-- Background jobs, scheduler events, realtime notifications, and WebSocket channels are not implemented.
+- Background jobs now have basic Queue/Cron support, but durable dashboards, job result storage, worker pools, retry administration, and scheduler admin views are not implemented.
+- Realtime notifications and WebSocket channels are not implemented.
 - Auth providers and session management are intentionally left as adapter seams; no default trusted resolver is provided.
 - File storage and attachments should use R2 but are not implemented.
 - There is no installable CLI yet.

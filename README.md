@@ -13,6 +13,7 @@ The current slice is a working kernel:
 - Durable Object coordinator factory for serial per-aggregate command processing
 - D1 projection-index planner from DocType `indexes`
 - generated Desk list/form UI from DocType metadata
+- Cloudflare Queue/Cron background job primitives
 - a runnable `Task` example under `examples/todos`
 
 ## Why
@@ -27,6 +28,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | Hooks/controllers | pure hook contracts registered in `ModelRegistry` |
 | REST resources | generated `/api/resource/:doctype` routes |
 | Desk list/forms | generated `/desk` pages from DocType metadata |
+| Background jobs | `JobRegistry`, Queue producers/consumers, and Cron dispatch |
 | Database tables | D1 append-only events plus current projections |
 | Concurrency boundary | Durable Object command coordinator per aggregate stream |
 
@@ -136,6 +138,54 @@ The checked-in Wrangler demo uses a read-only guest actor. For local demos only,
 - `x-cf-frappe-tenant`
 - `x-cf-frappe-email`
 
+## Background Jobs
+
+Jobs are registered separately from DocTypes, then dispatched through a `JobQueue` port. On Cloudflare, `CloudflareJobQueue` wraps a Queue binding and the Worker factory can expose both `queue(...)` and `scheduled(...)` handlers.
+
+```ts
+import {
+  CloudflareJobQueue,
+  createAggregateCoordinatorClass,
+  createCloudFrappeWorker,
+  createJobRegistry,
+  type CloudFrappeEnv,
+  type CloudFrappeRuntimeServices,
+  type JobMessage
+} from "cf-frappe";
+import { registry } from "./models";
+
+interface Env extends CloudFrappeEnv {
+  readonly JOBS: Queue<JobMessage>;
+}
+
+const jobs = createJobRegistry<CloudFrappeRuntimeServices>({
+  jobs: [
+    {
+      name: "task.digest",
+      handler: async ({ resources }) => {
+        const actor = { id: "jobs", roles: ["System Manager"], tenantId: "default" };
+        const tasks = await resources.queries.listDocuments(actor, "Task");
+        console.log("Digest task count", tasks.data.length);
+      }
+    }
+  ]
+});
+
+export class AggregateCoordinator extends createAggregateCoordinatorClass({ registry }) {}
+
+export default createCloudFrappeWorker<Env>({
+  registry,
+  actor: yourTrustedActorResolver,
+  jobs: {
+    registry: jobs,
+    queue: (env) => new CloudflareJobQueue(env.JOBS),
+    schedules: [{ cron: "0 2 * * *", jobName: "task.digest" }]
+  }
+});
+```
+
+Queue consumers process each message independently: malformed messages and permanent failures are acknowledged, retryable failures use backoff, and job contexts carry an idempotency key. For production, create the Queue with Wrangler and add producer/consumer bindings plus UTC Cron triggers in `wrangler.jsonc`.
+
 ## Architecture
 
 ```mermaid
@@ -143,6 +193,11 @@ flowchart LR
   HTTP["Worker HTTP adapter"] --> DOCLIENT["DurableObjectCommandExecutor"]
   DESK["Desk adapter"] --> DOCLIENT
   DESK --> QUERY
+  CRON["Cron trigger"] --> JOBS["JobDispatcher"]
+  QUEUE["Queue consumer"] --> EXEC["JobExecutor"]
+  JOBS --> CFQ["Cloudflare Queue"]
+  EXEC --> APP
+  EXEC --> QUERY
   DOCLIENT --> DO["Durable Object coordinator"]
   DO --> APP["DocumentService"]
   HTTP --> QUERY["QueryService"]
@@ -159,8 +214,9 @@ The dependency direction is one way:
 
 - `core` has pure types, schema validation, event folding, permissions, and registry contracts
 - `application` orchestrates commands and queries through ports
-- `ports` define storage, clocks, and id generation
-- `adapters` implement in-memory, D1, and HTTP integration
+- `application` orchestrates commands, queries, and job execution through ports
+- `ports` define storage, queues, execution logs, clocks, and id generation
+- `adapters` implement in-memory, D1, HTTP, Desk, and Cloudflare integration
 - `cloudflare` packages Worker and Durable Object factories
 
 ## Quality Gate
@@ -177,11 +233,11 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 62 tests across schema, permissions, events, registry, services, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, and D1 schema planning.
+Current suite: 80 tests across schema, permissions, events, registry, services, jobs, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, Queue/Cron integration, and D1 schema planning.
 
 ## Status
 
-This is not Frappe parity yet. Basic generated Desk list/form pages exist, but full migration management, reporting, print views, background jobs, realtime events, auth integrations, file storage, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
+This is not Frappe parity yet. Basic generated Desk list/form pages and Cloudflare-native background job primitives exist, but full migration management, reporting, print views, durable job dashboards, realtime events, auth integrations, file storage, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
 
 ## References
 
@@ -192,3 +248,5 @@ This is not Frappe parity yet. Basic generated Desk list/form pages exist, but f
 - [Cloudflare Workers](https://developers.cloudflare.com/workers/)
 - [Cloudflare D1](https://developers.cloudflare.com/d1/)
 - [Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/)
+- [Cloudflare Queues](https://developers.cloudflare.com/queues/)
+- [Cloudflare Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
