@@ -214,6 +214,16 @@ export const salesInvoiceDocType = defineDocType({
   ]
 });
 
+export const supportTicketDocType = defineDocType({
+  name: "Support Ticket",
+  naming: { kind: "series", pattern: "TICK-.####" },
+  fields: [
+    { name: "subject", type: "text", required: true },
+    { name: "description", type: "longText" }
+  ],
+  permissions: [{ roles: ["User"], actions: ["read", "create", "update", "submit", "cancel"] }]
+});
+
 export function createTestRegistry(): ModelRegistry {
   return createRegistry({
     doctypes: [noteDocType],
@@ -275,6 +285,19 @@ export function createChildTableServices(ids: readonly string[] = ["evt1", "evt2
   const registry = createRegistry({
     doctypes: [productDocType, salesInvoiceItemDocType, salesInvoiceDocType]
   });
+  const store = new InMemoryDocumentStore();
+  const documents = new DocumentService({
+    registry,
+    store,
+    clock: fixedClock(now),
+    ids: deterministicIds(ids)
+  });
+  const queries = new QueryService({ registry, projections: store });
+  return { registry, store, events: store, projections: store, documents, queries };
+}
+
+export function createSeriesServices(ids: readonly string[] = ["evt1", "evt2", "evt3", "evt4"]) {
+  const registry = createRegistry({ doctypes: [supportTicketDocType] });
   const store = new InMemoryDocumentStore();
   const documents = new DocumentService({
     registry,

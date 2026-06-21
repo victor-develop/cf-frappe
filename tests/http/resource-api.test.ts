@@ -1,5 +1,5 @@
 import { createResourceApi, unsafeHeaderActorResolver } from "../../src";
-import { createLinkedServices, createServices, owner } from "../helpers";
+import { createLinkedServices, createSeriesServices, createServices, owner } from "../helpers";
 
 describe("resource api", () => {
   function makeApp() {
@@ -25,6 +25,17 @@ describe("resource api", () => {
 
   function makeLinkedApp() {
     const services = createLinkedServices(["p1", "p2"]);
+    const app = createResourceApi({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: unsafeHeaderActorResolver
+    });
+    return { app, services };
+  }
+
+  function makeSeriesApp() {
+    const services = createSeriesServices(["series-1", "ticket-1"]);
     const app = createResourceApi({
       registry: services.registry,
       documents: services.documents,
@@ -205,6 +216,24 @@ describe("resource api", () => {
         field: "project",
         target: "Project",
         options: [{ value: "Apollo", label: "Apollo" }]
+      }
+    });
+  });
+
+  it("rejects explicit names for series-named resources", async () => {
+    const { app } = makeSeriesApp();
+
+    const response = await app.request("/api/resource/Support%20Ticket", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ name: "MANUAL-1", subject: "Manual" })
+    });
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "VALIDATION_FAILED",
+        issues: [expect.objectContaining({ field: "name", code: "name" })]
       }
     });
   });

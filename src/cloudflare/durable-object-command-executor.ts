@@ -66,7 +66,7 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
 
   private stubForCreate(command: CreateDocumentCommand): AggregateCoordinatorRpc {
     const doctype = this.registry.get(command.doctype);
-    const name = command.name ?? previewName(doctype, command.data) ?? "_new";
+    const name = previewSeriesAggregateName(doctype) ?? command.name ?? previewName(doctype, command.data) ?? "_new";
     return this.stub(resolveTenant(command), doctype.name, name);
   }
 
@@ -96,4 +96,8 @@ function previewName(doctype: DocTypeDefinition, data: Record<string, unknown>):
     return typeof value === "string" && value.length > 0 ? value : null;
   }
   return null;
+}
+
+function previewSeriesAggregateName(doctype: DocTypeDefinition): string | null {
+  return doctype.naming?.kind === "series" ? `_series:${doctype.naming.pattern}` : null;
 }

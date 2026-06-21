@@ -1,7 +1,7 @@
 import { foldDocument } from "../core/events";
 import { can } from "../core/permissions";
 import { applyDefaults, compactData, validateDocumentData } from "../core/schema";
-import { documentStream } from "../core/streams";
+import { documentStream, namingSeriesStream } from "../core/streams";
 import type { ModelRegistry } from "../core/registry";
 import type { AfterCommitContext } from "../core/registry";
 import type { Clock } from "../ports/clock";
@@ -111,6 +111,9 @@ export interface DocumentCommandExecutor {
   execute(command: ExecuteDomainCommand): Promise<DocumentSnapshot>;
 }
 
+const NAMING_SERIES_DOCTYPE = "__NamingSeries";
+const NAMING_SERIES_MAX_ATTEMPTS = 10;
+
 export class DocumentService implements DocumentCommandExecutor {
   private readonly registry: ModelRegistry;
   private readonly store: DocumentStore;
@@ -134,6 +137,7 @@ export class DocumentService implements DocumentCommandExecutor {
     if (!can(command.actor, doctype, "create")) {
       throw permissionDenied(`Actor '${command.actor.id}' cannot create ${doctype.name}`);
     }
+    ensureCreateNameAllowed(doctype, command.name);
 
     const now = this.clock.now();
     const withDefaults = applyDefaults(doctype, command.data, { actor: command.actor, now });
@@ -150,7 +154,11 @@ export class DocumentService implements DocumentCommandExecutor {
       throw validationFailed(issues);
     }
 
-    const name = command.name ?? resolveName(doctype, data, this.ids);
+    const name = command.name ?? await this.resolveName(doctype, data, {
+      actor: command.actor,
+      tenantId,
+      now
+    });
     const stream = documentStream(tenantId, doctype.name, name);
     const existing = foldDocument(await this.store.readStream(stream));
     if (existing && existing.docstatus !== "deleted") {
@@ -677,6 +685,74 @@ export class DocumentService implements DocumentCommandExecutor {
       id: this.ids.next("evt_")
     };
   }
+
+  private async resolveName(
+    doctype: DocTypeDefinition,
+    data: DocumentData,
+    context: { readonly actor: Actor; readonly tenantId: string; readonly now: string }
+  ): Promise<string> {
+    const naming = doctype.naming ?? { kind: "uuid" };
+    if (naming.kind !== "series") {
+      return resolveName(doctype, data, this.ids);
+    }
+    return this.allocateSeriesName(doctype, naming.pattern, context);
+  }
+
+  private async allocateSeriesName(
+    doctype: DocTypeDefinition,
+    pattern: string,
+    context: { readonly actor: Actor; readonly tenantId: string; readonly now: string }
+  ): Promise<string> {
+    const stream = namingSeriesStream(context.tenantId, doctype.name, pattern);
+    for (let attempt = 0; attempt < NAMING_SERIES_MAX_ATTEMPTS; attempt += 1) {
+      const existing = foldDocument(await this.store.readStream(stream));
+      const current = numberField(existing?.data.current) ?? 0;
+      const next = current + 1;
+      const event = this.newEvent({
+        tenantId: context.tenantId,
+        stream,
+        type: existing ? "NamingSeriesAdvanced" : "NamingSeriesStarted",
+        doctype: NAMING_SERIES_DOCTYPE,
+        documentName: `${doctype.name}:${pattern}`,
+        actorId: context.actor.id,
+        occurredAt: context.now,
+        payload: existing
+          ? {
+              kind: "DocumentUpdated",
+              patch: { current: next }
+            }
+          : {
+              kind: "DocumentCreated",
+              data: { doctype: doctype.name, pattern, current: next },
+              docstatus: "draft"
+            },
+        metadata: { target_doctype: doctype.name }
+      });
+      try {
+        await this.store.commit(stream, existing?.version ?? 0, [event], ([saved]) => {
+          if (!saved) {
+            throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
+          }
+          if (!existing) {
+            return snapshotFromCreate(saved);
+          }
+          return {
+            ...existing,
+            version: saved.sequence,
+            data: { ...existing.data, current: next },
+            updatedAt: saved.occurredAt
+          };
+        });
+        return renderNamingSeries(pattern, next);
+      } catch (error) {
+        if (isDocumentConflict(error) && attempt + 1 < NAMING_SERIES_MAX_ATTEMPTS) {
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw conflict(`Could not allocate naming series '${pattern}' for ${doctype.name}`);
+  }
 }
 
 function resolveTenant(actor: Actor, explicitTenantId?: string): string {
@@ -701,12 +777,42 @@ function resolveName(doctype: DocTypeDefinition, data: DocumentData, ids: IdGene
     }
     return value;
   }
+  if (naming.kind === "series") {
+    throw new FrameworkError("DOCTYPE_NAMING_INVALID", `Naming series for ${doctype.name} needs a document store`, {
+      status: 500
+    });
+  }
   const field = naming.field ?? "name";
   const value = data[field];
   if (typeof value === "string" && value.length > 0) {
     return value;
   }
   return ids.next("doc_");
+}
+
+function ensureCreateNameAllowed(doctype: DocTypeDefinition, name: string | undefined): void {
+  if (name === undefined || doctype.naming?.kind !== "series") {
+    return;
+  }
+  throw validationFailed([
+    {
+      field: "name",
+      code: "name",
+      message: `${doctype.name} uses a naming series and cannot be created with an explicit name`
+    }
+  ]);
+}
+
+function renderNamingSeries(pattern: string, value: number): string {
+  return pattern.replace(/#+/, (placeholder) => String(value).padStart(placeholder.length, "0"));
+}
+
+function numberField(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+function isDocumentConflict(error: unknown): boolean {
+  return error instanceof FrameworkError && error.code === "DOCUMENT_CONFLICT";
 }
 
 function snapshotFromCreate(event: DomainEvent): DocumentSnapshot {

@@ -4,6 +4,10 @@ export function documentStream(tenantId: TenantId, doctype: DocTypeName, name: D
   return `${escapePart(tenantId)}:${escapePart(doctype)}:${escapePart(name)}`;
 }
 
+export function namingSeriesStream(tenantId: TenantId, doctype: DocTypeName, pattern: string): StreamName {
+  return documentStream(tenantId, "__NamingSeries", `${doctype}:${pattern}`);
+}
+
 export function escapePart(value: string): string {
   return encodeURIComponent(value).replaceAll(".", "%2E");
 }

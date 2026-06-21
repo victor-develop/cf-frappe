@@ -1,5 +1,15 @@
-import { CHILD_TABLE_ROW_INDEX_FIELD, FrameworkError } from "../../src";
-import { createChildTableServices, createLinkedServices, createServices, data, guest, manager, now, owner } from "../helpers";
+import { CHILD_TABLE_ROW_INDEX_FIELD, FrameworkError, namingSeriesStream } from "../../src";
+import {
+  createChildTableServices,
+  createLinkedServices,
+  createSeriesServices,
+  createServices,
+  data,
+  guest,
+  manager,
+  now,
+  owner
+} from "../helpers";
 
 describe("DocumentService", () => {
   it("creates a document through defaults, hooks, events, and projection", async () => {
@@ -55,6 +65,57 @@ describe("DocumentService", () => {
     expect(updated).toMatchObject({
       version: 2,
       data: { body: "from events" }
+    });
+  });
+
+  it("allocates series names from an event stream before creating documents", async () => {
+    const { documents, events, queries } = createSeriesServices(["series-1", "ticket-1", "series-2", "ticket-2"]);
+
+    await expect(
+      documents.create({
+        actor: owner,
+        doctype: "Support Ticket",
+        name: "MANUAL-1",
+        data: { subject: "Manual" }
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "name", code: "name" })]
+    });
+
+    const first = await documents.create({
+      actor: owner,
+      doctype: "Support Ticket",
+      data: { subject: "First" }
+    });
+    const second = await documents.create({
+      actor: owner,
+      doctype: "Support Ticket",
+      data: { subject: "Second" }
+    });
+
+    expect(first).toMatchObject({
+      name: "TICK-.0001",
+      data: { subject: "First" }
+    });
+    expect(second).toMatchObject({
+      name: "TICK-.0002",
+      data: { subject: "Second" }
+    });
+    await expect(
+      events.readStream(namingSeriesStream("acme", "Support Ticket", "TICK-.####"))
+    ).resolves.toMatchObject([
+      {
+        type: "NamingSeriesStarted",
+        payload: { kind: "DocumentCreated", data: { current: 1, pattern: "TICK-.####" } }
+      },
+      {
+        type: "NamingSeriesAdvanced",
+        payload: { kind: "DocumentUpdated", patch: { current: 2 } }
+      }
+    ]);
+    await expect(queries.getDocument(owner, "Support Ticket", "TICK-.0002")).resolves.toMatchObject({
+      data: { subject: "Second" }
     });
   });
 

@@ -114,7 +114,8 @@ export interface DomainCommandDefinition {
 export type NamingStrategy =
   | { readonly kind: "uuid" }
   | { readonly kind: "field"; readonly field: string }
-  | { readonly kind: "provided"; readonly field?: string };
+  | { readonly kind: "provided"; readonly field?: string }
+  | { readonly kind: "series"; readonly pattern: string };
 
 export interface DocTypeDefinition<TData extends DocumentData = DocumentData> {
   readonly name: DocTypeName;

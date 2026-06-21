@@ -31,6 +31,7 @@ export function defineDocType<TData extends DocumentData>(
     assertTableFieldDefinition(definition, field);
     seen.add(field.name);
   }
+  assertNamingStrategyDefinition(definition);
   assertFormViewDefinition(definition);
   assertListViewDefinition(definition);
   const formView = definition.formView ? freezeFormView(definition.formView) : undefined;
@@ -232,6 +233,20 @@ function validateTableField(
 function assertIdentifier(value: string, label: string): void {
   if (!/^[A-Za-z][A-Za-z0-9_ ]*$/.test(value)) {
     throw new Error(`Invalid ${label}: '${value}'`);
+  }
+}
+
+function assertNamingStrategyDefinition(doctype: DocTypeDefinition): void {
+  const naming = doctype.naming;
+  if (!naming || naming.kind !== "series") {
+    return;
+  }
+  if (naming.pattern.trim().length === 0 || !/#+/.test(naming.pattern)) {
+    throw new FrameworkError(
+      "DOCTYPE_NAMING_INVALID",
+      `Naming series on ${doctype.name} must include at least one # placeholder`,
+      { status: 400 }
+    );
   }
 }
 

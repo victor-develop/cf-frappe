@@ -1,5 +1,5 @@
-import { DurableObjectCommandExecutor, type RpcDurableObjectNamespace } from "../../src";
-import { createTestRegistry, data, owner } from "../helpers";
+import { createRegistry, DurableObjectCommandExecutor, type RpcDurableObjectNamespace } from "../../src";
+import { createTestRegistry, data, owner, supportTicketDocType } from "../helpers";
 
 describe("DurableObjectCommandExecutor", () => {
   it("routes create commands by tenant, doctype, and previewed document name", async () => {
@@ -15,6 +15,28 @@ describe("DurableObjectCommandExecutor", () => {
 
     expect(names).toEqual(["acme:Note:My Note"]);
     expect(calls).toMatchObject([{ kind: "create", doctype: "Note" }]);
+  });
+
+  it("routes series-named creates through a shared series aggregate", async () => {
+    const calls: unknown[] = [];
+    const names: string[] = [];
+    const namespace = fakeNamespace(names, calls);
+    const executor = new DurableObjectCommandExecutor({
+      registry: createRegistry({ doctypes: [supportTicketDocType] }),
+      namespace
+    });
+
+    await executor.create({ actor: owner, doctype: "Support Ticket", data: { subject: "First" } });
+    await executor.create({ actor: owner, doctype: "Support Ticket", name: "MANUAL-1", data: { subject: "Second" } });
+
+    expect(names).toEqual([
+      "acme:Support Ticket:_series:TICK-.####",
+      "acme:Support Ticket:_series:TICK-.####"
+    ]);
+    expect(calls).toMatchObject([
+      { kind: "create", doctype: "Support Ticket" },
+      { kind: "create", doctype: "Support Ticket" }
+    ]);
   });
 
   it("routes named mutations to the same aggregate identity", async () => {

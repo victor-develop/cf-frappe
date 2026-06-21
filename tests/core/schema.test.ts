@@ -66,6 +66,16 @@ describe("schema", () => {
     ).toThrow("Duplicate field");
   });
 
+  it("requires naming series metadata to include a placeholder", () => {
+    expect(() =>
+      defineDocType({
+        name: "Ticket",
+        naming: { kind: "series", pattern: "TICKET" },
+        fields: [{ name: "title", type: "text" }]
+      })
+    ).toThrow(FrameworkError);
+  });
+
   it("requires link fields to declare their target DocType", () => {
     expect(() =>
       defineDocType({

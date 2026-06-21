@@ -24,6 +24,7 @@ That model is powerful, but it is not event-sourcing first. cf-frappe keeps the 
 | Capability | Frappe | cf-frappe current state |
 | --- | --- | --- |
 | Metadata model | DocTypes | `defineDocType` |
+| Naming series | autoname and naming_series | field/provided/uuid strategies plus event-stream-backed series counters |
 | Field validation | DocField rules | built-in field types, required, min/max, select options |
 | Link fields | Link DocFields | registered DocType targets, event-stream existence checks, generated option lookup API, and Desk select controls |
 | Child tables | Table DocFields and child DocTypes | `type: "table"` fields backed by child DocType row validation, nested link checks, and Desk row grids |

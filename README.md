@@ -5,6 +5,7 @@ cf-frappe is an early Cloudflare-native application framework inspired by Frappe
 The current slice is a working kernel:
 
 - typed DocType metadata with fields, defaults, validation, naming, permissions, and workflows
+- event-stream-backed naming series for human-readable document IDs
 - metadata-defined link fields with event-stream referential integrity and generated lookup options
 - metadata-defined child table fields validated from child DocType metadata
 - first-class draft/submitted/cancelled document lifecycle events
@@ -32,6 +33,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | Frappe concept | cf-frappe direction |
 | --- | --- |
 | DocType | `defineDocType(...)` metadata |
+| Naming series | `naming: { kind: "series" }` with an internal event-stream counter |
 | Link fields | registered `type: "link"` targets with write-time existence checks and lookup options |
 | Child tables | registered `type: "table"` child DocTypes embedded in event-sourced document data |
 | Document lifecycle | event-sourced create, update, submit, cancel, and delete commands |
@@ -240,6 +242,21 @@ The checked-in Wrangler demo uses a read-only guest actor. For local demos only,
 - `x-cf-frappe-roles`
 - `x-cf-frappe-tenant`
 - `x-cf-frappe-email`
+
+## Naming Strategies
+
+DocTypes can choose how document names are assigned:
+
+```ts
+export const Ticket = defineDocType({
+  name: "Support Ticket",
+  naming: { kind: "series", pattern: "TICK-.####" },
+  fields: [{ name: "subject", type: "text", required: true }],
+  permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }]
+});
+```
+
+`field` and `provided` strategies use caller data, while `uuid` uses the configured id generator. A `series` strategy advances an internal `__NamingSeries` event stream per tenant, DocType, and pattern before the document create event is written. Explicit `name` values are rejected for series-named DocTypes so metadata remains the naming authority. That keeps the counter independent of projections; Cloudflare Durable Object command routing sends series creates through one shared aggregate key for the pattern, and direct D1 commits still use stream expected-version checks and retry on counter conflicts.
 
 ## Resource Lists
 
@@ -559,7 +576,7 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 195 tests across schema, permissions, events, registry, services, document lifecycle, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, reports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
+Current suite: 199 tests across schema, permissions, events, registry, services, naming series, document lifecycle, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, reports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
 
 ## Status
 
