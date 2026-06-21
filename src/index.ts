@@ -16,6 +16,7 @@ export * from "./cloudflare";
 export * from "./core/errors";
 export * from "./core/events";
 export * from "./core/file-doctype";
+export * from "./core/form-view";
 export * from "./core/jobs";
 export * from "./core/list-view";
 export * from "./core/permissions";

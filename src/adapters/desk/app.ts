@@ -5,7 +5,7 @@ import { QueryService } from "../../application/query-service";
 import type { ReportFilters, ReportService } from "../../application/report-service";
 import { FrameworkError } from "../../core/errors";
 import type { ModelRegistry } from "../../core/registry";
-import type { Actor, DocTypeDefinition, DocumentData, FieldDefinition, JsonPrimitive, MutableDocumentData } from "../../core/types";
+import type { Actor, DocTypeDefinition, DocumentData, FieldDefinition, JsonPrimitive, MutableDocumentData, ResolvedFormView } from "../../core/types";
 import type { ActorResolver } from "../http/actor";
 import { listFiltersFromUrl, parseOptionalInteger } from "../http/request";
 import { renderPrintDocument } from "../print";
@@ -122,6 +122,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
   app.get("/desk/:doctype/new", async (c) => {
     const actor = await options.actor(c.req.raw);
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const formView = options.queries.getFormView(actor, doctype.name);
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
     return html(
@@ -130,7 +131,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         active: doctype.name,
         doctypes,
         reports,
-        body: renderFormView(doctype, { mode: "create" })
+        body: renderFormView(doctype, formView, { mode: "create" })
       })
     );
   });
@@ -138,11 +139,12 @@ export function createDeskApp(options: DeskAppOptions): Hono {
   app.post("/desk/:doctype", async (c) => {
     const actor = await options.actor(c.req.raw);
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const formView = options.queries.getFormView(actor, doctype.name);
     try {
       const snapshot = await options.documents.create({
         actor,
         doctype: doctype.name,
-        data: (await parseDeskForm(c.req.raw, doctype, "create")).data,
+        data: (await parseDeskForm(c.req.raw, doctype, formView)).data,
         metadata: requestMetadata(c.req.raw)
       });
       return c.redirect(`/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(snapshot.name)}`, 303);
@@ -157,6 +159,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
     const printFormats = listPrintFormats(options, actor, doctype.name);
+    const formView = options.queries.getFormView(actor, doctype.name);
     const document = await options.queries.getDocument(actor, doctype.name, c.req.param("name"));
     return html(
       renderDeskLayout({
@@ -164,7 +167,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         active: doctype.name,
         doctypes,
         reports,
-        body: renderFormView(doctype, { mode: "update", document, printFormats })
+        body: renderFormView(doctype, formView, { mode: "update", document, printFormats })
       })
     );
   });
@@ -172,9 +175,10 @@ export function createDeskApp(options: DeskAppOptions): Hono {
   app.post("/desk/:doctype/:name", async (c) => {
     const actor = await options.actor(c.req.raw);
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const formView = options.queries.getFormView(actor, doctype.name);
     const name = c.req.param("name");
     try {
-      const form = await parseDeskForm(c.req.raw, doctype, "update");
+      const form = await parseDeskForm(c.req.raw, doctype, formView);
       await options.documents.update({
         actor,
         doctype: doctype.name,
@@ -192,9 +196,10 @@ export function createDeskApp(options: DeskAppOptions): Hono {
   app.post("/desk/:doctype/:name/command/:command", async (c) => {
     const actor = await options.actor(c.req.raw);
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const formView = options.queries.getFormView(actor, doctype.name);
     const name = c.req.param("name");
     try {
-      const form = await parseDeskForm(c.req.raw, doctype, "update");
+      const form = await parseDeskForm(c.req.raw, doctype, formView);
       await options.documents.execute({
         actor,
         doctype: doctype.name,
@@ -256,6 +261,7 @@ async function renderDeskError(
 ): Promise<Response> {
   const doctypes = options.queries.listDoctypes(actor);
   const reports = listReports(options, actor);
+  const formView = options.queries.getFormView(actor, doctype.name);
   const document = name ? await options.queries.getDocument(actor, doctype.name, name).catch(() => undefined) : undefined;
   const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
   return html(
@@ -264,7 +270,7 @@ async function renderDeskError(
       active: doctype.name,
       doctypes,
       reports,
-      body: renderFormView(doctype, {
+      body: renderFormView(doctype, formView, {
         mode,
         ...(document ? { document } : {}),
         ...(document ? { printFormats: listPrintFormats(options, actor, doctype.name) } : {}),
@@ -301,10 +307,12 @@ interface ParsedDeskForm {
 async function parseDeskForm(
   request: Request,
   doctype: DocTypeDefinition,
-  mode: "create" | "update"
+  formView: ResolvedFormView
 ): Promise<ParsedDeskForm> {
   const form = await request.formData();
-  const entries = doctype.fields
+  const fields = new Set(doctype.fields.map((field) => field.name));
+  const entries = formView.fields
+    .filter((field) => fields.has(field.name))
     .filter((field) => !field.hidden && !field.readOnly)
     .map((field) => [field.name, coerceFormValue(field, form.get(field.name))] as const)
     .filter(([, value]) => value !== undefined);

@@ -46,6 +46,12 @@ export const noteDocType = defineDocType({
     { name: "workflow_state", type: "select", options: ["Open", "Closed"], defaultValue: "Open" },
     { name: "created_by", type: "text", readOnly: true, defaultValue: ({ actor }) => actor.id }
   ],
+  formView: {
+    sections: [
+      { heading: "Summary", columns: 1, fields: ["title", "priority"] },
+      { heading: "Details", columns: 2, fields: ["body", "count", "workflow_state"] }
+    ]
+  },
   listView: {
     columns: ["title", "priority", "workflow_state"],
     filterFields: ["title", "priority", "workflow_state"],

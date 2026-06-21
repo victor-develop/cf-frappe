@@ -35,6 +35,7 @@ export interface FieldDefinition {
   readonly required?: boolean;
   readonly readOnly?: boolean;
   readonly hidden?: boolean;
+  readonly inFormView?: boolean;
   readonly inListView?: boolean;
   readonly inListFilter?: boolean;
   readonly options?: readonly string[];
@@ -119,6 +120,7 @@ export interface DocTypeDefinition<TData extends DocumentData = DocumentData> {
   readonly version?: number;
   readonly label?: string;
   readonly fields: readonly FieldDefinition[];
+  readonly formView?: FormViewDefinition;
   readonly listView?: ListViewDefinition;
   readonly permissions?: readonly PermissionRule[];
   readonly workflow?: WorkflowDefinition;
@@ -202,6 +204,27 @@ export interface ListDocumentsFilter {
   readonly field: string;
   readonly operator?: ListFilterOperator;
   readonly value: JsonPrimitive;
+}
+
+export interface FormSectionDefinition {
+  readonly heading?: string;
+  readonly fields: readonly string[];
+  readonly columns?: 1 | 2;
+}
+
+export interface FormViewDefinition {
+  readonly sections?: readonly FormSectionDefinition[];
+}
+
+export interface ResolvedFormSection {
+  readonly heading?: string;
+  readonly fields: readonly FieldDefinition[];
+  readonly columns: 1 | 2;
+}
+
+export interface ResolvedFormView {
+  readonly sections: readonly ResolvedFormSection[];
+  readonly fields: readonly FieldDefinition[];
 }
 
 export interface ListViewDefinition {

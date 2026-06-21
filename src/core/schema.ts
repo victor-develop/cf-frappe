@@ -7,6 +7,7 @@ import type {
   MutableDocumentData,
   ValidationIssue
 } from "./types";
+import { assertFormViewDefinition } from "./form-view";
 import { assertListViewDefinition } from "./list-view";
 
 export interface ValidationOptions {
@@ -26,11 +27,14 @@ export function defineDocType<TData extends DocumentData>(
     }
     seen.add(field.name);
   }
+  assertFormViewDefinition(definition);
   assertListViewDefinition(definition);
+  const formView = definition.formView ? freezeFormView(definition.formView) : undefined;
   const listView = definition.listView ? freezeListView(definition.listView) : undefined;
   return Object.freeze({
     ...definition,
     fields: Object.freeze([...definition.fields]),
+    ...(formView ? { formView } : {}),
     ...(listView ? { listView } : {})
   });
 }
@@ -172,6 +176,24 @@ function assertIdentifier(value: string, label: string): void {
   if (!/^[A-Za-z][A-Za-z0-9_ ]*$/.test(value)) {
     throw new Error(`Invalid ${label}: '${value}'`);
   }
+}
+
+function freezeFormView(formView: NonNullable<DocTypeDefinition["formView"]>): NonNullable<DocTypeDefinition["formView"]> {
+  return Object.freeze({
+    ...formView,
+    ...(formView.sections
+      ? {
+          sections: Object.freeze(
+            formView.sections.map((section) =>
+              Object.freeze({
+                ...section,
+                fields: Object.freeze([...section.fields])
+              })
+            )
+          )
+        }
+      : {})
+  });
 }
 
 function freezeListView(listView: NonNullable<DocTypeDefinition["listView"]>): NonNullable<DocTypeDefinition["listView"]> {

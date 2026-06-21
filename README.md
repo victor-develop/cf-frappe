@@ -13,6 +13,7 @@ The current slice is a working kernel:
 - Durable Object coordinator factory for serial per-aggregate command processing
 - D1 schema migration planner/runner from DocType `indexes`
 - generated Desk list/form UI from DocType metadata
+- metadata-configured form sections, field order, and form column layout
 - metadata-configured list columns, default filters, filter controls, and page size
 - metadata-defined print formats for documents
 - metadata-defined reports over current projections
@@ -32,7 +33,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | Permissions | role and predicate rules attached to DocTypes |
 | Hooks/controllers | pure hook contracts registered in `ModelRegistry` |
 | REST resources | generated `/api/resource/:doctype` routes |
-| Desk list/forms | generated `/desk` pages, list columns, filters, and forms from DocType metadata |
+| Desk list/forms | generated `/desk` pages, list/form layouts, columns, and filters from DocType metadata |
 | Print formats | metadata-defined printable document pages |
 | Reports | metadata-defined report columns, filters, API, and Desk pages |
 | Background jobs | `JobRegistry`, Queue producers/consumers, and Cron dispatch |
@@ -76,8 +77,15 @@ export const Task = defineDocType({
   fields: [
     { name: "title", type: "text", required: true, min: 3 },
     { name: "priority", type: "select", options: ["Low", "Medium", "High"], defaultValue: "Medium" },
-    { name: "status", type: "select", options: ["Open", "Closed"], defaultValue: "Open" }
+    { name: "status", type: "select", options: ["Open", "Closed"], defaultValue: "Open" },
+    { name: "description", type: "longText" }
   ],
+  formView: {
+    sections: [
+      { heading: "Summary", columns: 1, fields: ["title", "priority", "status"] },
+      { heading: "Details", columns: 2, fields: ["description"] }
+    ]
+  },
   listView: {
     columns: ["title", "priority", "status"],
     filterFields: ["title", "priority", "status"],
@@ -229,6 +237,12 @@ HTTP and Desk list pages share the same query shape:
 - `filter_count__lte=10`
 
 The D1 adapter builds filtered row and count queries with prepared statements, so filter values are bound parameters rather than interpolated SQL.
+
+## Desk Forms
+
+Form layouts are also DocType metadata. `formView.sections` controls generated Desk form grouping, field order, section headings, and one- or two-column field grids. If a DocType omits `formView`, Desk falls back to visible fields in metadata order; field-level `inFormView` is available for small DocTypes that prefer local annotations.
+
+`defineDocType(...)` validates form sections up front. Unknown fields, hidden fields, duplicate section fields, empty sections, and invalid column counts fail with `FORM_VIEW_INVALID`. Command validation still belongs to `DocumentService`, so form layout changes do not alter event creation, permissions, or field validation.
 
 ## Reports
 
@@ -471,11 +485,11 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 152 tests across schema, permissions, events, registry, services, metadata-configured list views, metadata-validated list filters, print formats, reports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
+Current suite: 160 tests across schema, permissions, events, registry, services, metadata-configured form/list views, metadata-validated list filters, print formats, reports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
 
 ## Status
 
-This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, metadata-configured list views, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, and Durable Object realtime topics exist, but saved filters, custom print templates, grouped report summaries, charts, durable job dashboards, richer realtime presence, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
+This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, and Durable Object realtime topics exist, but saved filters, custom print templates, grouped report summaries, charts, durable job dashboards, richer realtime presence, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
 
 ## References
 

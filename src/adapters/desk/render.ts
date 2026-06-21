@@ -6,6 +6,8 @@ import type {
   JsonValue,
   ListDocumentsFilter,
   ListFilterOperator,
+  ResolvedFormSection,
+  ResolvedFormView,
   ResolvedListView
 } from "../../core/types";
 import type { ReportDefinition } from "../../core/reports";
@@ -178,6 +180,7 @@ export function renderListView(
 
 export function renderFormView(
   doctype: DocTypeDefinition,
+  formView: ResolvedFormView,
   options: {
     readonly mode: "create" | "update";
     readonly document?: DocumentSnapshot;
@@ -190,10 +193,7 @@ export function renderFormView(
       ? `/desk/${encodeURIComponent(doctype.name)}`
       : `/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(options.document?.name ?? "")}`;
   const title = options.mode === "create" ? `New ${labelFor(doctype)}` : options.document?.name ?? doctype.name;
-  const fields = doctype.fields
-    .filter((field) => !field.hidden)
-    .map((field) => renderField(field, options.document?.data[field.name], options.mode))
-    .join("");
+  const sections = formView.sections.map((section) => renderFormSection(section, options.document, options.mode)).join("");
   const commands =
     options.mode === "update" && doctype.commands?.length
       ? `<section class="command-row" aria-label="Commands">${doctype.commands
@@ -222,7 +222,7 @@ export function renderFormView(
     </div>
     ${versionField}
     ${options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : ""}
-    <div class="fields">${fields}</div>
+    ${sections}
     <div class="actions">
       <a class="button" href="/desk/${encodeURIComponent(doctype.name)}">Cancel</a>
       <button class="button primary" type="submit">${options.mode === "create" ? "Create" : "Save"}</button>
@@ -238,6 +238,18 @@ export function renderNotFound(message: string): string {
 
 export function renderErrorPanel(message: string): string {
   return `<section class="panel"><p class="error" role="alert">${escapeHtml(message)}</p></section>`;
+}
+
+function renderFormSection(
+  section: ResolvedFormSection,
+  document: DocumentSnapshot | undefined,
+  mode: "create" | "update"
+): string {
+  const fields = section.fields.map((field) => renderField(field, document?.data[field.name], mode)).join("");
+  return `<section class="form-section">
+    ${section.heading ? `<h3>${escapeHtml(section.heading)}</h3>` : ""}
+    <div class="fields cols-${section.columns}">${fields}</div>
+  </section>`;
 }
 
 function renderField(field: FieldDefinition, value: JsonValue | undefined, mode: "create" | "update"): string {
@@ -443,6 +455,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visib
 h1, h2 { margin: 0; letter-spacing: 0; }
 h1 { font-size: 28px; line-height: 1.2; }
 h2 { font-size: 20px; line-height: 1.3; }
+h3 { margin: 0 0 12px; font-size: 16px; line-height: 1.35; letter-spacing: 0; }
 .toolbar { margin-bottom: 16px; }
 .panel {
   background: var(--surface);
@@ -488,11 +501,17 @@ tr:last-child td { border-bottom: 0; }
   margin-bottom: 18px;
 }
 .form-head p { margin: 0; color: var(--muted); }
+.form-section + .form-section {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
 .fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
+.fields.cols-1 { grid-template-columns: 1fr; }
 .field { display: grid; gap: 6px; }
 .field span { font-weight: 650; }
 .field small { color: var(--muted); }

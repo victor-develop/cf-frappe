@@ -1,5 +1,14 @@
-import { createDeskApp } from "../../src";
-import { createServices, data, owner } from "../helpers";
+import {
+  createDeskApp,
+  createRegistry,
+  defineDocType,
+  deterministicIds,
+  DocumentService,
+  fixedClock,
+  InMemoryDocumentStore,
+  QueryService
+} from "../../src";
+import { createServices, data, now, owner } from "../helpers";
 
 describe("Desk app", () => {
   function makeDesk() {
@@ -60,6 +69,11 @@ describe("Desk app", () => {
     const html = await form.text();
     expect(html).toContain('name="title"');
     expect(html).toContain('name="body"');
+    expect(html).toContain("<h3>Summary</h3>");
+    expect(html).toContain("<h3>Details</h3>");
+    expect(html.indexOf('name="title"')).toBeLessThan(html.indexOf('name="body"'));
+    expect(html).toContain('class="fields cols-1"');
+    expect(html).toContain('class="fields cols-2"');
     expect(html).toContain("Create");
   });
 
@@ -149,6 +163,59 @@ describe("Desk app", () => {
     await expect(services.events.readStream("acme:Note:Desk%20Note")).resolves.toMatchObject([
       { metadata: { method: "POST", url: "http://localhost/desk/Note" } }
     ]);
+  });
+
+  it("does not submit omitted form-view boolean fields as unchecked", async () => {
+    const Flag = defineDocType({
+      name: "Flag",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "enabled", type: "boolean", defaultValue: true }
+      ],
+      formView: {
+        sections: [{ fields: ["title"] }]
+      },
+      permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }]
+    });
+    const registry = createRegistry({ doctypes: [Flag] });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry,
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["flag-1", "flag-2"])
+    });
+    const queries = new QueryService({ registry, projections: store });
+    const app = createDeskApp({
+      registry,
+      documents,
+      queries,
+      actor: () => owner
+    });
+
+    const created = await app.request("/desk/Flag", {
+      method: "POST",
+      body: new URLSearchParams({ title: "Feature Flag" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(created.status).toBe(303);
+    await expect(queries.getDocument(owner, "Flag", "Feature Flag")).resolves.toMatchObject({
+      data: { enabled: true }
+    });
+
+    const updated = await app.request("/desk/Flag/Feature%20Flag", {
+      method: "POST",
+      body: new URLSearchParams({ title: "Feature Flag", expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(updated.status).toBe(303);
+    await expect(queries.getDocument(owner, "Flag", "Feature Flag")).resolves.toMatchObject({
+      data: { enabled: true },
+      version: 2
+    });
   });
 
   it("ignores read-only fields submitted on create", async () => {

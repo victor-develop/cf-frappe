@@ -16,6 +16,15 @@ describe("QueryService", () => {
     });
   });
 
+  it("resolves metadata-driven form views through the query boundary", () => {
+    const { queries } = createServices();
+
+    expect(queries.getFormView(owner, "Note").sections).toMatchObject([
+      { heading: "Summary", columns: 1, fields: [{ name: "title" }, { name: "priority" }] },
+      { heading: "Details", columns: 2, fields: [{ name: "body" }, { name: "count" }, { name: "workflow_state" }] }
+    ]);
+  });
+
   it("hides deleted documents from list results", async () => {
     const { documents, queries } = createServices(["e1", "e2"]);
     await documents.create({ actor: owner, doctype: "Note", data: data() });

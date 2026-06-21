@@ -1,4 +1,5 @@
 import { FrameworkError, notFound, permissionDenied } from "../core/errors";
+import { resolveFormView } from "../core/form-view";
 import { normalizeListFilters, resolveListView } from "../core/list-view";
 import { can } from "../core/permissions";
 import type { ModelRegistry } from "../core/registry";
@@ -9,6 +10,7 @@ import {
   type DocumentSnapshot,
   type ListDocumentsFilter,
   type ListDocumentsResult,
+  type ResolvedFormView,
   type ResolvedListView
 } from "../core/types";
 import type { ProjectionStore } from "../ports/projection-store";
@@ -87,6 +89,10 @@ export class QueryService {
 
   getListView(actor: Actor, doctypeName: string): ResolvedListView {
     return resolveListView(this.getMeta(actor, doctypeName));
+  }
+
+  getFormView(actor: Actor, doctypeName: string): ResolvedFormView {
+    return resolveFormView(this.getMeta(actor, doctypeName));
   }
 
   async listDocumentsForView(
