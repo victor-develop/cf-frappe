@@ -1,4 +1,4 @@
-import { createRegistry, defineDocType, defineReport } from "../../src";
+import { createRegistry, defineDocType, definePrintFormat, defineReport } from "../../src";
 
 export const Task = defineDocType({
   name: "Task",
@@ -77,8 +77,29 @@ export const OpenTasks = defineReport({
   roles: ["Guest", "User", "Task Manager"]
 });
 
+export const TaskPrint = definePrintFormat({
+  name: "Task Standard",
+  label: "Task Standard",
+  module: "Desk",
+  description: "Printable task summary.",
+  doctype: "Task",
+  sections: [
+    {
+      heading: "Task",
+      fields: [
+        { field: "title", label: "Title" },
+        { field: "priority", label: "Priority" },
+        { field: "workflow_state", label: "State" },
+        { field: "description", label: "Description" }
+      ]
+    }
+  ],
+  roles: ["Guest", "User", "Task Manager"]
+});
+
 export const todoRegistry = createRegistry({
   doctypes: [Task],
+  printFormats: [TaskPrint],
   reports: [OpenTasks],
   hooks: {
     Task: [

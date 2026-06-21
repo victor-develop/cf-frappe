@@ -1,4 +1,6 @@
 import { FrameworkError } from "./errors";
+import type { PrintFormatDefinition } from "./print-format";
+import { assertPrintFormatMatchesDocType } from "./print-format";
 import type { ReportDefinition } from "./reports";
 import { assertReportMatchesDocType } from "./reports";
 import type {
@@ -31,12 +33,14 @@ export interface DocumentHooks {
 
 export interface RegistryOptions {
   readonly doctypes?: readonly DocTypeDefinition[];
+  readonly printFormats?: readonly PrintFormatDefinition[];
   readonly reports?: readonly ReportDefinition[];
   readonly hooks?: Readonly<Record<string, readonly DocumentHooks[]>>;
 }
 
 export class ModelRegistry {
   private readonly doctypes = new Map<string, DocTypeDefinition>();
+  private readonly printFormats = new Map<string, PrintFormatDefinition>();
   private readonly reports = new Map<string, ReportDefinition>();
   private readonly hooks = new Map<string, DocumentHooks[]>();
 
@@ -46,6 +50,9 @@ export class ModelRegistry {
     }
     for (const report of options.reports ?? []) {
       this.registerReport(report);
+    }
+    for (const format of options.printFormats ?? []) {
+      this.registerPrintFormat(format);
     }
     for (const [doctype, hooks] of Object.entries(options.hooks ?? {})) {
       for (const hook of hooks) {
@@ -77,6 +84,22 @@ export class ModelRegistry {
     }
     assertReportMatchesDocType(report, doctype);
     this.reports.set(report.name, report);
+  }
+
+  registerPrintFormat(format: PrintFormatDefinition): void {
+    const doctype = this.doctypes.get(format.doctype);
+    if (!doctype) {
+      throw new FrameworkError("DOCTYPE_NOT_FOUND", `DocType '${format.doctype}' is not registered`, {
+        status: 404
+      });
+    }
+    if (this.printFormats.has(format.name)) {
+      throw new FrameworkError("PRINT_FORMAT_DUPLICATE", `Print format '${format.name}' is already registered`, {
+        status: 409
+      });
+    }
+    assertPrintFormatMatchesDocType(format, doctype);
+    this.printFormats.set(format.name, format);
   }
 
   registerHooks(doctype: string, hooks: DocumentHooks): void {
@@ -113,6 +136,20 @@ export class ModelRegistry {
 
   listReports(): readonly ReportDefinition[] {
     return [...this.reports.values()].sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  getPrintFormat(formatName: string): PrintFormatDefinition {
+    const definition = this.printFormats.get(formatName);
+    if (!definition) {
+      throw new FrameworkError("PRINT_FORMAT_NOT_FOUND", `Print format '${formatName}' is not registered`, {
+        status: 404
+      });
+    }
+    return definition;
+  }
+
+  listPrintFormats(): readonly PrintFormatDefinition[] {
+    return [...this.printFormats.values()].sort((left, right) => left.name.localeCompare(right.name));
   }
 
   hooksFor(doctype: string): readonly DocumentHooks[] {

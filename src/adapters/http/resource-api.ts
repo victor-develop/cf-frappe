@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { DocumentCommandExecutor } from "../../application/document-service";
 import type { FileService } from "../../application/file-service";
+import type { PrintService } from "../../application/print-service";
 import { QueryService } from "../../application/query-service";
 import type { ReportService } from "../../application/report-service";
 import type { ModelRegistry } from "../../core/registry";
@@ -9,6 +10,7 @@ import type { DocumentData, MutableDocumentData } from "../../core/types";
 import type { ActorResolver } from "./actor";
 import { toErrorResponse } from "./errors";
 import { createFileApi } from "./file-api";
+import { createPrintApi } from "./print-api";
 import { createReportApi } from "./report-api";
 import { parseOptionalInteger, readBoundedText, requestMetadata } from "./request";
 
@@ -19,6 +21,7 @@ export interface ResourceApiOptions {
   readonly actor: ActorResolver;
   readonly maxJsonBytes?: number;
   readonly files?: FileService;
+  readonly prints?: PrintService;
   readonly reports?: ReportService;
   readonly maxFileBytes?: number;
 }
@@ -69,6 +72,16 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       "/",
       createReportApi({
         reports: options.reports,
+        actor: resolveActor
+      })
+    );
+  }
+
+  if (options.prints) {
+    app.route(
+      "/",
+      createPrintApi({
+        prints: options.prints,
         actor: resolveActor
       })
     );

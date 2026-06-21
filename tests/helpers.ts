@@ -1,11 +1,13 @@
 import {
   createRegistry,
   defineDocType,
+  definePrintFormat,
   defineReport,
   deterministicIds,
   DocumentService,
   fixedClock,
   InMemoryDocumentStore,
+  PrintService,
   QueryService,
   ReportService
 } from "../src";
@@ -90,9 +92,29 @@ export const openNotesReport = defineReport({
   roles: ["User", "Task Manager"]
 });
 
+export const notePrintFormat = definePrintFormat({
+  name: "Note Standard",
+  label: "Standard",
+  module: "Tests",
+  description: "Printable note summary.",
+  doctype: "Note",
+  sections: [
+    {
+      heading: "Details",
+      fields: [
+        { field: "title", label: "Title" },
+        { field: "priority", label: "Priority" },
+        { field: "body", label: "Body" }
+      ]
+    }
+  ],
+  roles: ["User", "Task Manager"]
+});
+
 export function createTestRegistry(): ModelRegistry {
   return createRegistry({
     doctypes: [noteDocType],
+    printFormats: [notePrintFormat],
     reports: [openNotesReport],
     hooks: {
       Note: [
@@ -128,8 +150,9 @@ export function createServices(
     ...(options.onHookError === undefined ? {} : { onHookError: options.onHookError })
   });
   const queries = new QueryService({ registry, projections: store });
+  const prints = new PrintService({ registry, queries });
   const reports = new ReportService({ registry, queries });
-  return { registry, store, events: store, projections: store, documents, queries, reports };
+  return { registry, store, events: store, projections: store, documents, prints, queries, reports };
 }
 
 export function data(overrides: DocumentData = {}): DocumentData {

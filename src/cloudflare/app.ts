@@ -1,6 +1,7 @@
 import { JobExecutionError } from "../application/job-errors";
 import { JobDispatcher } from "../application/job-dispatcher";
 import { JobExecutor } from "../application/job-executor";
+import { PrintService } from "../application/print-service";
 import { QueryService } from "../application/query-service";
 import { ReportService } from "../application/report-service";
 import type { DocumentCommandExecutor } from "../application/document-service";
@@ -37,6 +38,7 @@ export interface CloudFrappeEnv {
 export interface CloudFrappeRuntimeServices {
   readonly registry: ModelRegistry;
   readonly documents: DocumentCommandExecutor;
+  readonly prints: PrintService;
   readonly queries: QueryService;
   readonly reports: ReportService;
   readonly files?: FileService;
@@ -159,10 +161,12 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     namespace: env.AGGREGATES
   });
   const queries = new QueryService({ registry: options.registry, projections });
+  const prints = new PrintService({ registry: options.registry, queries });
   const reports = new ReportService({ registry: options.registry, queries });
   const baseServices: Omit<CloudFrappeRuntimeServices, "files"> = {
     registry: options.registry,
     documents,
+    prints,
     queries,
     reports
   };
@@ -188,6 +192,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
   const app = createResourceApi({
     registry: options.registry,
     documents,
+    prints,
     queries,
     reports,
     actor: options.actor,
@@ -198,6 +203,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
   const desk = createDeskApp({
     registry: options.registry,
     documents,
+    prints,
     queries,
     reports,
     actor: options.actor

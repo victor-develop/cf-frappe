@@ -7,6 +7,7 @@ describe("Desk app", () => {
     const app = createDeskApp({
       registry: services.registry,
       documents: services.documents,
+      prints: services.prints,
       queries: services.queries,
       reports: services.reports,
       actor: () => owner
@@ -69,7 +70,25 @@ describe("Desk app", () => {
     const response = await app.request("/desk/Note/My%20Note");
 
     expect(response.status).toBe(200);
-    await expect(response.text()).resolves.toContain('name="expectedVersion" value="1"');
+    const html = await response.text();
+    expect(html).toContain('name="expectedVersion" value="1"');
+    expect(html).toContain("/desk/print/Note%20Standard/My%20Note");
+  });
+
+  it("renders printable documents from Desk", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Desk Print", priority: "High", body: "Print body" })
+    });
+
+    const response = await app.request("/desk/print/Note%20Standard/Desk%20Print");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Desk Print");
+    expect(html).toContain("Print body");
   });
 
   it("creates documents from generated forms", async () => {

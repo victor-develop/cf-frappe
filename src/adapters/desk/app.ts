@@ -1,11 +1,13 @@
 import { Hono } from "hono";
 import type { DocumentCommandExecutor } from "../../application/document-service";
+import type { PrintService } from "../../application/print-service";
 import { QueryService } from "../../application/query-service";
 import type { ReportFilters, ReportService } from "../../application/report-service";
 import { FrameworkError } from "../../core/errors";
 import type { ModelRegistry } from "../../core/registry";
 import type { Actor, DocTypeDefinition, DocumentData, FieldDefinition, JsonPrimitive, MutableDocumentData } from "../../core/types";
 import type { ActorResolver } from "../http/actor";
+import { renderPrintDocument } from "../print";
 import {
   renderDeskHome,
   renderDeskLayout,
@@ -20,6 +22,7 @@ import {
 export interface DeskAppOptions {
   readonly registry: ModelRegistry;
   readonly documents: DocumentCommandExecutor;
+  readonly prints?: PrintService;
   readonly queries: QueryService;
   readonly reports?: ReportService;
   readonly actor: ActorResolver;
@@ -80,6 +83,15 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     );
   });
 
+  app.get("/desk/print/:format/:name", async (c) => {
+    if (!options.prints) {
+      throw new FrameworkError("PRINT_FORMAT_NOT_FOUND", "Print formats are not enabled", { status: 404 });
+    }
+    const actor = await options.actor(c.req.raw);
+    const view = await options.prints.printDocument(actor, c.req.param("format"), c.req.param("name"));
+    return html(renderPrintDocument(view));
+  });
+
   app.get("/desk/:doctype", async (c) => {
     const actor = await options.actor(c.req.raw);
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
@@ -134,6 +146,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
+    const printFormats = listPrintFormats(options, actor, doctype.name);
     const document = await options.queries.getDocument(actor, doctype.name, c.req.param("name"));
     return html(
       renderDeskLayout({
@@ -141,7 +154,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         active: doctype.name,
         doctypes,
         reports,
-        body: renderFormView(doctype, { mode: "update", document })
+        body: renderFormView(doctype, { mode: "update", document, printFormats })
       })
     );
   });
@@ -244,6 +257,7 @@ async function renderDeskError(
       body: renderFormView(doctype, {
         mode,
         ...(document ? { document } : {}),
+        ...(document ? { printFormats: listPrintFormats(options, actor, doctype.name) } : {}),
         error: message
       })
     }),
@@ -253,6 +267,10 @@ async function renderDeskError(
 
 function listReports(options: DeskAppOptions, actor: Actor) {
   return options.reports?.listReports(actor) ?? [];
+}
+
+function listPrintFormats(options: DeskAppOptions, actor: Actor, doctype?: string) {
+  return options.prints?.listPrintFormats(actor, doctype) ?? [];
 }
 
 function reportFiltersFromUrl(url: URL): ReportFilters {

@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the metadata report slice:
+As of the metadata print-format slice:
 
-- Test files: `31`
-- Vitest cases: `126`
+- Test files: `34`
+- Vitest cases: `135`
 
 ## Implication
 

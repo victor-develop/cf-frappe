@@ -7,6 +7,7 @@ import type {
 } from "../../core/types";
 import type { ReportDefinition } from "../../core/reports";
 import type { ReportRunResult } from "../../application/report-service";
+import type { PrintFormatDefinition } from "../../core/print-format";
 
 export interface DeskLayoutOptions {
   readonly title: string;
@@ -173,6 +174,7 @@ export function renderFormView(
     readonly mode: "create" | "update";
     readonly document?: DocumentSnapshot;
     readonly error?: string;
+    readonly printFormats?: readonly PrintFormatDefinition[];
   }
 ): string {
   const action =
@@ -193,6 +195,15 @@ export function renderFormView(
           )
           .join("")}</section>`
       : "";
+  const printLinks =
+    options.mode === "update" && options.document && options.printFormats?.length
+      ? `<section class="command-row" aria-label="Print formats">${options.printFormats
+          .map(
+            (format) =>
+              `<a class="button" href="/desk/print/${encodeURIComponent(format.name)}/${encodeURIComponent(options.document!.name)}">${escapeHtml(format.label ?? format.name)}</a>`
+          )
+          .join("")}</section>`
+      : "";
   const versionField = options.document
     ? `<input type="hidden" name="expectedVersion" value="${String(options.document.version)}">`
     : "";
@@ -209,6 +220,7 @@ export function renderFormView(
       <button class="button primary" type="submit">${options.mode === "create" ? "Create" : "Save"}</button>
     </div>
     ${commands}
+    ${printLinks}
   </form>`;
 }
 

@@ -13,6 +13,7 @@ The current slice is a working kernel:
 - Durable Object coordinator factory for serial per-aggregate command processing
 - D1 schema migration planner/runner from DocType `indexes`
 - generated Desk list/form UI from DocType metadata
+- metadata-defined print formats for documents
 - metadata-defined reports over current projections
 - Cloudflare Queue/Cron background job primitives
 - R2-backed file attachments with event-sourced `File` metadata
@@ -31,6 +32,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | Hooks/controllers | pure hook contracts registered in `ModelRegistry` |
 | REST resources | generated `/api/resource/:doctype` routes |
 | Desk list/forms | generated `/desk` pages from DocType metadata |
+| Print formats | metadata-defined printable document pages |
 | Reports | metadata-defined report columns, filters, API, and Desk pages |
 | Background jobs | `JobRegistry`, Queue producers/consumers, and Cron dispatch |
 | File attachments | `File` DocType metadata plus R2 object storage |
@@ -65,7 +67,7 @@ npm run dev
 ## Define A Model
 
 ```ts
-import { createRegistry, defineDocType, defineReport, fileDocType } from "cf-frappe";
+import { createRegistry, defineDocType, definePrintFormat, defineReport, fileDocType } from "cf-frappe";
 
 export const Task = defineDocType({
   name: "Task",
@@ -98,7 +100,26 @@ export const OpenTasks = defineReport({
   roles: ["User"]
 });
 
-export const registry = createRegistry({ doctypes: [Task, fileDocType], reports: [OpenTasks] });
+export const TaskPrint = definePrintFormat({
+  name: "Task Standard",
+  doctype: "Task",
+  sections: [
+    {
+      heading: "Task",
+      fields: [
+        { field: "title", label: "Title" },
+        { field: "priority", label: "Priority" }
+      ]
+    }
+  ],
+  roles: ["User"]
+});
+
+export const registry = createRegistry({
+  doctypes: [Task, fileDocType],
+  printFormats: [TaskPrint],
+  reports: [OpenTasks]
+});
 ```
 
 ## Expose It On Workers
@@ -120,8 +141,11 @@ The generated API includes:
 - `GET /health`
 - `GET /api/meta/doctypes`
 - `GET /api/meta/doctypes/:doctype`
+- `GET /api/meta/print-formats`
+- `GET /api/meta/print-formats/:format`
 - `GET /api/meta/reports`
 - `GET /api/meta/reports/:report`
+- `GET /api/print/:format/:name`
 - `GET /api/report/:report/run`
 - `POST /api/resource/:doctype`
 - `GET /api/resource/:doctype`
@@ -140,6 +164,7 @@ When file support is enabled, the generated API also includes:
 The generated Desk UI includes:
 
 - `GET /desk`
+- `GET /desk/print/:format/:name`
 - `GET /desk/reports`
 - `GET /desk/reports/:report`
 - `GET /desk/:doctype`
@@ -192,6 +217,16 @@ const result = await services.reports.runReport(actor, "Open Tasks", {
 ```
 
 HTTP clients can call `/api/report/Open%20Tasks/run?filter_priority=High`. Desk renders the same report at `/desk/reports/Open%20Tasks`. This first report slice is projection-backed and read-only; grouped summaries, charts, saved filters, exports, and custom query adapters are future report layers over the same service boundary.
+
+## Print Formats
+
+Print formats are metadata registered beside DocTypes. `PrintService` reads the current projection through `QueryService`, so DocType read permissions and print-format role restrictions are both enforced before printable HTML is produced.
+
+```ts
+const printable = await services.prints.printDocument(actor, "Task Standard", "TASK-1");
+```
+
+HTTP clients can call `/api/print/Task%20Standard/TASK-1`. Desk exposes the same printable page at `/desk/print/Task%20Standard/TASK-1` and links available print formats from generated edit forms. This slice renders field-based document printouts; custom templates, letterheads, PDF generation, print settings, and report printouts are future layers over the same view-model boundary.
 
 ## Background Jobs
 
@@ -354,6 +389,7 @@ flowchart LR
   HTTP["Worker HTTP adapter"] --> DOCLIENT["DurableObjectCommandExecutor"]
   DESK["Desk adapter"] --> DOCLIENT
   DESK --> QUERY
+  DESK --> PRINTS
   DESK --> REPORTS
   CRON["Cron trigger"] --> JOBS["JobDispatcher"]
   QUEUE["Queue consumer"] --> EXEC["JobExecutor"]
@@ -370,6 +406,9 @@ flowchart LR
   DOCLIENT --> DO["Durable Object coordinator"]
   DO --> APP["DocumentService"]
   HTTP --> QUERY["QueryService"]
+  HTTP --> PRINTS["PrintService"]
+  PRINTS --> QUERY
+  PRINTS --> REG
   HTTP --> REPORTS["ReportService"]
   REPORTS --> QUERY
   REPORTS --> REG
@@ -388,7 +427,7 @@ flowchart LR
 The dependency direction is one way:
 
 - `core` has pure types, schema validation, event folding, permissions, and registry contracts
-- `application` orchestrates commands, queries, reports, files, realtime, and job execution through ports
+- `application` orchestrates commands, queries, print views, reports, files, realtime, and job execution through ports
 - `ports` define document storage, projections, file storage, realtime publishing, queues, execution logs, clocks, and id generation
 - `adapters` implement in-memory, D1 stores/migrations, HTTP, Desk, R2, realtime, and Cloudflare integration
 - `cloudflare` packages Worker and Durable Object factories
@@ -407,11 +446,11 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 126 tests across schema, permissions, events, registry, services, reports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
+Current suite: 135 tests across schema, permissions, events, registry, services, print formats, reports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
 
 ## Status
 
-This is not Frappe parity yet. Basic generated Desk list/form/report pages, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, and Durable Object realtime topics exist, but print views, grouped report summaries, charts, durable job dashboards, richer realtime presence, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
+This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, and Durable Object realtime topics exist, but custom print templates, grouped report summaries, charts, durable job dashboards, richer realtime presence, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
 
 ## References
 
