@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Durable Object realtime slice:
+As of the D1 migration lifecycle slice:
 
-- Test files: `27`
-- Vitest cases: `104`
+- Test files: `28`
+- Vitest cases: `114`
 
 ## Implication
 

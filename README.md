@@ -11,7 +11,7 @@ The current slice is a working kernel:
 - Cloudflare D1 adapters for atomic event/projection commits
 - Hono-powered resource API compatible with Workers
 - Durable Object coordinator factory for serial per-aggregate command processing
-- D1 projection-index planner from DocType `indexes`
+- D1 schema migration planner/runner from DocType `indexes`
 - generated Desk list/form UI from DocType metadata
 - Cloudflare Queue/Cron background job primitives
 - R2-backed file attachments with event-sourced `File` metadata
@@ -34,6 +34,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | File attachments | `File` DocType metadata plus R2 object storage |
 | Realtime events | document commit events over Durable Object WebSocket topics |
 | Database tables | D1 append-only events plus current projections |
+| Migrations | metadata-planned D1 migrations with applied checksum journal |
 | Concurrency boundary | Durable Object command coordinator per aggregate stream |
 
 See [docs/frappe-assessment.md](docs/frappe-assessment.md) for the assessment and parity map.
@@ -130,13 +131,26 @@ The generated Desk UI includes:
 - `POST /desk/:doctype/:name`
 - `POST /desk/:doctype/:name/command/:command`
 
-Generate D1 projection indexes from metadata:
+Generate and review D1 migrations from metadata:
 
 ```ts
-import { renderD1ProjectionIndexMigration } from "cf-frappe";
+import { planD1Migrations, renderD1Migrations } from "cf-frappe";
 import { registry } from "./models";
 
-const sql = renderD1ProjectionIndexMigration(registry.list());
+const migrations = planD1Migrations(registry.list());
+const sql = renderD1Migrations(migrations);
+```
+
+Apply pending D1 migrations from a trusted admin route, deployment task, or CI script:
+
+```ts
+import { D1MigrationRunner, planD1Migrations, type CloudFrappeEnv } from "cf-frappe";
+import { registry } from "./models";
+
+export async function migrate(env: CloudFrappeEnv) {
+  const runner = new D1MigrationRunner(env.DB);
+  return runner.apply(planD1Migrations(registry.list()));
+}
 ```
 
 No actor resolver is installed by default. Production apps must pass a trusted resolver that derives the actor from a verified session, Access JWT, API token, or another authenticated source.
@@ -327,6 +341,9 @@ flowchart LR
   APP --> REG["ModelRegistry"]
   QUERY --> REG
   APP --> STORE["DocumentStore port"]
+  MIG["D1MigrationRunner"] --> D1M["cf_frappe_migrations"]
+  MIG --> D1E
+  MIG --> D1P
   QUERY --> PS["ProjectionStore port"]
   STORE --> D1E["D1 cf_frappe_events"]
   STORE --> D1P["D1 cf_frappe_documents"]
@@ -338,7 +355,7 @@ The dependency direction is one way:
 - `core` has pure types, schema validation, event folding, permissions, and registry contracts
 - `application` orchestrates commands, queries, files, realtime, and job execution through ports
 - `ports` define document storage, projections, file storage, realtime publishing, queues, execution logs, clocks, and id generation
-- `adapters` implement in-memory, D1, HTTP, Desk, R2, realtime, and Cloudflare integration
+- `adapters` implement in-memory, D1 stores/migrations, HTTP, Desk, R2, realtime, and Cloudflare integration
 - `cloudflare` packages Worker and Durable Object factories
 
 ## Quality Gate
@@ -355,11 +372,11 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 104 tests across schema, permissions, events, registry, services, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning.
+Current suite: 114 tests across schema, permissions, events, registry, services, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
 
 ## Status
 
-This is not Frappe parity yet. Basic generated Desk list/form pages, Cloudflare-native background job primitives, R2-backed file attachments, and Durable Object realtime topics exist, but full migration management, reporting, print views, durable job dashboards, richer realtime presence, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
+This is not Frappe parity yet. Basic generated Desk list/form pages, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, and Durable Object realtime topics exist, but reporting, print views, durable job dashboards, richer realtime presence, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
 
 ## References
 

@@ -33,3 +33,10 @@ CREATE TABLE IF NOT EXISTS cf_frappe_documents (
 
 CREATE INDEX IF NOT EXISTS idx_cf_frappe_documents_list
   ON cf_frappe_documents(tenant_id, doctype, updated_at);
+
+CREATE TABLE IF NOT EXISTS cf_frappe_migrations (
+  id TEXT PRIMARY KEY,
+  checksum TEXT NOT NULL,
+  statement_count INTEGER NOT NULL,
+  applied_at TEXT NOT NULL
+);

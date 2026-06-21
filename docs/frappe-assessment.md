@@ -32,6 +32,7 @@ That model is powerful, but it is not event-sourcing first. cf-frappe keeps the 
 | Desk views | list/form views from metadata | generated server-rendered `/desk` list/forms |
 | Audit trail | document versioning/activity | append-only events plus model-declared domain commands |
 | Current reads | SQL document tables | D1/in-memory projections plus metadata-planned D1 indexes |
+| Migrations | patches and schema migrations | D1 migration plans, rendered SQL bundles, and applied checksum journal |
 | Workflow | Workflow DocType | metadata transitions and transition events |
 | Background jobs | scheduler and queue workers | basic `JobRegistry`, queue dispatch/consume, and Cron mapping |
 | File attachments | File DocType plus file store | `File` metadata DocType plus R2/in-memory `FileStorage` |
@@ -41,7 +42,7 @@ That model is powerful, but it is not event-sourcing first. cf-frappe keeps the 
 ## Current Gaps
 
 - Generated Desk UI now covers basic list/form pages. Report builder, print views, richer admin tools, saved filters, and client scripting are not implemented.
-- DocType metadata currently plans D1 projection indexes, but does not yet manage a full migration lifecycle.
+- DocType metadata now plans and applies D1 projection-index migrations with a checksum journal, but destructive/renaming migrations, data backfills, and an installable CLI are still future work.
 - Background jobs now have basic Queue/Cron support, but durable dashboards, job result storage, worker pools, retry administration, and scheduler admin views are not implemented.
 - Realtime notifications now have basic Durable Object WebSocket document topics, but presence, tenant/doctype filtered fan-out, per-user rooms, Desk client integration, and durable replay are not implemented.
 - Auth providers and session management are intentionally left as adapter seams; no default trusted resolver is provided.
@@ -55,7 +56,7 @@ The next stage should preserve the current dependency direction:
 
 1. Keep domain decisions and event creation in pure TypeScript.
 2. Add platform integrations only through ports and adapters.
-3. Grow metadata into UI/report/job generators without coupling those surfaces to D1 directly.
+3. Grow metadata into UI/report/job/migration generators without coupling those surfaces to D1 directly.
 4. Treat Durable Objects as command routers, not as the source of all model logic.
 5. Add contract tests for every new adapter before adding more generated features.
 
