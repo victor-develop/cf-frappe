@@ -80,6 +80,30 @@ describe("DocumentHistoryService", () => {
     });
   });
 
+  it("summarizes assignment activity and derives current assignees from the event stream", async () => {
+    const { documents, history } = createServices(["create-1", "assign-1", "assign-2", "unassign-1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Assigned Note" }) });
+    await documents.assign({ actor: owner, doctype: "Note", name: "Assigned Note", assignee: "zoe@example.com" });
+    await documents.assign({ actor: owner, doctype: "Note", name: "Assigned Note", assignee: "amy@example.com" });
+    await documents.unassign({ actor: owner, doctype: "Note", name: "Assigned Note", assignee: "zoe@example.com" });
+
+    const timeline = await history.getTimeline(owner, "Note", "Assigned Note");
+    const assignments = await history.getAssignments(owner, "Note", "Assigned Note");
+
+    expect(timeline.entries.map(({ kind, summary }) => ({ kind, summary }))).toEqual([
+      { kind: "DocumentCreated", summary: "Created document" },
+      { kind: "DocumentAssigned", summary: "Assigned zoe@example.com" },
+      { kind: "DocumentAssigned", summary: "Assigned amy@example.com" },
+      { kind: "DocumentUnassigned", summary: "Unassigned zoe@example.com" }
+    ]);
+    expect(assignments).toMatchObject({
+      doctype: "Note",
+      name: "Assigned Note",
+      version: 4,
+      assignees: ["amy@example.com"]
+    });
+  });
+
   it("does not expose orphaned events without a readable projection", async () => {
     const { history } = createServices(["create-1"]);
 

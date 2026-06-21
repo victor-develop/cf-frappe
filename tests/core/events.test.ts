@@ -95,4 +95,35 @@ describe("event folding", () => {
       data: { title: "One" }
     });
   });
+
+  it("folds assignment activity without changing document data or status", () => {
+    const events: DomainEvent[] = [
+      {
+        ...base,
+        sequence: 1,
+        type: "DocumentCreated",
+        payload: { kind: "DocumentCreated", data: { title: "One" }, docstatus: "draft" }
+      },
+      {
+        ...base,
+        id: "evt2",
+        sequence: 2,
+        type: "DocumentAssigned",
+        payload: { kind: "DocumentAssigned", assigneeId: "support@example.com" }
+      },
+      {
+        ...base,
+        id: "evt3",
+        sequence: 3,
+        type: "DocumentUnassigned",
+        payload: { kind: "DocumentUnassigned", assigneeId: "support@example.com" }
+      }
+    ];
+
+    expect(foldDocument(events)).toMatchObject({
+      version: 3,
+      docstatus: "draft",
+      data: { title: "One" }
+    });
+  });
 });

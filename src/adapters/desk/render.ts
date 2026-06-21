@@ -13,7 +13,7 @@ import {
   type ResolvedListView
 } from "../../core/types";
 import type { ReportDefinition } from "../../core/reports";
-import type { DocumentTimeline } from "../../application/document-history-service";
+import type { DocumentAssignments, DocumentTimeline } from "../../application/document-history-service";
 import type { ReportRunResult } from "../../application/report-service";
 import type { PrintFormatDefinition } from "../../core/print-format";
 
@@ -265,7 +265,11 @@ export function renderFormView(
 
 export function renderDocumentTimeline(
   timeline: DocumentTimeline,
-  options: { readonly allowComment?: boolean } = {}
+  options: {
+    readonly allowComment?: boolean;
+    readonly allowAssign?: boolean;
+    readonly assignments?: DocumentAssignments;
+  } = {}
 ): string {
   const rows = timeline.entries
     .map(
@@ -278,11 +282,15 @@ export function renderDocumentTimeline(
     )
     .join("");
   const commentForm = options.allowComment ? renderCommentForm(timeline) : "";
+  const assignmentPanel = options.assignments
+    ? renderAssignmentPanel(timeline, options.assignments, { allowAssign: options.allowAssign ?? false })
+    : "";
   return `<section class="panel timeline" aria-labelledby="document-timeline">
     <div class="timeline-head">
       <h2 id="document-timeline">Timeline</h2>
       <p>v${String(timeline.version)} · ${escapeHtml(timeline.docstatus)}</p>
     </div>
+    ${assignmentPanel}
     <div class="table-wrap">
       <table>
         <thead><tr><th>#</th><th>Event</th><th>Actor</th><th>Occurred</th></tr></thead>
@@ -291,6 +299,44 @@ export function renderDocumentTimeline(
     </div>
     ${commentForm}
   </section>`;
+}
+
+function renderAssignmentPanel(
+  timeline: DocumentTimeline,
+  assignments: DocumentAssignments,
+  options: { readonly allowAssign?: boolean }
+): string {
+  const assigneeRows = assignments.assignees
+    .map(
+      (assignee) => `<li>
+        <span>${escapeHtml(assignee)}</span>
+        ${options.allowAssign ? renderUnassignForm(timeline, assignee) : ""}
+      </li>`
+    )
+    .join("");
+  const assignmentForm = options.allowAssign ? renderAssignmentForm(timeline) : "";
+  return `<div class="timeline-assignments">
+    <h3 id="document-assignments">Assignments</h3>
+    <ul class="assignment-list">${assigneeRows || `<li class="empty">No assignees.</li>`}</ul>
+    ${assignmentForm}
+  </div>`;
+}
+
+function renderAssignmentForm(timeline: DocumentTimeline): string {
+  const action = `/desk/${encodeURIComponent(timeline.doctype)}/${encodeURIComponent(timeline.name)}/assignments`;
+  return `<form class="timeline-assignment-form" method="post">
+    <input type="hidden" name="expectedVersion" value="${String(timeline.version)}">
+    <label class="field" for="timeline-assignee"><span>Assign</span><input id="timeline-assignee" name="assignee" type="text"></label>
+    <button class="button primary" type="submit" formaction="${action}">Assign</button>
+  </form>`;
+}
+
+function renderUnassignForm(timeline: DocumentTimeline, assignee: string): string {
+  const action = `/desk/${encodeURIComponent(timeline.doctype)}/${encodeURIComponent(timeline.name)}/assignments/${encodeURIComponent(assignee)}/remove`;
+  return `<form class="inline-action" method="post">
+    <input type="hidden" name="expectedVersion" value="${String(timeline.version)}">
+    <button class="button" type="submit" formaction="${action}">Unassign</button>
+  </form>`;
 }
 
 function renderCommentForm(timeline: DocumentTimeline): string {
@@ -740,6 +786,32 @@ tr:last-child td { border-bottom: 0; }
 .form-head p, .timeline-head p { margin: 0; color: var(--muted); }
 .timeline strong { display: block; }
 .timeline small { color: var(--muted); }
+.timeline-assignments {
+  padding: 0 18px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.assignment-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.assignment-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+}
+.inline-action { margin: 0; }
+.timeline-assignment-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  margin-top: 12px;
+}
 .timeline-comment {
   padding: 16px 18px 18px;
   border-top: 1px solid var(--border);
@@ -813,5 +885,6 @@ input[readonly], textarea[readonly] { background: #f3f4f6; color: var(--muted); 
   .main { margin-left: 0; padding: 16px; }
   .topbar, .form-head { align-items: flex-start; flex-direction: column; }
   .fields { grid-template-columns: 1fr; }
+  .timeline-assignment-form { grid-template-columns: 1fr; }
 }`;
 }

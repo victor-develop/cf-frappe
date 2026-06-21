@@ -68,10 +68,10 @@ export const noteDocType = defineDocType({
     { roles: ["Guest"], actions: ["read"] },
     {
       roles: ["User"],
-      actions: ["read", "create", "update", "submit", "cancel", "transition", "comment"],
+      actions: ["read", "create", "update", "submit", "cancel", "transition", "comment", "assign"],
       when: ({ actor, document }) => !document || document.data.created_by === actor.id
     },
-    { roles: ["Task Manager"], actions: ["read", "create", "update", "delete", "submit", "cancel", "transition", "comment"] }
+    { roles: ["Task Manager"], actions: ["read", "create", "update", "delete", "submit", "cancel", "transition", "comment", "assign"] }
   ],
   commands: [
     {

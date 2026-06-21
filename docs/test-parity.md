@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document comments slice:
+As of the document assignments slice:
 
 - Test files: `38`
-- Vitest cases: `213`
+- Vitest cases: `222`
 
 ## Implication
 

@@ -190,6 +190,42 @@ describe("Desk app", () => {
     await expect(edit.text()).resolves.toContain("Commented: Desk note");
   });
 
+  it("renders and submits assignment controls from generated edit forms", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    const initial = await app.request("/desk/Note/My%20Note");
+    expect(initial.status).toBe(200);
+    const initialHtml = await initial.text();
+    expect(initialHtml).toContain('<h3 id="document-assignments">Assignments</h3>');
+    expect(initialHtml).toContain('formaction="/desk/Note/My%20Note/assignments"');
+    expect(initialHtml).toContain('name="assignee"');
+
+    const assigned = await app.request("/desk/Note/My%20Note/assignments", {
+      method: "POST",
+      body: new URLSearchParams({ assignee: "support@example.com", expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(assigned.status).toBe(303);
+    await expect(services.queries.getDocument(owner, "Note", "My Note")).resolves.toMatchObject({ version: 2 });
+
+    const withAssignee = await app.request("/desk/Note/My%20Note");
+    expect(withAssignee.status).toBe(200);
+    const assignedHtml = await withAssignee.text();
+    expect(assignedHtml).toContain("support@example.com");
+    expect(assignedHtml).toContain('formaction="/desk/Note/My%20Note/assignments/support%40example.com/remove"');
+
+    const unassigned = await app.request("/desk/Note/My%20Note/assignments/support%40example.com/remove", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "2" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(unassigned.status).toBe(303);
+    await expect(services.queries.getDocument(owner, "Note", "My Note")).resolves.toMatchObject({ version: 3 });
+  });
+
   it("submits and cancels documents from generated edit forms", async () => {
     const { app, services } = makeDesk();
     await services.documents.create({ actor: owner, doctype: "Note", data: data() });

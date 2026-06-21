@@ -526,6 +526,92 @@ describe("DocumentService", () => {
     });
   });
 
+  it("assigns and unassigns users as document stream events without mutating document data", async () => {
+    const { documents, events, projections } = createServices(["e1", "assign-1", "unassign-1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    const assigned = await documents.assign({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      assignee: "support@example.com",
+      expectedVersion: 1
+    });
+    const unassigned = await documents.unassign({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      assignee: "support@example.com",
+      expectedVersion: 2
+    });
+
+    expect(assigned).toMatchObject({
+      version: 2,
+      docstatus: "draft",
+      data: { body: "Body" }
+    });
+    expect(unassigned).toMatchObject({
+      version: 3,
+      docstatus: "draft",
+      data: { body: "Body" }
+    });
+    await expect(projections.get("acme", "Note", "My Note")).resolves.toMatchObject({ version: 3 });
+    await expect(events.readStream("acme:Note:My%20Note")).resolves.toMatchObject([
+      expect.anything(),
+      {
+        type: "NoteAssigned",
+        actorId: owner.id,
+        payload: { kind: "DocumentAssigned", assigneeId: "support@example.com" }
+      },
+      {
+        type: "NoteUnassigned",
+        actorId: owner.id,
+        payload: { kind: "DocumentUnassigned", assigneeId: "support@example.com" }
+      }
+    ]);
+  });
+
+  it("keeps repeated assignment commands idempotent", async () => {
+    const { documents, events } = createServices(["e1", "assign-1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data() });
+    await documents.assign({ actor: owner, doctype: "Note", name: "My Note", assignee: "support@example.com" });
+
+    const duplicateAssign = await documents.assign({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      assignee: "support@example.com",
+      expectedVersion: 2
+    });
+    const absentUnassign = await documents.unassign({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      assignee: "missing@example.com",
+      expectedVersion: 2
+    });
+
+    expect(duplicateAssign.version).toBe(2);
+    expect(absentUnassign.version).toBe(2);
+    await expect(events.readStream("acme:Note:My%20Note")).resolves.toHaveLength(2);
+  });
+
+  it("requires assign permission and non-empty assignees", async () => {
+    const { documents } = createServices(["e1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    await expect(
+      documents.assign({ actor: guest, doctype: "Note", name: "My Note", assignee: "support@example.com" })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+
+    await expect(
+      documents.assign({ actor: owner, doctype: "Note", name: "My Note", assignee: "   " })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Assignee is required"
+    });
+  });
+
   it("executes model-declared domain commands with intentful event payloads", async () => {
     const { documents, events } = createServices(["e1", "e2"]);
     await documents.create({ actor: owner, doctype: "Note", data: data() });

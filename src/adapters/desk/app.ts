@@ -184,7 +184,9 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const tableDefinitions = tableDefinitionsForForm(options, formView);
     const lifecycleActions = lifecycleActionsFor(actor, doctype, document);
     const timeline = await options.timeline?.getTimeline(actor, doctype.name, document.name, { limit: 25 });
+    const assignments = await options.timeline?.getAssignments(actor, doctype.name, document.name);
     const canComment = can(actor, doctype, "comment", document);
+    const canAssign = can(actor, doctype, "assign", document);
     const form = renderFormView(doctype, formView, {
       mode: "update",
       document,
@@ -199,7 +201,15 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         active: doctype.name,
         doctypes,
         reports,
-        body: `${form}${timeline ? renderDocumentTimeline(timeline, { allowComment: canComment }) : ""}`
+        body: `${form}${
+          timeline
+            ? renderDocumentTimeline(timeline, {
+                allowComment: canComment,
+                allowAssign: canAssign,
+                ...(assignments ? { assignments } : {})
+              })
+            : ""
+        }`
       })
     );
   });
@@ -216,6 +226,46 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         name,
         text: form.text,
         ...(form.expectedVersion !== undefined ? { expectedVersion: form.expectedVersion } : {}),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(`/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(name)}`, 303);
+    } catch (error) {
+      return renderDeskError(options, c.req.raw, actor, doctype, "update", error, name);
+    }
+  });
+
+  app.post("/desk/:doctype/:name/assignments", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const name = c.req.param("name");
+    try {
+      const form = await parseDeskAssignment(c.req.raw);
+      await options.documents.assign({
+        actor,
+        doctype: doctype.name,
+        name,
+        assignee: form.assignee,
+        ...(form.expectedVersion !== undefined ? { expectedVersion: form.expectedVersion } : {}),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(`/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(name)}`, 303);
+    } catch (error) {
+      return renderDeskError(options, c.req.raw, actor, doctype, "update", error, name);
+    }
+  });
+
+  app.post("/desk/:doctype/:name/assignments/:assignee/remove", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const name = c.req.param("name");
+    try {
+      const expectedVersion = await parseDeskExpectedVersion(c.req.raw);
+      await options.documents.unassign({
+        actor,
+        doctype: doctype.name,
+        name,
+        assignee: c.req.param("assignee"),
+        ...(expectedVersion !== undefined ? { expectedVersion } : {}),
         metadata: requestMetadata(c.req.raw)
       });
       return c.redirect(`/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(name)}`, 303);
@@ -456,12 +506,27 @@ interface ParsedDeskComment {
   readonly expectedVersion?: number;
 }
 
+interface ParsedDeskAssignment {
+  readonly assignee: string;
+  readonly expectedVersion?: number;
+}
+
 async function parseDeskComment(request: Request): Promise<ParsedDeskComment> {
   const form = await request.formData();
   const text = form.get("comment_text");
   const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
   return {
     text: typeof text === "string" ? text : "",
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
+async function parseDeskAssignment(request: Request): Promise<ParsedDeskAssignment> {
+  const form = await request.formData();
+  const assignee = form.get("assignee");
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  return {
+    assignee: typeof assignee === "string" ? assignee : "",
     ...(expectedVersion !== undefined ? { expectedVersion } : {})
   };
 }

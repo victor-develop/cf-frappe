@@ -22,6 +22,25 @@ describe("in-memory adapters", () => {
     await expect(store.append(stream, 0, [event])).resolves.toMatchObject([{ sequence: 1 }]);
   });
 
+  it("filters stream reads by payload kind before limiting", async () => {
+    const store = new InMemoryEventStore();
+    await store.append(stream, 0, [
+      event,
+      { ...event, id: "evt2", payload: { kind: "DocumentUpdated", patch: { title: "Two" } } },
+      { ...event, id: "evt3", payload: { kind: "DocumentAssigned", assigneeId: "amy@example.com" } },
+      { ...event, id: "evt4", payload: { kind: "DocumentUnassigned", assigneeId: "amy@example.com" } },
+      { ...event, id: "evt5", payload: { kind: "DocumentUpdated", patch: { title: "Five" } } }
+    ]);
+
+    const events = await store.readStream(stream, {
+      payloadKinds: ["DocumentAssigned", "DocumentUnassigned"],
+      limit: 1
+    });
+
+    expect(events.map((item) => item.sequence)).toEqual([4]);
+    expect(events.map((item) => item.payload.kind)).toEqual(["DocumentUnassigned"]);
+  });
+
   it("rejects unexpected versions", async () => {
     const store = new InMemoryEventStore();
     await store.append(stream, 0, [event]);

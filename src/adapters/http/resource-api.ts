@@ -141,6 +141,12 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       });
       return c.json({ data });
     });
+
+    app.get("/api/resource/:doctype/:name/assignments", async (c) => {
+      const actor = await resolveActor(c.req.raw);
+      const data = await timeline.getAssignments(actor, c.req.param("doctype"), c.req.param("name"));
+      return c.json({ data });
+    });
   }
 
   app.get("/api/resource/:doctype/:name", async (c) => {
@@ -178,6 +184,36 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       metadata: requestMetadata(c.req.raw)
     });
     return c.json({ data: snapshot }, 201);
+  });
+
+  app.post("/api/resource/:doctype/:name/assignments", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    const body = await readJson(c.req.raw, { maxJsonBytes });
+    const expectedVersion = numberValue(body.expectedVersion);
+    const snapshot = await options.documents.assign({
+      actor,
+      doctype: c.req.param("doctype"),
+      name: c.req.param("name"),
+      assignee: stringValue(body.assignee) ?? "",
+      ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: snapshot }, 201);
+  });
+
+  app.delete("/api/resource/:doctype/:name/assignments/:assignee", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    const body = await readJson(c.req.raw, { allowEmpty: true, maxJsonBytes });
+    const expectedVersion = numberValue(body.expectedVersion);
+    const snapshot = await options.documents.unassign({
+      actor,
+      doctype: c.req.param("doctype"),
+      name: c.req.param("name"),
+      assignee: c.req.param("assignee"),
+      ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: snapshot });
   });
 
   app.post("/api/resource/:doctype/:name/transition/:action", async (c) => {

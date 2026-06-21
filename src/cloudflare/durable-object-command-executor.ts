@@ -1,4 +1,5 @@
 import type {
+  AssignDocumentCommand,
   CancelDocumentCommand,
   AddDocumentCommentCommand,
   CreateDocumentCommand,
@@ -7,6 +8,7 @@ import type {
   ExecuteDomainCommand,
   SubmitDocumentCommand,
   TransitionDocumentCommand,
+  UnassignDocumentCommand,
   UpdateDocumentCommand
 } from "../application/document-service";
 import type { ModelRegistry } from "../core/registry";
@@ -67,6 +69,14 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
 
   comment(command: AddDocumentCommentCommand): Promise<DocumentSnapshot> {
     return this.stubForNamed(command).transact({ ...command, kind: "comment" });
+  }
+
+  assign(command: AssignDocumentCommand): Promise<DocumentSnapshot> {
+    return this.stubForNamed(command).transact({ ...command, kind: "assign" });
+  }
+
+  unassign(command: UnassignDocumentCommand): Promise<DocumentSnapshot> {
+    return this.stubForNamed(command).transact({ ...command, kind: "unassign" });
   }
 
   private stubForCreate(command: CreateDocumentCommand): AggregateCoordinatorRpc {

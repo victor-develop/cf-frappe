@@ -8,6 +8,7 @@ import type {
   DomainEvent,
   TenantId
 } from "../core/types";
+import { foldDocumentAssignments } from "../core/events";
 import { badRequest } from "../core/errors";
 import { documentStream } from "../core/streams";
 import type { EventStore } from "../ports/event-store";
@@ -37,6 +38,15 @@ export interface DocumentTimeline {
   readonly beforeSequence: number;
   readonly nextBeforeSequence?: number;
   readonly entries: readonly DocumentTimelineEntry[];
+}
+
+export interface DocumentAssignments {
+  readonly tenantId: TenantId;
+  readonly doctype: DocTypeName;
+  readonly name: DocumentName;
+  readonly version: number;
+  readonly docstatus: DocStatus;
+  readonly assignees: readonly string[];
 }
 
 export interface DocumentTimelineEntry {
@@ -92,6 +102,28 @@ export class DocumentHistoryService {
       entries: visibleEvents.map(toTimelineEntry)
     };
   }
+
+  async getAssignments(
+    actor: Actor,
+    doctypeName: string,
+    name: string,
+    options: Pick<GetDocumentTimelineOptions, "tenantId"> = {}
+  ): Promise<DocumentAssignments> {
+    const document = await this.queries.getDocument(actor, doctypeName, name, options.tenantId);
+    const stream = documentStream(document.tenantId, document.doctype, document.name);
+    const events = await this.events.readStream(stream, {
+      maxSequence: document.version,
+      payloadKinds: ["DocumentAssigned", "DocumentUnassigned"]
+    });
+    return {
+      tenantId: document.tenantId,
+      doctype: document.doctype,
+      name: document.name,
+      version: document.version,
+      docstatus: document.docstatus,
+      assignees: foldDocumentAssignments(events.filter((event) => event.sequence <= document.version))
+    };
+  }
 }
 
 function toTimelineEntry(event: DomainEvent): DocumentTimelineEntry {
@@ -122,6 +154,10 @@ function summarize(payload: DocumentEventPayload): string {
       return "Cancelled document";
     case "DocumentCommentAdded":
       return `Commented: ${summarizeText(payload.text)}`;
+    case "DocumentAssigned":
+      return `Assigned ${payload.assigneeId}`;
+    case "DocumentUnassigned":
+      return `Unassigned ${payload.assigneeId}`;
     case "WorkflowTransitioned":
       return workflowSummary(payload);
     case "DomainCommandApplied":

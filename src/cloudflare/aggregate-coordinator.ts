@@ -3,12 +3,14 @@ import { DocumentService } from "../application/document-service";
 import type { DomainEvent } from "../core/types";
 import { createDocumentRealtimeHooks } from "../application/realtime";
 import type {
+  AssignDocumentCommand,
   CancelDocumentCommand,
   AddDocumentCommentCommand,
   CreateDocumentCommand,
   DeleteDocumentCommand,
   SubmitDocumentCommand,
   TransitionDocumentCommand,
+  UnassignDocumentCommand,
   UpdateDocumentCommand
 } from "../application/document-service";
 import type { ExecuteDomainCommand } from "../application/document-service";
@@ -26,7 +28,9 @@ export type AggregateCoordinatorCommand =
   | ({ readonly kind: "delete" } & DeleteDocumentCommand)
   | ({ readonly kind: "transition" } & TransitionDocumentCommand)
   | ({ readonly kind: "execute" } & ExecuteDomainCommand)
-  | ({ readonly kind: "comment" } & AddDocumentCommentCommand);
+  | ({ readonly kind: "comment" } & AddDocumentCommentCommand)
+  | ({ readonly kind: "assign" } & AssignDocumentCommand)
+  | ({ readonly kind: "unassign" } & UnassignDocumentCommand);
 
 export interface AggregateCoordinatorEnv {
   readonly DB: D1Database;
@@ -83,6 +87,10 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
           return this.service.execute(command);
         case "comment":
           return this.service.comment(command);
+        case "assign":
+          return this.service.assign(command);
+        case "unassign":
+          return this.service.unassign(command);
       }
     }
   };

@@ -207,6 +207,45 @@ describe("resource api", () => {
     });
   });
 
+  it("assigns and unassigns resources through event-sourced assignment routes", async () => {
+    const app = makeApp();
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Assigned", body: "Body" })
+    });
+
+    const assigned = await app.request("/api/resource/Note/HTTP%20Assigned/assignments", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ assignee: "support@example.com", expectedVersion: 1 })
+    });
+
+    expect(assigned.status).toBe(201);
+    await expect(assigned.json()).resolves.toMatchObject({ data: { version: 2 } });
+
+    const current = await app.request("/api/resource/Note/HTTP%20Assigned/assignments", { headers: userHeaders });
+    expect(current.status).toBe(200);
+    await expect(current.json()).resolves.toMatchObject({
+      data: {
+        version: 2,
+        assignees: ["support@example.com"]
+      }
+    });
+
+    const unassigned = await app.request("/api/resource/Note/HTTP%20Assigned/assignments/support%40example.com", {
+      method: "DELETE",
+      headers: userHeaders,
+      body: JSON.stringify({ expectedVersion: 2 })
+    });
+
+    expect(unassigned.status).toBe(200);
+    await expect(unassigned.json()).resolves.toMatchObject({ data: { version: 3 } });
+
+    const empty = await app.request("/api/resource/Note/HTTP%20Assigned/assignments", { headers: userHeaders });
+    await expect(empty.json()).resolves.toMatchObject({ data: { assignees: [] } });
+  });
+
   it("returns bounded resource timeline pages from query parameters", async () => {
     const app = makeApp();
     await app.request("/api/resource/Note", {

@@ -1,8 +1,9 @@
-import type { DocumentSnapshot, DomainEvent, NewDomainEvent, StreamName } from "../core/types";
+import type { DocumentEventPayload, DocumentSnapshot, DomainEvent, NewDomainEvent, StreamName } from "../core/types";
 
 export interface ReadStreamOptions {
   readonly maxSequence?: number;
   readonly limit?: number;
+  readonly payloadKinds?: readonly DocumentEventPayload["kind"][];
 }
 
 export interface DocumentCommit {

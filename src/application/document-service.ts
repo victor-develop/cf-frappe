@@ -1,4 +1,4 @@
-import { foldDocument } from "../core/events";
+import { foldDocument, foldDocumentAssignments } from "../core/events";
 import { can } from "../core/permissions";
 import { applyDefaults, compactData, validateDocumentData } from "../core/schema";
 import { documentStream, namingSeriesStream } from "../core/streams";
@@ -111,6 +111,26 @@ export interface AddDocumentCommentCommand {
   readonly metadata?: DocumentData;
 }
 
+export interface AssignDocumentCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly assignee: string;
+  readonly tenantId?: string;
+  readonly expectedVersion?: number;
+  readonly metadata?: DocumentData;
+}
+
+export interface UnassignDocumentCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly assignee: string;
+  readonly tenantId?: string;
+  readonly expectedVersion?: number;
+  readonly metadata?: DocumentData;
+}
+
 export interface DocumentCommandExecutor {
   create(command: CreateDocumentCommand): Promise<DocumentSnapshot>;
   update(command: UpdateDocumentCommand): Promise<DocumentSnapshot>;
@@ -120,11 +140,14 @@ export interface DocumentCommandExecutor {
   transition(command: TransitionDocumentCommand): Promise<DocumentSnapshot>;
   execute(command: ExecuteDomainCommand): Promise<DocumentSnapshot>;
   comment(command: AddDocumentCommentCommand): Promise<DocumentSnapshot>;
+  assign(command: AssignDocumentCommand): Promise<DocumentSnapshot>;
+  unassign(command: UnassignDocumentCommand): Promise<DocumentSnapshot>;
 }
 
 const NAMING_SERIES_DOCTYPE = "__NamingSeries";
 const NAMING_SERIES_MAX_ATTEMPTS = 10;
 const MAX_COMMENT_TEXT_LENGTH = 5000;
+const MAX_ASSIGNEE_ID_LENGTH = 320;
 
 export class DocumentService implements DocumentCommandExecutor {
   private readonly registry: ModelRegistry;
@@ -446,6 +469,24 @@ export class DocumentService implements DocumentCommandExecutor {
     return commit.snapshot;
   }
 
+  async assign(command: AssignDocumentCommand): Promise<DocumentSnapshot> {
+    return this.changeAssignment({
+      command,
+      eventKind: "DocumentAssigned",
+      eventType: (doctype) => doctype.events?.assign ?? `${doctype.name}Assigned`,
+      alreadyDone: (assignees, assigneeId) => assignees.includes(assigneeId)
+    });
+  }
+
+  async unassign(command: UnassignDocumentCommand): Promise<DocumentSnapshot> {
+    return this.changeAssignment({
+      command,
+      eventKind: "DocumentUnassigned",
+      eventType: (doctype) => doctype.events?.unassign ?? `${doctype.name}Unassigned`,
+      alreadyDone: (assignees, assigneeId) => !assignees.includes(assigneeId)
+    });
+  }
+
   async delete(command: DeleteDocumentCommand): Promise<DocumentSnapshot> {
     const doctype = this.registry.get(command.doctype);
     const tenantId = resolveTenant(command.actor, command.tenantId);
@@ -536,14 +577,70 @@ export class DocumentService implements DocumentCommandExecutor {
     doctype: DocTypeDefinition,
     name: string
   ): Promise<DocumentSnapshot> {
-    const existing = foldDocument(await this.store.readStream(stream));
+    return (await this.requireExistingEventStream(stream, doctype, name)).snapshot;
+  }
+
+  private async requireExistingEventStream(
+    stream: string,
+    doctype: DocTypeDefinition,
+    name: string
+  ): Promise<{ readonly snapshot: DocumentSnapshot; readonly events: readonly DomainEvent[] }> {
+    const events = await this.store.readStream(stream);
+    const existing = foldDocument(events);
     if (!existing) {
       throw notFound(`${doctype.name}/${name} was not found`);
     }
     if (existing.docstatus === "deleted") {
       throw new FrameworkError("DOCUMENT_DELETED", `${doctype.name}/${name} was deleted`, { status: 410 });
     }
-    return existing;
+    return { snapshot: existing, events };
+  }
+
+  private async changeAssignment(options: {
+    readonly command: AssignDocumentCommand | UnassignDocumentCommand;
+    readonly eventKind: "DocumentAssigned" | "DocumentUnassigned";
+    readonly eventType: (doctype: DocTypeDefinition) => string;
+    readonly alreadyDone: (assignees: readonly string[], assigneeId: string) => boolean;
+  }): Promise<DocumentSnapshot> {
+    const doctype = this.registry.get(options.command.doctype);
+    const tenantId = resolveTenant(options.command.actor, options.command.tenantId);
+    const stream = documentStream(tenantId, doctype.name, options.command.name);
+    const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, options.command.name);
+    if (!can(options.command.actor, doctype, "assign", existing)) {
+      throw permissionDenied(`Actor '${options.command.actor.id}' cannot assign ${doctype.name}/${options.command.name}`);
+    }
+    ensureExpectedVersion(existing, options.command.expectedVersion);
+    const assigneeId = normalizeAssigneeId(options.command.assignee);
+    if (options.alreadyDone(foldDocumentAssignments(events), assigneeId)) {
+      return existing;
+    }
+    const now = this.clock.now();
+    const event = this.newEvent({
+      tenantId,
+      stream,
+      type: options.eventType(doctype),
+      doctype: doctype.name,
+      documentName: options.command.name,
+      actorId: options.command.actor.id,
+      occurredAt: now,
+      payload: { kind: options.eventKind, assigneeId },
+      metadata: options.command.metadata ?? {}
+    });
+    const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
+      if (!saved) {
+        throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
+      }
+      return {
+        ...existing,
+        version: saved.sequence,
+        updatedAt: saved.occurredAt
+      };
+    });
+    const [saved] = commit.events;
+    if (saved) {
+      await this.runAfterCommit(doctype, saved, commit.snapshot);
+    }
+    return commit.snapshot;
   }
 
   private async changeDocStatus(options: {
@@ -909,6 +1006,17 @@ function normalizeCommentText(text: string): string {
   }
   if (normalized.length > MAX_COMMENT_TEXT_LENGTH) {
     throw badRequest(`Comment text exceeds ${MAX_COMMENT_TEXT_LENGTH} characters`);
+  }
+  return normalized;
+}
+
+function normalizeAssigneeId(assignee: string): string {
+  const normalized = assignee.trim();
+  if (normalized.length === 0) {
+    throw badRequest("Assignee is required");
+  }
+  if (normalized.length > MAX_ASSIGNEE_ID_LENGTH) {
+    throw badRequest(`Assignee exceeds ${MAX_ASSIGNEE_ID_LENGTH} characters`);
   }
   return normalized;
 }

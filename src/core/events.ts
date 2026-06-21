@@ -74,6 +74,8 @@ export function foldDocument(events: readonly DomainEvent[]): DocumentSnapshot |
         }
         break;
       case "DocumentCommentAdded":
+      case "DocumentAssigned":
+      case "DocumentUnassigned":
         if (snapshot) {
           const current: DocumentSnapshot = snapshot;
           snapshot = {
@@ -87,6 +89,21 @@ export function foldDocument(events: readonly DomainEvent[]): DocumentSnapshot |
   }
 
   return snapshot;
+}
+
+export function foldDocumentAssignments(events: readonly DomainEvent[]): readonly string[] {
+  const assignees = new Set<string>();
+  for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
+    switch (event.payload.kind) {
+      case "DocumentAssigned":
+        assignees.add(event.payload.assigneeId);
+        break;
+      case "DocumentUnassigned":
+        assignees.delete(event.payload.assigneeId);
+        break;
+    }
+  }
+  return [...assignees].sort((left, right) => left.localeCompare(right));
 }
 
 function cloneData<TData extends DocumentData>(data: TData): TData {
