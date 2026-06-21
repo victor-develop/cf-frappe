@@ -71,4 +71,43 @@ describe("QueryService", () => {
       message: "Filter 'count' must be an integer"
     });
   });
+
+  it("applies DocType list-view defaults only for generated list views", async () => {
+    const { documents, queries } = createServices(["e1", "e2"]);
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Open Note", workflow_state: "Open" })
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Closed Note", workflow_state: "Closed" })
+    });
+
+    const raw = await queries.listDocuments(owner, "Note");
+    expect(raw.total).toBe(2);
+    expect(raw.data.map((document) => document.name).sort()).toEqual(["Closed Note", "Open Note"]);
+
+    const view = await queries.listDocumentsForView(owner, "Note");
+
+    expect(view.listView.columns.map((field) => field.name)).toEqual(["title", "priority", "workflow_state"]);
+    expect(view.result).toMatchObject({
+      data: [{ name: "Open Note" }],
+      limit: 25,
+      total: 1
+    });
+
+    const closedView = await queries.listDocumentsForView(owner, "Note", {
+      filters: [{ field: "workflow_state", value: "Closed" }]
+    });
+    expect(closedView.filters).toEqual([{ field: "workflow_state", value: "Closed" }]);
+    expect(closedView.result).toMatchObject({
+      data: [{ name: "Closed Note" }],
+      total: 1
+    });
+
+    const allView = await queries.listDocumentsForView(owner, "Note", { useDefaultFilters: false });
+    expect(allView.result.total).toBe(2);
+  });
 });

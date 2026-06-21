@@ -5,7 +5,8 @@ import type {
   FieldDefinition,
   JsonValue,
   ListDocumentsFilter,
-  ListFilterOperator
+  ListFilterOperator,
+  ResolvedListView
 } from "../../core/types";
 import type { ReportDefinition } from "../../core/reports";
 import type { ReportRunResult } from "../../application/report-service";
@@ -140,11 +141,12 @@ export function renderReportView(result: ReportRunResult): string {
 
 export function renderListView(
   doctype: DocTypeDefinition,
+  listView: ResolvedListView,
   documents: readonly DocumentSnapshot[],
   filters: readonly ListDocumentsFilter[] = []
 ): string {
-  const fields = visibleListFields(doctype);
-  const filterFields = filterableListFields(doctype);
+  const fields = listView.columns;
+  const filterFields = listView.filterFields;
   const filterForm = filterFields.map((field) => renderFilterField(field, filters)).join("");
   const header = fields.map((field) => `<th>${escapeHtml(field.label ?? field.name)}</th>`).join("");
   const rows = documents
@@ -163,7 +165,7 @@ export function renderListView(
   return `<section class="toolbar">
     <a class="button primary" href="/desk/${encodeURIComponent(doctype.name)}/new">New ${escapeHtml(labelFor(doctype))}</a>
   </section>
-  ${filterForm ? `<form class="panel form list-filters" method="get"><div class="fields">${filterForm}</div><div class="actions"><button class="button primary" type="submit">Filter</button><a class="button" href="/desk/${encodeURIComponent(doctype.name)}">Clear</a></div></form>` : ""}
+  ${filterForm ? `<form class="panel form list-filters" method="get"><div class="fields">${filterForm}</div><div class="actions"><button class="button primary" type="submit">Filter</button><a class="button" href="/desk/${encodeURIComponent(doctype.name)}?default_filters=0">Clear</a></div></form>` : ""}
   <section class="panel">
     <div class="table-wrap">
       <table>
@@ -274,14 +276,6 @@ function inputType(field: FieldDefinition): string {
     default:
       return "text";
   }
-}
-
-function visibleListFields(doctype: DocTypeDefinition): readonly FieldDefinition[] {
-  return doctype.fields.filter((field) => !field.hidden).slice(0, 5);
-}
-
-function filterableListFields(doctype: DocTypeDefinition): readonly FieldDefinition[] {
-  return visibleListFields(doctype).filter((field) => field.type !== "json");
 }
 
 function renderFilterField(field: FieldDefinition, filters: readonly ListDocumentsFilter[]): string {

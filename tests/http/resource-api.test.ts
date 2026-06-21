@@ -117,6 +117,11 @@ describe("resource api", () => {
       headers: userHeaders,
       body: JSON.stringify({ title: "HTTP Low", priority: "Low", body: "Routine" })
     });
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Closed High", priority: "High", workflow_state: "Closed", body: "Closed" })
+    });
 
     const response = await app.request("/api/resource/Note?filter_priority=High", { headers: userHeaders });
 
@@ -125,6 +130,27 @@ describe("resource api", () => {
       data: [{ name: "HTTP High" }],
       total: 1
     });
+
+    const closed = await app.request(
+      "/api/resource/Note?filter_priority=High&filter_workflow_state=Closed",
+      { headers: userHeaders }
+    );
+    expect(closed.status).toBe(200);
+    await expect(closed.json()).resolves.toMatchObject({
+      data: [{ name: "HTTP Closed High" }],
+      total: 1
+    });
+
+    const allHigh = await app.request("/api/resource/Note?default_filters=0&filter_priority=High", {
+      headers: userHeaders
+    });
+    expect(allHigh.status).toBe(200);
+    const allHighJson = (await allHigh.json()) as { readonly total: number; readonly data: readonly { readonly name: string }[] };
+    expect(allHighJson.total).toBe(2);
+    expect(allHighJson.data.map((document) => document.name).sort()).toEqual([
+      "HTTP Closed High",
+      "HTTP High"
+    ]);
   });
 
   it("maps invalid resource list filters to JSON bad requests", async () => {

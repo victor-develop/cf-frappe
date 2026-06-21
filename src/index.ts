@@ -17,6 +17,7 @@ export * from "./core/errors";
 export * from "./core/events";
 export * from "./core/file-doctype";
 export * from "./core/jobs";
+export * from "./core/list-view";
 export * from "./core/permissions";
 export * from "./core/print-format";
 export * from "./core/realtime";

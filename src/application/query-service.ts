@@ -1,4 +1,5 @@
 import { FrameworkError, notFound, permissionDenied } from "../core/errors";
+import { normalizeListFilters, resolveListView } from "../core/list-view";
 import { can } from "../core/permissions";
 import type { ModelRegistry } from "../core/registry";
 import {
@@ -6,11 +7,9 @@ import {
   type Actor,
   type DocTypeDefinition,
   type DocumentSnapshot,
-  type FieldDefinition,
-  type JsonPrimitive,
   type ListDocumentsFilter,
-  type ListFilterOperator,
-  type ListDocumentsResult
+  type ListDocumentsResult,
+  type ResolvedListView
 } from "../core/types";
 import type { ProjectionStore } from "../ports/projection-store";
 
@@ -85,83 +84,57 @@ export class QueryService {
       data: result.data.filter((document) => document.docstatus !== "deleted" && can(actor, doctype, "read", document))
     };
   }
+
+  getListView(actor: Actor, doctypeName: string): ResolvedListView {
+    return resolveListView(this.getMeta(actor, doctypeName));
+  }
+
+  async listDocumentsForView(
+    actor: Actor,
+    doctypeName: string,
+    options: {
+      readonly tenantId?: string;
+      readonly filters?: readonly ListDocumentsFilter[];
+      readonly useDefaultFilters?: boolean;
+      readonly limit?: number;
+      readonly offset?: number;
+    } = {}
+  ): Promise<{
+    readonly listView: ResolvedListView;
+    readonly filters: readonly ListDocumentsFilter[];
+    readonly result: ListDocumentsResult;
+  }> {
+    const doctype = this.registry.get(doctypeName);
+    if (!can(actor, doctype, "read")) {
+      throw permissionDenied(`Actor '${actor.id}' cannot read ${doctype.name}`);
+    }
+    const listView = resolveListView(doctype);
+    const filters = mergeDefaultFilters(
+      options.useDefaultFilters === false ? [] : listView.filters,
+      options.filters ?? []
+    );
+    const result = await this.listDocuments(actor, doctype.name, {
+      ...(options.tenantId !== undefined ? { tenantId: options.tenantId } : {}),
+      filters,
+      limit: options.limit ?? listView.pageSize,
+      ...(options.offset !== undefined ? { offset: options.offset } : {})
+    });
+    return { listView, filters, result };
+  }
 }
 
-function normalizeListFilters(
-  doctype: DocTypeDefinition,
-  filters: readonly ListDocumentsFilter[]
+function mergeDefaultFilters(
+  defaults: readonly ListDocumentsFilter[],
+  overrides: readonly ListDocumentsFilter[]
 ): readonly ListDocumentsFilter[] {
-  if (filters.length === 0) {
-    return [];
+  if (defaults.length === 0) {
+    return overrides;
   }
-  const fields = new Map(doctype.fields.map((field) => [field.name, field]));
-  return filters.map((filter) => {
-    const field = fields.get(filter.field);
-    if (!field) {
-      throw new FrameworkError("BAD_REQUEST", `Filter field '${filter.field}' is not defined on ${doctype.name}`, {
-        status: 400
-      });
-    }
-    if (field.type === "json") {
-      throw new FrameworkError("BAD_REQUEST", `Filter field '${filter.field}' cannot be a json field`, {
-        status: 400
-      });
-    }
-    const operator = normalizeFilterOperator(filter.operator);
-    if (field.type === "boolean" && operator !== "eq") {
-      throw new FrameworkError("BAD_REQUEST", `Boolean filter '${filter.field}' only supports eq`, {
-        status: 400
-      });
-    }
-    return {
-      field: filter.field,
-      ...(operator === "eq" ? {} : { operator }),
-      value: coerceFilterValue(field, filter.value)
-    };
-  });
-}
-
-function normalizeFilterOperator(operator: unknown): ListFilterOperator {
-  if (operator === undefined) {
-    return "eq";
+  if (overrides.length === 0) {
+    return defaults;
   }
-  if (operator === "eq" || operator === "contains" || operator === "gte" || operator === "lte") {
-    return operator;
-  }
-  throw new FrameworkError("BAD_REQUEST", `Unsupported list filter operator '${String(operator)}'`, { status: 400 });
-}
-
-function coerceFilterValue(field: FieldDefinition, value: JsonPrimitive): JsonPrimitive {
-  if (value === null) {
-    throw new FrameworkError("BAD_REQUEST", `Filter '${field.name}' cannot be null`, { status: 400 });
-  }
-  if (field.type === "integer") {
-    const parsed = typeof value === "number" ? value : Number(value);
-    if (!Number.isInteger(parsed)) {
-      throw new FrameworkError("BAD_REQUEST", `Filter '${field.name}' must be an integer`, { status: 400 });
-    }
-    return parsed;
-  }
-  if (field.type === "number") {
-    const parsed = typeof value === "number" ? value : Number(value);
-    if (!Number.isFinite(parsed)) {
-      throw new FrameworkError("BAD_REQUEST", `Filter '${field.name}' must be a number`, { status: 400 });
-    }
-    return parsed;
-  }
-  if (field.type === "boolean") {
-    if (typeof value === "boolean") {
-      return value;
-    }
-    if (value === "true" || value === "1" || value === "on") {
-      return true;
-    }
-    if (value === "false" || value === "0" || value === "off") {
-      return false;
-    }
-    throw new FrameworkError("BAD_REQUEST", `Filter '${field.name}' must be a boolean`, { status: 400 });
-  }
-  return typeof value === "string" ? value : String(value);
+  const overrideFields = new Set(overrides.map((filter) => filter.field));
+  return [...defaults.filter((filter) => !overrideFields.has(filter.field)), ...overrides];
 }
 
 function clampLimit(limit?: number): number {

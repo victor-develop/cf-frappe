@@ -35,6 +35,8 @@ export interface FieldDefinition {
   readonly required?: boolean;
   readonly readOnly?: boolean;
   readonly hidden?: boolean;
+  readonly inListView?: boolean;
+  readonly inListFilter?: boolean;
   readonly options?: readonly string[];
   readonly linkTo?: DocTypeName;
   readonly min?: number;
@@ -117,6 +119,7 @@ export interface DocTypeDefinition<TData extends DocumentData = DocumentData> {
   readonly version?: number;
   readonly label?: string;
   readonly fields: readonly FieldDefinition[];
+  readonly listView?: ListViewDefinition;
   readonly permissions?: readonly PermissionRule[];
   readonly workflow?: WorkflowDefinition;
   readonly commands?: readonly DomainCommandDefinition[];
@@ -199,6 +202,20 @@ export interface ListDocumentsFilter {
   readonly field: string;
   readonly operator?: ListFilterOperator;
   readonly value: JsonPrimitive;
+}
+
+export interface ListViewDefinition {
+  readonly columns?: readonly string[];
+  readonly filterFields?: readonly string[];
+  readonly filters?: readonly ListDocumentsFilter[];
+  readonly pageSize?: number;
+}
+
+export interface ResolvedListView {
+  readonly columns: readonly FieldDefinition[];
+  readonly filterFields: readonly FieldDefinition[];
+  readonly filters: readonly ListDocumentsFilter[];
+  readonly pageSize: number;
 }
 
 export interface ListDocumentsQuery {

@@ -68,12 +68,17 @@ describe("Desk app", () => {
     await services.documents.create({
       actor: owner,
       doctype: "Note",
-      data: data({ title: "Desk High", priority: "High", body: "Escalated" })
+      data: data({ title: "Desk High", priority: "High", body: "Hidden body" })
     });
     await services.documents.create({
       actor: owner,
       doctype: "Note",
       data: data({ title: "Desk Low", priority: "Low", body: "Routine" })
+    });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Desk Closed High", priority: "High", workflow_state: "Closed", body: "Closed" })
     });
 
     const response = await app.request("/desk/Note?filter_priority=High");
@@ -82,8 +87,21 @@ describe("Desk app", () => {
     const html = await response.text();
     expect(html).toContain("Desk High");
     expect(html).not.toContain("Desk Low");
+    expect(html).not.toContain("Desk Closed High");
+    expect(html).not.toContain("Hidden body");
+    expect(html).toContain("<th>title</th><th>priority</th><th>workflow_state</th>");
+    expect(html).toContain('name="filter_title__contains"');
     expect(html).toContain('name="filter_priority"');
     expect(html).toContain('<option value="High" selected>High</option>');
+    expect(html).toContain('<option value="Open" selected>Open</option>');
+    expect(html).toContain("/desk/Note?default_filters=0");
+
+    const closed = await app.request("/desk/Note?filter_priority=High&filter_workflow_state=Closed");
+    expect(closed.status).toBe(200);
+    const closedHtml = await closed.text();
+    expect(closedHtml).toContain("Desk Closed High");
+    expect(closedHtml).not.toContain("Desk High");
+    expect(closedHtml).toContain('<option value="Closed" selected>Closed</option>');
   });
 
   it("renders expectedVersion in edit forms", async () => {

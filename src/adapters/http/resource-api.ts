@@ -92,12 +92,13 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     const url = new URL(c.req.url);
     const limit = parseOptionalInteger(c.req.query("limit"));
     const offset = parseOptionalInteger(c.req.query("offset"));
-    const data = await options.queries.listDocuments(actor, c.req.param("doctype"), {
+    const { result } = await options.queries.listDocumentsForView(actor, c.req.param("doctype"), {
       filters: listFiltersFromUrl(url),
+      useDefaultFilters: url.searchParams.get("default_filters") !== "0",
       ...(limit !== undefined ? { limit } : {}),
       ...(offset !== undefined ? { offset } : {})
     });
-    return c.json(data);
+    return c.json(result);
   });
 
   app.post("/api/resource/:doctype", async (c) => {

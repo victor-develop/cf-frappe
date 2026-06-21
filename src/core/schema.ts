@@ -7,6 +7,7 @@ import type {
   MutableDocumentData,
   ValidationIssue
 } from "./types";
+import { assertListViewDefinition } from "./list-view";
 
 export interface ValidationOptions {
   readonly partial?: boolean;
@@ -25,9 +26,12 @@ export function defineDocType<TData extends DocumentData>(
     }
     seen.add(field.name);
   }
+  assertListViewDefinition(definition);
+  const listView = definition.listView ? freezeListView(definition.listView) : undefined;
   return Object.freeze({
     ...definition,
-    fields: Object.freeze([...definition.fields])
+    fields: Object.freeze([...definition.fields]),
+    ...(listView ? { listView } : {})
   });
 }
 
@@ -168,4 +172,13 @@ function assertIdentifier(value: string, label: string): void {
   if (!/^[A-Za-z][A-Za-z0-9_ ]*$/.test(value)) {
     throw new Error(`Invalid ${label}: '${value}'`);
   }
+}
+
+function freezeListView(listView: NonNullable<DocTypeDefinition["listView"]>): NonNullable<DocTypeDefinition["listView"]> {
+  return Object.freeze({
+    ...listView,
+    ...(listView.columns ? { columns: Object.freeze([...listView.columns]) } : {}),
+    ...(listView.filterFields ? { filterFields: Object.freeze([...listView.filterFields]) } : {}),
+    ...(listView.filters ? { filters: Object.freeze([...listView.filters]) } : {})
+  });
 }
