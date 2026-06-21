@@ -1,5 +1,5 @@
 import type { DomainEvent, NewDomainEvent, StreamName } from "../core/types";
-import type { DocumentStore } from "./document-store";
+import type { DocumentStore, ReadStreamOptions } from "./document-store";
 
 export interface EventStore extends Pick<DocumentStore, "readStream"> {
   append(
@@ -7,6 +7,6 @@ export interface EventStore extends Pick<DocumentStore, "readStream"> {
     expectedVersion: number,
     events: readonly NewDomainEvent[]
   ): Promise<readonly DomainEvent[]>;
-  readStream(stream: StreamName): Promise<readonly DomainEvent[]>;
+  readStream(stream: StreamName, options?: ReadStreamOptions): Promise<readonly DomainEvent[]>;
   currentVersion(stream: StreamName): Promise<number>;
 }

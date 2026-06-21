@@ -1,12 +1,13 @@
 import { JobExecutionError } from "../application/job-errors";
 import { JobDispatcher } from "../application/job-dispatcher";
 import { JobExecutor } from "../application/job-executor";
+import { DocumentHistoryService } from "../application/document-history-service";
 import { PrintService } from "../application/print-service";
 import { QueryService } from "../application/query-service";
 import { ReportService } from "../application/report-service";
 import type { DocumentCommandExecutor } from "../application/document-service";
 import { FileService } from "../application/file-service";
-import { D1ProjectionStore } from "../adapters/d1";
+import { D1EventStore, D1ProjectionStore } from "../adapters/d1";
 import { createDeskApp } from "../adapters/desk";
 import { createResourceApi } from "../adapters/http";
 import type { ActorResolver } from "../adapters/http";
@@ -38,6 +39,7 @@ export interface CloudFrappeEnv {
 export interface CloudFrappeRuntimeServices {
   readonly registry: ModelRegistry;
   readonly documents: DocumentCommandExecutor;
+  readonly history: DocumentHistoryService;
   readonly prints: PrintService;
   readonly queries: QueryService;
   readonly reports: ReportService;
@@ -156,16 +158,19 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     return cached;
   }
   const projections = new D1ProjectionStore(env.DB);
+  const events = new D1EventStore(env.DB);
   const documents = new DurableObjectCommandExecutor({
     registry: options.registry,
     namespace: env.AGGREGATES
   });
   const queries = new QueryService({ registry: options.registry, projections });
+  const history = new DocumentHistoryService({ events, queries });
   const prints = new PrintService({ registry: options.registry, queries });
   const reports = new ReportService({ registry: options.registry, queries });
   const baseServices: Omit<CloudFrappeRuntimeServices, "files"> = {
     registry: options.registry,
     documents,
+    history,
     prints,
     queries,
     reports
@@ -194,6 +199,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     documents,
     prints,
     queries,
+    timeline: history,
     reports,
     actor: options.actor,
     ...(options.maxJsonBytes ? { maxJsonBytes: options.maxJsonBytes } : {}),
@@ -205,6 +211,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     documents,
     prints,
     queries,
+    timeline: history,
     reports,
     actor: options.actor
   });

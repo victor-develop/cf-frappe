@@ -1,4 +1,4 @@
-import { D1DocumentStore } from "../../src";
+import { D1DocumentStore, D1EventStore } from "../../src";
 import type { DocumentSnapshot, NewDomainEvent } from "../../src";
 
 describe("D1DocumentStore", () => {
@@ -37,6 +37,34 @@ describe("D1DocumentStore", () => {
     await expect(store.readStream(stream)).resolves.toEqual([]);
     expect(db.documents.size).toBe(0);
   });
+
+  it("reads a bounded recent stream page with bound sequence and limit parameters", async () => {
+    const db = new FakeD1Database();
+    const store = new D1EventStore(db as unknown as D1Database);
+    await store.append(stream, 0, [
+      event,
+      updateEvent("evt2", "Two"),
+      updateEvent("evt3", "Three"),
+      updateEvent("evt4", "Four")
+    ]);
+
+    const page = await store.readStream(stream, { maxSequence: 3, limit: 2 });
+
+    expect(page.map((item) => item.sequence)).toEqual([2, 3]);
+    const read = db.statements.at(-1);
+    expect(read?.sql).toContain("sequence <= ?");
+    expect(read?.sql).toContain("ORDER BY sequence DESC LIMIT ?");
+    expect(read?.params).toEqual([stream, 3, 2]);
+  });
+
+  function updateEvent(id: string, title: string): NewDomainEvent {
+    return {
+      ...event,
+      id,
+      type: "NoteUpdated",
+      payload: { kind: "DocumentUpdated", patch: { title } }
+    };
+  }
 });
 
 function snapshotFrom(event: { tenantId: string; doctype: string; documentName: string; sequence: number; occurredAt: string; payload: any }): DocumentSnapshot {
@@ -55,6 +83,7 @@ function snapshotFrom(event: { tenantId: string; doctype: string; documentName: 
 class FakeD1Database {
   readonly events: any[] = [];
   readonly documents = new Map<string, any>();
+  readonly statements: FakeD1PreparedStatement[] = [];
   readonly failDocumentUpsert: boolean;
 
   constructor(options: { readonly failDocumentUpsert?: boolean } = {}) {
@@ -62,7 +91,9 @@ class FakeD1Database {
   }
 
   prepare(sql: string) {
-    return new FakeD1PreparedStatement(this, sql);
+    const statement = new FakeD1PreparedStatement(this, sql);
+    this.statements.push(statement);
+    return statement;
   }
 
   async batch(statements: FakeD1PreparedStatement[]) {
@@ -87,11 +118,11 @@ class FakeD1Database {
 }
 
 class FakeD1PreparedStatement {
-  private params: unknown[] = [];
+  params: unknown[] = [];
 
   constructor(
     private readonly db: FakeD1Database,
-    private readonly sql: string
+    readonly sql: string
   ) {}
 
   bind(...params: unknown[]) {
@@ -113,10 +144,15 @@ class FakeD1PreparedStatement {
   async all() {
     if (this.sql.includes("FROM cf_frappe_events")) {
       const stream = String(this.params[0]);
+      const maxSequence = this.sql.includes("sequence <= ?") ? Number(this.params[1]) : undefined;
+      const limit = this.sql.includes("LIMIT ?") ? Number(this.params.at(-1)) : undefined;
+      const sortDescending = this.sql.includes("ORDER BY sequence DESC");
+      const filtered = this.db.events
+        .filter((event) => event.stream === stream)
+        .filter((event) => maxSequence === undefined || event.sequence <= maxSequence)
+        .sort((left, right) => sortDescending ? right.sequence - left.sequence : left.sequence - right.sequence);
       return {
-        results: this.db.events
-          .filter((event) => event.stream === stream)
-          .sort((left, right) => left.sequence - right.sequence)
+        results: limit === undefined ? filtered : filtered.slice(0, limit)
       };
     }
     return { results: [] };

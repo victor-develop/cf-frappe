@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { DocumentCommandExecutor } from "../../application/document-service";
+import type { DocumentHistoryService } from "../../application/document-history-service";
 import type { FileService } from "../../application/file-service";
 import type { PrintService } from "../../application/print-service";
 import { QueryService } from "../../application/query-service";
@@ -18,6 +19,7 @@ export interface ResourceApiOptions {
   readonly registry: ModelRegistry;
   readonly documents: DocumentCommandExecutor;
   readonly queries: QueryService;
+  readonly timeline?: DocumentHistoryService;
   readonly actor: ActorResolver;
   readonly maxJsonBytes?: number;
   readonly files?: FileService;
@@ -126,6 +128,20 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     });
     return c.json({ data: snapshot }, 201);
   });
+
+  if (options.timeline) {
+    const timeline = options.timeline;
+    app.get("/api/resource/:doctype/:name/timeline", async (c) => {
+      const actor = await resolveActor(c.req.raw);
+      const limit = parseOptionalInteger(c.req.query("limit"));
+      const beforeSequence = parseOptionalInteger(c.req.query("before_sequence"));
+      const data = await timeline.getTimeline(actor, c.req.param("doctype"), c.req.param("name"), {
+        ...(limit !== undefined ? { limit } : {}),
+        ...(beforeSequence !== undefined ? { beforeSequence } : {})
+      });
+      return c.json({ data });
+    });
+  }
 
   app.get("/api/resource/:doctype/:name", async (c) => {
     const actor = await resolveActor(c.req.raw);

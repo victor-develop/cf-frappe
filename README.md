@@ -10,6 +10,7 @@ The current slice is a working kernel:
 - metadata-defined child table fields validated from child DocType metadata
 - first-class draft/submitted/cancelled document lifecycle events
 - command-side document service that writes immutable events
+- permissioned document timelines derived from append-only event streams
 - query-side projection service for current document reads and lists
 - in-memory adapters for TDD
 - Cloudflare D1 adapters for atomic event/projection commits
@@ -37,6 +38,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | Link fields | registered `type: "link"` targets with write-time existence checks and lookup options |
 | Child tables | registered `type: "table"` child DocTypes embedded in event-sourced document data |
 | Document lifecycle | event-sourced create, update, submit, cancel, and delete commands |
+| Audit trail | permissioned document timelines from immutable events |
 | Permissions | role and predicate rules attached to DocTypes |
 | Hooks/controllers | pure hook contracts registered in `ModelRegistry` |
 | REST resources | generated `/api/resource/:doctype` routes |
@@ -184,6 +186,7 @@ The generated API includes:
 - `POST /api/resource/:doctype`
 - `GET /api/resource/:doctype`
 - `GET /api/resource/:doctype/:name`
+- `GET /api/resource/:doctype/:name/timeline`
 - `PUT /api/resource/:doctype/:name`
 - `POST /api/resource/:doctype/:name/submit`
 - `POST /api/resource/:doctype/:name/cancel`
@@ -328,6 +331,12 @@ HTTP resource updates treat a table field as a whole-array replacement. Desk inc
 Every document starts as `draft`. `DocumentService.submit(...)` appends a `DocumentSubmitted` event and moves the projection to `submitted`; `DocumentService.cancel(...)` appends `DocumentCancelled` and moves it to `cancelled`. Submit is allowed only from draft, cancel only from submitted, and update/workflow/domain-command mutations are draft-only in this slice. Deleting a submitted document is rejected until it is cancelled, keeping lifecycle rules in the command boundary instead of the query projection.
 
 HTTP clients can call `/api/resource/:doctype/:name/submit` and `/api/resource/:doctype/:name/cancel` with optional `expectedVersion`. Desk edit forms render the allowed lifecycle action for the current actor and document status.
+
+## Document Timelines
+
+`DocumentHistoryService` reads a document's authoritative event stream after `QueryService.getDocument(...)` confirms the current actor can read the document. That keeps the timeline event-sourced while preserving the same DocType read rules as normal resource reads.
+
+HTTP clients can call `/api/resource/:doctype/:name/timeline` to get ordered timeline entries with event sequence, type, kind, actor, timestamp, summary, payload, and metadata. The endpoint defaults to the latest 50 entries, accepts `limit`, and returns `nextBeforeSequence` for older pages that can be requested with `before_sequence`. Desk edit forms render the latest 25 entries below the generated form when history is enabled.
 
 ## Desk Forms
 
@@ -557,7 +566,7 @@ flowchart LR
 The dependency direction is one way:
 
 - `core` has pure types, schema validation, event folding, permissions, and registry contracts
-- `application` orchestrates commands, queries, print views, reports, files, realtime, and job execution through ports
+- `application` orchestrates commands, queries, document history, print views, reports, files, realtime, and job execution through ports
 - `ports` define document storage, projections, file storage, realtime publishing, queues, execution logs, clocks, and id generation
 - `adapters` implement in-memory, D1 stores/migrations, HTTP, Desk, R2, realtime, and Cloudflare integration
 - `cloudflare` packages Worker and Durable Object factories
@@ -576,11 +585,11 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 199 tests across schema, permissions, events, registry, services, naming series, document lifecycle, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, reports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
+Current suite: 209 tests across schema, permissions, events, registry, services, naming series, document lifecycle, document timelines, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, reports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
 
 ## Status
 
-This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, and Durable Object realtime topics exist, but saved filters, custom print templates, grouped report summaries, charts, durable job dashboards, richer realtime presence, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
+This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, permissioned document timelines, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, and Durable Object realtime topics exist, but saved filters, custom print templates, grouped report summaries, charts, durable job dashboards, richer realtime presence, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
 
 ## References
 

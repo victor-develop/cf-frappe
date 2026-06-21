@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { DocumentCommandExecutor } from "../../application/document-service";
+import type { DocumentHistoryService } from "../../application/document-history-service";
 import type { PrintService } from "../../application/print-service";
 import { QueryService } from "../../application/query-service";
 import type { ReportFilters, ReportService } from "../../application/report-service";
@@ -24,6 +25,7 @@ import {
   renderDeskHome,
   renderDeskLayout,
   renderErrorPanel,
+  renderDocumentTimeline,
   renderFormView,
   renderListView,
   renderNotFound,
@@ -39,6 +41,7 @@ export interface DeskAppOptions {
   readonly documents: DocumentCommandExecutor;
   readonly prints?: PrintService;
   readonly queries: QueryService;
+  readonly timeline?: DocumentHistoryService;
   readonly reports?: ReportService;
   readonly actor: ActorResolver;
 }
@@ -180,20 +183,22 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const linkOptions = await linkOptionsForForm(options, actor, doctype, formView);
     const tableDefinitions = tableDefinitionsForForm(options, formView);
     const lifecycleActions = lifecycleActionsFor(actor, doctype, document);
+    const timeline = await options.timeline?.getTimeline(actor, doctype.name, document.name, { limit: 25 });
+    const form = renderFormView(doctype, formView, {
+      mode: "update",
+      document,
+      linkOptions,
+      tableDefinitions,
+      lifecycleActions,
+      printFormats
+    });
     return html(
       renderDeskLayout({
         title: document.name,
         active: doctype.name,
         doctypes,
         reports,
-        body: renderFormView(doctype, formView, {
-          mode: "update",
-          document,
-          linkOptions,
-          tableDefinitions,
-          lifecycleActions,
-          printFormats
-        })
+        body: `${form}${timeline ? renderDocumentTimeline(timeline) : ""}`
       })
     );
   });

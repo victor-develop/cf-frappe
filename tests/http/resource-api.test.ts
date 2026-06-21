@@ -8,6 +8,7 @@ describe("resource api", () => {
       registry: services.registry,
       documents: services.documents,
       queries: services.queries,
+      timeline: services.history,
       actor: unsafeHeaderActorResolver
     });
   }
@@ -18,6 +19,7 @@ describe("resource api", () => {
       registry: services.registry,
       documents: services.documents,
       queries: services.queries,
+      timeline: services.history,
       actor: unsafeHeaderActorResolver,
       maxJsonBytes
     });
@@ -141,6 +143,80 @@ describe("resource api", () => {
     });
     expect(deleted.status).toBe(200);
     await expect(deleted.json()).resolves.toMatchObject({ data: { docstatus: "deleted" } });
+  });
+
+  it("returns a permissioned resource timeline from the document event stream", async () => {
+    const app = makeApp();
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Timeline", body: "Body" })
+    });
+    await app.request("/api/resource/Note/HTTP%20Timeline", {
+      method: "PUT",
+      headers: userHeaders,
+      body: JSON.stringify({ body: "Updated" })
+    });
+
+    const response = await app.request("/api/resource/Note/HTTP%20Timeline/timeline", { headers: userHeaders });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        doctype: "Note",
+        name: "HTTP Timeline",
+        version: 2,
+        entries: [
+          { sequence: 1, kind: "DocumentCreated", summary: "Created document" },
+          { sequence: 2, kind: "DocumentUpdated", summary: "Updated body" }
+        ]
+      }
+    });
+  });
+
+  it("returns bounded resource timeline pages from query parameters", async () => {
+    const app = makeApp();
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Paged", body: "Body" })
+    });
+    await app.request("/api/resource/Note/HTTP%20Paged", {
+      method: "PUT",
+      headers: userHeaders,
+      body: JSON.stringify({ body: "Updated" })
+    });
+
+    const response = await app.request("/api/resource/Note/HTTP%20Paged/timeline?limit=1", { headers: userHeaders });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        limit: 1,
+        beforeSequence: 2,
+        nextBeforeSequence: 1,
+        entries: [{ sequence: 2, kind: "DocumentUpdated" }]
+      }
+    });
+  });
+
+  it("maps unreadable resource timelines to JSON permission errors", async () => {
+    const app = makeApp();
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Private", body: "Body" })
+    });
+
+    const response = await app.request("/api/resource/Note/HTTP%20Private/timeline", {
+      headers: {
+        ...userHeaders,
+        "x-cf-frappe-user": "other@example.com"
+      }
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "PERMISSION_DENIED" } });
   });
 
   it("lists resources with metadata-validated query filters", async () => {

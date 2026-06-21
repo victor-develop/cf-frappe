@@ -4,6 +4,7 @@ export * from "./adapters/http";
 export * from "./adapters/in-memory";
 export * from "./adapters/print";
 export * from "./application/document-service";
+export * from "./application/document-history-service";
 export * from "./application/file-service";
 export * from "./application/job-dispatcher";
 export * from "./application/job-errors";

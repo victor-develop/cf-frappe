@@ -11,6 +11,7 @@ import type {
   TenantId
 } from "../../core/types";
 import type { DocumentCommit, DocumentStore } from "../../ports/document-store";
+import type { ReadStreamOptions } from "../../ports/document-store";
 import type { EventStore } from "../../ports/event-store";
 import type { ProjectionStore } from "../../ports/projection-store";
 import { matchesListFilters } from "./list-filters";
@@ -48,8 +49,11 @@ export class InMemoryDocumentStore implements DocumentStore, EventStore, Project
     return saved;
   }
 
-  async readStream(stream: StreamName): Promise<readonly DomainEvent[]> {
-    return [...(this.streams.get(stream) ?? [])];
+  async readStream(stream: StreamName, options: ReadStreamOptions = {}): Promise<readonly DomainEvent[]> {
+    const events = [...(this.streams.get(stream) ?? [])]
+      .filter((event) => options.maxSequence === undefined || event.sequence <= options.maxSequence)
+      .sort((left, right) => left.sequence - right.sequence);
+    return options.limit === undefined ? events : events.slice(Math.max(0, events.length - options.limit));
   }
 
   async currentVersion(stream: StreamName): Promise<number> {

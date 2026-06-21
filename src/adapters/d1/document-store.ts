@@ -5,7 +5,8 @@ import type {
   NewDomainEvent,
   StreamName
 } from "../../core/types";
-import type { DocumentCommit, DocumentStore } from "../../ports/document-store";
+import type { DocumentCommit, DocumentStore, ReadStreamOptions } from "../../ports/document-store";
+import { eventStreamQuery } from "./read-stream-query";
 import { eventFromRow, type EventRow } from "./serde";
 
 export class D1DocumentStore implements DocumentStore {
@@ -82,17 +83,14 @@ export class D1DocumentStore implements DocumentStore {
     return { events: saved, snapshot };
   }
 
-  async readStream(stream: StreamName): Promise<readonly DomainEvent[]> {
+  async readStream(stream: StreamName, options: ReadStreamOptions = {}): Promise<readonly DomainEvent[]> {
+    const query = eventStreamQuery(options);
     const result = await this.db
-      .prepare(
-        `SELECT id, tenant_id, stream, sequence, type, doctype, document_name, actor_id, occurred_at, payload_json, metadata_json
-         FROM cf_frappe_events
-         WHERE stream = ?
-         ORDER BY sequence ASC`
-      )
-      .bind(stream)
+      .prepare(query.sql)
+      .bind(stream, ...query.params)
       .all<EventRow>();
-    return (result.results ?? []).map(eventFromRow);
+    const events = (result.results ?? []).map(eventFromRow);
+    return query.reverseResults ? [...events].reverse() : events;
   }
 
   async currentVersion(stream: StreamName): Promise<number> {

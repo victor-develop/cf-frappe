@@ -13,6 +13,7 @@ import {
   type ResolvedListView
 } from "../../core/types";
 import type { ReportDefinition } from "../../core/reports";
+import type { DocumentTimeline } from "../../application/document-history-service";
 import type { ReportRunResult } from "../../application/report-service";
 import type { PrintFormatDefinition } from "../../core/print-format";
 
@@ -260,6 +261,31 @@ export function renderFormView(
     ${lifecycleActions}
     ${printLinks}
   </form>`;
+}
+
+export function renderDocumentTimeline(timeline: DocumentTimeline): string {
+  const rows = timeline.entries
+    .map(
+      (entry) => `<tr>
+        <td>${String(entry.sequence)}</td>
+        <td><strong>${escapeHtml(entry.summary)}</strong><small>${escapeHtml(entry.type)}</small></td>
+        <td>${escapeHtml(entry.actorId)}</td>
+        <td>${escapeHtml(entry.occurredAt)}</td>
+      </tr>`
+    )
+    .join("");
+  return `<section class="panel timeline" aria-labelledby="document-timeline">
+    <div class="timeline-head">
+      <h2 id="document-timeline">Timeline</h2>
+      <p>v${String(timeline.version)} · ${escapeHtml(timeline.docstatus)}</p>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>#</th><th>Event</th><th>Actor</th><th>Occurred</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="4" class="empty">No events yet.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>`;
 }
 
 export function renderNotFound(message: string): string {
@@ -685,15 +711,19 @@ tr:last-child td { border-bottom: 0; }
   border-color: #fecdca;
 }
 .form { padding: 18px; max-width: 860px; }
+.timeline { margin-top: 16px; max-width: 860px; }
 .list-filters { max-width: none; margin-bottom: 16px; }
 .list-filters .actions { justify-content: flex-start; }
-.form-head {
+.form-head, .timeline-head {
   display: flex;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 18px;
 }
-.form-head p { margin: 0; color: var(--muted); }
+.timeline-head { padding: 18px 18px 0; }
+.form-head p, .timeline-head p { margin: 0; color: var(--muted); }
+.timeline strong { display: block; }
+.timeline small { color: var(--muted); }
 .form-section + .form-section {
   margin-top: 20px;
   padding-top: 18px;

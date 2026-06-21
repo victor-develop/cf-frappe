@@ -20,6 +20,7 @@ describe("Desk app", () => {
       prints: services.prints,
       queries: services.queries,
       reports: services.reports,
+      timeline: services.history,
       actor: () => owner
     });
     return { app, services };
@@ -151,6 +152,21 @@ describe("Desk app", () => {
     const html = await response.text();
     expect(html).toContain('name="expectedVersion" value="1"');
     expect(html).toContain("/desk/print/Note%20Standard/My%20Note");
+  });
+
+  it("renders document timeline entries on edit forms", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({ actor: owner, doctype: "Note", data: data() });
+    await services.documents.update({ actor: owner, doctype: "Note", name: "My Note", patch: { body: "Edited" } });
+
+    const response = await app.request("/desk/Note/My%20Note");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('<h2 id="document-timeline">Timeline</h2>');
+    expect(html).toContain("Created document");
+    expect(html).toContain("Updated body");
+    expect(html).toContain("NoteUpdated");
   });
 
   it("submits and cancels documents from generated edit forms", async () => {

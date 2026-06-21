@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the naming series slice:
+As of the document timeline slice:
 
-- Test files: `37`
-- Vitest cases: `199`
+- Test files: `38`
+- Vitest cases: `209`
 
 ## Implication
 
