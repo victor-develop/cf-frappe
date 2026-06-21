@@ -1,11 +1,13 @@
 import {
   createRegistry,
   defineDocType,
+  defineReport,
   deterministicIds,
   DocumentService,
   fixedClock,
   InMemoryDocumentStore,
-  QueryService
+  QueryService,
+  ReportService
 } from "../src";
 import type { Actor, DocumentData, DomainEvent, ModelRegistry } from "../src";
 import type { AfterCommitContext } from "../src";
@@ -70,9 +72,28 @@ export const noteDocType = defineDocType({
   ]
 });
 
+export const openNotesReport = defineReport({
+  name: "Open Notes",
+  label: "Open Notes",
+  module: "Tests",
+  description: "Notes grouped for operational follow-up.",
+  doctype: "Note",
+  columns: [
+    { name: "title", label: "Title", type: "text" },
+    { name: "priority", label: "Priority", type: "select" },
+    { name: "body", label: "Body", type: "longText" }
+  ],
+  filters: [
+    { name: "priority", label: "Priority", field: "priority", type: "select" },
+    { name: "title", label: "Title", field: "title", type: "text", operator: "contains" }
+  ],
+  roles: ["User", "Task Manager"]
+});
+
 export function createTestRegistry(): ModelRegistry {
   return createRegistry({
     doctypes: [noteDocType],
+    reports: [openNotesReport],
     hooks: {
       Note: [
         {
@@ -107,7 +128,8 @@ export function createServices(
     ...(options.onHookError === undefined ? {} : { onHookError: options.onHookError })
   });
   const queries = new QueryService({ registry, projections: store });
-  return { registry, store, events: store, projections: store, documents, queries };
+  const reports = new ReportService({ registry, queries });
+  return { registry, store, events: store, projections: store, documents, queries, reports };
 }
 
 export function data(overrides: DocumentData = {}): DocumentData {

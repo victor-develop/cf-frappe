@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the D1 migration lifecycle slice:
+As of the metadata report slice:
 
-- Test files: `28`
-- Vitest cases: `114`
+- Test files: `31`
+- Vitest cases: `126`
 
 ## Implication
 

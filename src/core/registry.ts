@@ -1,4 +1,6 @@
 import { FrameworkError } from "./errors";
+import type { ReportDefinition } from "./reports";
+import { assertReportMatchesDocType } from "./reports";
 import type {
   DocTypeDefinition,
   DocumentData,
@@ -29,16 +31,21 @@ export interface DocumentHooks {
 
 export interface RegistryOptions {
   readonly doctypes?: readonly DocTypeDefinition[];
+  readonly reports?: readonly ReportDefinition[];
   readonly hooks?: Readonly<Record<string, readonly DocumentHooks[]>>;
 }
 
 export class ModelRegistry {
   private readonly doctypes = new Map<string, DocTypeDefinition>();
+  private readonly reports = new Map<string, ReportDefinition>();
   private readonly hooks = new Map<string, DocumentHooks[]>();
 
   constructor(options: RegistryOptions = {}) {
     for (const doctype of options.doctypes ?? []) {
       this.registerDocType(doctype);
+    }
+    for (const report of options.reports ?? []) {
+      this.registerReport(report);
     }
     for (const [doctype, hooks] of Object.entries(options.hooks ?? {})) {
       for (const hook of hooks) {
@@ -54,6 +61,22 @@ export class ModelRegistry {
       });
     }
     this.doctypes.set(doctype.name, doctype);
+  }
+
+  registerReport(report: ReportDefinition): void {
+    const doctype = this.doctypes.get(report.doctype);
+    if (!doctype) {
+      throw new FrameworkError("DOCTYPE_NOT_FOUND", `DocType '${report.doctype}' is not registered`, {
+        status: 404
+      });
+    }
+    if (this.reports.has(report.name)) {
+      throw new FrameworkError("REPORT_DUPLICATE", `Report '${report.name}' is already registered`, {
+        status: 409
+      });
+    }
+    assertReportMatchesDocType(report, doctype);
+    this.reports.set(report.name, report);
   }
 
   registerHooks(doctype: string, hooks: DocumentHooks): void {
@@ -76,6 +99,20 @@ export class ModelRegistry {
 
   list(): readonly DocTypeDefinition[] {
     return [...this.doctypes.values()].sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  getReport(reportName: string): ReportDefinition {
+    const definition = this.reports.get(reportName);
+    if (!definition) {
+      throw new FrameworkError("REPORT_NOT_FOUND", `Report '${reportName}' is not registered`, {
+        status: 404
+      });
+    }
+    return definition;
+  }
+
+  listReports(): readonly ReportDefinition[] {
+    return [...this.reports.values()].sort((left, right) => left.name.localeCompare(right.name));
   }
 
   hooksFor(doctype: string): readonly DocumentHooks[] {

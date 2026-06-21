@@ -2,12 +2,14 @@ import { Hono } from "hono";
 import type { DocumentCommandExecutor } from "../../application/document-service";
 import type { FileService } from "../../application/file-service";
 import { QueryService } from "../../application/query-service";
+import type { ReportService } from "../../application/report-service";
 import type { ModelRegistry } from "../../core/registry";
 import { badRequest } from "../../core/errors";
 import type { DocumentData, MutableDocumentData } from "../../core/types";
 import type { ActorResolver } from "./actor";
 import { toErrorResponse } from "./errors";
 import { createFileApi } from "./file-api";
+import { createReportApi } from "./report-api";
 import { parseOptionalInteger, readBoundedText, requestMetadata } from "./request";
 
 export interface ResourceApiOptions {
@@ -17,6 +19,7 @@ export interface ResourceApiOptions {
   readonly actor: ActorResolver;
   readonly maxJsonBytes?: number;
   readonly files?: FileService;
+  readonly reports?: ReportService;
   readonly maxFileBytes?: number;
 }
 
@@ -57,6 +60,16 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
         files: options.files,
         actor: resolveActor,
         ...(options.maxFileBytes === undefined ? {} : { maxFileBytes: options.maxFileBytes })
+      })
+    );
+  }
+
+  if (options.reports) {
+    app.route(
+      "/",
+      createReportApi({
+        reports: options.reports,
+        actor: resolveActor
       })
     );
   }

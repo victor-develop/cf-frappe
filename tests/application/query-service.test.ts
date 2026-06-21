@@ -21,6 +21,6 @@ describe("QueryService", () => {
     await documents.create({ actor: owner, doctype: "Note", data: data() });
     await documents.delete({ actor: { ...owner, roles: ["Task Manager"] }, doctype: "Note", name: "My Note" });
 
-    await expect(queries.listDocuments(guest, "Note")).resolves.toMatchObject({ data: [] });
+    await expect(queries.listDocuments(guest, "Note")).resolves.toMatchObject({ data: [], total: 1 });
   });
 });

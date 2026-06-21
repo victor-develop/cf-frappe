@@ -2,6 +2,7 @@ import { JobExecutionError } from "../application/job-errors";
 import { JobDispatcher } from "../application/job-dispatcher";
 import { JobExecutor } from "../application/job-executor";
 import { QueryService } from "../application/query-service";
+import { ReportService } from "../application/report-service";
 import type { DocumentCommandExecutor } from "../application/document-service";
 import { FileService } from "../application/file-service";
 import { D1ProjectionStore } from "../adapters/d1";
@@ -37,6 +38,7 @@ export interface CloudFrappeRuntimeServices {
   readonly registry: ModelRegistry;
   readonly documents: DocumentCommandExecutor;
   readonly queries: QueryService;
+  readonly reports: ReportService;
   readonly files?: FileService;
   readonly realtime?: RealtimePublisher;
 }
@@ -157,10 +159,12 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     namespace: env.AGGREGATES
   });
   const queries = new QueryService({ registry: options.registry, projections });
+  const reports = new ReportService({ registry: options.registry, queries });
   const baseServices: Omit<CloudFrappeRuntimeServices, "files"> = {
     registry: options.registry,
     documents,
-    queries
+    queries,
+    reports
   };
   const files = options.files
     ? new FileService({
@@ -185,6 +189,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     registry: options.registry,
     documents,
     queries,
+    reports,
     actor: options.actor,
     ...(options.maxJsonBytes ? { maxJsonBytes: options.maxJsonBytes } : {}),
     ...(files === undefined ? {} : { files }),
@@ -194,6 +199,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     registry: options.registry,
     documents,
     queries,
+    reports,
     actor: options.actor
   });
   const runtimeApps = { app, desk, services: servicesWithRealtime };

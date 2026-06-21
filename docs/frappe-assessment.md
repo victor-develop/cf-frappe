@@ -30,6 +30,7 @@ That model is powerful, but it is not event-sourcing first. cf-frappe keeps the 
 | Lifecycle behavior | hooks/controllers | registry hooks: `beforeValidate`, `validate`, `afterCommit` |
 | REST resources | `/api/resource/:doctype` | generated Hono routes |
 | Desk views | list/form views from metadata | generated server-rendered `/desk` list/forms |
+| Reports | Report DocType/query reports | metadata-defined report columns, filters, API, and Desk pages |
 | Audit trail | document versioning/activity | append-only events plus model-declared domain commands |
 | Current reads | SQL document tables | D1/in-memory projections plus metadata-planned D1 indexes |
 | Migrations | patches and schema migrations | D1 migration plans, rendered SQL bundles, and applied checksum journal |
@@ -41,7 +42,7 @@ That model is powerful, but it is not event-sourcing first. cf-frappe keeps the 
 
 ## Current Gaps
 
-- Generated Desk UI now covers basic list/form pages. Report builder, print views, richer admin tools, saved filters, and client scripting are not implemented.
+- Generated Desk UI now covers basic list/form/report pages. Report builder, print views, richer admin tools, saved filters, grouped summaries, charts, and client scripting are not implemented.
 - DocType metadata now plans and applies D1 projection-index migrations with a checksum journal, but destructive/renaming migrations, data backfills, and an installable CLI are still future work.
 - Background jobs now have basic Queue/Cron support, but durable dashboards, job result storage, worker pools, retry administration, and scheduler admin views are not implemented.
 - Realtime notifications now have basic Durable Object WebSocket document topics, but presence, tenant/doctype filtered fan-out, per-user rooms, Desk client integration, and durable replay are not implemented.

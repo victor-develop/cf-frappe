@@ -5,12 +5,16 @@ import type {
   FieldDefinition,
   JsonValue
 } from "../../core/types";
+import type { ReportDefinition } from "../../core/reports";
+import type { ReportRunResult } from "../../application/report-service";
 
 export interface DeskLayoutOptions {
   readonly title: string;
   readonly body: string;
   readonly active?: string;
+  readonly activeReport?: string;
   readonly doctypes: readonly DocTypeDefinition[];
+  readonly reports?: readonly ReportDefinition[];
   readonly message?: string;
 }
 
@@ -19,6 +23,12 @@ export function renderDeskLayout(options: DeskLayoutOptions): string {
     .map(
       (doctype) =>
         `<a class="nav-link${doctype.name === options.active ? " is-active" : ""}" href="/desk/${encodeURIComponent(doctype.name)}">${escapeHtml(labelFor(doctype))}</a>`
+    )
+    .join("");
+  const reportNav = (options.reports ?? [])
+    .map(
+      (report) =>
+        `<a class="nav-link${report.name === options.activeReport ? " is-active" : ""}" href="/desk/reports/${encodeURIComponent(report.name)}">${escapeHtml(report.label ?? report.name)}</a>`
     )
     .join("");
   return `<!doctype html>
@@ -31,9 +41,12 @@ export function renderDeskLayout(options: DeskLayoutOptions): string {
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
-  <aside class="sidebar" aria-label="DocTypes">
+  <aside class="sidebar" aria-label="Desk navigation">
     <a class="brand" href="/desk">cf-frappe</a>
-    <nav>${nav}</nav>
+    <nav>
+      ${nav ? `<p class="nav-heading">DocTypes</p>${nav}` : ""}
+      ${reportNav ? `<p class="nav-heading">Reports</p>${reportNav}` : ""}
+    </nav>
   </aside>
   <main id="main" class="main">
     <header class="topbar">
@@ -49,7 +62,10 @@ export function renderDeskLayout(options: DeskLayoutOptions): string {
 </html>`;
 }
 
-export function renderDeskHome(doctypes: readonly DocTypeDefinition[]): string {
+export function renderDeskHome(
+  doctypes: readonly DocTypeDefinition[],
+  reports: readonly ReportDefinition[] = []
+): string {
   const rows = doctypes
     .map(
       (doctype) => `<tr>
@@ -65,6 +81,55 @@ export function renderDeskHome(doctypes: readonly DocTypeDefinition[]): string {
       <table>
         <thead><tr><th>DocType</th><th>Module</th><th>Fields</th><th>Description</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="4" class="empty">No readable DocTypes.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>
+  ${renderReportList(reports)}`;
+}
+
+export function renderReportList(reports: readonly ReportDefinition[]): string {
+  const rows = reports
+    .map(
+      (report) => `<tr>
+        <td><a href="/desk/reports/${encodeURIComponent(report.name)}">${escapeHtml(report.label ?? report.name)}</a></td>
+        <td>${escapeHtml(report.doctype)}</td>
+        <td>${escapeHtml(report.module ?? "")}</td>
+        <td>${escapeHtml(report.description ?? "")}</td>
+      </tr>`
+    )
+    .join("");
+  return `<section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Report</th><th>DocType</th><th>Module</th><th>Description</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="4" class="empty">No readable reports.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+export function renderReportView(result: ReportRunResult): string {
+  const filterForm = (result.report.filters ?? [])
+    .map((filter) => {
+      const id = `filter-${slug(filter.name)}`;
+      return `<label class="field" for="${id}"><span>${escapeHtml(filter.label ?? filter.name)}</span><input id="${id}" name="filter_${escapeHtml(filter.name)}" type="text"></label>`;
+    })
+    .join("");
+  const headers = result.columns.map((column) => `<th>${escapeHtml(column.label ?? column.name)}</th>`).join("");
+  const rows = result.rows
+    .map(
+      (row) =>
+        `<tr>${result.columns
+          .map((column) => `<td>${escapeHtml(formatValue(row[column.name]))}</td>`)
+          .join("")}</tr>`
+    )
+    .join("");
+  return `${filterForm ? `<form class="panel form report-filters" method="get"><div class="fields">${filterForm}</div><div class="actions"><button class="button primary" type="submit">Run</button></div></form>` : ""}
+  <section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr>${headers}</tr></thead>
+        <tbody>${rows || `<tr><td colspan="${result.columns.length}" class="empty">No rows matched.</td></tr>`}</tbody>
       </table>
     </div>
   </section>`;
@@ -292,6 +357,13 @@ a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visib
   text-decoration: none;
 }
 .nav-link:hover, .nav-link.is-active { background: #e9eef7; }
+.nav-heading {
+  margin: 18px 12px 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
 .main { margin-left: 240px; padding: 24px; }
 .topbar {
   display: flex;

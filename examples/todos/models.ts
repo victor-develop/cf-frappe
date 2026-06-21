@@ -1,4 +1,4 @@
-import { createRegistry, defineDocType } from "../../src";
+import { createRegistry, defineDocType, defineReport } from "../../src";
 
 export const Task = defineDocType({
   name: "Task",
@@ -59,8 +59,27 @@ export const Task = defineDocType({
   indexes: [["priority"], ["workflow_state", "priority"]]
 });
 
+export const OpenTasks = defineReport({
+  name: "Open Tasks",
+  label: "Open Tasks",
+  module: "Desk",
+  description: "Open task queue by priority.",
+  doctype: "Task",
+  columns: [
+    { name: "title", label: "Title", type: "text" },
+    { name: "priority", label: "Priority", type: "select" },
+    { name: "workflow_state", label: "State", type: "select" }
+  ],
+  filters: [
+    { name: "priority", label: "Priority", field: "priority", type: "select" },
+    { name: "workflow_state", label: "State", field: "workflow_state", type: "select", defaultValue: "Open" }
+  ],
+  roles: ["Guest", "User", "Task Manager"]
+});
+
 export const todoRegistry = createRegistry({
   doctypes: [Task],
+  reports: [OpenTasks],
   hooks: {
     Task: [
       {

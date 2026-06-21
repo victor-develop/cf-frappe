@@ -8,6 +8,7 @@ describe("Desk app", () => {
       registry: services.registry,
       documents: services.documents,
       queries: services.queries,
+      reports: services.reports,
       actor: () => owner
     });
     return { app, services };
@@ -22,7 +23,27 @@ describe("Desk app", () => {
     const html = await response.text();
     expect(html).toContain("cf-frappe Desk");
     expect(html).toContain("/desk/Note");
+    expect(html).toContain("/desk/reports/Open%20Notes");
     expect(html).toContain("DocType");
+  });
+
+  it("renders report list and report result pages", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Report Note", priority: "High", body: "For reporting" })
+    });
+
+    const list = await app.request("/desk/reports");
+    expect(list.status).toBe(200);
+    await expect(list.text()).resolves.toContain("Open Notes");
+
+    const report = await app.request("/desk/reports/Open%20Notes?filter_priority=High");
+    expect(report.status).toBe(200);
+    const html = await report.text();
+    expect(html).toContain("Report Note");
+    expect(html).toContain("For reporting");
   });
 
   it("renders list and create form pages", async () => {

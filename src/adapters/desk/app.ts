@@ -1,9 +1,10 @@
 import { Hono } from "hono";
 import type { DocumentCommandExecutor } from "../../application/document-service";
 import { QueryService } from "../../application/query-service";
+import type { ReportFilters, ReportService } from "../../application/report-service";
 import { FrameworkError } from "../../core/errors";
 import type { ModelRegistry } from "../../core/registry";
-import type { Actor, DocTypeDefinition, DocumentData, FieldDefinition, MutableDocumentData } from "../../core/types";
+import type { Actor, DocTypeDefinition, DocumentData, FieldDefinition, JsonPrimitive, MutableDocumentData } from "../../core/types";
 import type { ActorResolver } from "../http/actor";
 import {
   renderDeskHome,
@@ -11,13 +12,16 @@ import {
   renderErrorPanel,
   renderFormView,
   renderListView,
-  renderNotFound
+  renderNotFound,
+  renderReportList,
+  renderReportView
 } from "./render";
 
 export interface DeskAppOptions {
   readonly registry: ModelRegistry;
   readonly documents: DocumentCommandExecutor;
   readonly queries: QueryService;
+  readonly reports?: ReportService;
   readonly actor: ActorResolver;
 }
 
@@ -29,11 +33,49 @@ export function createDeskApp(options: DeskAppOptions): Hono {
   app.get("/desk", async (c) => {
     const actor = await options.actor(c.req.raw);
     const doctypes = options.queries.listDoctypes(actor);
+    const reports = listReports(options, actor);
     return html(
       renderDeskLayout({
         title: "Home",
         doctypes,
-        body: renderDeskHome(doctypes)
+        reports,
+        body: renderDeskHome(doctypes, reports)
+      })
+    );
+  });
+
+  app.get("/desk/reports", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const doctypes = options.queries.listDoctypes(actor);
+    const reports = listReports(options, actor);
+    return html(
+      renderDeskLayout({
+        title: "Reports",
+        doctypes,
+        reports,
+        body: renderReportList(reports)
+      })
+    );
+  });
+
+  app.get("/desk/reports/:report", async (c) => {
+    if (!options.reports) {
+      throw new FrameworkError("REPORT_NOT_FOUND", "Reports are not enabled", { status: 404 });
+    }
+    const actor = await options.actor(c.req.raw);
+    const doctypes = options.queries.listDoctypes(actor);
+    const reports = listReports(options, actor);
+    const result = await options.reports.runReport(actor, c.req.param("report"), {
+      filters: reportFiltersFromUrl(new URL(c.req.url)),
+      limit: 100
+    });
+    return html(
+      renderDeskLayout({
+        title: result.report.label ?? result.report.name,
+        activeReport: result.report.name,
+        doctypes,
+        reports,
+        body: renderReportView(result)
       })
     );
   });
@@ -42,12 +84,14 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
     const doctypes = options.queries.listDoctypes(actor);
+    const reports = listReports(options, actor);
     const result = await options.queries.listDocuments(actor, doctype.name, { limit: 100 });
     return html(
       renderDeskLayout({
         title: doctype.label ?? doctype.name,
         active: doctype.name,
         doctypes,
+        reports,
         body: renderListView(doctype, result.data)
       })
     );
@@ -57,11 +101,13 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
     const doctypes = options.queries.listDoctypes(actor);
+    const reports = listReports(options, actor);
     return html(
       renderDeskLayout({
         title: `New ${doctype.label ?? doctype.name}`,
         active: doctype.name,
         doctypes,
+        reports,
         body: renderFormView(doctype, { mode: "create" })
       })
     );
@@ -87,12 +133,14 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
     const doctypes = options.queries.listDoctypes(actor);
+    const reports = listReports(options, actor);
     const document = await options.queries.getDocument(actor, doctype.name, c.req.param("name"));
     return html(
       renderDeskLayout({
         title: document.name,
         active: doctype.name,
         doctypes,
+        reports,
         body: renderFormView(doctype, { mode: "update", document })
       })
     );
@@ -144,6 +192,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       renderDeskLayout({
         title: "Not found",
         doctypes: [],
+        reports: [],
         body: renderNotFound("Page not found")
       }),
       404
@@ -159,10 +208,14 @@ async function renderDeskFailure(options: DeskAppOptions, request: Request, erro
   const doctypes = await Promise.resolve(options.actor(request))
     .then((actor) => options.queries.listDoctypes(actor))
     .catch(() => []);
+  const reports = await Promise.resolve(options.actor(request))
+    .then((actor) => listReports(options, actor))
+    .catch(() => []);
   return html(
     renderDeskLayout({
       title: status === 404 ? "Not found" : "Request failed",
       doctypes,
+      reports,
       body: status === 404 ? renderNotFound(message) : renderErrorPanel(message)
     }),
     status
@@ -179,6 +232,7 @@ async function renderDeskError(
   name?: string
 ): Promise<Response> {
   const doctypes = options.queries.listDoctypes(actor);
+  const reports = listReports(options, actor);
   const document = name ? await options.queries.getDocument(actor, doctype.name, name).catch(() => undefined) : undefined;
   const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
   return html(
@@ -186,6 +240,7 @@ async function renderDeskError(
       title: mode === "create" ? `New ${doctype.label ?? doctype.name}` : name ?? doctype.name,
       active: doctype.name,
       doctypes,
+      reports,
       body: renderFormView(doctype, {
         mode,
         ...(document ? { document } : {}),
@@ -194,6 +249,20 @@ async function renderDeskError(
     }),
     error instanceof FrameworkError ? error.status : 500
   );
+}
+
+function listReports(options: DeskAppOptions, actor: Actor) {
+  return options.reports?.listReports(actor) ?? [];
+}
+
+function reportFiltersFromUrl(url: URL): ReportFilters {
+  const filters: Record<string, JsonPrimitive> = {};
+  url.searchParams.forEach((value, key) => {
+    if (key.startsWith("filter_")) {
+      filters[key.slice("filter_".length)] = value;
+    }
+  });
+  return filters;
 }
 
 interface ParsedDeskForm {

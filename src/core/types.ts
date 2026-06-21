@@ -204,7 +204,7 @@ export interface ListDocumentsResult<TData extends DocumentData = DocumentData> 
   readonly data: readonly DocumentSnapshot<TData>[];
   readonly limit: number;
   readonly offset: number;
-  readonly total?: number;
+  readonly total: number;
 }
 
 export const SYSTEM_MANAGER_ROLE = "System Manager";
