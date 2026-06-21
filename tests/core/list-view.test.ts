@@ -61,6 +61,16 @@ describe("list views", () => {
     ).toThrow(FrameworkError);
   });
 
+  it("rejects table fields as list filter fields", () => {
+    expect(() =>
+      defineDocType({
+        name: "Task",
+        fields: [{ name: "items", type: "table", tableOf: "Task Item" }],
+        listView: { filterFields: ["items"] }
+      })
+    ).toThrow(FrameworkError);
+  });
+
   it("reports invalid default filter metadata as a list-view error", () => {
     expect(() =>
       defineDocType({

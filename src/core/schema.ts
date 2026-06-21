@@ -14,6 +14,7 @@ import { assertListViewDefinition } from "./list-view";
 export interface ValidationOptions {
   readonly partial?: boolean;
   readonly existing?: DocumentData;
+  readonly relatedDocType?: (doctype: string) => DocTypeDefinition | undefined;
 }
 
 export function defineDocType<TData extends DocumentData>(
@@ -27,6 +28,7 @@ export function defineDocType<TData extends DocumentData>(
       throw new Error(`Duplicate field '${field.name}' on doctype '${definition.name}'`);
     }
     assertLinkFieldDefinition(definition, field);
+    assertTableFieldDefinition(definition, field);
     seen.add(field.name);
   }
   assertFormViewDefinition(definition);
@@ -87,8 +89,13 @@ export function validateDocumentData(
 
   for (const field of definition.fields) {
     const value = input[field.name];
-    const isMissing = value === undefined || value === null || value === "";
-    if (!options.partial && field.required && isMissing) {
+    const isOmitted = value === undefined;
+    const isMissing =
+      isOmitted ||
+      value === null ||
+      value === "" ||
+      (field.type === "table" && Array.isArray(value) && value.length === 0);
+    if (field.required && isMissing && (!options.partial || !isOmitted)) {
       issues.push({
         field: field.name,
         code: "required",
@@ -96,13 +103,13 @@ export function validateDocumentData(
       });
       continue;
     }
-    if (options.partial && value === undefined) {
+    if (options.partial && isOmitted) {
       continue;
     }
     if (isMissing) {
       continue;
     }
-    issues.push(...validateField(field, value));
+    issues.push(...validateField(field, value, options));
   }
 
   return issues;
@@ -114,7 +121,11 @@ export function compactData(input: MutableDocumentData): DocumentData {
   ) as DocumentData;
 }
 
-function validateField(field: FieldDefinition, value: JsonValue): readonly ValidationIssue[] {
+function validateField(
+  field: FieldDefinition,
+  value: JsonValue,
+  options: ValidationOptions
+): readonly ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const fail = (code: string, message: string) => issues.push({ field: field.name, code, message });
 
@@ -145,6 +156,9 @@ function validateField(field: FieldDefinition, value: JsonValue): readonly Valid
       break;
     case "json":
       break;
+    case "table":
+      issues.push(...validateTableField(field, value, options));
+      break;
     case "select":
       if (typeof value !== "string") {
         fail("type", `Field '${field.name}' must be a string`);
@@ -174,6 +188,47 @@ function validateField(field: FieldDefinition, value: JsonValue): readonly Valid
   return issues;
 }
 
+function validateTableField(
+  field: FieldDefinition,
+  value: JsonValue,
+  options: ValidationOptions
+): readonly ValidationIssue[] {
+  if (!Array.isArray(value)) {
+    return [
+      {
+        field: field.name,
+        code: "type",
+        message: `Field '${field.name}' must be a table array`
+      }
+    ];
+  }
+  const child = field.tableOf ? options.relatedDocType?.(field.tableOf) : undefined;
+  if (!child) {
+    return [
+      {
+        field: field.name,
+        code: "table_target",
+        message: `Field '${field.name}' references unavailable child DocType '${field.tableOf ?? ""}'`
+      }
+    ];
+  }
+  return value.flatMap((row, index) => {
+    if (!isJsonObject(row)) {
+      return [
+        {
+          field: `${field.name}[${index}]`,
+          code: "type",
+          message: `Row ${index + 1} in '${field.name}' must be an object`
+        }
+      ];
+    }
+    return validateDocumentData(child, { ...row }, { ...options, partial: false }).map((issue) => ({
+      ...issue,
+      field: `${field.name}[${index}]${issue.field ? `.${issue.field}` : ""}`
+    }));
+  });
+}
+
 function assertIdentifier(value: string, label: string): void {
   if (!/^[A-Za-z][A-Za-z0-9_ ]*$/.test(value)) {
     throw new Error(`Invalid ${label}: '${value}'`);
@@ -199,6 +254,31 @@ function assertLinkFieldDefinition(doctype: DocTypeDefinition, field: FieldDefin
       { status: 400 }
     );
   }
+}
+
+function assertTableFieldDefinition(doctype: DocTypeDefinition, field: FieldDefinition): void {
+  if (field.type === "table") {
+    if (!field.tableOf) {
+      throw new FrameworkError(
+        "DOCTYPE_TABLE_INVALID",
+        `Table field '${field.name}' on ${doctype.name} must declare tableOf`,
+        { status: 400 }
+      );
+    }
+    assertIdentifier(field.tableOf, `table target on ${doctype.name}.${field.name}`);
+    return;
+  }
+  if (field.tableOf !== undefined) {
+    throw new FrameworkError(
+      "DOCTYPE_TABLE_INVALID",
+      `Field '${field.name}' on ${doctype.name} declares tableOf but is not a table field`,
+      { status: 400 }
+    );
+  }
+}
+
+function isJsonObject(value: JsonValue): value is Record<string, JsonValue> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function freezeFormView(formView: NonNullable<DocTypeDefinition["formView"]>): NonNullable<DocTypeDefinition["formView"]> {

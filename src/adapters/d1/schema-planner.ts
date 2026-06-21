@@ -210,13 +210,21 @@ function validateIndexedFields(doctype: DocTypeDefinition, fields: readonly stri
       { status: 400 }
     );
   }
-  const declaredFields = new Set(doctype.fields.map((field) => field.name));
+  const declaredFields = new Map(doctype.fields.map((field) => [field.name, field]));
   const indexedFields = new Set<string>();
   for (const field of fields) {
-    if (!declaredFields.has(field)) {
+    const definition = declaredFields.get(field);
+    if (!definition) {
       throw new FrameworkError(
         "MIGRATION_INDEX_INVALID",
         `D1 index on DocType '${doctype.name}' references unknown field '${field}'`,
+        { status: 400 }
+      );
+    }
+    if (definition.type === "json" || definition.type === "table") {
+      throw new FrameworkError(
+        "MIGRATION_INDEX_INVALID",
+        `D1 index on DocType '${doctype.name}' cannot index ${definition.type} field '${field}'`,
         { status: 400 }
       );
     }

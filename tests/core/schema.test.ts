@@ -83,4 +83,78 @@ describe("schema", () => {
       })
     ).toThrow(FrameworkError);
   });
+
+  it("requires table fields to declare their child DocType", () => {
+    expect(() =>
+      defineDocType({
+        name: "Invoice",
+        fields: [{ name: "items", type: "table" }]
+      })
+    ).toThrow(FrameworkError);
+  });
+
+  it("rejects table targets on non-table fields", () => {
+    expect(() =>
+      defineDocType({
+        name: "Invoice",
+        fields: [{ name: "items", type: "json", tableOf: "Invoice Item" }]
+      })
+    ).toThrow(FrameworkError);
+  });
+
+  it("validates table rows against child DocType metadata", () => {
+    const InvoiceItem = defineDocType({
+      name: "Invoice Item",
+      fields: [
+        { name: "item_code", type: "text", required: true },
+        { name: "quantity", type: "integer", required: true, min: 1 }
+      ]
+    });
+    const Invoice = defineDocType({
+      name: "Sales Invoice",
+      fields: [{ name: "items", type: "table", tableOf: "Invoice Item", required: true }]
+    });
+
+    const issues = validateDocumentData(
+      Invoice,
+      {
+        items: [
+          { item_code: "SKU-1", quantity: 2 },
+          { item_code: "", quantity: 0 },
+          "not a row"
+        ]
+      },
+      {
+        relatedDocType: (name) => (name === "Invoice Item" ? InvoiceItem : undefined)
+      }
+    );
+
+    expect(issues).toMatchObject([
+      { field: "items[1].item_code", code: "required" },
+      { field: "items[1].quantity", code: "min" },
+      { field: "items[2]", code: "type" }
+    ]);
+  });
+
+  it("treats an empty required table as missing", () => {
+    const Invoice = defineDocType({
+      name: "Sales Invoice",
+      fields: [{ name: "items", type: "table", tableOf: "Invoice Item", required: true }]
+    });
+
+    expect(validateDocumentData(Invoice, { items: [] })).toMatchObject([
+      { field: "items", code: "required" }
+    ]);
+  });
+
+  it("rejects explicitly empty required fields during partial validation", () => {
+    const Invoice = defineDocType({
+      name: "Sales Invoice",
+      fields: [{ name: "items", type: "table", tableOf: "Invoice Item", required: true }]
+    });
+
+    expect(validateDocumentData(Invoice, { items: [] }, { partial: true })).toMatchObject([
+      { field: "items", code: "required" }
+    ]);
+  });
 });

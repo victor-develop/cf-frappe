@@ -47,4 +47,25 @@ describe("registry", () => {
 
     expect(() => createRegistry({ doctypes: [Task] })).toThrow(FrameworkError);
   });
+
+  it("allows table fields to reference child doctypes registered later in the same registry", () => {
+    const Invoice = defineDocType({
+      name: "Sales Invoice",
+      fields: [{ name: "items", type: "table", tableOf: "Sales Invoice Item" }]
+    });
+    const InvoiceItem = defineDocType({ name: "Sales Invoice Item", fields: [] });
+
+    const registry = createRegistry({ doctypes: [Invoice, InvoiceItem] });
+
+    expect(registry.get("Sales Invoice").fields).toMatchObject([{ tableOf: "Sales Invoice Item" }]);
+  });
+
+  it("rejects table fields that target an unregistered child doctype", () => {
+    const Invoice = defineDocType({
+      name: "Sales Invoice",
+      fields: [{ name: "items", type: "table", tableOf: "Sales Invoice Item" }]
+    });
+
+    expect(() => createRegistry({ doctypes: [Invoice] })).toThrow(FrameworkError);
+  });
 });

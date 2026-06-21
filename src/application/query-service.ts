@@ -109,6 +109,19 @@ export class QueryService {
     } = {}
   ): Promise<LinkOptionsResult> {
     const doctype = this.getMeta(actor, doctypeName);
+    return this.listLinkOptionsForField(actor, doctype, fieldName, options);
+  }
+
+  async listLinkOptionsForField(
+    actor: Actor,
+    doctype: DocTypeDefinition,
+    fieldName: string,
+    options: {
+      readonly tenantId?: string;
+      readonly q?: string;
+      readonly limit?: number;
+    } = {}
+  ): Promise<LinkOptionsResult> {
     const field = getField(doctype, fieldName);
     if (field.type !== "link" || !field.linkTo) {
       throw new FrameworkError("BAD_REQUEST", `Field '${fieldName}' on ${doctype.name} is not a link field`, {

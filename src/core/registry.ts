@@ -48,7 +48,7 @@ export class ModelRegistry {
     for (const doctype of options.doctypes ?? []) {
       this.putDocType(doctype);
     }
-    this.assertDocTypeLinksResolve();
+    this.assertDocTypeReferencesResolve();
     for (const report of options.reports ?? []) {
       this.registerReport(report);
     }
@@ -65,7 +65,7 @@ export class ModelRegistry {
   registerDocType(doctype: DocTypeDefinition): void {
     this.putDocType(doctype);
     try {
-      this.assertDocTypeLinksResolve();
+      this.assertDocTypeReferencesResolve();
     } catch (error) {
       this.doctypes.delete(doctype.name);
       throw error;
@@ -81,17 +81,20 @@ export class ModelRegistry {
     this.doctypes.set(doctype.name, doctype);
   }
 
-  private assertDocTypeLinksResolve(): void {
+  private assertDocTypeReferencesResolve(): void {
     for (const doctype of this.doctypes.values()) {
       for (const field of doctype.fields) {
-        if (field.type !== "link") {
-          continue;
-        }
-        const target = field.linkTo;
-        if (!target || !this.doctypes.has(target)) {
+        if (field.type === "link" && (!field.linkTo || !this.doctypes.has(field.linkTo))) {
           throw new FrameworkError(
             "DOCTYPE_LINK_INVALID",
-            `Link field '${field.name}' on ${doctype.name} targets unregistered DocType '${target ?? ""}'`,
+            `Link field '${field.name}' on ${doctype.name} targets unregistered DocType '${field.linkTo ?? ""}'`,
+            { status: 400 }
+          );
+        }
+        if (field.type === "table" && (!field.tableOf || !this.doctypes.has(field.tableOf))) {
+          throw new FrameworkError(
+            "DOCTYPE_TABLE_INVALID",
+            `Table field '${field.name}' on ${doctype.name} targets unregistered DocType '${field.tableOf ?? ""}'`,
             { status: 400 }
           );
         }

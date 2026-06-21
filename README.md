@@ -6,6 +6,7 @@ The current slice is a working kernel:
 
 - typed DocType metadata with fields, defaults, validation, naming, permissions, and workflows
 - metadata-defined link fields with event-stream referential integrity and generated lookup options
+- metadata-defined child table fields validated from child DocType metadata
 - command-side document service that writes immutable events
 - query-side projection service for current document reads and lists
 - in-memory adapters for TDD
@@ -31,6 +32,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | --- | --- |
 | DocType | `defineDocType(...)` metadata |
 | Link fields | registered `type: "link"` targets with write-time existence checks and lookup options |
+| Child tables | registered `type: "table"` child DocTypes embedded in event-sourced document data |
 | Document lifecycle | command handlers that emit domain events |
 | Permissions | role and predicate rules attached to DocTypes |
 | Hooks/controllers | pure hook contracts registered in `ModelRegistry` |
@@ -262,6 +264,42 @@ Link fields declare relationships in DocType metadata:
 `defineDocType(...)` requires every link field to name a target, and `ModelRegistry` verifies that the target DocType is registered. On create, update, and model-declared domain commands, `DocumentService` folds the target document's event stream and rejects missing, deleted, or unreadable targets with `VALIDATION_FAILED` / `link_not_found`. Projection state is not used as write authority for link integrity.
 
 Generated clients can call `QueryService.listLinkOptions(...)` or `GET /api/link-options/:doctype/:field?q=apollo&limit=20` to retrieve readable target documents as `{ value, label }` options. Desk forms render visible link fields as select controls populated from the same query boundary.
+
+## Child Tables
+
+Child tables use regular DocType metadata for each row shape, then embed rows in the parent document's event payload and projection:
+
+```ts
+export const SalesInvoiceItem = defineDocType({
+  name: "Sales Invoice Item",
+  fields: [
+    { name: "product", type: "link", linkTo: "Product", required: true },
+    { name: "quantity", type: "integer", required: true, min: 1 },
+    { name: "rate", type: "number", min: 0 }
+  ]
+});
+
+export const SalesInvoice = defineDocType({
+  name: "Sales Invoice",
+  fields: [
+    { name: "title", type: "text", required: true },
+    { name: "items", type: "table", tableOf: "Sales Invoice Item", required: true }
+  ],
+  formView: {
+    sections: [{ heading: "Invoice", columns: 1, fields: ["title", "items"] }]
+  }
+});
+
+export const registry = createRegistry({
+  doctypes: [Product, SalesInvoiceItem, SalesInvoice]
+});
+```
+
+`ModelRegistry` verifies `tableOf` targets, `DocumentService` validates each child row through the child DocType schema, and nested link fields inside child rows use the same event-stream existence and read-permission checks as top-level links. Table fields are intentionally excluded from list filters and D1 projection indexes because they are row arrays rather than scalar keys.
+
+Desk forms render visible table fields as editable row grids. Existing rows are rendered with one blank row for appending; blank rows are ignored on submit, while partially filled rows are validated at the command boundary. Child DocTypes can be embedded-only; nested link options are authorized through the readable parent form and still require read access to the linked target DocType.
+
+HTTP resource updates treat a table field as a whole-array replacement. Desk includes the exported `CHILD_TABLE_ROW_INDEX_FIELD` marker on existing rows so the command service can preserve omitted read-only child values from the correct original row, then strips the marker before validation, events, and projections. Non-Desk clients that need that preservation must send a unique, in-range marker for each retained row or submit complete row data; without a marker, omitted read-only child values are not guessed because deletes and reorders would otherwise risk copying protected values onto the wrong row.
 
 ## Desk Forms
 
@@ -510,7 +548,7 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 160 tests across schema, permissions, events, registry, services, metadata-configured form/list views, metadata-validated list filters, print formats, reports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
+Current suite: 191 tests across schema, permissions, events, registry, services, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, reports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
 
 ## Status
 

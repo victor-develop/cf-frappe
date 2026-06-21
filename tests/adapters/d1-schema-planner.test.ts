@@ -109,6 +109,16 @@ describe("D1 schema planner", () => {
     expect(() => planD1ProjectionIndexes([Task])).toThrow("references unknown field 'statsu'");
   });
 
+  it("rejects projection indexes over table fields", () => {
+    const Invoice = defineDocType({
+      name: "Sales Invoice",
+      fields: [{ name: "items", type: "table", tableOf: "Sales Invoice Item" }],
+      indexes: [["items"]]
+    });
+
+    expect(() => planD1ProjectionIndexes([Invoice])).toThrow("cannot index table field 'items'");
+  });
+
   it("keeps the checked-in Wrangler core migration exactly equivalent to the TypeScript plan", () => {
     const fileSql = readFileSync(new URL("../../migrations/0001_cf_frappe_core.sql", import.meta.url), "utf8");
 

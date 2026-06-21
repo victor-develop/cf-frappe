@@ -164,6 +164,56 @@ export const taskDocType = defineDocType({
   ]
 });
 
+export const productDocType = defineDocType({
+  name: "Product",
+  naming: { kind: "field", field: "sku" },
+  fields: [
+    { name: "sku", type: "text", required: true },
+    { name: "title", type: "text" }
+  ],
+  permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }]
+});
+
+export const salesInvoiceItemDocType = defineDocType({
+  name: "Sales Invoice Item",
+  fields: [
+    { name: "product", type: "link", linkTo: "Product", required: true },
+    { name: "quantity", type: "integer", required: true, min: 1 },
+    { name: "rate", type: "number", min: 0 },
+    { name: "line_id", type: "text", readOnly: true }
+  ]
+});
+
+export const salesInvoiceDocType = defineDocType({
+  name: "Sales Invoice",
+  naming: { kind: "field", field: "title" },
+  fields: [
+    { name: "title", type: "text", required: true },
+    { name: "items", type: "table", tableOf: "Sales Invoice Item", required: true },
+    { name: "remarks", type: "longText" }
+  ],
+  formView: {
+    sections: [{ heading: "Invoice", columns: 1, fields: ["title", "items", "remarks"] }]
+  },
+  listView: {
+    columns: ["title"],
+    filterFields: ["title"]
+  },
+  permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }],
+  commands: [
+    {
+      name: "replaceItems",
+      eventType: "SalesInvoiceItemsReplaced",
+      fields: ["items"]
+    },
+    {
+      name: "customReplaceItems",
+      eventType: "SalesInvoiceCustomItemsReplaced",
+      buildPatch: ({ input }) => (input.items === undefined ? {} : { items: input.items })
+    }
+  ]
+});
+
 export function createTestRegistry(): ModelRegistry {
   return createRegistry({
     doctypes: [noteDocType],
@@ -210,6 +260,21 @@ export function createServices(
 
 export function createLinkedServices(ids: readonly string[] = ["evt1", "evt2", "evt3", "evt4"]) {
   const registry = createRegistry({ doctypes: [projectDocType, taskDocType] });
+  const store = new InMemoryDocumentStore();
+  const documents = new DocumentService({
+    registry,
+    store,
+    clock: fixedClock(now),
+    ids: deterministicIds(ids)
+  });
+  const queries = new QueryService({ registry, projections: store });
+  return { registry, store, events: store, projections: store, documents, queries };
+}
+
+export function createChildTableServices(ids: readonly string[] = ["evt1", "evt2", "evt3", "evt4"]) {
+  const registry = createRegistry({
+    doctypes: [productDocType, salesInvoiceItemDocType, salesInvoiceDocType]
+  });
   const store = new InMemoryDocumentStore();
   const documents = new DocumentService({
     registry,

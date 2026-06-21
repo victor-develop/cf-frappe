@@ -46,8 +46,8 @@ export function normalizeListFilters(
         status: 400
       });
     }
-    if (field.type === "json") {
-      throw new FrameworkError(errorCode, `Filter field '${filter.field}' cannot be a json field`, {
+    if (!isFilterable(field)) {
+      throw new FrameworkError(errorCode, `Filter field '${filter.field}' cannot be a ${field.type} field`, {
         status: 400
       });
     }
@@ -81,7 +81,7 @@ function resolveListFilterFields(
     return ensureFilterable(resolveFields(doctype, doctype.listView.filterFields, "filter field"));
   }
   const flagged = doctype.fields.filter((field) => field.inListFilter);
-  return flagged.length > 0 ? ensureFilterable(flagged) : columns.filter((field) => field.type !== "json");
+  return flagged.length > 0 ? ensureFilterable(flagged) : columns.filter(isFilterable);
 }
 
 function resolveFields(
@@ -112,8 +112,8 @@ function resolveFields(
 
 function ensureFilterable(fields: readonly FieldDefinition[]): readonly FieldDefinition[] {
   for (const field of fields) {
-    if (field.type === "json") {
-      throw new FrameworkError("LIST_VIEW_INVALID", `List filter field '${field.name}' cannot be a json field`, {
+    if (!isFilterable(field)) {
+      throw new FrameworkError("LIST_VIEW_INVALID", `List filter field '${field.name}' cannot be a ${field.type} field`, {
         status: 400
       });
     }
@@ -182,6 +182,10 @@ function coerceFilterValue(
 
 function visibleFields(doctype: DocTypeDefinition): readonly FieldDefinition[] {
   return doctype.fields.filter((field) => !field.hidden);
+}
+
+function isFilterable(field: FieldDefinition): boolean {
+  return field.type !== "json" && field.type !== "table";
 }
 
 function fieldMap(doctype: DocTypeDefinition): Map<string, FieldDefinition> {

@@ -1,21 +1,23 @@
-import type {
-  DocTypeDefinition,
-  DocumentData,
-  DocumentSnapshot,
-  FieldDefinition,
-  JsonValue,
-  LinkOption,
-  ListDocumentsFilter,
-  ListFilterOperator,
-  ResolvedFormSection,
-  ResolvedFormView,
-  ResolvedListView
+import {
+  CHILD_TABLE_ROW_INDEX_FIELD,
+  type DocTypeDefinition,
+  type DocumentData,
+  type DocumentSnapshot,
+  type FieldDefinition,
+  type JsonValue,
+  type LinkOption,
+  type ListDocumentsFilter,
+  type ListFilterOperator,
+  type ResolvedFormSection,
+  type ResolvedFormView,
+  type ResolvedListView
 } from "../../core/types";
 import type { ReportDefinition } from "../../core/reports";
 import type { ReportRunResult } from "../../application/report-service";
 import type { PrintFormatDefinition } from "../../core/print-format";
 
 export type FormLinkOptions = Readonly<Record<string, readonly LinkOption[]>>;
+export type FormTableDefinitions = Readonly<Record<string, DocTypeDefinition>>;
 
 export interface DeskLayoutOptions {
   readonly title: string;
@@ -189,6 +191,7 @@ export function renderFormView(
     readonly document?: DocumentSnapshot;
     readonly error?: string;
     readonly linkOptions?: FormLinkOptions;
+    readonly tableDefinitions?: FormTableDefinitions;
     readonly printFormats?: readonly PrintFormatDefinition[];
   }
 ): string {
@@ -198,7 +201,15 @@ export function renderFormView(
       : `/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(options.document?.name ?? "")}`;
   const title = options.mode === "create" ? `New ${labelFor(doctype)}` : options.document?.name ?? doctype.name;
   const sections = formView.sections
-    .map((section) => renderFormSection(section, options.document, options.mode, options.linkOptions ?? {}))
+    .map((section) =>
+      renderFormSection(
+        section,
+        options.document,
+        options.mode,
+        options.linkOptions ?? {},
+        options.tableDefinitions ?? {}
+      )
+    )
     .join("");
   const commands =
     options.mode === "update" && doctype.commands?.length
@@ -250,10 +261,20 @@ function renderFormSection(
   section: ResolvedFormSection,
   document: DocumentSnapshot | undefined,
   mode: "create" | "update",
-  linkOptions: FormLinkOptions
+  linkOptions: FormLinkOptions,
+  tableDefinitions: FormTableDefinitions
 ): string {
   const fields = section.fields
-    .map((field) => renderField(field, document?.data[field.name], mode, linkOptions[field.name] ?? []))
+    .map((field) =>
+      renderField(
+        field,
+        document?.data[field.name],
+        mode,
+        linkOptions[field.name] ?? [],
+        tableDefinitions[field.name],
+        linkOptions
+      )
+    )
     .join("");
   return `<section class="form-section">
     ${section.heading ? `<h3>${escapeHtml(section.heading)}</h3>` : ""}
@@ -265,7 +286,9 @@ function renderField(
   field: FieldDefinition,
   value: JsonValue | undefined,
   mode: "create" | "update",
-  linkOptions: readonly LinkOption[]
+  linkOptions: readonly LinkOption[],
+  tableDefinition: DocTypeDefinition | undefined,
+  allLinkOptions: FormLinkOptions
 ): string {
   const id = `field-${slug(field.name)}`;
   const label = escapeHtml(field.label ?? field.name);
@@ -274,6 +297,9 @@ function renderField(
   const common = `id="${id}" name="${escapeHtml(field.name)}"${required}${readonly}`;
   const formatted = formatFormValue(value);
   const help = field.readOnly ? `<small>Read only</small>` : "";
+  if (field.type === "table") {
+    return renderTableField(field, value, tableDefinition, allLinkOptions);
+  }
   if (field.type === "link") {
     const options = renderLinkOptions(linkOptions, formatted);
     return `<label class="field" for="${id}"><span>${label}${field.required ? " *" : ""}</span><select ${common}>${options}</select>${help}</label>`;
@@ -290,6 +316,119 @@ function renderField(
   const type = inputType(field);
   const checked = field.type === "boolean" && value === true ? " checked" : "";
   return `<label class="field" for="${id}"><span>${label}${field.required ? " *" : ""}</span><input type="${type}" ${common} value="${escapeHtml(formatted)}"${checked}>${help}</label>`;
+}
+
+function renderTableField(
+  field: FieldDefinition,
+  value: JsonValue | undefined,
+  child: DocTypeDefinition | undefined,
+  linkOptions: FormLinkOptions
+): string {
+  const label = escapeHtml(field.label ?? field.name);
+  if (!child) {
+    return `<label class="field" for="field-${slug(field.name)}"><span>${label}${field.required ? " *" : ""}</span><textarea id="field-${slug(field.name)}" name="${escapeHtml(field.name)}">${escapeHtml(formatFormValue(value))}</textarea></label>`;
+  }
+  const rows = Array.isArray(value) ? value.filter(isJsonObject) : [];
+  const renderRows = rows.length > 0 ? rows : [{}];
+  const childFields = child.fields.filter((childField) => !childField.hidden && !childField.readOnly);
+  const headers = childFields
+    .map((childField) => `<th>${escapeHtml(childField.label ?? childField.name)}</th>`)
+    .join("");
+  const body = renderRows
+    .map((row, rowIndex) =>
+      renderTableRow({
+        tableField: field.name,
+        rowIndex,
+        ...(rows.length > 0 ? { originIndex: rowIndex } : {}),
+        row,
+        childFields,
+        linkOptions
+      })
+    )
+    .join("");
+  const nextRow = rows.length > 0 ? renderBlankTableRow(field.name, rows.length, childFields, linkOptions) : "";
+  return `<fieldset class="field table-field">
+    <legend>${label}${field.required ? " *" : ""}</legend>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>${headers}</tr></thead>
+        <tbody>${body}${nextRow}</tbody>
+      </table>
+    </div>
+  </fieldset>`;
+}
+
+function renderTableRow(options: {
+  readonly tableField: string;
+  readonly rowIndex: number;
+  readonly originIndex?: number;
+  readonly row: Record<string, JsonValue>;
+  readonly childFields: readonly FieldDefinition[];
+  readonly linkOptions: FormLinkOptions;
+}): string {
+  const marker =
+    options.originIndex === undefined ? "" : renderTableRowOrigin(options.tableField, options.rowIndex, options.originIndex);
+  if (options.childFields.length === 0) {
+    return `<tr><td>${marker}</td></tr>`;
+  }
+  return `<tr>${options.childFields
+    .map((childField, cellIndex) => {
+      const input = renderTableCellInput(
+        options.tableField,
+        options.rowIndex,
+        childField,
+        options.row[childField.name],
+        options.linkOptions[`${options.tableField}.${childField.name}`] ?? []
+      );
+      return `<td>${cellIndex === 0 ? marker : ""}${input}</td>`;
+    })
+    .join("")}</tr>`;
+}
+
+function renderTableRowOrigin(tableField: string, rowIndex: number, originIndex: number): string {
+  const name = `${tableField}[${rowIndex}].${CHILD_TABLE_ROW_INDEX_FIELD}`;
+  return `<input type="hidden" name="${escapeHtml(name)}" value="${String(originIndex)}">`;
+}
+
+function renderBlankTableRow(
+  tableField: string,
+  rowIndex: number,
+  childFields: readonly FieldDefinition[],
+  linkOptions: FormLinkOptions
+): string {
+  return `<tr>${childFields
+    .map((childField) =>
+      `<td>${renderTableCellInput(tableField, rowIndex, childField, undefined, linkOptions[`${tableField}.${childField.name}`] ?? [])}</td>`
+    )
+    .join("")}</tr>`;
+}
+
+function renderTableCellInput(
+  tableField: string,
+  rowIndex: number,
+  field: FieldDefinition,
+  value: JsonValue | undefined,
+  linkOptions: readonly LinkOption[]
+): string {
+  const name = `${tableField}[${rowIndex}].${field.name}`;
+  const id = `field-${slug(name)}`;
+  const common = `id="${id}" name="${escapeHtml(name)}"`;
+  const formatted = formatFormValue(value);
+  if (field.type === "link") {
+    return `<select ${common}>${renderLinkOptions(linkOptions, formatted)}</select>`;
+  }
+  if (field.type === "select") {
+    const options = (field.options ?? [])
+      .map((option) => `<option value="${escapeHtml(option)}"${option === formatted ? " selected" : ""}>${escapeHtml(option)}</option>`)
+      .join("");
+    return `<select ${common}>${options}</select>`;
+  }
+  if (field.type === "longText" || field.type === "json") {
+    return `<textarea ${common}>${escapeHtml(formatted)}</textarea>`;
+  }
+  const type = inputType(field);
+  const checked = field.type === "boolean" && value === true ? " checked" : "";
+  return `<input type="${type}" ${common} value="${escapeHtml(formatted)}"${checked}>`;
 }
 
 function renderLinkOptions(options: readonly LinkOption[], currentValue: string): string {
@@ -388,6 +527,10 @@ function formatValue(value: JsonValue | undefined): string {
 
 function formatFormValue(value: JsonValue | undefined): string {
   return formatValue(value);
+}
+
+function isJsonObject(value: JsonValue): value is Record<string, JsonValue> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function escapeHtml(value: string): string {

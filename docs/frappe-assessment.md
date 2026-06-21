@@ -26,6 +26,7 @@ That model is powerful, but it is not event-sourcing first. cf-frappe keeps the 
 | Metadata model | DocTypes | `defineDocType` |
 | Field validation | DocField rules | built-in field types, required, min/max, select options |
 | Link fields | Link DocFields | registered DocType targets, event-stream existence checks, generated option lookup API, and Desk select controls |
+| Child tables | Table DocFields and child DocTypes | `type: "table"` fields backed by child DocType row validation, nested link checks, and Desk row grids |
 | Default values | DocField defaults | scalar and function defaults |
 | Permissions | roles and permission rules | role/action/predicate rules |
 | Lifecycle behavior | hooks/controllers | registry hooks: `beforeValidate`, `validate`, `afterCommit` |
@@ -44,7 +45,7 @@ That model is powerful, but it is not event-sourcing first. cf-frappe keeps the 
 
 ## Current Gaps
 
-- Generated Desk UI now covers basic list/form/report/print pages, model-defined form sections and field order, list columns, default list filters, filter controls, link-field select controls, and page size. Saved user filters, advanced filter builders, report builder, custom print templates, letterheads, richer admin tools, grouped summaries, charts, and client scripting are not implemented.
+- Generated Desk UI now covers basic list/form/report/print pages, model-defined form sections and field order, list columns, default list filters, filter controls, link-field select controls, child table row grids, and page size. Saved user filters, advanced filter builders, report builder, custom print templates, letterheads, richer admin tools, grouped summaries, charts, and client scripting are not implemented.
 - DocType metadata now plans and applies D1 projection-index migrations with a checksum journal, but destructive/renaming migrations, data backfills, and an installable CLI are still future work.
 - Background jobs now have basic Queue/Cron support, but durable dashboards, job result storage, worker pools, retry administration, and scheduler admin views are not implemented.
 - Realtime notifications now have basic Durable Object WebSocket document topics, but presence, tenant/doctype filtered fan-out, per-user rooms, Desk client integration, and durable replay are not implemented.

@@ -5,7 +5,16 @@ import { QueryService } from "../../application/query-service";
 import type { ReportFilters, ReportService } from "../../application/report-service";
 import { FrameworkError } from "../../core/errors";
 import type { ModelRegistry } from "../../core/registry";
-import type { Actor, DocTypeDefinition, DocumentData, FieldDefinition, JsonPrimitive, MutableDocumentData, ResolvedFormView } from "../../core/types";
+import {
+  CHILD_TABLE_ROW_INDEX_FIELD,
+  type Actor,
+  type DocTypeDefinition,
+  type DocumentData,
+  type FieldDefinition,
+  type JsonPrimitive,
+  type MutableDocumentData,
+  type ResolvedFormView
+} from "../../core/types";
 import type { ActorResolver } from "../http/actor";
 import { listFiltersFromUrl, parseOptionalInteger } from "../http/request";
 import { renderPrintDocument } from "../print";
@@ -18,7 +27,8 @@ import {
   renderNotFound,
   renderReportList,
   renderReportView,
-  type FormLinkOptions
+  type FormLinkOptions,
+  type FormTableDefinitions
 } from "./render";
 
 export interface DeskAppOptions {
@@ -125,6 +135,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
     const formView = options.queries.getFormView(actor, doctype.name);
     const linkOptions = await linkOptionsForForm(options, actor, doctype, formView);
+    const tableDefinitions = tableDefinitionsForForm(options, formView);
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
     return html(
@@ -133,7 +144,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         active: doctype.name,
         doctypes,
         reports,
-        body: renderFormView(doctype, formView, { mode: "create", linkOptions })
+        body: renderFormView(doctype, formView, { mode: "create", linkOptions, tableDefinitions })
       })
     );
   });
@@ -146,7 +157,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       const snapshot = await options.documents.create({
         actor,
         doctype: doctype.name,
-        data: (await parseDeskForm(c.req.raw, doctype, formView)).data,
+        data: (await parseDeskForm(c.req.raw, doctype, formView, (name) => options.registry.get(name))).data,
         metadata: requestMetadata(c.req.raw)
       });
       return c.redirect(`/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(snapshot.name)}`, 303);
@@ -164,13 +175,14 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const formView = options.queries.getFormView(actor, doctype.name);
     const document = await options.queries.getDocument(actor, doctype.name, c.req.param("name"));
     const linkOptions = await linkOptionsForForm(options, actor, doctype, formView);
+    const tableDefinitions = tableDefinitionsForForm(options, formView);
     return html(
       renderDeskLayout({
         title: document.name,
         active: doctype.name,
         doctypes,
         reports,
-        body: renderFormView(doctype, formView, { mode: "update", document, linkOptions, printFormats })
+        body: renderFormView(doctype, formView, { mode: "update", document, linkOptions, tableDefinitions, printFormats })
       })
     );
   });
@@ -181,7 +193,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const formView = options.queries.getFormView(actor, doctype.name);
     const name = c.req.param("name");
     try {
-      const form = await parseDeskForm(c.req.raw, doctype, formView);
+      const form = await parseDeskForm(c.req.raw, doctype, formView, (doctypeName) => options.registry.get(doctypeName));
       await options.documents.update({
         actor,
         doctype: doctype.name,
@@ -202,7 +214,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const formView = options.queries.getFormView(actor, doctype.name);
     const name = c.req.param("name");
     try {
-      const form = await parseDeskForm(c.req.raw, doctype, formView);
+      const form = await parseDeskForm(c.req.raw, doctype, formView, (doctypeName) => options.registry.get(doctypeName));
       await options.documents.execute({
         actor,
         doctype: doctype.name,
@@ -266,6 +278,7 @@ async function renderDeskError(
   const reports = listReports(options, actor);
   const formView = options.queries.getFormView(actor, doctype.name);
   const linkOptions = await linkOptionsForForm(options, actor, doctype, formView);
+  const tableDefinitions = tableDefinitionsForForm(options, formView);
   const document = name ? await options.queries.getDocument(actor, doctype.name, name).catch(() => undefined) : undefined;
   const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
   return html(
@@ -278,6 +291,7 @@ async function renderDeskError(
         mode,
         ...(document ? { document } : {}),
         linkOptions,
+        tableDefinitions,
         ...(document ? { printFormats: listPrintFormats(options, actor, doctype.name) } : {}),
         error: message
       })
@@ -301,14 +315,35 @@ async function linkOptionsForForm(
   formView: ResolvedFormView
 ): Promise<FormLinkOptions> {
   const entries = await Promise.all(
-    formView.fields
-      .filter((field) => field.type === "link")
-      .map(async (field) => {
-        const result = await options.queries.listLinkOptions(actor, doctype.name, field.name);
-        return [field.name, result.options] as const;
-      })
+    formView.fields.flatMap((field) => {
+      if (field.type === "link") {
+        return [
+          async () => {
+            const result = await options.queries.listLinkOptions(actor, doctype.name, field.name);
+            return [field.name, result.options] as const;
+          }
+        ];
+      }
+      if (field.type === "table" && field.tableOf) {
+        const child = options.registry.get(field.tableOf);
+        return child.fields
+          .filter((childField) => childField.type === "link")
+          .map((childField) => async () => {
+            const result = await options.queries.listLinkOptionsForField(actor, child, childField.name);
+            return [`${field.name}.${childField.name}`, result.options] as const;
+          });
+      }
+      return [];
+    }).map((load) => load())
   );
   return Object.fromEntries(entries) as FormLinkOptions;
+}
+
+function tableDefinitionsForForm(options: DeskAppOptions, formView: ResolvedFormView): FormTableDefinitions {
+  const entries = formView.fields
+    .filter((field) => field.type === "table" && field.tableOf)
+    .map((field) => [field.name, options.registry.get(field.tableOf!)] as const);
+  return Object.fromEntries(entries) as FormTableDefinitions;
 }
 
 function reportFiltersFromUrl(url: URL): ReportFilters {
@@ -329,14 +364,20 @@ interface ParsedDeskForm {
 async function parseDeskForm(
   request: Request,
   doctype: DocTypeDefinition,
-  formView: ResolvedFormView
+  formView: ResolvedFormView,
+  relatedDocType: (doctype: string) => DocTypeDefinition
 ): Promise<ParsedDeskForm> {
   const form = await request.formData();
   const fields = new Set(doctype.fields.map((field) => field.name));
   const entries = formView.fields
     .filter((field) => fields.has(field.name))
     .filter((field) => !field.hidden && !field.readOnly)
-    .map((field) => [field.name, coerceFormValue(field, form.get(field.name))] as const)
+    .map((field) => [
+      field.name,
+      field.type === "table" && field.tableOf
+        ? coerceTableFormValue(field, relatedDocType(field.tableOf), form)
+        : coerceFormValue(field, form.get(field.name))
+    ] as const)
     .filter(([, value]) => value !== undefined);
   const data = Object.fromEntries(entries) as MutableDocumentData;
   const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
@@ -344,6 +385,72 @@ async function parseDeskForm(
     data,
     ...(expectedVersion !== undefined ? { expectedVersion } : {})
   };
+}
+
+function coerceTableFormValue(
+  field: FieldDefinition,
+  child: DocTypeDefinition,
+  form: FormData
+): DocumentData[string] | undefined {
+  const childFields = child.fields.filter((childField) => !childField.hidden && !childField.readOnly);
+  const rows = tableRowIndexes(form, field.name)
+    .filter((rowIndex) => !isEmptyTableRow(form, field.name, rowIndex, childFields))
+    .map((rowIndex) => {
+      const row = Object.fromEntries(
+        childFields
+          .map((childField) => [
+            childField.name,
+            coerceFormValue(childField, form.get(tableInputName(field.name, rowIndex, childField.name)))
+          ] as const)
+          .filter(([, value]) => value !== undefined)
+      ) as MutableDocumentData;
+      const origin = coerceChildRowOrigin(form.get(tableInputName(field.name, rowIndex, CHILD_TABLE_ROW_INDEX_FIELD)));
+      if (origin !== undefined) {
+        row[CHILD_TABLE_ROW_INDEX_FIELD] = origin;
+      }
+      return row;
+    });
+  const nonEmptyRows = rows.filter((row) => Object.keys(row).length > 0);
+  if (nonEmptyRows.length === 0) {
+    return field.required ? [] : undefined;
+  }
+  return nonEmptyRows as DocumentData[string];
+}
+
+function isEmptyTableRow(
+  form: FormData,
+  tableField: string,
+  rowIndex: number,
+  childFields: readonly FieldDefinition[]
+): boolean {
+  return childFields.every((childField) => {
+    const value = form.get(tableInputName(tableField, rowIndex, childField.name));
+    return value === null || value === "";
+  });
+}
+
+function tableRowIndexes(form: FormData, tableField: string): readonly number[] {
+  const indexes = new Set<number>();
+  const pattern = new RegExp(`^${escapeRegExp(tableField)}\\[(\\d+)\\]\\.`);
+  form.forEach((_, key) => {
+    const match = key.match(pattern);
+    if (match?.[1] !== undefined) {
+      indexes.add(Number(match[1]));
+    }
+  });
+  return [...indexes].sort((left, right) => left - right);
+}
+
+function tableInputName(tableField: string, rowIndex: number, childField: string): string {
+  return `${tableField}[${rowIndex}].${childField}`;
+}
+
+function coerceChildRowOrigin(value: FormDataEntryValue | null): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function coerceFormValue(field: FieldDefinition, value: FormDataEntryValue | null): DocumentData[string] | undefined {

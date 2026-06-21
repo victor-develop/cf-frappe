@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the link-field integrity and lookup slice:
+As of the child-table metadata and Desk grid slice:
 
 - Test files: `37`
-- Vitest cases: `175`
+- Vitest cases: `191`
 
 ## Implication
 

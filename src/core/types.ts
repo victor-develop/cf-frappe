@@ -21,7 +21,8 @@ export type FieldType =
   | "datetime"
   | "json"
   | "select"
-  | "link";
+  | "link"
+  | "table";
 
 export interface FieldDefaultContext {
   readonly actor: Actor;
@@ -40,6 +41,7 @@ export interface FieldDefinition {
   readonly inListFilter?: boolean;
   readonly options?: readonly string[];
   readonly linkTo?: DocTypeName;
+  readonly tableOf?: DocTypeName;
   readonly min?: number;
   readonly max?: number;
   readonly defaultValue?: JsonValue | ((context: FieldDefaultContext) => JsonValue);
@@ -268,5 +270,6 @@ export interface LinkOptionsResult {
   readonly options: readonly LinkOption[];
 }
 
+export const CHILD_TABLE_ROW_INDEX_FIELD = "__cf_frappe_row_index";
 export const SYSTEM_MANAGER_ROLE = "System Manager";
 export const DEFAULT_TENANT_ID = "default";

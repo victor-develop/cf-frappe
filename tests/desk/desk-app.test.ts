@@ -1,4 +1,5 @@
 import {
+  CHILD_TABLE_ROW_INDEX_FIELD,
   createDeskApp,
   createRegistry,
   defineDocType,
@@ -8,7 +9,7 @@ import {
   InMemoryDocumentStore,
   QueryService
 } from "../../src";
-import { createLinkedServices, createServices, data, now, owner } from "../helpers";
+import { createChildTableServices, createLinkedServices, createServices, data, now, owner } from "../helpers";
 
 describe("Desk app", () => {
   function makeDesk() {
@@ -26,6 +27,17 @@ describe("Desk app", () => {
 
   function makeLinkedDesk() {
     const services = createLinkedServices(["p1", "p2", "t1"]);
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: () => owner
+    });
+    return { app, services };
+  }
+
+  function makeChildTableDesk() {
+    const services = createChildTableServices(["product-1", "product-2", "invoice-1", "invoice-2"]);
     const app = createDeskApp({
       registry: services.registry,
       documents: services.documents,
@@ -198,6 +210,99 @@ describe("Desk app", () => {
     const edit = await app.request("/desk/Task/Launch");
     expect(edit.status).toBe(200);
     await expect(edit.text()).resolves.toContain('<option value="Apollo" selected>Apollo</option>');
+  });
+
+  it("renders and parses child table fields from generated forms", async () => {
+    const { app, services } = makeChildTableDesk();
+    await services.documents.create({ actor: owner, doctype: "Product", data: { sku: "SKU-1", title: "Widget" } });
+
+    const form = await app.request("/desk/Sales%20Invoice/new");
+
+    expect(form.status).toBe(200);
+    const html = await form.text();
+    expect(html).toContain("<legend>items *</legend>");
+    expect(html).toContain('name="items[0].product"');
+    expect(html).toContain('<option value="SKU-1">Widget</option>');
+    expect(html).toContain('name="items[0].quantity"');
+    expect(html).not.toContain("/desk/Sales%20Invoice%20Item");
+
+    const created = await app.request("/desk/Sales%20Invoice", {
+      method: "POST",
+      body: new URLSearchParams({
+        title: "INV-DESK",
+        "items[0].product": "SKU-1",
+        "items[0].quantity": "2",
+        "items[0].rate": "10",
+        "items[1].product": "",
+        "items[1].quantity": ""
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(created.status).toBe(303);
+    expect(created.headers.get("location")).toBe("/desk/Sales%20Invoice/INV-DESK");
+    await expect(services.queries.getDocument(owner, "Sales Invoice", "INV-DESK")).resolves.toMatchObject({
+      data: {
+        items: [{ product: "SKU-1", quantity: 2, rate: 10 }]
+      }
+    });
+
+    const edit = await app.request("/desk/Sales%20Invoice/INV-DESK");
+    expect(edit.status).toBe(200);
+    const editHtml = await edit.text();
+    expect(editHtml).toContain('name="items[0].product"');
+    expect(editHtml).toContain('<option value="SKU-1" selected>Widget</option>');
+    expect(editHtml).toContain(`name="items[0].${CHILD_TABLE_ROW_INDEX_FIELD}" value="0"`);
+    expect(editHtml).toContain('name="items[1].product"');
+  });
+
+  it("keeps read-only child values with the correct Desk row after deleting an earlier row", async () => {
+    const { app, services } = makeChildTableDesk();
+    await services.documents.create({ actor: owner, doctype: "Product", data: { sku: "SKU-1", title: "Widget" } });
+    await services.documents.create({ actor: owner, doctype: "Product", data: { sku: "SKU-2", title: "Gadget" } });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Sales Invoice",
+      data: {
+        title: "INV-DESK",
+        items: [
+          { product: "SKU-1", quantity: 1, line_id: "line-1" },
+          { product: "SKU-2", quantity: 2, rate: 20, line_id: "line-2" }
+        ]
+      }
+    });
+
+    const edit = await app.request("/desk/Sales%20Invoice/INV-DESK");
+    expect(edit.status).toBe(200);
+    const editHtml = await edit.text();
+    expect(editHtml).toContain(`name="items[0].${CHILD_TABLE_ROW_INDEX_FIELD}" value="0"`);
+    expect(editHtml).toContain(`name="items[1].${CHILD_TABLE_ROW_INDEX_FIELD}" value="1"`);
+
+    const updated = await app.request("/desk/Sales%20Invoice/INV-DESK", {
+      method: "POST",
+      body: new URLSearchParams({
+        title: "INV-DESK",
+        expectedVersion: "1",
+        [`items[0].${CHILD_TABLE_ROW_INDEX_FIELD}`]: "0",
+        "items[0].product": "",
+        "items[0].quantity": "",
+        [`items[1].${CHILD_TABLE_ROW_INDEX_FIELD}`]: "1",
+        "items[1].product": "SKU-2",
+        "items[1].quantity": "3",
+        "items[1].rate": "20"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(updated.status).toBe(303);
+    await expect(services.queries.getDocument(owner, "Sales Invoice", "INV-DESK")).resolves.toMatchObject({
+      data: {
+        items: [{ product: "SKU-2", quantity: 3, rate: 20, line_id: "line-2" }]
+      },
+      version: 2
+    });
+    const stream = await services.events.readStream("acme:Sales%20Invoice:INV-DESK");
+    expect(JSON.stringify(stream)).not.toContain(CHILD_TABLE_ROW_INDEX_FIELD);
   });
 
   it("does not submit omitted form-view boolean fields as unchecked", async () => {

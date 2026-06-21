@@ -11,6 +11,7 @@ import type { IdGenerator } from "../ports/id-generator";
 import { cryptoIdGenerator } from "../ports/id-generator";
 import {
   DEFAULT_TENANT_ID,
+  CHILD_TABLE_ROW_INDEX_FIELD,
   type Actor,
   type DocStatus,
   type DocTypeDefinition,
@@ -116,7 +117,11 @@ export class DocumentService implements DocumentCommandExecutor {
 
     const now = this.clock.now();
     const withDefaults = applyDefaults(doctype, command.data, { actor: command.actor, now });
-    const data = await this.runBeforeValidate(doctype, withDefaults);
+    const data = stripInternalTableFields(
+      doctype,
+      await this.runBeforeValidate(doctype, withDefaults),
+      (name) => this.relatedDocType(name)
+    );
     const issues = [
       ...(await this.validate(doctype, data)),
       ...(await this.validateLinks(command.actor, tenantId, doctype, data))
@@ -170,10 +175,13 @@ export class DocumentService implements DocumentCommandExecutor {
     ensureExpectedVersion(existing, command.expectedVersion);
 
     const patch = await this.runBeforeValidate(doctype, compactData(command.patch), existing);
-    const readOnlyIssues = readonlyIssues(doctype, patch);
-    const validationIssues = await this.validate(doctype, patch, existing);
-    const linkIssues = await this.validateLinks(command.actor, tenantId, doctype, patch);
-    const issues = [...readOnlyIssues, ...validationIssues, ...linkIssues];
+    const patchWithoutInternalFields = stripInternalTableFields(doctype, patch, (name) => this.relatedDocType(name));
+    const originIssues = childTableOriginIssues(doctype, patch, existing.data, (name) => this.relatedDocType(name));
+    const readOnlyIssues = readonlyIssues(doctype, patchWithoutInternalFields, (name) => this.relatedDocType(name));
+    const normalizedPatch = preserveReadOnlyTableValues(doctype, patch, existing, (name) => this.relatedDocType(name));
+    const validationIssues = await this.validate(doctype, normalizedPatch, existing);
+    const linkIssues = await this.validateLinks(command.actor, tenantId, doctype, normalizedPatch);
+    const issues = [...originIssues, ...readOnlyIssues, ...validationIssues, ...linkIssues];
     if (issues.length > 0) {
       throw validationFailed(issues);
     }
@@ -187,7 +195,7 @@ export class DocumentService implements DocumentCommandExecutor {
       documentName: command.name,
       actorId: command.actor.id,
       occurredAt: now,
-      payload: { kind: "DocumentUpdated", patch },
+      payload: { kind: "DocumentUpdated", patch: normalizedPatch },
       metadata: command.metadata ?? {}
     });
     const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
@@ -197,7 +205,7 @@ export class DocumentService implements DocumentCommandExecutor {
       return {
         ...existing,
         version: saved.sequence,
-        data: { ...existing.data, ...patch },
+        data: { ...existing.data, ...normalizedPatch },
         updatedAt: saved.occurredAt
       };
     });
@@ -300,15 +308,24 @@ export class DocumentService implements DocumentCommandExecutor {
     ensureExpectedVersion(existing, command.expectedVersion);
 
     const input = compactData(command.input);
+    const sanitizedInput = stripInternalTableFields(doctype, input, (name) => this.relatedDocType(name));
     const now = this.clock.now();
     const patch = commandDefinition.buildPatch
       ? commandDefinition.buildPatch({ actor: command.actor, document: existing, input, now })
       : pickCommandFields(commandDefinition.fields, input);
     const normalizedPatch = await this.runBeforeValidate(doctype, compactData(patch), existing);
-    const readOnlyIssues = readonlyIssues(doctype, normalizedPatch);
-    const validationIssues = await this.validate(doctype, normalizedPatch, existing);
-    const linkIssues = await this.validateLinks(command.actor, tenantId, doctype, normalizedPatch);
-    const issues = [...readOnlyIssues, ...validationIssues, ...linkIssues];
+    const patchWithoutInternalFields = stripInternalTableFields(doctype, normalizedPatch, (name) => this.relatedDocType(name));
+    const originIssues = childTableOriginIssues(doctype, normalizedPatch, existing.data, (name) => this.relatedDocType(name));
+    const readOnlyIssues = readonlyIssues(doctype, patchWithoutInternalFields, (name) => this.relatedDocType(name));
+    const patchWithReadOnlyValues = preserveReadOnlyTableValues(
+      doctype,
+      normalizedPatch,
+      existing,
+      (name) => this.relatedDocType(name)
+    );
+    const validationIssues = await this.validate(doctype, patchWithReadOnlyValues, existing);
+    const linkIssues = await this.validateLinks(command.actor, tenantId, doctype, patchWithReadOnlyValues);
+    const issues = [...originIssues, ...readOnlyIssues, ...validationIssues, ...linkIssues];
     if (issues.length > 0) {
       throw validationFailed(issues);
     }
@@ -324,8 +341,8 @@ export class DocumentService implements DocumentCommandExecutor {
       payload: {
         kind: "DomainCommandApplied",
         command: command.command,
-        input,
-        patch: normalizedPatch
+        input: sanitizedInput,
+        patch: patchWithReadOnlyValues
       },
       metadata: command.metadata ?? {}
     });
@@ -336,7 +353,7 @@ export class DocumentService implements DocumentCommandExecutor {
       return {
         ...existing,
         version: saved.sequence,
-        data: { ...existing.data, ...normalizedPatch },
+        data: { ...existing.data, ...patchWithReadOnlyValues },
         updatedAt: saved.occurredAt
       };
     });
@@ -425,7 +442,12 @@ export class DocumentService implements DocumentCommandExecutor {
     data: MutableDocumentData,
     existing?: DocumentSnapshot
   ): Promise<readonly ValidationIssue[]> {
-    const issues = [...validateDocumentData(doctype, data, { partial: existing !== undefined })];
+    const issues = [
+      ...validateDocumentData(doctype, data, {
+        partial: existing !== undefined,
+        relatedDocType: (name) => this.relatedDocType(name)
+      })
+    ];
     const hookData = existing ? { ...existing.data, ...compactData(data) } : compactData(data);
     for (const hook of this.registry.hooksFor(doctype.name)) {
       const context = existing
@@ -445,26 +467,59 @@ export class DocumentService implements DocumentCommandExecutor {
     doctype: DocTypeDefinition,
     data: MutableDocumentData
   ): Promise<readonly ValidationIssue[]> {
-    const linkFields = doctype.fields.filter(
-      (field) => field.type === "link" && Object.prototype.hasOwnProperty.call(data, field.name)
+    return this.validateLinksInData(actor, tenantId, doctype, data);
+  }
+
+  private async validateLinksInData(
+    actor: Actor,
+    tenantId: string,
+    doctype: DocTypeDefinition,
+    data: MutableDocumentData,
+    pathPrefix = ""
+  ): Promise<readonly ValidationIssue[]> {
+    const linkableFields = doctype.fields.filter(
+      (field) =>
+        (field.type === "link" || field.type === "table") &&
+        Object.prototype.hasOwnProperty.call(data, field.name)
     );
-    if (linkFields.length === 0) {
+    if (linkableFields.length === 0) {
       return [];
     }
     const issues = await Promise.all(
-      linkFields.map(async (field): Promise<readonly ValidationIssue[]> => {
+      linkableFields.map(async (field): Promise<readonly ValidationIssue[]> => {
         const value = data[field.name];
+        const fieldPath = `${pathPrefix}${field.name}`;
+        if (field.type === "table") {
+          if (!Array.isArray(value) || !field.tableOf) {
+            return [];
+          }
+          const child = this.relatedDocType(field.tableOf);
+          if (!child) {
+            return [];
+          }
+          const rowIssues = await Promise.all(
+            value.map((row, index) =>
+              isMutableData(row)
+                ? this.validateLinksInData(actor, tenantId, child, row, `${fieldPath}[${index}].`)
+                : Promise.resolve([])
+            )
+          );
+          return rowIssues.flat();
+        }
         if (typeof value !== "string" || value.length === 0) {
           return [];
         }
-        const targetDoctype = this.registry.get(field.linkTo ?? "");
+        const targetDoctype = this.relatedDocType(field.linkTo ?? "");
+        if (!targetDoctype) {
+          return [];
+        }
         const target = await this.readDocumentFromEvents(tenantId, targetDoctype, value);
         if (target && target.docstatus !== "deleted" && can(actor, targetDoctype, "read", target)) {
           return [];
         }
         return [
           {
-            field: field.name,
+            field: fieldPath,
             code: "link_not_found",
             message: `Field '${field.name}' references missing ${targetDoctype.name}/${value}`
           }
@@ -472,6 +527,10 @@ export class DocumentService implements DocumentCommandExecutor {
       })
     );
     return issues.flat();
+  }
+
+  private relatedDocType(name: string): DocTypeDefinition | undefined {
+    return this.registry.has(name) ? this.registry.get(name) : undefined;
   }
 
   private async readDocumentFromEvents(
@@ -564,15 +623,194 @@ function ensureExpectedVersion(existing: DocumentSnapshot, expectedVersion?: num
   }
 }
 
-function readonlyIssues(doctype: DocTypeDefinition, patch: DocumentData): readonly ValidationIssue[] {
+function readonlyIssues(
+  doctype: DocTypeDefinition,
+  patch: MutableDocumentData,
+  relatedDocType: (doctype: string) => DocTypeDefinition | undefined
+): readonly ValidationIssue[] {
   const readonlyFields = new Set(doctype.fields.filter((field) => field.readOnly).map((field) => field.name));
-  return Object.keys(patch)
+  const topLevelIssues = Object.keys(patch)
     .filter((field) => readonlyFields.has(field))
     .map((field) => ({
       field,
       code: "readonly",
       message: `Field '${field}' is read only`
     }));
+  const childIssues = doctype.fields
+    .filter((field) => field.type === "table" && Object.prototype.hasOwnProperty.call(patch, field.name))
+    .flatMap((field) => {
+      const value = patch[field.name];
+      if (!Array.isArray(value) || !field.tableOf) {
+        return [];
+      }
+      const child = relatedDocType(field.tableOf);
+      if (!child) {
+        return [];
+      }
+      return value.flatMap((row, index) =>
+        isMutableData(row)
+          ? readonlyIssues(child, row, relatedDocType).map((issue) => ({
+              ...issue,
+              field: `${field.name}[${index}]${issue.field ? `.${issue.field}` : ""}`
+            }))
+          : []
+      );
+    });
+  return [...topLevelIssues, ...childIssues];
+}
+
+function childTableOriginIssues(
+  doctype: DocTypeDefinition,
+  patch: MutableDocumentData,
+  existingData: MutableDocumentData | undefined,
+  relatedDocType: (doctype: string) => DocTypeDefinition | undefined,
+  pathPrefix = ""
+): readonly ValidationIssue[] {
+  return doctype.fields
+    .filter((field) => field.type === "table" && Object.prototype.hasOwnProperty.call(patch, field.name))
+    .flatMap((field) => {
+      const value = patch[field.name];
+      if (!Array.isArray(value) || !field.tableOf) {
+        return [];
+      }
+      const child = relatedDocType(field.tableOf);
+      if (!child) {
+        return [];
+      }
+      const existingValue = existingData?.[field.name];
+      const existingRows = Array.isArray(existingValue) ? existingValue : [];
+      const seenOrigins = new Set<number>();
+      return value.flatMap((row, rowIndex) => {
+        if (!isMutableData(row) || !Object.prototype.hasOwnProperty.call(row, CHILD_TABLE_ROW_INDEX_FIELD)) {
+          return [];
+        }
+        const fieldPath = `${pathPrefix}${field.name}[${rowIndex}].${CHILD_TABLE_ROW_INDEX_FIELD}`;
+        const originIndex = childRowOriginIndex(row[CHILD_TABLE_ROW_INDEX_FIELD]);
+        const issues: ValidationIssue[] = [];
+        if (originIndex === undefined) {
+          issues.push({
+            field: fieldPath,
+            code: "child_row_origin",
+            message: `Field '${field.name}' has an invalid child row origin`
+          });
+          return issues;
+        }
+        if (originIndex >= existingRows.length) {
+          issues.push({
+            field: fieldPath,
+            code: "child_row_origin",
+            message: `Field '${field.name}' references a child row origin outside the current table`
+          });
+          return issues;
+        }
+        if (seenOrigins.has(originIndex)) {
+          issues.push({
+            field: fieldPath,
+            code: "child_row_origin",
+            message: `Field '${field.name}' cannot reuse the same child row origin more than once`
+          });
+          return issues;
+        }
+        seenOrigins.add(originIndex);
+        return [
+          ...issues,
+          ...childTableOriginIssues(
+            child,
+            row,
+            isMutableData(existingRows[originIndex]) ? existingRows[originIndex] : undefined,
+            relatedDocType,
+            `${pathPrefix}${field.name}[${rowIndex}].`
+          )
+        ];
+      });
+    });
+}
+
+function preserveReadOnlyTableValues(
+  doctype: DocTypeDefinition,
+  patch: DocumentData,
+  existing: DocumentSnapshot,
+  relatedDocType: (doctype: string) => DocTypeDefinition | undefined
+): DocumentData {
+  return normalizeTableFields(doctype, patch, existing.data, relatedDocType);
+}
+
+function stripInternalTableFields(
+  doctype: DocTypeDefinition,
+  data: DocumentData,
+  relatedDocType: (doctype: string) => DocTypeDefinition | undefined
+): DocumentData {
+  return normalizeTableFields(doctype, data, undefined, relatedDocType);
+}
+
+function normalizeTableFields(
+  doctype: DocTypeDefinition,
+  data: DocumentData,
+  existingData: MutableDocumentData | undefined,
+  relatedDocType: (doctype: string) => DocTypeDefinition | undefined
+): DocumentData {
+  const entries = Object.entries(data).map(([fieldName, value]) => {
+    const field = doctype.fields.find((item) => item.name === fieldName);
+    if (field?.type !== "table" || !field.tableOf || !Array.isArray(value)) {
+      return [fieldName, value] as const;
+    }
+    const child = relatedDocType(field.tableOf);
+    if (!child) {
+      return [fieldName, value.map((row) => stripChildRowInternalFields(row))] as const;
+    }
+    const existingValue = existingData?.[fieldName];
+    const existingRows = Array.isArray(existingValue) ? existingValue : undefined;
+    const readOnlyChildFields = child.fields.filter((childField) => childField.readOnly);
+    const rows = value.map((row) => {
+      if (!isMutableData(row)) {
+        return row;
+      }
+      const originIndex = childRowOriginIndex(row[CHILD_TABLE_ROW_INDEX_FIELD]);
+      const existingRow =
+        originIndex === undefined || existingRows === undefined ? undefined : existingRows[originIndex];
+      const normalized = normalizeTableFields(
+        child,
+        stripChildRowInternalFields(row),
+        isMutableData(existingRow) ? existingRow : undefined,
+        relatedDocType
+      ) as MutableDocumentData;
+      if (!isMutableData(existingRow) || readOnlyChildFields.length === 0) {
+        return normalized;
+      }
+      const preserved = { ...normalized };
+      for (const childField of readOnlyChildFields) {
+        if (
+          !Object.prototype.hasOwnProperty.call(preserved, childField.name) &&
+          Object.prototype.hasOwnProperty.call(existingRow, childField.name)
+        ) {
+          preserved[childField.name] = existingRow[childField.name];
+        }
+      }
+      return preserved;
+    });
+    return [fieldName, rows] as const;
+  });
+  return Object.fromEntries(entries) as DocumentData;
+}
+
+function stripChildRowInternalFields(row: unknown): DocumentData {
+  if (!isMutableData(row)) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(row).filter(([fieldName]) => fieldName !== CHILD_TABLE_ROW_INDEX_FIELD)
+  ) as DocumentData;
+}
+
+function childRowOriginIndex(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
+    return value;
+  }
+  if (typeof value !== "string" || !/^\d+$/.test(value)) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
 function pickCommandFields(fields: readonly string[] | undefined, input: DocumentData): DocumentData {
@@ -580,4 +818,8 @@ function pickCommandFields(fields: readonly string[] | undefined, input: Documen
     return input;
   }
   return Object.fromEntries(fields.map((field) => [field, input[field]]).filter(([, value]) => value !== undefined)) as DocumentData;
+}
+
+function isMutableData(value: unknown): value is MutableDocumentData {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

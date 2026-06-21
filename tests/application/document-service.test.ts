@@ -1,5 +1,5 @@
-import { FrameworkError } from "../../src";
-import { createLinkedServices, createServices, data, guest, manager, now, owner } from "../helpers";
+import { CHILD_TABLE_ROW_INDEX_FIELD, FrameworkError } from "../../src";
+import { createChildTableServices, createLinkedServices, createServices, data, guest, manager, now, owner } from "../helpers";
 
 describe("DocumentService", () => {
   it("creates a document through defaults, hooks, events, and projection", async () => {
@@ -148,6 +148,243 @@ describe("DocumentService", () => {
       code: "VALIDATION_FAILED",
       issues: [expect.objectContaining({ field: "project", code: "link_not_found" })]
     });
+  });
+
+  it("creates documents with child table rows in the event payload and projection", async () => {
+    const { documents, events, projections } = createChildTableServices(["product-1", "invoice-1"]);
+    await documents.create({ actor: owner, doctype: "Product", data: { sku: "SKU-1", title: "Widget" } });
+
+    const invoice = await documents.create({
+      actor: owner,
+      doctype: "Sales Invoice",
+      data: {
+        title: "INV-1",
+        items: [{ product: "SKU-1", quantity: 2, rate: 10 }]
+      }
+    });
+
+    expect(invoice).toMatchObject({
+      doctype: "Sales Invoice",
+      data: {
+        items: [{ product: "SKU-1", quantity: 2, rate: 10 }]
+      }
+    });
+    await expect(events.readStream("acme:Sales%20Invoice:INV-1")).resolves.toMatchObject([
+      {
+        payload: {
+          kind: "DocumentCreated",
+          data: { items: [{ product: "SKU-1", quantity: 2, rate: 10 }] }
+        }
+      }
+    ]);
+    await expect(projections.get("acme", "Sales Invoice", "INV-1")).resolves.toMatchObject({
+      data: { items: [{ product: "SKU-1", quantity: 2, rate: 10 }] }
+    });
+  });
+
+  it("validates child table rows and nested link fields at the command boundary", async () => {
+    const { documents } = createChildTableServices(["product-1", "invoice-1", "invoice-2"]);
+    await documents.create({ actor: owner, doctype: "Product", data: { sku: "SKU-1", title: "Widget" } });
+
+    await expect(
+      documents.create({
+        actor: owner,
+        doctype: "Sales Invoice",
+        data: {
+          title: "Broken",
+          items: [{ product: "Missing", quantity: 0 }]
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: expect.arrayContaining([
+        expect.objectContaining({ field: "items[0].quantity", code: "min" }),
+        expect.objectContaining({ field: "items[0].product", code: "link_not_found" })
+      ])
+    });
+
+    await documents.create({
+      actor: owner,
+      doctype: "Sales Invoice",
+      data: {
+        title: "INV-1",
+        items: [{ product: "SKU-1", quantity: 1 }]
+      }
+    });
+
+    await expect(
+      documents.update({
+        actor: owner,
+        doctype: "Sales Invoice",
+        name: "INV-1",
+        patch: { items: [] }
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "items", code: "required" })]
+    });
+
+    await expect(
+      documents.update({
+        actor: owner,
+        doctype: "Sales Invoice",
+        name: "INV-1",
+        patch: {
+          items: [{ product: "SKU-1", quantity: 1, line_id: "attacker" }]
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "items[0].line_id", code: "readonly" })]
+    });
+
+    await expect(
+      documents.execute({
+        actor: owner,
+        doctype: "Sales Invoice",
+        name: "INV-1",
+        command: "replaceItems",
+        input: {
+          items: [{ product: "Missing", quantity: 1 }]
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "items[0].product", code: "link_not_found" })]
+    });
+  });
+
+  it("preserves omitted read-only child table values by submitted row origin", async () => {
+    const { documents, events } = createChildTableServices(["product-1", "product-2", "invoice-1", "invoice-2"]);
+    await documents.create({ actor: owner, doctype: "Product", data: { sku: "SKU-1", title: "Widget" } });
+    await documents.create({ actor: owner, doctype: "Product", data: { sku: "SKU-2", title: "Gadget" } });
+    await documents.create({
+      actor: owner,
+      doctype: "Sales Invoice",
+      data: {
+        title: "INV-1",
+        items: [
+          { product: "SKU-1", quantity: 1, line_id: "line-1" },
+          { product: "SKU-2", quantity: 2, line_id: "line-2" }
+        ]
+      }
+    });
+
+    const updated = await documents.update({
+      actor: owner,
+      doctype: "Sales Invoice",
+      name: "INV-1",
+      patch: {
+        items: [{ [CHILD_TABLE_ROW_INDEX_FIELD]: "1", product: "SKU-2", quantity: 3 }]
+      }
+    });
+
+    expect(updated).toMatchObject({
+      data: { items: [{ product: "SKU-2", quantity: 3, line_id: "line-2" }] }
+    });
+    await expect(events.readStream("acme:Sales%20Invoice:INV-1")).resolves.toMatchObject([
+      expect.anything(),
+      {
+        payload: {
+          kind: "DocumentUpdated",
+          patch: { items: [{ product: "SKU-2", quantity: 3, line_id: "line-2" }] }
+        }
+      }
+    ]);
+    const stream = await events.readStream("acme:Sales%20Invoice:INV-1");
+    expect(JSON.stringify(stream)).not.toContain(CHILD_TABLE_ROW_INDEX_FIELD);
+  });
+
+  it("rejects duplicate and out-of-range child row origins", async () => {
+    const { documents } = createChildTableServices(["product-1", "product-2", "invoice-1"]);
+    await documents.create({ actor: owner, doctype: "Product", data: { sku: "SKU-1", title: "Widget" } });
+    await documents.create({ actor: owner, doctype: "Product", data: { sku: "SKU-2", title: "Gadget" } });
+    await documents.create({
+      actor: owner,
+      doctype: "Sales Invoice",
+      data: {
+        title: "INV-1",
+        items: [
+          { product: "SKU-1", quantity: 1, line_id: "line-1" },
+          { product: "SKU-2", quantity: 2, line_id: "line-2" }
+        ]
+      }
+    });
+
+    await expect(
+      documents.update({
+        actor: owner,
+        doctype: "Sales Invoice",
+        name: "INV-1",
+        patch: {
+          items: [
+            { [CHILD_TABLE_ROW_INDEX_FIELD]: "1", product: "SKU-2", quantity: 3 },
+            { [CHILD_TABLE_ROW_INDEX_FIELD]: "1", product: "SKU-2", quantity: 4 }
+          ]
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: `items[1].${CHILD_TABLE_ROW_INDEX_FIELD}`, code: "child_row_origin" })]
+    });
+
+    await expect(
+      documents.update({
+        actor: owner,
+        doctype: "Sales Invoice",
+        name: "INV-1",
+        patch: {
+          items: [{ [CHILD_TABLE_ROW_INDEX_FIELD]: "5", product: "SKU-2", quantity: 3 }]
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: `items[0].${CHILD_TABLE_ROW_INDEX_FIELD}`, code: "child_row_origin" })]
+    });
+  });
+
+  it("preserves child row origins through custom domain command patches without storing markers", async () => {
+    const { documents, events } = createChildTableServices(["product-1", "product-2", "invoice-1", "invoice-2"]);
+    await documents.create({ actor: owner, doctype: "Product", data: { sku: "SKU-1", title: "Widget" } });
+    await documents.create({ actor: owner, doctype: "Product", data: { sku: "SKU-2", title: "Gadget" } });
+    await documents.create({
+      actor: owner,
+      doctype: "Sales Invoice",
+      data: {
+        title: "INV-1",
+        items: [
+          { product: "SKU-1", quantity: 1, line_id: "line-1" },
+          { product: "SKU-2", quantity: 2, line_id: "line-2" }
+        ]
+      }
+    });
+
+    const updated = await documents.execute({
+      actor: owner,
+      doctype: "Sales Invoice",
+      name: "INV-1",
+      command: "customReplaceItems",
+      input: {
+        items: [{ [CHILD_TABLE_ROW_INDEX_FIELD]: "1", product: "SKU-2", quantity: 3 }]
+      }
+    });
+
+    expect(updated).toMatchObject({
+      data: { items: [{ product: "SKU-2", quantity: 3, line_id: "line-2" }] }
+    });
+    await expect(events.readStream("acme:Sales%20Invoice:INV-1")).resolves.toMatchObject([
+      expect.anything(),
+      {
+        payload: {
+          kind: "DomainCommandApplied",
+          command: "customReplaceItems",
+          input: { items: [{ product: "SKU-2", quantity: 3 }] },
+          patch: { items: [{ product: "SKU-2", quantity: 3, line_id: "line-2" }] }
+        }
+      }
+    ]);
+    const stream = await events.readStream("acme:Sales%20Invoice:INV-1");
+    expect(JSON.stringify(stream)).not.toContain(CHILD_TABLE_ROW_INDEX_FIELD);
   });
 
   it("runs beforeValidate hooks for updates", async () => {
