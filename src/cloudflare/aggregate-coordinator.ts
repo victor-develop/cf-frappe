@@ -4,6 +4,7 @@ import type { DomainEvent } from "../core/types";
 import { createDocumentRealtimeHooks } from "../application/realtime";
 import type {
   CancelDocumentCommand,
+  AddDocumentCommentCommand,
   CreateDocumentCommand,
   DeleteDocumentCommand,
   SubmitDocumentCommand,
@@ -24,7 +25,8 @@ export type AggregateCoordinatorCommand =
   | ({ readonly kind: "cancel" } & CancelDocumentCommand)
   | ({ readonly kind: "delete" } & DeleteDocumentCommand)
   | ({ readonly kind: "transition" } & TransitionDocumentCommand)
-  | ({ readonly kind: "execute" } & ExecuteDomainCommand);
+  | ({ readonly kind: "execute" } & ExecuteDomainCommand)
+  | ({ readonly kind: "comment" } & AddDocumentCommentCommand);
 
 export interface AggregateCoordinatorEnv {
   readonly DB: D1Database;
@@ -79,6 +81,8 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
           return this.service.transition(command);
         case "execute":
           return this.service.execute(command);
+        case "comment":
+          return this.service.comment(command);
       }
     }
   };

@@ -184,6 +184,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const tableDefinitions = tableDefinitionsForForm(options, formView);
     const lifecycleActions = lifecycleActionsFor(actor, doctype, document);
     const timeline = await options.timeline?.getTimeline(actor, doctype.name, document.name, { limit: 25 });
+    const canComment = can(actor, doctype, "comment", document);
     const form = renderFormView(doctype, formView, {
       mode: "update",
       document,
@@ -198,9 +199,29 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         active: doctype.name,
         doctypes,
         reports,
-        body: `${form}${timeline ? renderDocumentTimeline(timeline) : ""}`
+        body: `${form}${timeline ? renderDocumentTimeline(timeline, { allowComment: canComment }) : ""}`
       })
     );
+  });
+
+  app.post("/desk/:doctype/:name/comments", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const name = c.req.param("name");
+    try {
+      const form = await parseDeskComment(c.req.raw);
+      await options.documents.comment({
+        actor,
+        doctype: doctype.name,
+        name,
+        text: form.text,
+        ...(form.expectedVersion !== undefined ? { expectedVersion: form.expectedVersion } : {}),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(`/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(name)}`, 303);
+    } catch (error) {
+      return renderDeskError(options, c.req.raw, actor, doctype, "update", error, name);
+    }
   });
 
   app.post("/desk/:doctype/:name", async (c) => {
@@ -428,6 +449,21 @@ function reportFiltersFromUrl(url: URL): ReportFilters {
 interface ParsedDeskForm {
   readonly data: MutableDocumentData;
   readonly expectedVersion?: number;
+}
+
+interface ParsedDeskComment {
+  readonly text: string;
+  readonly expectedVersion?: number;
+}
+
+async function parseDeskComment(request: Request): Promise<ParsedDeskComment> {
+  const form = await request.formData();
+  const text = form.get("comment_text");
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  return {
+    text: typeof text === "string" ? text : "",
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
 }
 
 async function parseDeskForm(

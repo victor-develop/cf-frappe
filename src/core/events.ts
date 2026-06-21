@@ -73,6 +73,16 @@ export function foldDocument(events: readonly DomainEvent[]): DocumentSnapshot |
           };
         }
         break;
+      case "DocumentCommentAdded":
+        if (snapshot) {
+          const current: DocumentSnapshot = snapshot;
+          snapshot = {
+            ...current,
+            version: event.sequence,
+            updatedAt: event.occurredAt
+          };
+        }
+        break;
     }
   }
 

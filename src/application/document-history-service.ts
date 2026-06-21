@@ -120,6 +120,8 @@ function summarize(payload: DocumentEventPayload): string {
       return "Submitted document";
     case "DocumentCancelled":
       return "Cancelled document";
+    case "DocumentCommentAdded":
+      return `Commented: ${summarizeText(payload.text)}`;
     case "WorkflowTransitioned":
       return workflowSummary(payload);
     case "DomainCommandApplied":
@@ -130,6 +132,11 @@ function summarize(payload: DocumentEventPayload): string {
 function updatedSummary(patch: DocumentData): string {
   const fields = Object.keys(patch);
   return fields.length > 0 ? `Updated ${fields.join(", ")}` : "Updated document";
+}
+
+function summarizeText(text: string): string {
+  const normalized = text.replaceAll(/\s+/g, " ").trim();
+  return normalized.length <= 80 ? normalized : `${normalized.slice(0, 77)}...`;
 }
 
 function workflowSummary(payload: Extract<DocumentEventPayload, { readonly kind: "WorkflowTransitioned" }>): string {

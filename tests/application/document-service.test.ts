@@ -482,6 +482,50 @@ describe("DocumentService", () => {
     });
   });
 
+  it("adds comments as document stream events without mutating document data", async () => {
+    const { documents, events, projections } = createServices(["e1", "comment-1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    const commented = await documents.comment({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      text: "Looks good to me",
+      expectedVersion: 1
+    });
+
+    expect(commented).toMatchObject({
+      version: 2,
+      docstatus: "draft",
+      data: { body: "Body" }
+    });
+    await expect(projections.get("acme", "Note", "My Note")).resolves.toMatchObject({ version: 2 });
+    await expect(events.readStream("acme:Note:My%20Note")).resolves.toMatchObject([
+      expect.anything(),
+      {
+        type: "NoteCommentAdded",
+        actorId: owner.id,
+        payload: { kind: "DocumentCommentAdded", text: "Looks good to me" }
+      }
+    ]);
+  });
+
+  it("requires comment permission and non-empty comment text", async () => {
+    const { documents } = createServices(["e1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    await expect(
+      documents.comment({ actor: guest, doctype: "Note", name: "My Note", text: "I should not comment" })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+
+    await expect(
+      documents.comment({ actor: owner, doctype: "Note", name: "My Note", text: "   " })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Comment text is required"
+    });
+  });
+
   it("executes model-declared domain commands with intentful event payloads", async () => {
     const { documents, events } = createServices(["e1", "e2"]);
     await documents.create({ actor: owner, doctype: "Note", data: data() });

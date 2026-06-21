@@ -167,6 +167,27 @@ describe("Desk app", () => {
     expect(html).toContain("Created document");
     expect(html).toContain("Updated body");
     expect(html).toContain("NoteUpdated");
+    expect(html).toContain('formaction="/desk/Note/My%20Note/comments"');
+    expect(html).toContain('name="comment_text"');
+  });
+
+  it("adds comments from generated edit forms", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    const response = await app.request("/desk/Note/My%20Note/comments", {
+      method: "POST",
+      body: new URLSearchParams({ comment_text: "Desk note", expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("/desk/Note/My%20Note");
+    await expect(services.queries.getDocument(owner, "Note", "My Note")).resolves.toMatchObject({ version: 2 });
+
+    const edit = await app.request("/desk/Note/My%20Note");
+    expect(edit.status).toBe(200);
+    await expect(edit.text()).resolves.toContain("Commented: Desk note");
   });
 
   it("submits and cancels documents from generated edit forms", async () => {

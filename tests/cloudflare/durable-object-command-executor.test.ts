@@ -53,9 +53,11 @@ describe("DurableObjectCommandExecutor", () => {
     await executor.cancel({ actor: owner, doctype: "Note", name: "My Note" });
     await executor.transition({ actor: owner, doctype: "Note", name: "My Note", action: "close" });
     await executor.execute({ actor: owner, doctype: "Note", name: "My Note", command: "archive", input: {} });
+    await executor.comment({ actor: owner, doctype: "Note", name: "My Note", text: "Routed comment" });
     await executor.delete({ actor: owner, doctype: "Note", name: "My Note" });
 
     expect(names).toEqual([
+      "acme:Note:My Note",
       "acme:Note:My Note",
       "acme:Note:My Note",
       "acme:Note:My Note",
@@ -69,6 +71,7 @@ describe("DurableObjectCommandExecutor", () => {
       { kind: "cancel" },
       { kind: "transition" },
       { kind: "execute" },
+      { kind: "comment" },
       { kind: "delete" }
     ]);
   });

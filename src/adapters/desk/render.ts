@@ -263,7 +263,10 @@ export function renderFormView(
   </form>`;
 }
 
-export function renderDocumentTimeline(timeline: DocumentTimeline): string {
+export function renderDocumentTimeline(
+  timeline: DocumentTimeline,
+  options: { readonly allowComment?: boolean } = {}
+): string {
   const rows = timeline.entries
     .map(
       (entry) => `<tr>
@@ -274,6 +277,7 @@ export function renderDocumentTimeline(timeline: DocumentTimeline): string {
       </tr>`
     )
     .join("");
+  const commentForm = options.allowComment ? renderCommentForm(timeline) : "";
   return `<section class="panel timeline" aria-labelledby="document-timeline">
     <div class="timeline-head">
       <h2 id="document-timeline">Timeline</h2>
@@ -285,7 +289,19 @@ export function renderDocumentTimeline(timeline: DocumentTimeline): string {
         <tbody>${rows || `<tr><td colspan="4" class="empty">No events yet.</td></tr>`}</tbody>
       </table>
     </div>
+    ${commentForm}
   </section>`;
+}
+
+function renderCommentForm(timeline: DocumentTimeline): string {
+  const action = `/desk/${encodeURIComponent(timeline.doctype)}/${encodeURIComponent(timeline.name)}/comments`;
+  return `<form class="timeline-comment" method="post">
+    <input type="hidden" name="expectedVersion" value="${String(timeline.version)}">
+    <label class="field" for="timeline-comment"><span>Comment</span><textarea id="timeline-comment" name="comment_text"></textarea></label>
+    <div class="actions">
+      <button class="button primary" type="submit" formaction="${action}">Add comment</button>
+    </div>
+  </form>`;
 }
 
 export function renderNotFound(message: string): string {
@@ -724,6 +740,11 @@ tr:last-child td { border-bottom: 0; }
 .form-head p, .timeline-head p { margin: 0; color: var(--muted); }
 .timeline strong { display: block; }
 .timeline small { color: var(--muted); }
+.timeline-comment {
+  padding: 16px 18px 18px;
+  border-top: 1px solid var(--border);
+}
+.timeline-comment textarea { min-height: 88px; }
 .form-section + .form-section {
   margin-top: 20px;
   padding-top: 18px;

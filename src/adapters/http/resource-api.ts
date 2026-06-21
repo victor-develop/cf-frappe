@@ -165,6 +165,21 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     return c.json({ data: snapshot });
   });
 
+  app.post("/api/resource/:doctype/:name/comments", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    const body = await readJson(c.req.raw, { maxJsonBytes });
+    const expectedVersion = numberValue(body.expectedVersion);
+    const snapshot = await options.documents.comment({
+      actor,
+      doctype: c.req.param("doctype"),
+      name: c.req.param("name"),
+      text: stringValue(body.text) ?? "",
+      ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: snapshot }, 201);
+  });
+
   app.post("/api/resource/:doctype/:name/transition/:action", async (c) => {
     const actor = await resolveActor(c.req.raw);
     const body = await readJson(c.req.raw, { allowEmpty: true, maxJsonBytes });

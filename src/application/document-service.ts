@@ -22,7 +22,7 @@ import {
   type NewDomainEvent,
   type ValidationIssue
 } from "../core/types";
-import { conflict, FrameworkError, notFound, permissionDenied, validationFailed } from "../core/errors";
+import { badRequest, conflict, FrameworkError, notFound, permissionDenied, validationFailed } from "../core/errors";
 
 export interface DocumentServiceOptions {
   readonly registry: ModelRegistry;
@@ -101,6 +101,16 @@ export interface ExecuteDomainCommand {
   readonly metadata?: DocumentData;
 }
 
+export interface AddDocumentCommentCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly text: string;
+  readonly tenantId?: string;
+  readonly expectedVersion?: number;
+  readonly metadata?: DocumentData;
+}
+
 export interface DocumentCommandExecutor {
   create(command: CreateDocumentCommand): Promise<DocumentSnapshot>;
   update(command: UpdateDocumentCommand): Promise<DocumentSnapshot>;
@@ -109,10 +119,12 @@ export interface DocumentCommandExecutor {
   delete(command: DeleteDocumentCommand): Promise<DocumentSnapshot>;
   transition(command: TransitionDocumentCommand): Promise<DocumentSnapshot>;
   execute(command: ExecuteDomainCommand): Promise<DocumentSnapshot>;
+  comment(command: AddDocumentCommentCommand): Promise<DocumentSnapshot>;
 }
 
 const NAMING_SERIES_DOCTYPE = "__NamingSeries";
 const NAMING_SERIES_MAX_ATTEMPTS = 10;
+const MAX_COMMENT_TEXT_LENGTH = 5000;
 
 export class DocumentService implements DocumentCommandExecutor {
   private readonly registry: ModelRegistry;
@@ -385,6 +397,45 @@ export class DocumentService implements DocumentCommandExecutor {
         ...existing,
         version: saved.sequence,
         data: { ...existing.data, ...patchWithReadOnlyValues },
+        updatedAt: saved.occurredAt
+      };
+    });
+    const [saved] = commit.events;
+    if (saved) {
+      await this.runAfterCommit(doctype, saved, commit.snapshot);
+    }
+    return commit.snapshot;
+  }
+
+  async comment(command: AddDocumentCommentCommand): Promise<DocumentSnapshot> {
+    const doctype = this.registry.get(command.doctype);
+    const tenantId = resolveTenant(command.actor, command.tenantId);
+    const stream = documentStream(tenantId, doctype.name, command.name);
+    const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
+    if (!can(command.actor, doctype, "comment", existing)) {
+      throw permissionDenied(`Actor '${command.actor.id}' cannot comment on ${doctype.name}/${command.name}`);
+    }
+    ensureExpectedVersion(existing, command.expectedVersion);
+    const text = normalizeCommentText(command.text);
+    const now = this.clock.now();
+    const event = this.newEvent({
+      tenantId,
+      stream,
+      type: doctype.events?.comment ?? `${doctype.name}CommentAdded`,
+      doctype: doctype.name,
+      documentName: command.name,
+      actorId: command.actor.id,
+      occurredAt: now,
+      payload: { kind: "DocumentCommentAdded", text },
+      metadata: command.metadata ?? {}
+    });
+    const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
+      if (!saved) {
+        throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
+      }
+      return {
+        ...existing,
+        version: saved.sequence,
         updatedAt: saved.occurredAt
       };
     });
@@ -849,6 +900,17 @@ function ensureDocumentStatus(
       { status: 409 }
     );
   }
+}
+
+function normalizeCommentText(text: string): string {
+  const normalized = text.trim();
+  if (normalized.length === 0) {
+    throw badRequest("Comment text is required");
+  }
+  if (normalized.length > MAX_COMMENT_TEXT_LENGTH) {
+    throw badRequest(`Comment text exceeds ${MAX_COMMENT_TEXT_LENGTH} characters`);
+  }
+  return normalized;
 }
 
 function readonlyIssues(

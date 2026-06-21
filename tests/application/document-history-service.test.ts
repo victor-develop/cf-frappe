@@ -3,7 +3,7 @@ import { createServices, data, owner } from "../helpers";
 
 describe("DocumentHistoryService", () => {
   it("derives chronological timeline entries from the document event stream", async () => {
-    const { documents, events, queries } = createServices(["create-1", "update-1", "transition-1", "command-1"]);
+    const { documents, events, queries } = createServices(["create-1", "update-1", "transition-1", "command-1", "comment-1"]);
     const history = new DocumentHistoryService({ events, queries });
     await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Timeline Note" }) });
     await documents.update({ actor: owner, doctype: "Note", name: "Timeline Note", patch: { body: "Updated" } });
@@ -15,6 +15,12 @@ describe("DocumentHistoryService", () => {
       command: "rewriteBody",
       input: { body: "Commanded" }
     });
+    await documents.comment({
+      actor: owner,
+      doctype: "Note",
+      name: "Timeline Note",
+      text: "Ship it"
+    });
 
     const timeline = await history.getTimeline(owner, "Note", "Timeline Note");
 
@@ -22,7 +28,7 @@ describe("DocumentHistoryService", () => {
       tenantId: "acme",
       doctype: "Note",
       name: "Timeline Note",
-      version: 4
+      version: 5
     });
     expect(timeline.entries.map(({ sequence, kind, type, summary }) => ({ sequence, kind, type, summary }))).toEqual([
       {
@@ -48,6 +54,12 @@ describe("DocumentHistoryService", () => {
         kind: "DomainCommandApplied",
         type: "NoteBodyRewritten",
         summary: "Applied rewriteBody"
+      },
+      {
+        sequence: 5,
+        kind: "DocumentCommentAdded",
+        type: "NoteCommentAdded",
+        summary: "Commented: Ship it"
       }
     ]);
     expect(timeline.entries[1]).toMatchObject({

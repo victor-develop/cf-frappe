@@ -1,5 +1,6 @@
 import type {
   CancelDocumentCommand,
+  AddDocumentCommentCommand,
   CreateDocumentCommand,
   DeleteDocumentCommand,
   DocumentCommandExecutor,
@@ -62,6 +63,10 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
 
   execute(command: ExecuteDomainCommand): Promise<DocumentSnapshot> {
     return this.stubForNamed(command).transact({ ...command, kind: "execute" });
+  }
+
+  comment(command: AddDocumentCommentCommand): Promise<DocumentSnapshot> {
+    return this.stubForNamed(command).transact({ ...command, kind: "comment" });
   }
 
   private stubForCreate(command: CreateDocumentCommand): AggregateCoordinatorRpc {

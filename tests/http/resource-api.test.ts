@@ -174,6 +174,39 @@ describe("resource api", () => {
     });
   });
 
+  it("adds comments through the resource API and returns them in the timeline", async () => {
+    const app = makeApp();
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Commented", body: "Body" })
+    });
+
+    const commented = await app.request("/api/resource/Note/HTTP%20Commented/comments", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ text: "Needs one more look", expectedVersion: 1 })
+    });
+
+    expect(commented.status).toBe(201);
+    await expect(commented.json()).resolves.toMatchObject({ data: { version: 2 } });
+
+    const timeline = await app.request("/api/resource/Note/HTTP%20Commented/timeline", { headers: userHeaders });
+    expect(timeline.status).toBe(200);
+    await expect(timeline.json()).resolves.toMatchObject({
+      data: {
+        entries: [
+          expect.objectContaining({ kind: "DocumentCreated" }),
+          expect.objectContaining({
+            kind: "DocumentCommentAdded",
+            summary: "Commented: Needs one more look",
+            payload: expect.objectContaining({ text: "Needs one more look" })
+          })
+        ]
+      }
+    });
+  });
+
   it("returns bounded resource timeline pages from query parameters", async () => {
     const app = makeApp();
     await app.request("/api/resource/Note", {
