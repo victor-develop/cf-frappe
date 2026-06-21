@@ -3,6 +3,7 @@ import { can } from "../core/permissions";
 import { applyDefaults, compactData, validateDocumentData } from "../core/schema";
 import { documentStream } from "../core/streams";
 import type { ModelRegistry } from "../core/registry";
+import type { AfterCommitContext } from "../core/registry";
 import type { Clock } from "../ports/clock";
 import { systemClock } from "../ports/clock";
 import type { DocumentStore } from "../ports/document-store";
@@ -28,6 +29,7 @@ export interface DocumentServiceOptions {
   readonly clock?: Clock;
   readonly ids?: IdGenerator;
   readonly onHookError?: (error: unknown, event: DomainEvent) => void | Promise<void>;
+  readonly afterCommit?: (context: AfterCommitContext) => void | Promise<void>;
 }
 
 export interface CreateDocumentCommand {
@@ -94,6 +96,7 @@ export class DocumentService implements DocumentCommandExecutor {
   private readonly clock: Clock;
   private readonly ids: IdGenerator;
   private readonly onHookError: ((error: unknown, event: DomainEvent) => void | Promise<void>) | undefined;
+  private readonly afterCommit: ((context: AfterCommitContext) => void | Promise<void>) | undefined;
 
   constructor(options: DocumentServiceOptions) {
     this.registry = options.registry;
@@ -101,6 +104,7 @@ export class DocumentService implements DocumentCommandExecutor {
     this.clock = options.clock ?? systemClock;
     this.ids = options.ids ?? cryptoIdGenerator;
     this.onHookError = options.onHookError;
+    this.afterCommit = options.afterCommit;
   }
 
   async create(command: CreateDocumentCommand): Promise<DocumentSnapshot> {
@@ -435,12 +439,18 @@ export class DocumentService implements DocumentCommandExecutor {
     event: DomainEvent,
     snapshot: DocumentSnapshot | null
   ): Promise<void> {
+    const context = { doctype, data: snapshot?.data ?? {}, event, snapshot };
     for (const hook of this.registry.hooksFor(doctype.name)) {
       try {
-        await hook.afterCommit?.({ doctype, data: snapshot?.data ?? {}, event, snapshot });
+        await hook.afterCommit?.(context);
       } catch (error) {
         await this.onHookError?.(error, event);
       }
+    }
+    try {
+      await this.afterCommit?.(context);
+    } catch (error) {
+      await this.onHookError?.(error, event);
     }
   }
 

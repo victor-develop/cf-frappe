@@ -1,5 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { DocumentService } from "../application/document-service";
+import type { DomainEvent } from "../core/types";
+import { createDocumentRealtimeHooks } from "../application/realtime";
 import type {
   CreateDocumentCommand,
   DeleteDocumentCommand,
@@ -11,6 +13,7 @@ import { D1DocumentStore } from "../adapters/d1";
 import type { ModelRegistry } from "../core/registry";
 import type { Clock } from "../ports/clock";
 import type { IdGenerator } from "../ports/id-generator";
+import type { RealtimePublisher } from "../ports/realtime";
 
 export type AggregateCoordinatorCommand =
   | ({ readonly kind: "create" } & CreateDocumentCommand)
@@ -23,32 +26,36 @@ export interface AggregateCoordinatorEnv {
   readonly DB: D1Database;
 }
 
-export interface AggregateCoordinatorOptions {
+export interface AggregateCoordinatorOptions<Env extends AggregateCoordinatorEnv = AggregateCoordinatorEnv> {
   readonly registry: ModelRegistry;
   readonly clock?: Clock;
   readonly ids?: IdGenerator;
+  readonly realtime?: (env: Env) => RealtimePublisher;
+  readonly onHookError?: (error: unknown, event: DomainEvent) => void | Promise<void>;
 }
 
-export type AggregateCoordinatorClass = new (
+export type AggregateCoordinatorClass<Env extends AggregateCoordinatorEnv = AggregateCoordinatorEnv> = new (
   ctx: DurableObjectState,
-  env: AggregateCoordinatorEnv
+  env: Env
 ) => {
   transact(command: AggregateCoordinatorCommand): Promise<unknown>;
 };
 
-export function createAggregateCoordinatorClass(
-  options: AggregateCoordinatorOptions
-): AggregateCoordinatorClass {
-  return class CloudFrappeAggregateCoordinator extends DurableObject<AggregateCoordinatorEnv> {
+export function createAggregateCoordinatorClass<Env extends AggregateCoordinatorEnv = AggregateCoordinatorEnv>(
+  options: AggregateCoordinatorOptions<Env>
+): AggregateCoordinatorClass<Env> {
+  return class CloudFrappeAggregateCoordinator extends DurableObject<Env> {
     private readonly service: DocumentService;
 
-    constructor(_ctx: DurableObjectState, env: AggregateCoordinatorEnv) {
+    constructor(_ctx: DurableObjectState, env: Env) {
       super(_ctx, env);
       this.service = new DocumentService({
         registry: options.registry,
         store: new D1DocumentStore(env.DB),
         ...(options.clock ? { clock: options.clock } : {}),
-        ...(options.ids ? { ids: options.ids } : {})
+        ...(options.ids ? { ids: options.ids } : {}),
+        ...(options.onHookError ? { onHookError: options.onHookError } : {}),
+        ...(options.realtime ? { afterCommit: createDocumentRealtimeHooks(options.realtime(env)).afterCommit } : {})
       });
     }
 

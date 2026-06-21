@@ -10,19 +10,23 @@ import { createResourceApi } from "../adapters/http";
 import type { ActorResolver } from "../adapters/http";
 import { FrameworkError } from "../core/errors";
 import type { JobRegistry, JobRetryPolicy } from "../core/jobs";
+import { canSubscribeToRealtimeTopic, parseRealtimeTopic, realtimeTopicFromScope } from "../core/realtime";
 import type { ModelRegistry } from "../core/registry";
 import type { Clock } from "../ports/clock";
 import type { FileStorage } from "../ports/file-storage";
 import type { IdGenerator } from "../ports/id-generator";
 import type { JobExecutionLog } from "../ports/job-execution-log";
 import type { JobMessage, JobQueue } from "../ports/job-queue";
+import type { RealtimePublisher } from "../ports/realtime";
 import {
   DurableObjectCommandExecutor,
   type AggregateCoordinatorRpc,
   type RpcDurableObjectNamespace
 } from "./durable-object-command-executor";
 import { processCloudflareJobBatch } from "./job-consumer";
+import { DurableObjectRealtimePublisher, type RealtimeHubNamespace } from "./realtime-hub";
 import { dispatchScheduledJobs, type ScheduledJobDefinition } from "./scheduled-jobs";
+import { toErrorResponse } from "../adapters/http";
 
 export interface CloudFrappeEnv {
   readonly DB: D1Database;
@@ -34,6 +38,7 @@ export interface CloudFrappeRuntimeServices {
   readonly documents: DocumentCommandExecutor;
   readonly queries: QueryService;
   readonly files?: FileService;
+  readonly realtime?: RealtimePublisher;
 }
 
 export interface CloudFrappeFileOptions<TEnv extends CloudFrappeEnv = CloudFrappeEnv> {
@@ -42,6 +47,11 @@ export interface CloudFrappeFileOptions<TEnv extends CloudFrappeEnv = CloudFrapp
   readonly fileDoctype?: string;
   readonly clock?: Clock;
   readonly ids?: IdGenerator;
+}
+
+export interface CloudFrappeRealtimeOptions<TEnv extends CloudFrappeEnv = CloudFrappeEnv> {
+  readonly namespace: (env: TEnv) => RealtimeHubNamespace;
+  readonly route?: string;
 }
 
 export interface CloudFrappeJobOptions<
@@ -66,6 +76,7 @@ export interface CloudFrappeWorkerOptions<
   readonly actor: ActorResolver;
   readonly maxJsonBytes?: number;
   readonly files?: CloudFrappeFileOptions<TEnv>;
+  readonly realtime?: CloudFrappeRealtimeOptions<TEnv>;
   readonly jobs?: CloudFrappeJobOptions<TEnv, TJobResources>;
 }
 
@@ -77,6 +88,9 @@ export function createCloudFrappeWorker<
   const jobRuntimes = new WeakMap<object, JobRuntime<TJobResources>>();
   const handler: ExportedHandler<TEnv, JobMessage> = {
     fetch(request, env) {
+      if (options.realtime && isRealtimePath(new URL(request.url).pathname, options.realtime.route)) {
+        return handleRealtimeRequest(runtimeApps, request, env, options);
+      }
       const { app, desk } = appsForEnv(runtimeApps, options, env);
       if (isDeskPath(new URL(request.url).pathname)) {
         return desk.fetch(request, env);
@@ -161,6 +175,12 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
       })
     : undefined;
   const services: CloudFrappeRuntimeServices = files ? { ...baseServices, files } : baseServices;
+  const realtime = options.realtime
+    ? new DurableObjectRealtimePublisher(options.realtime.namespace(env))
+    : undefined;
+  const servicesWithRealtime: CloudFrappeRuntimeServices = realtime
+    ? { ...services, realtime }
+    : services;
   const app = createResourceApi({
     registry: options.registry,
     documents,
@@ -176,7 +196,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     queries,
     actor: options.actor
   });
-  const runtimeApps = { app, desk, services };
+  const runtimeApps = { app, desk, services: servicesWithRealtime };
   cache.set(env, runtimeApps);
   return runtimeApps;
 }
@@ -214,6 +234,92 @@ function jobsForEnv<TEnv extends CloudFrappeEnv, TResources>(
 
 function isDeskPath(pathname: string): boolean {
   return pathname === "/desk" || pathname.startsWith("/desk/");
+}
+
+async function handleRealtimeRequest<TEnv extends CloudFrappeEnv, TJobResources>(
+  cache: WeakMap<object, RuntimeApps>,
+  request: Request,
+  env: TEnv,
+  options: CloudFrappeWorkerOptions<TEnv, TJobResources>
+): Promise<Response> {
+  const realtime = options.realtime;
+  if (!realtime) {
+    return new Response("Realtime is not enabled", { status: 404 });
+  }
+  if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+    return new Response("Expected WebSocket upgrade", { status: 426 });
+  }
+  const url = new URL(request.url);
+  const requestedTopics = [rawQueryValue(url, "topic"), url.searchParams.get("topic")].filter(
+    (value): value is string => value !== undefined && value !== null && value !== ""
+  );
+  if (requestedTopics.length === 0) {
+    return Response.json({ error: { code: "BAD_REQUEST", message: "topic is required" } }, { status: 400 });
+  }
+  const parsedTopic = parseFirstRealtimeTopic(requestedTopics);
+  if (!parsedTopic) {
+    return Response.json({ error: { code: "BAD_REQUEST", message: "topic is invalid" } }, { status: 400 });
+  }
+  const topic = realtimeTopicFromScope(parsedTopic);
+  let actor;
+  try {
+    actor = await options.actor(request);
+  } catch (error) {
+    return jsonErrorResponse(error);
+  }
+  if (!canSubscribeToRealtimeTopic(actor, topic)) {
+    return Response.json({ error: { code: "PERMISSION_DENIED", message: "Permission denied" } }, { status: 403 });
+  }
+  const { services } = appsForEnv(cache, options, env);
+  if (parsedTopic.kind !== "document") {
+    return Response.json({ error: { code: "BAD_REQUEST", message: "Only document realtime topics are subscribable" } }, { status: 400 });
+  }
+  try {
+    await services.queries.getDocument(actor, parsedTopic.doctype, parsedTopic.name, parsedTopic.tenantId);
+  } catch (error) {
+    return jsonErrorResponse(error);
+  }
+  const namespace = realtime.namespace(env);
+  const stub = namespace.get(namespace.idFromName(topic));
+  return stub.fetch(requestWithRealtimeTopic(request, topic));
+}
+
+function isRealtimePath(pathname: string, route = "/api/realtime"): boolean {
+  return pathname === route;
+}
+
+function rawQueryValue(url: URL, key: string): string | undefined {
+  const prefix = `${encodeURIComponent(key)}=`;
+  for (const part of url.search.slice(1).split("&")) {
+    if (part.startsWith(prefix)) {
+      return part.slice(prefix.length);
+    }
+  }
+  return undefined;
+}
+
+function parseFirstRealtimeTopic(candidates: readonly string[]) {
+  for (const candidate of candidates) {
+    const parsed = parseRealtimeTopic(candidate);
+    if (parsed) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function requestWithRealtimeTopic(request: Request, topic: string): Request {
+  const url = new URL(request.url);
+  url.searchParams.set("topic", topic);
+  return new Request(url.toString(), request);
+}
+
+function jsonErrorResponse(error: unknown): Response {
+  return toErrorResponse(error, {
+    json(body: unknown, status: number) {
+      return Response.json(body, { status });
+    }
+  } as any);
 }
 
 function isPermanentScheduledDispatchError(error: unknown): boolean {

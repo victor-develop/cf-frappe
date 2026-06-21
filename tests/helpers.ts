@@ -7,7 +7,8 @@ import {
   InMemoryDocumentStore,
   QueryService
 } from "../src";
-import type { Actor, DocumentData, ModelRegistry } from "../src";
+import type { Actor, DocumentData, DomainEvent, ModelRegistry } from "../src";
+import type { AfterCommitContext } from "../src";
 
 export const now = "2026-01-01T00:00:00.000Z";
 
@@ -88,14 +89,22 @@ export function createTestRegistry(): ModelRegistry {
   });
 }
 
-export function createServices(ids: readonly string[] = ["evt1", "evt2", "evt3", "evt4"]) {
+export function createServices(
+  ids: readonly string[] = ["evt1", "evt2", "evt3", "evt4"],
+  options: {
+    readonly afterCommit?: (context: AfterCommitContext) => void | Promise<void>;
+    readonly onHookError?: (error: unknown, event: DomainEvent) => void | Promise<void>;
+  } = {}
+) {
   const registry = createTestRegistry();
   const store = new InMemoryDocumentStore();
   const documents = new DocumentService({
     registry,
     store,
     clock: fixedClock(now),
-    ids: deterministicIds(ids)
+    ids: deterministicIds(ids),
+    ...(options.afterCommit === undefined ? {} : { afterCommit: options.afterCommit }),
+    ...(options.onHookError === undefined ? {} : { onHookError: options.onHookError })
   });
   const queries = new QueryService({ registry, projections: store });
   return { registry, store, events: store, projections: store, documents, queries };

@@ -15,6 +15,7 @@ The current slice is a working kernel:
 - generated Desk list/form UI from DocType metadata
 - Cloudflare Queue/Cron background job primitives
 - R2-backed file attachments with event-sourced `File` metadata
+- Durable Object WebSocket realtime topics for document events
 - a runnable `Task` example under `examples/todos`
 
 ## Why
@@ -31,6 +32,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | Desk list/forms | generated `/desk` pages from DocType metadata |
 | Background jobs | `JobRegistry`, Queue producers/consumers, and Cron dispatch |
 | File attachments | `File` DocType metadata plus R2 object storage |
+| Realtime events | document commit events over Durable Object WebSocket topics |
 | Database tables | D1 append-only events plus current projections |
 | Concurrency boundary | Durable Object command coordinator per aggregate stream |
 
@@ -238,6 +240,68 @@ Register `fileDocType` with your app registry, then bind R2 in `wrangler.jsonc`:
 
 Uploads are buffered in this first slice so the framework always knows the object length before writing to R2. Multipart uploads and presigned direct browser uploads are intentionally left as future adapters over the same `FileStorage` boundary.
 
+## Realtime
+
+Realtime is modeled as a port over event-sourced commits. `DocumentService` publishes after-commit events, and the Cloudflare adapter delivers them through one Durable Object hub per topic.
+
+```ts
+import {
+  DurableObjectRealtimePublisher,
+  createAggregateCoordinatorClass,
+  createCloudFrappeWorker,
+  createRealtimeHubClass,
+  type CloudFrappeEnv,
+  type RealtimeHubNamespace
+} from "cf-frappe";
+import { registry } from "./models";
+
+interface Env extends CloudFrappeEnv {
+  readonly REALTIME: RealtimeHubNamespace;
+}
+
+export class AggregateCoordinator extends createAggregateCoordinatorClass<Env>({
+  registry,
+  realtime: (env) => new DurableObjectRealtimePublisher(env.REALTIME)
+}) {}
+
+export class RealtimeHub extends createRealtimeHubClass() {}
+
+export default createCloudFrappeWorker<Env>({
+  registry,
+  actor: yourTrustedActorResolver,
+  realtime: {
+    namespace: (env) => env.REALTIME
+  }
+});
+```
+
+Clients subscribe with a WebSocket upgrade to `/api/realtime?topic=...`. Built-in topic helpers create tenant, DocType, and document topics such as `tenant:acme`, `doctype:acme:Task`, and `document:acme:Task:TASK-1`. This slice exposes document-topic subscriptions only after `QueryService.getDocument(...)` confirms the actor can read the document; broader tenant/DocType filtered fan-out is future work.
+
+Bind the realtime hub in `wrangler.jsonc`:
+
+```jsonc
+{
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "AGGREGATES",
+        "class_name": "AggregateCoordinator"
+      },
+      {
+        "name": "REALTIME",
+        "class_name": "RealtimeHub"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["AggregateCoordinator", "RealtimeHub"]
+    }
+  ]
+}
+```
+
 ## Architecture
 
 ```mermaid
@@ -251,6 +315,9 @@ flowchart LR
   FSVC --> DOCLIENT
   FSVC --> QUERY
   FSVC --> R2["R2 FileStorage"]
+  WS["WebSocket /api/realtime"] --> RTHUB["RealtimeHub Durable Object"]
+  APP --> RT["RealtimePublisher"]
+  RT --> RTHUB
   JOBS --> CFQ["Cloudflare Queue"]
   EXEC --> APP
   EXEC --> QUERY
@@ -269,9 +336,9 @@ flowchart LR
 The dependency direction is one way:
 
 - `core` has pure types, schema validation, event folding, permissions, and registry contracts
-- `application` orchestrates commands, queries, files, and job execution through ports
-- `ports` define document storage, projections, file storage, queues, execution logs, clocks, and id generation
-- `adapters` implement in-memory, D1, HTTP, Desk, R2, and Cloudflare integration
+- `application` orchestrates commands, queries, files, realtime, and job execution through ports
+- `ports` define document storage, projections, file storage, realtime publishing, queues, execution logs, clocks, and id generation
+- `adapters` implement in-memory, D1, HTTP, Desk, R2, realtime, and Cloudflare integration
 - `cloudflare` packages Worker and Durable Object factories
 
 ## Quality Gate
@@ -288,11 +355,11 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 92 tests across schema, permissions, events, registry, services, jobs, files, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, Queue/Cron/R2 integration, and D1 schema planning.
+Current suite: 104 tests across schema, permissions, events, registry, services, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning.
 
 ## Status
 
-This is not Frappe parity yet. Basic generated Desk list/form pages, Cloudflare-native background job primitives, and R2-backed file attachments exist, but full migration management, reporting, print views, durable job dashboards, realtime events, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
+This is not Frappe parity yet. Basic generated Desk list/form pages, Cloudflare-native background job primitives, R2-backed file attachments, and Durable Object realtime topics exist, but full migration management, reporting, print views, durable job dashboards, richer realtime presence, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
 
 ## References
 
@@ -303,6 +370,7 @@ This is not Frappe parity yet. Basic generated Desk list/form pages, Cloudflare-
 - [Cloudflare Workers](https://developers.cloudflare.com/workers/)
 - [Cloudflare D1](https://developers.cloudflare.com/d1/)
 - [Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/)
+- [Cloudflare Durable Objects WebSockets](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)
 - [Cloudflare Queues](https://developers.cloudflare.com/queues/)
 - [Cloudflare Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
 - [Cloudflare R2](https://developers.cloudflare.com/r2/)

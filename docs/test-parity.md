@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the R2 file attachments slice:
+As of the Durable Object realtime slice:
 
-- Test files: `23`
-- Vitest cases: `92`
+- Test files: `27`
+- Vitest cases: `104`
 
 ## Implication
 
