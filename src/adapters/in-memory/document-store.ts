@@ -13,6 +13,7 @@ import type {
 import type { DocumentCommit, DocumentStore } from "../../ports/document-store";
 import type { EventStore } from "../../ports/event-store";
 import type { ProjectionStore } from "../../ports/projection-store";
+import { matchesListFilters } from "./list-filters";
 
 export class InMemoryDocumentStore implements DocumentStore, EventStore, ProjectionStore {
   private readonly streams = new Map<StreamName, DomainEvent[]>();
@@ -72,6 +73,7 @@ export class InMemoryDocumentStore implements DocumentStore, EventStore, Project
     const offset = query.offset ?? 0;
     const all = [...this.documents.values()]
       .filter((document) => document.tenantId === query.tenantId && document.doctype === query.doctype)
+      .filter((document) => matchesListFilters(document, query.filters))
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
     return {
       data: all.slice(offset, offset + limit),

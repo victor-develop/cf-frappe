@@ -58,4 +58,89 @@ describe("in-memory adapters", () => {
       data: [{ name: "New" }, { name: "Old" }]
     });
   });
+
+  it("applies projection list filters before paging", async () => {
+    const projections = new InMemoryProjectionStore();
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "High",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "High", priority: "High", count: 5 },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    });
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "Low",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "Low", priority: "Low", count: 1 },
+      createdAt: "2026-01-02T00:00:00.000Z",
+      updatedAt: "2026-01-02T00:00:00.000Z"
+    });
+
+    await expect(
+      projections.list({
+        tenantId: "acme",
+        doctype: "Note",
+        filters: [
+          { field: "priority", value: "High" },
+          { field: "count", operator: "gte", value: 2 }
+        ],
+        limit: 1
+      })
+    ).resolves.toMatchObject({
+      data: [{ name: "High" }],
+      total: 1
+    });
+  });
+
+  it("does not match missing projection values for scalar operators", async () => {
+    const projections = new InMemoryProjectionStore();
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "Missing Count",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "Missing Count" },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    });
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "Low Count",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "Low Count", count: 1 },
+      createdAt: "2026-01-02T00:00:00.000Z",
+      updatedAt: "2026-01-02T00:00:00.000Z"
+    });
+
+    await expect(
+      projections.list({
+        tenantId: "acme",
+        doctype: "Note",
+        filters: [{ field: "count", operator: "lte", value: 2 }]
+      })
+    ).resolves.toMatchObject({
+      data: [{ name: "Low Count" }],
+      total: 1
+    });
+
+    await expect(
+      projections.list({
+        tenantId: "acme",
+        doctype: "Note",
+        filters: [{ field: "body", operator: "contains", value: "" }]
+      })
+    ).resolves.toMatchObject({
+      data: [],
+      total: 0
+    });
+  });
 });

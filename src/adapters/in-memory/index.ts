@@ -3,5 +3,6 @@ export * from "./event-store";
 export * from "./file-storage";
 export * from "./job-execution-log";
 export * from "./job-queue";
+export * from "./list-filters";
 export * from "./projection-store";
 export * from "./realtime";

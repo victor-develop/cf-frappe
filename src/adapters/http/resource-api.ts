@@ -12,7 +12,7 @@ import { toErrorResponse } from "./errors";
 import { createFileApi } from "./file-api";
 import { createPrintApi } from "./print-api";
 import { createReportApi } from "./report-api";
-import { parseOptionalInteger, readBoundedText, requestMetadata } from "./request";
+import { listFiltersFromUrl, parseOptionalInteger, readBoundedText, requestMetadata } from "./request";
 
 export interface ResourceApiOptions {
   readonly registry: ModelRegistry;
@@ -89,9 +89,11 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
 
   app.get("/api/resource/:doctype", async (c) => {
     const actor = await resolveActor(c.req.raw);
+    const url = new URL(c.req.url);
     const limit = parseOptionalInteger(c.req.query("limit"));
     const offset = parseOptionalInteger(c.req.query("offset"));
     const data = await options.queries.listDocuments(actor, c.req.param("doctype"), {
+      filters: listFiltersFromUrl(url),
       ...(limit !== undefined ? { limit } : {}),
       ...(offset !== undefined ? { offset } : {})
     });

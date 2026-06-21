@@ -105,6 +105,39 @@ describe("resource api", () => {
     await expect(deleted.json()).resolves.toMatchObject({ data: { docstatus: "deleted" } });
   });
 
+  it("lists resources with metadata-validated query filters", async () => {
+    const app = makeApp();
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP High", priority: "High", body: "Escalated" })
+    });
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Low", priority: "Low", body: "Routine" })
+    });
+
+    const response = await app.request("/api/resource/Note?filter_priority=High", { headers: userHeaders });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: [{ name: "HTTP High" }],
+      total: 1
+    });
+  });
+
+  it("maps invalid resource list filters to JSON bad requests", async () => {
+    const app = makeApp();
+
+    const response = await app.request("/api/resource/Note?filter_missing=x", { headers: userHeaders });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Filter field 'missing' is not defined on Note" }
+    });
+  });
+
   it("maps validation errors to JSON error responses", async () => {
     const app = makeApp();
 

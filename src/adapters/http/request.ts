@@ -1,5 +1,5 @@
 import { badRequest } from "../../core/errors";
-import type { DocumentData } from "../../core/types";
+import type { DocumentData, ListDocumentsFilter, ListFilterOperator } from "../../core/types";
 
 export function parseOptionalInteger(value: string | undefined): number | undefined {
   if (value === undefined) {
@@ -17,6 +17,22 @@ export function requestMetadata(request: Request): DocumentData {
     method: request.method,
     url: request.url
   };
+}
+
+export function listFiltersFromUrl(url: URL): readonly ListDocumentsFilter[] {
+  const filters: ListDocumentsFilter[] = [];
+  url.searchParams.forEach((value, key) => {
+    const parsed = parseFilterKey(key);
+    if (!parsed || value === "") {
+      return;
+    }
+    filters.push({
+      field: parsed.field,
+      ...(parsed.operator === "eq" ? {} : { operator: parsed.operator }),
+      value
+    });
+  });
+  return filters;
 }
 
 export async function readBoundedText(request: Request, maxBytes: number, errorMessage: string): Promise<string> {
@@ -58,4 +74,18 @@ export async function readBoundedBytes(
     offset += chunk.byteLength;
   }
   return bytes.buffer;
+}
+
+function parseFilterKey(key: string): { readonly field: string; readonly operator: ListFilterOperator } | null {
+  if (!key.startsWith("filter_")) {
+    return null;
+  }
+  const raw = key.slice("filter_".length);
+  for (const operator of ["contains", "gte", "lte"] as const) {
+    const suffix = `__${operator}`;
+    if (raw.endsWith(suffix)) {
+      return { field: raw.slice(0, -suffix.length), operator };
+    }
+  }
+  return { field: raw, operator: "eq" };
 }

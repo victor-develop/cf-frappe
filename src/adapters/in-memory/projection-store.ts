@@ -7,6 +7,7 @@ import type {
   TenantId
 } from "../../core/types";
 import type { ProjectionStore } from "../../ports/projection-store";
+import { matchesListFilters } from "./list-filters";
 
 export class InMemoryProjectionStore implements ProjectionStore {
   private readonly documents = new Map<string, DocumentSnapshot>();
@@ -28,6 +29,7 @@ export class InMemoryProjectionStore implements ProjectionStore {
     const offset = query.offset ?? 0;
     const all = [...this.documents.values()]
       .filter((document) => document.tenantId === query.tenantId && document.doctype === query.doctype)
+      .filter((document) => matchesListFilters(document, query.filters))
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
     return {
       data: all.slice(offset, offset + limit),

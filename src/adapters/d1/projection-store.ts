@@ -2,6 +2,8 @@ import type {
   DocTypeName,
   DocumentName,
   DocumentSnapshot,
+  JsonPrimitive,
+  ListDocumentsFilter,
   ListDocumentsQuery,
   ListDocumentsResult,
   TenantId
@@ -57,21 +59,22 @@ export class D1ProjectionStore implements ProjectionStore {
   async list(query: ListDocumentsQuery): Promise<ListDocumentsResult> {
     const limit = query.limit ?? 50;
     const offset = query.offset ?? 0;
+    const filtered = listFilterWhere(query.filters ?? []);
+    const where = ["tenant_id = ?", "doctype = ?", ...filtered.conditions].join(" AND ");
+    const params = [query.tenantId, query.doctype, ...filtered.params];
     const [rows, count] = await this.db.batch([
       this.db
         .prepare(
           `SELECT tenant_id, doctype, name, version, docstatus, data_json, created_at, updated_at
            FROM cf_frappe_documents
-           WHERE tenant_id = ? AND doctype = ?
+           WHERE ${where}
            ORDER BY updated_at DESC
            LIMIT ? OFFSET ?`
         )
-        .bind(query.tenantId, query.doctype, limit, offset),
+        .bind(...params, limit, offset),
       this.db
-        .prepare(
-          "SELECT COUNT(*) AS total FROM cf_frappe_documents WHERE tenant_id = ? AND doctype = ?"
-        )
-        .bind(query.tenantId, query.doctype)
+        .prepare(`SELECT COUNT(*) AS total FROM cf_frappe_documents WHERE ${where}`)
+        .bind(...params)
     ]);
     if (!rows || !count) {
       return { data: [], limit, offset, total: 0 };
@@ -83,4 +86,55 @@ export class D1ProjectionStore implements ProjectionStore {
       total: Number(((count.results ?? [])[0] as { total?: number } | undefined)?.total ?? 0)
     };
   }
+}
+
+interface ListFilterWhere {
+  readonly conditions: readonly string[];
+  readonly params: readonly JsonPrimitive[];
+}
+
+function listFilterWhere(filters: readonly ListDocumentsFilter[]): ListFilterWhere {
+  const conditions: string[] = [];
+  const params: JsonPrimitive[] = [];
+  for (const filter of filters) {
+    const expression = `json_extract(data_json, '${escapeSqlString(jsonPath(filter.field))}')`;
+    const operator = filter.operator ?? "eq";
+    switch (operator) {
+      case "eq":
+        conditions.push(`${expression} = ?`);
+        params.push(sqliteJsonValue(filter.value));
+        break;
+      case "contains":
+        conditions.push(`LOWER(CAST(${expression} AS TEXT)) LIKE ? ESCAPE '\\'`);
+        params.push(`%${escapeLike(String(filter.value).toLowerCase())}%`);
+        break;
+      case "gte":
+        conditions.push(`${expression} >= ?`);
+        params.push(sqliteJsonValue(filter.value));
+        break;
+      case "lte":
+        conditions.push(`${expression} <= ?`);
+        params.push(sqliteJsonValue(filter.value));
+        break;
+      default:
+        throw new Error(`Unsupported list filter operator '${String(operator)}'`);
+    }
+  }
+  return { conditions, params };
+}
+
+function sqliteJsonValue(value: JsonPrimitive): JsonPrimitive {
+  return typeof value === "boolean" ? Number(value) : value;
+}
+
+function jsonPath(field: string): string {
+  return `$.${field}`;
+}
+
+function escapeSqlString(value: string): string {
+  return value.replaceAll("'", "''");
+}
+
+function escapeLike(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
 }

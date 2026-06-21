@@ -63,6 +63,29 @@ describe("Desk app", () => {
     expect(html).toContain("Create");
   });
 
+  it("renders metadata-driven list filters", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Desk High", priority: "High", body: "Escalated" })
+    });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Desk Low", priority: "Low", body: "Routine" })
+    });
+
+    const response = await app.request("/desk/Note?filter_priority=High");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Desk High");
+    expect(html).not.toContain("Desk Low");
+    expect(html).toContain('name="filter_priority"');
+    expect(html).toContain('<option value="High" selected>High</option>');
+  });
+
   it("renders expectedVersion in edit forms", async () => {
     const { app, services } = makeDesk();
     await services.documents.create({ actor: owner, doctype: "Note", data: data() });

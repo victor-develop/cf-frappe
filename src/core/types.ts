@@ -193,9 +193,18 @@ export interface DomainEvent<TPayload extends DocumentEventPayload = DocumentEve
 export type NewDomainEvent<TPayload extends DocumentEventPayload = DocumentEventPayload> =
   Omit<DomainEvent<TPayload>, "sequence">;
 
+export type ListFilterOperator = "eq" | "contains" | "gte" | "lte";
+
+export interface ListDocumentsFilter {
+  readonly field: string;
+  readonly operator?: ListFilterOperator;
+  readonly value: JsonPrimitive;
+}
+
 export interface ListDocumentsQuery {
   readonly tenantId: TenantId;
   readonly doctype: DocTypeName;
+  readonly filters?: readonly ListDocumentsFilter[];
   readonly limit?: number;
   readonly offset?: number;
 }

@@ -3,7 +3,9 @@ import type {
   DocumentData,
   DocumentSnapshot,
   FieldDefinition,
-  JsonValue
+  JsonValue,
+  ListDocumentsFilter,
+  ListFilterOperator
 } from "../../core/types";
 import type { ReportDefinition } from "../../core/reports";
 import type { ReportRunResult } from "../../application/report-service";
@@ -138,9 +140,12 @@ export function renderReportView(result: ReportRunResult): string {
 
 export function renderListView(
   doctype: DocTypeDefinition,
-  documents: readonly DocumentSnapshot[]
+  documents: readonly DocumentSnapshot[],
+  filters: readonly ListDocumentsFilter[] = []
 ): string {
   const fields = visibleListFields(doctype);
+  const filterFields = filterableListFields(doctype);
+  const filterForm = filterFields.map((field) => renderFilterField(field, filters)).join("");
   const header = fields.map((field) => `<th>${escapeHtml(field.label ?? field.name)}</th>`).join("");
   const rows = documents
     .map((document) => {
@@ -158,6 +163,7 @@ export function renderListView(
   return `<section class="toolbar">
     <a class="button primary" href="/desk/${encodeURIComponent(doctype.name)}/new">New ${escapeHtml(labelFor(doctype))}</a>
   </section>
+  ${filterForm ? `<form class="panel form list-filters" method="get"><div class="fields">${filterForm}</div><div class="actions"><button class="button primary" type="submit">Filter</button><a class="button" href="/desk/${encodeURIComponent(doctype.name)}">Clear</a></div></form>` : ""}
   <section class="panel">
     <div class="table-wrap">
       <table>
@@ -272,6 +278,55 @@ function inputType(field: FieldDefinition): string {
 
 function visibleListFields(doctype: DocTypeDefinition): readonly FieldDefinition[] {
   return doctype.fields.filter((field) => !field.hidden).slice(0, 5);
+}
+
+function filterableListFields(doctype: DocTypeDefinition): readonly FieldDefinition[] {
+  return visibleListFields(doctype).filter((field) => field.type !== "json");
+}
+
+function renderFilterField(field: FieldDefinition, filters: readonly ListDocumentsFilter[]): string {
+  const id = `filter-${slug(field.name)}`;
+  const label = escapeHtml(field.label ?? field.name);
+  const operator = filterOperatorForField(field);
+  const name = `filter_${field.name}${operator === "eq" ? "" : `__${operator}`}`;
+  const value = currentFilterValue(filters, field.name, operator);
+  const common = `id="${id}" name="${escapeHtml(name)}"`;
+  if (field.type === "select") {
+    const options = [`<option value=""></option>`]
+      .concat(
+        (field.options ?? []).map(
+          (option) =>
+            `<option value="${escapeHtml(option)}"${option === value ? " selected" : ""}>${escapeHtml(option)}</option>`
+        )
+      )
+      .join("");
+    return `<label class="field" for="${id}"><span>${label}</span><select ${common}>${options}</select></label>`;
+  }
+  if (field.type === "boolean") {
+    const options = [
+      `<option value=""></option>`,
+      `<option value="true"${value === "true" ? " selected" : ""}>True</option>`,
+      `<option value="false"${value === "false" ? " selected" : ""}>False</option>`
+    ].join("");
+    return `<label class="field" for="${id}"><span>${label}</span><select ${common}>${options}</select></label>`;
+  }
+  return `<label class="field" for="${id}"><span>${label}</span><input type="${inputType(field)}" ${common} value="${escapeHtml(value)}"></label>`;
+}
+
+function filterOperatorForField(field: FieldDefinition): ListFilterOperator {
+  return field.type === "text" || field.type === "longText" || field.type === "link" ? "contains" : "eq";
+}
+
+function currentFilterValue(
+  filters: readonly ListDocumentsFilter[],
+  field: string,
+  operator: ListFilterOperator
+): string {
+  const filter = filters.find((item) => item.field === field && (item.operator ?? "eq") === operator);
+  if (!filter) {
+    return "";
+  }
+  return formatFormValue(filter.value);
 }
 
 function labelFor(doctype: DocTypeDefinition): string {
@@ -430,6 +485,8 @@ tr:last-child td { border-bottom: 0; }
   border-color: #fecdca;
 }
 .form { padding: 18px; max-width: 860px; }
+.list-filters { max-width: none; margin-bottom: 16px; }
+.list-filters .actions { justify-content: flex-start; }
 .form-head {
   display: flex;
   justify-content: space-between;

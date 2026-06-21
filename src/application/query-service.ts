@@ -6,6 +6,10 @@ import {
   type Actor,
   type DocTypeDefinition,
   type DocumentSnapshot,
+  type FieldDefinition,
+  type JsonPrimitive,
+  type ListDocumentsFilter,
+  type ListFilterOperator,
   type ListDocumentsResult
 } from "../core/types";
 import type { ProjectionStore } from "../ports/projection-store";
@@ -56,7 +60,12 @@ export class QueryService {
   async listDocuments(
     actor: Actor,
     doctypeName: string,
-    options: { readonly tenantId?: string; readonly limit?: number; readonly offset?: number } = {}
+    options: {
+      readonly tenantId?: string;
+      readonly filters?: readonly ListDocumentsFilter[];
+      readonly limit?: number;
+      readonly offset?: number;
+    } = {}
   ): Promise<ListDocumentsResult> {
     const doctype = this.registry.get(doctypeName);
     if (!can(actor, doctype, "read")) {
@@ -67,6 +76,7 @@ export class QueryService {
     const result = await this.projections.list({
       tenantId: options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID,
       doctype: doctype.name,
+      filters: normalizeListFilters(doctype, options.filters ?? []),
       limit,
       offset
     });
@@ -75,6 +85,83 @@ export class QueryService {
       data: result.data.filter((document) => document.docstatus !== "deleted" && can(actor, doctype, "read", document))
     };
   }
+}
+
+function normalizeListFilters(
+  doctype: DocTypeDefinition,
+  filters: readonly ListDocumentsFilter[]
+): readonly ListDocumentsFilter[] {
+  if (filters.length === 0) {
+    return [];
+  }
+  const fields = new Map(doctype.fields.map((field) => [field.name, field]));
+  return filters.map((filter) => {
+    const field = fields.get(filter.field);
+    if (!field) {
+      throw new FrameworkError("BAD_REQUEST", `Filter field '${filter.field}' is not defined on ${doctype.name}`, {
+        status: 400
+      });
+    }
+    if (field.type === "json") {
+      throw new FrameworkError("BAD_REQUEST", `Filter field '${filter.field}' cannot be a json field`, {
+        status: 400
+      });
+    }
+    const operator = normalizeFilterOperator(filter.operator);
+    if (field.type === "boolean" && operator !== "eq") {
+      throw new FrameworkError("BAD_REQUEST", `Boolean filter '${filter.field}' only supports eq`, {
+        status: 400
+      });
+    }
+    return {
+      field: filter.field,
+      ...(operator === "eq" ? {} : { operator }),
+      value: coerceFilterValue(field, filter.value)
+    };
+  });
+}
+
+function normalizeFilterOperator(operator: unknown): ListFilterOperator {
+  if (operator === undefined) {
+    return "eq";
+  }
+  if (operator === "eq" || operator === "contains" || operator === "gte" || operator === "lte") {
+    return operator;
+  }
+  throw new FrameworkError("BAD_REQUEST", `Unsupported list filter operator '${String(operator)}'`, { status: 400 });
+}
+
+function coerceFilterValue(field: FieldDefinition, value: JsonPrimitive): JsonPrimitive {
+  if (value === null) {
+    throw new FrameworkError("BAD_REQUEST", `Filter '${field.name}' cannot be null`, { status: 400 });
+  }
+  if (field.type === "integer") {
+    const parsed = typeof value === "number" ? value : Number(value);
+    if (!Number.isInteger(parsed)) {
+      throw new FrameworkError("BAD_REQUEST", `Filter '${field.name}' must be an integer`, { status: 400 });
+    }
+    return parsed;
+  }
+  if (field.type === "number") {
+    const parsed = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(parsed)) {
+      throw new FrameworkError("BAD_REQUEST", `Filter '${field.name}' must be a number`, { status: 400 });
+    }
+    return parsed;
+  }
+  if (field.type === "boolean") {
+    if (typeof value === "boolean") {
+      return value;
+    }
+    if (value === "true" || value === "1" || value === "on") {
+      return true;
+    }
+    if (value === "false" || value === "0" || value === "off") {
+      return false;
+    }
+    throw new FrameworkError("BAD_REQUEST", `Filter '${field.name}' must be a boolean`, { status: 400 });
+  }
+  return typeof value === "string" ? value : String(value);
 }
 
 function clampLimit(limit?: number): number {

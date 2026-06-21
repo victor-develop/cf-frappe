@@ -7,6 +7,7 @@ import { FrameworkError } from "../../core/errors";
 import type { ModelRegistry } from "../../core/registry";
 import type { Actor, DocTypeDefinition, DocumentData, FieldDefinition, JsonPrimitive, MutableDocumentData } from "../../core/types";
 import type { ActorResolver } from "../http/actor";
+import { listFiltersFromUrl } from "../http/request";
 import { renderPrintDocument } from "../print";
 import {
   renderDeskHome,
@@ -94,17 +95,19 @@ export function createDeskApp(options: DeskAppOptions): Hono {
 
   app.get("/desk/:doctype", async (c) => {
     const actor = await options.actor(c.req.raw);
+    const url = new URL(c.req.url);
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
-    const result = await options.queries.listDocuments(actor, doctype.name, { limit: 100 });
+    const filters = listFiltersFromUrl(url);
+    const result = await options.queries.listDocuments(actor, doctype.name, { filters, limit: 100 });
     return html(
       renderDeskLayout({
         title: doctype.label ?? doctype.name,
         active: doctype.name,
         doctypes,
         reports,
-        body: renderListView(doctype, result.data)
+        body: renderListView(doctype, result.data, filters)
       })
     );
   });
