@@ -1,0 +1,210 @@
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonObject = { readonly [key: string]: JsonValue };
+export type JsonArray = readonly JsonValue[];
+export type JsonValue = JsonPrimitive | JsonObject | JsonArray;
+
+export type MutableDocumentData = Record<string, JsonValue | undefined>;
+export type DocumentData = Record<string, JsonValue>;
+
+export type TenantId = string;
+export type DocumentName = string;
+export type DocTypeName = string;
+export type StreamName = string;
+
+export type FieldType =
+  | "text"
+  | "longText"
+  | "integer"
+  | "number"
+  | "boolean"
+  | "date"
+  | "datetime"
+  | "json"
+  | "select"
+  | "link";
+
+export interface FieldDefaultContext {
+  readonly actor: Actor;
+  readonly now: string;
+}
+
+export interface FieldDefinition {
+  readonly name: string;
+  readonly label?: string;
+  readonly type: FieldType;
+  readonly required?: boolean;
+  readonly readOnly?: boolean;
+  readonly hidden?: boolean;
+  readonly options?: readonly string[];
+  readonly linkTo?: DocTypeName;
+  readonly min?: number;
+  readonly max?: number;
+  readonly defaultValue?: JsonValue | ((context: FieldDefaultContext) => JsonValue);
+}
+
+export type PermissionAction =
+  | "read"
+  | "create"
+  | "update"
+  | "delete"
+  | "submit"
+  | "cancel"
+  | "transition";
+
+export interface Actor {
+  readonly id: string;
+  readonly roles: readonly string[];
+  readonly tenantId?: TenantId;
+  readonly email?: string;
+}
+
+export type PermissionPredicate = (context: PermissionContext) => boolean;
+
+export interface PermissionContext {
+  readonly actor: Actor;
+  readonly action: PermissionAction;
+  readonly doctype: DocTypeDefinition;
+  readonly document?: DocumentSnapshot;
+}
+
+export interface PermissionRule {
+  readonly roles: readonly string[];
+  readonly actions: readonly PermissionAction[];
+  readonly when?: PermissionPredicate;
+}
+
+export type DocStatus = "draft" | "submitted" | "cancelled" | "deleted";
+
+export interface WorkflowTransition {
+  readonly action: string;
+  readonly from: string;
+  readonly to: string;
+  readonly roles?: readonly string[];
+  readonly eventType?: string;
+}
+
+export interface WorkflowDefinition {
+  readonly stateField?: string;
+  readonly initialState: string;
+  readonly states: readonly string[];
+  readonly transitions: readonly WorkflowTransition[];
+}
+
+export interface DomainCommandContext {
+  readonly actor: Actor;
+  readonly document: DocumentSnapshot;
+  readonly input: DocumentData;
+  readonly now: string;
+}
+
+export interface DomainCommandDefinition {
+  readonly name: string;
+  readonly eventType: string;
+  readonly fields?: readonly string[];
+  readonly roles?: readonly string[];
+  readonly buildPatch?: (context: DomainCommandContext) => DocumentData;
+}
+
+export type NamingStrategy =
+  | { readonly kind: "uuid" }
+  | { readonly kind: "field"; readonly field: string }
+  | { readonly kind: "provided"; readonly field?: string };
+
+export interface DocTypeDefinition<TData extends DocumentData = DocumentData> {
+  readonly name: DocTypeName;
+  readonly module?: string;
+  readonly version?: number;
+  readonly label?: string;
+  readonly fields: readonly FieldDefinition[];
+  readonly permissions?: readonly PermissionRule[];
+  readonly workflow?: WorkflowDefinition;
+  readonly commands?: readonly DomainCommandDefinition[];
+  readonly naming?: NamingStrategy;
+  readonly allowUnknownFields?: boolean;
+  readonly indexes?: readonly (readonly string[])[];
+  readonly events?: {
+    readonly create?: string;
+    readonly update?: string;
+    readonly delete?: string;
+  };
+  readonly description?: string;
+  readonly __data?: TData;
+}
+
+export interface ValidationIssue {
+  readonly field?: string;
+  readonly code: string;
+  readonly message: string;
+}
+
+export interface DocumentSnapshot<TData extends DocumentData = DocumentData> {
+  readonly tenantId: TenantId;
+  readonly doctype: DocTypeName;
+  readonly name: DocumentName;
+  readonly version: number;
+  readonly docstatus: DocStatus;
+  readonly data: TData;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export type DocumentEventPayload =
+  | {
+      readonly kind: "DocumentCreated";
+      readonly data: DocumentData;
+      readonly docstatus: DocStatus;
+    }
+  | {
+      readonly kind: "DocumentUpdated";
+      readonly patch: DocumentData;
+    }
+  | {
+      readonly kind: "DocumentDeleted";
+    }
+  | {
+      readonly kind: "WorkflowTransitioned";
+      readonly action: string;
+      readonly from: string;
+      readonly to: string;
+      readonly patch: DocumentData;
+    }
+  | {
+      readonly kind: "DomainCommandApplied";
+      readonly command: string;
+      readonly input: DocumentData;
+      readonly patch: DocumentData;
+    };
+
+export interface DomainEvent<TPayload extends DocumentEventPayload = DocumentEventPayload> {
+  readonly id: string;
+  readonly tenantId: TenantId;
+  readonly stream: StreamName;
+  readonly sequence: number;
+  readonly type: string;
+  readonly doctype: DocTypeName;
+  readonly documentName: DocumentName;
+  readonly actorId: string;
+  readonly occurredAt: string;
+  readonly payload: TPayload;
+  readonly metadata: DocumentData;
+}
+
+export type NewDomainEvent<TPayload extends DocumentEventPayload = DocumentEventPayload> =
+  Omit<DomainEvent<TPayload>, "sequence">;
+
+export interface ListDocumentsQuery {
+  readonly tenantId: TenantId;
+  readonly doctype: DocTypeName;
+  readonly limit?: number;
+  readonly offset?: number;
+}
+
+export interface ListDocumentsResult<TData extends DocumentData = DocumentData> {
+  readonly data: readonly DocumentSnapshot<TData>[];
+  readonly limit: number;
+  readonly offset: number;
+  readonly total?: number;
+}
+
+export const SYSTEM_MANAGER_ROLE = "System Manager";
+export const DEFAULT_TENANT_ID = "default";

@@ -1,0 +1,43 @@
+{
+  "name": "cf-frappe",
+  "version": "0.1.0",
+  "description": "A metadata-driven, event-sourced application framework for Cloudflare Workers.",
+  "type": "module",
+  "private": false,
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "migrations",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run test && npm run build",
+    "dev": "wrangler dev --persist-to=.wrangler/state",
+    "deploy": "wrangler deploy",
+    "d1:migrate:local": "wrangler d1 migrations apply cf-frappe-dev --local",
+    "d1:migrate:remote": "wrangler d1 migrations apply cf-frappe-dev --remote"
+  },
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "frappe",
+    "event-sourcing",
+    "durable-objects",
+    "d1",
+    "metadata-driven"
+  ],
+  "dependencies": {
+    "hono": "^4.6.17"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.9",
+    "wrangler": "^4.103.0"
+  }
+}
