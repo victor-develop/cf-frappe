@@ -7,6 +7,7 @@ The current slice is a working kernel:
 - typed DocType metadata with fields, defaults, validation, naming, permissions, and workflows
 - metadata-defined link fields with event-stream referential integrity and generated lookup options
 - metadata-defined child table fields validated from child DocType metadata
+- first-class draft/submitted/cancelled document lifecycle events
 - command-side document service that writes immutable events
 - query-side projection service for current document reads and lists
 - in-memory adapters for TDD
@@ -33,7 +34,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | DocType | `defineDocType(...)` metadata |
 | Link fields | registered `type: "link"` targets with write-time existence checks and lookup options |
 | Child tables | registered `type: "table"` child DocTypes embedded in event-sourced document data |
-| Document lifecycle | command handlers that emit domain events |
+| Document lifecycle | event-sourced create, update, submit, cancel, and delete commands |
 | Permissions | role and predicate rules attached to DocTypes |
 | Hooks/controllers | pure hook contracts registered in `ModelRegistry` |
 | REST resources | generated `/api/resource/:doctype` routes |
@@ -182,6 +183,8 @@ The generated API includes:
 - `GET /api/resource/:doctype`
 - `GET /api/resource/:doctype/:name`
 - `PUT /api/resource/:doctype/:name`
+- `POST /api/resource/:doctype/:name/submit`
+- `POST /api/resource/:doctype/:name/cancel`
 - `POST /api/resource/:doctype/:name/transition/:action`
 - `POST /api/resource/:doctype/:name/command/:command`
 - `DELETE /api/resource/:doctype/:name`
@@ -203,6 +206,8 @@ The generated Desk UI includes:
 - `POST /desk/:doctype`
 - `GET /desk/:doctype/:name`
 - `POST /desk/:doctype/:name`
+- `POST /desk/:doctype/:name/submit`
+- `POST /desk/:doctype/:name/cancel`
 - `POST /desk/:doctype/:name/command/:command`
 
 Generate and review D1 migrations from metadata:
@@ -300,6 +305,12 @@ export const registry = createRegistry({
 Desk forms render visible table fields as editable row grids. Existing rows are rendered with one blank row for appending; blank rows are ignored on submit, while partially filled rows are validated at the command boundary. Child DocTypes can be embedded-only; nested link options are authorized through the readable parent form and still require read access to the linked target DocType.
 
 HTTP resource updates treat a table field as a whole-array replacement. Desk includes the exported `CHILD_TABLE_ROW_INDEX_FIELD` marker on existing rows so the command service can preserve omitted read-only child values from the correct original row, then strips the marker before validation, events, and projections. Non-Desk clients that need that preservation must send a unique, in-range marker for each retained row or submit complete row data; without a marker, omitted read-only child values are not guessed because deletes and reorders would otherwise risk copying protected values onto the wrong row.
+
+## Document Lifecycle
+
+Every document starts as `draft`. `DocumentService.submit(...)` appends a `DocumentSubmitted` event and moves the projection to `submitted`; `DocumentService.cancel(...)` appends `DocumentCancelled` and moves it to `cancelled`. Submit is allowed only from draft, cancel only from submitted, and update/workflow/domain-command mutations are draft-only in this slice. Deleting a submitted document is rejected until it is cancelled, keeping lifecycle rules in the command boundary instead of the query projection.
+
+HTTP clients can call `/api/resource/:doctype/:name/submit` and `/api/resource/:doctype/:name/cancel` with optional `expectedVersion`. Desk edit forms render the allowed lifecycle action for the current actor and document status.
 
 ## Desk Forms
 
@@ -548,7 +559,7 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 191 tests across schema, permissions, events, registry, services, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, reports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
+Current suite: 195 tests across schema, permissions, events, registry, services, document lifecycle, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, reports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
 
 ## Status
 

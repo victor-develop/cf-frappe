@@ -133,6 +133,8 @@ export interface DocTypeDefinition<TData extends DocumentData = DocumentData> {
   readonly events?: {
     readonly create?: string;
     readonly update?: string;
+    readonly submit?: string;
+    readonly cancel?: string;
     readonly delete?: string;
   };
   readonly description?: string;
@@ -168,6 +170,12 @@ export type DocumentEventPayload =
     }
   | {
       readonly kind: "DocumentDeleted";
+    }
+  | {
+      readonly kind: "DocumentSubmitted";
+    }
+  | {
+      readonly kind: "DocumentCancelled";
     }
   | {
       readonly kind: "WorkflowTransitioned";

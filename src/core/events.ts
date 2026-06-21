@@ -51,6 +51,28 @@ export function foldDocument(events: readonly DomainEvent[]): DocumentSnapshot |
           };
         }
         break;
+      case "DocumentSubmitted":
+        if (snapshot) {
+          const current: DocumentSnapshot = snapshot;
+          snapshot = {
+            ...current,
+            version: event.sequence,
+            docstatus: "submitted",
+            updatedAt: event.occurredAt
+          };
+        }
+        break;
+      case "DocumentCancelled":
+        if (snapshot) {
+          const current: DocumentSnapshot = snapshot;
+          snapshot = {
+            ...current,
+            version: event.sequence,
+            docstatus: "cancelled",
+            updatedAt: event.occurredAt
+          };
+        }
+        break;
     }
   }
 

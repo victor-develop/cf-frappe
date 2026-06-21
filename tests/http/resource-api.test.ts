@@ -3,7 +3,7 @@ import { createLinkedServices, createServices, owner } from "../helpers";
 
 describe("resource api", () => {
   function makeApp() {
-    const services = createServices(["e1", "e2", "e3", "e4", "e5", "e6"]);
+    const services = createServices(["e1", "e2", "e3", "e4", "e5", "e6", "e7"]);
     return createResourceApi({
       registry: services.registry,
       documents: services.documents,
@@ -59,7 +59,7 @@ describe("resource api", () => {
     await expect(response.json()).resolves.toMatchObject({ data: { name: "Note" } });
   });
 
-  it("creates, reads, lists, updates, transitions, and deletes a resource", async () => {
+  it("creates, reads, lists, updates, transitions, submits, cancels, and deletes a resource", async () => {
     const app = makeApp();
     const created = await app.request("/api/resource/Note", {
       method: "POST",
@@ -104,13 +104,29 @@ describe("resource api", () => {
       data: { data: { body: "Commanded" } }
     });
 
+    const submitted = await app.request("/api/resource/Note/HTTP%20Note/submit", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ expectedVersion: 4 })
+    });
+    expect(submitted.status).toBe(200);
+    await expect(submitted.json()).resolves.toMatchObject({ data: { version: 5, docstatus: "submitted" } });
+
+    const cancelled = await app.request("/api/resource/Note/HTTP%20Note/cancel", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ expectedVersion: 5 })
+    });
+    expect(cancelled.status).toBe(200);
+    await expect(cancelled.json()).resolves.toMatchObject({ data: { version: 6, docstatus: "cancelled" } });
+
     const deleted = await app.request("/api/resource/Note/HTTP%20Note", {
       method: "DELETE",
       headers: {
         ...userHeaders,
         "x-cf-frappe-roles": "Task Manager"
       },
-      body: "{}"
+      body: JSON.stringify({ expectedVersion: 6 })
     });
     expect(deleted.status).toBe(200);
     await expect(deleted.json()).resolves.toMatchObject({ data: { docstatus: "deleted" } });

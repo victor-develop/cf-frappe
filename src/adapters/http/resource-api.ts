@@ -164,6 +164,34 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     return c.json({ data: snapshot });
   });
 
+  app.post("/api/resource/:doctype/:name/submit", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    const body = await readJson(c.req.raw, { allowEmpty: true, maxJsonBytes });
+    const expectedVersion = numberValue(body.expectedVersion);
+    const snapshot = await options.documents.submit({
+      actor,
+      doctype: c.req.param("doctype"),
+      name: c.req.param("name"),
+      ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: snapshot });
+  });
+
+  app.post("/api/resource/:doctype/:name/cancel", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    const body = await readJson(c.req.raw, { allowEmpty: true, maxJsonBytes });
+    const expectedVersion = numberValue(body.expectedVersion);
+    const snapshot = await options.documents.cancel({
+      actor,
+      doctype: c.req.param("doctype"),
+      name: c.req.param("name"),
+      ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: snapshot });
+  });
+
   app.post("/api/resource/:doctype/:name/command/:command", async (c) => {
     const actor = await resolveActor(c.req.raw);
     const body = await readJson(c.req.raw, { allowEmpty: true, maxJsonBytes });

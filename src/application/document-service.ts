@@ -62,6 +62,24 @@ export interface DeleteDocumentCommand {
   readonly metadata?: DocumentData;
 }
 
+export interface SubmitDocumentCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly tenantId?: string;
+  readonly expectedVersion?: number;
+  readonly metadata?: DocumentData;
+}
+
+export interface CancelDocumentCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly tenantId?: string;
+  readonly expectedVersion?: number;
+  readonly metadata?: DocumentData;
+}
+
 export interface TransitionDocumentCommand {
   readonly actor: Actor;
   readonly doctype: string;
@@ -86,6 +104,8 @@ export interface ExecuteDomainCommand {
 export interface DocumentCommandExecutor {
   create(command: CreateDocumentCommand): Promise<DocumentSnapshot>;
   update(command: UpdateDocumentCommand): Promise<DocumentSnapshot>;
+  submit(command: SubmitDocumentCommand): Promise<DocumentSnapshot>;
+  cancel(command: CancelDocumentCommand): Promise<DocumentSnapshot>;
   delete(command: DeleteDocumentCommand): Promise<DocumentSnapshot>;
   transition(command: TransitionDocumentCommand): Promise<DocumentSnapshot>;
   execute(command: ExecuteDomainCommand): Promise<DocumentSnapshot>;
@@ -173,6 +193,7 @@ export class DocumentService implements DocumentCommandExecutor {
       throw permissionDenied(`Actor '${command.actor.id}' cannot update ${doctype.name}/${command.name}`);
     }
     ensureExpectedVersion(existing, command.expectedVersion);
+    ensureDocumentStatus(existing, ["draft"], "update");
 
     const patch = await this.runBeforeValidate(doctype, compactData(command.patch), existing);
     const patchWithoutInternalFields = stripInternalTableFields(doctype, patch, (name) => this.relatedDocType(name));
@@ -229,6 +250,7 @@ export class DocumentService implements DocumentCommandExecutor {
       throw permissionDenied(`Actor '${command.actor.id}' cannot transition ${doctype.name}/${command.name}`);
     }
     ensureExpectedVersion(existing, command.expectedVersion);
+    ensureDocumentStatus(existing, ["draft"], "transition");
 
     const stateField = workflow.stateField ?? "workflow_state";
     const currentState = String(existing.data[stateField] ?? workflow.initialState);
@@ -306,6 +328,7 @@ export class DocumentService implements DocumentCommandExecutor {
       throw permissionDenied(`Actor '${command.actor.id}' cannot execute ${command.command}`);
     }
     ensureExpectedVersion(existing, command.expectedVersion);
+    ensureDocumentStatus(existing, ["draft"], `execute ${command.command}`);
 
     const input = compactData(command.input);
     const sanitizedInput = stripInternalTableFields(doctype, input, (name) => this.relatedDocType(name));
@@ -373,6 +396,7 @@ export class DocumentService implements DocumentCommandExecutor {
       throw permissionDenied(`Actor '${command.actor.id}' cannot delete ${doctype.name}/${command.name}`);
     }
     ensureExpectedVersion(existing, command.expectedVersion);
+    ensureDocumentStatus(existing, ["draft", "cancelled"], "delete");
 
     const now = this.clock.now();
     const event = this.newEvent({
@@ -404,6 +428,50 @@ export class DocumentService implements DocumentCommandExecutor {
     return commit.snapshot;
   }
 
+  async submit(command: SubmitDocumentCommand): Promise<DocumentSnapshot> {
+    const doctype = this.registry.get(command.doctype);
+    const tenantId = resolveTenant(command.actor, command.tenantId);
+    const stream = documentStream(tenantId, doctype.name, command.name);
+    const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
+    if (!can(command.actor, doctype, "submit", existing)) {
+      throw permissionDenied(`Actor '${command.actor.id}' cannot submit ${doctype.name}/${command.name}`);
+    }
+    ensureExpectedVersion(existing, command.expectedVersion);
+    ensureDocumentStatus(existing, ["draft"], "submit");
+    return this.changeDocStatus({
+      command,
+      doctype,
+      tenantId,
+      stream,
+      existing,
+      nextStatus: "submitted",
+      eventType: doctype.events?.submit ?? `${doctype.name}Submitted`,
+      payloadKind: "DocumentSubmitted"
+    });
+  }
+
+  async cancel(command: CancelDocumentCommand): Promise<DocumentSnapshot> {
+    const doctype = this.registry.get(command.doctype);
+    const tenantId = resolveTenant(command.actor, command.tenantId);
+    const stream = documentStream(tenantId, doctype.name, command.name);
+    const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
+    if (!can(command.actor, doctype, "cancel", existing)) {
+      throw permissionDenied(`Actor '${command.actor.id}' cannot cancel ${doctype.name}/${command.name}`);
+    }
+    ensureExpectedVersion(existing, command.expectedVersion);
+    ensureDocumentStatus(existing, ["submitted"], "cancel");
+    return this.changeDocStatus({
+      command,
+      doctype,
+      tenantId,
+      stream,
+      existing,
+      nextStatus: "cancelled",
+      eventType: doctype.events?.cancel ?? `${doctype.name}Cancelled`,
+      payloadKind: "DocumentCancelled"
+    });
+  }
+
   private async requireExistingFromEvents(
     stream: string,
     doctype: DocTypeDefinition,
@@ -417,6 +485,46 @@ export class DocumentService implements DocumentCommandExecutor {
       throw new FrameworkError("DOCUMENT_DELETED", `${doctype.name}/${name} was deleted`, { status: 410 });
     }
     return existing;
+  }
+
+  private async changeDocStatus(options: {
+    readonly command: SubmitDocumentCommand | CancelDocumentCommand;
+    readonly doctype: DocTypeDefinition;
+    readonly tenantId: string;
+    readonly stream: string;
+    readonly existing: DocumentSnapshot;
+    readonly nextStatus: DocStatus;
+    readonly eventType: string;
+    readonly payloadKind: "DocumentSubmitted" | "DocumentCancelled";
+  }): Promise<DocumentSnapshot> {
+    const now = this.clock.now();
+    const event = this.newEvent({
+      tenantId: options.tenantId,
+      stream: options.stream,
+      type: options.eventType,
+      doctype: options.doctype.name,
+      documentName: options.command.name,
+      actorId: options.command.actor.id,
+      occurredAt: now,
+      payload: { kind: options.payloadKind },
+      metadata: options.command.metadata ?? {}
+    });
+    const commit = await this.store.commit(options.stream, options.existing.version, [event], ([saved]) => {
+      if (!saved) {
+        throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
+      }
+      return {
+        ...options.existing,
+        version: saved.sequence,
+        docstatus: options.nextStatus,
+        updatedAt: saved.occurredAt
+      };
+    });
+    const [saved] = commit.events;
+    if (saved) {
+      await this.runAfterCommit(options.doctype, saved, commit.snapshot);
+    }
+    return commit.snapshot;
   }
 
   private async runBeforeValidate(
@@ -620,6 +728,20 @@ function snapshotFromCreate(event: DomainEvent): DocumentSnapshot {
 function ensureExpectedVersion(existing: DocumentSnapshot, expectedVersion?: number): void {
   if (expectedVersion !== undefined && existing.version !== expectedVersion) {
     throw conflict(`Expected version ${expectedVersion}, found ${existing.version}`);
+  }
+}
+
+function ensureDocumentStatus(
+  document: DocumentSnapshot,
+  allowed: readonly DocStatus[],
+  action: string
+): void {
+  if (!allowed.includes(document.docstatus)) {
+    throw new FrameworkError(
+      "DOCUMENT_STATUS_CONFLICT",
+      `Cannot ${action} ${document.doctype}/${document.name} while it is ${document.docstatus}`,
+      { status: 409 }
+    );
   }
 }
 

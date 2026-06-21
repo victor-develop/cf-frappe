@@ -64,4 +64,35 @@ describe("event folding", () => {
       data: { title: "One" }
     });
   });
+
+  it("folds submit and cancel lifecycle events without changing document data", () => {
+    const events: DomainEvent[] = [
+      {
+        ...base,
+        sequence: 1,
+        type: "DocumentCreated",
+        payload: { kind: "DocumentCreated", data: { title: "One" }, docstatus: "draft" }
+      },
+      {
+        ...base,
+        id: "evt2",
+        sequence: 2,
+        type: "DocumentSubmitted",
+        payload: { kind: "DocumentSubmitted" }
+      },
+      {
+        ...base,
+        id: "evt3",
+        sequence: 3,
+        type: "DocumentCancelled",
+        payload: { kind: "DocumentCancelled" }
+      }
+    ];
+
+    expect(foldDocument(events)).toMatchObject({
+      version: 3,
+      docstatus: "cancelled",
+      data: { title: "One" }
+    });
+  });
 });

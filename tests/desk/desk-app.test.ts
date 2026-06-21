@@ -153,6 +153,47 @@ describe("Desk app", () => {
     expect(html).toContain("/desk/print/Note%20Standard/My%20Note");
   });
 
+  it("submits and cancels documents from generated edit forms", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    const draft = await app.request("/desk/Note/My%20Note");
+    expect(draft.status).toBe(200);
+    const draftHtml = await draft.text();
+    expect(draftHtml).toContain('formaction="/desk/Note/My%20Note/submit"');
+    expect(draftHtml).not.toContain('formaction="/desk/Note/My%20Note/cancel"');
+
+    const submitted = await app.request("/desk/Note/My%20Note/submit", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(submitted.status).toBe(303);
+    await expect(services.queries.getDocument(owner, "Note", "My Note")).resolves.toMatchObject({
+      docstatus: "submitted",
+      version: 2
+    });
+
+    const submittedForm = await app.request("/desk/Note/My%20Note");
+    expect(submittedForm.status).toBe(200);
+    const submittedHtml = await submittedForm.text();
+    expect(submittedHtml).toContain("submitted");
+    expect(submittedHtml).toContain('formaction="/desk/Note/My%20Note/cancel"');
+    expect(submittedHtml).not.toContain(">Save</button>");
+    expect(submittedHtml).not.toContain("/command/archive");
+
+    const cancelled = await app.request("/desk/Note/My%20Note/cancel", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "2" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(cancelled.status).toBe(303);
+    await expect(services.queries.getDocument(owner, "Note", "My Note")).resolves.toMatchObject({
+      docstatus: "cancelled",
+      version: 3
+    });
+  });
+
   it("renders printable documents from Desk", async () => {
     const { app, services } = makeDesk();
     await services.documents.create({

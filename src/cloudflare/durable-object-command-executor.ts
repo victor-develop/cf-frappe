@@ -1,8 +1,10 @@
 import type {
+  CancelDocumentCommand,
   CreateDocumentCommand,
   DeleteDocumentCommand,
   DocumentCommandExecutor,
   ExecuteDomainCommand,
+  SubmitDocumentCommand,
   TransitionDocumentCommand,
   UpdateDocumentCommand
 } from "../application/document-service";
@@ -40,6 +42,14 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
 
   update(command: UpdateDocumentCommand): Promise<DocumentSnapshot> {
     return this.stubForNamed(command).transact({ ...command, kind: "update" });
+  }
+
+  submit(command: SubmitDocumentCommand): Promise<DocumentSnapshot> {
+    return this.stubForNamed(command).transact({ ...command, kind: "submit" });
+  }
+
+  cancel(command: CancelDocumentCommand): Promise<DocumentSnapshot> {
+    return this.stubForNamed(command).transact({ ...command, kind: "cancel" });
   }
 
   delete(command: DeleteDocumentCommand): Promise<DocumentSnapshot> {

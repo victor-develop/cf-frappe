@@ -4,12 +4,14 @@ import type { PrintService } from "../../application/print-service";
 import { QueryService } from "../../application/query-service";
 import type { ReportFilters, ReportService } from "../../application/report-service";
 import { FrameworkError } from "../../core/errors";
+import { can } from "../../core/permissions";
 import type { ModelRegistry } from "../../core/registry";
 import {
   CHILD_TABLE_ROW_INDEX_FIELD,
   type Actor,
   type DocTypeDefinition,
   type DocumentData,
+  type DocumentSnapshot,
   type FieldDefinition,
   type JsonPrimitive,
   type MutableDocumentData,
@@ -27,6 +29,7 @@ import {
   renderNotFound,
   renderReportList,
   renderReportView,
+  type FormLifecycleAction,
   type FormLinkOptions,
   type FormTableDefinitions
 } from "./render";
@@ -176,13 +179,21 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const document = await options.queries.getDocument(actor, doctype.name, c.req.param("name"));
     const linkOptions = await linkOptionsForForm(options, actor, doctype, formView);
     const tableDefinitions = tableDefinitionsForForm(options, formView);
+    const lifecycleActions = lifecycleActionsFor(actor, doctype, document);
     return html(
       renderDeskLayout({
         title: document.name,
         active: doctype.name,
         doctypes,
         reports,
-        body: renderFormView(doctype, formView, { mode: "update", document, linkOptions, tableDefinitions, printFormats })
+        body: renderFormView(doctype, formView, {
+          mode: "update",
+          document,
+          linkOptions,
+          tableDefinitions,
+          lifecycleActions,
+          printFormats
+        })
       })
     );
   });
@@ -222,6 +233,44 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         command: c.req.param("command"),
         input: form.data,
         ...(form.expectedVersion !== undefined ? { expectedVersion: form.expectedVersion } : {}),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(`/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(name)}`, 303);
+    } catch (error) {
+      return renderDeskError(options, c.req.raw, actor, doctype, "update", error, name);
+    }
+  });
+
+  app.post("/desk/:doctype/:name/submit", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const name = c.req.param("name");
+    try {
+      const expectedVersion = await parseDeskExpectedVersion(c.req.raw);
+      await options.documents.submit({
+        actor,
+        doctype: doctype.name,
+        name,
+        ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(`/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(name)}`, 303);
+    } catch (error) {
+      return renderDeskError(options, c.req.raw, actor, doctype, "update", error, name);
+    }
+  });
+
+  app.post("/desk/:doctype/:name/cancel", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const name = c.req.param("name");
+    try {
+      const expectedVersion = await parseDeskExpectedVersion(c.req.raw);
+      await options.documents.cancel({
+        actor,
+        doctype: doctype.name,
+        name,
+        ...(expectedVersion !== undefined ? { expectedVersion } : {}),
         metadata: requestMetadata(c.req.raw)
       });
       return c.redirect(`/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(name)}`, 303);
@@ -292,6 +341,7 @@ async function renderDeskError(
         ...(document ? { document } : {}),
         linkOptions,
         tableDefinitions,
+        ...(document ? { lifecycleActions: lifecycleActionsFor(actor, doctype, document) } : {}),
         ...(document ? { printFormats: listPrintFormats(options, actor, doctype.name) } : {}),
         error: message
       })
@@ -306,6 +356,20 @@ function listReports(options: DeskAppOptions, actor: Actor) {
 
 function listPrintFormats(options: DeskAppOptions, actor: Actor, doctype?: string) {
   return options.prints?.listPrintFormats(actor, doctype) ?? [];
+}
+
+function lifecycleActionsFor(
+  actor: Actor,
+  doctype: DocTypeDefinition,
+  document: DocumentSnapshot
+): readonly FormLifecycleAction[] {
+  if (document.docstatus === "draft" && can(actor, doctype, "submit", document)) {
+    return ["submit"];
+  }
+  if (document.docstatus === "submitted" && can(actor, doctype, "cancel", document)) {
+    return ["cancel"];
+  }
+  return [];
 }
 
 async function linkOptionsForForm(
@@ -385,6 +449,11 @@ async function parseDeskForm(
     data,
     ...(expectedVersion !== undefined ? { expectedVersion } : {})
   };
+}
+
+async function parseDeskExpectedVersion(request: Request): Promise<number | undefined> {
+  const form = await request.formData();
+  return coerceExpectedVersion(form.get("expectedVersion"));
 }
 
 function coerceTableFormValue(

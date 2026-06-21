@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the child-table metadata and Desk grid slice:
+As of the document lifecycle slice:
 
 - Test files: `37`
-- Vitest cases: `191`
+- Vitest cases: `195`
 
 ## Implication
 

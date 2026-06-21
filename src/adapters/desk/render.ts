@@ -18,6 +18,7 @@ import type { PrintFormatDefinition } from "../../core/print-format";
 
 export type FormLinkOptions = Readonly<Record<string, readonly LinkOption[]>>;
 export type FormTableDefinitions = Readonly<Record<string, DocTypeDefinition>>;
+export type FormLifecycleAction = "submit" | "cancel";
 
 export interface DeskLayoutOptions {
   readonly title: string;
@@ -192,6 +193,7 @@ export function renderFormView(
     readonly error?: string;
     readonly linkOptions?: FormLinkOptions;
     readonly tableDefinitions?: FormTableDefinitions;
+    readonly lifecycleActions?: readonly FormLifecycleAction[];
     readonly printFormats?: readonly PrintFormatDefinition[];
   }
 ): string {
@@ -200,6 +202,7 @@ export function renderFormView(
       ? `/desk/${encodeURIComponent(doctype.name)}`
       : `/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(options.document?.name ?? "")}`;
   const title = options.mode === "create" ? `New ${labelFor(doctype)}` : options.document?.name ?? doctype.name;
+  const canSave = options.mode === "create" || options.document?.docstatus === "draft";
   const sections = formView.sections
     .map((section) =>
       renderFormSection(
@@ -212,12 +215,21 @@ export function renderFormView(
     )
     .join("");
   const commands =
-    options.mode === "update" && doctype.commands?.length
+    options.mode === "update" && options.document?.docstatus === "draft" && doctype.commands?.length
       ? `<section class="command-row" aria-label="Commands">${doctype.commands
           .map(
             (command) =>
               `<button class="button" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(options.document?.name ?? "")}/command/${encodeURIComponent(command.name)}">${escapeHtml(command.name)}</button>`
           )
+          .join("")}</section>`
+      : "";
+  const lifecycleActions =
+    options.mode === "update" && options.document && options.lifecycleActions?.length
+      ? `<section class="command-row" aria-label="Lifecycle actions">${options.lifecycleActions
+          .map((action) => {
+            const label = action === "submit" ? "Submit" : "Cancel Document";
+            return `<button class="button" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(options.document!.name)}/${action}">${escapeHtml(label)}</button>`;
+          })
           .join("")}</section>`
       : "";
   const printLinks =
@@ -242,9 +254,10 @@ export function renderFormView(
     ${sections}
     <div class="actions">
       <a class="button" href="/desk/${encodeURIComponent(doctype.name)}">Cancel</a>
-      <button class="button primary" type="submit">${options.mode === "create" ? "Create" : "Save"}</button>
+      ${canSave ? `<button class="button primary" type="submit">${options.mode === "create" ? "Create" : "Save"}</button>` : ""}
     </div>
     ${commands}
+    ${lifecycleActions}
     ${printLinks}
   </form>`;
 }

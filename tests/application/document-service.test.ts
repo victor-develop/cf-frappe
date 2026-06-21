@@ -560,6 +560,79 @@ describe("DocumentService", () => {
     ).rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
   });
 
+  it("submits and cancels documents as lifecycle events", async () => {
+    const { documents, events, projections } = createServices(["e1", "e2", "e3"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    const submitted = await documents.submit({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      expectedVersion: 1
+    });
+    expect(submitted).toMatchObject({
+      version: 2,
+      docstatus: "submitted",
+      data: { title: "My Note" }
+    });
+    await expect(projections.get("acme", "Note", "My Note")).resolves.toMatchObject({
+      version: 2,
+      docstatus: "submitted"
+    });
+
+    const cancelled = await documents.cancel({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      expectedVersion: 2
+    });
+    expect(cancelled).toMatchObject({
+      version: 3,
+      docstatus: "cancelled",
+      data: { title: "My Note" }
+    });
+    await expect(events.readStream("acme:Note:My%20Note")).resolves.toMatchObject([
+      expect.anything(),
+      { type: "NoteSubmitted", payload: { kind: "DocumentSubmitted" } },
+      { type: "NoteCancelled", payload: { kind: "DocumentCancelled" } }
+    ]);
+  });
+
+  it("enforces lifecycle permissions and status transitions at the command boundary", async () => {
+    const { documents } = createServices(["e1", "e2", "e3", "e4"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    await expect(
+      documents.submit({ actor: guest, doctype: "Note", name: "My Note" })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+
+    await documents.submit({ actor: owner, doctype: "Note", name: "My Note" });
+
+    await expect(
+      documents.update({ actor: owner, doctype: "Note", name: "My Note", patch: { body: "Too late" } })
+    ).rejects.toMatchObject({ code: "DOCUMENT_STATUS_CONFLICT" });
+    await expect(
+      documents.execute({ actor: owner, doctype: "Note", name: "My Note", command: "rewriteBody", input: { body: "Too late" } })
+    ).rejects.toMatchObject({ code: "DOCUMENT_STATUS_CONFLICT" });
+    await expect(
+      documents.transition({ actor: owner, doctype: "Note", name: "My Note", action: "close" })
+    ).rejects.toMatchObject({ code: "DOCUMENT_STATUS_CONFLICT" });
+    await expect(
+      documents.delete({ actor: manager, doctype: "Note", name: "My Note" })
+    ).rejects.toMatchObject({ code: "DOCUMENT_STATUS_CONFLICT" });
+    await expect(
+      documents.submit({ actor: owner, doctype: "Note", name: "My Note" })
+    ).rejects.toMatchObject({ code: "DOCUMENT_STATUS_CONFLICT" });
+
+    await documents.cancel({ actor: owner, doctype: "Note", name: "My Note" });
+    await expect(
+      documents.cancel({ actor: owner, doctype: "Note", name: "My Note" })
+    ).rejects.toMatchObject({ code: "DOCUMENT_STATUS_CONFLICT" });
+    await expect(
+      documents.delete({ actor: manager, doctype: "Note", name: "My Note" })
+    ).resolves.toMatchObject({ docstatus: "deleted" });
+  });
+
   it("soft deletes via an event and hides future writes", async () => {
     const { documents } = createServices(["e1", "e2", "e3"]);
     await documents.create({ actor: owner, doctype: "Note", data: data() });

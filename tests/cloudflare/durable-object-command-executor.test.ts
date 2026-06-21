@@ -27,12 +27,28 @@ describe("DurableObjectCommandExecutor", () => {
     });
 
     await executor.update({ actor: owner, doctype: "Note", name: "My Note", patch: { body: "New" } });
+    await executor.submit({ actor: owner, doctype: "Note", name: "My Note" });
+    await executor.cancel({ actor: owner, doctype: "Note", name: "My Note" });
     await executor.transition({ actor: owner, doctype: "Note", name: "My Note", action: "close" });
     await executor.execute({ actor: owner, doctype: "Note", name: "My Note", command: "archive", input: {} });
     await executor.delete({ actor: owner, doctype: "Note", name: "My Note" });
 
-    expect(names).toEqual(["acme:Note:My Note", "acme:Note:My Note", "acme:Note:My Note", "acme:Note:My Note"]);
-    expect(calls).toMatchObject([{ kind: "update" }, { kind: "transition" }, { kind: "execute" }, { kind: "delete" }]);
+    expect(names).toEqual([
+      "acme:Note:My Note",
+      "acme:Note:My Note",
+      "acme:Note:My Note",
+      "acme:Note:My Note",
+      "acme:Note:My Note",
+      "acme:Note:My Note"
+    ]);
+    expect(calls).toMatchObject([
+      { kind: "update" },
+      { kind: "submit" },
+      { kind: "cancel" },
+      { kind: "transition" },
+      { kind: "execute" },
+      { kind: "delete" }
+    ]);
   });
 });
 

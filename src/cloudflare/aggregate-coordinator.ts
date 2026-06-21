@@ -3,8 +3,10 @@ import { DocumentService } from "../application/document-service";
 import type { DomainEvent } from "../core/types";
 import { createDocumentRealtimeHooks } from "../application/realtime";
 import type {
+  CancelDocumentCommand,
   CreateDocumentCommand,
   DeleteDocumentCommand,
+  SubmitDocumentCommand,
   TransitionDocumentCommand,
   UpdateDocumentCommand
 } from "../application/document-service";
@@ -18,6 +20,8 @@ import type { RealtimePublisher } from "../ports/realtime";
 export type AggregateCoordinatorCommand =
   | ({ readonly kind: "create" } & CreateDocumentCommand)
   | ({ readonly kind: "update" } & UpdateDocumentCommand)
+  | ({ readonly kind: "submit" } & SubmitDocumentCommand)
+  | ({ readonly kind: "cancel" } & CancelDocumentCommand)
   | ({ readonly kind: "delete" } & DeleteDocumentCommand)
   | ({ readonly kind: "transition" } & TransitionDocumentCommand)
   | ({ readonly kind: "execute" } & ExecuteDomainCommand);
@@ -65,6 +69,10 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
           return this.service.create(command);
         case "update":
           return this.service.update(command);
+        case "submit":
+          return this.service.submit(command);
+        case "cancel":
+          return this.service.cancel(command);
         case "delete":
           return this.service.delete(command);
         case "transition":
