@@ -1,11 +1,14 @@
 import { Hono } from "hono";
 import type { DocumentCommandExecutor } from "../../application/document-service";
+import type { FileService } from "../../application/file-service";
 import { QueryService } from "../../application/query-service";
 import type { ModelRegistry } from "../../core/registry";
 import { badRequest } from "../../core/errors";
 import type { DocumentData, MutableDocumentData } from "../../core/types";
 import type { ActorResolver } from "./actor";
 import { toErrorResponse } from "./errors";
+import { createFileApi } from "./file-api";
+import { parseOptionalInteger, readBoundedText, requestMetadata } from "./request";
 
 export interface ResourceApiOptions {
   readonly registry: ModelRegistry;
@@ -13,6 +16,8 @@ export interface ResourceApiOptions {
   readonly queries: QueryService;
   readonly actor: ActorResolver;
   readonly maxJsonBytes?: number;
+  readonly files?: FileService;
+  readonly maxFileBytes?: number;
 }
 
 export function createResourceApi(options: ResourceApiOptions): Hono {
@@ -44,6 +49,17 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     const actor = await resolveActor(c.req.raw);
     return c.json({ data: options.queries.getMeta(actor, c.req.param("doctype")) });
   });
+
+  if (options.files) {
+    app.route(
+      "/",
+      createFileApi({
+        files: options.files,
+        actor: resolveActor,
+        ...(options.maxFileBytes === undefined ? {} : { maxFileBytes: options.maxFileBytes })
+      })
+    );
+  }
 
   app.get("/api/resource/:doctype", async (c) => {
     const actor = await resolveActor(c.req.raw);
@@ -150,7 +166,7 @@ async function readJson(
   if (contentLength && Number(contentLength) > options.maxJsonBytes) {
     throw badRequest(`JSON body exceeds ${options.maxJsonBytes} bytes`);
   }
-  const text = await readBoundedText(request, options.maxJsonBytes);
+  const text = await readBoundedText(request, options.maxJsonBytes, `JSON body exceeds ${options.maxJsonBytes} bytes`);
   if (!text.trim()) {
     if (options.allowEmpty) {
       return {};
@@ -172,17 +188,6 @@ async function readJson(
   return value as MutableDocumentData;
 }
 
-function parseOptionalInteger(value: string | undefined): number | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed)) {
-    throw badRequest("Expected integer query parameter");
-  }
-  return parsed;
-}
-
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
@@ -197,42 +202,7 @@ function numberValue(value: unknown): number | undefined {
   return value;
 }
 
-function requestMetadata(request: Request): DocumentData {
-  return {
-    method: request.method,
-    url: request.url
-  };
-}
-
 function withoutKeys(data: MutableDocumentData, keys: readonly string[]): MutableDocumentData {
   const blocked = new Set(keys);
   return Object.fromEntries(Object.entries(data).filter(([key]) => !blocked.has(key))) as MutableDocumentData;
-}
-
-async function readBoundedText(request: Request, maxBytes: number): Promise<string> {
-  if (!request.body) {
-    return "";
-  }
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel();
-      throw badRequest(`JSON body exceeds ${maxBytes} bytes`);
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(bytes);
 }

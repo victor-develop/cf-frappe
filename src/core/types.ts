@@ -102,6 +102,7 @@ export interface DomainCommandDefinition {
   readonly eventType: string;
   readonly fields?: readonly string[];
   readonly roles?: readonly string[];
+  readonly permissionAction?: PermissionAction;
   readonly buildPatch?: (context: DomainCommandContext) => DocumentData;
 }
 

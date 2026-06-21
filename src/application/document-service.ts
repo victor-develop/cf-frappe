@@ -279,7 +279,8 @@ export class DocumentService implements DocumentCommandExecutor {
     const tenantId = resolveTenant(command.actor, command.tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
-    if (!can(command.actor, doctype, "update", existing)) {
+    const permissionAction = commandDefinition.permissionAction ?? "update";
+    if (!can(command.actor, doctype, permissionAction, existing)) {
       throw permissionDenied(`Actor '${command.actor.id}' cannot execute ${command.command} on ${doctype.name}/${command.name}`);
     }
     const roleAllowed =

@@ -14,6 +14,7 @@ The current slice is a working kernel:
 - D1 projection-index planner from DocType `indexes`
 - generated Desk list/form UI from DocType metadata
 - Cloudflare Queue/Cron background job primitives
+- R2-backed file attachments with event-sourced `File` metadata
 - a runnable `Task` example under `examples/todos`
 
 ## Why
@@ -29,6 +30,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | REST resources | generated `/api/resource/:doctype` routes |
 | Desk list/forms | generated `/desk` pages from DocType metadata |
 | Background jobs | `JobRegistry`, Queue producers/consumers, and Cron dispatch |
+| File attachments | `File` DocType metadata plus R2 object storage |
 | Database tables | D1 append-only events plus current projections |
 | Concurrency boundary | Durable Object command coordinator per aggregate stream |
 
@@ -58,7 +60,7 @@ npm run dev
 ## Define A Model
 
 ```ts
-import { createRegistry, defineDocType } from "cf-frappe";
+import { createRegistry, defineDocType, fileDocType } from "cf-frappe";
 
 export const Task = defineDocType({
   name: "Task",
@@ -80,7 +82,7 @@ export const Task = defineDocType({
   ]
 });
 
-export const registry = createRegistry({ doctypes: [Task] });
+export const registry = createRegistry({ doctypes: [Task, fileDocType] });
 ```
 
 ## Expose It On Workers
@@ -109,6 +111,12 @@ The generated API includes:
 - `POST /api/resource/:doctype/:name/transition/:action`
 - `POST /api/resource/:doctype/:name/command/:command`
 - `DELETE /api/resource/:doctype/:name`
+
+When file support is enabled, the generated API also includes:
+
+- `POST /api/files`
+- `GET /api/files/:name/content`
+- `DELETE /api/files/:name`
 
 The generated Desk UI includes:
 
@@ -186,6 +194,50 @@ export default createCloudFrappeWorker<Env>({
 
 Queue consumers process each message independently: malformed messages and permanent failures are acknowledged, retryable failures use backoff, and job contexts carry an idempotency key. For production, create the Queue with Wrangler and add producer/consumer bindings plus UTC Cron triggers in `wrangler.jsonc`.
 
+## File Attachments
+
+File bytes live in a `FileStorage` port; file metadata is a regular event-sourced `File` document. On Cloudflare, `R2FileStorage` stores bytes in R2 while `DocumentService` records filename, object key, size, content type, attachment target, uploader, privacy, and ETag.
+
+```ts
+import {
+  R2FileStorage,
+  createAggregateCoordinatorClass,
+  createCloudFrappeWorker,
+  type CloudFrappeEnv
+} from "cf-frappe";
+import { registry } from "./models";
+
+interface Env extends CloudFrappeEnv {
+  readonly FILES: R2Bucket;
+}
+
+export class AggregateCoordinator extends createAggregateCoordinatorClass({ registry }) {}
+
+export default createCloudFrappeWorker<Env>({
+  registry,
+  actor: yourTrustedActorResolver,
+  files: {
+    storage: (env) => new R2FileStorage(env.FILES),
+    maxFileBytes: 25 * 1024 * 1024
+  }
+});
+```
+
+Register `fileDocType` with your app registry, then bind R2 in `wrangler.jsonc`:
+
+```jsonc
+{
+  "r2_buckets": [
+    {
+      "binding": "FILES",
+      "bucket_name": "cf-frappe-files"
+    }
+  ]
+}
+```
+
+Uploads are buffered in this first slice so the framework always knows the object length before writing to R2. Multipart uploads and presigned direct browser uploads are intentionally left as future adapters over the same `FileStorage` boundary.
+
 ## Architecture
 
 ```mermaid
@@ -195,6 +247,10 @@ flowchart LR
   DESK --> QUERY
   CRON["Cron trigger"] --> JOBS["JobDispatcher"]
   QUEUE["Queue consumer"] --> EXEC["JobExecutor"]
+  FILES["File API"] --> FSVC["FileService"]
+  FSVC --> DOCLIENT
+  FSVC --> QUERY
+  FSVC --> R2["R2 FileStorage"]
   JOBS --> CFQ["Cloudflare Queue"]
   EXEC --> APP
   EXEC --> QUERY
@@ -213,10 +269,9 @@ flowchart LR
 The dependency direction is one way:
 
 - `core` has pure types, schema validation, event folding, permissions, and registry contracts
-- `application` orchestrates commands and queries through ports
-- `application` orchestrates commands, queries, and job execution through ports
-- `ports` define storage, queues, execution logs, clocks, and id generation
-- `adapters` implement in-memory, D1, HTTP, Desk, and Cloudflare integration
+- `application` orchestrates commands, queries, files, and job execution through ports
+- `ports` define document storage, projections, file storage, queues, execution logs, clocks, and id generation
+- `adapters` implement in-memory, D1, HTTP, Desk, R2, and Cloudflare integration
 - `cloudflare` packages Worker and Durable Object factories
 
 ## Quality Gate
@@ -233,11 +288,11 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 80 tests across schema, permissions, events, registry, services, jobs, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, Queue/Cron integration, and D1 schema planning.
+Current suite: 92 tests across schema, permissions, events, registry, services, jobs, files, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, Queue/Cron/R2 integration, and D1 schema planning.
 
 ## Status
 
-This is not Frappe parity yet. Basic generated Desk list/form pages and Cloudflare-native background job primitives exist, but full migration management, reporting, print views, durable job dashboards, realtime events, auth integrations, file storage, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
+This is not Frappe parity yet. Basic generated Desk list/form pages, Cloudflare-native background job primitives, and R2-backed file attachments exist, but full migration management, reporting, print views, durable job dashboards, realtime events, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
 
 ## References
 
@@ -250,3 +305,4 @@ This is not Frappe parity yet. Basic generated Desk list/form pages and Cloudfla
 - [Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/)
 - [Cloudflare Queues](https://developers.cloudflare.com/queues/)
 - [Cloudflare Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
+- [Cloudflare R2](https://developers.cloudflare.com/r2/)

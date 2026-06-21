@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Cloudflare background jobs slice:
+As of the R2 file attachments slice:
 
-- Test files: `19`
-- Vitest cases: `80`
+- Test files: `23`
+- Vitest cases: `92`
 
 ## Implication
 

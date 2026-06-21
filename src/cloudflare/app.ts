@@ -3,6 +3,7 @@ import { JobDispatcher } from "../application/job-dispatcher";
 import { JobExecutor } from "../application/job-executor";
 import { QueryService } from "../application/query-service";
 import type { DocumentCommandExecutor } from "../application/document-service";
+import { FileService } from "../application/file-service";
 import { D1ProjectionStore } from "../adapters/d1";
 import { createDeskApp } from "../adapters/desk";
 import { createResourceApi } from "../adapters/http";
@@ -11,6 +12,7 @@ import { FrameworkError } from "../core/errors";
 import type { JobRegistry, JobRetryPolicy } from "../core/jobs";
 import type { ModelRegistry } from "../core/registry";
 import type { Clock } from "../ports/clock";
+import type { FileStorage } from "../ports/file-storage";
 import type { IdGenerator } from "../ports/id-generator";
 import type { JobExecutionLog } from "../ports/job-execution-log";
 import type { JobMessage, JobQueue } from "../ports/job-queue";
@@ -31,6 +33,15 @@ export interface CloudFrappeRuntimeServices {
   readonly registry: ModelRegistry;
   readonly documents: DocumentCommandExecutor;
   readonly queries: QueryService;
+  readonly files?: FileService;
+}
+
+export interface CloudFrappeFileOptions<TEnv extends CloudFrappeEnv = CloudFrappeEnv> {
+  readonly storage: (env: TEnv, services: Omit<CloudFrappeRuntimeServices, "files">) => FileStorage;
+  readonly maxFileBytes?: number;
+  readonly fileDoctype?: string;
+  readonly clock?: Clock;
+  readonly ids?: IdGenerator;
 }
 
 export interface CloudFrappeJobOptions<
@@ -54,6 +65,7 @@ export interface CloudFrappeWorkerOptions<
   readonly registry: ModelRegistry;
   readonly actor: ActorResolver;
   readonly maxJsonBytes?: number;
+  readonly files?: CloudFrappeFileOptions<TEnv>;
   readonly jobs?: CloudFrappeJobOptions<TEnv, TJobResources>;
 }
 
@@ -131,17 +143,32 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     namespace: env.AGGREGATES
   });
   const queries = new QueryService({ registry: options.registry, projections });
-  const services: CloudFrappeRuntimeServices = {
+  const baseServices: Omit<CloudFrappeRuntimeServices, "files"> = {
     registry: options.registry,
     documents,
     queries
   };
+  const files = options.files
+    ? new FileService({
+        registry: options.registry,
+        documents,
+        queries,
+        storage: options.files.storage(env, baseServices),
+        ...(options.files.clock === undefined ? {} : { clock: options.files.clock }),
+        ...(options.files.ids === undefined ? {} : { ids: options.files.ids }),
+        ...(options.files.maxFileBytes === undefined ? {} : { maxFileBytes: options.files.maxFileBytes }),
+        ...(options.files.fileDoctype === undefined ? {} : { fileDoctype: options.files.fileDoctype })
+      })
+    : undefined;
+  const services: CloudFrappeRuntimeServices = files ? { ...baseServices, files } : baseServices;
   const app = createResourceApi({
     registry: options.registry,
     documents,
     queries,
     actor: options.actor,
-    ...(options.maxJsonBytes ? { maxJsonBytes: options.maxJsonBytes } : {})
+    ...(options.maxJsonBytes ? { maxJsonBytes: options.maxJsonBytes } : {}),
+    ...(files === undefined ? {} : { files }),
+    ...(options.files?.maxFileBytes === undefined ? {} : { maxFileBytes: options.files.maxFileBytes })
   });
   const desk = createDeskApp({
     registry: options.registry,
