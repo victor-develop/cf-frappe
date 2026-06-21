@@ -117,7 +117,10 @@ export class DocumentService implements DocumentCommandExecutor {
     const now = this.clock.now();
     const withDefaults = applyDefaults(doctype, command.data, { actor: command.actor, now });
     const data = await this.runBeforeValidate(doctype, withDefaults);
-    const issues = await this.validate(doctype, data);
+    const issues = [
+      ...(await this.validate(doctype, data)),
+      ...(await this.validateLinks(command.actor, tenantId, doctype, data))
+    ];
     if (issues.length > 0) {
       throw validationFailed(issues);
     }
@@ -169,7 +172,8 @@ export class DocumentService implements DocumentCommandExecutor {
     const patch = await this.runBeforeValidate(doctype, compactData(command.patch), existing);
     const readOnlyIssues = readonlyIssues(doctype, patch);
     const validationIssues = await this.validate(doctype, patch, existing);
-    const issues = [...readOnlyIssues, ...validationIssues];
+    const linkIssues = await this.validateLinks(command.actor, tenantId, doctype, patch);
+    const issues = [...readOnlyIssues, ...validationIssues, ...linkIssues];
     if (issues.length > 0) {
       throw validationFailed(issues);
     }
@@ -303,7 +307,8 @@ export class DocumentService implements DocumentCommandExecutor {
     const normalizedPatch = await this.runBeforeValidate(doctype, compactData(patch), existing);
     const readOnlyIssues = readonlyIssues(doctype, normalizedPatch);
     const validationIssues = await this.validate(doctype, normalizedPatch, existing);
-    const issues = [...readOnlyIssues, ...validationIssues];
+    const linkIssues = await this.validateLinks(command.actor, tenantId, doctype, normalizedPatch);
+    const issues = [...readOnlyIssues, ...validationIssues, ...linkIssues];
     if (issues.length > 0) {
       throw validationFailed(issues);
     }
@@ -432,6 +437,49 @@ export class DocumentService implements DocumentCommandExecutor {
       }
     }
     return issues;
+  }
+
+  private async validateLinks(
+    actor: Actor,
+    tenantId: string,
+    doctype: DocTypeDefinition,
+    data: MutableDocumentData
+  ): Promise<readonly ValidationIssue[]> {
+    const linkFields = doctype.fields.filter(
+      (field) => field.type === "link" && Object.prototype.hasOwnProperty.call(data, field.name)
+    );
+    if (linkFields.length === 0) {
+      return [];
+    }
+    const issues = await Promise.all(
+      linkFields.map(async (field): Promise<readonly ValidationIssue[]> => {
+        const value = data[field.name];
+        if (typeof value !== "string" || value.length === 0) {
+          return [];
+        }
+        const targetDoctype = this.registry.get(field.linkTo ?? "");
+        const target = await this.readDocumentFromEvents(tenantId, targetDoctype, value);
+        if (target && target.docstatus !== "deleted" && can(actor, targetDoctype, "read", target)) {
+          return [];
+        }
+        return [
+          {
+            field: field.name,
+            code: "link_not_found",
+            message: `Field '${field.name}' references missing ${targetDoctype.name}/${value}`
+          }
+        ];
+      })
+    );
+    return issues.flat();
+  }
+
+  private async readDocumentFromEvents(
+    tenantId: string,
+    doctype: DocTypeDefinition,
+    name: string
+  ): Promise<DocumentSnapshot | null> {
+    return foldDocument(await this.store.readStream(documentStream(tenantId, doctype.name, name)));
   }
 
   private async runAfterCommit(

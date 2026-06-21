@@ -8,8 +8,11 @@ import {
   type Actor,
   type DocTypeDefinition,
   type DocumentSnapshot,
+  type FieldDefinition,
   type ListDocumentsFilter,
   type ListDocumentsResult,
+  type LinkOption,
+  type LinkOptionsResult,
   type ResolvedFormView,
   type ResolvedListView
 } from "../core/types";
@@ -95,6 +98,39 @@ export class QueryService {
     return resolveFormView(this.getMeta(actor, doctypeName));
   }
 
+  async listLinkOptions(
+    actor: Actor,
+    doctypeName: string,
+    fieldName: string,
+    options: {
+      readonly tenantId?: string;
+      readonly q?: string;
+      readonly limit?: number;
+    } = {}
+  ): Promise<LinkOptionsResult> {
+    const doctype = this.getMeta(actor, doctypeName);
+    const field = getField(doctype, fieldName);
+    if (field.type !== "link" || !field.linkTo) {
+      throw new FrameworkError("BAD_REQUEST", `Field '${fieldName}' on ${doctype.name} is not a link field`, {
+        status: 400
+      });
+    }
+    const target = this.registry.get(field.linkTo);
+    if (!can(actor, target, "read")) {
+      throw permissionDenied(`Actor '${actor.id}' cannot read ${target.name}`);
+    }
+    const limit = clampLimit(options.limit ?? 20);
+    const search = normalizeSearch(options.q);
+    const tenantId = options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
+    const linkOptions = await this.collectLinkOptions(actor, target, tenantId, search, limit);
+    return {
+      doctype: doctype.name,
+      field: field.name,
+      target: target.name,
+      options: linkOptions
+    };
+  }
+
   async listDocumentsForView(
     actor: Actor,
     doctypeName: string,
@@ -127,6 +163,32 @@ export class QueryService {
     });
     return { listView, filters, result };
   }
+
+  private async collectLinkOptions(
+    actor: Actor,
+    target: DocTypeDefinition,
+    tenantId: string,
+    search: string | undefined,
+    limit: number
+  ): Promise<readonly LinkOption[]> {
+    const matches: LinkOption[] = [];
+    const pageSize = 200;
+    for (let offset = 0; ; offset += pageSize) {
+      const result = await this.listDocuments(actor, target.name, { tenantId, limit: pageSize, offset });
+      for (const document of result.data) {
+        const option = toLinkOption(document, target);
+        if (!search || matchesLinkSearch(option, search)) {
+          matches.push(option);
+          if (matches.length >= limit) {
+            return matches;
+          }
+        }
+      }
+      if (offset + pageSize >= result.total) {
+        return matches;
+      }
+    }
+  }
 }
 
 function mergeDefaultFilters(
@@ -151,4 +213,44 @@ function clampLimit(limit?: number): number {
     throw new FrameworkError("BAD_REQUEST", "limit must be a positive integer", { status: 400 });
   }
   return Math.min(limit, 200);
+}
+
+function getField(doctype: DocTypeDefinition, fieldName: string): FieldDefinition {
+  const field = doctype.fields.find((item) => item.name === fieldName);
+  if (!field) {
+    throw new FrameworkError("BAD_REQUEST", `Field '${fieldName}' is not defined on ${doctype.name}`, {
+      status: 400
+    });
+  }
+  return field;
+}
+
+function normalizeSearch(q: string | undefined): string | undefined {
+  const search = q?.trim().toLowerCase();
+  return search ? search : undefined;
+}
+
+function toLinkOption(document: DocumentSnapshot, doctype: DocTypeDefinition): LinkOption {
+  return {
+    value: document.name,
+    label: labelForLinkedDocument(document, doctype)
+  };
+}
+
+function labelForLinkedDocument(document: DocumentSnapshot, doctype: DocTypeDefinition): string {
+  const title = document.data.title;
+  if (typeof title === "string" && title.length > 0) {
+    return title;
+  }
+  if (doctype.naming?.kind === "field") {
+    const namedValue = document.data[doctype.naming.field];
+    if (typeof namedValue === "string" && namedValue.length > 0) {
+      return namedValue;
+    }
+  }
+  return document.name;
+}
+
+function matchesLinkSearch(option: LinkOption, search: string): boolean {
+  return option.value.toLowerCase().includes(search) || option.label.toLowerCase().includes(search);
 }

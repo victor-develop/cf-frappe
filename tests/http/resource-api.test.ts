@@ -1,5 +1,5 @@
 import { createResourceApi, unsafeHeaderActorResolver } from "../../src";
-import { createServices } from "../helpers";
+import { createLinkedServices, createServices, owner } from "../helpers";
 
 describe("resource api", () => {
   function makeApp() {
@@ -21,6 +21,17 @@ describe("resource api", () => {
       actor: unsafeHeaderActorResolver,
       maxJsonBytes
     });
+  }
+
+  function makeLinkedApp() {
+    const services = createLinkedServices(["p1", "p2"]);
+    const app = createResourceApi({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: unsafeHeaderActorResolver
+    });
+    return { app, services };
   }
 
   const userHeaders = {
@@ -161,6 +172,35 @@ describe("resource api", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "BAD_REQUEST", message: "Filter field 'missing' is not defined on Note" }
+    });
+  });
+
+  it("returns link field options from projected target documents", async () => {
+    const { app, services } = makeLinkedApp();
+    await services.documents.create({ actor: owner, doctype: "Project", data: { title: "Apollo" } });
+    await services.documents.create({ actor: owner, doctype: "Project", data: { title: "Zeus" } });
+
+    const response = await app.request("/api/link-options/Task/project?q=apo", { headers: userHeaders });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      data: {
+        doctype: "Task",
+        field: "project",
+        target: "Project",
+        options: [{ value: "Apollo", label: "Apollo" }]
+      }
+    });
+  });
+
+  it("maps invalid link option fields to JSON bad requests", async () => {
+    const { app } = makeLinkedApp();
+
+    const response = await app.request("/api/link-options/Task/title", { headers: userHeaders });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Field 'title' on Task is not a link field" }
     });
   });
 

@@ -8,7 +8,7 @@ import {
   InMemoryDocumentStore,
   QueryService
 } from "../../src";
-import { createServices, data, now, owner } from "../helpers";
+import { createLinkedServices, createServices, data, now, owner } from "../helpers";
 
 describe("Desk app", () => {
   function makeDesk() {
@@ -19,6 +19,17 @@ describe("Desk app", () => {
       prints: services.prints,
       queries: services.queries,
       reports: services.reports,
+      actor: () => owner
+    });
+    return { app, services };
+  }
+
+  function makeLinkedDesk() {
+    const services = createLinkedServices(["p1", "p2", "t1"]);
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
       actor: () => owner
     });
     return { app, services };
@@ -163,6 +174,30 @@ describe("Desk app", () => {
     await expect(services.events.readStream("acme:Note:Desk%20Note")).resolves.toMatchObject([
       { metadata: { method: "POST", url: "http://localhost/desk/Note" } }
     ]);
+  });
+
+  it("renders link fields as target-backed select options", async () => {
+    const { app, services } = makeLinkedDesk();
+    await services.documents.create({ actor: owner, doctype: "Project", data: { title: "Apollo" } });
+    await services.documents.create({ actor: owner, doctype: "Project", data: { title: "Zeus" } });
+
+    const form = await app.request("/desk/Task/new");
+
+    expect(form.status).toBe(200);
+    const html = await form.text();
+    expect(html).toContain('name="project"');
+    expect(html).toContain('<option value="Apollo">Apollo</option>');
+    expect(html).toContain('<option value="Zeus">Zeus</option>');
+
+    await services.documents.create({
+      actor: owner,
+      doctype: "Task",
+      data: { title: "Launch", project: "Apollo" }
+    });
+
+    const edit = await app.request("/desk/Task/Launch");
+    expect(edit.status).toBe(200);
+    await expect(edit.text()).resolves.toContain('<option value="Apollo" selected>Apollo</option>');
   });
 
   it("does not submit omitted form-view boolean fields as unchecked", async () => {

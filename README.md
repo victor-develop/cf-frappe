@@ -5,6 +5,7 @@ cf-frappe is an early Cloudflare-native application framework inspired by Frappe
 The current slice is a working kernel:
 
 - typed DocType metadata with fields, defaults, validation, naming, permissions, and workflows
+- metadata-defined link fields with event-stream referential integrity and generated lookup options
 - command-side document service that writes immutable events
 - query-side projection service for current document reads and lists
 - in-memory adapters for TDD
@@ -29,6 +30,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | Frappe concept | cf-frappe direction |
 | --- | --- |
 | DocType | `defineDocType(...)` metadata |
+| Link fields | registered `type: "link"` targets with write-time existence checks and lookup options |
 | Document lifecycle | command handlers that emit domain events |
 | Permissions | role and predicate rules attached to DocTypes |
 | Hooks/controllers | pure hook contracts registered in `ModelRegistry` |
@@ -71,28 +73,38 @@ npm run dev
 ```ts
 import { createRegistry, defineDocType, definePrintFormat, defineReport, fileDocType } from "cf-frappe";
 
+export const Project = defineDocType({
+  name: "Project",
+  naming: { kind: "field", field: "title" },
+  fields: [{ name: "title", type: "text", required: true }],
+  permissions: [
+    { roles: ["User"], actions: ["read", "create", "update"] }
+  ]
+});
+
 export const Task = defineDocType({
   name: "Task",
   naming: { kind: "field", field: "title" },
   fields: [
     { name: "title", type: "text", required: true, min: 3 },
+    { name: "project", type: "link", linkTo: "Project", required: true },
     { name: "priority", type: "select", options: ["Low", "Medium", "High"], defaultValue: "Medium" },
     { name: "status", type: "select", options: ["Open", "Closed"], defaultValue: "Open" },
     { name: "description", type: "longText" }
   ],
   formView: {
     sections: [
-      { heading: "Summary", columns: 1, fields: ["title", "priority", "status"] },
+      { heading: "Summary", columns: 1, fields: ["title", "project", "priority", "status"] },
       { heading: "Details", columns: 2, fields: ["description"] }
     ]
   },
   listView: {
-    columns: ["title", "priority", "status"],
-    filterFields: ["title", "priority", "status"],
+    columns: ["title", "project", "priority", "status"],
+    filterFields: ["title", "project", "priority", "status"],
     filters: [{ field: "status", value: "Open" }],
     pageSize: 25
   },
-  indexes: [["priority"], ["status"]],
+  indexes: [["project"], ["priority"], ["status"]],
   commands: [
     {
       name: "raisePriority",
@@ -132,7 +144,7 @@ export const TaskPrint = definePrintFormat({
 });
 
 export const registry = createRegistry({
-  doctypes: [Task, fileDocType],
+  doctypes: [Project, Task, fileDocType],
   printFormats: [TaskPrint],
   reports: [OpenTasks]
 });
@@ -163,6 +175,7 @@ The generated API includes:
 - `GET /api/meta/reports/:report`
 - `GET /api/print/:format/:name`
 - `GET /api/report/:report/run`
+- `GET /api/link-options/:doctype/:field`
 - `POST /api/resource/:doctype`
 - `GET /api/resource/:doctype`
 - `GET /api/resource/:doctype/:name`
@@ -237,6 +250,18 @@ HTTP and Desk list pages share the same query shape:
 - `filter_count__lte=10`
 
 The D1 adapter builds filtered row and count queries with prepared statements, so filter values are bound parameters rather than interpolated SQL.
+
+## Link Fields
+
+Link fields declare relationships in DocType metadata:
+
+```ts
+{ name: "project", type: "link", linkTo: "Project", required: true }
+```
+
+`defineDocType(...)` requires every link field to name a target, and `ModelRegistry` verifies that the target DocType is registered. On create, update, and model-declared domain commands, `DocumentService` folds the target document's event stream and rejects missing, deleted, or unreadable targets with `VALIDATION_FAILED` / `link_not_found`. Projection state is not used as write authority for link integrity.
+
+Generated clients can call `QueryService.listLinkOptions(...)` or `GET /api/link-options/:doctype/:field?q=apollo&limit=20` to retrieve readable target documents as `{ value, label }` options. Desk forms render visible link fields as select controls populated from the same query boundary.
 
 ## Desk Forms
 

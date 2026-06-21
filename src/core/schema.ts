@@ -7,6 +7,7 @@ import type {
   MutableDocumentData,
   ValidationIssue
 } from "./types";
+import { FrameworkError } from "./errors";
 import { assertFormViewDefinition } from "./form-view";
 import { assertListViewDefinition } from "./list-view";
 
@@ -25,6 +26,7 @@ export function defineDocType<TData extends DocumentData>(
     if (seen.has(field.name)) {
       throw new Error(`Duplicate field '${field.name}' on doctype '${definition.name}'`);
     }
+    assertLinkFieldDefinition(definition, field);
     seen.add(field.name);
   }
   assertFormViewDefinition(definition);
@@ -175,6 +177,27 @@ function validateField(field: FieldDefinition, value: JsonValue): readonly Valid
 function assertIdentifier(value: string, label: string): void {
   if (!/^[A-Za-z][A-Za-z0-9_ ]*$/.test(value)) {
     throw new Error(`Invalid ${label}: '${value}'`);
+  }
+}
+
+function assertLinkFieldDefinition(doctype: DocTypeDefinition, field: FieldDefinition): void {
+  if (field.type === "link") {
+    if (!field.linkTo) {
+      throw new FrameworkError(
+        "DOCTYPE_LINK_INVALID",
+        `Link field '${field.name}' on ${doctype.name} must declare linkTo`,
+        { status: 400 }
+      );
+    }
+    assertIdentifier(field.linkTo, `link target on ${doctype.name}.${field.name}`);
+    return;
+  }
+  if (field.linkTo !== undefined) {
+    throw new FrameworkError(
+      "DOCTYPE_LINK_INVALID",
+      `Field '${field.name}' on ${doctype.name} declares linkTo but is not a link field`,
+      { status: 400 }
+    );
   }
 }
 

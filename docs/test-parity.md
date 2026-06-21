@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the metadata form-view slice:
+As of the link-field integrity and lookup slice:
 
 - Test files: `37`
-- Vitest cases: `160`
+- Vitest cases: `175`
 
 ## Implication
 

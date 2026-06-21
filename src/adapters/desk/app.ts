@@ -17,7 +17,8 @@ import {
   renderListView,
   renderNotFound,
   renderReportList,
-  renderReportView
+  renderReportView,
+  type FormLinkOptions
 } from "./render";
 
 export interface DeskAppOptions {
@@ -123,6 +124,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
     const formView = options.queries.getFormView(actor, doctype.name);
+    const linkOptions = await linkOptionsForForm(options, actor, doctype, formView);
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
     return html(
@@ -131,7 +133,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         active: doctype.name,
         doctypes,
         reports,
-        body: renderFormView(doctype, formView, { mode: "create" })
+        body: renderFormView(doctype, formView, { mode: "create", linkOptions })
       })
     );
   });
@@ -161,13 +163,14 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const printFormats = listPrintFormats(options, actor, doctype.name);
     const formView = options.queries.getFormView(actor, doctype.name);
     const document = await options.queries.getDocument(actor, doctype.name, c.req.param("name"));
+    const linkOptions = await linkOptionsForForm(options, actor, doctype, formView);
     return html(
       renderDeskLayout({
         title: document.name,
         active: doctype.name,
         doctypes,
         reports,
-        body: renderFormView(doctype, formView, { mode: "update", document, printFormats })
+        body: renderFormView(doctype, formView, { mode: "update", document, linkOptions, printFormats })
       })
     );
   });
@@ -262,6 +265,7 @@ async function renderDeskError(
   const doctypes = options.queries.listDoctypes(actor);
   const reports = listReports(options, actor);
   const formView = options.queries.getFormView(actor, doctype.name);
+  const linkOptions = await linkOptionsForForm(options, actor, doctype, formView);
   const document = name ? await options.queries.getDocument(actor, doctype.name, name).catch(() => undefined) : undefined;
   const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
   return html(
@@ -273,6 +277,7 @@ async function renderDeskError(
       body: renderFormView(doctype, formView, {
         mode,
         ...(document ? { document } : {}),
+        linkOptions,
         ...(document ? { printFormats: listPrintFormats(options, actor, doctype.name) } : {}),
         error: message
       })
@@ -287,6 +292,23 @@ function listReports(options: DeskAppOptions, actor: Actor) {
 
 function listPrintFormats(options: DeskAppOptions, actor: Actor, doctype?: string) {
   return options.prints?.listPrintFormats(actor, doctype) ?? [];
+}
+
+async function linkOptionsForForm(
+  options: DeskAppOptions,
+  actor: Actor,
+  doctype: DocTypeDefinition,
+  formView: ResolvedFormView
+): Promise<FormLinkOptions> {
+  const entries = await Promise.all(
+    formView.fields
+      .filter((field) => field.type === "link")
+      .map(async (field) => {
+        const result = await options.queries.listLinkOptions(actor, doctype.name, field.name);
+        return [field.name, result.options] as const;
+      })
+  );
+  return Object.fromEntries(entries) as FormLinkOptions;
 }
 
 function reportFiltersFromUrl(url: URL): ReportFilters {

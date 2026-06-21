@@ -256,5 +256,17 @@ export interface ListDocumentsResult<TData extends DocumentData = DocumentData> 
   readonly total: number;
 }
 
+export interface LinkOption {
+  readonly value: DocumentName;
+  readonly label: string;
+}
+
+export interface LinkOptionsResult {
+  readonly doctype: DocTypeName;
+  readonly field: string;
+  readonly target: DocTypeName;
+  readonly options: readonly LinkOption[];
+}
+
 export const SYSTEM_MANAGER_ROLE = "System Manager";
 export const DEFAULT_TENANT_ID = "default";

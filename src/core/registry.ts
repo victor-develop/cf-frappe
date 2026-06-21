@@ -46,8 +46,9 @@ export class ModelRegistry {
 
   constructor(options: RegistryOptions = {}) {
     for (const doctype of options.doctypes ?? []) {
-      this.registerDocType(doctype);
+      this.putDocType(doctype);
     }
+    this.assertDocTypeLinksResolve();
     for (const report of options.reports ?? []) {
       this.registerReport(report);
     }
@@ -62,12 +63,40 @@ export class ModelRegistry {
   }
 
   registerDocType(doctype: DocTypeDefinition): void {
+    this.putDocType(doctype);
+    try {
+      this.assertDocTypeLinksResolve();
+    } catch (error) {
+      this.doctypes.delete(doctype.name);
+      throw error;
+    }
+  }
+
+  private putDocType(doctype: DocTypeDefinition): void {
     if (this.doctypes.has(doctype.name)) {
       throw new FrameworkError("DOCTYPE_DUPLICATE", `DocType '${doctype.name}' is already registered`, {
         status: 409
       });
     }
     this.doctypes.set(doctype.name, doctype);
+  }
+
+  private assertDocTypeLinksResolve(): void {
+    for (const doctype of this.doctypes.values()) {
+      for (const field of doctype.fields) {
+        if (field.type !== "link") {
+          continue;
+        }
+        const target = field.linkTo;
+        if (!target || !this.doctypes.has(target)) {
+          throw new FrameworkError(
+            "DOCTYPE_LINK_INVALID",
+            `Link field '${field.name}' on ${doctype.name} targets unregistered DocType '${target ?? ""}'`,
+            { status: 400 }
+          );
+        }
+      }
+    }
   }
 
   registerReport(report: ReportDefinition): void {

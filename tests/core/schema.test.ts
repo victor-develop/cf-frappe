@@ -1,4 +1,4 @@
-import { applyDefaults, defineDocType, validateDocumentData } from "../../src";
+import { applyDefaults, defineDocType, FrameworkError, validateDocumentData } from "../../src";
 import { owner } from "../helpers";
 
 describe("schema", () => {
@@ -64,5 +64,23 @@ describe("schema", () => {
         ]
       })
     ).toThrow("Duplicate field");
+  });
+
+  it("requires link fields to declare their target DocType", () => {
+    expect(() =>
+      defineDocType({
+        name: "Task",
+        fields: [{ name: "project", type: "link" }]
+      })
+    ).toThrow(FrameworkError);
+  });
+
+  it("rejects link targets on non-link fields", () => {
+    expect(() =>
+      defineDocType({
+        name: "Task",
+        fields: [{ name: "project", type: "text", linkTo: "Project" }]
+      })
+    ).toThrow(FrameworkError);
   });
 });

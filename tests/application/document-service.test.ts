@@ -1,5 +1,5 @@
 import { FrameworkError } from "../../src";
-import { createServices, data, guest, manager, now, owner } from "../helpers";
+import { createLinkedServices, createServices, data, guest, manager, now, owner } from "../helpers";
 
 describe("DocumentService", () => {
   it("creates a document through defaults, hooks, events, and projection", async () => {
@@ -55,6 +55,98 @@ describe("DocumentService", () => {
     expect(updated).toMatchObject({
       version: 2,
       data: { body: "from events" }
+    });
+  });
+
+  it("accepts link fields only when the target document exists in the event stream", async () => {
+    const { documents } = createLinkedServices(["p1", "t1"]);
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Apollo" } });
+
+    const task = await documents.create({
+      actor: owner,
+      doctype: "Task",
+      data: { title: "Launch", project: "Apollo" }
+    });
+
+    expect(task).toMatchObject({
+      doctype: "Task",
+      data: { project: "Apollo" }
+    });
+  });
+
+  it("rejects missing or deleted link targets on creates, updates, and commands", async () => {
+    const { documents } = createLinkedServices(["p1", "t1", "p2", "t2"]);
+
+    await expect(
+      documents.create({
+        actor: owner,
+        doctype: "Task",
+        data: { title: "Orphan", project: "Missing" }
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "project", code: "link_not_found" })]
+    });
+
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Apollo" } });
+    await documents.create({
+      actor: owner,
+      doctype: "Task",
+      data: { title: "Launch", project: "Apollo" }
+    });
+    await documents.delete({ actor: owner, doctype: "Project", name: "Apollo" });
+
+    await expect(
+      documents.update({
+        actor: owner,
+        doctype: "Task",
+        name: "Launch",
+        patch: { description: "Target deleted, link omitted" }
+      })
+    ).resolves.toMatchObject({
+      data: { description: "Target deleted, link omitted", project: "Apollo" }
+    });
+
+    await expect(
+      documents.update({
+        actor: owner,
+        doctype: "Task",
+        name: "Launch",
+        patch: { project: "Apollo" }
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "project", code: "link_not_found" })]
+    });
+
+    await expect(
+      documents.execute({
+        actor: owner,
+        doctype: "Task",
+        name: "Launch",
+        command: "move",
+        input: { project: "Apollo" }
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "project", code: "link_not_found" })]
+    });
+  });
+
+  it("rejects link targets the actor cannot read without exposing target existence", async () => {
+    const { documents } = createLinkedServices(["p1"]);
+    const other = { ...owner, id: "other@example.com" };
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Secret" } });
+
+    await expect(
+      documents.create({
+        actor: other,
+        doctype: "Task",
+        data: { title: "Unauthorized", project: "Secret" }
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "project", code: "link_not_found" })]
     });
   });
 

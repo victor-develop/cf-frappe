@@ -123,6 +123,47 @@ export const notePrintFormat = definePrintFormat({
   roles: ["User", "Task Manager"]
 });
 
+export const projectDocType = defineDocType({
+  name: "Project",
+  naming: { kind: "field", field: "title" },
+  fields: [
+    { name: "title", type: "text", required: true },
+    { name: "created_by", type: "text", readOnly: true, defaultValue: ({ actor }) => actor.id }
+  ],
+  permissions: [
+    {
+      roles: ["User"],
+      actions: ["read", "create", "update", "delete"],
+      when: ({ actor, document }) => !document || document.data.created_by === actor.id
+    }
+  ]
+});
+
+export const taskDocType = defineDocType({
+  name: "Task",
+  naming: { kind: "field", field: "title" },
+  fields: [
+    { name: "title", type: "text", required: true },
+    { name: "project", type: "link", linkTo: "Project", required: true },
+    { name: "description", type: "longText" }
+  ],
+  formView: {
+    sections: [{ heading: "Task", columns: 1, fields: ["title", "project", "description"] }]
+  },
+  listView: {
+    columns: ["title", "project"],
+    filterFields: ["title", "project"]
+  },
+  permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }],
+  commands: [
+    {
+      name: "move",
+      eventType: "TaskMoved",
+      fields: ["project"]
+    }
+  ]
+});
+
 export function createTestRegistry(): ModelRegistry {
   return createRegistry({
     doctypes: [noteDocType],
@@ -165,6 +206,19 @@ export function createServices(
   const prints = new PrintService({ registry, queries });
   const reports = new ReportService({ registry, queries });
   return { registry, store, events: store, projections: store, documents, prints, queries, reports };
+}
+
+export function createLinkedServices(ids: readonly string[] = ["evt1", "evt2", "evt3", "evt4"]) {
+  const registry = createRegistry({ doctypes: [projectDocType, taskDocType] });
+  const store = new InMemoryDocumentStore();
+  const documents = new DocumentService({
+    registry,
+    store,
+    clock: fixedClock(now),
+    ids: deterministicIds(ids)
+  });
+  const queries = new QueryService({ registry, projections: store });
+  return { registry, store, events: store, projections: store, documents, queries };
 }
 
 export function data(overrides: DocumentData = {}): DocumentData {

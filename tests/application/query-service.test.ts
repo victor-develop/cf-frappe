@@ -1,4 +1,5 @@
-import { createServices, data, guest, owner } from "../helpers";
+import { createLinkedServices, createServices, data, guest, owner } from "../helpers";
+import type { ProjectionStore } from "../../src";
 
 describe("QueryService", () => {
   it("lists readable doctypes", () => {
@@ -81,6 +82,64 @@ describe("QueryService", () => {
     });
   });
 
+  it("lists readable link options for link fields", async () => {
+    const { documents, queries } = createLinkedServices(["p1", "p2"]);
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Apollo" } });
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Zeus" } });
+
+    await expect(
+      queries.listLinkOptions(owner, "Task", "project", { q: "apo" })
+    ).resolves.toEqual({
+      doctype: "Task",
+      field: "project",
+      target: "Project",
+      options: [{ value: "Apollo", label: "Apollo" }]
+    });
+  });
+
+  it("omits unreadable target documents from link options", async () => {
+    const { documents, queries } = createLinkedServices(["p1"]);
+    const other = { ...owner, id: "other@example.com" };
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Secret" } });
+
+    await expect(queries.listLinkOptions(other, "Task", "project")).resolves.toMatchObject({
+      options: []
+    });
+  });
+
+  it("fills default link options beyond unreadable projection pages", async () => {
+    const { projections, queries } = createLinkedServices();
+    for (let index = 0; index < 200; index += 1) {
+      await saveProjectedProject(projections, `Secret ${index}`, "other@example.com", "2026-01-02T00:00:00.000Z");
+    }
+    await saveProjectedProject(projections, "Readable", owner.id, "2026-01-01T00:00:00.000Z");
+
+    await expect(queries.listLinkOptions(owner, "Task", "project", { limit: 1 })).resolves.toMatchObject({
+      options: [{ value: "Readable", label: "Readable" }]
+    });
+  });
+
+  it("continues searching link options beyond the first projection page", async () => {
+    const { projections, queries } = createLinkedServices();
+    for (let index = 0; index < 200; index += 1) {
+      await saveProjectedProject(projections, `Project ${index}`, owner.id, "2026-01-02T00:00:00.000Z");
+    }
+    await saveProjectedProject(projections, "Needle", owner.id, "2026-01-01T00:00:00.000Z");
+
+    await expect(queries.listLinkOptions(owner, "Task", "project", { q: "needle", limit: 1 })).resolves.toMatchObject({
+      options: [{ value: "Needle", label: "Needle" }]
+    });
+  });
+
+  it("rejects link option lookups for non-link fields", async () => {
+    const { queries } = createLinkedServices();
+
+    await expect(queries.listLinkOptions(owner, "Task", "title")).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Field 'title' on Task is not a link field"
+    });
+  });
+
   it("applies DocType list-view defaults only for generated list views", async () => {
     const { documents, queries } = createServices(["e1", "e2"]);
     await documents.create({
@@ -120,3 +179,21 @@ describe("QueryService", () => {
     expect(allView.result.total).toBe(2);
   });
 });
+
+async function saveProjectedProject(
+  projections: ProjectionStore,
+  name: string,
+  ownerId: string,
+  updatedAt: string
+): Promise<void> {
+  await projections.save({
+    tenantId: "acme",
+    doctype: "Project",
+    name,
+    version: 1,
+    docstatus: "draft",
+    data: { title: name, created_by: ownerId },
+    createdAt: updatedAt,
+    updatedAt
+  });
+}

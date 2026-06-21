@@ -26,4 +26,25 @@ describe("registry", () => {
     expect(registry.hooksFor("Note")).toEqual([hook]);
     expect(registry.hooksFor("Other")).toEqual([]);
   });
+
+  it("allows link fields to reference doctypes registered later in the same registry", () => {
+    const Task = defineDocType({
+      name: "Task",
+      fields: [{ name: "project", type: "link", linkTo: "Project" }]
+    });
+    const Project = defineDocType({ name: "Project", fields: [] });
+
+    const registry = createRegistry({ doctypes: [Task, Project] });
+
+    expect(registry.get("Task").fields).toMatchObject([{ linkTo: "Project" }]);
+  });
+
+  it("rejects link fields that target an unregistered doctype", () => {
+    const Task = defineDocType({
+      name: "Task",
+      fields: [{ name: "project", type: "link", linkTo: "Project" }]
+    });
+
+    expect(() => createRegistry({ doctypes: [Task] })).toThrow(FrameworkError);
+  });
 });

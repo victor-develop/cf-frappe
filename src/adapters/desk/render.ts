@@ -4,6 +4,7 @@ import type {
   DocumentSnapshot,
   FieldDefinition,
   JsonValue,
+  LinkOption,
   ListDocumentsFilter,
   ListFilterOperator,
   ResolvedFormSection,
@@ -13,6 +14,8 @@ import type {
 import type { ReportDefinition } from "../../core/reports";
 import type { ReportRunResult } from "../../application/report-service";
 import type { PrintFormatDefinition } from "../../core/print-format";
+
+export type FormLinkOptions = Readonly<Record<string, readonly LinkOption[]>>;
 
 export interface DeskLayoutOptions {
   readonly title: string;
@@ -185,6 +188,7 @@ export function renderFormView(
     readonly mode: "create" | "update";
     readonly document?: DocumentSnapshot;
     readonly error?: string;
+    readonly linkOptions?: FormLinkOptions;
     readonly printFormats?: readonly PrintFormatDefinition[];
   }
 ): string {
@@ -193,7 +197,9 @@ export function renderFormView(
       ? `/desk/${encodeURIComponent(doctype.name)}`
       : `/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(options.document?.name ?? "")}`;
   const title = options.mode === "create" ? `New ${labelFor(doctype)}` : options.document?.name ?? doctype.name;
-  const sections = formView.sections.map((section) => renderFormSection(section, options.document, options.mode)).join("");
+  const sections = formView.sections
+    .map((section) => renderFormSection(section, options.document, options.mode, options.linkOptions ?? {}))
+    .join("");
   const commands =
     options.mode === "update" && doctype.commands?.length
       ? `<section class="command-row" aria-label="Commands">${doctype.commands
@@ -243,16 +249,24 @@ export function renderErrorPanel(message: string): string {
 function renderFormSection(
   section: ResolvedFormSection,
   document: DocumentSnapshot | undefined,
-  mode: "create" | "update"
+  mode: "create" | "update",
+  linkOptions: FormLinkOptions
 ): string {
-  const fields = section.fields.map((field) => renderField(field, document?.data[field.name], mode)).join("");
+  const fields = section.fields
+    .map((field) => renderField(field, document?.data[field.name], mode, linkOptions[field.name] ?? []))
+    .join("");
   return `<section class="form-section">
     ${section.heading ? `<h3>${escapeHtml(section.heading)}</h3>` : ""}
     <div class="fields cols-${section.columns}">${fields}</div>
   </section>`;
 }
 
-function renderField(field: FieldDefinition, value: JsonValue | undefined, mode: "create" | "update"): string {
+function renderField(
+  field: FieldDefinition,
+  value: JsonValue | undefined,
+  mode: "create" | "update",
+  linkOptions: readonly LinkOption[]
+): string {
   const id = `field-${slug(field.name)}`;
   const label = escapeHtml(field.label ?? field.name);
   const required = field.required ? " required" : "";
@@ -260,6 +274,10 @@ function renderField(field: FieldDefinition, value: JsonValue | undefined, mode:
   const common = `id="${id}" name="${escapeHtml(field.name)}"${required}${readonly}`;
   const formatted = formatFormValue(value);
   const help = field.readOnly ? `<small>Read only</small>` : "";
+  if (field.type === "link") {
+    const options = renderLinkOptions(linkOptions, formatted);
+    return `<label class="field" for="${id}"><span>${label}${field.required ? " *" : ""}</span><select ${common}>${options}</select>${help}</label>`;
+  }
   if (field.type === "select") {
     const options = (field.options ?? [])
       .map((option) => `<option value="${escapeHtml(option)}"${option === formatted ? " selected" : ""}>${escapeHtml(option)}</option>`)
@@ -272,6 +290,25 @@ function renderField(field: FieldDefinition, value: JsonValue | undefined, mode:
   const type = inputType(field);
   const checked = field.type === "boolean" && value === true ? " checked" : "";
   return `<label class="field" for="${id}"><span>${label}${field.required ? " *" : ""}</span><input type="${type}" ${common} value="${escapeHtml(formatted)}"${checked}>${help}</label>`;
+}
+
+function renderLinkOptions(options: readonly LinkOption[], currentValue: string): string {
+  const rendered = [`<option value=""></option>`];
+  const seen = new Set<string>();
+  if (currentValue && !options.some((option) => option.value === currentValue)) {
+    rendered.push(`<option value="${escapeHtml(currentValue)}" selected>${escapeHtml(currentValue)}</option>`);
+    seen.add(currentValue);
+  }
+  for (const option of options) {
+    if (seen.has(option.value)) {
+      continue;
+    }
+    seen.add(option.value);
+    rendered.push(
+      `<option value="${escapeHtml(option.value)}"${option.value === currentValue ? " selected" : ""}>${escapeHtml(option.label)}</option>`
+    );
+  }
+  return rendered.join("");
 }
 
 function inputType(field: FieldDefinition): string {
