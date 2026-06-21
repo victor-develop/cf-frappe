@@ -1,4 +1,5 @@
 export * from "./adapters/d1";
+export * from "./adapters/desk";
 export * from "./adapters/http";
 export * from "./adapters/in-memory";
 export * from "./application/document-service";

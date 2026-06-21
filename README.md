@@ -12,6 +12,7 @@ The current slice is a working kernel:
 - Hono-powered resource API compatible with Workers
 - Durable Object coordinator factory for serial per-aggregate command processing
 - D1 projection-index planner from DocType `indexes`
+- generated Desk list/form UI from DocType metadata
 - a runnable `Task` example under `examples/todos`
 
 ## Why
@@ -25,10 +26,12 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | Permissions | role and predicate rules attached to DocTypes |
 | Hooks/controllers | pure hook contracts registered in `ModelRegistry` |
 | REST resources | generated `/api/resource/:doctype` routes |
+| Desk list/forms | generated `/desk` pages from DocType metadata |
 | Database tables | D1 append-only events plus current projections |
 | Concurrency boundary | Durable Object command coordinator per aggregate stream |
 
 See [docs/frappe-assessment.md](docs/frappe-assessment.md) for the assessment and parity map.
+See [docs/test-parity.md](docs/test-parity.md) for the current upstream Frappe test-count target.
 
 ## Quick Start
 
@@ -105,6 +108,16 @@ The generated API includes:
 - `POST /api/resource/:doctype/:name/command/:command`
 - `DELETE /api/resource/:doctype/:name`
 
+The generated Desk UI includes:
+
+- `GET /desk`
+- `GET /desk/:doctype`
+- `GET /desk/:doctype/new`
+- `POST /desk/:doctype`
+- `GET /desk/:doctype/:name`
+- `POST /desk/:doctype/:name`
+- `POST /desk/:doctype/:name/command/:command`
+
 Generate D1 projection indexes from metadata:
 
 ```ts
@@ -128,6 +141,8 @@ The checked-in Wrangler demo uses a read-only guest actor. For local demos only,
 ```mermaid
 flowchart LR
   HTTP["Worker HTTP adapter"] --> DOCLIENT["DurableObjectCommandExecutor"]
+  DESK["Desk adapter"] --> DOCLIENT
+  DESK --> QUERY
   DOCLIENT --> DO["Durable Object coordinator"]
   DO --> APP["DocumentService"]
   HTTP --> QUERY["QueryService"]
@@ -162,11 +177,11 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 52 tests across schema, permissions, events, registry, services, D1/in-memory adapters, HTTP API, Durable Object command routing, and D1 schema planning.
+Current suite: 62 tests across schema, permissions, events, registry, services, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, and D1 schema planning.
 
 ## Status
 
-This is not Frappe parity yet. Missing major surfaces include generated desk UI, full migration management, reporting, background jobs, realtime events, auth integrations, file storage, app installation, and a compatibility-sized test suite. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
+This is not Frappe parity yet. Basic generated Desk list/form pages exist, but full migration management, reporting, print views, background jobs, realtime events, auth integrations, file storage, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
 
 ## References
 

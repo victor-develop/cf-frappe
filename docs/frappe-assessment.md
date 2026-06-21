@@ -29,6 +29,7 @@ That model is powerful, but it is not event-sourcing first. cf-frappe keeps the 
 | Permissions | roles and permission rules | role/action/predicate rules |
 | Lifecycle behavior | hooks/controllers | registry hooks: `beforeValidate`, `validate`, `afterCommit` |
 | REST resources | `/api/resource/:doctype` | generated Hono routes |
+| Desk views | list/form views from metadata | generated server-rendered `/desk` list/forms |
 | Audit trail | document versioning/activity | append-only events plus model-declared domain commands |
 | Current reads | SQL document tables | D1/in-memory projections plus metadata-planned D1 indexes |
 | Workflow | Workflow DocType | metadata transitions and transition events |
@@ -36,7 +37,7 @@ That model is powerful, but it is not event-sourcing first. cf-frappe keeps the 
 
 ## Current Gaps
 
-- Generated Desk UI, forms, list views, report builder, print views, and admin tools are not implemented.
+- Generated Desk UI now covers basic list/form pages. Report builder, print views, richer admin tools, saved filters, and client scripting are not implemented.
 - DocType metadata currently plans D1 projection indexes, but does not yet manage a full migration lifecycle.
 - Background jobs, scheduler events, realtime notifications, and WebSocket channels are not implemented.
 - Auth providers and session management are intentionally left as adapter seams; no default trusted resolver is provided.
