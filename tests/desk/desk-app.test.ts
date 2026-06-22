@@ -7,7 +7,8 @@ import {
   DocumentService,
   fixedClock,
   InMemoryDocumentStore,
-  QueryService
+  QueryService,
+  SYSTEM_MANAGER_ROLE
 } from "../../src";
 import { createChildTableServices, createLinkedServices, createServices, data, guest, now, owner } from "../helpers";
 
@@ -22,6 +23,7 @@ describe("Desk app", () => {
       reports: services.reports,
       timeline: services.history,
       savedFilters: services.savedFilters,
+      userPermissions: services.userPermissions,
       actor: () => actor
     });
     return { app, services };
@@ -193,6 +195,75 @@ describe("Desk app", () => {
 
     expect(deleted.status).toBe(303);
     await expect(services.savedFilters.list(owner, "Note")).resolves.toEqual([]);
+  });
+
+  it("renders and mutates user permissions from the Desk admin surface", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
+    const { app, services } = makeDesk(admin);
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Permission Target" }) });
+
+    const empty = await app.request("/desk/admin/user-permissions?user=owner%40example.com");
+    expect(empty.status).toBe(200);
+    const emptyHtml = await empty.text();
+    expect(emptyHtml).toContain("User Permissions");
+    expect(emptyHtml).toContain('name="targetDoctype"');
+    expect(emptyHtml).toContain('name="applicableDoctypes"');
+    expect(emptyHtml).toContain("No grants configured.");
+
+    const granted = await app.request("/desk/admin/user-permissions", {
+      method: "POST",
+      body: new URLSearchParams({
+        user: owner.id,
+        targetDoctype: "Note",
+        targetName: "Permission Target",
+        applicableDoctypes: "Note",
+        expectedVersion: "0"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(granted.status).toBe(303);
+    expect(granted.headers.get("location")).toBe("/desk/admin/user-permissions?user=owner%40example.com");
+    await expect(services.userPermissions.getUserPermissions(admin, owner.id)).resolves.toMatchObject({
+      version: 1,
+      grants: [{ targetDoctype: "Note", targetName: "Permission Target", applicableDoctypes: ["Note"] }]
+    });
+
+    const current = await app.request("/desk/admin/user-permissions?user=owner%40example.com");
+    expect(current.status).toBe(200);
+    const currentHtml = await current.text();
+    expect(currentHtml).toContain("Note");
+    expect(currentHtml).toContain("Permission Target");
+    expect(currentHtml).toContain('name="expectedVersion" value="1"');
+    expect(currentHtml).toContain('action="/desk/admin/user-permissions/revoke"');
+
+    const revoked = await app.request("/desk/admin/user-permissions/revoke", {
+      method: "POST",
+      body: new URLSearchParams({
+        user: owner.id,
+        targetDoctype: "Note",
+        targetName: "Permission Target",
+        applicableDoctypes: "Note",
+        expectedVersion: "1"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(revoked.status).toBe(303);
+    await expect(services.userPermissions.getUserPermissions(admin, owner.id)).resolves.toMatchObject({
+      version: 2,
+      grants: []
+    });
+  });
+
+  it("uses the Desk error boundary for non-admin user-permission access", async () => {
+    const { app } = makeDesk(owner);
+
+    const response = await app.request("/desk/admin/user-permissions?user=owner%40example.com");
+
+    expect(response.status).toBe(403);
+    const html = await response.text();
+    expect(html).toContain("cannot manage user permissions");
   });
 
   it("renders expectedVersion in edit forms", async () => {

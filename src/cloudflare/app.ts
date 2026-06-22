@@ -8,6 +8,7 @@ import { QueryService } from "../application/query-service";
 import { ReportService } from "../application/report-service";
 import { SavedListFilterService } from "../application/saved-list-filter-service";
 import { UserPermissionService } from "../application/user-permission-service";
+import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator";
 import type { DocumentCommandExecutor } from "../application/document-service";
 import { FileService } from "../application/file-service";
 import { D1EventStore, D1ProjectionStore } from "../adapters/d1";
@@ -171,7 +172,10 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
   });
   const audit = new AuditService({ events });
   const savedFilters = new SavedListFilterService({ registry: options.registry, events });
-  const userPermissions = new UserPermissionService({ events });
+  const userPermissions = new UserPermissionService({
+    events,
+    validator: new ModelBackedUserPermissionGrantValidator({ registry: options.registry, events })
+  });
   const restrictedQueries = new QueryService({ registry: options.registry, projections, userPermissions });
   const restrictedHistory = new DocumentHistoryService({ events, queries: restrictedQueries });
   const prints = new PrintService({ registry: options.registry, queries: restrictedQueries });
@@ -214,6 +218,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     timeline: restrictedHistory,
     audit,
     savedFilters,
+    userPermissions,
     reports,
     actor: options.actor,
     ...(options.maxJsonBytes ? { maxJsonBytes: options.maxJsonBytes } : {}),
@@ -227,6 +232,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     queries: restrictedQueries,
     timeline: restrictedHistory,
     savedFilters,
+    userPermissions,
     reports,
     actor: options.actor
   });

@@ -7,6 +7,7 @@ import type { PrintService } from "../../application/print-service";
 import { QueryService } from "../../application/query-service";
 import type { ReportService } from "../../application/report-service";
 import type { SavedListFilterService } from "../../application/saved-list-filter-service";
+import type { UserPermissionService } from "../../application/user-permission-service";
 import type { ModelRegistry } from "../../core/registry";
 import { badRequest } from "../../core/errors";
 import type { DocumentData, JsonPrimitive, ListDocumentsFilter, MutableDocumentData } from "../../core/types";
@@ -16,7 +17,8 @@ import { toErrorResponse } from "./errors";
 import { createFileApi } from "./file-api";
 import { createPrintApi } from "./print-api";
 import { createReportApi } from "./report-api";
-import { listFiltersFromUrl, parseOptionalInteger, readBoundedText, requestMetadata } from "./request";
+import { listFiltersFromUrl, parseOptionalInteger, readJsonObject, requestMetadata } from "./request";
+import { createUserPermissionApi } from "./user-permission-api";
 
 export interface ResourceApiOptions {
   readonly registry: ModelRegistry;
@@ -30,6 +32,7 @@ export interface ResourceApiOptions {
   readonly prints?: PrintService;
   readonly reports?: ReportService;
   readonly audit?: AuditService;
+  readonly userPermissions?: UserPermissionService;
   readonly maxFileBytes?: number;
 }
 
@@ -111,6 +114,17 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       createAuditApi({
         audit: options.audit,
         actor: resolveActor
+      })
+    );
+  }
+
+  if (options.userPermissions) {
+    app.route(
+      "/",
+      createUserPermissionApi({
+        userPermissions: options.userPermissions,
+        actor: resolveActor,
+        maxJsonBytes
       })
     );
   }
@@ -445,30 +459,7 @@ async function readJson(
   request: Request,
   options: { readonly allowEmpty?: boolean; readonly maxJsonBytes: number }
 ): Promise<MutableDocumentData> {
-  const contentLength = request.headers.get("content-length");
-  if (contentLength && Number(contentLength) > options.maxJsonBytes) {
-    throw badRequest(`JSON body exceeds ${options.maxJsonBytes} bytes`);
-  }
-  const text = await readBoundedText(request, options.maxJsonBytes, `JSON body exceeds ${options.maxJsonBytes} bytes`);
-  if (!text.trim()) {
-    if (options.allowEmpty) {
-      return {};
-    }
-    throw badRequest("Request body must be JSON");
-  }
-  if (new TextEncoder().encode(text).byteLength > options.maxJsonBytes) {
-    throw badRequest(`JSON body exceeds ${options.maxJsonBytes} bytes`);
-  }
-  let value: unknown;
-  try {
-    value = JSON.parse(text) as unknown;
-  } catch {
-    throw badRequest("Request body contains malformed JSON");
-  }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw badRequest("JSON body must be an object");
-  }
-  return value as MutableDocumentData;
+  return readJsonObject(request, options);
 }
 
 function stringValue(value: unknown): string | undefined {

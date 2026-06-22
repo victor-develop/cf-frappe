@@ -37,6 +37,41 @@ describe("CloudFrappe Worker routing", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ data: { tenantId: "acme", events: [] } });
   });
+
+  it("mounts user-permission admin API and Desk routes on the Worker", async () => {
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => ({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" })
+    });
+    const env = {
+      DB: fakeD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const api = await worker.fetch!(
+      cfRequest("http://localhost/api/user-permissions/admin%40example.com"),
+      env,
+      fakeExecutionContext()
+    );
+    expect(api.status).toBe(200);
+    await expect(api.json()).resolves.toMatchObject({
+      data: {
+        tenantId: "acme",
+        userId: "admin@example.com",
+        grants: []
+      }
+    });
+
+    const desk = await worker.fetch!(
+      cfRequest("http://localhost/desk/admin/user-permissions?user=admin%40example.com"),
+      env,
+      fakeExecutionContext()
+    );
+    expect(desk.status).toBe(200);
+    const html = await desk.text();
+    expect(html).toContain("User Permissions");
+    expect(html).toContain("No grants configured.");
+  });
 });
 
 function fakeNamespace(): RpcDurableObjectNamespace<AggregateCoordinatorRpc> {

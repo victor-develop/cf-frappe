@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { DocumentService } from "../application/document-service";
 import { UserPermissionService } from "../application/user-permission-service";
+import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator";
 import type { DomainEvent } from "../core/types";
 import { createDocumentRealtimeHooks } from "../application/realtime";
 import type {
@@ -70,10 +71,14 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
 
     constructor(_ctx: DurableObjectState, env: Env) {
       super(_ctx, env);
+      const events = new D1EventStore(env.DB);
       this.service = new DocumentService({
         registry: options.registry,
         store: new D1DocumentStore(env.DB),
-        userPermissions: new UserPermissionService({ events: new D1EventStore(env.DB) }),
+        userPermissions: new UserPermissionService({
+          events,
+          validator: new ModelBackedUserPermissionGrantValidator({ registry: options.registry, events })
+        }),
         ...(options.clock ? { clock: options.clock } : {}),
         ...(options.ids ? { ids: options.ids } : {}),
         ...(options.onHookError ? { onHookError: options.onHookError } : {}),

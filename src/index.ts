@@ -16,6 +16,7 @@ export * from "./application/realtime";
 export * from "./application/report-service";
 export * from "./application/saved-list-filter-service";
 export * from "./application/user-permission-service";
+export * from "./application/user-permission-grant-validator";
 export * from "./cloudflare";
 export * from "./core/errors";
 export * from "./core/events";

@@ -13,7 +13,8 @@ import {
   QueryService,
   ReportService,
   SavedListFilterService,
-  UserPermissionService
+  UserPermissionService,
+  ModelBackedUserPermissionGrantValidator
 } from "../src";
 import type { Actor, DocumentData, DomainEvent, ModelRegistry } from "../src";
 import type { AfterCommitContext } from "../src";
@@ -286,7 +287,8 @@ export function createServices(
   const userPermissions = new UserPermissionService({
     events: store,
     clock: fixedClock(now),
-    ids: deterministicIds(["user-permission-event-1", "user-permission-event-2", "user-permission-event-3"])
+    ids: deterministicIds(["user-permission-event-1", "user-permission-event-2", "user-permission-event-3"]),
+    validator: new ModelBackedUserPermissionGrantValidator({ registry, events: store })
   });
   const documents = new DocumentService({
     registry,
@@ -317,7 +319,8 @@ export function createLinkedServices(ids: readonly string[] = ["evt1", "evt2", "
   const userPermissions = new UserPermissionService({
     events: store,
     clock: fixedClock(now),
-    ids: deterministicIds(["user-permission-event-1", "user-permission-event-2", "user-permission-event-3"])
+    ids: deterministicIds(["user-permission-event-1", "user-permission-event-2", "user-permission-event-3"]),
+    validator: new ModelBackedUserPermissionGrantValidator({ registry, events: store })
   });
   const documents = new DocumentService({
     registry,

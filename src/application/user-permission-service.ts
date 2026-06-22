@@ -21,12 +21,14 @@ import {
 import { systemClock, type Clock } from "../ports/clock";
 import type { EventStore } from "../ports/event-store";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator";
+import type { UserPermissionGrantValidator } from "./user-permission-grant-validator";
 
 export interface UserPermissionServiceOptions {
   readonly events: EventStore;
   readonly ids?: IdGenerator;
   readonly clock?: Clock;
   readonly adminRoles?: readonly string[];
+  readonly validator?: UserPermissionGrantValidator;
 }
 
 export interface AllowUserPermissionCommand extends UserPermissionGrant {
@@ -50,12 +52,14 @@ export class UserPermissionService implements UserPermissionProvider {
   private readonly ids: IdGenerator;
   private readonly clock: Clock;
   private readonly adminRoles: readonly string[];
+  private readonly validator: UserPermissionGrantValidator | undefined;
 
   constructor(options: UserPermissionServiceOptions) {
     this.events = options.events;
     this.ids = options.ids ?? cryptoIdGenerator;
     this.clock = options.clock ?? systemClock;
     this.adminRoles = options.adminRoles ?? [SYSTEM_MANAGER_ROLE];
+    this.validator = options.validator;
   }
 
   async allow(command: AllowUserPermissionCommand): Promise<UserPermissionState> {
@@ -80,6 +84,16 @@ export class UserPermissionService implements UserPermissionProvider {
     return (await this.stateFor(tenantId, actor.id)).grants;
   }
 
+  async getUserPermissions(
+    actor: Actor,
+    userId: string,
+    tenantId?: TenantId
+  ): Promise<UserPermissionState> {
+    this.ensureAdmin(actor);
+    const resolvedTenantId = resolveActorTenant(actor, tenantId);
+    return this.stateFor(resolvedTenantId, normalizeRequired(userId, "User id"));
+  }
+
   private async changePermission(options: {
     readonly command: AllowUserPermissionCommand | RevokeUserPermissionCommand;
     readonly eventType: "UserPermissionAllowed" | "UserPermissionRevoked";
@@ -94,6 +108,9 @@ export class UserPermissionService implements UserPermissionProvider {
     ensureExpectedVersion(state, options.command.expectedVersion);
     if (options.alreadyDone(state, grant)) {
       return state;
+    }
+    if (options.eventKind === "UserPermissionAllowed") {
+      await this.validator?.validateGrant({ tenantId, grant });
     }
     const event: NewDomainEvent = {
       id: this.ids.next(),

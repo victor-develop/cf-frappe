@@ -6,3 +6,4 @@ export * from "./print-api";
 export * from "./report-api";
 export * from "./request";
 export * from "./resource-api";
+export * from "./user-permission-api";

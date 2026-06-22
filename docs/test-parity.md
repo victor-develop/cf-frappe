@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the event-sourced user permissions slice:
+As of the user-permission admin surface slice:
 
 - Test files: `42`
-- Vitest cases: `295`
+- Vitest cases: `300`
 
 ## Implication
 

@@ -1,5 +1,5 @@
 import { badRequest } from "../../core/errors";
-import type { DocumentData, ListDocumentsFilter, ListFilterOperator } from "../../core/types";
+import type { DocumentData, ListDocumentsFilter, ListFilterOperator, MutableDocumentData } from "../../core/types";
 
 export function parseOptionalInteger(value: string | undefined): number | undefined {
   if (value === undefined) {
@@ -38,6 +38,36 @@ export function listFiltersFromUrl(url: URL): readonly ListDocumentsFilter[] {
 export async function readBoundedText(request: Request, maxBytes: number, errorMessage: string): Promise<string> {
   const bytes = await readBoundedBytes(request, maxBytes, errorMessage);
   return new TextDecoder().decode(bytes);
+}
+
+export async function readJsonObject(
+  request: Request,
+  options: { readonly allowEmpty?: boolean; readonly maxJsonBytes: number }
+): Promise<MutableDocumentData> {
+  const contentLength = request.headers.get("content-length");
+  if (contentLength && Number(contentLength) > options.maxJsonBytes) {
+    throw badRequest(`JSON body exceeds ${options.maxJsonBytes} bytes`);
+  }
+  const text = await readBoundedText(request, options.maxJsonBytes, `JSON body exceeds ${options.maxJsonBytes} bytes`);
+  if (!text.trim()) {
+    if (options.allowEmpty) {
+      return {};
+    }
+    throw badRequest("Request body must be JSON");
+  }
+  if (new TextEncoder().encode(text).byteLength > options.maxJsonBytes) {
+    throw badRequest(`JSON body exceeds ${options.maxJsonBytes} bytes`);
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(text) as unknown;
+  } catch {
+    throw badRequest("Request body contains malformed JSON");
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw badRequest("JSON body must be an object");
+  }
+  return value as MutableDocumentData;
 }
 
 export async function readBoundedBytes(

@@ -22,6 +22,7 @@ import type {
 import type { ReportRunResult } from "../../application/report-service";
 import type { SavedListFilter } from "../../application/saved-list-filter-service";
 import type { PrintFormatDefinition } from "../../core/print-format";
+import type { UserPermissionState } from "../../core/user-permissions";
 
 export type FormLinkOptions = Readonly<Record<string, readonly LinkOption[]>>;
 export type FormTableDefinitions = Readonly<Record<string, DocTypeDefinition>>;
@@ -122,6 +123,53 @@ export function renderReportList(reports: readonly ReportDefinition[]): string {
       <table>
         <thead><tr><th>Report</th><th>DocType</th><th>Module</th><th>Description</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="4" class="empty">No readable reports.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+export function renderUserPermissionAdmin(state: UserPermissionState): string {
+  const rows = state.grants
+    .map((grant) => {
+      const applicable = (grant.applicableDoctypes ?? []).join(", ");
+      return `<tr>
+        <td>${escapeHtml(grant.targetDoctype)}</td>
+        <td>${escapeHtml(grant.targetName)}</td>
+        <td>${escapeHtml(applicable)}</td>
+        <td>
+          <form class="inline-action" method="post" action="/desk/admin/user-permissions/revoke">
+            <input type="hidden" name="user" value="${escapeHtml(state.userId)}">
+            <input type="hidden" name="targetDoctype" value="${escapeHtml(grant.targetDoctype)}">
+            <input type="hidden" name="targetName" value="${escapeHtml(grant.targetName)}">
+            <input type="hidden" name="applicableDoctypes" value="${escapeHtml(applicable)}">
+            <input type="hidden" name="expectedVersion" value="${String(state.version)}">
+            <button class="button danger" type="submit">Revoke</button>
+          </form>
+        </td>
+      </tr>`;
+    })
+    .join("");
+  return `<form class="panel form" method="get" action="/desk/admin/user-permissions">
+    <div class="fields cols-1">
+      <label class="field"><span>User</span><input name="user" type="email" value="${escapeHtml(state.userId)}"></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Load</button></div>
+  </form>
+  <form class="panel form" method="post" action="/desk/admin/user-permissions">
+    <input type="hidden" name="user" value="${escapeHtml(state.userId)}">
+    <input type="hidden" name="expectedVersion" value="${String(state.version)}">
+    <div class="fields">
+      <label class="field"><span>Target DocType</span><input name="targetDoctype" value=""></label>
+      <label class="field"><span>Target Name</span><input name="targetName" value=""></label>
+      <label class="field"><span>Applicable DocTypes</span><input name="applicableDoctypes" value=""></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Allow</button></div>
+  </form>
+  <section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Target DocType</th><th>Target Name</th><th>Applicable DocTypes</th><th>Action</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="4" class="empty">No grants configured.</td></tr>`}</tbody>
       </table>
     </div>
   </section>`;
@@ -1332,6 +1380,10 @@ input[readonly], textarea[readonly] { background: #f3f4f6; color: var(--muted); 
   color: #fff;
 }
 .button.primary:hover { background: var(--primary-dark); }
+.button.danger {
+  border-color: #fecdca;
+  color: var(--danger);
+}
 @media (max-width: 760px) {
   .sidebar {
     position: static;

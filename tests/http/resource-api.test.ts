@@ -10,6 +10,7 @@ describe("resource api", () => {
       queries: services.queries,
       timeline: services.history,
       savedFilters: services.savedFilters,
+      userPermissions: services.userPermissions,
       audit: services.audit,
       actor: unsafeHeaderActorResolver
     });
@@ -233,6 +234,104 @@ describe("resource api", () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({ error: { code: "PERMISSION_DENIED" } });
+  });
+
+  it("manages event-sourced user permissions through admin API routes", async () => {
+    const app = makeApp();
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Permission Target", body: "Permission target" })
+    });
+
+    const granted = await app.request("/api/user-permissions/owner%40example.com", {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        targetDoctype: "Note",
+        targetName: "HTTP Permission Target",
+        applicableDoctypes: ["Note"]
+      })
+    });
+
+    expect(granted.status).toBe(201);
+    await expect(granted.json()).resolves.toMatchObject({
+      data: {
+        tenantId: "acme",
+        userId: "owner@example.com",
+        version: 1,
+        grants: [
+          {
+            targetDoctype: "Note",
+            targetName: "HTTP Permission Target",
+            applicableDoctypes: ["Note"]
+          }
+        ]
+      }
+    });
+
+    const current = await app.request("/api/user-permissions/owner%40example.com", { headers: adminHeaders });
+    expect(current.status).toBe(200);
+    await expect(current.json()).resolves.toMatchObject({
+      data: {
+        version: 1,
+        grants: [{ targetDoctype: "Note", targetName: "HTTP Permission Target" }]
+      }
+    });
+
+    const revoked = await app.request("/api/user-permissions/owner%40example.com", {
+      method: "DELETE",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        targetDoctype: "Note",
+        targetName: "HTTP Permission Target",
+        applicableDoctypes: ["Note"],
+        expectedVersion: 1
+      })
+    });
+
+    expect(revoked.status).toBe(200);
+    await expect(revoked.json()).resolves.toMatchObject({
+      data: {
+        version: 2,
+        grants: []
+      }
+    });
+  });
+
+  it("maps user-permission admin routes to permission and validation errors", async () => {
+    const app = makeApp();
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Valid Permission Target", body: "Permission target" })
+    });
+
+    const denied = await app.request("/api/user-permissions/owner%40example.com", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ targetDoctype: "Note", targetName: "HTTP Valid Permission Target" })
+    });
+    expect(denied.status).toBe(403);
+    await expect(denied.json()).resolves.toMatchObject({ error: { code: "PERMISSION_DENIED" } });
+
+    const invalid = await app.request("/api/user-permissions/owner%40example.com", {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({ targetDoctype: "Note", targetName: "HTTP Valid Permission Target", applicableDoctypes: ["Note", 7] })
+    });
+    expect(invalid.status).toBe(400);
+    await expect(invalid.json()).resolves.toMatchObject({ error: { code: "BAD_REQUEST" } });
+
+    const missingTarget = await app.request("/api/user-permissions/owner%40example.com", {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({ targetDoctype: "Note", targetName: "Missing Target" })
+    });
+    expect(missingTarget.status).toBe(400);
+    await expect(missingTarget.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Target document Note/Missing Target does not exist" }
+    });
   });
 
   it("maps cross-tenant audit searches to JSON permission errors", async () => {

@@ -5,6 +5,7 @@ import type { PrintService } from "../../application/print-service";
 import { QueryService } from "../../application/query-service";
 import type { ReportFilters, ReportService } from "../../application/report-service";
 import type { SavedListFilterService } from "../../application/saved-list-filter-service";
+import type { UserPermissionService } from "../../application/user-permission-service";
 import { FrameworkError } from "../../core/errors";
 import { can } from "../../core/permissions";
 import type { ModelRegistry } from "../../core/registry";
@@ -34,6 +35,7 @@ import {
   renderNotFound,
   renderReportList,
   renderReportView,
+  renderUserPermissionAdmin,
   type FormLifecycleAction,
   type FormLinkOptions,
   type FormTableDefinitions
@@ -46,6 +48,7 @@ export interface DeskAppOptions {
   readonly queries: QueryService;
   readonly timeline?: DocumentHistoryService;
   readonly savedFilters?: SavedListFilterService;
+  readonly userPermissions?: UserPermissionService;
   readonly reports?: ReportService;
   readonly actor: ActorResolver;
 }
@@ -81,6 +84,56 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         body: renderReportList(reports)
       })
     );
+  });
+
+  app.get("/desk/admin/user-permissions", async (c) => {
+    const userPermissions = requireUserPermissions(options);
+    const actor = await options.actor(c.req.raw);
+    const url = new URL(c.req.url);
+    const userId = url.searchParams.get("user") ?? actor.id;
+    const state = await userPermissions.getUserPermissions(actor, userId);
+    const doctypes = options.queries.listDoctypes(actor);
+    const reports = listReports(options, actor);
+    return html(
+      renderDeskLayout({
+        title: "User Permissions",
+        doctypes,
+        reports,
+        body: renderUserPermissionAdmin(state)
+      })
+    );
+  });
+
+  app.post("/desk/admin/user-permissions", async (c) => {
+    const userPermissions = requireUserPermissions(options);
+    const actor = await options.actor(c.req.raw);
+    const form = await parseDeskUserPermission(c.req.raw);
+    await userPermissions.allow({
+      actor,
+      userId: form.userId,
+      targetDoctype: form.targetDoctype,
+      targetName: form.targetName,
+      ...(form.applicableDoctypes.length > 0 ? { applicableDoctypes: form.applicableDoctypes } : {}),
+      ...(form.expectedVersion !== undefined ? { expectedVersion: form.expectedVersion } : {}),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.redirect(`/desk/admin/user-permissions?user=${encodeURIComponent(form.userId)}`, 303);
+  });
+
+  app.post("/desk/admin/user-permissions/revoke", async (c) => {
+    const userPermissions = requireUserPermissions(options);
+    const actor = await options.actor(c.req.raw);
+    const form = await parseDeskUserPermission(c.req.raw);
+    await userPermissions.revoke({
+      actor,
+      userId: form.userId,
+      targetDoctype: form.targetDoctype,
+      targetName: form.targetName,
+      ...(form.applicableDoctypes.length > 0 ? { applicableDoctypes: form.applicableDoctypes } : {}),
+      ...(form.expectedVersion !== undefined ? { expectedVersion: form.expectedVersion } : {}),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.redirect(`/desk/admin/user-permissions?user=${encodeURIComponent(form.userId)}`, 303);
   });
 
   app.get("/desk/reports/:report", async (c) => {
@@ -586,6 +639,13 @@ function listPrintFormats(options: DeskAppOptions, actor: Actor, doctype?: strin
   return options.prints?.listPrintFormats(actor, doctype) ?? [];
 }
 
+function requireUserPermissions(options: DeskAppOptions): UserPermissionService {
+  if (!options.userPermissions) {
+    throw new FrameworkError("DOCUMENT_NOT_FOUND", "User permissions are not enabled", { status: 404 });
+  }
+  return options.userPermissions;
+}
+
 function lifecycleActionsFor(
   actor: Actor,
   doctype: DocTypeDefinition,
@@ -673,6 +733,14 @@ interface ParsedDeskSavedFilter {
   readonly filters: readonly ListDocumentsFilter[];
 }
 
+interface ParsedDeskUserPermission {
+  readonly userId: string;
+  readonly targetDoctype: string;
+  readonly targetName: string;
+  readonly applicableDoctypes: readonly string[];
+  readonly expectedVersion?: number;
+}
+
 async function parseDeskComment(request: Request): Promise<ParsedDeskComment> {
   const form = await request.formData();
   const text = form.get("comment_text");
@@ -718,6 +786,18 @@ async function parseDeskTag(request: Request): Promise<ParsedDeskTag> {
   };
 }
 
+async function parseDeskUserPermission(request: Request): Promise<ParsedDeskUserPermission> {
+  const form = await request.formData();
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  return {
+    userId: stringFormValue(form, "user"),
+    targetDoctype: stringFormValue(form, "targetDoctype"),
+    targetName: stringFormValue(form, "targetName"),
+    applicableDoctypes: commaListFormValue(form.get("applicableDoctypes")),
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
 async function parseDeskForm(
   request: Request,
   doctype: DocTypeDefinition,
@@ -742,6 +822,18 @@ async function parseDeskForm(
     data,
     ...(expectedVersion !== undefined ? { expectedVersion } : {})
   };
+}
+
+function stringFormValue(form: FormData, name: string): string {
+  const value = form.get(name);
+  return typeof value === "string" ? value : "";
+}
+
+function commaListFormValue(value: FormDataEntryValue | null): readonly string[] {
+  if (typeof value !== "string") {
+    return [];
+  }
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
 async function parseDeskExpectedVersion(request: Request): Promise<number | undefined> {
