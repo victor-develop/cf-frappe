@@ -23,6 +23,7 @@ import type {
   DocumentTimeline
 } from "../../application/document-history-service.js";
 import type { FileDashboard } from "../../application/file-service.js";
+import type { DataPatchDashboard, DataPatchDashboardEntry } from "../../application/data-patch-service.js";
 import type { JobExecutionDashboard } from "../../application/job-history-service.js";
 import type { JobScheduleDashboard } from "../../application/job-schedule-service.js";
 import type { ReportRunResult } from "../../application/report-service.js";
@@ -670,6 +671,62 @@ export function renderJobAdmin(
       </table>
     </div>
   </section>`;
+}
+
+export function renderDataPatchAdmin(
+  dashboard: DataPatchDashboard,
+  options: { readonly error?: string } = {}
+): string {
+  const rows = dashboard.patches
+    .map((patch) => `<tr>
+      <td>${escapeHtml(patch.id)}</td>
+      <td>${escapeHtml(patch.label ?? "")}</td>
+      <td>${escapeHtml(patch.checksum)}</td>
+      <td>${escapeHtml(patch.status)}</td>
+      <td>${escapeHtml(dataPatchTimestamp(patch))}</td>
+      <td>${escapeHtml(dataPatchDetail(patch))}</td>
+      <td>${renderDataPatchAction(patch)}</td>
+    </tr>`)
+    .join("");
+  return `<form class="panel form" method="post" action="/desk/admin/data-patches/apply">
+    <div class="form-head"><h2>Apply Pending Patches</h2><p>${String(dashboard.totals.notApplied)} pending</p></div>
+    ${options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : ""}
+    <div class="fields">
+      <label class="field"><span>Limit</span><input name="limit" type="number" min="1" value="1"></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Apply Batch</button></div>
+  </form>
+  <section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Patch</th><th>Label</th><th>Checksum</th><th>Status</th><th>Timestamp</th><th>Result / Error</th><th>Action</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="7" class="empty">No data patches registered.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+function renderDataPatchAction(patch: DataPatchDashboardEntry): string {
+  if (patch.status !== "not_applied") {
+    return "";
+  }
+  return `<form class="inline-action" method="post">
+    <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/apply">Apply</button>
+  </form>`;
+}
+
+function dataPatchTimestamp(patch: DataPatchDashboardEntry): string {
+  return patch.appliedAt ?? patch.failedAt ?? patch.claimedAt ?? "";
+}
+
+function dataPatchDetail(patch: DataPatchDashboardEntry): string {
+  if (patch.status === "failed") {
+    return patch.error ?? "";
+  }
+  if (patch.status === "applied" && patch.result !== undefined) {
+    return JSON.stringify(patch.result);
+  }
+  return "";
 }
 
 function renderJobRetryAction(idempotencyKey: string, status: JobExecutionDashboard["executions"][number]["status"]): string {

@@ -201,6 +201,56 @@ describe("CloudFrappe Worker routing", () => {
     });
   });
 
+  it("mounts app-declared data patch Desk routes on the Worker", async () => {
+    const resources = { touched: [] as string[] };
+    const log = new InMemoryDataPatchLog();
+    const registry = createRegistry({
+      dataPatches: [
+        defineDataPatch<any>({
+          id: "crm.backfill",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.touched.push("crm");
+          }
+        })
+      ]
+    });
+    const worker = createCloudFrappeWorker({
+      registry,
+      actor: () => ({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" }),
+      dataPatches: {
+        log: () => log,
+        resources: () => resources,
+        clock: fixedClock(now),
+        ids: deterministicIds(["claim-1"])
+      }
+    });
+    const env = {
+      DB: fakeD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const dashboard = await worker.fetch!(
+      cfRequest("http://localhost/desk/admin/data-patches"),
+      env,
+      fakeExecutionContext()
+    );
+    expect(dashboard.status).toBe(200);
+    const html = await dashboard.text();
+    expect(html).toContain("Data Patches");
+    expect(html).toContain("crm.backfill");
+    expect(html).toContain('formaction="/desk/admin/data-patches/crm.backfill/apply"');
+
+    const applied = await worker.fetch!(
+      cfRequest("http://localhost/desk/admin/data-patches/crm.backfill/apply", { method: "POST" }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(applied.status).toBe(303);
+    expect(applied.headers.get("location")).toBe("/desk/admin/data-patches");
+    expect(resources.touched).toEqual(["crm"]);
+  });
+
   it("mounts user-permission admin API and Desk routes on the Worker", async () => {
     const worker = createCloudFrappeWorker({
       registry: createTestRegistry(),

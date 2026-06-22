@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { DataPatchAdminPort } from "../../application/data-patch-service.js";
 import type { DocumentCommandExecutor } from "../../application/document-service.js";
 import type { DocumentHistoryService } from "../../application/document-history-service.js";
 import type { FileService } from "../../application/file-service.js";
@@ -49,6 +50,7 @@ import {
   renderDeskLayout,
   renderErrorPanel,
   renderFileManager,
+  renderDataPatchAdmin,
   renderDocumentTimeline,
   renderFormView,
   renderJobAdmin,
@@ -105,6 +107,7 @@ export interface DeskAppOptions {
   readonly userProfiles?: UserProfileService;
   readonly userPermissions?: UserPermissionService;
   readonly reports?: ReportService;
+  readonly dataPatches?: DataPatchAdminPort;
   readonly jobs?: JobHistoryService;
   readonly jobRetry?: JobRetryPort;
   readonly jobSchedules?: JobScheduleService;
@@ -309,6 +312,36 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         })
       })
     );
+  });
+
+  app.get("/desk/admin/data-patches", async (c) => {
+    const dataPatches = requireDataPatches(options);
+    const actor = await options.actor(c.req.raw);
+    const dashboard = await dataPatches.dashboard(actor);
+    return renderDeskDataPatchPage(options, actor, dashboard);
+  });
+
+  app.post("/desk/admin/data-patches/apply", async (c) => {
+    const dataPatches = requireDataPatches(options);
+    const actor = await options.actor(c.req.raw);
+    try {
+      const form = await parseDeskDataPatchApply(c.req.raw);
+      await dataPatches.apply(actor, form.limit === undefined ? {} : { limit: form.limit });
+      return c.redirect("/desk/admin/data-patches", 303);
+    } catch (error) {
+      return renderDeskDataPatchFailure(options, actor, dataPatches, error);
+    }
+  });
+
+  app.post("/desk/admin/data-patches/:id/apply", async (c) => {
+    const dataPatches = requireDataPatches(options);
+    const actor = await options.actor(c.req.raw);
+    try {
+      await dataPatches.apply(actor, { patchIds: [c.req.param("id")] });
+      return c.redirect("/desk/admin/data-patches", 303);
+    } catch (error) {
+      return renderDeskDataPatchFailure(options, actor, dataPatches, error);
+    }
   });
 
   app.get("/desk/admin/jobs/schedules", async (c) => {
@@ -1256,6 +1289,13 @@ function requireJobs(options: DeskAppOptions): JobHistoryService {
   return options.jobs;
 }
 
+function requireDataPatches(options: DeskAppOptions): DataPatchAdminPort {
+  if (!options.dataPatches) {
+    throw new FrameworkError("DATA_PATCH_NOT_FOUND", "Data patches are not enabled", { status: 404 });
+  }
+  return options.dataPatches;
+}
+
 function requireJobRetry(options: DeskAppOptions): JobRetryPort {
   if (!options.jobRetry) {
     throw new FrameworkError("JOB_NOT_FOUND", "Job retry is not enabled", { status: 404 });
@@ -1318,6 +1358,47 @@ async function renderDeskFileFailure(
       body: renderFileManager(dashboard, { error: message })
     }),
     error instanceof FrameworkError ? error.status : 500
+  );
+}
+
+async function renderDeskDataPatchPage(
+  options: DeskAppOptions,
+  actor: Actor,
+  dashboard: Parameters<typeof renderDataPatchAdmin>[0],
+  status = 200,
+  error?: string
+): Promise<Response> {
+  const doctypes = options.queries.listDoctypes(actor);
+  const reports = listReports(options, actor);
+  return html(
+    renderDeskLayout({
+      title: "Data Patches",
+      doctypes,
+      reports,
+      showFiles: options.files !== undefined,
+      body: renderDataPatchAdmin(dashboard, error === undefined ? {} : { error })
+    }),
+    status
+  );
+}
+
+async function renderDeskDataPatchFailure(
+  options: DeskAppOptions,
+  actor: Actor,
+  dataPatches: DataPatchAdminPort,
+  error: unknown
+): Promise<Response> {
+  if (error instanceof FrameworkError && error.status === 403) {
+    throw error;
+  }
+  const dashboard = await dataPatches.dashboard(actor);
+  const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
+  return renderDeskDataPatchPage(
+    options,
+    actor,
+    dashboard,
+    error instanceof FrameworkError ? error.status : 500,
+    message
   );
 }
 
@@ -1595,6 +1676,23 @@ interface ParsedDeskFileUpload {
     readonly doctype: string;
     readonly name: string;
   };
+}
+
+interface ParsedDeskDataPatchApply {
+  readonly limit?: number;
+}
+
+async function parseDeskDataPatchApply(request: Request): Promise<ParsedDeskDataPatchApply> {
+  const form = await readUrlEncodedDeskForm(request);
+  const limit = stringSearchParamValue(form, "limit");
+  if (limit === undefined) {
+    return {};
+  }
+  const parsed = Number(limit);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new FrameworkError("BAD_REQUEST", "Data patch apply limit must be a positive integer", { status: 400 });
+  }
+  return { limit: parsed };
 }
 
 async function parseDeskFileUpload(request: Request): Promise<ParsedDeskFileUpload> {

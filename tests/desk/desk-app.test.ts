@@ -2,7 +2,9 @@ import {
   CHILD_TABLE_ROW_INDEX_FIELD,
   createDeskApp,
   createRegistry,
+  DataPatchService,
   defineClientScript,
+  defineDataPatch,
   defineDocType,
   deterministicIds,
   DocumentService,
@@ -11,6 +13,7 @@ import {
   fixedClock,
   createJobRegistry,
   InMemoryDocumentStore,
+  InMemoryDataPatchLog,
   InMemoryFileStorage,
   InMemoryJobExecutionLog,
   InMemoryJobQueue,
@@ -1180,6 +1183,107 @@ describe("Desk app", () => {
       runId: "job_retry-001",
       idempotencyKey: "reports.daily:job_002"
     });
+  });
+
+  it("renders and applies data patches from the Desk admin surface", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
+    const services = createServices();
+    const resources = { touched: [] as string[] };
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      dataPatches: new DataPatchService({
+        log: new InMemoryDataPatchLog(),
+        resources,
+        patches: [
+          defineDataPatch<typeof resources>({
+            id: "core.first",
+            checksum: "v1",
+            run: ({ resources }) => {
+              resources.touched.push("first");
+              return { touched: resources.touched.length };
+            }
+          }),
+          defineDataPatch<typeof resources>({
+            id: "crm.second",
+            checksum: "v1",
+            run: ({ resources }) => {
+              resources.touched.push("second");
+            }
+          })
+        ],
+        clock: fixedClock(now),
+        ids: deterministicIds(["claim-first", "claim-second"])
+      }),
+      actor: () => admin
+    });
+
+    const empty = await app.request("/desk/admin/data-patches");
+
+    expect(empty.status).toBe(200);
+    const emptyHtml = await empty.text();
+    expect(emptyHtml).toContain("Data Patches");
+    expect(emptyHtml).toContain("core.first");
+    expect(emptyHtml).toContain("crm.second");
+    expect(emptyHtml).toContain('action="/desk/admin/data-patches/apply"');
+    expect(emptyHtml).toContain('formaction="/desk/admin/data-patches/core.first/apply"');
+
+    const blocked = await app.request("/desk/admin/data-patches/crm.second/apply", { method: "POST" });
+    expect(blocked.status).toBe(409);
+    await expect(blocked.text()).resolves.toContain("cannot run before earlier patch");
+
+    const first = await app.request("/desk/admin/data-patches/apply", {
+      method: "POST",
+      body: new URLSearchParams({ limit: "1" })
+    });
+    expect(first.status).toBe(303);
+    expect(first.headers.get("location")).toBe("/desk/admin/data-patches");
+    expect(resources.touched).toEqual(["first"]);
+
+    const second = await app.request("/desk/admin/data-patches/crm.second/apply", { method: "POST" });
+    expect(second.status).toBe(303);
+    expect(second.headers.get("location")).toBe("/desk/admin/data-patches");
+    expect(resources.touched).toEqual(["first", "second"]);
+
+    const applied = await app.request("/desk/admin/data-patches");
+    const appliedHtml = await applied.text();
+    expect(appliedHtml).toContain("applied");
+    expect(appliedHtml).toContain("{&quot;touched&quot;:1}");
+  });
+
+  it("renders Desk data patch admin route errors", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
+    const services = createServices();
+    const dataPatches = new DataPatchService({
+      log: new InMemoryDataPatchLog(),
+      resources: {},
+      patches: [defineDataPatch({ id: "core.seed", checksum: "v1", run: () => undefined })]
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      dataPatches,
+      actor: () => admin
+    });
+
+    const invalidLimit = await app.request("/desk/admin/data-patches/apply", {
+      method: "POST",
+      body: new URLSearchParams({ limit: "0" })
+    });
+    expect(invalidLimit.status).toBe(400);
+    await expect(invalidLimit.text()).resolves.toContain("Data patch apply limit must be a positive integer");
+
+    const disabled = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: () => admin
+    });
+    const missing = await disabled.request("/desk/admin/data-patches");
+    expect(missing.status).toBe(404);
+    await expect(missing.text()).resolves.toContain("Data patches are not enabled");
   });
 
   it("renders and dispatches job schedules from the Desk admin surface", async () => {
