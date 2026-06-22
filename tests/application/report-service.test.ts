@@ -184,6 +184,90 @@ describe("ReportService", () => {
     ]);
   });
 
+  it("sorts report rows by metadata and runtime controls before pagination and export", async () => {
+    const { documents, registry, reports } = createServices(["e1", "e2", "e3"]);
+    registry.registerReport(
+      defineReport({
+        name: "Ordered Counts",
+        doctype: "Note",
+        columns: [
+          { name: "title", label: "Title" },
+          { name: "count", label: "Count" }
+        ],
+        orderBy: "count",
+        order: "desc",
+        roles: ["User"]
+      })
+    );
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Beta", count: 2 }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Alpha", count: 5 }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Gamma", count: 5 }) });
+
+    const metadataOrdered = await reports.runReport(owner, "Ordered Counts", { limit: 2 });
+
+    expect(metadataOrdered.order).toEqual({
+      orderBy: "count",
+      order: "desc",
+      options: [
+        { name: "title", label: "Title" },
+        { name: "count", label: "Count" }
+      ]
+    });
+    expect(metadataOrdered.rows).toEqual([
+      { title: "Alpha", count: 5 },
+      { title: "Gamma", count: 5 }
+    ]);
+    expect(metadataOrdered.total).toBe(3);
+
+    const runtimeOrdered = await reports.runReport(owner, "Ordered Counts", {
+      orderBy: "title",
+      order: "asc"
+    });
+
+    expect(runtimeOrdered.rows).toEqual([
+      { title: "Alpha", count: 5 },
+      { title: "Beta", count: 2 },
+      { title: "Gamma", count: 5 }
+    ]);
+
+    const csv = await reports.exportReportCsv(owner, "Ordered Counts", {
+      orderBy: "title",
+      order: "desc",
+      limit: 2
+    });
+
+    expect(csv).toMatchObject({ exported: 2, total: 3, truncated: true });
+    expect(csv.body).toBe([
+      "Title,Count",
+      "Gamma,5",
+      "Beta,2"
+    ].join("\n"));
+  });
+
+  it("rejects invalid runtime report ordering controls", async () => {
+    const { registry, reports } = createServices();
+    registry.registerReport(
+      defineReport({
+        name: "Ordered Counts",
+        doctype: "Note",
+        columns: [{ name: "title" }],
+        roles: ["User"]
+      })
+    );
+
+    await expect(
+      reports.runReport(owner, "Ordered Counts", {
+        orderBy: "missing"
+      })
+    ).rejects.toThrow("Report orderBy 'missing' is not a sortable report column");
+
+    await expect(
+      reports.runReport(owner, "Ordered Counts", {
+        order: "sideways" as "asc"
+      })
+    ).rejects.toThrow("Report order must be asc or desc");
+  });
+
   it("returns filter controls with coerced current values and select options", async () => {
     const { documents, registry, reports } = createServices(["e1", "e2"]);
     registry.registerReport(
@@ -504,6 +588,53 @@ describe("ReportService", () => {
       "Title,Priority,Body",
       "First,High,Body",
       "Second,High,Body"
+    ].join("\n"));
+  });
+
+  it("exports top ordered CSV rows across projection pages while counting all matches", async () => {
+    const { registry, reports, store } = createServices();
+    registry.registerReport(
+      defineReport({
+        name: "Ordered Count Export",
+        doctype: "Note",
+        columns: [
+          { name: "title", label: "Title" },
+          { name: "count", label: "Count" }
+        ],
+        orderBy: "count",
+        order: "desc",
+        roles: ["User"]
+      })
+    );
+    for (let index = 0; index < 205; index += 1) {
+      await store.save({
+        tenantId: "acme",
+        doctype: "Note",
+        name: `Rank ${index}`,
+        version: 1,
+        docstatus: "draft",
+        data: {
+          title: `Rank ${index}`,
+          count: index,
+          created_by: owner.id
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString()
+      });
+    }
+
+    const csv = await reports.exportReportCsv(owner, "Ordered Count Export", { limit: 2 });
+
+    expect(csv).toMatchObject({
+      exported: 2,
+      total: 205,
+      truncated: true,
+      limit: 2
+    });
+    expect(csv.body).toBe([
+      "Title,Count",
+      "Rank 204,204",
+      "Rank 203,203"
     ].join("\n"));
   });
 

@@ -46,6 +46,25 @@ describe("Desk report rendering", () => {
     expect(html).toContain('<option value="true" selected>True</option>');
   });
 
+  it("renders report ordering controls with current values", () => {
+    const html = renderReportView({
+      ...reportResult([]),
+      order: {
+        orderBy: "priority",
+        order: "desc",
+        options: [
+          { name: "title", label: "Title" },
+          { name: "priority", label: "Priority" }
+        ]
+      }
+    });
+
+    expect(html).toContain('<select id="report-order-by" name="order_by">');
+    expect(html).toContain('<option value="priority" selected>Priority</option>');
+    expect(html).toContain('<select id="report-order" name="order">');
+    expect(html).toContain('<option value="desc" selected>Descending</option>');
+  });
+
   it("renders pie chart legend entries only for positive slices", () => {
     const html = renderReportView(reportResult([
       {
@@ -136,6 +155,13 @@ function reportResult(charts: ReportRunResult["charts"]): ReportRunResult {
     report: openNotesReport,
     columns: openNotesReport.columns,
     filters: [],
+    order: {
+      order: "asc",
+      options: openNotesReport.columns.map((column) => ({
+        name: column.name,
+        label: column.label ?? column.name
+      }))
+    },
     summary: [],
     groups: [],
     charts,

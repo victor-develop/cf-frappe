@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the typed report filters slice:
+As of the report ordering controls slice:
 
 - Vitest files: `50`
-- Vitest cases: `391`
+- Vitest cases: `398`
 
 ## Implication
 

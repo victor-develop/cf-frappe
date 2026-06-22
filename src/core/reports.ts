@@ -6,10 +6,12 @@ export type ReportFilterOperator = "eq" | "contains" | "gte" | "lte";
 export type ReportSummaryAggregate = "count" | "sum" | "avg" | "min" | "max";
 export type ReportChartType = "bar" | "line" | "pie";
 export type ReportChartOrderBy = "key" | "label" | "value";
-export type ReportChartOrder = "asc" | "desc";
+export type ReportOrder = "asc" | "desc";
+export type ReportChartOrder = ReportOrder;
 
 const REPORT_FILTER_OPERATORS = ["eq", "contains", "gte", "lte"] as const;
 const REPORT_FILTER_TYPES = ["text", "longText", "integer", "number", "boolean", "date", "datetime", "select", "link"] as const;
+const REPORT_ORDERS = ["asc", "desc"] as const;
 const REPORT_CHART_COLOR_PATTERN = /^#[0-9A-Fa-f]{3}(?:[0-9A-Fa-f]{3})?$/;
 
 export interface ReportColumnDefinition {
@@ -69,6 +71,8 @@ export interface ReportDefinition {
   readonly summaries?: readonly ReportSummaryDefinition[];
   readonly groups?: readonly ReportGroupDefinition[];
   readonly charts?: readonly ReportChartDefinition[];
+  readonly orderBy?: string;
+  readonly order?: ReportOrder;
   readonly roles?: readonly string[];
   readonly permissionAction?: PermissionAction;
 }
@@ -127,6 +131,7 @@ export function assertReportDefinition(definition: ReportDefinition): void {
     assertUnique(group.summaries.map((summary) => summary.name), `summary on group '${group.name}'`, definition.name);
   }
   assertFiltersValid(definition);
+  assertReportOrderValid(definition);
   assertChartsReferenceGroups(definition);
 }
 
@@ -153,6 +158,7 @@ export function assertReportMatchesDocType(report: ReportDefinition, doctype: Do
       );
     }
   }
+  assertReportOrderMatchesDocType(report, fields);
   for (const filter of report.filters ?? []) {
     const field = fields.get(filter.field);
     if (!field) {
@@ -192,6 +198,45 @@ export function assertReportMatchesDocType(report: ReportDefinition, doctype: Do
     for (const summary of group.summaries) {
       assertSummaryMatchesDocType(report.name, summary, fields, ` on group '${group.name}'`);
     }
+  }
+}
+
+function assertReportOrderValid(report: ReportDefinition): void {
+  if (report.order !== undefined && !(REPORT_ORDERS as readonly string[]).includes(report.order)) {
+    throw new FrameworkError(
+      "REPORT_INVALID",
+      `Report '${report.name}' has invalid order '${String(report.order)}'`,
+      { status: 400 }
+    );
+  }
+  if (report.orderBy === undefined) {
+    return;
+  }
+  if (!report.columns.some((column) => column.name === report.orderBy)) {
+    throw new FrameworkError(
+      "REPORT_INVALID",
+      `Report '${report.name}' orderBy references unknown column '${report.orderBy}'`,
+      { status: 400 }
+    );
+  }
+}
+
+function assertReportOrderMatchesDocType(
+  report: ReportDefinition,
+  fields: ReadonlyMap<string, { readonly type: FieldType }>
+): void {
+  if (report.orderBy === undefined) {
+    return;
+  }
+  const column = report.columns.find((item) => item.name === report.orderBy);
+  const fieldName = column?.field ?? column?.name;
+  const field = fieldName ? fields.get(fieldName) : undefined;
+  if (fieldName && (field?.type === "json" || field?.type === "table")) {
+    throw new FrameworkError(
+      "REPORT_INVALID",
+      `Report '${report.name}' cannot order by ${field.type} column '${report.orderBy}'`,
+      { status: 400 }
+    );
   }
 }
 
@@ -261,7 +306,7 @@ function assertChartsReferenceGroups(report: ReportDefinition): void {
         { status: 400 }
       );
     }
-    if (chart.order !== undefined && chart.order !== "asc" && chart.order !== "desc") {
+    if (chart.order !== undefined && !(REPORT_ORDERS as readonly string[]).includes(chart.order)) {
       throw new FrameworkError(
         "REPORT_INVALID",
         `Report '${report.name}' chart '${chart.name}' has invalid order '${String(chart.order)}'`,

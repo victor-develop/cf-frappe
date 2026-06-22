@@ -12,6 +12,7 @@ import {
   type ReportFilterDefinition,
   type ReportFilterOperator,
   type ReportGroupDefinition,
+  type ReportOrder,
   type ReportSummaryAggregate,
   type ReportSummaryDefinition
 } from "../core/reports";
@@ -78,16 +79,30 @@ export interface ReportFilterControlResult {
   readonly options: readonly string[];
 }
 
+export interface ReportOrderOptionResult {
+  readonly name: string;
+  readonly label: string;
+}
+
+export interface ReportOrderControlResult {
+  readonly orderBy?: string;
+  readonly order: ReportOrder;
+  readonly options: readonly ReportOrderOptionResult[];
+}
+
 export interface ReportRunOptions {
   readonly filters?: ReportFilters;
   readonly limit?: number;
   readonly offset?: number;
+  readonly orderBy?: string;
+  readonly order?: ReportOrder;
 }
 
 export interface ReportRunResult {
   readonly report: ReportDefinition;
   readonly columns: readonly ReportColumnDefinition[];
   readonly filters: readonly ReportFilterControlResult[];
+  readonly order: ReportOrderControlResult;
   readonly summary: readonly ReportSummaryValue[];
   readonly groups: readonly ReportGroupResult[];
   readonly charts: readonly ReportChartResult[];
@@ -99,6 +114,8 @@ export interface ReportRunResult {
 
 export interface ReportCsvExportOptions extends Pick<ReportRunOptions, "filters"> {
   readonly limit?: number;
+  readonly orderBy?: string;
+  readonly order?: ReportOrder;
 }
 
 export interface ReportCsvExport {
@@ -144,13 +161,16 @@ export class ReportService {
     const limit = clampLimit(options.limit);
     const offset = Math.max(0, options.offset ?? 0);
     const filters = this.materializeFilters(report, doctype, options.filters ?? {});
+    const order = resolveReportOrder(report, doctype, options);
     const filtered = await this.filteredDocuments(actor, report, filters);
+    const sorted = sortReportDocuments(filtered, report, order);
     const groups = buildReportGroups(filtered, report.groups ?? []);
-    const rows = filtered.slice(offset, offset + limit).map((document) => reportRow(document, report.columns));
+    const rows = sorted.slice(offset, offset + limit).map((document) => reportRow(document, report.columns));
     return {
       report,
       columns: report.columns,
       filters: buildReportFilterControls(report, doctype, filters),
+      order,
       summary: buildReportSummary(filtered, report.summaries ?? []),
       groups,
       charts: buildReportCharts(groups, report.charts ?? []),
@@ -170,6 +190,41 @@ export class ReportService {
     const doctype = this.registry.get(report.doctype);
     const limit = clampCsvExportLimit(options.limit);
     const filters = this.materializeFilters(report, doctype, options.filters ?? {});
+    const order = resolveReportOrder(report, doctype, options);
+    if (order.orderBy === undefined) {
+      return this.exportUnorderedReportCsv(actor, report, filters, limit);
+    }
+    const rows = new BoundedOrderedReportRows(report, order, limit);
+    let total = 0;
+    await this.scanReadableDocuments(actor, report.doctype, (document) => {
+      if (!matchesReportFilters(document, report, filters)) {
+        return;
+      }
+      rows.add(document, total);
+      total += 1;
+    });
+    const lines = [
+      reportCsvHeader(report.columns),
+      ...rows.toRows().map((row) => reportRowToCsv(report.columns, row))
+    ];
+    const exported = Math.min(total, limit);
+    return {
+      filename: `${filenamePart(report.name)}.csv`,
+      contentType: "text/csv; charset=utf-8",
+      body: lines.join("\n"),
+      exported,
+      total,
+      truncated: exported < total,
+      limit
+    };
+  }
+
+  private async exportUnorderedReportCsv(
+    actor: Actor,
+    report: ReportDefinition,
+    filters: ReportFilters,
+    limit: number
+  ): Promise<ReportCsvExport> {
     const lines = [reportCsvHeader(report.columns)];
     let total = 0;
     let exported = 0;
@@ -273,8 +328,159 @@ function buildReportFilterControls(
   });
 }
 
+function buildReportOrderOptions(report: ReportDefinition, doctype: DocTypeDefinition): readonly ReportOrderOptionResult[] {
+  const fields = new Map(doctype.fields.map((field) => [field.name, field]));
+  return report.columns
+    .filter((column) => {
+      const field = fields.get(column.field ?? column.name);
+      return field?.type !== "json" && field?.type !== "table";
+    })
+    .map((column) => ({
+      name: column.name,
+      label: column.label ?? column.name
+    }));
+}
+
+function resolveReportOrder(
+  report: ReportDefinition,
+  doctype: DocTypeDefinition,
+  options: Pick<ReportRunOptions, "orderBy" | "order">
+): ReportOrderControlResult {
+  const orderOptions = buildReportOrderOptions(report, doctype);
+  const orderBy = options.orderBy ?? report.orderBy;
+  const order = options.order ?? report.order ?? "asc";
+  if (order !== "asc" && order !== "desc") {
+    throw badRequest("Report order must be asc or desc");
+  }
+  if (orderBy !== undefined && !orderOptions.some((option) => option.name === orderBy)) {
+    throw badRequest(`Report orderBy '${orderBy}' is not a sortable report column`);
+  }
+  return {
+    ...(orderBy === undefined ? {} : { orderBy }),
+    order,
+    options: orderOptions
+  };
+}
+
 function resolvedReportFilterType(filter: ReportFilterDefinition, field: FieldDefinition | undefined): FieldType | undefined {
   return filter.type ?? field?.type;
+}
+
+interface OrderedReportRow {
+  readonly row: ReportRow;
+  readonly sortValue: JsonValue | undefined;
+  readonly index: number;
+}
+
+class BoundedOrderedReportRows {
+  private readonly direction: 1 | -1;
+  private readonly field: string;
+  private readonly heap: OrderedReportRow[] = [];
+  private readonly limit: number;
+  private readonly report: ReportDefinition;
+
+  constructor(report: ReportDefinition, order: ReportOrderControlResult, limit: number) {
+    const column = report.columns.find((item) => item.name === order.orderBy);
+    this.field = column?.field ?? column?.name ?? "";
+    this.direction = order.order === "desc" ? -1 : 1;
+    this.limit = limit;
+    this.report = report;
+  }
+
+  add(document: DocumentSnapshot, index: number): void {
+    const entry: OrderedReportRow = {
+      row: reportRow(document, this.report.columns),
+      sortValue: document.data[this.field],
+      index
+    };
+    if (this.heap.length < this.limit) {
+      this.heap.push(entry);
+      this.siftUp(this.heap.length - 1);
+      return;
+    }
+    const worst = this.heap[0];
+    if (worst && compareOrderedRows(entry, worst, this.direction) < 0) {
+      this.heap[0] = entry;
+      this.siftDown(0);
+    }
+  }
+
+  toRows(): readonly ReportRow[] {
+    return this.heap
+      .slice()
+      .sort((left, right) => compareOrderedRows(left, right, this.direction))
+      .map((entry) => entry.row);
+  }
+
+  private siftUp(index: number): void {
+    let child = index;
+    while (child > 0) {
+      const parent = Math.floor((child - 1) / 2);
+      if (!isWorseOrderedRow(this.heap[child]!, this.heap[parent]!, this.direction)) {
+        return;
+      }
+      this.swap(child, parent);
+      child = parent;
+    }
+  }
+
+  private siftDown(index: number): void {
+    let parent = index;
+    while (true) {
+      const left = parent * 2 + 1;
+      const right = left + 1;
+      let worst = parent;
+      if (left < this.heap.length && isWorseOrderedRow(this.heap[left]!, this.heap[worst]!, this.direction)) {
+        worst = left;
+      }
+      if (right < this.heap.length && isWorseOrderedRow(this.heap[right]!, this.heap[worst]!, this.direction)) {
+        worst = right;
+      }
+      if (worst === parent) {
+        return;
+      }
+      this.swap(parent, worst);
+      parent = worst;
+    }
+  }
+
+  private swap(left: number, right: number): void {
+    const value = this.heap[left]!;
+    this.heap[left] = this.heap[right]!;
+    this.heap[right] = value;
+  }
+}
+
+function sortReportDocuments(
+  documents: readonly DocumentSnapshot[],
+  report: ReportDefinition,
+  order: ReportOrderControlResult
+): readonly DocumentSnapshot[] {
+  if (order.orderBy === undefined) {
+    return documents;
+  }
+  const column = report.columns.find((item) => item.name === order.orderBy);
+  const field = column?.field ?? column?.name;
+  if (!field) {
+    return documents;
+  }
+  const direction = order.order === "desc" ? -1 : 1;
+  return documents
+    .map((document, index) => ({ document, index }))
+    .sort((left, right) => {
+      const compared = compareDocumentValues(left.document.data[field], right.document.data[field]);
+      return compared === 0 ? left.index - right.index : compared * direction;
+    })
+    .map((item) => item.document);
+}
+
+function isWorseOrderedRow(left: OrderedReportRow, right: OrderedReportRow, direction: 1 | -1): boolean {
+  return compareOrderedRows(left, right, direction) > 0;
+}
+
+function compareOrderedRows(left: OrderedReportRow, right: OrderedReportRow, direction: 1 | -1): number {
+  const compared = compareDocumentValues(left.sortValue, right.sortValue) * direction;
+  return compared === 0 ? left.index - right.index : compared;
 }
 
 function matchesReportFilters(document: DocumentSnapshot, report: ReportDefinition, filters: ReportFilters): boolean {
@@ -585,6 +791,13 @@ function compareValues(actual: JsonValue | undefined, expected: JsonPrimitive): 
     return actual - expected;
   }
   return String(actual ?? "").localeCompare(String(expected));
+}
+
+function compareDocumentValues(left: JsonValue | undefined, right: JsonValue | undefined): number {
+  if (typeof left === "number" && typeof right === "number") {
+    return left - right;
+  }
+  return String(left ?? "").localeCompare(String(right ?? ""));
 }
 
 function clampLimit(limit?: number): number {

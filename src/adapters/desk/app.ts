@@ -7,7 +7,7 @@ import type { JobRetryPort } from "../../application/job-retry-service";
 import type { JobScheduleService } from "../../application/job-schedule-service";
 import type { PrintService } from "../../application/print-service";
 import { QueryService } from "../../application/query-service";
-import type { ReportFilters, ReportService } from "../../application/report-service";
+import type { ReportService } from "../../application/report-service";
 import type { SavedListFilterService } from "../../application/saved-list-filter-service";
 import type { UserPermissionService } from "../../application/user-permission-service";
 import { FrameworkError } from "../../core/errors";
@@ -21,7 +21,6 @@ import {
   type DocumentData,
   type DocumentSnapshot,
   type FieldDefinition,
-  type JsonPrimitive,
   type ListDocumentsFilter,
   type MutableDocumentData,
   type ResolvedFormView
@@ -29,6 +28,7 @@ import {
 import type { ActorResolver } from "../http/actor";
 import { listFiltersFromUrl, parseOptionalInteger } from "../http/request";
 import { writeReportCsvHeaders } from "../http/report-export";
+import { reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request";
 import { renderPrintDocument } from "../print";
 import { DESK_CLIENT_SCRIPT_PATH, renderDeskClientScript } from "./client";
 import {
@@ -316,6 +316,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const reports = listReports(options, actor);
     const result = await options.reports.runReport(actor, c.req.param("report"), {
       filters: reportFiltersFromUrl(url),
+      ...reportOrderingFromUrl(url),
       limit: 100
     });
     const exportHref = `/desk/reports/${encodeURIComponent(result.report.name)}/export.csv${url.search}`;
@@ -339,6 +340,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const limit = parseOptionalInteger(url.searchParams.get("limit") ?? undefined);
     const csv = await options.reports.exportReportCsv(actor, c.req.param("report"), {
       filters: reportFiltersFromUrl(url),
+      ...reportOrderingFromUrl(url),
       ...(limit !== undefined ? { limit } : {})
     });
     writeReportCsvHeaders(c, csv);
@@ -979,16 +981,6 @@ function tableDefinitionsForForm(options: DeskAppOptions, formView: ResolvedForm
     .filter((field) => field.type === "table" && field.tableOf)
     .map((field) => [field.name, options.registry.get(field.tableOf!)] as const);
   return Object.fromEntries(entries) as FormTableDefinitions;
-}
-
-function reportFiltersFromUrl(url: URL): ReportFilters {
-  const filters: Record<string, JsonPrimitive> = {};
-  url.searchParams.forEach((value, key) => {
-    if (key.startsWith("filter_")) {
-      filters[key.slice("filter_".length)] = value;
-    }
-  });
-  return filters;
 }
 
 interface ParsedDeskForm {

@@ -106,6 +106,44 @@ describe("report api", () => {
     });
   });
 
+  it("runs and exports reports with query-string ordering", async () => {
+    const { app, services } = makeApp();
+    await services.documents.create({ actor: { id: "owner@example.com", roles: ["User"], tenantId: "acme" }, doctype: "Note", data: data({ title: "Beta Note", priority: "High", count: 2 }) });
+    await services.documents.create({ actor: { id: "owner@example.com", roles: ["User"], tenantId: "acme" }, doctype: "Note", data: data({ title: "Alpha Note", priority: "High", count: 5 }) });
+
+    const response = await app.request("/api/report/Open%20Notes/run?filter_priority=High&order_by=title&order=desc", {
+      headers: userHeaders
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      order: {
+        orderBy: "title",
+        order: "desc",
+        options: [
+          { name: "title", label: "Title" },
+          { name: "priority", label: "Priority" },
+          { name: "body", label: "Body" }
+        ]
+      },
+      rows: [
+        { title: "Beta Note" },
+        { title: "Alpha Note" }
+      ]
+    });
+
+    const csv = await app.request("/api/report/Open%20Notes/export.csv?filter_priority=High&order_by=title&order=asc", {
+      headers: userHeaders
+    });
+
+    expect(csv.status).toBe(200);
+    await expect(csv.text()).resolves.toBe([
+      "Title,Priority,Body",
+      "Alpha Note,High,Body",
+      "Beta Note,High,Body"
+    ].join("\n"));
+  });
+
   it("maps invalid typed report filters to JSON errors", async () => {
     const { app, services } = makeApp();
     services.registry.registerReport(
@@ -125,6 +163,19 @@ describe("report api", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "BAD_REQUEST", message: "Report filter 'minimum' must be an integer" }
+    });
+  });
+
+  it("maps invalid report ordering to JSON errors", async () => {
+    const { app } = makeApp();
+
+    const response = await app.request("/api/report/Open%20Notes/run?order=sideways", {
+      headers: userHeaders
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Report order must be asc or desc" }
     });
   });
 

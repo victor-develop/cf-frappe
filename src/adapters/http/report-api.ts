@@ -1,9 +1,9 @@
 import { Hono } from "hono";
-import type { ReportFilters, ReportService } from "../../application/report-service";
-import type { JsonPrimitive } from "../../core/types";
+import type { ReportService } from "../../application/report-service";
 import type { ActorResolver } from "./actor";
 import { parseOptionalInteger } from "./request";
 import { writeReportCsvHeaders } from "./report-export";
+import { reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request";
 
 export interface ReportApiOptions {
   readonly reports: ReportService;
@@ -25,9 +25,11 @@ export function createReportApi(options: ReportApiOptions): Hono {
 
   app.get("/api/report/:report/export.csv", async (c) => {
     const actor = await options.actor(c.req.raw);
+    const url = new URL(c.req.url);
     const limit = parseOptionalInteger(c.req.query("limit"));
     const csv = await options.reports.exportReportCsv(actor, c.req.param("report"), {
-      filters: reportFiltersFromUrl(new URL(c.req.url)),
+      filters: reportFiltersFromUrl(url),
+      ...reportOrderingFromUrl(url),
       ...(limit !== undefined ? { limit } : {})
     });
     writeReportCsvHeaders(c, csv);
@@ -36,10 +38,12 @@ export function createReportApi(options: ReportApiOptions): Hono {
 
   app.get("/api/report/:report/run", async (c) => {
     const actor = await options.actor(c.req.raw);
+    const url = new URL(c.req.url);
     const limit = parseOptionalInteger(c.req.query("limit"));
     const offset = parseOptionalInteger(c.req.query("offset"));
     const result = await options.reports.runReport(actor, c.req.param("report"), {
-      filters: reportFiltersFromUrl(new URL(c.req.url)),
+      filters: reportFiltersFromUrl(url),
+      ...reportOrderingFromUrl(url),
       ...(limit !== undefined ? { limit } : {}),
       ...(offset !== undefined ? { offset } : {})
     });
@@ -47,14 +51,4 @@ export function createReportApi(options: ReportApiOptions): Hono {
   });
 
   return app;
-}
-
-function reportFiltersFromUrl(url: URL): ReportFilters {
-  const filters: Record<string, JsonPrimitive> = {};
-  url.searchParams.forEach((value, key) => {
-    if (key.startsWith("filter_")) {
-      filters[key.slice("filter_".length)] = value;
-    }
-  });
-  return filters;
 }

@@ -122,6 +122,72 @@ describe("reports", () => {
     ).toThrow("Report 'Broken Json Filter' filter 'meta_filter' cannot filter by json field 'meta'");
   });
 
+  it("validates report ordering against columns, directions, and sortable fields", () => {
+    const Note = defineDocType({
+      name: "Note",
+      fields: [
+        { name: "title", type: "text" },
+        { name: "meta", type: "json" }
+      ]
+    });
+
+    const ordered = defineReport({
+      name: "Ordered Notes",
+      doctype: "Note",
+      columns: [{ name: "title", label: "Title" }],
+      orderBy: "title",
+      order: "desc"
+    });
+
+    expect(ordered).toMatchObject({ orderBy: "title", order: "desc" });
+
+    expect(() =>
+      defineReport({
+        name: "Broken Order Column",
+        doctype: "Note",
+        columns: [{ name: "title" }],
+        orderBy: "missing"
+      })
+    ).toThrow("Report 'Broken Order Column' orderBy references unknown column 'missing'");
+
+    expect(() =>
+      defineReport({
+        name: "Broken Order Direction",
+        doctype: "Note",
+        columns: [{ name: "title" }],
+        order: "sideways" as "asc"
+      })
+    ).toThrow("Report 'Broken Order Direction' has invalid order 'sideways'");
+
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        reports: [
+          {
+            name: "Raw Broken Order Direction",
+            doctype: "Note",
+            columns: [{ name: "title" }],
+            order: "sideways" as "asc"
+          }
+        ]
+      })
+    ).toThrow("Report 'Raw Broken Order Direction' has invalid order 'sideways'");
+
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        reports: [
+          defineReport({
+            name: "Broken Json Order",
+            doctype: "Note",
+            columns: [{ name: "meta_value", field: "meta" }],
+            orderBy: "meta_value"
+          })
+        ]
+      })
+    ).toThrow("Report 'Broken Json Order' cannot order by json column 'meta_value'");
+  });
+
   it("validates report charts against grouped numeric summaries", () => {
     const Note = defineDocType({
       name: "Note",

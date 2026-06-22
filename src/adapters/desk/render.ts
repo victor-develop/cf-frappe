@@ -378,6 +378,8 @@ export function renderReportView(
   options: { readonly exportHref?: string } = {}
 ): string {
   const filterForm = result.filters.map(renderReportFilterControl).join("");
+  const orderForm = renderReportOrderControls(result.order);
+  const controls = `${filterForm}${orderForm}`;
   const headers = result.columns.map((column) => `<th>${escapeHtml(column.label ?? column.name)}</th>`).join("");
   const rows = result.rows
     .map(
@@ -390,7 +392,7 @@ export function renderReportView(
   const exportAction = options.exportHref
     ? `<a class="button" href="${escapeHtml(options.exportHref)}">Export CSV</a>`
     : "";
-  return `${filterForm ? `<form class="panel form report-filters" method="get"><div class="fields">${filterForm}</div><div class="actions"><button class="button primary" type="submit">Run</button>${exportAction}</div></form>` : exportAction ? `<section class="toolbar">${exportAction}</section>` : ""}
+  return `${controls ? `<form class="panel form report-filters" method="get"><div class="fields">${controls}</div><div class="actions"><button class="button primary" type="submit">Run</button>${exportAction}</div></form>` : exportAction ? `<section class="toolbar">${exportAction}</section>` : ""}
   ${renderReportSummary(result.summary)}
   ${renderReportCharts(result.charts)}
   ${renderReportGroups(result.groups)}
@@ -426,6 +428,25 @@ function renderReportFilterControl(filter: ReportRunResult["filters"][number]): 
   }
   const type = inputTypeForFieldType(filter.type);
   return `<label class="field" for="${id}"><span>${label}</span><input id="${id}" name="${name}" type="${type}" value="${escapeHtml(value)}"${required}></label>`;
+}
+
+function renderReportOrderControls(order: ReportRunResult["order"]): string {
+  if (order.options.length === 0) {
+    return "";
+  }
+  const selectedOrderBy = order.orderBy ?? "";
+  const orderByOptions = [
+    `<option value=""></option>`,
+    ...order.options.map((option) =>
+      `<option value="${escapeHtml(option.name)}"${option.name === selectedOrderBy ? " selected" : ""}>${escapeHtml(option.label)}</option>`
+    )
+  ].join("");
+  const orderOptions = [
+    `<option value="asc"${order.order === "asc" ? " selected" : ""}>Ascending</option>`,
+    `<option value="desc"${order.order === "desc" ? " selected" : ""}>Descending</option>`
+  ].join("");
+  return `<label class="field" for="report-order-by"><span>Order By</span><select id="report-order-by" name="order_by">${orderByOptions}</select></label>
+    <label class="field" for="report-order"><span>Order</span><select id="report-order" name="order">${orderOptions}</select></label>`;
 }
 
 function renderReportSelectOptions(options: readonly string[], value: string): string {

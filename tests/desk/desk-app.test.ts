@@ -116,15 +116,21 @@ describe("Desk app", () => {
       doctype: "Note",
       data: data({ title: "Report Note", priority: "High", body: "For reporting", count: 7 })
     });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Alpha Report", priority: "High", body: "Earlier title", count: 3 })
+    });
 
     const list = await app.request("/desk/reports");
     expect(list.status).toBe(200);
     await expect(list.text()).resolves.toContain("Open Notes");
 
-    const report = await app.request("/desk/reports/Open%20Notes?filter_priority=High");
+    const report = await app.request("/desk/reports/Open%20Notes?filter_priority=High&order_by=title&order=desc");
     expect(report.status).toBe(200);
     const html = await report.text();
     expect(html).toContain("Report Note");
+    expect(html.indexOf("Report Note")).toBeLessThan(html.indexOf("Alpha Report"));
     expect(html).toContain("For reporting");
     expect(html).toContain("Total Count");
     expect(html).toContain("By Priority");
@@ -133,15 +139,18 @@ describe("Desk app", () => {
     expect(html).toContain('<select id="filter-priority" name="filter_priority">');
     expect(html).toContain('<option value="High" selected>High</option>');
     expect(html).toContain('name="filter_title" type="text" value=""');
-    expect(html).toContain("/desk/reports/Open%20Notes/export.csv?filter_priority=High");
+    expect(html).toContain('<select id="report-order-by" name="order_by">');
+    expect(html).toContain('<option value="title" selected>Title</option>');
+    expect(html).toContain('<option value="desc" selected>Descending</option>');
+    expect(html).toContain("/desk/reports/Open%20Notes/export.csv?filter_priority=High&amp;order_by=title&amp;order=desc");
 
-    const csv = await app.request("/desk/reports/Open%20Notes/export.csv?filter_priority=High");
+    const csv = await app.request("/desk/reports/Open%20Notes/export.csv?filter_priority=High&order_by=title&order=desc");
     expect(csv.status).toBe(200);
     expect(csv.headers.get("content-disposition")).toBe('attachment; filename="Open-Notes.csv"');
-    expect(csv.headers.get("x-cf-frappe-export-total")).toBe("1");
-    expect(csv.headers.get("x-cf-frappe-exported")).toBe("1");
+    expect(csv.headers.get("x-cf-frappe-export-total")).toBe("2");
+    expect(csv.headers.get("x-cf-frappe-exported")).toBe("2");
     expect(csv.headers.get("x-cf-frappe-export-truncated")).toBe("false");
-    await expect(csv.text()).resolves.toBe("Title,Priority,Body\nReport Note,High,For reporting");
+    await expect(csv.text()).resolves.toBe("Title,Priority,Body\nReport Note,High,For reporting\nAlpha Report,High,Earlier title");
   });
 
   it("renders a Desk file manager for upload, download, and delete workflows", async () => {
