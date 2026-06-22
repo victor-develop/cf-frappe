@@ -10,7 +10,7 @@ import type {
   JsonValue,
   TenantId
 } from "../core/types";
-import { foldDocument, foldDocumentAssignments, foldDocumentFrom } from "../core/events";
+import { foldDocument, foldDocumentAssignments, foldDocumentFrom, foldDocumentTags } from "../core/events";
 import { badRequest } from "../core/errors";
 import { documentStream } from "../core/streams";
 import type { EventStore } from "../ports/event-store";
@@ -51,6 +51,15 @@ export interface DocumentAssignments {
   readonly version: number;
   readonly docstatus: DocStatus;
   readonly assignees: readonly string[];
+}
+
+export interface DocumentTags {
+  readonly tenantId: TenantId;
+  readonly doctype: DocTypeName;
+  readonly name: DocumentName;
+  readonly version: number;
+  readonly docstatus: DocStatus;
+  readonly tags: readonly string[];
 }
 
 export interface DocumentTimelineEntry {
@@ -139,6 +148,28 @@ export class DocumentHistoryService {
     };
   }
 
+  async getTags(
+    actor: Actor,
+    doctypeName: string,
+    name: string,
+    options: Pick<GetDocumentTimelineOptions, "tenantId"> = {}
+  ): Promise<DocumentTags> {
+    const document = await this.queries.getDocument(actor, doctypeName, name, options.tenantId);
+    const stream = documentStream(document.tenantId, document.doctype, document.name);
+    const events = await this.events.readStream(stream, {
+      maxSequence: document.version,
+      payloadKinds: ["DocumentTagged", "DocumentUntagged"]
+    });
+    return {
+      tenantId: document.tenantId,
+      doctype: document.doctype,
+      name: document.name,
+      version: document.version,
+      docstatus: document.docstatus,
+      tags: foldDocumentTags(events.filter((event) => event.sequence <= document.version))
+    };
+  }
+
   private async baselineBefore(stream: string, firstVisibleSequence: number | undefined): Promise<DocumentSnapshot | null> {
     if (firstVisibleSequence === undefined || firstVisibleSequence <= 1) {
       return null;
@@ -207,6 +238,8 @@ function diffEvent(
     case "DocumentActivityRecorded":
     case "DocumentAssigned":
     case "DocumentUnassigned":
+    case "DocumentTagged":
+    case "DocumentUntagged":
     case "SavedListFilterSaved":
     case "SavedListFilterDeleted":
       return [];
@@ -264,6 +297,10 @@ function summarize(payload: DocumentEventPayload): string {
       return `Assigned ${payload.assigneeId}`;
     case "DocumentUnassigned":
       return `Unassigned ${payload.assigneeId}`;
+    case "DocumentTagged":
+      return `Tagged ${payload.tag}`;
+    case "DocumentUntagged":
+      return `Untagged ${payload.tag}`;
     case "SavedListFilterSaved":
       return `Saved list filter ${payload.label}`;
     case "SavedListFilterDeleted":

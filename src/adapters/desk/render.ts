@@ -13,7 +13,7 @@ import {
   type ResolvedListView
 } from "../../core/types";
 import type { ReportDefinition } from "../../core/reports";
-import type { DocumentAssignments, DocumentTimeline } from "../../application/document-history-service";
+import type { DocumentAssignments, DocumentTags, DocumentTimeline } from "../../application/document-history-service";
 import type { ReportRunResult } from "../../application/report-service";
 import type { SavedListFilter } from "../../application/saved-list-filter-service";
 import type { PrintFormatDefinition } from "../../core/print-format";
@@ -456,7 +456,9 @@ export function renderDocumentTimeline(
   options: {
     readonly allowComment?: boolean;
     readonly allowAssign?: boolean;
+    readonly allowTag?: boolean;
     readonly assignments?: DocumentAssignments;
+    readonly tags?: DocumentTags;
   } = {}
 ): string {
   const rows = timeline.entries
@@ -473,11 +475,13 @@ export function renderDocumentTimeline(
   const assignmentPanel = options.assignments
     ? renderAssignmentPanel(timeline, options.assignments, { allowAssign: options.allowAssign ?? false })
     : "";
+  const tagPanel = options.tags ? renderTagPanel(timeline, options.tags, { allowTag: options.allowTag ?? false }) : "";
   return `<section class="panel timeline" aria-labelledby="document-timeline">
     <div class="timeline-head">
       <h2 id="document-timeline">Timeline</h2>
       <p>v${String(timeline.version)} · ${escapeHtml(timeline.docstatus)}</p>
     </div>
+    ${tagPanel}
     ${assignmentPanel}
     <div class="table-wrap">
       <table>
@@ -524,6 +528,44 @@ function renderAssignmentPanel(
     <ul class="assignment-list">${assigneeRows || `<li class="empty">No assignees.</li>`}</ul>
     ${assignmentForm}
   </div>`;
+}
+
+function renderTagPanel(
+  timeline: DocumentTimeline,
+  tags: DocumentTags,
+  options: { readonly allowTag?: boolean }
+): string {
+  const tagRows = tags.tags
+    .map(
+      (tag) => `<li>
+        <span>${escapeHtml(tag)}</span>
+        ${options.allowTag ? renderUntagForm(timeline, tag) : ""}
+      </li>`
+    )
+    .join("");
+  const tagForm = options.allowTag ? renderTagForm(timeline) : "";
+  return `<div class="timeline-tags">
+    <h3 id="document-tags">Tags</h3>
+    <ul class="tag-list">${tagRows || `<li class="empty">No tags.</li>`}</ul>
+    ${tagForm}
+  </div>`;
+}
+
+function renderTagForm(timeline: DocumentTimeline): string {
+  const action = `/desk/${encodeURIComponent(timeline.doctype)}/${encodeURIComponent(timeline.name)}/tags`;
+  return `<form class="timeline-tag-form" method="post">
+    <input type="hidden" name="expectedVersion" value="${String(timeline.version)}">
+    <label class="field" for="timeline-tag"><span>Tag</span><input id="timeline-tag" name="tag" type="text"></label>
+    <button class="button primary" type="submit" formaction="${action}">Add tag</button>
+  </form>`;
+}
+
+function renderUntagForm(timeline: DocumentTimeline, tag: string): string {
+  const action = `/desk/${encodeURIComponent(timeline.doctype)}/${encodeURIComponent(timeline.name)}/tags/${encodeURIComponent(tag)}/remove`;
+  return `<form class="inline-action" method="post">
+    <input type="hidden" name="expectedVersion" value="${String(timeline.version)}">
+    <button class="button" type="submit" formaction="${action}">Remove</button>
+  </form>`;
 }
 
 function renderAssignmentForm(timeline: DocumentTimeline): string {
@@ -1136,10 +1178,15 @@ tr:last-child td { border-bottom: 0; }
   color: var(--text);
   font-weight: 600;
 }
+.timeline-tags,
 .timeline-assignments {
   padding: 0 18px 18px;
   border-bottom: 1px solid var(--border);
 }
+.timeline-tags + .timeline-assignments {
+  padding-top: 18px;
+}
+.tag-list,
 .assignment-list {
   display: grid;
   gap: 8px;
@@ -1147,6 +1194,7 @@ tr:last-child td { border-bottom: 0; }
   padding: 0;
   list-style: none;
 }
+.tag-list li,
 .assignment-list li {
   display: flex;
   align-items: center;
@@ -1155,6 +1203,7 @@ tr:last-child td { border-bottom: 0; }
   min-height: 44px;
 }
 .inline-action { margin: 0; }
+.timeline-tag-form,
 .timeline-assignment-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

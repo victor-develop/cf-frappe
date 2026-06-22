@@ -601,6 +601,77 @@ describe("DocumentService", () => {
     ).rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
   });
 
+  it("tags and untags documents as idempotent stream events without mutating document data", async () => {
+    const { documents, events, projections } = createServices(["e1", "tag-1", "untag-1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    const tagged = await documents.tag({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      tag: " Urgent  Customer ",
+      expectedVersion: 1
+    });
+    const duplicateTag = await documents.tag({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      tag: "Urgent Customer",
+      expectedVersion: 2
+    });
+    const untagged = await documents.untag({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      tag: "Urgent Customer",
+      expectedVersion: 2
+    });
+    const absentUntag = await documents.untag({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      tag: "Urgent Customer",
+      expectedVersion: 3
+    });
+
+    expect(tagged).toMatchObject({ version: 2, docstatus: "draft", data: { body: "Body" } });
+    expect(duplicateTag.version).toBe(2);
+    expect(untagged).toMatchObject({ version: 3, docstatus: "draft", data: { body: "Body" } });
+    expect(absentUntag.version).toBe(3);
+    await expect(projections.get("acme", "Note", "My Note")).resolves.toMatchObject({ version: 3 });
+    await expect(events.readStream("acme:Note:My%20Note")).resolves.toMatchObject([
+      expect.anything(),
+      {
+        type: "NoteTagged",
+        payload: { kind: "DocumentTagged", tag: "Urgent Customer" }
+      },
+      {
+        type: "NoteUntagged",
+        payload: { kind: "DocumentUntagged", tag: "Urgent Customer" }
+      }
+    ]);
+  });
+
+  it("requires tag permission, non-empty tags, and current optimistic versions", async () => {
+    const { documents } = createServices(["e1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    await expect(
+      documents.tag({ actor: guest, doctype: "Note", name: "My Note", tag: "Urgent" })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+
+    await expect(
+      documents.tag({ actor: owner, doctype: "Note", name: "My Note", tag: "   " })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Tag is required"
+    });
+
+    await expect(
+      documents.tag({ actor: owner, doctype: "Note", name: "My Note", tag: "Urgent", expectedVersion: 0 })
+    ).rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
+  });
+
   it("assigns and unassigns users as document stream events without mutating document data", async () => {
     const { documents, events, projections } = createServices(["e1", "assign-1", "unassign-1"]);
     await documents.create({ actor: owner, doctype: "Note", data: data() });

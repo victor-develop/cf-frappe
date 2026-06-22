@@ -9,10 +9,10 @@ import {
   InMemoryDocumentStore,
   QueryService
 } from "../../src";
-import { createChildTableServices, createLinkedServices, createServices, data, now, owner } from "../helpers";
+import { createChildTableServices, createLinkedServices, createServices, data, guest, now, owner } from "../helpers";
 
 describe("Desk app", () => {
-  function makeDesk() {
+  function makeDesk(actor = owner) {
     const services = createServices(["e1", "e2", "e3", "e4"]);
     const app = createDeskApp({
       registry: services.registry,
@@ -22,7 +22,7 @@ describe("Desk app", () => {
       reports: services.reports,
       timeline: services.history,
       savedFilters: services.savedFilters,
-      actor: () => owner
+      actor: () => actor
     });
     return { app, services };
   }
@@ -291,6 +291,58 @@ describe("Desk app", () => {
 
     expect(unassigned.status).toBe(303);
     await expect(services.queries.getDocument(owner, "Note", "My Note")).resolves.toMatchObject({ version: 3 });
+  });
+
+  it("renders and submits tag controls from generated edit forms", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    const initial = await app.request("/desk/Note/My%20Note");
+    expect(initial.status).toBe(200);
+    const initialHtml = await initial.text();
+    expect(initialHtml).toContain('<h3 id="document-tags">Tags</h3>');
+    expect(initialHtml).toContain('formaction="/desk/Note/My%20Note/tags"');
+    expect(initialHtml).toContain('name="tag"');
+
+    const tagged = await app.request("/desk/Note/My%20Note/tags", {
+      method: "POST",
+      body: new URLSearchParams({ tag: "Urgent", expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(tagged.status).toBe(303);
+    await expect(services.queries.getDocument(owner, "Note", "My Note")).resolves.toMatchObject({ version: 2 });
+
+    const withTag = await app.request("/desk/Note/My%20Note");
+    expect(withTag.status).toBe(200);
+    const taggedHtml = await withTag.text();
+    expect(taggedHtml).toContain("Urgent");
+    expect(taggedHtml).toContain('formaction="/desk/Note/My%20Note/tags/Urgent/remove"');
+
+    const untagged = await app.request("/desk/Note/My%20Note/tags/Urgent/remove", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "2" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(untagged.status).toBe(303);
+    await expect(services.queries.getDocument(owner, "Note", "My Note")).resolves.toMatchObject({ version: 3 });
+  });
+
+  it("hides tag mutation controls from read-only generated edit forms", async () => {
+    const { app, services } = makeDesk(guest);
+    await services.documents.create({ actor: owner, doctype: "Note", data: data() });
+    await services.documents.tag({ actor: owner, doctype: "Note", name: "My Note", tag: "Urgent", expectedVersion: 1 });
+
+    const response = await app.request("/desk/Note/My%20Note");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('<h3 id="document-tags">Tags</h3>');
+    expect(html).toContain("Urgent");
+    expect(html).not.toContain('name="tag"');
+    expect(html).not.toContain('formaction="/desk/Note/My%20Note/tags"');
+    expect(html).not.toContain('formaction="/desk/Note/My%20Note/tags/Urgent/remove"');
   });
 
   it("submits and cancels documents from generated edit forms", async () => {

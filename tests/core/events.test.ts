@@ -1,4 +1,4 @@
-import { foldDocument } from "../../src";
+import { foldDocument, foldDocumentTags } from "../../src";
 import type { DomainEvent } from "../../src";
 
 describe("event folding", () => {
@@ -129,13 +129,54 @@ describe("event folding", () => {
         sequence: 4,
         type: "DocumentUnassigned",
         payload: { kind: "DocumentUnassigned", assigneeId: "support@example.com" }
+      },
+      {
+        ...base,
+        id: "evt5",
+        sequence: 5,
+        type: "DocumentTagged",
+        payload: { kind: "DocumentTagged", tag: "Urgent" }
+      },
+      {
+        ...base,
+        id: "evt6",
+        sequence: 6,
+        type: "DocumentUntagged",
+        payload: { kind: "DocumentUntagged", tag: "Urgent" }
       }
     ];
 
     expect(foldDocument(events)).toMatchObject({
-      version: 4,
+      version: 6,
       docstatus: "draft",
       data: { title: "One" }
     });
+  });
+
+  it("folds current document tags from tag events", () => {
+    const events: DomainEvent[] = [
+      {
+        ...base,
+        sequence: 1,
+        type: "DocumentTagged",
+        payload: { kind: "DocumentTagged", tag: "Urgent" }
+      },
+      {
+        ...base,
+        id: "evt2",
+        sequence: 2,
+        type: "DocumentTagged",
+        payload: { kind: "DocumentTagged", tag: "Customer" }
+      },
+      {
+        ...base,
+        id: "evt3",
+        sequence: 3,
+        type: "DocumentUntagged",
+        payload: { kind: "DocumentUntagged", tag: "Urgent" }
+      }
+    ];
+
+    expect(foldDocumentTags(events)).toEqual(["Customer"]);
   });
 });

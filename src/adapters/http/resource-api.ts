@@ -165,6 +165,12 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       const data = await timeline.getAssignments(actor, c.req.param("doctype"), c.req.param("name"));
       return c.json({ data });
     });
+
+    app.get("/api/resource/:doctype/:name/tags", async (c) => {
+      const actor = await resolveActor(c.req.raw);
+      const data = await timeline.getTags(actor, c.req.param("doctype"), c.req.param("name"));
+      return c.json({ data });
+    });
   }
 
   if (options.savedFilters) {
@@ -285,6 +291,36 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       doctype: c.req.param("doctype"),
       name: c.req.param("name"),
       assignee: c.req.param("assignee"),
+      ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: snapshot });
+  });
+
+  app.post("/api/resource/:doctype/:name/tags", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    const body = await readJson(c.req.raw, { maxJsonBytes });
+    const expectedVersion = numberValue(body.expectedVersion);
+    const snapshot = await options.documents.tag({
+      actor,
+      doctype: c.req.param("doctype"),
+      name: c.req.param("name"),
+      tag: stringValue(body.tag) ?? "",
+      ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: snapshot }, 201);
+  });
+
+  app.delete("/api/resource/:doctype/:name/tags/:tag", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    const body = await readJson(c.req.raw, { allowEmpty: true, maxJsonBytes });
+    const expectedVersion = numberValue(body.expectedVersion);
+    const snapshot = await options.documents.untag({
+      actor,
+      doctype: c.req.param("doctype"),
+      name: c.req.param("name"),
+      tag: c.req.param("tag"),
       ...(expectedVersion !== undefined ? { expectedVersion } : {}),
       metadata: requestMetadata(c.req.raw)
     });

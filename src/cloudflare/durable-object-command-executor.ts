@@ -8,8 +8,10 @@ import type {
   ExecuteDomainCommand,
   RecordDocumentActivityCommand,
   SubmitDocumentCommand,
+  TagDocumentCommand,
   TransitionDocumentCommand,
   UnassignDocumentCommand,
+  UntagDocumentCommand,
   UpdateDocumentCommand
 } from "../application/document-service";
 import type { ModelRegistry } from "../core/registry";
@@ -82,6 +84,14 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
 
   unassign(command: UnassignDocumentCommand): Promise<DocumentSnapshot> {
     return this.stubForNamed(command).transact({ ...command, kind: "unassign" });
+  }
+
+  tag(command: TagDocumentCommand): Promise<DocumentSnapshot> {
+    return this.stubForNamed(command).transact({ ...command, kind: "tag" });
+  }
+
+  untag(command: UntagDocumentCommand): Promise<DocumentSnapshot> {
+    return this.stubForNamed(command).transact({ ...command, kind: "untag" });
   }
 
   private stubForCreate(command: CreateDocumentCommand): AggregateCoordinatorRpc {

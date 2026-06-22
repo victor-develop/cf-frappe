@@ -83,6 +83,8 @@ export function foldDocumentFrom(
       case "DocumentActivityRecorded":
       case "DocumentAssigned":
       case "DocumentUnassigned":
+      case "DocumentTagged":
+      case "DocumentUntagged":
         if (snapshot) {
           const current: DocumentSnapshot = snapshot;
           snapshot = {
@@ -114,6 +116,21 @@ export function foldDocumentAssignments(events: readonly DomainEvent[]): readonl
     }
   }
   return [...assignees].sort((left, right) => left.localeCompare(right));
+}
+
+export function foldDocumentTags(events: readonly DomainEvent[]): readonly string[] {
+  const tags = new Set<string>();
+  for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
+    switch (event.payload.kind) {
+      case "DocumentTagged":
+        tags.add(event.payload.tag);
+        break;
+      case "DocumentUntagged":
+        tags.delete(event.payload.tag);
+        break;
+    }
+  }
+  return [...tags].sort((left, right) => left.localeCompare(right));
 }
 
 function cloneData<TData extends DocumentData>(data: TData): TData {

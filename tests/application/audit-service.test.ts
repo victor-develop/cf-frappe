@@ -80,6 +80,47 @@ describe("AuditService", () => {
     });
   });
 
+  it("searches tag events by audit kind", async () => {
+    const { audit, documents } = createServices(["create-1", "tag-1", "untag-1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Tag Audit" }) });
+    await documents.tag({
+      actor: owner,
+      doctype: "Note",
+      name: "Tag Audit",
+      tag: "Urgent",
+      expectedVersion: 1
+    });
+    await documents.untag({
+      actor: owner,
+      doctype: "Note",
+      name: "Tag Audit",
+      tag: "Urgent",
+      expectedVersion: 2
+    });
+
+    const tagged = await audit.search(admin, {
+      doctype: "Note",
+      name: "Tag Audit",
+      kind: "DocumentTagged"
+    });
+    const untagged = await audit.search(admin, {
+      doctype: "Note",
+      name: "Tag Audit",
+      kind: "DocumentUntagged"
+    });
+
+    expect(tagged.events).toHaveLength(1);
+    expect(tagged.events[0]).toMatchObject({
+      id: "evt_tag-1",
+      payload: { kind: "DocumentTagged", tag: "Urgent" }
+    });
+    expect(untagged.events).toHaveLength(1);
+    expect(untagged.events[0]).toMatchObject({
+      id: "evt_untag-1",
+      payload: { kind: "DocumentUntagged", tag: "Urgent" }
+    });
+  });
+
   it("rejects non-system managers before querying audit events", async () => {
     const { audit, documents } = createServices(["create-1"]);
     await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Private Audit" }) });

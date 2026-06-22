@@ -1,4 +1,4 @@
-import { foldDocument, foldDocumentAssignments } from "../core/events";
+import { foldDocument, foldDocumentAssignments, foldDocumentTags } from "../core/events";
 import { can } from "../core/permissions";
 import { applyDefaults, compactData, validateDocumentData } from "../core/schema";
 import { documentStream, namingSeriesStream } from "../core/streams";
@@ -145,6 +145,26 @@ export interface UnassignDocumentCommand {
   readonly metadata?: DocumentData;
 }
 
+export interface TagDocumentCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly tag: string;
+  readonly tenantId?: string;
+  readonly expectedVersion?: number;
+  readonly metadata?: DocumentData;
+}
+
+export interface UntagDocumentCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly tag: string;
+  readonly tenantId?: string;
+  readonly expectedVersion?: number;
+  readonly metadata?: DocumentData;
+}
+
 export interface DocumentCommandExecutor {
   create(command: CreateDocumentCommand): Promise<DocumentSnapshot>;
   update(command: UpdateDocumentCommand): Promise<DocumentSnapshot>;
@@ -157,6 +177,8 @@ export interface DocumentCommandExecutor {
   recordActivity(command: RecordDocumentActivityCommand): Promise<DocumentSnapshot>;
   assign(command: AssignDocumentCommand): Promise<DocumentSnapshot>;
   unassign(command: UnassignDocumentCommand): Promise<DocumentSnapshot>;
+  tag(command: TagDocumentCommand): Promise<DocumentSnapshot>;
+  untag(command: UntagDocumentCommand): Promise<DocumentSnapshot>;
 }
 
 const NAMING_SERIES_DOCTYPE = "__NamingSeries";
@@ -168,6 +190,7 @@ const MAX_ACTIVITY_DETAIL_LENGTH = 10000;
 const MAX_ACTIVITY_CHANNEL_LENGTH = 120;
 const MAX_ACTIVITY_EXTERNAL_ID_LENGTH = 256;
 const MAX_ASSIGNEE_ID_LENGTH = 320;
+const MAX_TAG_LENGTH = 80;
 
 export class DocumentService implements DocumentCommandExecutor {
   private readonly registry: ModelRegistry;
@@ -553,6 +576,24 @@ export class DocumentService implements DocumentCommandExecutor {
     });
   }
 
+  async tag(command: TagDocumentCommand): Promise<DocumentSnapshot> {
+    return this.changeTag({
+      command,
+      eventKind: "DocumentTagged",
+      eventType: (doctype) => doctype.events?.tag ?? `${doctype.name}Tagged`,
+      alreadyDone: (tags, tag) => tags.includes(tag)
+    });
+  }
+
+  async untag(command: UntagDocumentCommand): Promise<DocumentSnapshot> {
+    return this.changeTag({
+      command,
+      eventKind: "DocumentUntagged",
+      eventType: (doctype) => doctype.events?.untag ?? `${doctype.name}Untagged`,
+      alreadyDone: (tags, tag) => !tags.includes(tag)
+    });
+  }
+
   async delete(command: DeleteDocumentCommand): Promise<DocumentSnapshot> {
     const doctype = this.registry.get(command.doctype);
     const tenantId = resolveTenant(command.actor, command.tenantId);
@@ -690,6 +731,53 @@ export class DocumentService implements DocumentCommandExecutor {
       actorId: options.command.actor.id,
       occurredAt: now,
       payload: { kind: options.eventKind, assigneeId },
+      metadata: options.command.metadata ?? {}
+    });
+    const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
+      if (!saved) {
+        throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
+      }
+      return {
+        ...existing,
+        version: saved.sequence,
+        updatedAt: saved.occurredAt
+      };
+    });
+    const [saved] = commit.events;
+    if (saved) {
+      await this.runAfterCommit(doctype, saved, commit.snapshot);
+    }
+    return commit.snapshot;
+  }
+
+  private async changeTag(options: {
+    readonly command: TagDocumentCommand | UntagDocumentCommand;
+    readonly eventKind: "DocumentTagged" | "DocumentUntagged";
+    readonly eventType: (doctype: DocTypeDefinition) => string;
+    readonly alreadyDone: (tags: readonly string[], tag: string) => boolean;
+  }): Promise<DocumentSnapshot> {
+    const doctype = this.registry.get(options.command.doctype);
+    const tenantId = resolveTenant(options.command.actor, options.command.tenantId);
+    const stream = documentStream(tenantId, doctype.name, options.command.name);
+    const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, options.command.name);
+    if (!can(options.command.actor, doctype, "tag", existing)) {
+      throw permissionDenied(`Actor '${options.command.actor.id}' cannot tag ${doctype.name}/${options.command.name}`);
+    }
+    ensureExpectedVersion(existing, options.command.expectedVersion);
+    const tag = normalizeTag(options.command.tag);
+    if (options.alreadyDone(foldDocumentTags(events), tag)) {
+      return existing;
+    }
+    const now = this.clock.now();
+    const event = this.newEvent({
+      tenantId,
+      stream,
+      type: options.eventType(doctype),
+      doctype: doctype.name,
+      documentName: options.command.name,
+      actorId: options.command.actor.id,
+      occurredAt: now,
+      payload: { kind: options.eventKind, tag },
       metadata: options.command.metadata ?? {}
     });
     const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
@@ -1145,6 +1233,17 @@ function normalizeAssigneeId(assignee: string): string {
   }
   if (normalized.length > MAX_ASSIGNEE_ID_LENGTH) {
     throw badRequest(`Assignee exceeds ${MAX_ASSIGNEE_ID_LENGTH} characters`);
+  }
+  return normalized;
+}
+
+function normalizeTag(tag: string): string {
+  const normalized = tag.replaceAll(/\s+/g, " ").trim();
+  if (normalized.length === 0) {
+    throw badRequest("Tag is required");
+  }
+  if (normalized.length > MAX_TAG_LENGTH) {
+    throw badRequest(`Tag exceeds ${MAX_TAG_LENGTH} characters`);
   }
   return normalized;
 }

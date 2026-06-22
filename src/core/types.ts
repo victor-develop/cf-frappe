@@ -57,7 +57,8 @@ export type PermissionAction =
   | "transition"
   | "comment"
   | "assign"
-  | "activity";
+  | "activity"
+  | "tag";
 
 export interface Actor {
   readonly id: string;
@@ -144,6 +145,8 @@ export interface DocTypeDefinition<TData extends DocumentData = DocumentData> {
     readonly assign?: string;
     readonly unassign?: string;
     readonly activity?: string;
+    readonly tag?: string;
+    readonly untag?: string;
   };
   readonly description?: string;
   readonly __data?: TData;
@@ -204,6 +207,14 @@ export type DocumentEventPayload =
   | {
       readonly kind: "DocumentUnassigned";
       readonly assigneeId: string;
+    }
+  | {
+      readonly kind: "DocumentTagged";
+      readonly tag: string;
+    }
+  | {
+      readonly kind: "DocumentUntagged";
+      readonly tag: string;
     }
   | {
       readonly kind: "SavedListFilterSaved";

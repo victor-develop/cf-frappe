@@ -249,8 +249,10 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const lifecycleActions = lifecycleActionsFor(actor, doctype, document);
     const timeline = await options.timeline?.getTimeline(actor, doctype.name, document.name, { limit: 25 });
     const assignments = await options.timeline?.getAssignments(actor, doctype.name, document.name);
+    const tags = await options.timeline?.getTags(actor, doctype.name, document.name);
     const canComment = can(actor, doctype, "comment", document);
     const canAssign = can(actor, doctype, "assign", document);
+    const canTag = can(actor, doctype, "tag", document);
     const form = renderFormView(doctype, formView, {
       mode: "update",
       document,
@@ -270,7 +272,9 @@ export function createDeskApp(options: DeskAppOptions): Hono {
             ? renderDocumentTimeline(timeline, {
                 allowComment: canComment,
                 allowAssign: canAssign,
-                ...(assignments ? { assignments } : {})
+                allowTag: canTag,
+                ...(assignments ? { assignments } : {}),
+                ...(tags ? { tags } : {})
               })
             : ""
         }`
@@ -329,6 +333,46 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         doctype: doctype.name,
         name,
         assignee: c.req.param("assignee"),
+        ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(`/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(name)}`, 303);
+    } catch (error) {
+      return renderDeskError(options, c.req.raw, actor, doctype, "update", error, name);
+    }
+  });
+
+  app.post("/desk/:doctype/:name/tags", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const name = c.req.param("name");
+    try {
+      const form = await parseDeskTag(c.req.raw);
+      await options.documents.tag({
+        actor,
+        doctype: doctype.name,
+        name,
+        tag: form.tag,
+        ...(form.expectedVersion !== undefined ? { expectedVersion: form.expectedVersion } : {}),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(`/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(name)}`, 303);
+    } catch (error) {
+      return renderDeskError(options, c.req.raw, actor, doctype, "update", error, name);
+    }
+  });
+
+  app.post("/desk/:doctype/:name/tags/:tag/remove", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const name = c.req.param("name");
+    try {
+      const expectedVersion = await parseDeskExpectedVersion(c.req.raw);
+      await options.documents.untag({
+        actor,
+        doctype: doctype.name,
+        name,
+        tag: c.req.param("tag"),
         ...(expectedVersion !== undefined ? { expectedVersion } : {}),
         metadata: requestMetadata(c.req.raw)
       });
@@ -575,6 +619,11 @@ interface ParsedDeskAssignment {
   readonly expectedVersion?: number;
 }
 
+interface ParsedDeskTag {
+  readonly tag: string;
+  readonly expectedVersion?: number;
+}
+
 interface ParsedDeskSavedFilter {
   readonly label: string;
   readonly filters: readonly ListDocumentsFilter[];
@@ -611,6 +660,16 @@ async function parseDeskAssignment(request: Request): Promise<ParsedDeskAssignme
   const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
   return {
     assignee: typeof assignee === "string" ? assignee : "",
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
+async function parseDeskTag(request: Request): Promise<ParsedDeskTag> {
+  const form = await request.formData();
+  const tag = form.get("tag");
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  return {
+    tag: typeof tag === "string" ? tag : "",
     ...(expectedVersion !== undefined ? { expectedVersion } : {})
   };
 }

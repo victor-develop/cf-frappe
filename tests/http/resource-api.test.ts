@@ -412,6 +412,55 @@ describe("resource api", () => {
     await expect(empty.json()).resolves.toMatchObject({ data: { assignees: [] } });
   });
 
+  it("tags and untags resources through event-sourced tag routes", async () => {
+    const app = makeApp();
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Tagged", body: "Body" })
+    });
+
+    const tagged = await app.request("/api/resource/Note/HTTP%20Tagged/tags", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ tag: "Urgent", expectedVersion: 1 })
+    });
+
+    expect(tagged.status).toBe(201);
+    await expect(tagged.json()).resolves.toMatchObject({ data: { version: 2 } });
+
+    const current = await app.request("/api/resource/Note/HTTP%20Tagged/tags", { headers: userHeaders });
+    expect(current.status).toBe(200);
+    await expect(current.json()).resolves.toMatchObject({
+      data: {
+        version: 2,
+        tags: ["Urgent"]
+      }
+    });
+
+    const timeline = await app.request("/api/resource/Note/HTTP%20Tagged/timeline", { headers: userHeaders });
+    await expect(timeline.json()).resolves.toMatchObject({
+      data: {
+        entries: [
+          expect.objectContaining({ kind: "DocumentCreated" }),
+          expect.objectContaining({ kind: "DocumentTagged", summary: "Tagged Urgent", changes: [] })
+        ]
+      }
+    });
+
+    const untagged = await app.request("/api/resource/Note/HTTP%20Tagged/tags/Urgent", {
+      method: "DELETE",
+      headers: userHeaders,
+      body: JSON.stringify({ expectedVersion: 2 })
+    });
+
+    expect(untagged.status).toBe(200);
+    await expect(untagged.json()).resolves.toMatchObject({ data: { version: 3 } });
+
+    const empty = await app.request("/api/resource/Note/HTTP%20Tagged/tags", { headers: userHeaders });
+    await expect(empty.json()).resolves.toMatchObject({ data: { tags: [] } });
+  });
+
   it("returns bounded resource timeline pages from query parameters", async () => {
     const app = makeApp();
     await app.request("/api/resource/Note", {

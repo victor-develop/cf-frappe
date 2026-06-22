@@ -10,8 +10,10 @@ import type {
   DeleteDocumentCommand,
   RecordDocumentActivityCommand,
   SubmitDocumentCommand,
+  TagDocumentCommand,
   TransitionDocumentCommand,
   UnassignDocumentCommand,
+  UntagDocumentCommand,
   UpdateDocumentCommand
 } from "../application/document-service";
 import type { ExecuteDomainCommand } from "../application/document-service";
@@ -32,7 +34,9 @@ export type AggregateCoordinatorCommand =
   | ({ readonly kind: "comment" } & AddDocumentCommentCommand)
   | ({ readonly kind: "recordActivity" } & RecordDocumentActivityCommand)
   | ({ readonly kind: "assign" } & AssignDocumentCommand)
-  | ({ readonly kind: "unassign" } & UnassignDocumentCommand);
+  | ({ readonly kind: "unassign" } & UnassignDocumentCommand)
+  | ({ readonly kind: "tag" } & TagDocumentCommand)
+  | ({ readonly kind: "untag" } & UntagDocumentCommand);
 
 export interface AggregateCoordinatorEnv {
   readonly DB: D1Database;
@@ -95,6 +99,10 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
           return this.service.assign(command);
         case "unassign":
           return this.service.unassign(command);
+        case "tag":
+          return this.service.tag(command);
+        case "untag":
+          return this.service.untag(command);
       }
     }
   };
