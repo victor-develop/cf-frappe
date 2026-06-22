@@ -6,6 +6,7 @@ import type {
   DeleteDocumentCommand,
   DocumentCommandExecutor,
   ExecuteDomainCommand,
+  RecordDocumentActivityCommand,
   SubmitDocumentCommand,
   TransitionDocumentCommand,
   UnassignDocumentCommand,
@@ -69,6 +70,10 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
 
   comment(command: AddDocumentCommentCommand): Promise<DocumentSnapshot> {
     return this.stubForNamed(command).transact({ ...command, kind: "comment" });
+  }
+
+  recordActivity(command: RecordDocumentActivityCommand): Promise<DocumentSnapshot> {
+    return this.stubForNamed(command).transact({ ...command, kind: "recordActivity" });
   }
 
   assign(command: AssignDocumentCommand): Promise<DocumentSnapshot> {

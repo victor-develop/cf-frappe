@@ -56,7 +56,8 @@ export type PermissionAction =
   | "cancel"
   | "transition"
   | "comment"
-  | "assign";
+  | "assign"
+  | "activity";
 
 export interface Actor {
   readonly id: string;
@@ -142,6 +143,7 @@ export interface DocTypeDefinition<TData extends DocumentData = DocumentData> {
     readonly comment?: string;
     readonly assign?: string;
     readonly unassign?: string;
+    readonly activity?: string;
   };
   readonly description?: string;
   readonly __data?: TData;
@@ -186,6 +188,14 @@ export type DocumentEventPayload =
   | {
       readonly kind: "DocumentCommentAdded";
       readonly text: string;
+    }
+  | {
+      readonly kind: "DocumentActivityRecorded";
+      readonly activityType: string;
+      readonly subject: string;
+      readonly detail?: string;
+      readonly channel?: string;
+      readonly externalId?: string;
     }
   | {
       readonly kind: "DocumentAssigned";

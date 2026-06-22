@@ -526,6 +526,81 @@ describe("DocumentService", () => {
     });
   });
 
+  it("records activity feed entries as document stream events without mutating document data", async () => {
+    const { documents, events, projections } = createServices(["e1", "activity-1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    const activity = await documents.recordActivity({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      activityType: "email",
+      subject: "Follow-up sent",
+      detail: "Sent to customer@example.com",
+      channel: "email",
+      externalId: "msg-123",
+      expectedVersion: 1
+    });
+
+    expect(activity).toMatchObject({
+      version: 2,
+      docstatus: "draft",
+      data: { body: "Body" }
+    });
+    await expect(projections.get("acme", "Note", "My Note")).resolves.toMatchObject({ version: 2 });
+    await expect(events.readStream("acme:Note:My%20Note")).resolves.toMatchObject([
+      expect.anything(),
+      {
+        type: "NoteActivityRecorded",
+        actorId: owner.id,
+        payload: {
+          kind: "DocumentActivityRecorded",
+          activityType: "email",
+          subject: "Follow-up sent",
+          detail: "Sent to customer@example.com",
+          channel: "email",
+          externalId: "msg-123"
+        }
+      }
+    ]);
+  });
+
+  it("requires activity permission and non-empty activity subjects", async () => {
+    const { documents } = createServices(["e1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    await expect(
+      documents.recordActivity({
+        actor: guest,
+        doctype: "Note",
+        name: "My Note",
+        subject: "I should not record activity"
+      })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+
+    await expect(
+      documents.recordActivity({ actor: owner, doctype: "Note", name: "My Note", subject: "   " })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Activity subject is required"
+    });
+  });
+
+  it("rejects activity feed entries with stale optimistic versions", async () => {
+    const { documents } = createServices(["e1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    await expect(
+      documents.recordActivity({
+        actor: owner,
+        doctype: "Note",
+        name: "My Note",
+        subject: "Follow-up sent",
+        expectedVersion: 0
+      })
+    ).rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
+  });
+
   it("assigns and unassigns users as document stream events without mutating document data", async () => {
     const { documents, events, projections } = createServices(["e1", "assign-1", "unassign-1"]);
     await documents.create({ actor: owner, doctype: "Note", data: data() });

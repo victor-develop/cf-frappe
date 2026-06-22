@@ -238,6 +238,29 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     return c.json({ data: snapshot }, 201);
   });
 
+  app.post("/api/resource/:doctype/:name/activities", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    const body = await readJson(c.req.raw, { maxJsonBytes });
+    const expectedVersion = numberValue(body.expectedVersion);
+    const activityType = stringValue(body.activityType);
+    const detail = stringValue(body.detail);
+    const channel = stringValue(body.channel);
+    const externalId = stringValue(body.externalId);
+    const snapshot = await options.documents.recordActivity({
+      actor,
+      doctype: c.req.param("doctype"),
+      name: c.req.param("name"),
+      ...(activityType !== undefined ? { activityType } : {}),
+      subject: stringValue(body.subject) ?? "",
+      ...(detail !== undefined ? { detail } : {}),
+      ...(channel !== undefined ? { channel } : {}),
+      ...(externalId !== undefined ? { externalId } : {}),
+      ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: snapshot }, 201);
+  });
+
   app.post("/api/resource/:doctype/:name/assignments", async (c) => {
     const actor = await resolveActor(c.req.raw);
     const body = await readJson(c.req.raw, { maxJsonBytes });

@@ -204,6 +204,7 @@ function diffEvent(
     case "DocumentCancelled":
       return diffDocstatus(before, after);
     case "DocumentCommentAdded":
+    case "DocumentActivityRecorded":
     case "DocumentAssigned":
     case "DocumentUnassigned":
     case "SavedListFilterSaved":
@@ -257,6 +258,8 @@ function summarize(payload: DocumentEventPayload): string {
       return "Cancelled document";
     case "DocumentCommentAdded":
       return `Commented: ${summarizeText(payload.text)}`;
+    case "DocumentActivityRecorded":
+      return `${capitalize(payload.activityType)}: ${summarizeText(payload.subject)}`;
     case "DocumentAssigned":
       return `Assigned ${payload.assigneeId}`;
     case "DocumentUnassigned":

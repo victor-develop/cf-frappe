@@ -3,7 +3,7 @@ import { createServices, data, owner } from "../helpers";
 
 describe("DocumentHistoryService", () => {
   it("derives chronological timeline entries from the document event stream", async () => {
-    const { documents, events, queries } = createServices(["create-1", "update-1", "transition-1", "command-1", "comment-1"]);
+    const { documents, events, queries } = createServices(["create-1", "update-1", "transition-1", "command-1", "activity-1", "comment-1"]);
     const history = new DocumentHistoryService({ events, queries });
     await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Timeline Note" }) });
     await documents.update({ actor: owner, doctype: "Note", name: "Timeline Note", patch: { body: "Updated" } });
@@ -14,6 +14,14 @@ describe("DocumentHistoryService", () => {
       name: "Timeline Note",
       command: "rewriteBody",
       input: { body: "Commanded" }
+    });
+    await documents.recordActivity({
+      actor: owner,
+      doctype: "Note",
+      name: "Timeline Note",
+      activityType: "email",
+      subject: "Follow-up sent",
+      detail: "Sent to customer@example.com"
     });
     await documents.comment({
       actor: owner,
@@ -28,7 +36,7 @@ describe("DocumentHistoryService", () => {
       tenantId: "acme",
       doctype: "Note",
       name: "Timeline Note",
-      version: 5
+      version: 6
     });
     expect(timeline.entries.map(({ sequence, kind, type, summary }) => ({ sequence, kind, type, summary }))).toEqual([
       {
@@ -57,6 +65,12 @@ describe("DocumentHistoryService", () => {
       },
       {
         sequence: 5,
+        kind: "DocumentActivityRecorded",
+        type: "NoteActivityRecorded",
+        summary: "Email: Follow-up sent"
+      },
+      {
+        sequence: 6,
         kind: "DocumentCommentAdded",
         type: "NoteCommentAdded",
         summary: "Commented: Ship it"
@@ -87,6 +101,7 @@ describe("DocumentHistoryService", () => {
       { field: "body", oldValue: "Updated", newValue: "Commanded" }
     ]);
     expect(timeline.entries[4]!.changes).toEqual([]);
+    expect(timeline.entries[5]!.changes).toEqual([]);
   });
 
   it("requires normal document read permission before exposing stream history", async () => {

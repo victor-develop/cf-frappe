@@ -22,6 +22,7 @@ const DOCUMENT_EVENT_KINDS = new Set<DocumentEventPayload["kind"]>([
   "DocumentSubmitted",
   "DocumentCancelled",
   "DocumentCommentAdded",
+  "DocumentActivityRecorded",
   "DocumentAssigned",
   "DocumentUnassigned",
   "SavedListFilterSaved",

@@ -96,7 +96,7 @@ describe("event folding", () => {
     });
   });
 
-  it("folds assignment activity without changing document data or status", () => {
+  it("folds feed activity without changing document data or status", () => {
     const events: DomainEvent[] = [
       {
         ...base,
@@ -115,13 +115,25 @@ describe("event folding", () => {
         ...base,
         id: "evt3",
         sequence: 3,
+        type: "DocumentActivityRecorded",
+        payload: {
+          kind: "DocumentActivityRecorded",
+          activityType: "email",
+          subject: "Follow-up sent",
+          detail: "Sent to customer@example.com"
+        }
+      },
+      {
+        ...base,
+        id: "evt4",
+        sequence: 4,
         type: "DocumentUnassigned",
         payload: { kind: "DocumentUnassigned", assigneeId: "support@example.com" }
       }
     ];
 
     expect(foldDocument(events)).toMatchObject({
-      version: 3,
+      version: 4,
       docstatus: "draft",
       data: { title: "One" }
     });

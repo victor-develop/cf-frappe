@@ -80,6 +80,7 @@ export function foldDocumentFrom(
         }
         break;
       case "DocumentCommentAdded":
+      case "DocumentActivityRecorded":
       case "DocumentAssigned":
       case "DocumentUnassigned":
         if (snapshot) {

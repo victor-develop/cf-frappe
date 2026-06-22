@@ -111,6 +111,20 @@ export interface AddDocumentCommentCommand {
   readonly metadata?: DocumentData;
 }
 
+export interface RecordDocumentActivityCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly activityType?: string;
+  readonly subject: string;
+  readonly detail?: string;
+  readonly channel?: string;
+  readonly externalId?: string;
+  readonly tenantId?: string;
+  readonly expectedVersion?: number;
+  readonly metadata?: DocumentData;
+}
+
 export interface AssignDocumentCommand {
   readonly actor: Actor;
   readonly doctype: string;
@@ -140,6 +154,7 @@ export interface DocumentCommandExecutor {
   transition(command: TransitionDocumentCommand): Promise<DocumentSnapshot>;
   execute(command: ExecuteDomainCommand): Promise<DocumentSnapshot>;
   comment(command: AddDocumentCommentCommand): Promise<DocumentSnapshot>;
+  recordActivity(command: RecordDocumentActivityCommand): Promise<DocumentSnapshot>;
   assign(command: AssignDocumentCommand): Promise<DocumentSnapshot>;
   unassign(command: UnassignDocumentCommand): Promise<DocumentSnapshot>;
 }
@@ -147,6 +162,11 @@ export interface DocumentCommandExecutor {
 const NAMING_SERIES_DOCTYPE = "__NamingSeries";
 const NAMING_SERIES_MAX_ATTEMPTS = 10;
 const MAX_COMMENT_TEXT_LENGTH = 5000;
+const MAX_ACTIVITY_TYPE_LENGTH = 64;
+const MAX_ACTIVITY_SUBJECT_LENGTH = 240;
+const MAX_ACTIVITY_DETAIL_LENGTH = 10000;
+const MAX_ACTIVITY_CHANNEL_LENGTH = 120;
+const MAX_ACTIVITY_EXTERNAL_ID_LENGTH = 256;
 const MAX_ASSIGNEE_ID_LENGTH = 320;
 
 export class DocumentService implements DocumentCommandExecutor {
@@ -450,6 +470,52 @@ export class DocumentService implements DocumentCommandExecutor {
       actorId: command.actor.id,
       occurredAt: now,
       payload: { kind: "DocumentCommentAdded", text },
+      metadata: command.metadata ?? {}
+    });
+    const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
+      if (!saved) {
+        throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
+      }
+      return {
+        ...existing,
+        version: saved.sequence,
+        updatedAt: saved.occurredAt
+      };
+    });
+    const [saved] = commit.events;
+    if (saved) {
+      await this.runAfterCommit(doctype, saved, commit.snapshot);
+    }
+    return commit.snapshot;
+  }
+
+  async recordActivity(command: RecordDocumentActivityCommand): Promise<DocumentSnapshot> {
+    const doctype = this.registry.get(command.doctype);
+    const tenantId = resolveTenant(command.actor, command.tenantId);
+    const stream = documentStream(tenantId, doctype.name, command.name);
+    const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
+    if (!can(command.actor, doctype, "activity", existing)) {
+      throw permissionDenied(`Actor '${command.actor.id}' cannot record activity on ${doctype.name}/${command.name}`);
+    }
+    ensureExpectedVersion(existing, command.expectedVersion);
+    const activity = normalizeActivity(command);
+    const now = this.clock.now();
+    const event = this.newEvent({
+      tenantId,
+      stream,
+      type: doctype.events?.activity ?? `${doctype.name}ActivityRecorded`,
+      doctype: doctype.name,
+      documentName: command.name,
+      actorId: command.actor.id,
+      occurredAt: now,
+      payload: {
+        kind: "DocumentActivityRecorded",
+        activityType: activity.activityType,
+        subject: activity.subject,
+        ...(activity.detail !== undefined ? { detail: activity.detail } : {}),
+        ...(activity.channel !== undefined ? { channel: activity.channel } : {}),
+        ...(activity.externalId !== undefined ? { externalId: activity.externalId } : {})
+      },
       metadata: command.metadata ?? {}
     });
     const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
@@ -1006,6 +1072,68 @@ function normalizeCommentText(text: string): string {
   }
   if (normalized.length > MAX_COMMENT_TEXT_LENGTH) {
     throw badRequest(`Comment text exceeds ${MAX_COMMENT_TEXT_LENGTH} characters`);
+  }
+  return normalized;
+}
+
+function normalizeActivity(command: RecordDocumentActivityCommand): {
+  readonly activityType: string;
+  readonly subject: string;
+  readonly detail?: string;
+  readonly channel?: string;
+  readonly externalId?: string;
+} {
+  const activityType = normalizeOptionalText(command.activityType, {
+    defaultValue: "activity",
+    field: "Activity type",
+    maxLength: MAX_ACTIVITY_TYPE_LENGTH
+  }) ?? "activity";
+  const subject = normalizeRequiredText(command.subject, "Activity subject", MAX_ACTIVITY_SUBJECT_LENGTH);
+  const detail = normalizeOptionalText(command.detail, {
+    field: "Activity detail",
+    maxLength: MAX_ACTIVITY_DETAIL_LENGTH
+  });
+  const channel = normalizeOptionalText(command.channel, {
+    field: "Activity channel",
+    maxLength: MAX_ACTIVITY_CHANNEL_LENGTH
+  });
+  const externalId = normalizeOptionalText(command.externalId, {
+    field: "Activity external id",
+    maxLength: MAX_ACTIVITY_EXTERNAL_ID_LENGTH
+  });
+  return {
+    activityType,
+    subject,
+    ...(detail !== undefined ? { detail } : {}),
+    ...(channel !== undefined ? { channel } : {}),
+    ...(externalId !== undefined ? { externalId } : {})
+  };
+}
+
+function normalizeRequiredText(value: string, field: string, maxLength: number): string {
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    throw badRequest(`${field} is required`);
+  }
+  if (normalized.length > maxLength) {
+    throw badRequest(`${field} exceeds ${maxLength} characters`);
+  }
+  return normalized;
+}
+
+function normalizeOptionalText(
+  value: string | undefined,
+  options: { readonly field: string; readonly maxLength: number; readonly defaultValue?: string }
+): string | undefined {
+  if (value === undefined) {
+    return options.defaultValue;
+  }
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    return options.defaultValue;
+  }
+  if (normalized.length > options.maxLength) {
+    throw badRequest(`${options.field} exceeds ${options.maxLength} characters`);
   }
   return normalized;
 }

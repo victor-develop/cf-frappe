@@ -51,6 +51,35 @@ describe("AuditService", () => {
     });
   });
 
+  it("searches activity feed events by audit kind", async () => {
+    const { audit, documents } = createServices(["create-1", "activity-1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Activity Audit" }) });
+    await documents.recordActivity({
+      actor: owner,
+      doctype: "Note",
+      name: "Activity Audit",
+      activityType: "email",
+      subject: "Follow-up sent",
+      expectedVersion: 1
+    });
+
+    const result = await audit.search(admin, {
+      doctype: "Note",
+      name: "Activity Audit",
+      kind: "DocumentActivityRecorded"
+    });
+
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({
+      id: "evt_activity-1",
+      payload: {
+        kind: "DocumentActivityRecorded",
+        activityType: "email",
+        subject: "Follow-up sent"
+      }
+    });
+  });
+
   it("rejects non-system managers before querying audit events", async () => {
     const { audit, documents } = createServices(["create-1"]);
     await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Private Audit" }) });

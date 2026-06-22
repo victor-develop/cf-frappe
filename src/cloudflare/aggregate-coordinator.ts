@@ -8,6 +8,7 @@ import type {
   AddDocumentCommentCommand,
   CreateDocumentCommand,
   DeleteDocumentCommand,
+  RecordDocumentActivityCommand,
   SubmitDocumentCommand,
   TransitionDocumentCommand,
   UnassignDocumentCommand,
@@ -29,6 +30,7 @@ export type AggregateCoordinatorCommand =
   | ({ readonly kind: "transition" } & TransitionDocumentCommand)
   | ({ readonly kind: "execute" } & ExecuteDomainCommand)
   | ({ readonly kind: "comment" } & AddDocumentCommentCommand)
+  | ({ readonly kind: "recordActivity" } & RecordDocumentActivityCommand)
   | ({ readonly kind: "assign" } & AssignDocumentCommand)
   | ({ readonly kind: "unassign" } & UnassignDocumentCommand);
 
@@ -87,6 +89,8 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
           return this.service.execute(command);
         case "comment":
           return this.service.comment(command);
+        case "recordActivity":
+          return this.service.recordActivity(command);
         case "assign":
           return this.service.assign(command);
         case "unassign":

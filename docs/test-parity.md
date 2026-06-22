@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the deleted document audit recovery slice:
+As of the document activity feed slice:
 
 - Test files: `41`
-- Vitest cases: `266`
+- Vitest cases: `271`
 
 ## Implication
 

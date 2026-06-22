@@ -211,6 +211,14 @@ describe("Desk app", () => {
     const { app, services } = makeDesk();
     await services.documents.create({ actor: owner, doctype: "Note", data: data() });
     await services.documents.update({ actor: owner, doctype: "Note", name: "My Note", patch: { body: "Edited" } });
+    await services.documents.recordActivity({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      activityType: "email",
+      subject: "Follow-up sent",
+      expectedVersion: 2
+    });
 
     const response = await app.request("/desk/Note/My%20Note");
 
@@ -219,7 +227,9 @@ describe("Desk app", () => {
     expect(html).toContain('<h2 id="document-timeline">Timeline</h2>');
     expect(html).toContain("Created document");
     expect(html).toContain("Updated body");
+    expect(html).toContain("Email: Follow-up sent");
     expect(html).toContain("NoteUpdated");
+    expect(html).toContain("NoteActivityRecorded");
     expect(html).toContain("timeline-changes");
     expect(html).toContain("<span>body</span>");
     expect(html).toContain("<span>Body</span>");

@@ -325,6 +325,54 @@ describe("resource api", () => {
     });
   });
 
+  it("records activity feed entries through the resource API and returns them in the timeline", async () => {
+    const app = makeApp();
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Activity", body: "Body" })
+    });
+
+    const activity = await app.request("/api/resource/Note/HTTP%20Activity/activities", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({
+        activityType: "email",
+        subject: "Follow-up sent",
+        detail: "Sent to customer@example.com",
+        channel: "email",
+        externalId: "msg-123",
+        expectedVersion: 1
+      })
+    });
+
+    expect(activity.status).toBe(201);
+    await expect(activity.json()).resolves.toMatchObject({ data: { version: 2 } });
+
+    const timeline = await app.request("/api/resource/Note/HTTP%20Activity/timeline", { headers: userHeaders });
+    expect(timeline.status).toBe(200);
+    await expect(timeline.json()).resolves.toMatchObject({
+      data: {
+        entries: [
+          expect.objectContaining({ kind: "DocumentCreated" }),
+          expect.objectContaining({
+            kind: "DocumentActivityRecorded",
+            summary: "Email: Follow-up sent",
+            changes: [],
+            payload: {
+              kind: "DocumentActivityRecorded",
+              activityType: "email",
+              subject: "Follow-up sent",
+              detail: "Sent to customer@example.com",
+              channel: "email",
+              externalId: "msg-123"
+            }
+          })
+        ]
+      }
+    });
+  });
+
   it("assigns and unassigns resources through event-sourced assignment routes", async () => {
     const app = makeApp();
     await app.request("/api/resource/Note", {
