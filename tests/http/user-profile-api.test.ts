@@ -36,6 +36,12 @@ describe("user profile api", () => {
         username: "ada",
         language: "en",
         timeZone: "Europe/London",
+        deskTheme: "dark",
+        dateFormat: "yyyy-MM-dd",
+        timeFormat: "HH:mm",
+        numberFormat: "1,234.56",
+        weekStart: "Monday",
+        defaultWorkspace: "Support",
         phone: "+44 20 1234",
         bio: "First programmer",
         expectedVersion: 0
@@ -54,6 +60,12 @@ describe("user profile api", () => {
           username: "ada",
           language: "en",
           timeZone: "Europe/London",
+          deskTheme: "dark",
+          dateFormat: "yyyy-MM-dd",
+          timeFormat: "HH:mm",
+          numberFormat: "1,234.56",
+          weekStart: "Monday",
+          defaultWorkspace: "Support",
           phone: "+44 20 1234",
           bio: "First programmer"
         },
@@ -69,7 +81,7 @@ describe("user profile api", () => {
         "x-cf-frappe-roles": "User",
         "x-cf-frappe-tenant": "acme"
       },
-      body: JSON.stringify({ phone: null, bio: "Analytical engine notes", expectedVersion: 1 })
+      body: JSON.stringify({ deskTheme: null, phone: null, bio: "Analytical engine notes", expectedVersion: 1 })
     });
     expect(selfUpdate.status).toBe(200);
     await expect(selfUpdate.json()).resolves.toMatchObject({
@@ -77,6 +89,7 @@ describe("user profile api", () => {
         version: 2,
         profile: {
           fullName: "Ada Lovelace",
+          defaultWorkspace: "Support",
           bio: "Analytical engine notes"
         }
       }
@@ -93,7 +106,7 @@ describe("user profile api", () => {
     await expect(loaded.json()).resolves.toMatchObject({
       data: {
         version: 2,
-        profile: { fullName: "Ada Lovelace", bio: "Analytical engine notes" }
+        profile: { fullName: "Ada Lovelace", defaultWorkspace: "Support", bio: "Analytical engine notes" }
       }
     });
   });

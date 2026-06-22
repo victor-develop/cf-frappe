@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk document collaboration client helper slice:
+As of the event-sourced profile preference field slice:
 
-- Vitest files: `64`
-- Vitest cases: `532`
+- Vitest files: `65`
+- Vitest cases: `533`
 
 ## Implication
 

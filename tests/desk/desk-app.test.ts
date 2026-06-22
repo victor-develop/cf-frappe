@@ -1050,6 +1050,12 @@ describe("Desk app", () => {
         username: "ada",
         language: "en",
         timeZone: "Europe/London",
+        deskTheme: "dark",
+        dateFormat: "yyyy-MM-dd",
+        timeFormat: "HH:mm",
+        numberFormat: "1,234.56",
+        weekStart: "Monday",
+        defaultWorkspace: "Support",
         userImage: "",
         phone: "+44 20 1234",
         mobileNo: "+44 7000",
@@ -1069,6 +1075,12 @@ describe("Desk app", () => {
         username: "ada",
         language: "en",
         timeZone: "Europe/London",
+        deskTheme: "dark",
+        dateFormat: "yyyy-MM-dd",
+        timeFormat: "HH:mm",
+        numberFormat: "1,234.56",
+        weekStart: "Monday",
+        defaultWorkspace: "Support",
         phone: "+44 20 1234",
         mobileNo: "+44 7000",
         location: "London",
@@ -1080,6 +1092,8 @@ describe("Desk app", () => {
     expect(profiled.status).toBe(200);
     const profiledHtml = await profiled.text();
     expect(profiledHtml).toContain("Ada Lovelace");
+    expect(profiledHtml).toContain("Desk Theme");
+    expect(profiledHtml).toContain('name="defaultWorkspace" value="Support"');
     expect(profiledHtml).toContain('action="/desk/admin/users/profile"');
 
     const staleProfile = await app.request("/desk/admin/users/profile", {

@@ -645,6 +645,18 @@ function userProfileFieldLabel(field: (typeof USER_PROFILE_FIELDS)[number]): str
       return "Mobile No";
     case "timeZone":
       return "Time Zone";
+    case "deskTheme":
+      return "Desk Theme";
+    case "dateFormat":
+      return "Date Format";
+    case "timeFormat":
+      return "Time Format";
+    case "numberFormat":
+      return "Number Format";
+    case "weekStart":
+      return "Week Start";
+    case "defaultWorkspace":
+      return "Default Workspace";
     default:
       return `${field.slice(0, 1).toUpperCase()}${field.slice(1)}`;
   }

@@ -48,6 +48,12 @@ describe("UserProfileService", () => {
         username: " ada ",
         language: "en",
         timeZone: "Europe/London",
+        deskTheme: " Dark ",
+        dateFormat: " yyyy-MM-dd ",
+        timeFormat: " HH:mm ",
+        numberFormat: " 1,234.56 ",
+        weekStart: " Monday ",
+        defaultWorkspace: " Support ",
         userImage: "https://example.com/ada.png",
         phone: " +44 20 1234 ",
         mobileNo: "+44 7000",
@@ -59,6 +65,7 @@ describe("UserProfileService", () => {
       actor: owner,
       userId: owner.id,
       profile: {
+        deskTheme: "",
         phone: "",
         bio: "Analytical engine notes"
       },
@@ -76,6 +83,12 @@ describe("UserProfileService", () => {
         username: "ada",
         language: "en",
         timeZone: "Europe/London",
+        deskTheme: "Dark",
+        dateFormat: "yyyy-MM-dd",
+        timeFormat: "HH:mm",
+        numberFormat: "1,234.56",
+        weekStart: "Monday",
+        defaultWorkspace: "Support",
         userImage: "https://example.com/ada.png",
         phone: "+44 20 1234",
         mobileNo: "+44 7000",
@@ -93,12 +106,18 @@ describe("UserProfileService", () => {
         username: "ada",
         language: "en",
         timeZone: "Europe/London",
+        dateFormat: "yyyy-MM-dd",
+        timeFormat: "HH:mm",
+        numberFormat: "1,234.56",
+        weekStart: "Monday",
+        defaultWorkspace: "Support",
         userImage: "https://example.com/ada.png",
         mobileNo: "+44 7000",
         location: "London",
         bio: "Analytical engine notes"
       }
     });
+    expect(second.profile.deskTheme).toBeUndefined();
     expect(second.profile.phone).toBeUndefined();
     await expect(profiles.get(owner, owner.id)).resolves.toEqual(second);
     await expect(events.readStream(userProfilesStream("acme", owner.id))).resolves.toMatchObject([
