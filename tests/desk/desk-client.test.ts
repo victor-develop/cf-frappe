@@ -44,6 +44,11 @@ interface DeskClientRuntime {
     readonly current: () => DeskFormRuntime | null;
     readonly on: (doctype: string, handlers: DeskFormHandlers) => void;
   };
+  readonly msgprint: (message: unknown) => string;
+  readonly "throw": (message: unknown) => never;
+  readonly ui: {
+    readonly msgprint: (message: unknown) => string;
+  };
   readonly meta: {
     readonly listView: (doctype: string) => Promise<unknown>;
   };
@@ -99,14 +104,19 @@ interface DeskFormRuntime {
   readonly doctype?: string;
   doc: Record<string, unknown>;
   validated: boolean;
+  readonly clear_value: (fieldname: string) => Promise<unknown>;
   readonly dirty: () => void;
+  readonly get_field: (fieldname: string) => FakeField | null;
   readonly get_value: (fieldname: string) => unknown;
   readonly is_dirty: () => boolean;
   readonly is_new: () => boolean;
   readonly refresh: () => boolean;
   readonly refresh_field: (fieldname: string) => void;
   readonly save: () => boolean;
+  readonly set_df_property: (fieldname: string, property: string, value: unknown) => DeskFormRuntime;
   readonly set_value: (fieldname: string, value: unknown) => Promise<unknown>;
+  readonly toggle_display: (fieldname: string, show: boolean) => DeskFormRuntime;
+  readonly toggle_enable: (fieldname: string, enable: boolean) => DeskFormRuntime;
 }
 
 type DeskFormHandlers = Record<string, (frm: DeskFormRuntime) => boolean | undefined | void>;
@@ -322,7 +332,8 @@ describe("Desk client runtime", () => {
 
   it("runs Frappe-style form hooks over generated form fields", async () => {
     const title = new FakeField("title", "Queued");
-    const priority = new FakeField("priority", "Medium");
+    const priorityWrapper = new FakeFieldWrapper();
+    const priority = new FakeField("priority", "Medium", "select", priorityWrapper);
     const form = new FakeForm([
       title,
       priority,
@@ -382,6 +393,35 @@ describe("Desk client runtime", () => {
     form.fields[2]!.value = "BROKEN";
     runtime.form.current()?.refresh_field("items[0].product");
     expect(form.fields[2]!.value).toBe("SKU-1");
+    expect(runtime.form.current()?.get_field("priority")).toBe(priority);
+    runtime.form.current()?.set_df_property("priority", "reqd", true);
+    runtime.form.current()?.set_df_property("priority", "read_only", true);
+    expect(priority.required).toBe(true);
+    expect(priority.readOnly).toBe(true);
+    expect(priority.attributes["aria-readonly"]).toBe("true");
+    priority.value = "Low";
+    priority.emit("change");
+    expect(priority.value).toBe("Medium");
+    runtime.form.current()?.toggle_display("priority", false);
+    runtime.form.current()?.toggle_enable("priority", false);
+    expect(priority.hidden).toBe(true);
+    expect(priorityWrapper.hidden).toBe(true);
+    expect(priority.disabled).toBe(false);
+    expect(priority.attributes["aria-disabled"]).toBe("true");
+    runtime.form.current()?.toggle_display("priority", true);
+    expect(priority.hidden).toBe(false);
+    expect(priorityWrapper.hidden).toBe(false);
+    await runtime.form.current()?.set_value("priority", "High");
+    expect(priority.value).toBe("High");
+    priority.value = "Low";
+    priority.emit("change");
+    expect(priority.value).toBe("High");
+    expect(form.nativeValues().priority).toBe("High");
+    runtime.form.current()?.toggle_enable("priority", true);
+    expect(priority.disabled).toBe(false);
+    await runtime.form.current()?.clear_value("priority");
+    expect(priority.value).toBe("");
+    expect(runtime.form.current()?.get_value("priority")).toBe("");
 
     title.value = "In Progress";
     title.emit("change");
@@ -408,16 +448,29 @@ describe("Desk client runtime", () => {
     expect(form.emitSubmit()).toBe(true);
     expect(events.at(-1)).toBe("validate:Blocked");
   });
+
+  it("exposes Frappe-style user feedback helpers for client scripts", () => {
+    const alerts: string[] = [];
+    const runtime = evaluateDeskClient(fetch, new FakeDocument(), [], (message) => alerts.push(message));
+
+    expect(runtime.msgprint("Saved")).toBe("Saved");
+    expect(runtime.ui.msgprint(null)).toBe("");
+    expect(alerts).toEqual(["Saved", ""]);
+    expect(() => runtime.throw("Nope")).toThrow("Nope");
+    expect(alerts).toEqual(["Saved", "", "Nope"]);
+  });
 });
 
 function evaluateDeskClient(
   fetchImpl: typeof fetch = fetch,
   documentImpl: unknown = new FakeDocument(),
-  sockets: FakeWebSocket[] = []
+  sockets: FakeWebSocket[] = [],
+  alertImpl?: (message: string) => void
 ): DeskClientRuntime {
   const fakeWindow = {
+    ...(alertImpl === undefined ? {} : { alert: alertImpl }),
     location: { href: "https://app.example/desk/Task/TASK-1" }
-  } as { cfFrappe?: DeskClientRuntime; location: { href: string } };
+  } as { alert?: (message: string) => void; cfFrappe?: DeskClientRuntime; location: { href: string } };
 
   new Function(
     "window",
@@ -475,13 +528,27 @@ function fakeWebSocketClass(sockets: FakeWebSocket[]) {
 }
 
 class FakeField {
+  readonly attributes: Record<string, string> = {};
   readonly listeners: Record<string, Array<() => void>> = {};
   checked = false;
+  disabled = false;
+  hidden = false;
+  readOnly = false;
+  required = false;
 
-  constructor(readonly name: string, public value: string, readonly type = "text") {}
+  constructor(
+    readonly name: string,
+    public value: string,
+    readonly type = "text",
+    private readonly wrapper?: FakeFieldWrapper
+  ) {}
 
   addEventListener(type: string, listener: () => void): void {
     this.listeners[type] = [...(this.listeners[type] ?? []), listener];
+  }
+
+  closest(selector: string): FakeFieldWrapper | null {
+    return selector === ".field" ? this.wrapper ?? null : null;
   }
 
   emit(type: string): void {
@@ -489,6 +556,18 @@ class FakeField {
       listener();
     }
   }
+
+  removeAttribute(name: string): void {
+    delete this.attributes[name];
+  }
+
+  setAttribute(name: string, value: string): void {
+    this.attributes[name] = value;
+  }
+}
+
+class FakeFieldWrapper {
+  hidden = false;
 }
 
 class FakeForm {
@@ -515,6 +594,14 @@ class FakeForm {
 
   querySelectorAll(selector: string): readonly FakeField[] {
     return selector === "[name]" ? this.fields : [];
+  }
+
+  nativeValues(): Record<string, string> {
+    return Object.fromEntries(
+      this.fields
+        .filter((field) => !field.disabled)
+        .map((field) => [field.name, field.type === "checkbox" ? String(field.checked) : field.value])
+    );
   }
 
   requestSubmit(): void {

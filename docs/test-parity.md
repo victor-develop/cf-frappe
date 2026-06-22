@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the CLI app dependency metadata slice:
+As of the Desk browser field-control slice:
 
 - Vitest files: `59`
-- Vitest cases: `461`
+- Vitest cases: `462`
 
 ## Implication
 

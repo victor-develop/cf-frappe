@@ -8,6 +8,9 @@ export function renderDeskClientScript(): string {
 
   var root = window;
   var childRowIndexField = ${JSON.stringify(CHILD_TABLE_ROW_INDEX_FIELD)};
+  var lockedValueProperty = "__cfFrappeLockedValue";
+  var readOnlyProperty = "__cfFrappeReadOnly";
+  var softDisabledProperty = "__cfFrappeSoftDisabled";
 
   function encodePart(value) {
     return encodeURIComponent(String(value));
@@ -259,6 +262,13 @@ export function renderDeskClientScript(): string {
         syncFormData(binding);
         return docValue(binding.doc, fieldname);
       },
+      clear_value: function (fieldname) {
+        return frm.set_value(fieldname, null);
+      },
+      get_field: function (fieldname) {
+        var fields = fieldsNamed(binding.form, fieldname);
+        return fields.length > 0 ? fields[0] : null;
+      },
       is_dirty: function () {
         return binding.dirty;
       },
@@ -300,6 +310,18 @@ export function renderDeskClientScript(): string {
         triggerFormEvent(binding, fieldname);
         return Promise.resolve(value);
       },
+      set_df_property: function (fieldname, property, value) {
+        setFieldProperty(binding.form, fieldname, property, value);
+        return frm;
+      },
+      toggle_display: function (fieldname, show) {
+        setFieldProperty(binding.form, fieldname, "hidden", !show);
+        return frm;
+      },
+      toggle_enable: function (fieldname, enable) {
+        setFieldProperty(binding.form, fieldname, "disabled", !enable);
+        return frm;
+      },
       trigger: function (eventName) {
         return triggerFormEvent(binding, eventName);
       }
@@ -311,11 +333,17 @@ export function renderDeskClientScript(): string {
     Array.prototype.forEach.call(binding.form.querySelectorAll("[name]"), function (field) {
       var fieldname = field.name;
       field.addEventListener("change", function () {
+        if (restoreLockedFieldValue(field)) {
+          return;
+        }
         syncFormData(binding);
         binding.frm.dirty();
         triggerFormEvent(binding, fieldname);
       });
       field.addEventListener("input", function () {
+        if (restoreLockedFieldValue(field)) {
+          return;
+        }
         syncFormData(binding);
         binding.frm.dirty();
       });
@@ -345,15 +373,125 @@ export function renderDeskClientScript(): string {
   }
 
   function setFieldValue(form, fieldname, value) {
+    Array.prototype.forEach.call(fieldsNamed(form, fieldname), function (field) {
+      setControlValue(field, value);
+      rememberLockedFieldValue(field);
+    });
+  }
+
+  function fieldsNamed(form, fieldname) {
+    var fields = [];
     Array.prototype.forEach.call(form.querySelectorAll("[name]"), function (field) {
       if (field.name === fieldname) {
-        if (field.type === "checkbox") {
-          field.checked = Boolean(value);
-        } else {
-          field.value = value == null ? "" : String(value);
-        }
+        fields.push(field);
       }
     });
+    return fields;
+  }
+
+  function setFieldProperty(form, fieldname, property, value) {
+    Array.prototype.forEach.call(fieldsNamed(form, fieldname), function (field) {
+      if (property === "hidden") {
+        setFieldHidden(field, Boolean(value));
+        return;
+      }
+      if (property === "display") {
+        setFieldHidden(field, !value);
+        return;
+      }
+      if (property === "read_only" || property === "readOnly") {
+        setFieldReadOnly(field, Boolean(value));
+        return;
+      }
+      if (property === "disabled") {
+        setFieldSoftDisabled(field, Boolean(value));
+        return;
+      }
+      if (property === "reqd" || property === "required") {
+        field.required = Boolean(value);
+        return;
+      }
+      field[property] = value;
+    });
+  }
+
+  function setControlValue(field, value) {
+    if (field.type === "checkbox") {
+      field.checked = Boolean(value);
+    } else {
+      field.value = value == null ? "" : String(value);
+    }
+  }
+
+  function fieldWrapper(field) {
+    if (typeof field.closest === "function") {
+      return field.closest(".field") || field;
+    }
+    return field;
+  }
+
+  function setFieldHidden(field, hidden) {
+    field.hidden = hidden;
+    fieldWrapper(field).hidden = hidden;
+  }
+
+  function setFieldReadOnly(field, readOnly) {
+    field[readOnlyProperty] = readOnly;
+    field.readOnly = readOnly;
+    setBooleanAttribute(field, "aria-readonly", readOnly);
+    if (readOnly) {
+      rememberLockedFieldValue(field, true);
+    } else {
+      delete field[readOnlyProperty];
+      clearLockedFieldValueIfUnlocked(field);
+    }
+  }
+
+  function setFieldSoftDisabled(field, disabled) {
+    field[softDisabledProperty] = disabled;
+    setBooleanAttribute(field, "aria-disabled", disabled);
+    if (disabled) {
+      rememberLockedFieldValue(field, true);
+    } else {
+      delete field[softDisabledProperty];
+      clearLockedFieldValueIfUnlocked(field);
+    }
+  }
+
+  function setBooleanAttribute(field, name, value) {
+    if (typeof field.setAttribute === "function" && typeof field.removeAttribute === "function") {
+      if (value) {
+        field.setAttribute(name, "true");
+      } else {
+        field.removeAttribute(name);
+      }
+    }
+  }
+
+  function fieldInteractionLocked(field) {
+    return Boolean(field[readOnlyProperty] || field[softDisabledProperty]);
+  }
+
+  function rememberLockedFieldValue(field, force) {
+    if (force || fieldInteractionLocked(field)) {
+      field[lockedValueProperty] = fieldValue(field);
+    }
+  }
+
+  function restoreLockedFieldValue(field) {
+    if (!fieldInteractionLocked(field)) {
+      return false;
+    }
+    if (Object.prototype.hasOwnProperty.call(field, lockedValueProperty)) {
+      setControlValue(field, field[lockedValueProperty]);
+    }
+    return true;
+  }
+
+  function clearLockedFieldValueIfUnlocked(field) {
+    if (!fieldInteractionLocked(field)) {
+      delete field[lockedValueProperty];
+    }
   }
 
   function setDocValue(doc, fieldname, value) {
@@ -495,6 +633,19 @@ export function renderDeskClientScript(): string {
     }
   }
 
+  function msgprint(message) {
+    var text = message == null ? "" : String(message);
+    if (typeof root.alert === "function") {
+      root.alert(text);
+    }
+    return text;
+  }
+
+  function throwMessage(message) {
+    var text = msgprint(message);
+    throw new Error(text);
+  }
+
   root.cfFrappe = Object.freeze(Object.assign({}, root.cfFrappe || {}, {
     context: context,
     linkOptions: function (doctype, field, params) {
@@ -587,6 +738,11 @@ export function renderDeskClientScript(): string {
       }
     }),
     request: request,
+    msgprint: msgprint,
+    throw: throwMessage,
+    ui: Object.freeze({
+      msgprint: msgprint
+    }),
     resource: Object.freeze({
       cancel: function (doctype, name, options) {
         return request(resourcePath(doctype, name) + "/cancel", { method: "POST", body: versionBody(options) }).then(unwrapData);
