@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AuditService } from "../../application/audit-service.js";
+import type { DataPatchAdminPort } from "../../application/data-patch-service.js";
 import type { DocumentCommandExecutor } from "../../application/document-service.js";
 import type { DocumentHistoryService } from "../../application/document-history-service.js";
 import type { FileService } from "../../application/file-service.js";
@@ -22,6 +23,7 @@ import type { DocumentData, JsonPrimitive, ListDocumentsFilter, MutableDocumentD
 import type { ActorResolver } from "./actor.js";
 import { createAuthApi, type AuthSessionOptions } from "./auth-api.js";
 import { createAuditApi } from "./audit-api.js";
+import { createDataPatchApi } from "./data-patch-api.js";
 import { toErrorResponse } from "./errors.js";
 import { createFileApi } from "./file-api.js";
 import { createJobApi } from "./job-api.js";
@@ -48,6 +50,7 @@ export interface ResourceApiOptions {
   readonly roles?: RoleService;
   readonly savedReports?: SavedReportService;
   readonly audit?: AuditService;
+  readonly dataPatches?: DataPatchAdminPort;
   readonly jobs?: JobHistoryService;
   readonly jobRetry?: JobRetryPort;
   readonly jobSchedules?: JobScheduleService;
@@ -195,6 +198,16 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       "/",
       createAuditApi({
         audit: options.audit,
+        actor: resolveActor
+      })
+    );
+  }
+
+  if (options.dataPatches) {
+    app.route(
+      "/",
+      createDataPatchApi({
+        dataPatches: options.dataPatches,
         actor: resolveActor
       })
     );

@@ -1,8 +1,11 @@
 import {
+  createRegistry,
   createInMemoryAccountRecoveryNotifier,
   createSignedSessionCookie,
+  defineDataPatch,
   deterministicIds,
   fixedClock,
+  InMemoryDataPatchLog,
   signedSessionActorResolver,
   SYSTEM_MANAGER_ROLE,
   unsafeHeaderActorResolver,
@@ -88,6 +91,114 @@ describe("CloudFrappe Worker routing", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ data: [] });
+  });
+
+  it("mounts app-declared data patch admin routes on the Worker", async () => {
+    const resources = { touched: [] as string[] };
+    const log = new InMemoryDataPatchLog();
+    const registry = createRegistry({
+      dataPatches: [
+        defineDataPatch<any>({
+          id: "crm.backfill",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.touched.push("crm");
+            return { touched: resources.touched.length };
+          }
+        })
+      ]
+    });
+    const worker = createCloudFrappeWorker({
+      registry,
+      actor: () => ({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" }),
+      dataPatches: {
+        log: () => log,
+        resources: () => resources,
+        clock: fixedClock(now),
+        ids: deterministicIds(["claim-1"])
+      }
+    });
+    const env = {
+      DB: fakeD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const dashboard = await worker.fetch!(
+      cfRequest("http://localhost/api/data-patches"),
+      env,
+      fakeExecutionContext()
+    );
+    expect(dashboard.status).toBe(200);
+    await expect(dashboard.json()).resolves.toMatchObject({
+      data: {
+        totals: { total: 1, notApplied: 1 },
+        patches: [{ id: "crm.backfill", checksum: "v1", status: "not_applied" }]
+      }
+    });
+
+    const applied = await worker.fetch!(
+      cfRequest("http://localhost/api/data-patches/apply", { method: "POST" }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(applied.status).toBe(201);
+    await expect(applied.json()).resolves.toMatchObject({
+      data: {
+        applied: [{ id: "crm.backfill", checksum: "v1", appliedAt: now, result: { touched: 1 } }],
+        skipped: []
+      }
+    });
+    expect(resources.touched).toEqual(["crm"]);
+  });
+
+  it("uses the default D1 data patch journal for app-declared Worker patches", async () => {
+    const registry = createRegistry({
+      dataPatches: [
+        defineDataPatch<any>({
+          id: "core.seed",
+          checksum: "v1",
+          run: ({ resources }) => ({
+            hasQueries: typeof resources.queries?.listDoctypes === "function"
+          })
+        })
+      ]
+    });
+    const worker = createCloudFrappeWorker({
+      registry,
+      actor: () => ({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" })
+    });
+    const env = {
+      DB: fakeDataPatchD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const applied = await worker.fetch!(
+      cfRequest("http://localhost/api/data-patches/apply", { method: "POST" }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(applied.status).toBe(201);
+    await expect(applied.json()).resolves.toMatchObject({
+      data: {
+        applied: [{ id: "core.seed", checksum: "v1", result: { hasQueries: true } }],
+        skipped: []
+      }
+    });
+
+    const dashboard = await worker.fetch!(
+      cfRequest("http://localhost/api/data-patches"),
+      env,
+      fakeExecutionContext()
+    );
+    expect(dashboard.status).toBe(200);
+    await expect(dashboard.json()).resolves.toMatchObject({
+      data: {
+        totals: { total: 1, applied: 1 },
+        patches: [{ id: "core.seed", checksum: "v1", status: "applied", result: { hasQueries: true } }]
+      }
+    });
   });
 
   it("mounts user-permission admin API and Desk routes on the Worker", async () => {
@@ -744,6 +855,113 @@ function fakeD1(): D1Database {
       throw new Error("Not implemented");
     }
   } as unknown as D1Database;
+}
+
+function fakeDataPatchD1(): D1Database {
+  const rows = new Map<string, MutableDataPatchRow>();
+  return {
+    prepare(sql: string) {
+      const statement = {
+        params: [] as unknown[],
+        bind(...params: unknown[]) {
+          this.params = params;
+          return this;
+        },
+        async all() {
+          if (sql.includes("FROM cf_frappe_documents")) {
+            return { results: [] };
+          }
+          if (!sql.includes("FROM cf_frappe_data_patches")) {
+            return { results: [] };
+          }
+          const ordered = [...rows.values()].sort((left, right) => left.id.localeCompare(right.id));
+          return {
+            results: sql.includes("WHERE status = 'applied'")
+              ? ordered.filter((row) => row.status === "applied")
+              : ordered
+          };
+        },
+        async first() {
+          if (!sql.includes("FROM cf_frappe_data_patches")) {
+            return null;
+          }
+          return rows.get(String(this.params[0] ?? "")) ?? null;
+        },
+        async run() {
+          if (sql.includes("INSERT OR IGNORE INTO cf_frappe_data_patches")) {
+            const [id, checksum, claimId, claimedAt] = this.params;
+            const rowId = String(id);
+            if (!rows.has(rowId)) {
+              rows.set(rowId, {
+                id: rowId,
+                checksum: String(checksum),
+                status: "pending",
+                claim_id: String(claimId),
+                claimed_at: String(claimedAt),
+                applied_at: null,
+                failed_at: null,
+                error: null,
+                result_json: null,
+                result_present: 0
+              });
+            }
+          }
+          if (sql.includes("SET status = 'applied'")) {
+            const [appliedAt, resultJson, resultPresent, id, checksum, claimId] = this.params;
+            const row = rows.get(String(id));
+            if (row && row.checksum === checksum && row.claim_id === claimId && row.status === "pending") {
+              row.status = "applied";
+              row.applied_at = String(appliedAt);
+              row.result_json = resultJson === null ? null : String(resultJson);
+              row.result_present = Number(resultPresent);
+              row.failed_at = null;
+              row.error = null;
+              return { success: true, meta: { changes: 1 } };
+            }
+            return { success: true, meta: { changes: 0 } };
+          }
+          if (sql.includes("SET status = 'failed'")) {
+            const [failedAt, error, id, checksum, claimId] = this.params;
+            const row = rows.get(String(id));
+            if (row && row.checksum === checksum && row.claim_id === claimId && row.status === "pending") {
+              row.status = "failed";
+              row.failed_at = String(failedAt);
+              row.error = String(error);
+              return { success: true, meta: { changes: 1 } };
+            }
+            return { success: true, meta: { changes: 0 } };
+          }
+          return { success: true };
+        }
+      };
+      return statement;
+    },
+    async batch(statements: any[]) {
+      return Promise.all(statements.map((statement) => statement.run()));
+    },
+    dump() {
+      throw new Error("Not implemented");
+    },
+    exec() {
+      throw new Error("Not implemented");
+    },
+    withSession() {
+      throw new Error("Not implemented");
+    }
+  } as unknown as D1Database;
+}
+
+interface MutableDataPatchRow {
+  readonly id: string;
+  readonly checksum: string;
+  status: string;
+  readonly claim_id: string | null;
+  readonly claimed_at: string | null;
+  applied_at: string | null;
+  failed_at: string | null;
+  error: string | null;
+  result_json: string | null;
+  result_present: number;
 }
 
 function fakeEventD1(): D1Database {

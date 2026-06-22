@@ -1,6 +1,7 @@
 export * from "./actor.js";
 export * from "./auth-api.js";
 export * from "./audit-api.js";
+export * from "./data-patch-api.js";
 export * from "./errors.js";
 export * from "./file-api.js";
 export * from "./job-api.js";

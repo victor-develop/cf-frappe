@@ -1,4 +1,5 @@
 import { AuditService } from "../application/audit-service.js";
+import { DataPatchService } from "../application/data-patch-service.js";
 import { JobExecutionError } from "../application/job-errors.js";
 import { JobDispatcher } from "../application/job-dispatcher.js";
 import { JobExecutor } from "../application/job-executor.js";
@@ -20,17 +21,19 @@ import { RoleCatalogUserRoleValidator } from "../application/user-role-validator
 import type { DocumentCommandExecutor } from "../application/document-service.js";
 import { FileService } from "../application/file-service.js";
 import { webCryptoPbkdf2PasswordHasher } from "../adapters/crypto/index.js";
-import { D1EventStore, D1ProjectionStore } from "../adapters/d1/index.js";
+import { D1DataPatchLog, D1EventStore, D1ProjectionStore } from "../adapters/d1/index.js";
 import { createDeskApp } from "../adapters/desk/index.js";
 import { createResourceApi, userAccountSessionActorResolver } from "../adapters/http/index.js";
 import type { ActorResolver, AuthSessionOptions } from "../adapters/http/index.js";
 import { DEFAULT_TENANT_ID, type Actor } from "../core/types.js";
 import { FrameworkError } from "../core/errors.js";
 import type { JobRegistry, JobRetryPolicy } from "../core/jobs.js";
+import type { DataPatchDefinition } from "../core/data-patch.js";
 import { canSubscribeToRealtimeTopic, parseRealtimeTopic, realtimeTopicFromScope } from "../core/realtime.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { AccountRecoveryNotifier } from "../ports/account-recovery.js";
 import { systemClock, type Clock } from "../ports/clock.js";
+import type { DataPatchLog } from "../ports/data-patch-log.js";
 import type { FileStorage } from "../ports/file-storage.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 import type { JobExecutionLog } from "../ports/job-execution-log.js";
@@ -121,9 +124,21 @@ export interface CloudFrappeJobOptions<
   readonly ids?: IdGenerator;
 }
 
+export interface CloudFrappeDataPatchOptions<
+  TEnv extends CloudFrappeEnv = CloudFrappeEnv,
+  TResources = CloudFrappeRuntimeServices
+> {
+  readonly resources?: (env: TEnv, services: CloudFrappeRuntimeServices) => TResources;
+  readonly log?: (env: TEnv, services: CloudFrappeRuntimeServices) => DataPatchLog;
+  readonly adminRoles?: readonly string[];
+  readonly clock?: Clock;
+  readonly ids?: IdGenerator;
+}
+
 export interface CloudFrappeWorkerOptions<
   TEnv extends CloudFrappeEnv = CloudFrappeEnv,
-  TJobResources = CloudFrappeRuntimeServices
+  TJobResources = CloudFrappeRuntimeServices,
+  TDataPatchResources = CloudFrappeRuntimeServices
 > {
   readonly registry: ModelRegistry;
   readonly actor: CloudFrappeActorResolver<TEnv>;
@@ -132,6 +147,7 @@ export interface CloudFrappeWorkerOptions<
   readonly files?: CloudFrappeFileOptions<TEnv>;
   readonly realtime?: CloudFrappeRealtimeOptions<TEnv>;
   readonly jobs?: CloudFrappeJobOptions<TEnv, TJobResources>;
+  readonly dataPatches?: CloudFrappeDataPatchOptions<TEnv, TDataPatchResources>;
 }
 
 export type CloudFrappeActorResolver<TEnv extends CloudFrappeEnv = CloudFrappeEnv> = (
@@ -141,8 +157,9 @@ export type CloudFrappeActorResolver<TEnv extends CloudFrappeEnv = CloudFrappeEn
 
 export function createCloudFrappeWorker<
   TEnv extends CloudFrappeEnv = CloudFrappeEnv,
-  TJobResources = CloudFrappeRuntimeServices
->(options: CloudFrappeWorkerOptions<TEnv, TJobResources>): ExportedHandler<TEnv, JobMessage> {
+  TJobResources = CloudFrappeRuntimeServices,
+  TDataPatchResources = CloudFrappeRuntimeServices
+>(options: CloudFrappeWorkerOptions<TEnv, TJobResources, TDataPatchResources>): ExportedHandler<TEnv, JobMessage> {
   const runtimeApps = new WeakMap<object, RuntimeApps>();
   const jobRuntimes = new WeakMap<object, JobRuntime<TJobResources>>();
   const handler: ExportedHandler<TEnv, JobMessage> = {
@@ -204,10 +221,10 @@ interface JobRuntime<TResources> {
   readonly executor: JobExecutor<TResources>;
 }
 
-function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
+function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResources>(
   cache: WeakMap<object, RuntimeApps>,
   jobRuntimeCache: WeakMap<object, JobRuntime<TJobResources>>,
-  options: CloudFrappeWorkerOptions<TEnv, TJobResources>,
+  options: CloudFrappeWorkerOptions<TEnv, TJobResources, TDataPatchResources>,
   env: TEnv
 ): RuntimeApps {
   const cached = cache.get(env);
@@ -299,6 +316,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
   const servicesWithRealtime: CloudFrappeRuntimeServices = realtime
     ? { ...services, realtime }
     : services;
+  const dataPatches = dataPatchesForEnv(options, env, servicesWithRealtime);
   const jobOptions = options.jobs;
   const schedules = jobOptions?.schedules ?? [];
   const jobExecutionLog = jobOptions?.executionLog?.(env, servicesWithRealtime);
@@ -359,6 +377,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     actor,
     ...(options.maxJsonBytes ? { maxJsonBytes: options.maxJsonBytes } : {}),
     ...(files === undefined ? {} : { files }),
+    ...(dataPatches === undefined ? {} : { dataPatches }),
     ...(jobHistory === undefined ? {} : { jobs: jobHistory }),
     ...(jobRetry === undefined ? {} : { jobRetry }),
     ...(jobSchedules === undefined ? {} : { jobSchedules }),
@@ -392,6 +411,31 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
   };
   cache.set(env, runtimeApps);
   return runtimeApps;
+}
+
+function dataPatchesForEnv<TEnv extends CloudFrappeEnv, TResources>(
+  options: {
+    readonly registry: ModelRegistry;
+    readonly dataPatches?: CloudFrappeDataPatchOptions<TEnv, TResources>;
+  },
+  env: TEnv,
+  services: CloudFrappeRuntimeServices
+): DataPatchService<TResources> | undefined {
+  const patches = options.registry.listDataPatches() as readonly DataPatchDefinition<TResources>[];
+  if (patches.length === 0 && !options.dataPatches) {
+    return undefined;
+  }
+  const patchOptions = options.dataPatches;
+  const resources = patchOptions?.resources?.(env, services) ?? (services as unknown as TResources);
+  const log = patchOptions?.log?.(env, services) ?? new D1DataPatchLog(env.DB);
+  return new DataPatchService({
+    patches,
+    log,
+    resources,
+    ...(patchOptions?.adminRoles === undefined ? {} : { adminRoles: patchOptions.adminRoles }),
+    ...(patchOptions?.clock === undefined ? {} : { clock: patchOptions.clock }),
+    ...(patchOptions?.ids === undefined ? {} : { ids: patchOptions.ids })
+  });
 }
 
 function jobsForEnv<TEnv extends CloudFrappeEnv, TResources>(
@@ -440,8 +484,8 @@ function authSessionOptions<TEnv extends CloudFrappeEnv>(
   };
 }
 
-function actorResolverForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
-  options: CloudFrappeWorkerOptions<TEnv, TJobResources>,
+function actorResolverForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResources>(
+  options: CloudFrappeWorkerOptions<TEnv, TJobResources, TDataPatchResources>,
   env: TEnv,
   userAccounts: UserAccountService | undefined
 ): ActorResolver {
@@ -461,12 +505,12 @@ function isDeskPath(pathname: string): boolean {
   return pathname === "/desk" || pathname.startsWith("/desk/");
 }
 
-async function handleRealtimeRequest<TEnv extends CloudFrappeEnv, TJobResources>(
+async function handleRealtimeRequest<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResources>(
   cache: WeakMap<object, RuntimeApps>,
   jobRuntimeCache: WeakMap<object, JobRuntime<TJobResources>>,
   request: Request,
   env: TEnv,
-  options: CloudFrappeWorkerOptions<TEnv, TJobResources>
+  options: CloudFrappeWorkerOptions<TEnv, TJobResources, TDataPatchResources>
 ): Promise<Response> {
   const realtime = options.realtime;
   if (!realtime) {
