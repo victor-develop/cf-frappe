@@ -1,5 +1,10 @@
 import { AuditService } from "../application/audit-service.js";
-import { DataPatchService } from "../application/data-patch-service.js";
+import {
+  DATA_PATCH_APPLY_JOB_NAME,
+  DataPatchQueueService,
+  type DataPatchQueuePort
+} from "../application/data-patch-jobs.js";
+import { DataPatchService, type DataPatchAdminPort } from "../application/data-patch-service.js";
 import { JobExecutionError } from "../application/job-errors.js";
 import { JobDispatcher } from "../application/job-dispatcher.js";
 import { JobExecutor } from "../application/job-executor.js";
@@ -73,6 +78,7 @@ export interface CloudFrappeRuntimeServices {
   readonly reports: ReportService;
   readonly roles: RoleService;
   readonly savedReports: SavedReportService;
+  readonly dataPatches?: DataPatchAdminPort;
   readonly files?: FileService;
   readonly realtime?: RealtimePublisher;
 }
@@ -317,14 +323,30 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ? { ...services, realtime }
     : services;
   const dataPatches = dataPatchesForEnv(options, env, servicesWithRealtime);
+  const runtimeServices: CloudFrappeRuntimeServices = dataPatches === undefined
+    ? servicesWithRealtime
+    : { ...servicesWithRealtime, dataPatches };
   const jobOptions = options.jobs;
   const schedules = jobOptions?.schedules ?? [];
-  const jobExecutionLog = jobOptions?.executionLog?.(env, servicesWithRealtime);
+  const jobExecutionLog = jobOptions?.executionLog?.(env, runtimeServices);
+  const dataPatchQueueEnabled = dataPatches !== undefined &&
+    jobOptions !== undefined &&
+    jobOptions.registry.has(DATA_PATCH_APPLY_JOB_NAME);
   const jobHistory = jobExecutionLog && jobOptions
     ? new JobHistoryService({ registry: jobOptions.registry, executionLog: jobExecutionLog })
     : undefined;
-  const jobRuntime = jobOptions && (jobExecutionLog || schedules.length > 0)
-    ? jobsForEnv(jobRuntimeCache, jobOptions, env, servicesWithRealtime, jobExecutionLog)
+  const jobRuntime = jobOptions && (jobExecutionLog || schedules.length > 0 || dataPatchQueueEnabled)
+    ? jobsForEnv(
+        jobRuntimeCache,
+        jobOptions,
+        env,
+        runtimeServices,
+        jobExecutionLog,
+        dataPatchQueueEnabled ? ({ dataPatches } as unknown as Partial<TJobResources>) : undefined
+      )
+    : undefined;
+  const dataPatchQueue: DataPatchQueuePort | undefined = dataPatchQueueEnabled && jobRuntime
+    ? new DataPatchQueueService({ dataPatches, dispatcher: jobRuntime.dispatcher })
     : undefined;
   const jobRetry = jobExecutionLog && jobOptions && jobRuntime
     ? new JobRetryService({
@@ -378,6 +400,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(options.maxJsonBytes ? { maxJsonBytes: options.maxJsonBytes } : {}),
     ...(files === undefined ? {} : { files }),
     ...(dataPatches === undefined ? {} : { dataPatches }),
+    ...(dataPatchQueue === undefined ? {} : { dataPatchQueue }),
     ...(jobHistory === undefined ? {} : { jobs: jobHistory }),
     ...(jobRetry === undefined ? {} : { jobRetry }),
     ...(jobSchedules === undefined ? {} : { jobSchedules }),
@@ -407,7 +430,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   const runtimeApps = {
     app,
     desk,
-    services: servicesWithRealtime,
+    services: runtimeServices,
     ...(jobExecutionLog === undefined ? {} : { jobExecutionLog })
   };
   cache.set(env, runtimeApps);
@@ -444,7 +467,8 @@ function jobsForEnv<TEnv extends CloudFrappeEnv, TResources>(
   options: CloudFrappeJobOptions<TEnv, TResources>,
   env: TEnv,
   services: CloudFrappeRuntimeServices,
-  sharedExecutionLog?: JobExecutionLog
+  sharedExecutionLog?: JobExecutionLog,
+  additionalResources?: Partial<TResources>
 ): JobRuntime<TResources> {
   const cached = cache.get(env);
   if (cached) {
@@ -452,7 +476,10 @@ function jobsForEnv<TEnv extends CloudFrappeEnv, TResources>(
   }
 
   const queue = options.queue(env, services);
-  const resources = options.resources?.(env, services) ?? (services as TResources);
+  const resources = withAdditionalJobResources(
+    options.resources?.(env, services) ?? (services as TResources),
+    additionalResources
+  );
   const executionLog = sharedExecutionLog ?? options.executionLog?.(env, services);
   const dispatcher = new JobDispatcher({
     registry: options.registry,
@@ -469,6 +496,20 @@ function jobsForEnv<TEnv extends CloudFrappeEnv, TResources>(
   const runtime = { dispatcher, executor };
   cache.set(env, runtime);
   return runtime;
+}
+
+function withAdditionalJobResources<TResources>(
+  resources: TResources,
+  additionalResources: Partial<TResources> | undefined
+): TResources {
+  if (additionalResources === undefined) {
+    return resources;
+  }
+  if (typeof resources !== "object" || resources === null) {
+    throw new FrameworkError("JOB_RESOURCE_INVALID", "CloudFrappe job resources must be an object", { status: 500 });
+  }
+  Object.assign(resources as object, additionalResources);
+  return resources;
 }
 
 function authSessionOptions<TEnv extends CloudFrappeEnv>(

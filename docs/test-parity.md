@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the D1 projection-index retirement slice:
+As of the queued data-patch apply slice:
 
 - Vitest files: `63`
-- Vitest cases: `508`
+- Vitest cases: `514`
 
 ## Implication
 

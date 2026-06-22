@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AuditService } from "../../application/audit-service.js";
+import type { DataPatchQueuePort } from "../../application/data-patch-jobs.js";
 import type { DataPatchAdminPort } from "../../application/data-patch-service.js";
 import type { DocumentCommandExecutor } from "../../application/document-service.js";
 import type { DocumentHistoryService } from "../../application/document-history-service.js";
@@ -51,6 +52,7 @@ export interface ResourceApiOptions {
   readonly savedReports?: SavedReportService;
   readonly audit?: AuditService;
   readonly dataPatches?: DataPatchAdminPort;
+  readonly dataPatchQueue?: DataPatchQueuePort;
   readonly jobs?: JobHistoryService;
   readonly jobRetry?: JobRetryPort;
   readonly jobSchedules?: JobScheduleService;
@@ -208,6 +210,7 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       "/",
       createDataPatchApi({
         dataPatches: options.dataPatches,
+        ...(options.dataPatchQueue === undefined ? {} : { dataPatchQueue: options.dataPatchQueue }),
         actor: resolveActor,
         maxJsonBytes
       })

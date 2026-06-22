@@ -1,10 +1,15 @@
 import {
+  createDataPatchApplyJob,
+  createJobRegistry,
   createResourceApi,
+  DataPatchQueueService,
   DataPatchService,
   defineDataPatch,
   deterministicIds,
   fixedClock,
   InMemoryDataPatchLog,
+  InMemoryJobQueue,
+  JobDispatcher,
   SYSTEM_MANAGER_ROLE,
   unsafeHeaderActorResolver
 } from "../../src";
@@ -176,6 +181,106 @@ describe("data patch api", () => {
     expect(resources.touched).toEqual(["first", "second", "third"]);
   });
 
+  it("enqueues data patch apply jobs through admin JSON routes", async () => {
+    const services = createServices();
+    const resources = { touched: [] as string[] };
+    const dataPatches = new DataPatchService({
+      log: new InMemoryDataPatchLog(),
+      resources,
+      patches: [
+        defineDataPatch<typeof resources>({
+          id: "core.first",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.touched.push("first");
+          }
+        }),
+        defineDataPatch<typeof resources>({
+          id: "crm.second",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.touched.push("second");
+          }
+        })
+      ],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-first", "claim-second"])
+    });
+    const registry = createJobRegistry({ jobs: [createDataPatchApplyJob()] });
+    const queue = new InMemoryJobQueue();
+    const app = createResourceApi({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: unsafeHeaderActorResolver,
+      dataPatches,
+      dataPatchQueue: new DataPatchQueueService({
+        dataPatches,
+        dispatcher: new JobDispatcher({
+          registry,
+          queue,
+          clock: fixedClock(now),
+          ids: deterministicIds(["patch-001", "patch-002"])
+        })
+      })
+    });
+
+    const blocked = await app.request("/api/data-patches/crm.second/enqueue", {
+      method: "POST",
+      headers: adminHeaders
+    });
+    expect(blocked.status).toBe(409);
+    await expect(blocked.json()).resolves.toMatchObject({
+      error: {
+        code: "DATA_PATCH_ORDER_VIOLATION",
+        message: "Data patch 'crm.second' cannot run before earlier patch 'core.first' is applied"
+      }
+    });
+
+    const enqueued = await app.request("/api/data-patches/enqueue?limit=1", {
+      method: "POST",
+      headers: { ...adminHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ idempotencyKey: "patches:first", delaySeconds: 15 })
+    });
+
+    expect(enqueued.status).toBe(202);
+    await expect(enqueued.json()).resolves.toMatchObject({
+      data: {
+        plan: { patchIds: ["core.first"], limit: 1 },
+        message: {
+          tenantId: "acme",
+          jobName: "cf-frappe.data-patches.apply",
+          runId: "job_patch-001",
+          idempotencyKey: "patches:first",
+          payload: {
+            actor: { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },
+            patchIds: ["core.first"]
+          }
+        }
+      }
+    });
+    expect(queue.queued()).toEqual([
+      expect.objectContaining({
+        delaySeconds: 15,
+        message: expect.objectContaining({ idempotencyKey: "patches:first" })
+      })
+    ]);
+    expect(resources.touched).toEqual([]);
+
+    const single = await app.request("/api/data-patches/core.first/enqueue", {
+      method: "POST",
+      headers: { ...adminHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ patchIds: [], idempotencyKey: "patches:route-id" })
+    });
+    expect(single.status).toBe(202);
+    await expect(single.json()).resolves.toMatchObject({
+      data: {
+        plan: { patchIds: ["core.first"], requestedPatchIds: ["core.first"] },
+        message: { idempotencyKey: "patches:route-id", payload: { patchIds: ["core.first"] } }
+      }
+    });
+  });
+
   it("maps invalid data patch apply options to JSON errors", async () => {
     const services = createServices();
     const app = createResourceApi({
@@ -187,6 +292,19 @@ describe("data patch api", () => {
         log: new InMemoryDataPatchLog(),
         resources: {},
         patches: [defineDataPatch({ id: "core.seed", checksum: "v1", run: () => undefined })]
+      }),
+      dataPatchQueue: new DataPatchQueueService({
+        dataPatches: new DataPatchService({
+          log: new InMemoryDataPatchLog(),
+          resources: {},
+          patches: [defineDataPatch({ id: "core.seed", checksum: "v1", run: () => undefined })]
+        }),
+        dispatcher: new JobDispatcher({
+          registry: createJobRegistry({ jobs: [createDataPatchApplyJob()] }),
+          queue: new InMemoryJobQueue(),
+          clock: fixedClock(now),
+          ids: deterministicIds(["patch-001"])
+        })
       })
     });
 
@@ -217,5 +335,44 @@ describe("data patch api", () => {
     await expect(missingPatch.json()).resolves.toMatchObject({
       error: { code: "DATA_PATCH_NOT_FOUND", message: "Data patch 'missing.patch' is not registered" }
     });
+
+    const invalidDelay = await app.request("/api/data-patches/enqueue", {
+      method: "POST",
+      headers: { ...adminHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ delaySeconds: -1 })
+    });
+    expect(invalidDelay.status).toBe(400);
+    await expect(invalidDelay.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Data patch enqueue delaySeconds must be a non-negative integer" }
+    });
+
+    const invalidKey = await app.request("/api/data-patches/enqueue", {
+      method: "POST",
+      headers: { ...adminHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ idempotencyKey: "" })
+    });
+    expect(invalidKey.status).toBe(400);
+    await expect(invalidKey.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "idempotencyKey must be a non-empty string" }
+    });
+  });
+
+  it("keeps data patch enqueue routes hidden until a queue port is configured", async () => {
+    const services = createServices();
+    const app = createResourceApi({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: unsafeHeaderActorResolver,
+      dataPatches: new DataPatchService({
+        log: new InMemoryDataPatchLog(),
+        resources: {},
+        patches: [defineDataPatch({ id: "core.seed", checksum: "v1", run: () => undefined })]
+      })
+    });
+
+    const hidden = await app.request("/api/data-patches/enqueue", { method: "POST", headers: adminHeaders });
+
+    expect(hidden.status).toBe(404);
   });
 });

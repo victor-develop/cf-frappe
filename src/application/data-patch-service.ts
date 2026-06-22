@@ -33,11 +33,18 @@ export interface DataPatchDashboard {
 
 export interface DataPatchAdminPort {
   dashboard(actor: Actor): Promise<DataPatchDashboard>;
+  planApply(actor: Actor, options?: DataPatchApplyOptions): Promise<DataPatchApplyPlan>;
   apply(actor: Actor, options?: DataPatchApplyOptions): Promise<DataPatchRunResult>;
 }
 
 export interface DataPatchApplyOptions {
   readonly patchIds?: readonly string[];
+  readonly limit?: number;
+}
+
+export interface DataPatchApplyPlan {
+  readonly patchIds: readonly string[];
+  readonly requestedPatchIds?: readonly string[];
   readonly limit?: number;
 }
 
@@ -76,6 +83,20 @@ export class DataPatchService<TResources = unknown> {
 
   async apply(actor: Actor, options: DataPatchApplyOptions = {}): Promise<DataPatchRunResult> {
     this.authorize(actor);
+    return this.runner().apply(await this.patchesForApply(options));
+  }
+
+  async planApply(actor: Actor, options: DataPatchApplyOptions = {}): Promise<DataPatchApplyPlan> {
+    this.authorize(actor);
+    const patches = await this.patchesForApply(options);
+    return {
+      patchIds: patches.map((patch) => patch.id),
+      ...(options.patchIds === undefined ? {} : { requestedPatchIds: [...options.patchIds] }),
+      ...(options.limit === undefined ? {} : { limit: options.limit })
+    };
+  }
+
+  private async patchesForApply(options: DataPatchApplyOptions): Promise<readonly DataPatchDefinition<TResources>[]> {
     assertApplyLimit(options.limit);
     const runner = this.runner();
     const selected = selectPatches(this.patches, options.patchIds);
@@ -83,10 +104,10 @@ export class DataPatchService<TResources = unknown> {
       await this.assertPredecessorsApplied(selected);
     }
     if (options.limit === undefined) {
-      return runner.apply(selected);
+      return selected;
     }
     const pending = await runner.pendingPatches(selected);
-    return runner.apply(pending.slice(0, options.limit));
+    return pending.slice(0, options.limit);
   }
 
   private runner(): DataPatchRunner<TResources> {

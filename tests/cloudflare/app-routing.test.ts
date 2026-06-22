@@ -1,4 +1,6 @@
 import {
+  createDataPatchApplyJob,
+  createJobRegistry,
   createRegistry,
   createInMemoryAccountRecoveryNotifier,
   createSignedSessionCookie,
@@ -6,9 +8,11 @@ import {
   deterministicIds,
   fixedClock,
   InMemoryDataPatchLog,
+  InMemoryJobQueue,
   signedSessionActorResolver,
   SYSTEM_MANAGER_ROLE,
   unsafeHeaderActorResolver,
+  type JobMessage,
   type PasswordHasher,
 } from "../../src";
 import {
@@ -199,6 +203,142 @@ describe("CloudFrappe Worker routing", () => {
         patches: [{ id: "core.seed", checksum: "v1", status: "applied", result: { hasQueries: true } }]
       }
     });
+  });
+
+  it("enqueues and consumes app-declared data patches through Worker jobs", async () => {
+    const resources = { touched: [] as string[] };
+    const log = new InMemoryDataPatchLog();
+    const queue = new InMemoryJobQueue();
+    const checkedResources: string[] = [];
+    class NarrowJobResources {
+      constructor(readonly custom: string) {}
+      describe() {
+        return this.custom;
+      }
+    }
+    const jobResources = new NarrowJobResources("narrow");
+    const registry = createRegistry({
+      dataPatches: [
+        defineDataPatch<any>({
+          id: "crm.backfill",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.touched.push("crm");
+            return { touched: resources.touched.length };
+          }
+        })
+      ]
+    });
+    const worker = createCloudFrappeWorker({
+      registry,
+      actor: () => ({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" }),
+      dataPatches: {
+        log: () => log,
+        resources: () => resources,
+        clock: fixedClock(now),
+        ids: deterministicIds(["claim-1"])
+      },
+      jobs: {
+        registry: createJobRegistry<any>({
+          jobs: [
+            createDataPatchApplyJob<any>(),
+            {
+              name: "custom.check",
+              handler: ({ resources }) => {
+                checkedResources.push(
+                  resources instanceof NarrowJobResources ? resources.describe() : "flattened"
+                );
+              }
+            }
+          ]
+        }),
+        queue: () => queue,
+        resources: () => jobResources,
+        clock: fixedClock(now),
+        ids: deterministicIds(["patch-001"])
+      }
+    });
+    const env = {
+      DB: fakeD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const enqueued = await worker.fetch!(
+      cfRequest("http://localhost/api/data-patches/enqueue?limit=1", { method: "POST" }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(enqueued.status).toBe(202);
+    await expect(enqueued.json()).resolves.toMatchObject({
+      data: {
+        plan: { patchIds: ["crm.backfill"], limit: 1 },
+        message: {
+          tenantId: "acme",
+          jobName: "cf-frappe.data-patches.apply",
+          runId: "job_patch-001",
+          payload: { patchIds: ["crm.backfill"] }
+        }
+      }
+    });
+    expect(resources.touched).toEqual([]);
+    const message = queue.queued()[0]!.message;
+
+    await worker.queue?.(
+      {
+        queue: "jobs",
+        metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
+        messages: [
+          {
+            id: "msg_001",
+            timestamp: new Date(now),
+            body: message,
+            attempts: 1,
+            ack: vi.fn(),
+            retry: vi.fn()
+          } as unknown as Message<JobMessage>
+        ],
+        retryAll: vi.fn(),
+        ackAll: vi.fn()
+      },
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(resources.touched).toEqual(["crm"]);
+    await expect(log.appliedDataPatches()).resolves.toMatchObject([
+      { id: "crm.backfill", checksum: "v1", appliedAt: now, result: { touched: 1 } }
+    ]);
+
+    await worker.queue?.(
+      {
+        queue: "jobs",
+        metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
+        messages: [
+          {
+            id: "msg_002",
+            timestamp: new Date(now),
+            body: {
+              tenantId: "acme",
+              jobName: "custom.check",
+              payload: {},
+              runId: "job_custom",
+              idempotencyKey: "custom.check:job_custom",
+              enqueuedAt: now,
+              metadata: {}
+            },
+            attempts: 1,
+            ack: vi.fn(),
+            retry: vi.fn()
+          } as unknown as Message<JobMessage>
+        ],
+        retryAll: vi.fn(),
+        ackAll: vi.fn()
+      },
+      env,
+      fakeExecutionContext()
+    );
+    expect(checkedResources).toEqual(["narrow"]);
   });
 
   it("mounts app-declared data patch Desk routes on the Worker", async () => {

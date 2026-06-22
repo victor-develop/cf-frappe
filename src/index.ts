@@ -7,6 +7,7 @@ export * from "./adapters/print/index.js";
 export * from "./application/audit-service.js";
 export * from "./application/data-patch-runner.js";
 export * from "./application/data-patch-service.js";
+export * from "./application/data-patch-jobs.js";
 export * from "./application/document-service.js";
 export * from "./application/document-history-service.js";
 export * from "./application/file-service.js";
