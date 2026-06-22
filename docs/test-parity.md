@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the queued data-patch apply slice:
+As of the Cloudflare Access actor resolver slice:
 
-- Vitest files: `63`
-- Vitest cases: `514`
+- Vitest files: `64`
+- Vitest cases: `519`
 
 ## Implication
 
