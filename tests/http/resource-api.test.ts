@@ -80,6 +80,84 @@ describe("resource api", () => {
     await expect(response.json()).resolves.toMatchObject({ data: { name: "Note" } });
   });
 
+  it("returns resolved list-view metadata for filter builders", async () => {
+    const app = makeApp();
+
+    const response = await app.request("/api/meta/doctypes/Note/list-view", { headers: userHeaders });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        columns: [{ name: "title" }, { name: "priority" }, { name: "workflow_state" }],
+        filterBuilderFields: [
+          {
+            field: "title",
+            inputType: "text",
+            operators: [
+              { operator: "eq", label: "equals" },
+              { operator: "ne", label: "is not" },
+              { operator: "contains", label: "contains" }
+            ]
+          },
+          {
+            field: "priority",
+            inputType: "select",
+            operators: [
+              { operator: "eq", label: "equals" },
+              { operator: "ne", label: "is not" }
+            ]
+          },
+          {
+            field: "workflow_state",
+            inputType: "select",
+            operators: [
+              { operator: "eq", label: "equals" },
+              { operator: "ne", label: "is not" }
+            ]
+          },
+          {
+            field: "count",
+            inputType: "number",
+            operators: [
+              { operator: "eq", label: "equals" },
+              { operator: "ne", label: "is not" },
+              { operator: "gt", label: "greater than" },
+              { operator: "gte", label: "greater than or equal" },
+              { operator: "lt", label: "less than" },
+              { operator: "lte", label: "less than or equal" }
+            ]
+          }
+        ],
+        filterControls: [
+          { field: "title", inputType: "text", operator: "contains", queryKey: "filter_title__contains" },
+          { field: "title", inputType: "text", operator: "ne", queryKey: "filter_title__ne" },
+          { field: "priority", inputType: "select", operator: "eq", queryKey: "filter_priority" },
+          { field: "priority", inputType: "select", operator: "ne", queryKey: "filter_priority__ne" },
+          { field: "workflow_state", inputType: "select", operator: "eq", queryKey: "filter_workflow_state" },
+          { field: "workflow_state", inputType: "select", operator: "ne", queryKey: "filter_workflow_state__ne" },
+          { field: "count", inputType: "number", operator: "gte", queryKey: "filter_count__gte" },
+          { field: "count", inputType: "number", operator: "lte", queryKey: "filter_count__lte" }
+        ],
+        pageSize: 25
+      }
+    });
+  });
+
+  it("protects resolved list-view metadata with DocType read permissions", async () => {
+    const { app } = makeLinkedApp();
+
+    const response = await app.request("/api/meta/doctypes/Task/list-view", {
+      headers: {
+        ...userHeaders,
+        "x-cf-frappe-user": "guest",
+        "x-cf-frappe-roles": "Guest"
+      }
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "PERMISSION_DENIED" } });
+  });
+
   it("creates, reads, lists, updates, transitions, submits, cancels, and deletes a resource", async () => {
     const app = makeApp();
     const created = await app.request("/api/resource/Note", {

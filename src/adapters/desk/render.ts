@@ -4,6 +4,7 @@ import {
   type DocumentData,
   type DocumentSnapshot,
   type FieldDefinition,
+  type ListFilterControlDefinition,
   type JsonValue,
   type LinkOption,
   type ListDocumentsFilter,
@@ -577,7 +578,13 @@ export function renderListView(
 ): string {
   const fields = listView.columns;
   const filterFields = listView.filterFields;
-  const filterForm = filterFields.map((field) => renderFilterField(field, filters)).join("");
+  const filterFieldMap = new Map(filterFields.map((field) => [field.name, field]));
+  const filterForm = listView.filterControls
+    .map((control) => {
+      const field = filterFieldMap.get(control.field);
+      return field ? renderFilterControl(field, filters, control) : "";
+    })
+    .join("");
   const savedFilterPanel = renderSavedFilters(doctype, options.savedFilters ?? [], options.selectedSavedFilterId);
   const header = fields.map((field) => `<th>${escapeHtml(field.label ?? field.name)}</th>`).join("");
   const rows = documents
@@ -1159,21 +1166,16 @@ function inputType(field: FieldDefinition): string {
   }
 }
 
-function renderFilterField(field: FieldDefinition, filters: readonly ListDocumentsFilter[]): string {
-  return filterControlsForField(field).map((control) => renderFilterControl(field, filters, control)).join("");
-}
-
 function renderFilterControl(
   field: FieldDefinition,
   filters: readonly ListDocumentsFilter[],
-  control: { readonly operator: ListFilterOperator; readonly labelSuffix?: string }
+  control: ListFilterControlDefinition
 ): string {
   const id = `filter-${slug(field.name)}`;
   const label = escapeHtml(`${field.label ?? field.name}${control.labelSuffix ? ` ${control.labelSuffix}` : ""}`);
   const operator = control.operator;
-  const name = `filter_${field.name}${operator === "eq" ? "" : `__${operator}`}`;
   const value = currentFilterValue(filters, field.name, operator);
-  const common = `id="${id}-${operator}" name="${escapeHtml(name)}"`;
+  const common = `id="${id}-${operator}" name="${escapeHtml(control.queryKey)}"`;
   if (field.type === "select") {
     const options = [`<option value=""></option>`]
       .concat(
@@ -1193,34 +1195,7 @@ function renderFilterControl(
     ].join("");
     return `<label class="field" for="${id}-${operator}"><span>${label}</span><select ${common}>${options}</select></label>`;
   }
-  return `<label class="field" for="${id}-${operator}"><span>${label}</span><input type="${inputType(field)}" ${common} value="${escapeHtml(value)}"></label>`;
-}
-
-function filterControlsForField(
-  field: FieldDefinition
-): readonly { readonly operator: ListFilterOperator; readonly labelSuffix?: string }[] {
-  switch (field.type) {
-    case "text":
-    case "longText":
-    case "link":
-      return [
-        { operator: "contains" },
-        { operator: "ne", labelSuffix: "is not" }
-      ];
-    case "integer":
-    case "number":
-    case "date":
-    case "datetime":
-      return [
-        { operator: "gte", labelSuffix: "from" },
-        { operator: "lte", labelSuffix: "to" }
-      ];
-    default:
-      return [
-        { operator: "eq" },
-        { operator: "ne", labelSuffix: "is not" }
-      ];
-  }
+  return `<label class="field" for="${id}-${operator}"><span>${label}</span><input type="${control.inputType}" ${common} value="${escapeHtml(value)}"></label>`;
 }
 
 function currentFilterValue(

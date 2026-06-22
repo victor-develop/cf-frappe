@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk advanced filter operators slice:
+As of the filter-builder metadata slice:
 
 - Vitest files: `50`
-- Vitest cases: `366`
+- Vitest cases: `370`
 
 ## Implication
 

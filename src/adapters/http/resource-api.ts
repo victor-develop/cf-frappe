@@ -74,6 +74,11 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     return c.json({ data: options.queries.getMeta(actor, c.req.param("doctype")) });
   });
 
+  app.get("/api/meta/doctypes/:doctype/list-view", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    return c.json({ data: options.queries.getListView(actor, c.req.param("doctype")) });
+  });
+
   app.get("/api/link-options/:doctype/:field", async (c) => {
     const actor = await resolveActor(c.req.raw);
     const q = c.req.query("q");

@@ -3,17 +3,44 @@ import type {
   DocTypeDefinition,
   FieldDefinition,
   JsonPrimitive,
+  ListFilterBuilderField,
   ListDocumentsFilter,
+  ListFilterControlDefinition,
+  ListFilterInputType,
   ListFilterOperator,
+  ListFilterOperatorOption,
   ResolvedListView
 } from "./types";
 
 export const DEFAULT_LIST_PAGE_SIZE = 50;
 export const MAX_LIST_PAGE_SIZE = 200;
 export const LIST_FILTER_OPERATORS = ["eq", "ne", "contains", "gt", "gte", "lt", "lte"] as const;
+const LIST_FILTER_OPERATOR_LABELS: Record<ListFilterOperator, string> = {
+  eq: "equals",
+  ne: "is not",
+  contains: "contains",
+  gt: "greater than",
+  gte: "greater than or equal",
+  lt: "less than",
+  lte: "less than or equal"
+};
 
 export function isListFilterOperator(operator: unknown): operator is ListFilterOperator {
   return typeof operator === "string" && LIST_FILTER_OPERATORS.includes(operator as ListFilterOperator);
+}
+
+export function listFilterOperatorsForField(field: FieldDefinition): readonly ListFilterOperatorOption[] {
+  return supportedListFilterOperatorsForField(field).map((operator) => ({
+    operator,
+    label: LIST_FILTER_OPERATOR_LABELS[operator]
+  }));
+}
+
+export function listFilterControlsForField(field: FieldDefinition): readonly ListFilterControlDefinition[] {
+  if (!isFilterable(field)) {
+    return [];
+  }
+  return defaultListFilterControlOperators(field).map((control) => listFilterControl(field, control));
 }
 
 interface NormalizeListFiltersOptions {
@@ -26,9 +53,12 @@ export function assertListViewDefinition(doctype: DocTypeDefinition): void {
 
 export function resolveListView(doctype: DocTypeDefinition): ResolvedListView {
   const columns = resolveListColumns(doctype);
+  const filterFields = resolveListFilterFields(doctype, columns);
   return {
     columns,
-    filterFields: resolveListFilterFields(doctype, columns),
+    filterFields,
+    filterBuilderFields: filterFields.map(listFilterBuilderField),
+    filterControls: filterFields.flatMap(listFilterControlsForField),
     filters: normalizeListFilters(doctype, doctype.listView?.filters ?? [], { errorCode: "LIST_VIEW_INVALID" }),
     pageSize: normalizeListPageSize(doctype.listView?.pageSize, doctype.name)
   };
@@ -174,13 +204,92 @@ function normalizeFilterOperator(operator: unknown, errorCode: FrameworkErrorCod
 }
 
 function operatorAllowedForField(field: FieldDefinition, operator: ListFilterOperator): boolean {
-  if (operator === "eq" || operator === "ne") {
-    return true;
+  return supportedListFilterOperatorsForField(field).includes(operator);
+}
+
+function supportedListFilterOperatorsForField(field: FieldDefinition): readonly ListFilterOperator[] {
+  if (!isFilterable(field)) {
+    return [];
   }
-  if (operator === "contains") {
-    return field.type === "text" || field.type === "longText" || field.type === "link";
+  const operators: ListFilterOperator[] = ["eq", "ne"];
+  if (field.type === "text" || field.type === "longText" || field.type === "link") {
+    operators.push("contains");
   }
-  return field.type === "integer" || field.type === "number" || field.type === "date" || field.type === "datetime";
+  if (field.type === "integer" || field.type === "number" || field.type === "date" || field.type === "datetime") {
+    operators.push("gt", "gte", "lt", "lte");
+  }
+  return operators;
+}
+
+function defaultListFilterControlOperators(
+  field: FieldDefinition
+): readonly { readonly operator: ListFilterOperator; readonly labelSuffix?: string }[] {
+  switch (field.type) {
+    case "text":
+    case "longText":
+    case "link":
+      return [
+        { operator: "contains" },
+        { operator: "ne", labelSuffix: "is not" }
+      ];
+    case "integer":
+    case "number":
+    case "date":
+    case "datetime":
+      return [
+        { operator: "gte", labelSuffix: "from" },
+        { operator: "lte", labelSuffix: "to" }
+      ];
+    default:
+      return [
+        { operator: "eq" },
+        { operator: "ne", labelSuffix: "is not" }
+      ];
+  }
+}
+
+function listFilterControl(
+  field: FieldDefinition,
+  control: { readonly operator: ListFilterOperator; readonly labelSuffix?: string }
+): ListFilterControlDefinition {
+  return {
+    field: field.name,
+    operator: control.operator,
+    operatorLabel: LIST_FILTER_OPERATOR_LABELS[control.operator],
+    inputType: listFilterInputType(field),
+    queryKey: listFilterQueryKey(field.name, control.operator),
+    ...(control.labelSuffix ? { labelSuffix: control.labelSuffix } : {})
+  };
+}
+
+function listFilterBuilderField(field: FieldDefinition): ListFilterBuilderField {
+  return {
+    field: field.name,
+    inputType: listFilterInputType(field),
+    operators: listFilterOperatorsForField(field)
+  };
+}
+
+function listFilterQueryKey(field: string, operator: ListFilterOperator): string {
+  return `filter_${field}${operator === "eq" ? "" : `__${operator}`}`;
+}
+
+function listFilterInputType(field: FieldDefinition): ListFilterInputType {
+  switch (field.type) {
+    case "integer":
+    case "number":
+      return "number";
+    case "date":
+      return "date";
+    case "datetime":
+      return "datetime-local";
+    case "select":
+      return "select";
+    case "boolean":
+      return "boolean";
+    default:
+      return "text";
+  }
 }
 
 function coerceFilterValue(

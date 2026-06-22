@@ -419,6 +419,9 @@ export function renderDeskClientScript(): string {
       doctypes: function () {
         return request("/api/meta/doctypes").then(unwrapData);
       },
+      listView: function (doctype) {
+        return request("/api/meta/doctypes/" + encodePart(doctype) + "/list-view").then(unwrapData);
+      },
       reports: function () {
         return request("/api/meta/reports").then(unwrapData);
       }

@@ -285,11 +285,32 @@ export type NewDomainEvent<TPayload extends DocumentEventPayload = DocumentEvent
   Omit<DomainEvent<TPayload>, "sequence">;
 
 export type ListFilterOperator = "eq" | "ne" | "contains" | "gt" | "gte" | "lt" | "lte";
+export type ListFilterInputType = "text" | "number" | "date" | "datetime-local" | "select" | "boolean";
 
 export interface ListDocumentsFilter {
   readonly field: string;
   readonly operator?: ListFilterOperator;
   readonly value: JsonPrimitive;
+}
+
+export interface ListFilterOperatorOption {
+  readonly operator: ListFilterOperator;
+  readonly label: string;
+}
+
+export interface ListFilterControlDefinition {
+  readonly field: string;
+  readonly operator: ListFilterOperator;
+  readonly operatorLabel: string;
+  readonly inputType: ListFilterInputType;
+  readonly queryKey: string;
+  readonly labelSuffix?: string;
+}
+
+export interface ListFilterBuilderField {
+  readonly field: string;
+  readonly inputType: ListFilterInputType;
+  readonly operators: readonly ListFilterOperatorOption[];
 }
 
 export interface FormSectionDefinition {
@@ -323,6 +344,8 @@ export interface ListViewDefinition {
 export interface ResolvedListView {
   readonly columns: readonly FieldDefinition[];
   readonly filterFields: readonly FieldDefinition[];
+  readonly filterBuilderFields: readonly ListFilterBuilderField[];
+  readonly filterControls: readonly ListFilterControlDefinition[];
   readonly filters: readonly ListDocumentsFilter[];
   readonly pageSize: number;
 }

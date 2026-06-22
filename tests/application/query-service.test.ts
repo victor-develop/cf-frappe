@@ -292,6 +292,55 @@ describe("QueryService", () => {
     const view = await queries.listDocumentsForView(owner, "Note");
 
     expect(view.listView.columns.map((field) => field.name)).toEqual(["title", "priority", "workflow_state"]);
+    expect(view.listView.filterBuilderFields).toEqual([
+      expect.objectContaining({
+        field: "title",
+        inputType: "text",
+        operators: [
+          { operator: "eq", label: "equals" },
+          { operator: "ne", label: "is not" },
+          { operator: "contains", label: "contains" }
+        ]
+      }),
+      expect.objectContaining({
+        field: "priority",
+        inputType: "select",
+        operators: [
+          { operator: "eq", label: "equals" },
+          { operator: "ne", label: "is not" }
+        ]
+      }),
+      expect.objectContaining({
+        field: "workflow_state",
+        inputType: "select",
+        operators: [
+          { operator: "eq", label: "equals" },
+          { operator: "ne", label: "is not" }
+        ]
+      }),
+      expect.objectContaining({
+        field: "count",
+        inputType: "number",
+        operators: [
+          { operator: "eq", label: "equals" },
+          { operator: "ne", label: "is not" },
+          { operator: "gt", label: "greater than" },
+          { operator: "gte", label: "greater than or equal" },
+          { operator: "lt", label: "less than" },
+          { operator: "lte", label: "less than or equal" }
+        ]
+      })
+    ]);
+    expect(view.listView.filterControls).toEqual([
+      expect.objectContaining({ field: "title", inputType: "text", operator: "contains", queryKey: "filter_title__contains" }),
+      expect.objectContaining({ field: "title", inputType: "text", operator: "ne", queryKey: "filter_title__ne" }),
+      expect.objectContaining({ field: "priority", inputType: "select", operator: "eq", queryKey: "filter_priority" }),
+      expect.objectContaining({ field: "priority", inputType: "select", operator: "ne", queryKey: "filter_priority__ne" }),
+      expect.objectContaining({ field: "workflow_state", inputType: "select", operator: "eq", queryKey: "filter_workflow_state" }),
+      expect.objectContaining({ field: "workflow_state", inputType: "select", operator: "ne", queryKey: "filter_workflow_state__ne" }),
+      expect.objectContaining({ field: "count", inputType: "number", operator: "gte", queryKey: "filter_count__gte" }),
+      expect.objectContaining({ field: "count", inputType: "number", operator: "lte", queryKey: "filter_count__lte" })
+    ]);
     expect(view.result).toMatchObject({
       data: [{ name: "Open Note" }],
       limit: 25,

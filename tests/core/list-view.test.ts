@@ -1,4 +1,4 @@
-import { defineDocType, FrameworkError, resolveListView } from "../../src";
+import { defineDocType, FrameworkError, listFilterControlsForField, listFilterOperatorsForField, resolveListView } from "../../src";
 
 describe("list views", () => {
   it("resolves explicit list-view metadata and coerces default filters", () => {
@@ -21,8 +21,67 @@ describe("list views", () => {
 
     expect(listView.columns.map((field) => field.name)).toEqual(["status", "title"]);
     expect(listView.filterFields.map((field) => field.name)).toEqual(["status"]);
+    expect(listView.filterBuilderFields).toEqual([
+      {
+        field: "status",
+        inputType: "select",
+        operators: [
+          { operator: "eq", label: "equals" },
+          { operator: "ne", label: "is not" }
+        ]
+      }
+    ]);
+    expect(listView.filterControls).toEqual([
+      {
+        field: "status",
+        inputType: "select",
+        operator: "eq",
+        operatorLabel: "equals",
+        queryKey: "filter_status"
+      },
+      {
+        field: "status",
+        inputType: "select",
+        labelSuffix: "is not",
+        operator: "ne",
+        operatorLabel: "is not",
+        queryKey: "filter_status__ne"
+      }
+    ]);
     expect(listView.filters).toEqual([{ field: "count", operator: "gte", value: 2 }]);
     expect(listView.pageSize).toBe(200);
+  });
+
+  it("exposes field-aware operators for visual filter builders", () => {
+    const Task = defineDocType({
+      name: "Task",
+      fields: [
+        { name: "title", type: "text" },
+        { name: "count", type: "integer" },
+        { name: "done", type: "boolean" },
+        { name: "payload", type: "json" }
+      ]
+    });
+
+    expect(listFilterOperatorsForField(Task.fields[0] ?? failField())).toEqual([
+      { operator: "eq", label: "equals" },
+      { operator: "ne", label: "is not" },
+      { operator: "contains", label: "contains" }
+    ]);
+    expect(listFilterOperatorsForField(Task.fields[1] ?? failField()).map((item) => item.operator)).toEqual([
+      "eq",
+      "ne",
+      "gt",
+      "gte",
+      "lt",
+      "lte"
+    ]);
+    expect(listFilterOperatorsForField(Task.fields[2] ?? failField()).map((item) => item.operator)).toEqual([
+      "eq",
+      "ne"
+    ]);
+    expect(listFilterOperatorsForField(Task.fields[3] ?? failField())).toEqual([]);
+    expect(listFilterControlsForField(Task.fields[3] ?? failField())).toEqual([]);
   });
 
   it("falls back to field-level list flags", () => {
@@ -81,3 +140,7 @@ describe("list views", () => {
     ).toThrow(expect.objectContaining({ code: "LIST_VIEW_INVALID" }));
   });
 });
+
+function failField(): never {
+  throw new Error("Expected field");
+}

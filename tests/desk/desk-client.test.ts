@@ -16,6 +16,9 @@ interface DeskClientRuntime {
     readonly current: () => DeskFormRuntime | null;
     readonly on: (doctype: string, handlers: DeskFormHandlers) => void;
   };
+  readonly meta: {
+    readonly listView: (doctype: string) => Promise<unknown>;
+  };
   readonly resource: {
     readonly command: (
       doctype: string,
@@ -117,6 +120,21 @@ describe("Desk client runtime", () => {
     expect(calls[0]?.url).toBe(
       "/api/resource/Task?filter_priority__ne=Low&filter_count__gt=2&filter_count__lt=9&filter_title=Launch"
     );
+  });
+
+  it("fetches resolved list-view metadata for browser filter builders", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { filterControls: [] } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.meta.listView("Task Type")).resolves.toEqual({ filterControls: [] });
+
+    expect(calls[0]?.url).toBe("/api/meta/doctypes/Task%20Type/list-view");
+    expect(calls[0]?.init.credentials).toBe("same-origin");
   });
 
   it("exposes client-script context and WebSocket realtime URLs", () => {
