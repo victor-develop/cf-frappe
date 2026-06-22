@@ -97,6 +97,118 @@ describe("QueryService", () => {
     });
   });
 
+  it("applies event-sourced user permissions to linked documents and link options", async () => {
+    const { documents, queries, userPermissions } = createLinkedServices(["p1", "p2", "t1", "t2"]);
+    const admin = { id: "admin@example.com", roles: ["System Manager"], tenantId: "acme" };
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Apollo" } });
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Zeus" } });
+    await documents.create({
+      actor: owner,
+      doctype: "Task",
+      data: { title: "Apollo Task", project: "Apollo", description: "Allowed" }
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Task",
+      data: { title: "Zeus Task", project: "Zeus", description: "Denied" }
+    });
+    await userPermissions.allow({
+      actor: admin,
+      userId: owner.id,
+      targetDoctype: "Project",
+      targetName: "Apollo"
+    });
+
+    await expect(queries.getDocument(owner, "Project", "Apollo")).resolves.toMatchObject({ name: "Apollo" });
+    await expect(queries.getDocument(owner, "Project", "Zeus")).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+    await expect(queries.listDocuments(owner, "Project")).resolves.toMatchObject({
+      data: [{ name: "Apollo" }],
+      total: 2
+    });
+    await expect(queries.listDocuments(owner, "Task")).resolves.toMatchObject({
+      data: [{ name: "Apollo Task" }],
+      total: 2
+    });
+    await expect(queries.listLinkOptions(owner, "Task", "project")).resolves.toMatchObject({
+      options: [{ value: "Apollo", label: "Apollo" }]
+    });
+  });
+
+  it("limits user-permission grants to explicitly applicable DocTypes when configured", async () => {
+    const { documents, queries, userPermissions } = createLinkedServices(["p1", "p2", "t1", "t2"]);
+    const admin = { id: "admin@example.com", roles: ["System Manager"], tenantId: "acme" };
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Apollo" } });
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Zeus" } });
+    await documents.create({
+      actor: owner,
+      doctype: "Task",
+      data: { title: "Apollo Task", project: "Apollo", description: "Allowed" }
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Task",
+      data: { title: "Zeus Task", project: "Zeus", description: "Still visible" }
+    });
+    await userPermissions.allow({
+      actor: admin,
+      userId: owner.id,
+      targetDoctype: "Project",
+      targetName: "Apollo",
+      applicableDoctypes: ["Project"]
+    });
+
+    await expect(queries.listDocuments(owner, "Project")).resolves.toMatchObject({
+      data: [{ name: "Apollo" }],
+      total: 2
+    });
+    await expect(queries.listDocuments(owner, "Task")).resolves.toMatchObject({
+      data: [{ name: "Apollo Task" }, { name: "Zeus Task" }],
+      total: 2
+    });
+    await expect(queries.listLinkOptions(owner, "Task", "project")).resolves.toMatchObject({
+      options: [
+        { value: "Apollo", label: "Apollo" },
+        { value: "Zeus", label: "Zeus" }
+      ]
+    });
+  });
+
+  it("applies source-scoped user permissions to link options", async () => {
+    const { documents, queries, userPermissions } = createLinkedServices(["p1", "p2", "t1", "t2"]);
+    const admin = { id: "admin@example.com", roles: ["System Manager"], tenantId: "acme" };
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Apollo" } });
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Zeus" } });
+    await documents.create({
+      actor: owner,
+      doctype: "Task",
+      data: { title: "Apollo Task", project: "Apollo", description: "Allowed" }
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Task",
+      data: { title: "Zeus Task", project: "Zeus", description: "Denied" }
+    });
+    await userPermissions.allow({
+      actor: admin,
+      userId: owner.id,
+      targetDoctype: "Project",
+      targetName: "Apollo",
+      applicableDoctypes: ["Task"]
+    });
+
+    await expect(queries.listDocuments(owner, "Project")).resolves.toMatchObject({
+      data: [{ name: "Apollo" }, { name: "Zeus" }],
+      total: 2
+    });
+    await expect(queries.listDocuments(owner, "Task")).resolves.toMatchObject({
+      data: [{ name: "Apollo Task" }],
+      total: 2
+    });
+    await expect(queries.listLinkOptions(owner, "Task", "project")).resolves.toMatchObject({
+      options: [{ value: "Apollo", label: "Apollo" }]
+    });
+  });
+
   it("omits unreadable target documents from link options", async () => {
     const { documents, queries } = createLinkedServices(["p1"]);
     const other = { ...owner, id: "other@example.com" };

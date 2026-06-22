@@ -2,6 +2,11 @@ import { foldDocument, foldDocumentAssignments, foldDocumentFollowers, foldDocum
 import { can } from "../core/permissions";
 import { applyDefaults, compactData, validateDocumentData } from "../core/schema";
 import { documentStream, namingSeriesStream } from "../core/streams";
+import {
+  documentMatchesUserPermissions,
+  linkTargetMatchesUserPermissions,
+  type UserPermissionProvider
+} from "../core/user-permissions";
 import type { ModelRegistry } from "../core/registry";
 import type { AfterCommitContext } from "../core/registry";
 import type { Clock } from "../ports/clock";
@@ -18,6 +23,7 @@ import {
   type DocumentData,
   type DocumentSnapshot,
   type DomainEvent,
+  type FieldDefinition,
   type MutableDocumentData,
   type NewDomainEvent,
   type ValidationIssue
@@ -27,6 +33,7 @@ import { badRequest, conflict, FrameworkError, notFound, permissionDenied, valid
 export interface DocumentServiceOptions {
   readonly registry: ModelRegistry;
   readonly store: DocumentStore;
+  readonly userPermissions?: UserPermissionProvider;
   readonly clock?: Clock;
   readonly ids?: IdGenerator;
   readonly onHookError?: (error: unknown, event: DomainEvent) => void | Promise<void>;
@@ -220,6 +227,7 @@ export class DocumentService implements DocumentCommandExecutor {
   private readonly store: DocumentStore;
   private readonly clock: Clock;
   private readonly ids: IdGenerator;
+  private readonly userPermissions: UserPermissionProvider | undefined;
   private readonly onHookError: ((error: unknown, event: DomainEvent) => void | Promise<void>) | undefined;
   private readonly afterCommit: ((context: AfterCommitContext) => void | Promise<void>) | undefined;
 
@@ -228,6 +236,7 @@ export class DocumentService implements DocumentCommandExecutor {
     this.store = options.store;
     this.clock = options.clock ?? systemClock;
     this.ids = options.ids ?? cryptoIdGenerator;
+    this.userPermissions = options.userPermissions;
     this.onHookError = options.onHookError;
     this.afterCommit = options.afterCommit;
   }
@@ -301,6 +310,7 @@ export class DocumentService implements DocumentCommandExecutor {
     if (!can(command.actor, doctype, "update", existing)) {
       throw permissionDenied(`Actor '${command.actor.id}' cannot update ${doctype.name}/${command.name}`);
     }
+    await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
     ensureDocumentStatus(existing, ["draft"], "update");
 
@@ -358,6 +368,7 @@ export class DocumentService implements DocumentCommandExecutor {
     if (!can(command.actor, doctype, "transition", existing)) {
       throw permissionDenied(`Actor '${command.actor.id}' cannot transition ${doctype.name}/${command.name}`);
     }
+    await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
     ensureDocumentStatus(existing, ["draft"], "transition");
 
@@ -430,6 +441,7 @@ export class DocumentService implements DocumentCommandExecutor {
     if (!can(command.actor, doctype, permissionAction, existing)) {
       throw permissionDenied(`Actor '${command.actor.id}' cannot execute ${command.command} on ${doctype.name}/${command.name}`);
     }
+    await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     const roleAllowed =
       commandDefinition.roles === undefined ||
       commandDefinition.roles.some((role) => command.actor.roles.includes(role));
@@ -504,6 +516,7 @@ export class DocumentService implements DocumentCommandExecutor {
     if (!can(command.actor, doctype, "comment", existing)) {
       throw permissionDenied(`Actor '${command.actor.id}' cannot comment on ${doctype.name}/${command.name}`);
     }
+    await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
     const text = normalizeCommentText(command.text);
     const now = this.clock.now();
@@ -543,6 +556,7 @@ export class DocumentService implements DocumentCommandExecutor {
     if (!can(command.actor, doctype, "activity", existing)) {
       throw permissionDenied(`Actor '${command.actor.id}' cannot record activity on ${doctype.name}/${command.name}`);
     }
+    await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
     const activity = normalizeActivity(command);
     const now = this.clock.now();
@@ -643,6 +657,7 @@ export class DocumentService implements DocumentCommandExecutor {
     if (!can(command.actor, doctype, "delete", existing)) {
       throw permissionDenied(`Actor '${command.actor.id}' cannot delete ${doctype.name}/${command.name}`);
     }
+    await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
     ensureDocumentStatus(existing, ["draft", "cancelled"], "delete");
 
@@ -684,6 +699,7 @@ export class DocumentService implements DocumentCommandExecutor {
     if (!can(command.actor, doctype, "submit", existing)) {
       throw permissionDenied(`Actor '${command.actor.id}' cannot submit ${doctype.name}/${command.name}`);
     }
+    await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
     ensureDocumentStatus(existing, ["draft"], "submit");
     return this.changeDocStatus({
@@ -706,6 +722,7 @@ export class DocumentService implements DocumentCommandExecutor {
     if (!can(command.actor, doctype, "cancel", existing)) {
       throw permissionDenied(`Actor '${command.actor.id}' cannot cancel ${doctype.name}/${command.name}`);
     }
+    await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
     ensureDocumentStatus(existing, ["submitted"], "cancel");
     return this.changeDocStatus({
@@ -757,6 +774,7 @@ export class DocumentService implements DocumentCommandExecutor {
     if (!can(options.command.actor, doctype, "assign", existing)) {
       throw permissionDenied(`Actor '${options.command.actor.id}' cannot assign ${doctype.name}/${options.command.name}`);
     }
+    await this.ensureUserPermissionAccess(options.command.actor, doctype, existing);
     ensureExpectedVersion(existing, options.command.expectedVersion);
     const assigneeId = normalizeAssigneeId(options.command.assignee);
     if (options.alreadyDone(foldDocumentAssignments(events), assigneeId)) {
@@ -804,6 +822,7 @@ export class DocumentService implements DocumentCommandExecutor {
     if (!can(options.command.actor, doctype, "tag", existing)) {
       throw permissionDenied(`Actor '${options.command.actor.id}' cannot tag ${doctype.name}/${options.command.name}`);
     }
+    await this.ensureUserPermissionAccess(options.command.actor, doctype, existing);
     ensureExpectedVersion(existing, options.command.expectedVersion);
     const tag = normalizeTag(options.command.tag);
     if (options.alreadyDone(foldDocumentTags(events), tag)) {
@@ -851,6 +870,7 @@ export class DocumentService implements DocumentCommandExecutor {
     if (!can(options.command.actor, doctype, "follow", existing)) {
       throw permissionDenied(`Actor '${options.command.actor.id}' cannot follow ${doctype.name}/${options.command.name}`);
     }
+    await this.ensureUserPermissionAccess(options.command.actor, doctype, existing);
     ensureExpectedVersion(existing, options.command.expectedVersion);
     const followerId = normalizeFollowerId(options.command.follower ?? options.command.actor.id);
     if (options.alreadyDone(foldDocumentFollowers(events), followerId)) {
@@ -1020,7 +1040,12 @@ export class DocumentService implements DocumentCommandExecutor {
           return [];
         }
         const target = await this.readDocumentFromEvents(tenantId, targetDoctype, value);
-        if (target && target.docstatus !== "deleted" && can(actor, targetDoctype, "read", target)) {
+        if (
+          target &&
+          target.docstatus !== "deleted" &&
+          can(actor, targetDoctype, "read", target) &&
+          (await this.matchesLinkUserPermissions(actor, doctype, field, target))
+        ) {
           return [];
         }
         return [
@@ -1033,6 +1058,35 @@ export class DocumentService implements DocumentCommandExecutor {
       })
     );
     return issues.flat();
+  }
+
+  private async ensureUserPermissionAccess(
+    actor: Actor,
+    doctype: DocTypeDefinition,
+    document: DocumentSnapshot
+  ): Promise<void> {
+    if (!(await this.matchesUserPermissions(actor, doctype, document))) {
+      throw permissionDenied(`Actor '${actor.id}' cannot access ${doctype.name}/${document.name}`);
+    }
+  }
+
+  private async matchesUserPermissions(
+    actor: Actor,
+    doctype: DocTypeDefinition,
+    document: DocumentSnapshot
+  ): Promise<boolean> {
+    const grants = await this.userPermissions?.permissionsFor(actor, document.tenantId);
+    return documentMatchesUserPermissions(doctype, document, grants ?? []);
+  }
+
+  private async matchesLinkUserPermissions(
+    actor: Actor,
+    sourceDoctype: DocTypeDefinition,
+    field: FieldDefinition,
+    target: DocumentSnapshot
+  ): Promise<boolean> {
+    const grants = await this.userPermissions?.permissionsFor(actor, target.tenantId);
+    return linkTargetMatchesUserPermissions(sourceDoctype, field, target, grants ?? []);
   }
 
   private relatedDocType(name: string): DocTypeDefinition | undefined {

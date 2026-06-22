@@ -281,6 +281,8 @@ function diffEvent(
     case "DocumentUnfollowed":
     case "SavedListFilterSaved":
     case "SavedListFilterDeleted":
+    case "UserPermissionAllowed":
+    case "UserPermissionRevoked":
       return [];
   }
 }
@@ -348,6 +350,10 @@ function summarize(payload: DocumentEventPayload): string {
       return `Saved list filter ${payload.label}`;
     case "SavedListFilterDeleted":
       return "Deleted list filter";
+    case "UserPermissionAllowed":
+      return `Allowed ${payload.userId} to access ${payload.targetDoctype}/${payload.targetName}`;
+    case "UserPermissionRevoked":
+      return `Revoked ${payload.userId} access to ${payload.targetDoctype}/${payload.targetName}`;
     case "WorkflowTransitioned":
       return workflowSummary(payload);
     case "DomainCommandApplied":

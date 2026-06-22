@@ -29,6 +29,8 @@ const DOCUMENT_EVENT_KINDS = new Set<DocumentEventPayload["kind"]>([
   "DocumentUntagged",
   "DocumentFollowed",
   "DocumentUnfollowed",
+  "UserPermissionAllowed",
+  "UserPermissionRevoked",
   "SavedListFilterSaved",
   "SavedListFilterDeleted",
   "WorkflowTransitioned",

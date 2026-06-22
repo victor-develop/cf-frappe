@@ -228,6 +228,20 @@ export type DocumentEventPayload =
       readonly followerId: string;
     }
   | {
+      readonly kind: "UserPermissionAllowed";
+      readonly userId: string;
+      readonly targetDoctype: DocTypeName;
+      readonly targetName: DocumentName;
+      readonly applicableDoctypes?: readonly DocTypeName[];
+    }
+  | {
+      readonly kind: "UserPermissionRevoked";
+      readonly userId: string;
+      readonly targetDoctype: DocTypeName;
+      readonly targetName: DocumentName;
+      readonly applicableDoctypes?: readonly DocTypeName[];
+    }
+  | {
       readonly kind: "SavedListFilterSaved";
       readonly filterId: string;
       readonly label: string;

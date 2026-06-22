@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { DocumentService } from "../application/document-service";
+import { UserPermissionService } from "../application/user-permission-service";
 import type { DomainEvent } from "../core/types";
 import { createDocumentRealtimeHooks } from "../application/realtime";
 import type {
@@ -19,7 +20,7 @@ import type {
   UpdateDocumentCommand
 } from "../application/document-service";
 import type { ExecuteDomainCommand } from "../application/document-service";
-import { D1DocumentStore } from "../adapters/d1";
+import { D1DocumentStore, D1EventStore } from "../adapters/d1";
 import type { ModelRegistry } from "../core/registry";
 import type { Clock } from "../ports/clock";
 import type { IdGenerator } from "../ports/id-generator";
@@ -72,6 +73,7 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
       this.service = new DocumentService({
         registry: options.registry,
         store: new D1DocumentStore(env.DB),
+        userPermissions: new UserPermissionService({ events: new D1EventStore(env.DB) }),
         ...(options.clock ? { clock: options.clock } : {}),
         ...(options.ids ? { ids: options.ids } : {}),
         ...(options.onHookError ? { onHookError: options.onHookError } : {}),

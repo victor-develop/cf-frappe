@@ -4,6 +4,12 @@ import { mergeListFilters, normalizeListFilters, resolveListView } from "../core
 import { can } from "../core/permissions";
 import type { ModelRegistry } from "../core/registry";
 import {
+  documentMatchesUserPermissions,
+  linkTargetMatchesUserPermissions,
+  type UserPermissionGrant,
+  type UserPermissionProvider
+} from "../core/user-permissions";
+import {
   DEFAULT_TENANT_ID,
   type Actor,
   type DocTypeDefinition,
@@ -21,15 +27,18 @@ import type { ProjectionStore } from "../ports/projection-store";
 export interface QueryServiceOptions {
   readonly registry: ModelRegistry;
   readonly projections: ProjectionStore;
+  readonly userPermissions?: UserPermissionProvider;
 }
 
 export class QueryService {
   private readonly registry: ModelRegistry;
   private readonly projections: ProjectionStore;
+  private readonly userPermissions: UserPermissionProvider | undefined;
 
   constructor(options: QueryServiceOptions) {
     this.registry = options.registry;
     this.projections = options.projections;
+    this.userPermissions = options.userPermissions;
   }
 
   listDoctypes(actor: Actor): readonly DocTypeDefinition[] {
@@ -55,7 +64,7 @@ export class QueryService {
     if (!document || document.docstatus === "deleted") {
       throw notFound(`${doctype.name}/${name} was not found`);
     }
-    if (!can(actor, doctype, "read", document)) {
+    if (!(await this.canReadDocument(actor, doctype, document))) {
       throw permissionDenied(`Actor '${actor.id}' cannot read ${doctype.name}/${name}`);
     }
     return document;
@@ -84,9 +93,10 @@ export class QueryService {
       limit,
       offset
     });
+    const data = await this.filterReadableDocuments(actor, doctype, result.data);
     return {
       ...result,
-      data: result.data.filter((document) => document.docstatus !== "deleted" && can(actor, doctype, "read", document))
+      data
     };
   }
 
@@ -135,7 +145,7 @@ export class QueryService {
     const limit = clampLimit(options.limit ?? 20);
     const search = normalizeSearch(options.q);
     const tenantId = options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
-    const linkOptions = await this.collectLinkOptions(actor, target, tenantId, search, limit);
+    const linkOptions = await this.collectLinkOptions(actor, doctype, field, target, tenantId, search, limit);
     return {
       doctype: doctype.name,
       field: field.name,
@@ -179,6 +189,8 @@ export class QueryService {
 
   private async collectLinkOptions(
     actor: Actor,
+    source: DocTypeDefinition,
+    field: FieldDefinition,
     target: DocTypeDefinition,
     tenantId: string,
     search: string | undefined,
@@ -186,9 +198,19 @@ export class QueryService {
   ): Promise<readonly LinkOption[]> {
     const matches: LinkOption[] = [];
     const pageSize = 200;
+    const grants = (await this.userPermissions?.permissionsFor(actor, tenantId)) ?? [];
     for (let offset = 0; ; offset += pageSize) {
-      const result = await this.listDocuments(actor, target.name, { tenantId, limit: pageSize, offset });
+      const result = await this.projections.list({
+        tenantId,
+        doctype: target.name,
+        filters: [],
+        limit: pageSize,
+        offset
+      });
       for (const document of result.data) {
+        if (!canReadLinkTarget(actor, source, field, target, document, grants)) {
+          continue;
+        }
         const option = toLinkOption(document, target);
         if (!search || matchesLinkSearch(option, search)) {
           matches.push(option);
@@ -202,6 +224,43 @@ export class QueryService {
       }
     }
   }
+
+  private async filterReadableDocuments(
+    actor: Actor,
+    doctype: DocTypeDefinition,
+    documents: readonly DocumentSnapshot[]
+  ): Promise<readonly DocumentSnapshot[]> {
+    const readable = await Promise.all(
+      documents.map(async (document) => ({
+        document,
+        readable: document.docstatus !== "deleted" && (await this.canReadDocument(actor, doctype, document))
+      }))
+    );
+    return readable.filter((entry) => entry.readable).map((entry) => entry.document);
+  }
+
+  private async canReadDocument(actor: Actor, doctype: DocTypeDefinition, document: DocumentSnapshot): Promise<boolean> {
+    if (!can(actor, doctype, "read", document)) {
+      return false;
+    }
+    const grants = await this.userPermissions?.permissionsFor(actor, document.tenantId);
+    return documentMatchesUserPermissions(doctype, document, grants ?? []);
+  }
+}
+
+function canReadLinkTarget(
+  actor: Actor,
+  source: DocTypeDefinition,
+  field: FieldDefinition,
+  target: DocTypeDefinition,
+  document: DocumentSnapshot,
+  grants: readonly UserPermissionGrant[]
+): boolean {
+  return (
+    document.docstatus !== "deleted" &&
+    can(actor, target, "read", document) &&
+    linkTargetMatchesUserPermissions(source, field, document, grants)
+  );
 }
 
 function mergeDefaultFilters(

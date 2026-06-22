@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document following slice:
+As of the event-sourced user permissions slice:
 
-- Test files: `41`
-- Vitest cases: `288`
+- Test files: `42`
+- Vitest cases: `295`
 
 ## Implication
 

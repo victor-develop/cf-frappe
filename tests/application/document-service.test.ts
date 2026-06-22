@@ -222,6 +222,99 @@ describe("DocumentService", () => {
     });
   });
 
+  it("enforces event-sourced user permissions on linked writes and existing document commands", async () => {
+    const { documents, userPermissions } = createLinkedServices(["p1", "p2", "t1", "t2"]);
+    const admin = { id: "admin@example.com", roles: ["System Manager"], tenantId: "acme" };
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Apollo" } });
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Zeus" } });
+    await documents.create({
+      actor: owner,
+      doctype: "Task",
+      data: { title: "Legacy Zeus", project: "Zeus", description: "created before restriction" }
+    });
+    await userPermissions.allow({
+      actor: admin,
+      userId: owner.id,
+      targetDoctype: "Project",
+      targetName: "Apollo"
+    });
+
+    await expect(
+      documents.create({
+        actor: owner,
+        doctype: "Task",
+        data: { title: "Allowed Apollo", project: "Apollo", description: "allowed" }
+      })
+    ).resolves.toMatchObject({ name: "Allowed Apollo" });
+    await expect(
+      documents.create({
+        actor: owner,
+        doctype: "Task",
+        data: { title: "Blocked Zeus", project: "Zeus", description: "blocked" }
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "project", code: "link_not_found" })]
+    });
+    await expect(
+      documents.update({
+        actor: owner,
+        doctype: "Task",
+        name: "Legacy Zeus",
+        patch: { description: "should not be writable" }
+      })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+  });
+
+  it("enforces source-scoped user permissions while validating link writes", async () => {
+    const { documents, userPermissions } = createLinkedServices(["p1", "p2", "t1", "t2"]);
+    const admin = { id: "admin@example.com", roles: ["System Manager"], tenantId: "acme" };
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Apollo" } });
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Zeus" } });
+    await documents.create({
+      actor: owner,
+      doctype: "Task",
+      data: { title: "Movable", project: "Apollo", description: "created before restriction" }
+    });
+    await userPermissions.allow({
+      actor: admin,
+      userId: owner.id,
+      targetDoctype: "Project",
+      targetName: "Apollo",
+      applicableDoctypes: ["Task"]
+    });
+
+    await expect(
+      documents.create({
+        actor: owner,
+        doctype: "Task",
+        data: { title: "Allowed Scoped Apollo", project: "Apollo", description: "allowed" }
+      })
+    ).resolves.toMatchObject({ name: "Allowed Scoped Apollo" });
+    await expect(
+      documents.create({
+        actor: owner,
+        doctype: "Task",
+        data: { title: "Blocked Scoped Zeus", project: "Zeus", description: "blocked" }
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "project", code: "link_not_found" })]
+    });
+    await expect(
+      documents.execute({
+        actor: owner,
+        doctype: "Task",
+        name: "Movable",
+        command: "move",
+        input: { project: "Zeus" }
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "project", code: "link_not_found" })]
+    });
+  });
+
   it("creates documents with child table rows in the event payload and projection", async () => {
     const { documents, events, projections } = createChildTableServices(["product-1", "invoice-1"]);
     await documents.create({ actor: owner, doctype: "Product", data: { sku: "SKU-1", title: "Widget" } });

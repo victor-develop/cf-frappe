@@ -12,7 +12,8 @@ import {
   PrintService,
   QueryService,
   ReportService,
-  SavedListFilterService
+  SavedListFilterService,
+  UserPermissionService
 } from "../src";
 import type { Actor, DocumentData, DomainEvent, ModelRegistry } from "../src";
 import type { AfterCommitContext } from "../src";
@@ -282,15 +283,21 @@ export function createServices(
 ) {
   const registry = createTestRegistry();
   const store = new InMemoryDocumentStore();
+  const userPermissions = new UserPermissionService({
+    events: store,
+    clock: fixedClock(now),
+    ids: deterministicIds(["user-permission-event-1", "user-permission-event-2", "user-permission-event-3"])
+  });
   const documents = new DocumentService({
     registry,
     store,
+    userPermissions,
     clock: fixedClock(now),
     ids: deterministicIds(ids),
     ...(options.afterCommit === undefined ? {} : { afterCommit: options.afterCommit }),
     ...(options.onHookError === undefined ? {} : { onHookError: options.onHookError })
   });
-  const queries = new QueryService({ registry, projections: store });
+  const queries = new QueryService({ registry, projections: store, userPermissions });
   const history = new DocumentHistoryService({ events: store, queries });
   const audit = new AuditService({ events: store });
   const savedFilters = new SavedListFilterService({
@@ -301,20 +308,26 @@ export function createServices(
   });
   const prints = new PrintService({ registry, queries });
   const reports = new ReportService({ registry, queries });
-  return { registry, store, events: store, projections: store, documents, history, audit, savedFilters, prints, queries, reports };
+  return { registry, store, events: store, projections: store, documents, history, audit, savedFilters, userPermissions, prints, queries, reports };
 }
 
 export function createLinkedServices(ids: readonly string[] = ["evt1", "evt2", "evt3", "evt4"]) {
   const registry = createRegistry({ doctypes: [projectDocType, taskDocType] });
   const store = new InMemoryDocumentStore();
+  const userPermissions = new UserPermissionService({
+    events: store,
+    clock: fixedClock(now),
+    ids: deterministicIds(["user-permission-event-1", "user-permission-event-2", "user-permission-event-3"])
+  });
   const documents = new DocumentService({
     registry,
     store,
+    userPermissions,
     clock: fixedClock(now),
     ids: deterministicIds(ids)
   });
-  const queries = new QueryService({ registry, projections: store });
-  return { registry, store, events: store, projections: store, documents, queries };
+  const queries = new QueryService({ registry, projections: store, userPermissions });
+  return { registry, store, events: store, projections: store, documents, queries, userPermissions };
 }
 
 export function createChildTableServices(ids: readonly string[] = ["evt1", "evt2", "evt3", "evt4"]) {

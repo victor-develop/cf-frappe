@@ -98,6 +98,8 @@ export function foldDocumentFrom(
         break;
       case "SavedListFilterSaved":
       case "SavedListFilterDeleted":
+      case "UserPermissionAllowed":
+      case "UserPermissionRevoked":
         break;
     }
   }
