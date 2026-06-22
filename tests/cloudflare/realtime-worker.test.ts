@@ -14,7 +14,7 @@ describe("CloudFrappe Worker realtime", () => {
     const fetches: Request[] = [];
     const worker = createCloudFrappeWorker({
       registry: createTestRegistry(),
-      actor: () => owner,
+      actor: () => ({ ...owner, roles: ["System Manager"] }),
       realtime: { namespace: () => fakeRealtimeNamespace(topics, fetches) }
     });
 
@@ -29,6 +29,72 @@ describe("CloudFrappe Worker realtime", () => {
     expect(response.status).toBe(101);
     expect(topics).toEqual(["document:acme:Note:My%20Note"]);
     expect(fetches).toHaveLength(1);
+  });
+
+  it("routes authorized doctype websocket subscriptions to the topic hub", async () => {
+    const topics: string[] = [];
+    const fetches: Request[] = [];
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => ({ ...owner, roles: ["System Manager"] }),
+      realtime: { namespace: () => fakeRealtimeNamespace(topics, fetches) }
+    });
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/api/realtime?topic=doctype:acme:Note", {
+        headers: { upgrade: "websocket" }
+      }),
+      { DB: fakeD1(), AGGREGATES: fakeAggregateNamespace() },
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(101);
+    expect(topics).toEqual(["doctype:acme:Note"]);
+    expect(fetches).toHaveLength(1);
+  });
+
+  it("routes same-tenant system-manager tenant websocket subscriptions to the topic hub", async () => {
+    const topics: string[] = [];
+    const fetches: Request[] = [];
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => ({ ...owner, roles: ["System Manager"] }),
+      realtime: { namespace: () => fakeRealtimeNamespace(topics, fetches) }
+    });
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/api/realtime?topic=tenant:acme", {
+        headers: { upgrade: "websocket" }
+      }),
+      { DB: fakeD1(), AGGREGATES: fakeAggregateNamespace() },
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(101);
+    expect(topics).toEqual(["tenant:acme"]);
+    expect(fetches).toHaveLength(1);
+  });
+
+  it("rejects doctype realtime subscriptions from non-system actors", async () => {
+    const topics: string[] = [];
+    const fetches: Request[] = [];
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => owner,
+      realtime: { namespace: () => fakeRealtimeNamespace(topics, fetches) }
+    });
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/api/realtime?topic=doctype:acme:Note", {
+        headers: { upgrade: "websocket" }
+      }),
+      { DB: fakeD1(), AGGREGATES: fakeAggregateNamespace() },
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(403);
+    expect(topics).toEqual([]);
+    expect(fetches).toEqual([]);
   });
 
   it("uses env-backed signed sessions for realtime subscriptions", async () => {
@@ -151,6 +217,28 @@ describe("CloudFrappe Worker realtime", () => {
 
     const response = await worker.fetch!(
       cfRequest("http://localhost/api/realtime?topic=tenant:other", {
+        headers: { upgrade: "websocket" }
+      }),
+      { DB: fakeD1(), AGGREGATES: fakeAggregateNamespace() },
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(403);
+    expect(topics).toEqual([]);
+    expect(fetches).toEqual([]);
+  });
+
+  it("rejects cross-tenant doctype realtime subscriptions before reaching the hub", async () => {
+    const topics: string[] = [];
+    const fetches: Request[] = [];
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => owner,
+      realtime: { namespace: () => fakeRealtimeNamespace(topics, fetches) }
+    });
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/api/realtime?topic=doctype:other:Note", {
         headers: { upgrade: "websocket" }
       }),
       { DB: fakeD1(), AGGREGATES: fakeAggregateNamespace() },

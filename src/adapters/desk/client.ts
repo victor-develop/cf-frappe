@@ -119,12 +119,32 @@ export function renderDeskClientScript(): string {
     return "document:" + encodePart(tenantId) + ":" + encodePart(doctype) + ":" + encodePart(name);
   }
 
-  function documentTopicFromOptions(doctype, name, options) {
+  function doctypeTopic(tenantId, doctype) {
+    return "doctype:" + encodePart(tenantId) + ":" + encodePart(doctype);
+  }
+
+  function tenantTopic(tenantId) {
+    return "tenant:" + encodePart(tenantId);
+  }
+
+  function tenantIdFromOptions(options, label) {
     var tenantId = options && (options.tenantId || (options.document && options.document.tenantId));
     if (!tenantId) {
-      throw new Error("tenantId is required for document realtime subscriptions");
+      throw new Error("tenantId is required for " + label + " realtime subscriptions");
     }
-    return documentTopic(tenantId, doctype, name);
+    return tenantId;
+  }
+
+  function doctypeTopicFromOptions(doctype, options) {
+    return doctypeTopic(tenantIdFromOptions(options, "doctype"), doctype);
+  }
+
+  function documentTopicFromOptions(doctype, name, options) {
+    return documentTopic(tenantIdFromOptions(options, "document"), doctype, name);
+  }
+
+  function tenantTopicFromOptions(options) {
+    return tenantTopic(tenantIdFromOptions(options, "tenant"));
   }
 
   function runtimeScript() {
@@ -430,11 +450,23 @@ export function renderDeskClientScript(): string {
       connect: function (topic, options) {
         return new WebSocket(realtimeUrl(topic), options && options.protocols);
       },
+      doctype: function (doctype, options) {
+        return new WebSocket(realtimeUrl(doctypeTopicFromOptions(doctype, options)), options && options.protocols);
+      },
+      doctypeUrl: function (doctype, options) {
+        return realtimeUrl(doctypeTopicFromOptions(doctype, options)).toString();
+      },
       document: function (doctype, name, options) {
         return new WebSocket(realtimeUrl(documentTopicFromOptions(doctype, name, options)), options && options.protocols);
       },
       documentUrl: function (doctype, name, options) {
         return realtimeUrl(documentTopicFromOptions(doctype, name, options)).toString();
+      },
+      tenant: function (options) {
+        return new WebSocket(realtimeUrl(tenantTopicFromOptions(options)), options && options.protocols);
+      },
+      tenantUrl: function (options) {
+        return realtimeUrl(tenantTopicFromOptions(options)).toString();
       },
       url: function (topic) {
         return realtimeUrl(topic).toString();

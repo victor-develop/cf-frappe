@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the filter-builder metadata slice:
+As of the realtime topic fan-out slice:
 
 - Vitest files: `50`
-- Vitest cases: `370`
+- Vitest cases: `374`
 
 ## Implication
 

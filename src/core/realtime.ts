@@ -67,10 +67,14 @@ export function canSubscribeToRealtimeTopic(actor: Actor, topic: RealtimeTopic):
   if (!parsed) {
     return false;
   }
-  if (parsed.kind !== "document") {
-    return false;
+  const actorTenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
+  if (parsed.kind === "tenant") {
+    return parsed.tenantId === actorTenantId && actor.roles.includes(SYSTEM_MANAGER_ROLE);
   }
-  return parsed.tenantId === (actor.tenantId ?? DEFAULT_TENANT_ID) || actor.roles.includes(SYSTEM_MANAGER_ROLE);
+  if (parsed.kind === "doctype") {
+    return parsed.tenantId === actorTenantId && actor.roles.includes(SYSTEM_MANAGER_ROLE);
+  }
+  return parsed.tenantId === actorTenantId || actor.roles.includes(SYSTEM_MANAGER_ROLE);
 }
 
 export function realtimeEventFromDomainEvent(event: DomainEvent, snapshot: DocumentSnapshot | null): RealtimeEvent {

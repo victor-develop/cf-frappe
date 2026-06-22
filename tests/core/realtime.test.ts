@@ -24,9 +24,14 @@ describe("realtime topics", () => {
 
   it("allows subscriptions only within the actor tenant or system manager role", () => {
     expect(canSubscribeToRealtimeTopic(owner, "tenant:acme")).toBe(false);
+    expect(canSubscribeToRealtimeTopic(owner, "doctype:acme:Note")).toBe(false);
+    expect(canSubscribeToRealtimeTopic(owner, "doctype:other:Note")).toBe(false);
     expect(canSubscribeToRealtimeTopic(owner, "document:acme:Note:One")).toBe(true);
     expect(canSubscribeToRealtimeTopic(owner, "tenant:other")).toBe(false);
+    expect(canSubscribeToRealtimeTopic({ ...manager, roles: ["System Manager"] }, "tenant:acme")).toBe(true);
     expect(canSubscribeToRealtimeTopic({ ...manager, roles: ["System Manager"] }, "tenant:other")).toBe(false);
+    expect(canSubscribeToRealtimeTopic({ ...manager, roles: ["System Manager"] }, "doctype:acme:Note")).toBe(true);
+    expect(canSubscribeToRealtimeTopic({ ...manager, roles: ["System Manager"] }, "doctype:other:Note")).toBe(false);
     expect(canSubscribeToRealtimeTopic({ ...manager, roles: ["System Manager"] }, "document:other:Note:One")).toBe(true);
     expect(canSubscribeToRealtimeTopic(owner, "bad-topic")).toBe(false);
   });

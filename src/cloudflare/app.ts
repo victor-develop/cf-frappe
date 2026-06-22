@@ -385,11 +385,13 @@ async function handleRealtimeRequest<TEnv extends CloudFrappeEnv, TJobResources>
     return Response.json({ error: { code: "PERMISSION_DENIED", message: "Permission denied" } }, { status: 403 });
   }
   const { services } = appsForEnv(cache, jobRuntimeCache, options, env);
-  if (parsedTopic.kind !== "document") {
-    return Response.json({ error: { code: "BAD_REQUEST", message: "Only document realtime topics are subscribable" } }, { status: 400 });
-  }
   try {
-    await services.queries.getDocument(actor, parsedTopic.doctype, parsedTopic.name, parsedTopic.tenantId);
+    if (parsedTopic.kind === "document") {
+      await services.queries.getDocument(actor, parsedTopic.doctype, parsedTopic.name, parsedTopic.tenantId);
+    }
+    if (parsedTopic.kind === "doctype") {
+      services.queries.getMeta(actor, parsedTopic.doctype);
+    }
   } catch (error) {
     return jsonErrorResponse(error);
   }
