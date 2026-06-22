@@ -1,3 +1,4 @@
+export * from "./audit-events";
 export * from "./document-store";
 export * from "./event-store";
 export * from "./file-storage";

@@ -1,5 +1,6 @@
 import {
   createRegistry,
+  AuditService,
   defineDocType,
   definePrintFormat,
   defineReport,
@@ -291,6 +292,7 @@ export function createServices(
   });
   const queries = new QueryService({ registry, projections: store });
   const history = new DocumentHistoryService({ events: store, queries });
+  const audit = new AuditService({ events: store });
   const savedFilters = new SavedListFilterService({
     registry,
     events: store,
@@ -299,7 +301,7 @@ export function createServices(
   });
   const prints = new PrintService({ registry, queries });
   const reports = new ReportService({ registry, queries });
-  return { registry, store, events: store, projections: store, documents, history, savedFilters, prints, queries, reports };
+  return { registry, store, events: store, projections: store, documents, history, audit, savedFilters, prints, queries, reports };
 }
 
 export function createLinkedServices(ids: readonly string[] = ["evt1", "evt2", "evt3", "evt4"]) {

@@ -12,11 +12,13 @@ import type {
 } from "../../core/types";
 import type { DocumentCommit, DocumentStore } from "../../ports/document-store";
 import type { ReadStreamOptions } from "../../ports/document-store";
+import type { AuditEventQuery, AuditEventStore } from "../../ports/audit-event-store";
 import type { EventStore } from "../../ports/event-store";
 import type { ProjectionStore } from "../../ports/projection-store";
+import { searchInMemoryAuditEvents } from "./audit-events";
 import { matchesListFilters } from "./list-filters";
 
-export class InMemoryDocumentStore implements DocumentStore, EventStore, ProjectionStore {
+export class InMemoryDocumentStore implements DocumentStore, EventStore, ProjectionStore, AuditEventStore {
   private readonly streams = new Map<StreamName, DomainEvent[]>();
   private readonly documents = new Map<string, DocumentSnapshot>();
 
@@ -60,6 +62,10 @@ export class InMemoryDocumentStore implements DocumentStore, EventStore, Project
 
   async currentVersion(stream: StreamName): Promise<number> {
     return this.streams.get(stream)?.length ?? 0;
+  }
+
+  async searchEvents(query: AuditEventQuery): Promise<readonly DomainEvent[]> {
+    return searchInMemoryAuditEvents(this.streams.values(), query);
   }
 
   async get(

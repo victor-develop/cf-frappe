@@ -57,6 +57,12 @@ export const D1_CORE_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
       "ON cf_frappe_events(tenant_id, doctype, occurred_at);"
   },
   {
+    name: "index_cf_frappe_events_tenant_time",
+    sql:
+      "CREATE INDEX IF NOT EXISTS idx_cf_frappe_events_tenant_time " +
+      "ON cf_frappe_events(tenant_id, occurred_at, stream, sequence);"
+  },
+  {
     name: "create_cf_frappe_documents",
     sql:
       "CREATE TABLE IF NOT EXISTS cf_frappe_documents (" +

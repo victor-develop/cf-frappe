@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the event-sourced timeline diffs slice:
+As of the admin audit search slice:
 
-- Test files: `40`
-- Vitest cases: `249`
+- Test files: `41`
+- Vitest cases: `260`
 
 ## Implication
 

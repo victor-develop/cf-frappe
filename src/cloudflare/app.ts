@@ -1,3 +1,4 @@
+import { AuditService } from "../application/audit-service";
 import { JobExecutionError } from "../application/job-errors";
 import { JobDispatcher } from "../application/job-dispatcher";
 import { JobExecutor } from "../application/job-executor";
@@ -40,6 +41,7 @@ export interface CloudFrappeEnv {
 export interface CloudFrappeRuntimeServices {
   readonly registry: ModelRegistry;
   readonly documents: DocumentCommandExecutor;
+  readonly audit: AuditService;
   readonly history: DocumentHistoryService;
   readonly savedFilters: SavedListFilterService;
   readonly prints: PrintService;
@@ -167,12 +169,14 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
   });
   const queries = new QueryService({ registry: options.registry, projections });
   const history = new DocumentHistoryService({ events, queries });
+  const audit = new AuditService({ events });
   const savedFilters = new SavedListFilterService({ registry: options.registry, events });
   const prints = new PrintService({ registry: options.registry, queries });
   const reports = new ReportService({ registry: options.registry, queries });
   const baseServices: Omit<CloudFrappeRuntimeServices, "files"> = {
     registry: options.registry,
     documents,
+    audit,
     history,
     savedFilters,
     prints,
@@ -204,6 +208,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     prints,
     queries,
     timeline: history,
+    audit,
     savedFilters,
     reports,
     actor: options.actor,

@@ -62,6 +62,14 @@ describe("D1 schema planner", () => {
       "doctype_task_v7_indexes"
     ]);
     expect(migrations[0]!.checksum).toMatch(/^fnv1a32:[a-f0-9]{8}$/);
+    expect(migrations[0]!.statements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "index_cf_frappe_events_tenant_time",
+          sql: "CREATE INDEX IF NOT EXISTS idx_cf_frappe_events_tenant_time ON cf_frappe_events(tenant_id, occurred_at, stream, sequence);"
+        })
+      ])
+    );
     expect(migrations[1]).toMatchObject({
       label: "Task projection indexes",
       statements: [

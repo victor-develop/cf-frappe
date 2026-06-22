@@ -1,4 +1,4 @@
-import { createResourceApi, unsafeHeaderActorResolver } from "../../src";
+import { createResourceApi, SYSTEM_MANAGER_ROLE, unsafeHeaderActorResolver } from "../../src";
 import { createLinkedServices, createSeriesServices, createServices, owner } from "../helpers";
 
 describe("resource api", () => {
@@ -10,6 +10,7 @@ describe("resource api", () => {
       queries: services.queries,
       timeline: services.history,
       savedFilters: services.savedFilters,
+      audit: services.audit,
       actor: unsafeHeaderActorResolver
     });
   }
@@ -53,6 +54,11 @@ describe("resource api", () => {
     "x-cf-frappe-user": "owner@example.com",
     "x-cf-frappe-roles": "User",
     "x-cf-frappe-tenant": "acme"
+  };
+  const adminHeaders = {
+    ...userHeaders,
+    "x-cf-frappe-user": "admin@example.com",
+    "x-cf-frappe-roles": SYSTEM_MANAGER_ROLE
   };
 
   it("returns health", async () => {
@@ -178,6 +184,64 @@ describe("resource api", () => {
         ]
       }
     });
+  });
+
+  it("returns admin-only audit events from the immutable event stream", async () => {
+    const app = makeApp();
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Audit", body: "Body" })
+    });
+    await app.request("/api/resource/Note/HTTP%20Audit", {
+      method: "PUT",
+      headers: userHeaders,
+      body: JSON.stringify({ body: "Updated" })
+    });
+
+    const response = await app.request(
+      "/api/audit/events?doctype=Note&name=HTTP%20Audit&actor_id=owner%40example.com&kind=DocumentUpdated&limit=5",
+      { headers: adminHeaders }
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        tenantId: "acme",
+        limit: 5,
+        filters: {
+          doctype: "Note",
+          name: "HTTP Audit",
+          actorId: "owner@example.com",
+          kind: "DocumentUpdated"
+        },
+        events: [
+          {
+            id: "evt_e2",
+            actorId: "owner@example.com",
+            payload: { kind: "DocumentUpdated", patch: { body: "Updated" } }
+          }
+        ]
+      }
+    });
+  });
+
+  it("maps audit searches by non-system managers to JSON permission errors", async () => {
+    const app = makeApp();
+
+    const response = await app.request("/api/audit/events?doctype=Note", { headers: userHeaders });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "PERMISSION_DENIED" } });
+  });
+
+  it("maps cross-tenant audit searches to JSON permission errors", async () => {
+    const app = makeApp();
+
+    const response = await app.request("/api/audit/events?tenant=other", { headers: adminHeaders });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "PERMISSION_DENIED" } });
   });
 
   it("adds comments through the resource API and returns them in the timeline", async () => {

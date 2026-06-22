@@ -11,6 +11,7 @@ The current slice is a working kernel:
 - first-class draft/submitted/cancelled document lifecycle events
 - command-side document service that writes immutable events
 - permissioned document timelines with field-level diffs, comments, and assignments derived from append-only event streams
+- admin-only audit search over immutable event streams
 - query-side projection service for current document reads and lists
 - in-memory adapters for TDD
 - Cloudflare D1 adapters for atomic event/projection commits
@@ -38,7 +39,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | Link fields | registered `type: "link"` targets with write-time existence checks and lookup options |
 | Child tables | registered `type: "table"` child DocTypes embedded in event-sourced document data |
 | Document lifecycle | event-sourced create, update, submit, cancel, and delete commands |
-| Audit trail | permissioned document timelines, field diffs, comments, and assignments from immutable events |
+| Audit trail | permissioned timelines, field diffs, comments, assignments, and admin audit search from immutable events |
 | Permissions | role and predicate rules attached to DocTypes |
 | Hooks/controllers | pure hook contracts registered in `ModelRegistry` |
 | REST resources | generated `/api/resource/:doctype` routes |
@@ -204,6 +205,7 @@ The generated API includes:
 - `GET /api/report/:report/run`
 - `GET /api/report/:report/export.csv`
 - `GET /api/link-options/:doctype/:field`
+- `GET /api/audit/events`
 - `POST /api/resource/:doctype`
 - `GET /api/resource/:doctype`
 - `GET /api/resource/:doctype/saved-filters`
@@ -370,6 +372,12 @@ HTTP clients can call `/api/resource/:doctype/:name/timeline` to get ordered tim
 Comments are document stream events rather than side records. `DocumentService.comment(...)` and `POST /api/resource/:doctype/:name/comments` append `DocumentCommentAdded`, advance the document version, and leave document data/status unchanged. Desk renders a comment form in the timeline panel for actors with the DocType `comment` permission.
 
 Assignments are also document stream events. `DocumentService.assign(...)`, `DocumentService.unassign(...)`, and the assignment API routes append `DocumentAssigned`/`DocumentUnassigned`, advance the version only when the assignment set changes, and leave document data/status unchanged. `DocumentHistoryService.getAssignments(...)` folds the authorized stream into the current assignee list, and Desk renders assignment controls in the timeline panel for actors with the DocType `assign` permission.
+
+## Audit Search
+
+`AuditService` searches immutable domain events across a tenant for actors with the `System Manager` role by default. Apps can pass custom admin roles when embedding the service, but ordinary DocType read permissions are intentionally not enough because audit search can span documents, actors, and event kinds. Tenant-scoped admins cannot query another tenant unless the app explicitly opts into platform-wide audit search.
+
+HTTP clients can call `/api/audit/events` when audit support is enabled. Supported filters are `tenant`, `doctype`, `name`, `actor_id`, `kind`, `since`, `until`, and `limit`. The D1 adapter answers these queries from `cf_frappe_events` without reading projections, while in-memory adapters use the same `AuditEventStore` port for TDD parity.
 
 ## Desk Forms
 
@@ -624,11 +632,11 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 249 tests across schema, permissions, events, registry, services, naming series, document lifecycle, document timelines and diffs, comments, assignments, saved user filters, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, print templates, print letterheads, reports, report summaries, report charts, report exports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
+Current suite: 260 tests across schema, permissions, events, registry, services, naming series, document lifecycle, document timelines and diffs, admin audit search, comments, assignments, saved user filters, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, print templates, print letterheads, reports, report summaries, report charts, report exports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
 
 ## Status
 
-This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, permissioned document timelines with field diffs, comments, assignments, saved user filters, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, report charts/exports, custom print templates, reusable letterheads, and Durable Object realtime topics exist, but richer chart controls, durable job dashboards, richer realtime presence, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
+This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, permissioned document timelines with field diffs, admin audit search, comments, assignments, saved user filters, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, report charts/exports, custom print templates, reusable letterheads, and Durable Object realtime topics exist, but richer chart controls, durable job dashboards, richer realtime presence, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
 
 ## References
 

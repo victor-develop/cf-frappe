@@ -5,12 +5,14 @@ import type {
   NewDomainEvent,
   StreamName
 } from "../../core/types";
+import type { AuditEventQuery, AuditEventStore } from "../../ports/audit-event-store";
 import type { DocumentCommit, DocumentStore, ReadStreamOptions } from "../../ports/document-store";
+import { auditEventQuery } from "./audit-event-query";
 import { isD1ConstraintError } from "./constraint-error";
 import { eventStreamQuery } from "./read-stream-query";
 import { eventFromRow, type EventRow } from "./serde";
 
-export class D1DocumentStore implements DocumentStore {
+export class D1DocumentStore implements DocumentStore, AuditEventStore {
   constructor(private readonly db: D1Database) {}
 
   async commit(
@@ -100,5 +102,14 @@ export class D1DocumentStore implements DocumentStore {
       .bind(stream)
       .first<{ version: number }>();
     return Number(row?.version ?? 0);
+  }
+
+  async searchEvents(query: AuditEventQuery): Promise<readonly DomainEvent[]> {
+    const prepared = auditEventQuery(query);
+    const result = await this.db
+      .prepare(prepared.sql)
+      .bind(...prepared.params)
+      .all<EventRow>();
+    return (result.results ?? []).map(eventFromRow);
   }
 }

@@ -78,6 +78,49 @@ describe("D1DocumentStore", () => {
     expect(read?.params).toEqual([stream, 4, "DocumentAssigned", "DocumentUnassigned"]);
   });
 
+  it("searches audit events with tenant, metadata, kind, and limit filters", async () => {
+    const db = new FakeD1Database();
+    const store = new D1EventStore(db as unknown as D1Database);
+    await store.append(stream, 0, [
+      event,
+      updateEvent("evt2", "Two"),
+      assignmentEvent("evt3", "DocumentAssigned")
+    ]);
+    await store.append("acme:Task:Two", 0, [{ ...event, id: "evt4", stream: "acme:Task:Two", doctype: "Task", documentName: "Two" }]);
+
+    const results = await store.searchEvents({
+      tenantId: "acme",
+      doctype: "Note",
+      documentName: "One",
+      actorId: "owner",
+      since: "2026-01-01T00:00:00.000Z",
+      until: "2026-01-01T00:00:00.000Z",
+      payloadKinds: ["DocumentUpdated"],
+      limit: 10
+    });
+
+    expect(results.map((item) => item.id)).toEqual(["evt2"]);
+    const read = db.statements.at(-1);
+    expect(read?.sql).toContain("tenant_id = ?");
+    expect(read?.sql).toContain("doctype = ?");
+    expect(read?.sql).toContain("document_name = ?");
+    expect(read?.sql).toContain("actor_id = ?");
+    expect(read?.sql).toContain("occurred_at >= ?");
+    expect(read?.sql).toContain("occurred_at <= ?");
+    expect(read?.sql).toContain("json_extract(payload_json, '$.kind') IN (?)");
+    expect(read?.sql).toContain("ORDER BY occurred_at DESC, stream ASC, sequence DESC LIMIT ?");
+    expect(read?.params).toEqual([
+      "acme",
+      "Note",
+      "One",
+      "owner",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:00.000Z",
+      "DocumentUpdated",
+      10
+    ]);
+  });
+
   it("translates event append constraint races into document conflicts", async () => {
     const db = new FakeD1Database({ failEventInsertAsConstraint: true });
     const store = new D1EventStore(db as unknown as D1Database);
@@ -184,7 +227,7 @@ class FakeD1PreparedStatement {
   }
 
   async all() {
-    if (this.sql.includes("FROM cf_frappe_events")) {
+    if (this.sql.includes("FROM cf_frappe_events") && this.sql.includes("stream = ?")) {
       const stream = String(this.params[0]);
       const maxSequence = this.sql.includes("sequence <= ?") ? Number(this.params[1]) : undefined;
       const limit = this.sql.includes("LIMIT ?") ? Number(this.params.at(-1)) : undefined;
@@ -200,6 +243,43 @@ class FakeD1PreparedStatement {
         .filter((event) => maxSequence === undefined || event.sequence <= maxSequence)
         .filter((event) => kindParams === undefined || kindParams.includes(JSON.parse(String(event.payload_json)).kind))
         .sort((left, right) => sortDescending ? right.sequence - left.sequence : left.sequence - right.sequence);
+      return {
+        results: limit === undefined ? filtered : filtered.slice(0, limit)
+      };
+    }
+    if (this.sql.includes("FROM cf_frappe_events") && this.sql.includes("tenant_id = ?")) {
+      let index = 0;
+      const tenantId = String(this.params[index++]);
+      const doctype = this.sql.includes("doctype = ?") ? String(this.params[index++]) : undefined;
+      const documentName = this.sql.includes("document_name = ?") ? String(this.params[index++]) : undefined;
+      const actorId = this.sql.includes("actor_id = ?") ? String(this.params[index++]) : undefined;
+      const since = this.sql.includes("occurred_at >= ?") ? String(this.params[index++]) : undefined;
+      const until = this.sql.includes("occurred_at <= ?") ? String(this.params[index++]) : undefined;
+      const kindParams = this.sql.includes("json_extract(payload_json, '$.kind')")
+        ? this.params
+            .slice(index, this.sql.includes("LIMIT ?") ? -1 : undefined)
+            .map(String)
+        : undefined;
+      const limit = this.sql.includes("LIMIT ?") ? Number(this.params.at(-1)) : undefined;
+      const filtered = this.db.events
+        .filter((event) => event.tenant_id === tenantId)
+        .filter((event) => doctype === undefined || event.doctype === doctype)
+        .filter((event) => documentName === undefined || event.document_name === documentName)
+        .filter((event) => actorId === undefined || event.actor_id === actorId)
+        .filter((event) => since === undefined || event.occurred_at >= since)
+        .filter((event) => until === undefined || event.occurred_at <= until)
+        .filter((event) => kindParams === undefined || kindParams.includes(JSON.parse(String(event.payload_json)).kind))
+        .sort((left, right) => {
+          const time = String(right.occurred_at).localeCompare(String(left.occurred_at));
+          if (time !== 0) {
+            return time;
+          }
+          const stream = String(left.stream).localeCompare(String(right.stream));
+          if (stream !== 0) {
+            return stream;
+          }
+          return Number(right.sequence) - Number(left.sequence);
+        });
       return {
         results: limit === undefined ? filtered : filtered.slice(0, limit)
       };

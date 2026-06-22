@@ -19,6 +19,9 @@ CREATE INDEX IF NOT EXISTS idx_cf_frappe_events_stream_sequence
 CREATE INDEX IF NOT EXISTS idx_cf_frappe_events_doctype_time
   ON cf_frappe_events(tenant_id, doctype, occurred_at);
 
+CREATE INDEX IF NOT EXISTS idx_cf_frappe_events_tenant_time
+  ON cf_frappe_events(tenant_id, occurred_at, stream, sequence);
+
 CREATE TABLE IF NOT EXISTS cf_frappe_documents (
   tenant_id TEXT NOT NULL,
   doctype TEXT NOT NULL,

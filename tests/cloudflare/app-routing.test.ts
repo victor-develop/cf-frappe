@@ -1,4 +1,4 @@
-import { createCloudFrappeWorker, type AggregateCoordinatorRpc, type RpcDurableObjectNamespace } from "../../src";
+import { createCloudFrappeWorker, SYSTEM_MANAGER_ROLE, type AggregateCoordinatorRpc, type RpcDurableObjectNamespace } from "../../src";
 import { createTestRegistry, owner } from "../helpers";
 
 describe("CloudFrappe Worker routing", () => {
@@ -20,6 +20,22 @@ describe("CloudFrappe Worker routing", () => {
     expect(desk.headers.get("content-type")).toContain("text/html");
     expect(deskish.status).toBe(404);
     expect(deskish.headers.get("content-type")).toContain("application/json");
+  });
+
+  it("mounts admin audit search on the Worker API", async () => {
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => ({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" })
+    });
+    const env = {
+      DB: fakeD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const response = await worker.fetch!(cfRequest("http://localhost/api/audit/events?limit=1"), env, fakeExecutionContext());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ data: { tenantId: "acme", events: [] } });
   });
 });
 
