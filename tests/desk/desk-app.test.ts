@@ -130,6 +130,9 @@ describe("Desk app", () => {
     expect(html).toContain("By Priority");
     expect(html).toContain("Notes by Priority");
     expect(html).toContain("chart-svg chart-bar");
+    expect(html).toContain('<select id="filter-priority" name="filter_priority">');
+    expect(html).toContain('<option value="High" selected>High</option>');
+    expect(html).toContain('name="filter_title" type="text" value=""');
     expect(html).toContain("/desk/reports/Open%20Notes/export.csv?filter_priority=High");
 
     const csv = await app.request("/desk/reports/Open%20Notes/export.csv?filter_priority=High");

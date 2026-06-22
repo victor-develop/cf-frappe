@@ -45,6 +45,10 @@ describe("report api", () => {
         { name: "note_count", value: 1 },
         { name: "total_count", value: 7 }
       ],
+      filters: [
+        { name: "priority", type: "select", value: "High", options: ["Low", "Medium", "High"] },
+        { name: "title", type: "text", operator: "contains", options: [] }
+      ],
       groups: [{ name: "by_priority", rows: [{ key: "High" }] }],
       charts: [{ name: "notes_by_priority", points: [{ key: "High", value: 1 }] }],
       total: 1
@@ -99,6 +103,28 @@ describe("report api", () => {
           points: [{ key: "High", value: 2 }]
         }
       ]
+    });
+  });
+
+  it("maps invalid typed report filters to JSON errors", async () => {
+    const { app, services } = makeApp();
+    services.registry.registerReport(
+      defineReport({
+        name: "Count Threshold",
+        doctype: "Note",
+        columns: [{ name: "title" }],
+        filters: [{ name: "minimum", label: "Minimum Count", field: "count", operator: "gte" }],
+        roles: ["User"]
+      })
+    );
+
+    const response = await app.request("/api/report/Count%20Threshold/run?filter_minimum=many", {
+      headers: userHeaders
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Report filter 'minimum' must be an integer" }
     });
   });
 

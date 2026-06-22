@@ -8,6 +8,8 @@ export type ReportChartType = "bar" | "line" | "pie";
 export type ReportChartOrderBy = "key" | "label" | "value";
 export type ReportChartOrder = "asc" | "desc";
 
+const REPORT_FILTER_OPERATORS = ["eq", "contains", "gte", "lte"] as const;
+const REPORT_FILTER_TYPES = ["text", "longText", "integer", "number", "boolean", "date", "datetime", "select", "link"] as const;
 const REPORT_CHART_COLOR_PATTERN = /^#[0-9A-Fa-f]{3}(?:[0-9A-Fa-f]{3})?$/;
 
 export interface ReportColumnDefinition {
@@ -124,6 +126,7 @@ export function assertReportDefinition(definition: ReportDefinition): void {
     }
     assertUnique(group.summaries.map((summary) => summary.name), `summary on group '${group.name}'`, definition.name);
   }
+  assertFiltersValid(definition);
   assertChartsReferenceGroups(definition);
 }
 
@@ -151,10 +154,18 @@ export function assertReportMatchesDocType(report: ReportDefinition, doctype: Do
     }
   }
   for (const filter of report.filters ?? []) {
-    if (!fields.has(filter.field)) {
+    const field = fields.get(filter.field);
+    if (!field) {
       throw new FrameworkError(
         "REPORT_INVALID",
         `Report '${report.name}' filter '${filter.name}' references unknown field '${filter.field}'`,
+        { status: 400 }
+      );
+    }
+    if (field.type === "json" || field.type === "table") {
+      throw new FrameworkError(
+        "REPORT_INVALID",
+        `Report '${report.name}' filter '${filter.name}' cannot filter by ${field.type} field '${filter.field}'`,
         { status: 400 }
       );
     }
@@ -180,6 +191,25 @@ export function assertReportMatchesDocType(report: ReportDefinition, doctype: Do
     }
     for (const summary of group.summaries) {
       assertSummaryMatchesDocType(report.name, summary, fields, ` on group '${group.name}'`);
+    }
+  }
+}
+
+function assertFiltersValid(report: ReportDefinition): void {
+  for (const filter of report.filters ?? []) {
+    if (filter.operator !== undefined && !REPORT_FILTER_OPERATORS.includes(filter.operator)) {
+      throw new FrameworkError(
+        "REPORT_INVALID",
+        `Report '${report.name}' filter '${filter.name}' has invalid operator '${String(filter.operator)}'`,
+        { status: 400 }
+      );
+    }
+    if (filter.type !== undefined && !(REPORT_FILTER_TYPES as readonly FieldType[]).includes(filter.type)) {
+      throw new FrameworkError(
+        "REPORT_INVALID",
+        `Report '${report.name}' filter '${filter.name}' has invalid type '${String(filter.type)}'`,
+        { status: 400 }
+      );
     }
   }
 }

@@ -4,6 +4,7 @@ import {
   type DocumentData,
   type DocumentSnapshot,
   type FieldDefinition,
+  type FieldType,
   type ListFilterControlDefinition,
   type JsonValue,
   type LinkOption,
@@ -376,12 +377,7 @@ export function renderReportView(
   result: ReportRunResult,
   options: { readonly exportHref?: string } = {}
 ): string {
-  const filterForm = (result.report.filters ?? [])
-    .map((filter) => {
-      const id = `filter-${slug(filter.name)}`;
-      return `<label class="field" for="${id}"><span>${escapeHtml(filter.label ?? filter.name)}</span><input id="${id}" name="filter_${escapeHtml(filter.name)}" type="text"></label>`;
-    })
-    .join("");
+  const filterForm = result.filters.map(renderReportFilterControl).join("");
   const headers = result.columns.map((column) => `<th>${escapeHtml(column.label ?? column.name)}</th>`).join("");
   const rows = result.rows
     .map(
@@ -406,6 +402,43 @@ export function renderReportView(
       </table>
     </div>
   </section>`;
+}
+
+function renderReportFilterControl(filter: ReportRunResult["filters"][number]): string {
+  const id = `filter-${slug(filter.name)}`;
+  const name = `filter_${escapeHtml(filter.name)}`;
+  const label = escapeHtml(filter.label);
+  const value = formatFormValue(filter.value);
+  const required = filter.required ? " required" : "";
+  if (filter.type === "select") {
+    return `<label class="field" for="${id}"><span>${label}</span><select id="${id}" name="${name}"${required}>${renderReportSelectOptions(filter.options, value)}</select></label>`;
+  }
+  if (filter.type === "boolean") {
+    const options = [
+      `<option value=""></option>`,
+      `<option value="true"${value === "true" ? " selected" : ""}>True</option>`,
+      `<option value="false"${value === "false" ? " selected" : ""}>False</option>`
+    ].join("");
+    return `<label class="field" for="${id}"><span>${label}</span><select id="${id}" name="${name}"${required}>${options}</select></label>`;
+  }
+  if (filter.type === "longText" || filter.type === "json") {
+    return `<label class="field" for="${id}"><span>${label}</span><textarea id="${id}" name="${name}"${required}>${escapeHtml(value)}</textarea></label>`;
+  }
+  const type = inputTypeForFieldType(filter.type);
+  return `<label class="field" for="${id}"><span>${label}</span><input id="${id}" name="${name}" type="${type}" value="${escapeHtml(value)}"${required}></label>`;
+}
+
+function renderReportSelectOptions(options: readonly string[], value: string): string {
+  const rendered = [`<option value=""></option>`];
+  if (value && !options.includes(value)) {
+    rendered.push(`<option value="${escapeHtml(value)}" selected>${escapeHtml(value)}</option>`);
+  }
+  rendered.push(
+    ...options.map((option) =>
+      `<option value="${escapeHtml(option)}"${option === value ? " selected" : ""}>${escapeHtml(option)}</option>`
+    )
+  );
+  return rendered.join("");
 }
 
 function renderJobStatusOptions(status: JobExecutionDashboard["filters"]["status"]): string {
@@ -1174,7 +1207,11 @@ function renderLinkOptions(options: readonly LinkOption[], currentValue: string)
 }
 
 function inputType(field: FieldDefinition): string {
-  switch (field.type) {
+  return inputTypeForFieldType(field.type);
+}
+
+function inputTypeForFieldType(type?: FieldType): string {
+  switch (type) {
     case "integer":
     case "number":
       return "number";

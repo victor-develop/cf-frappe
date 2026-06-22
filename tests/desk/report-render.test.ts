@@ -3,6 +3,49 @@ import { openNotesReport } from "../helpers";
 import type { ReportRunResult } from "../../src";
 
 describe("Desk report rendering", () => {
+  it("renders metadata-aware report filter controls with current values", () => {
+    const html = renderReportView({
+      ...reportResult([]),
+      filters: [
+        {
+          name: "priority",
+          label: "Priority",
+          field: "priority",
+          type: "select",
+          operator: "eq",
+          required: true,
+          value: "High",
+          options: ["Low", "Medium", "High"]
+        },
+        {
+          name: "minimum",
+          label: "Minimum Count",
+          field: "count",
+          type: "integer",
+          operator: "gte",
+          required: false,
+          value: 2,
+          options: []
+        },
+        {
+          name: "mine",
+          label: "Mine",
+          field: "created_by",
+          type: "boolean",
+          operator: "eq",
+          required: false,
+          value: true,
+          options: []
+        }
+      ]
+    });
+
+    expect(html).toContain('<select id="filter-priority" name="filter_priority" required>');
+    expect(html).toContain('<option value="High" selected>High</option>');
+    expect(html).toContain('name="filter_minimum" type="number" value="2"');
+    expect(html).toContain('<option value="true" selected>True</option>');
+  });
+
   it("renders pie chart legend entries only for positive slices", () => {
     const html = renderReportView(reportResult([
       {
@@ -92,6 +135,7 @@ function reportResult(charts: ReportRunResult["charts"]): ReportRunResult {
   return {
     report: openNotesReport,
     columns: openNotesReport.columns,
+    filters: [],
     summary: [],
     groups: [],
     charts,

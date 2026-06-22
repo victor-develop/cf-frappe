@@ -69,6 +69,59 @@ describe("reports", () => {
     ).toThrow("Report 'Broken Group' group 'by_meta' cannot group by json field 'meta'");
   });
 
+  it("validates report filters against supported operators, types, and fields", () => {
+    const Note = defineDocType({
+      name: "Note",
+      fields: [
+        { name: "title", type: "text" },
+        { name: "count", type: "integer" },
+        { name: "meta", type: "json" }
+      ]
+    });
+
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        reports: [
+          {
+            name: "Broken Filter Operator",
+            doctype: "Note",
+            columns: [{ name: "title" }],
+            filters: [{ name: "title_filter", field: "title", operator: "between" as "eq" }]
+          }
+        ]
+      })
+    ).toThrow("Report 'Broken Filter Operator' filter 'title_filter' has invalid operator 'between'");
+
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        reports: [
+          {
+            name: "Broken Filter Type",
+            doctype: "Note",
+            columns: [{ name: "title" }],
+            filters: [{ name: "count_filter", field: "count", type: "currency" as "integer" }]
+          }
+        ]
+      })
+    ).toThrow("Report 'Broken Filter Type' filter 'count_filter' has invalid type 'currency'");
+
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        reports: [
+          defineReport({
+            name: "Broken Json Filter",
+            doctype: "Note",
+            columns: [{ name: "title" }],
+            filters: [{ name: "meta_filter", field: "meta" }]
+          })
+        ]
+      })
+    ).toThrow("Report 'Broken Json Filter' filter 'meta_filter' cannot filter by json field 'meta'");
+  });
+
   it("validates report charts against grouped numeric summaries", () => {
     const Note = defineDocType({
       name: "Note",

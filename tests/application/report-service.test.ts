@@ -20,6 +20,27 @@ describe("ReportService", () => {
 
     expect(result).toMatchObject({
       columns: [{ name: "title" }, { name: "priority" }, { name: "body" }],
+      filters: [
+        {
+          name: "priority",
+          label: "Priority",
+          field: "priority",
+          type: "select",
+          operator: "eq",
+          required: false,
+          value: "High",
+          options: ["Low", "Medium", "High"]
+        },
+        {
+          name: "title",
+          label: "Title",
+          field: "title",
+          type: "text",
+          operator: "contains",
+          required: false,
+          options: []
+        }
+      ],
       rows: [{ title: "High Note", priority: "High", body: "Needs care" }],
       summary: [
         { name: "note_count", label: "Notes", aggregate: "count", value: 1, type: "integer" },
@@ -161,6 +182,109 @@ describe("ReportService", () => {
         ]
       }
     ]);
+  });
+
+  it("returns filter controls with coerced current values and select options", async () => {
+    const { documents, registry, reports } = createServices(["e1", "e2"]);
+    registry.registerReport(
+      defineReport({
+        name: "Count Threshold",
+        doctype: "Note",
+        columns: [{ name: "title" }, { name: "count" }],
+        filters: [
+          { name: "priority", label: "Priority", field: "priority", type: "select", defaultValue: "Medium" },
+          { name: "minimum", label: "Minimum Count", field: "count", operator: "gte", defaultValue: 1 }
+        ],
+        roles: ["User"]
+      })
+    );
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Low Count", priority: "High", count: 1 }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "High Count", priority: "High", count: 3 }) });
+
+    const result = await reports.runReport(owner, "Count Threshold", {
+      filters: { priority: "High", minimum: "2" }
+    });
+
+    expect(result.rows).toEqual([{ title: "High Count", count: 3 }]);
+    expect(result.filters).toEqual([
+      {
+        name: "priority",
+        label: "Priority",
+        field: "priority",
+        type: "select",
+        operator: "eq",
+        required: false,
+        value: "High",
+        options: ["Low", "Medium", "High"]
+      },
+      {
+        name: "minimum",
+        label: "Minimum Count",
+        field: "count",
+        type: "integer",
+        operator: "gte",
+        required: false,
+        value: 2,
+        options: []
+      }
+    ]);
+  });
+
+  it("rejects invalid typed report filter values", async () => {
+    const { registry, reports } = createServices();
+    registry.registerReport(
+      defineReport({
+        name: "Count Threshold",
+        doctype: "Note",
+        columns: [{ name: "title" }],
+        filters: [
+          { name: "minimum", label: "Minimum Count", field: "count", operator: "gte" },
+          { name: "enabled", label: "Enabled", field: "workflow_state", type: "boolean" }
+        ],
+        roles: ["User"]
+      })
+    );
+
+    await expect(
+      reports.runReport(owner, "Count Threshold", {
+        filters: { minimum: "many" }
+      })
+    ).rejects.toThrow("Report filter 'minimum' must be an integer");
+
+    await expect(
+      reports.runReport(owner, "Count Threshold", {
+        filters: { minimum: true }
+      })
+    ).rejects.toThrow("Report filter 'minimum' must be an integer");
+
+    await expect(
+      reports.runReport(owner, "Count Threshold", {
+        filters: { minimum: 1.5 }
+      })
+    ).rejects.toThrow("Report filter 'minimum' must be an integer");
+
+    await expect(
+      reports.runReport(owner, "Count Threshold", {
+        filters: { enabled: 2 }
+      })
+    ).rejects.toThrow("Report filter 'enabled' must be a boolean");
+  });
+
+  it("rejects invalid typed report filter defaults", async () => {
+    const { registry, reports } = createServices();
+    registry.registerReport(
+      defineReport({
+        name: "Broken Default",
+        doctype: "Note",
+        columns: [{ name: "title" }],
+        filters: [{ name: "enabled", label: "Enabled", field: "workflow_state", type: "boolean", defaultValue: 2 }],
+        roles: ["User"]
+      })
+    );
+
+    await expect(reports.runReport(owner, "Broken Default")).rejects.toThrow(
+      "Report filter 'enabled' must be a boolean"
+    );
   });
 
   it("keeps null chart values behind numeric points before applying maxPoints", async () => {

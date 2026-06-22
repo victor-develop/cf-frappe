@@ -9,12 +9,14 @@ import {
   type ReportChartOrderBy,
   type ReportChartType,
   type ReportDefinition,
+  type ReportFilterDefinition,
+  type ReportFilterOperator,
   type ReportGroupDefinition,
   type ReportSummaryAggregate,
   type ReportSummaryDefinition
 } from "../core/reports";
 import type { ModelRegistry } from "../core/registry";
-import type { Actor, DocumentSnapshot, FieldType, JsonPrimitive, JsonValue } from "../core/types";
+import type { Actor, DocTypeDefinition, DocumentSnapshot, FieldDefinition, FieldType, JsonPrimitive, JsonValue } from "../core/types";
 import { QueryService } from "./query-service";
 
 export type ReportFilters = Readonly<Record<string, JsonPrimitive | undefined>>;
@@ -65,6 +67,17 @@ export interface ReportChartResult {
   readonly points: readonly ReportChartPoint[];
 }
 
+export interface ReportFilterControlResult {
+  readonly name: string;
+  readonly label: string;
+  readonly field: string;
+  readonly type?: FieldType;
+  readonly operator: ReportFilterOperator;
+  readonly required: boolean;
+  readonly value?: JsonPrimitive;
+  readonly options: readonly string[];
+}
+
 export interface ReportRunOptions {
   readonly filters?: ReportFilters;
   readonly limit?: number;
@@ -74,6 +87,7 @@ export interface ReportRunOptions {
 export interface ReportRunResult {
   readonly report: ReportDefinition;
   readonly columns: readonly ReportColumnDefinition[];
+  readonly filters: readonly ReportFilterControlResult[];
   readonly summary: readonly ReportSummaryValue[];
   readonly groups: readonly ReportGroupResult[];
   readonly charts: readonly ReportChartResult[];
@@ -126,14 +140,17 @@ export class ReportService {
 
   async runReport(actor: Actor, reportName: string, options: ReportRunOptions = {}): Promise<ReportRunResult> {
     const report = this.getReport(actor, reportName);
+    const doctype = this.registry.get(report.doctype);
     const limit = clampLimit(options.limit);
     const offset = Math.max(0, options.offset ?? 0);
-    const filtered = await this.filteredDocuments(actor, report, options.filters ?? {});
+    const filters = this.materializeFilters(report, doctype, options.filters ?? {});
+    const filtered = await this.filteredDocuments(actor, report, filters);
     const groups = buildReportGroups(filtered, report.groups ?? []);
     const rows = filtered.slice(offset, offset + limit).map((document) => reportRow(document, report.columns));
     return {
       report,
       columns: report.columns,
+      filters: buildReportFilterControls(report, doctype, filters),
       summary: buildReportSummary(filtered, report.summaries ?? []),
       groups,
       charts: buildReportCharts(groups, report.charts ?? []),
@@ -150,8 +167,9 @@ export class ReportService {
     options: ReportCsvExportOptions = {}
   ): Promise<ReportCsvExport> {
     const report = this.getReport(actor, reportName);
+    const doctype = this.registry.get(report.doctype);
     const limit = clampCsvExportLimit(options.limit);
-    const filters = this.materializeFilters(report, options.filters ?? {});
+    const filters = this.materializeFilters(report, doctype, options.filters ?? {});
     const lines = [reportCsvHeader(report.columns)];
     let total = 0;
     let exported = 0;
@@ -212,16 +230,17 @@ export class ReportService {
     report: ReportDefinition,
     input: ReportFilters
   ): Promise<readonly DocumentSnapshot[]> {
-    const filters = this.materializeFilters(report, input);
     const documents = await this.listAllReadableDocuments(actor, report.doctype);
-    return documents.filter((document) => matchesReportFilters(document, report, filters));
+    return documents.filter((document) => matchesReportFilters(document, report, input));
   }
 
-  private materializeFilters(report: ReportDefinition, input: ReportFilters): ReportFilters {
+  private materializeFilters(report: ReportDefinition, doctype: DocTypeDefinition, input: ReportFilters): ReportFilters {
+    const fields = new Map(doctype.fields.map((field) => [field.name, field]));
     const values: Record<string, JsonPrimitive | undefined> = {};
     for (const filter of report.filters ?? []) {
+      const type = resolvedReportFilterType(filter, fields.get(filter.field));
       const raw = input[filter.name] ?? filter.defaultValue;
-      const value = coerceFilterValue(raw, filter.type);
+      const value = coerceFilterValue(raw, type, filter.name);
       if (filter.required && (value === undefined || value === "")) {
         throw badRequest(`Report filter '${filter.name}' is required`);
       }
@@ -229,6 +248,33 @@ export class ReportService {
     }
     return values;
   }
+}
+
+function buildReportFilterControls(
+  report: ReportDefinition,
+  doctype: DocTypeDefinition,
+  filters: ReportFilters
+): readonly ReportFilterControlResult[] {
+  const fields = new Map(doctype.fields.map((field) => [field.name, field]));
+  return (report.filters ?? []).map((filter) => {
+    const field = fields.get(filter.field);
+    const type = resolvedReportFilterType(filter, field);
+    const value = filters[filter.name];
+    return {
+      name: filter.name,
+      label: filter.label ?? filter.name,
+      field: filter.field,
+      ...(type ? { type } : {}),
+      operator: filter.operator ?? "eq",
+      required: filter.required ?? false,
+      ...(value === undefined ? {} : { value }),
+      options: type === "select" ? field?.options ?? [] : []
+    };
+  });
+}
+
+function resolvedReportFilterType(filter: ReportFilterDefinition, field: FieldDefinition | undefined): FieldType | undefined {
+  return filter.type ?? field?.type;
 }
 
 function matchesReportFilters(document: DocumentSnapshot, report: ReportDefinition, filters: ReportFilters): boolean {
@@ -497,27 +543,41 @@ function groupLabel(value: JsonPrimitive): string {
   return value === null ? "(empty)" : String(value);
 }
 
-function coerceFilterValue(value: JsonPrimitive | undefined, type?: FieldType): JsonPrimitive | undefined {
-  if (value === undefined || value === null || typeof value !== "string") {
+function coerceFilterValue(value: JsonPrimitive | undefined, type: FieldType | undefined, filterName: string): JsonPrimitive | undefined {
+  if (value === undefined || value === null || value === "") {
     return value;
   }
   if (type === "integer") {
-    const parsed = Number(value);
-    return Number.isInteger(parsed) ? parsed : value;
+    const parsed = numericFilterValue(value, filterName, "an integer");
+    if (!Number.isInteger(parsed)) {
+      throw badRequest(`Report filter '${filterName}' must be an integer`);
+    }
+    return parsed;
   }
   if (type === "number") {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : value;
+    return numericFilterValue(value, filterName, "a number");
   }
   if (type === "boolean") {
+    if (typeof value === "boolean") {
+      return value;
+    }
     if (value === "true" || value === "1" || value === "on") {
       return true;
     }
     if (value === "false" || value === "0" || value === "off") {
       return false;
     }
+    throw badRequest(`Report filter '${filterName}' must be a boolean`);
   }
-  return value;
+  return typeof value === "string" ? value : String(value);
+}
+
+function numericFilterValue(value: JsonPrimitive, filterName: string, expectedType: "an integer" | "a number"): number {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  if (!Number.isFinite(parsed)) {
+    throw badRequest(`Report filter '${filterName}' must be ${expectedType}`);
+  }
+  return parsed;
 }
 
 function compareValues(actual: JsonValue | undefined, expected: JsonPrimitive): number {
