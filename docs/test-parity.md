@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the disabled scheduler controls slice:
+As of the file metadata dashboard API slice:
 
 - Vitest files: `64`
-- Vitest cases: `521`
+- Vitest cases: `522`
 
 ## Implication
 

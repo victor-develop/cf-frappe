@@ -14,6 +14,19 @@ export function createFileApi(options: FileApiOptions): Hono {
   const app = new Hono();
   const maxFileBytes = options.maxFileBytes ?? 25 * 1024 * 1024;
 
+  app.get("/api/files", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const limit = parseOptionalInteger(c.req.query("limit"));
+    const attachedToDoctype = c.req.query("attached_to_doctype");
+    const attachedToName = c.req.query("attached_to_name");
+    const dashboard = await options.files.dashboard(actor, {
+      ...(attachedToDoctype === undefined ? {} : { attachedToDoctype }),
+      ...(attachedToName === undefined ? {} : { attachedToName }),
+      ...(limit === undefined ? {} : { limit })
+    });
+    return c.json({ data: dashboard });
+  });
+
   app.post("/api/files", async (c) => {
     const actor = await options.actor(c.req.raw);
     const filename = c.req.query("filename") ?? c.req.raw.headers.get("x-cf-frappe-filename");
