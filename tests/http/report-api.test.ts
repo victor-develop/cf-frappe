@@ -9,7 +9,7 @@ describe("report api", () => {
   };
 
   function makeApp() {
-    const services = createServices(["e1", "e2"]);
+    const services = createServices(["e1", "e2", "e3"]);
     const app = createResourceApi({
       registry: services.registry,
       documents: services.documents,
@@ -49,6 +49,24 @@ describe("report api", () => {
       charts: [{ name: "notes_by_priority", points: [{ key: "High", value: 1 }] }],
       total: 1
     });
+  });
+
+  it("exports a report as filtered CSV", async () => {
+    const { app, services } = makeApp();
+    await services.documents.create({ actor: { id: "owner@example.com", roles: ["User"], tenantId: "acme" }, doctype: "Note", data: data({ title: "Low Note", priority: "Low", count: 2 }) });
+    await services.documents.create({ actor: { id: "owner@example.com", roles: ["User"], tenantId: "acme" }, doctype: "Note", data: data({ title: "High Note A", priority: "High", body: "Needs care", count: 7 }) });
+    await services.documents.create({ actor: { id: "owner@example.com", roles: ["User"], tenantId: "acme" }, doctype: "Note", data: data({ title: "High Note B", priority: "High", body: "Later", count: 3 }) });
+
+    const response = await app.request("/api/report/Open%20Notes/export.csv?filter_priority=High&limit=1", { headers: userHeaders });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/csv");
+    expect(response.headers.get("content-disposition")).toBe('attachment; filename="Open-Notes.csv"');
+    expect(response.headers.get("x-cf-frappe-export-total")).toBe("2");
+    expect(response.headers.get("x-cf-frappe-exported")).toBe("1");
+    expect(response.headers.get("x-cf-frappe-export-limit")).toBe("1");
+    expect(response.headers.get("x-cf-frappe-export-truncated")).toBe("true");
+    await expect(response.text()).resolves.toBe("Title,Priority,Body\nHigh Note A,High,Needs care");
   });
 
   it("hides reports from actors without report roles", async () => {

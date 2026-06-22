@@ -185,6 +185,73 @@ describe("ReportService", () => {
     expect(result.total).toBe(2);
   });
 
+  it("exports all filtered report rows as CSV with escaped cells", async () => {
+    const { documents, reports } = createServices(["e1", "e2", "e3", "e4"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Low Note", priority: "Low" }) });
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "High, One", priority: "High", body: "Needs \"care\"" })
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "High Two", priority: "High", body: "Line\nbreak" })
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({
+        title: "=HYPERLINK(\"https://example.com\",\"x\")",
+        priority: "High",
+        body: "+SUM(1,1)"
+      })
+    });
+
+    const csv = await reports.exportReportCsv(owner, "Open Notes", {
+      filters: { priority: "High" }
+    });
+
+    expect(csv).toMatchObject({
+      filename: "Open-Notes.csv",
+      contentType: "text/csv; charset=utf-8",
+      exported: 3,
+      total: 3,
+      truncated: false,
+      limit: 10_000
+    });
+    expect(csv.body).toBe([
+      "Title,Priority,Body",
+      "\"High, One\",High,\"Needs \"\"care\"\"\"",
+      "High Two,High,\"Line\nbreak\"",
+      "\"'=HYPERLINK(\"\"https://example.com\"\",\"\"x\"\")\",High,\"'+SUM(1,1)\""
+    ].join("\n"));
+  });
+
+  it("caps CSV exports while counting all matched rows", async () => {
+    const { documents, reports } = createServices(["e1", "e2", "e3"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "First", priority: "High" }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Second", priority: "High" }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Third", priority: "High" }) });
+
+    const csv = await reports.exportReportCsv(owner, "Open Notes", {
+      filters: { priority: "High" },
+      limit: 2
+    });
+
+    expect(csv).toMatchObject({
+      exported: 2,
+      total: 3,
+      truncated: true,
+      limit: 2
+    });
+    expect(csv.body).toBe([
+      "Title,Priority,Body",
+      "First,High,Body",
+      "Second,High,Body"
+    ].join("\n"));
+  });
+
   it("finds matching rows beyond the first projection page", async () => {
     const { store, reports } = createServices();
     for (let index = 0; index < 204; index += 1) {

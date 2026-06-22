@@ -18,6 +18,8 @@ import { QueryService } from "./query-service";
 export type ReportFilters = Readonly<Record<string, JsonPrimitive | undefined>>;
 export type ReportRow = Readonly<Record<string, JsonValue>>;
 
+const DEFAULT_CSV_EXPORT_LIMIT = 10_000;
+
 export interface ReportSummaryValue {
   readonly name: string;
   readonly label: string;
@@ -74,6 +76,20 @@ export interface ReportRunResult {
   readonly total: number;
 }
 
+export interface ReportCsvExportOptions extends Pick<ReportRunOptions, "filters"> {
+  readonly limit?: number;
+}
+
+export interface ReportCsvExport {
+  readonly filename: string;
+  readonly contentType: "text/csv; charset=utf-8";
+  readonly body: string;
+  readonly exported: number;
+  readonly total: number;
+  readonly truncated: boolean;
+  readonly limit: number;
+}
+
 export interface ReportServiceOptions {
   readonly registry: ModelRegistry;
   readonly queries: QueryService;
@@ -105,9 +121,7 @@ export class ReportService {
     const report = this.getReport(actor, reportName);
     const limit = clampLimit(options.limit);
     const offset = Math.max(0, options.offset ?? 0);
-    const filters = this.materializeFilters(report, options.filters ?? {});
-    const documents = await this.listAllReadableDocuments(actor, report.doctype);
-    const filtered = documents.filter((document) => matchesReportFilters(document, report, filters));
+    const filtered = await this.filteredDocuments(actor, report, options.filters ?? {});
     const groups = buildReportGroups(filtered, report.groups ?? []);
     const rows = filtered.slice(offset, offset + limit).map((document) => reportRow(document, report.columns));
     return {
@@ -123,24 +137,77 @@ export class ReportService {
     };
   }
 
+  async exportReportCsv(
+    actor: Actor,
+    reportName: string,
+    options: ReportCsvExportOptions = {}
+  ): Promise<ReportCsvExport> {
+    const report = this.getReport(actor, reportName);
+    const limit = clampCsvExportLimit(options.limit);
+    const filters = this.materializeFilters(report, options.filters ?? {});
+    const lines = [reportCsvHeader(report.columns)];
+    let total = 0;
+    let exported = 0;
+    await this.scanReadableDocuments(actor, report.doctype, (document) => {
+      if (!matchesReportFilters(document, report, filters)) {
+        return;
+      }
+      total += 1;
+      if (exported >= limit) {
+        return;
+      }
+      lines.push(reportRowToCsv(report.columns, reportRow(document, report.columns)));
+      exported += 1;
+    });
+    return {
+      filename: `${filenamePart(report.name)}.csv`,
+      contentType: "text/csv; charset=utf-8",
+      body: lines.join("\n"),
+      exported,
+      total,
+      truncated: exported < total,
+      limit
+    };
+  }
+
   private canAccess(actor: Actor, report: ReportDefinition): boolean {
     const doctype = this.registry.get(report.doctype);
     return canReadReport(actor, report) && can(actor, doctype, report.permissionAction ?? "read");
   }
 
   private async listAllReadableDocuments(actor: Actor, doctype: string): Promise<readonly DocumentSnapshot[]> {
-    const pageSize = 200;
     const documents: DocumentSnapshot[] = [];
-    let offset = 0;
-    while (true) {
+    await this.scanReadableDocuments(actor, doctype, (document) => {
+      documents.push(document);
+    });
+    return documents;
+  }
+
+  private async scanReadableDocuments(
+    actor: Actor,
+    doctype: string,
+    visit: (document: DocumentSnapshot) => void
+  ): Promise<void> {
+    const pageSize = 200;
+    for (let offset = 0; ; offset += pageSize) {
       const page = await this.queries.listDocuments(actor, doctype, { limit: pageSize, offset });
-      documents.push(...page.data);
-      const scanned = offset + page.limit;
-      if (scanned >= page.total) {
-        return documents;
+      for (const document of page.data) {
+        visit(document);
       }
-      offset = scanned;
+      if (offset + page.limit >= page.total) {
+        return;
+      }
     }
+  }
+
+  private async filteredDocuments(
+    actor: Actor,
+    report: ReportDefinition,
+    input: ReportFilters
+  ): Promise<readonly DocumentSnapshot[]> {
+    const filters = this.materializeFilters(report, input);
+    const documents = await this.listAllReadableDocuments(actor, report.doctype);
+    return documents.filter((document) => matchesReportFilters(document, report, filters));
   }
 
   private materializeFilters(report: ReportDefinition, input: ReportFilters): ReportFilters {
@@ -181,6 +248,49 @@ function reportRow(document: DocumentSnapshot, columns: readonly ReportColumnDef
   return Object.fromEntries(
     columns.map((column) => [column.name, document.data[column.field ?? column.name] ?? null])
   ) as ReportRow;
+}
+
+function reportCsvHeader(columns: readonly ReportColumnDefinition[]): string {
+  return columns.map((column) => csvCell(column.label ?? column.name)).join(",");
+}
+
+function reportRowToCsv(columns: readonly ReportColumnDefinition[], row: ReportRow): string {
+  return columns.map((column) => csvCell(row[column.name])).join(",");
+}
+
+function csvCell(value: JsonValue | undefined): string {
+  const text = typeof value === "string"
+    ? neutralizeSpreadsheetFormula(csvValue(value))
+    : csvValue(value);
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll("\"", "\"\"")}"` : text;
+}
+
+function csvValue(value: JsonValue | undefined): string {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+function filenamePart(value: string): string {
+  return value.trim().replaceAll(/[^A-Za-z0-9._-]+/g, "-").replaceAll(/^-+|-+$/g, "") || "report";
+}
+
+function neutralizeSpreadsheetFormula(text: string): string {
+  return /^(?:[=+\-@\t\r]|\s+[=+\-@])/u.test(text) ? `'${text}` : text;
+}
+
+function clampCsvExportLimit(limit: number | undefined): number {
+  if (limit === undefined) {
+    return DEFAULT_CSV_EXPORT_LIMIT;
+  }
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw badRequest("CSV export limit must be a positive integer");
+  }
+  return Math.min(limit, DEFAULT_CSV_EXPORT_LIMIT);
 }
 
 function buildReportSummary(

@@ -83,6 +83,15 @@ describe("Desk app", () => {
     expect(html).toContain("By Priority");
     expect(html).toContain("Notes by Priority");
     expect(html).toContain("chart-svg chart-bar");
+    expect(html).toContain("/desk/reports/Open%20Notes/export.csv?filter_priority=High");
+
+    const csv = await app.request("/desk/reports/Open%20Notes/export.csv?filter_priority=High");
+    expect(csv.status).toBe(200);
+    expect(csv.headers.get("content-disposition")).toBe('attachment; filename="Open-Notes.csv"');
+    expect(csv.headers.get("x-cf-frappe-export-total")).toBe("1");
+    expect(csv.headers.get("x-cf-frappe-exported")).toBe("1");
+    expect(csv.headers.get("x-cf-frappe-export-truncated")).toBe("false");
+    await expect(csv.text()).resolves.toBe("Title,Priority,Body\nReport Note,High,For reporting");
   });
 
   it("renders list and create form pages", async () => {

@@ -3,6 +3,7 @@ import type { ReportFilters, ReportService } from "../../application/report-serv
 import type { JsonPrimitive } from "../../core/types";
 import type { ActorResolver } from "./actor";
 import { parseOptionalInteger } from "./request";
+import { writeReportCsvHeaders } from "./report-export";
 
 export interface ReportApiOptions {
   readonly reports: ReportService;
@@ -20,6 +21,17 @@ export function createReportApi(options: ReportApiOptions): Hono {
   app.get("/api/meta/reports/:report", async (c) => {
     const actor = await options.actor(c.req.raw);
     return c.json({ data: options.reports.getReport(actor, c.req.param("report")) });
+  });
+
+  app.get("/api/report/:report/export.csv", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const limit = parseOptionalInteger(c.req.query("limit"));
+    const csv = await options.reports.exportReportCsv(actor, c.req.param("report"), {
+      filters: reportFiltersFromUrl(new URL(c.req.url)),
+      ...(limit !== undefined ? { limit } : {})
+    });
+    writeReportCsvHeaders(c, csv);
+    return c.body(csv.body);
   });
 
   app.get("/api/report/:report/run", async (c) => {

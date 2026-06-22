@@ -202,6 +202,7 @@ The generated API includes:
 - `GET /api/meta/reports/:report`
 - `GET /api/print/:format/:name`
 - `GET /api/report/:report/run`
+- `GET /api/report/:report/export.csv`
 - `GET /api/link-options/:doctype/:field`
 - `POST /api/resource/:doctype`
 - `GET /api/resource/:doctype`
@@ -233,6 +234,7 @@ The generated Desk UI includes:
 - `GET /desk/print/:format/:name`
 - `GET /desk/reports`
 - `GET /desk/reports/:report`
+- `GET /desk/reports/:report/export.csv`
 - `GET /desk/:doctype`
 - `GET /desk/:doctype/new`
 - `POST /desk/:doctype`
@@ -386,7 +388,7 @@ const result = await services.reports.runReport(actor, "Open Tasks", {
 });
 ```
 
-HTTP clients can call `/api/report/Open%20Tasks/run?filter_priority=High`. Desk renders the same report at `/desk/reports/Open%20Tasks`. Report metadata can declare top-level summaries, grouped summaries, and charts backed by grouped summary metrics, all computed over the filtered result set before pagination. This report slice is projection-backed and read-only; exports, richer chart controls, and custom query adapters are future report layers over the same service boundary.
+HTTP clients can call `/api/report/Open%20Tasks/run?filter_priority=High`, or `/api/report/Open%20Tasks/export.csv?filter_priority=High` for a filtered CSV export. Desk renders the same report at `/desk/reports/Open%20Tasks` and exposes the CSV export beside the report filters. Report metadata can declare top-level summaries, grouped summaries, and charts backed by grouped summary metrics, all computed over the filtered result set before pagination. This report slice is projection-backed and read-only; richer chart controls and custom query adapters are future report layers over the same service boundary.
 
 ## Saved List Filters
 
@@ -622,11 +624,11 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 233 tests across schema, permissions, events, registry, services, naming series, document lifecycle, document timelines, comments, assignments, saved user filters, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, reports, report summaries, report charts, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
+Current suite: 236 tests across schema, permissions, events, registry, services, naming series, document lifecycle, document timelines, comments, assignments, saved user filters, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, reports, report summaries, report charts, report exports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
 
 ## Status
 
-This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, permissioned document timelines, comments, assignments, saved user filters, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, report charts, and Durable Object realtime topics exist, but custom print templates, richer chart controls, durable job dashboards, richer realtime presence, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
+This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, permissioned document timelines, comments, assignments, saved user filters, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, report charts/exports, and Durable Object realtime topics exist, but custom print templates, richer chart controls, durable job dashboards, richer realtime presence, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
 
 ## References
 

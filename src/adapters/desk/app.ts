@@ -22,6 +22,7 @@ import {
 } from "../../core/types";
 import type { ActorResolver } from "../http/actor";
 import { listFiltersFromUrl, parseOptionalInteger } from "../http/request";
+import { writeReportCsvHeaders } from "../http/report-export";
 import { renderPrintDocument } from "../print";
 import {
   renderDeskHome,
@@ -87,21 +88,38 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       throw new FrameworkError("REPORT_NOT_FOUND", "Reports are not enabled", { status: 404 });
     }
     const actor = await options.actor(c.req.raw);
+    const url = new URL(c.req.url);
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
     const result = await options.reports.runReport(actor, c.req.param("report"), {
-      filters: reportFiltersFromUrl(new URL(c.req.url)),
+      filters: reportFiltersFromUrl(url),
       limit: 100
     });
+    const exportHref = `/desk/reports/${encodeURIComponent(result.report.name)}/export.csv${url.search}`;
     return html(
       renderDeskLayout({
         title: result.report.label ?? result.report.name,
         activeReport: result.report.name,
         doctypes,
         reports,
-        body: renderReportView(result)
+        body: renderReportView(result, { exportHref })
       })
     );
+  });
+
+  app.get("/desk/reports/:report/export.csv", async (c) => {
+    if (!options.reports) {
+      throw new FrameworkError("REPORT_NOT_FOUND", "Reports are not enabled", { status: 404 });
+    }
+    const actor = await options.actor(c.req.raw);
+    const url = new URL(c.req.url);
+    const limit = parseOptionalInteger(url.searchParams.get("limit") ?? undefined);
+    const csv = await options.reports.exportReportCsv(actor, c.req.param("report"), {
+      filters: reportFiltersFromUrl(url),
+      ...(limit !== undefined ? { limit } : {})
+    });
+    writeReportCsvHeaders(c, csv);
+    return c.body(csv.body);
   });
 
   app.get("/desk/print/:format/:name", async (c) => {

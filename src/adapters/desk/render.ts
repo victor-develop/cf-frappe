@@ -122,7 +122,10 @@ export function renderReportList(reports: readonly ReportDefinition[]): string {
   </section>`;
 }
 
-export function renderReportView(result: ReportRunResult): string {
+export function renderReportView(
+  result: ReportRunResult,
+  options: { readonly exportHref?: string } = {}
+): string {
   const filterForm = (result.report.filters ?? [])
     .map((filter) => {
       const id = `filter-${slug(filter.name)}`;
@@ -138,7 +141,10 @@ export function renderReportView(result: ReportRunResult): string {
           .join("")}</tr>`
     )
     .join("");
-  return `${filterForm ? `<form class="panel form report-filters" method="get"><div class="fields">${filterForm}</div><div class="actions"><button class="button primary" type="submit">Run</button></div></form>` : ""}
+  const exportAction = options.exportHref
+    ? `<a class="button" href="${escapeHtml(options.exportHref)}">Export CSV</a>`
+    : "";
+  return `${filterForm ? `<form class="panel form report-filters" method="get"><div class="fields">${filterForm}</div><div class="actions"><button class="button primary" type="submit">Run</button>${exportAction}</div></form>` : exportAction ? `<section class="toolbar">${exportAction}</section>` : ""}
   ${renderReportSummary(result.summary)}
   ${renderReportCharts(result.charts)}
   ${renderReportGroups(result.groups)}
