@@ -43,6 +43,7 @@ That model is powerful, but it is not event-sourcing first. cf-frappe keeps the 
 | Background jobs | scheduler and queue workers | basic `JobRegistry`, queue dispatch/consume, and Cron mapping |
 | File attachments | File DocType plus file store | `File` metadata DocType plus R2/in-memory `FileStorage` |
 | Realtime notifications | `publish_realtime`/Socket.IO | document commit events over Durable Object WebSocket topics |
+| Session auth | sessions | signed cookie actor resolver with env-backed Worker composition |
 | Cloudflare runtime | not native | Worker, D1, Durable Object command routing |
 
 ## Current Gaps
@@ -52,7 +53,7 @@ That model is powerful, but it is not event-sourcing first. cf-frappe keeps the 
 - Background jobs now have basic Queue/Cron support, but durable dashboards, job result storage, worker pools, retry administration, and scheduler admin views are not implemented.
 - Document history now exposes permissioned timeline entries with bounded event-sourced field-level old/new diffs, comment events, activity feed entries, assignment events, tag events, follower events, admin-only audit search, and deleted-document audit recovery from the event stream.
 - Realtime notifications now have basic Durable Object WebSocket document topics, but presence, tenant/doctype filtered fan-out, per-user rooms, Desk client integration, and durable replay are not implemented.
-- Auth providers and session management are intentionally left as adapter seams; no default trusted resolver is provided.
+- Auth providers remain adapter seams; signed cookie actor resolution exists, but full user/login management and provider-specific integrations are still future work.
 - User permissions now restrict reads, link options, link validation, and existing-document commands from event-sourced per-user grants, with admin API and Desk management over the same event stream plus model-backed grant validation.
 - File storage now has basic R2-backed attachments, but multipart uploads, presigned browser uploads, virus scanning hooks, image transforms, and file manager Desk views are not implemented.
 - There is no installable CLI yet.

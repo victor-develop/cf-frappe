@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the user-permission admin surface slice:
+As of the signed session actor resolver slice:
 
-- Test files: `42`
-- Vitest cases: `300`
+- Test files: `43`
+- Vitest cases: `306`
 
 ## Implication
 

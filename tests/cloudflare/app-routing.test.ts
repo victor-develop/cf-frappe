@@ -1,4 +1,11 @@
-import { createCloudFrappeWorker, SYSTEM_MANAGER_ROLE, type AggregateCoordinatorRpc, type RpcDurableObjectNamespace } from "../../src";
+import {
+  createCloudFrappeWorker,
+  createSignedSessionCookie,
+  signedSessionActorResolver,
+  SYSTEM_MANAGER_ROLE,
+  type AggregateCoordinatorRpc,
+  type RpcDurableObjectNamespace
+} from "../../src";
 import { createTestRegistry, owner } from "../helpers";
 
 describe("CloudFrappe Worker routing", () => {
@@ -72,7 +79,34 @@ describe("CloudFrappe Worker routing", () => {
     expect(html).toContain("User Permissions");
     expect(html).toContain("No grants configured.");
   });
+
+  it("supports env-backed signed-session actor resolvers in the Worker factory", async () => {
+    const cookie = await createSignedSessionCookie(owner, {
+      secret: "edge-secret",
+      maxAgeSeconds: 60,
+      secure: false
+    });
+    const worker = createCloudFrappeWorker<CloudFrappeAuthTestEnv>({
+      registry: createTestRegistry(),
+      actor: (request, env) => signedSessionActorResolver({ secret: env.SESSION_SECRET })(request)
+    });
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/api/meta/doctypes/Note", { headers: { cookie } }),
+      { DB: fakeD1(), AGGREGATES: fakeNamespace(), SESSION_SECRET: "edge-secret" },
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ data: { name: "Note" } });
+  });
 });
+
+interface CloudFrappeAuthTestEnv {
+  readonly DB: D1Database;
+  readonly AGGREGATES: RpcDurableObjectNamespace<AggregateCoordinatorRpc>;
+  readonly SESSION_SECRET: string;
+}
 
 function fakeNamespace(): RpcDurableObjectNamespace<AggregateCoordinatorRpc> {
   return {
@@ -89,8 +123,8 @@ function fakeNamespace(): RpcDurableObjectNamespace<AggregateCoordinatorRpc> {
   };
 }
 
-function cfRequest(url: string): Parameters<NonNullable<ReturnType<typeof createCloudFrappeWorker>["fetch"]>>[0] {
-  return new Request(url) as unknown as Parameters<NonNullable<ReturnType<typeof createCloudFrappeWorker>["fetch"]>>[0];
+function cfRequest(url: string, init?: RequestInit): Parameters<NonNullable<ReturnType<typeof createCloudFrappeWorker>["fetch"]>>[0] {
+  return new Request(url, init) as unknown as Parameters<NonNullable<ReturnType<typeof createCloudFrappeWorker>["fetch"]>>[0];
 }
 
 function fakeD1(): D1Database {

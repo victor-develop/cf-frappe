@@ -15,6 +15,7 @@ import { D1EventStore, D1ProjectionStore } from "../adapters/d1";
 import { createDeskApp } from "../adapters/desk";
 import { createResourceApi } from "../adapters/http";
 import type { ActorResolver } from "../adapters/http";
+import type { Actor } from "../core/types";
 import { FrameworkError } from "../core/errors";
 import type { JobRegistry, JobRetryPolicy } from "../core/jobs";
 import { canSubscribeToRealtimeTopic, parseRealtimeTopic, realtimeTopicFromScope } from "../core/realtime";
@@ -86,12 +87,17 @@ export interface CloudFrappeWorkerOptions<
   TJobResources = CloudFrappeRuntimeServices
 > {
   readonly registry: ModelRegistry;
-  readonly actor: ActorResolver;
+  readonly actor: CloudFrappeActorResolver<TEnv>;
   readonly maxJsonBytes?: number;
   readonly files?: CloudFrappeFileOptions<TEnv>;
   readonly realtime?: CloudFrappeRealtimeOptions<TEnv>;
   readonly jobs?: CloudFrappeJobOptions<TEnv, TJobResources>;
 }
+
+export type CloudFrappeActorResolver<TEnv extends CloudFrappeEnv = CloudFrappeEnv> = (
+  request: Request,
+  env: TEnv
+) => Actor | Promise<Actor>;
 
 export function createCloudFrappeWorker<
   TEnv extends CloudFrappeEnv = CloudFrappeEnv,
@@ -210,6 +216,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
   const servicesWithRealtime: CloudFrappeRuntimeServices = realtime
     ? { ...services, realtime }
     : services;
+  const actor = (request: Request) => options.actor(request, env);
   const app = createResourceApi({
     registry: options.registry,
     documents,
@@ -220,7 +227,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     savedFilters,
     userPermissions,
     reports,
-    actor: options.actor,
+    actor,
     ...(options.maxJsonBytes ? { maxJsonBytes: options.maxJsonBytes } : {}),
     ...(files === undefined ? {} : { files }),
     ...(options.files?.maxFileBytes === undefined ? {} : { maxFileBytes: options.files.maxFileBytes })
@@ -234,7 +241,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     savedFilters,
     userPermissions,
     reports,
-    actor: options.actor
+    actor
   });
   const runtimeApps = { app, desk, services: servicesWithRealtime };
   cache.set(env, runtimeApps);
@@ -303,7 +310,7 @@ async function handleRealtimeRequest<TEnv extends CloudFrappeEnv, TJobResources>
   const topic = realtimeTopicFromScope(parsedTopic);
   let actor;
   try {
-    actor = await options.actor(request);
+    actor = await options.actor(request, env);
   } catch (error) {
     return jsonErrorResponse(error);
   }

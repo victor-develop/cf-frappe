@@ -1,5 +1,7 @@
 import {
   createCloudFrappeWorker,
+  createSignedSessionCookie,
+  signedSessionActorResolver,
   type AggregateCoordinatorRpc,
   type RealtimeHubNamespace,
   type RpcDurableObjectNamespace
@@ -21,6 +23,33 @@ describe("CloudFrappe Worker realtime", () => {
         headers: { upgrade: "websocket" }
       }),
       { DB: fakeD1(), AGGREGATES: fakeAggregateNamespace() },
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(101);
+    expect(topics).toEqual(["document:acme:Note:My%20Note"]);
+    expect(fetches).toHaveLength(1);
+  });
+
+  it("uses env-backed signed sessions for realtime subscriptions", async () => {
+    const topics: string[] = [];
+    const fetches: Request[] = [];
+    const cookie = await createSignedSessionCookie(owner, {
+      secret: "edge-secret",
+      maxAgeSeconds: 60,
+      secure: false
+    });
+    const worker = createCloudFrappeWorker<RealtimeAuthEnv>({
+      registry: createTestRegistry(),
+      actor: (request, env) => signedSessionActorResolver({ secret: env.SESSION_SECRET })(request),
+      realtime: { namespace: () => fakeRealtimeNamespace(topics, fetches) }
+    });
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/api/realtime?topic=document:acme:Note:My%20Note", {
+        headers: { upgrade: "websocket", cookie }
+      }),
+      { DB: fakeD1(), AGGREGATES: fakeAggregateNamespace(), SESSION_SECRET: "edge-secret" },
       fakeExecutionContext()
     );
 
@@ -133,6 +162,12 @@ describe("CloudFrappe Worker realtime", () => {
     expect(fetches).toEqual([]);
   });
 });
+
+interface RealtimeAuthEnv {
+  readonly DB: D1Database;
+  readonly AGGREGATES: RpcDurableObjectNamespace<AggregateCoordinatorRpc>;
+  readonly SESSION_SECRET: string;
+}
 
 function fakeRealtimeNamespace(topics: string[], fetches: Request[]): RealtimeHubNamespace {
   return {
