@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the per-user realtime rooms slice:
+As of the parsed Desk realtime subscriptions slice:
 
 - Vitest files: `50`
-- Vitest cases: `378`
+- Vitest cases: `381`
 
 ## Implication
 

@@ -428,6 +428,73 @@ export function renderDeskClientScript(): string {
     return url;
   }
 
+  function realtimeSubscribe(topic, handlers, options) {
+    var url = realtimeUrl(topic).toString();
+    var socket = new WebSocket(url, options && options.protocols);
+    var subscription = {
+      close: function (code, reason) {
+        socket.close(code, reason);
+      },
+      socket: socket,
+      topic: topic,
+      url: url
+    };
+    var callbacks = handlers || {};
+    addSocketListener(socket, "message", function (message) {
+      handleRealtimeMessage(message, subscription, callbacks);
+    });
+    addSocketListener(socket, "open", function (event) {
+      callRealtimeHandler(callbacks.open, [event, subscription]);
+    });
+    addSocketListener(socket, "close", function (event) {
+      callRealtimeHandler(callbacks.close, [event, subscription]);
+    });
+    addSocketListener(socket, "error", function (event) {
+      callRealtimeHandler(callbacks.error, [event, subscription]);
+    });
+    return subscription;
+  }
+
+  function handleRealtimeMessage(rawMessage, subscription, callbacks) {
+    var raw = rawMessage && rawMessage.data;
+    var parsed;
+    try {
+      parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    } catch (error) {
+      callRealtimeHandler(callbacks.malformed, [error, raw, rawMessage, subscription]);
+      return;
+    }
+    callRealtimeHandler(callbacks.message, [parsed, rawMessage, subscription]);
+    if (!parsed || typeof parsed !== "object") {
+      return;
+    }
+    if (parsed.type === "cf-frappe.realtime.connected") {
+      callRealtimeHandler(callbacks.connected, [parsed, subscription]);
+      return;
+    }
+    if (parsed.type === "cf-frappe.realtime.event" && parsed.event) {
+      callRealtimeHandler(callbacks.event, [parsed.event, parsed, subscription]);
+      var payload = parsed.event && parsed.event.payload;
+      if (payload && payload.kind === "DocumentUserNotification") {
+        callRealtimeHandler(callbacks.notification, [payload, parsed.event, parsed, subscription]);
+      }
+    }
+  }
+
+  function addSocketListener(socket, type, listener) {
+    if (typeof socket.addEventListener === "function") {
+      socket.addEventListener(type, listener);
+      return;
+    }
+    socket["on" + type] = listener;
+  }
+
+  function callRealtimeHandler(handler, args) {
+    if (typeof handler === "function") {
+      handler.apply(null, args);
+    }
+  }
+
   root.cfFrappe = Object.freeze(Object.assign({}, root.cfFrappe || {}, {
     context: context,
     linkOptions: function (doctype, field, params) {
@@ -485,6 +552,21 @@ export function renderDeskClientScript(): string {
       },
       userUrl: function (userId, options) {
         return realtimeUrl(userTopicFromOptions(userId, options)).toString();
+      },
+      subscribe: function (topic, handlers, options) {
+        return realtimeSubscribe(topic, handlers, options);
+      },
+      subscribeDoctype: function (doctype, handlers, options) {
+        return realtimeSubscribe(doctypeTopicFromOptions(doctype, options), handlers, options);
+      },
+      subscribeDocument: function (doctype, name, handlers, options) {
+        return realtimeSubscribe(documentTopicFromOptions(doctype, name, options), handlers, options);
+      },
+      subscribeTenant: function (handlers, options) {
+        return realtimeSubscribe(tenantTopicFromOptions(options), handlers, options);
+      },
+      subscribeUser: function (userId, handlers, options) {
+        return realtimeSubscribe(userTopicFromOptions(userId, options), handlers, options);
       },
       url: function (topic) {
         return realtimeUrl(topic).toString();

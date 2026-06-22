@@ -11,6 +11,31 @@ interface DeskClientRuntime {
   readonly realtime: {
     readonly doctypeUrl: (doctype: string, options: { readonly tenantId: string }) => string;
     readonly documentUrl: (doctype: string, name: string, options: { readonly tenantId: string }) => string;
+    readonly subscribe: (
+      topic: string,
+      handlers: DeskRealtimeHandlers,
+      options?: { readonly protocols?: string | readonly string[] }
+    ) => DeskRealtimeSubscription;
+    readonly subscribeDoctype: (
+      doctype: string,
+      handlers: DeskRealtimeHandlers,
+      options: { readonly tenantId: string; readonly protocols?: string | readonly string[] }
+    ) => DeskRealtimeSubscription;
+    readonly subscribeDocument: (
+      doctype: string,
+      name: string,
+      handlers: DeskRealtimeHandlers,
+      options: { readonly tenantId: string; readonly protocols?: string | readonly string[] }
+    ) => DeskRealtimeSubscription;
+    readonly subscribeTenant: (
+      handlers: DeskRealtimeHandlers,
+      options: { readonly tenantId: string; readonly protocols?: string | readonly string[] }
+    ) => DeskRealtimeSubscription;
+    readonly subscribeUser: (
+      userId: string,
+      handlers: DeskRealtimeHandlers,
+      options: { readonly tenantId: string; readonly protocols?: string | readonly string[] }
+    ) => DeskRealtimeSubscription;
     readonly tenantUrl: (options: { readonly tenantId: string }) => string;
     readonly userUrl: (userId: string, options: { readonly tenantId: string }) => string;
     readonly url: (topic: string) => string;
@@ -44,6 +69,29 @@ interface DeskClientRuntime {
       options: { readonly expectedVersion: number }
     ) => Promise<unknown>;
   };
+}
+
+interface DeskRealtimeHandlers {
+  readonly connected?: (message: unknown, subscription: DeskRealtimeSubscription) => void;
+  readonly event?: (event: Record<string, unknown>, message: unknown, subscription: DeskRealtimeSubscription) => void;
+  readonly malformed?: (error: Error, raw: unknown, message: unknown, subscription: DeskRealtimeSubscription) => void;
+  readonly message?: (message: unknown, messageEvent: unknown, subscription: DeskRealtimeSubscription) => void;
+  readonly open?: (event: unknown, subscription: DeskRealtimeSubscription) => void;
+  readonly close?: (event: unknown, subscription: DeskRealtimeSubscription) => void;
+  readonly error?: (event: unknown, subscription: DeskRealtimeSubscription) => void;
+  readonly notification?: (
+    notification: Record<string, unknown>,
+    event: Record<string, unknown>,
+    message: unknown,
+    subscription: DeskRealtimeSubscription
+  ) => void;
+}
+
+interface DeskRealtimeSubscription {
+  readonly socket: FakeWebSocket;
+  readonly topic: string;
+  readonly url: string;
+  readonly close: (code?: number, reason?: string) => void;
 }
 
 interface DeskFormRuntime {
@@ -177,6 +225,101 @@ describe("Desk client runtime", () => {
     );
   });
 
+  it("parses realtime subscriptions into events and redacted user notifications", () => {
+    const sockets: FakeWebSocket[] = [];
+    const runtime = evaluateDeskClient(fetch, new FakeDocument(), sockets);
+    const seen: string[] = [];
+    const subscription = runtime.realtime.subscribeUser("owner@example.com", {
+      connected: (message, sub) => {
+        seen.push(`connected:${String((message as { topic?: string }).topic)}:${sub.topic}`);
+      },
+      event: (event, _message, sub) => {
+        seen.push(`event:${String(event.type)}:${sub.url}`);
+      },
+      notification: (notification, event) => {
+        seen.push(`notification:${String(notification.recipientId)}:${String(event.id)}`);
+      },
+      message: (message) => {
+        seen.push(`message:${String((message as { type?: string }).type)}`);
+      },
+      malformed: (error, raw) => {
+        seen.push(`malformed:${error.name}:${String(raw)}`);
+      }
+    }, { tenantId: "acme", protocols: ["cf-frappe.realtime.v1"] });
+
+    expect(subscription.topic).toBe("user:acme:owner%40example.com");
+    expect(subscription.url).toBe("wss://app.example/api/realtime?topic=user%3Aacme%3Aowner%2540example.com");
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]?.url).toBe(subscription.url);
+    expect(sockets[0]?.protocols).toEqual(["cf-frappe.realtime.v1"]);
+
+    sockets[0]?.emitMessage(JSON.stringify({ type: "cf-frappe.realtime.connected", topic: subscription.topic }));
+    sockets[0]?.emitMessage(JSON.stringify({
+      type: "cf-frappe.realtime.event",
+      event: {
+        id: "evt1:user:owner%40example.com",
+        type: "NoteAssigned",
+        payload: {
+          kind: "DocumentUserNotification",
+          recipientId: "owner@example.com"
+        }
+      }
+    }));
+    sockets[0]?.emitMessage("{");
+    subscription.close(1000, "done");
+
+    expect(seen).toEqual([
+      `message:cf-frappe.realtime.connected`,
+      `connected:user:acme:owner%40example.com:user:acme:owner%40example.com`,
+      `message:cf-frappe.realtime.event`,
+      `event:NoteAssigned:wss://app.example/api/realtime?topic=user%3Aacme%3Aowner%2540example.com`,
+      `notification:owner@example.com:evt1:user:owner%40example.com`,
+      "malformed:SyntaxError:{"
+    ]);
+    expect(sockets[0]?.closed).toEqual({ code: 1000, reason: "done" });
+  });
+
+  it("builds document realtime subscriptions with canonical encoded topics", () => {
+    const sockets: FakeWebSocket[] = [];
+    const runtime = evaluateDeskClient(fetch, new FakeDocument(), sockets);
+
+    const subscription = runtime.realtime.subscribeDocument("Task Type", "TASK:1", {}, { tenantId: "acme:west" });
+
+    expect(subscription.topic).toBe("document:acme%3Awest:Task%20Type:TASK%3A1");
+    expect(subscription.url).toBe(
+      "wss://app.example/api/realtime?topic=document%3Aacme%253Awest%3ATask%2520Type%3ATASK%253A1"
+    );
+    expect(sockets[0]?.url).toBe(subscription.url);
+  });
+
+  it("builds doctype and tenant realtime subscriptions and forwards socket lifecycle callbacks", () => {
+    const sockets: FakeWebSocket[] = [];
+    const runtime = evaluateDeskClient(fetch, new FakeDocument(), sockets);
+    const seen: string[] = [];
+
+    const doctypeSubscription = runtime.realtime.subscribeDoctype("Task Type", {
+      open: (_event, sub) => seen.push(`open:${sub.topic}`),
+      close: (_event, sub) => seen.push(`close:${sub.topic}`),
+      error: (_event, sub) => seen.push(`error:${sub.topic}`)
+    }, { tenantId: "acme:west" });
+    const tenantSubscription = runtime.realtime.subscribeTenant({}, { tenantId: "acme:west" });
+
+    expect(doctypeSubscription.topic).toBe("doctype:acme%3Awest:Task%20Type");
+    expect(doctypeSubscription.url).toBe("wss://app.example/api/realtime?topic=doctype%3Aacme%253Awest%3ATask%2520Type");
+    expect(tenantSubscription.topic).toBe("tenant:acme%3Awest");
+    expect(tenantSubscription.url).toBe("wss://app.example/api/realtime?topic=tenant%3Aacme%253Awest");
+
+    sockets[0]?.emit("open", { type: "open" });
+    sockets[0]?.emit("error", { type: "error" });
+    sockets[0]?.emit("close", { type: "close" });
+
+    expect(seen).toEqual([
+      "open:doctype:acme%3Awest:Task%20Type",
+      "error:doctype:acme%3Awest:Task%20Type",
+      "close:doctype:acme%3Awest:Task%20Type"
+    ]);
+  });
+
   it("runs Frappe-style form hooks over generated form fields", async () => {
     const title = new FakeField("title", "Queued");
     const priority = new FakeField("priority", "Medium");
@@ -267,13 +410,14 @@ describe("Desk client runtime", () => {
   });
 });
 
-function evaluateDeskClient(fetchImpl: typeof fetch = fetch, documentImpl: unknown = new FakeDocument()): DeskClientRuntime {
+function evaluateDeskClient(
+  fetchImpl: typeof fetch = fetch,
+  documentImpl: unknown = new FakeDocument(),
+  sockets: FakeWebSocket[] = []
+): DeskClientRuntime {
   const fakeWindow = {
     location: { href: "https://app.example/desk/Task/TASK-1" }
   } as { cfFrappe?: DeskClientRuntime; location: { href: string } };
-  const FakeWebSocket = class {
-    constructor(readonly url: string) {}
-  };
 
   new Function(
     "window",
@@ -285,12 +429,49 @@ function evaluateDeskClient(fetchImpl: typeof fetch = fetch, documentImpl: unkno
     "WebSocket",
     "document",
     renderDeskClientScript()
-  )(fakeWindow, fetchImpl, Headers, FormData, URLSearchParams, Blob, FakeWebSocket, documentImpl);
+  )(fakeWindow, fetchImpl, Headers, FormData, URLSearchParams, Blob, fakeWebSocketClass(sockets), documentImpl);
 
   if (!fakeWindow.cfFrappe) {
     throw new Error("Desk client runtime was not installed");
   }
   return fakeWindow.cfFrappe;
+}
+
+class FakeWebSocket {
+  readonly listeners: Record<string, Array<(event: unknown) => void>> = {};
+  closed?: { readonly code?: number; readonly reason?: string };
+
+  constructor(readonly url: string, readonly protocols?: string | readonly string[]) {}
+
+  addEventListener(type: string, listener: (event: unknown) => void): void {
+    this.listeners[type] = [...(this.listeners[type] ?? []), listener];
+  }
+
+  close(code?: number, reason?: string): void {
+    this.closed = {
+      ...(code === undefined ? {} : { code }),
+      ...(reason === undefined ? {} : { reason })
+    };
+  }
+
+  emitMessage(data: unknown): void {
+    this.emit("message", { data });
+  }
+
+  emit(type: string, event: unknown): void {
+    for (const listener of this.listeners[type] ?? []) {
+      listener(event);
+    }
+  }
+}
+
+function fakeWebSocketClass(sockets: FakeWebSocket[]) {
+  return class extends FakeWebSocket {
+    constructor(url: string, protocols?: string | readonly string[]) {
+      super(url, protocols);
+      sockets.push(this);
+    }
+  };
 }
 
 class FakeField {
