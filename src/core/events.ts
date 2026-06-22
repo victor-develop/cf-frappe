@@ -1,8 +1,14 @@
 import type { DocumentData, DocumentSnapshot, DomainEvent } from "./types";
 
 export function foldDocument(events: readonly DomainEvent[]): DocumentSnapshot | null {
-  let snapshot: DocumentSnapshot | null = null;
+  return foldDocumentFrom(null, events);
+}
 
+export function foldDocumentFrom(
+  initialSnapshot: DocumentSnapshot | null,
+  events: readonly DomainEvent[]
+): DocumentSnapshot | null {
+  let snapshot = initialSnapshot ? cloneSnapshot(initialSnapshot) : null;
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     switch (event.payload.kind) {
       case "DocumentCreated":
@@ -85,6 +91,9 @@ export function foldDocument(events: readonly DomainEvent[]): DocumentSnapshot |
           };
         }
         break;
+      case "SavedListFilterSaved":
+      case "SavedListFilterDeleted":
+        break;
     }
   }
 
@@ -108,4 +117,11 @@ export function foldDocumentAssignments(events: readonly DomainEvent[]): readonl
 
 function cloneData<TData extends DocumentData>(data: TData): TData {
   return JSON.parse(JSON.stringify(data)) as TData;
+}
+
+function cloneSnapshot(snapshot: DocumentSnapshot): DocumentSnapshot {
+  return {
+    ...snapshot,
+    data: cloneData(snapshot.data)
+  };
 }

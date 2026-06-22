@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the print letterheads slice:
+As of the event-sourced timeline diffs slice:
 
 - Test files: `40`
-- Vitest cases: `248`
+- Vitest cases: `249`
 
 ## Implication
 

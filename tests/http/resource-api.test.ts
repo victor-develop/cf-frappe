@@ -169,7 +169,12 @@ describe("resource api", () => {
         version: 2,
         entries: [
           { sequence: 1, kind: "DocumentCreated", summary: "Created document" },
-          { sequence: 2, kind: "DocumentUpdated", summary: "Updated body" }
+          {
+            sequence: 2,
+            kind: "DocumentUpdated",
+            summary: "Updated body",
+            changes: [{ field: "body", oldValue: "Body", newValue: "Updated" }]
+          }
         ]
       }
     });

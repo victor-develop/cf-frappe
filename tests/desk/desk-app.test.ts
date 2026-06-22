@@ -220,6 +220,10 @@ describe("Desk app", () => {
     expect(html).toContain("Created document");
     expect(html).toContain("Updated body");
     expect(html).toContain("NoteUpdated");
+    expect(html).toContain("timeline-changes");
+    expect(html).toContain("<span>body</span>");
+    expect(html).toContain("<span>Body</span>");
+    expect(html).toContain("<span>Edited</span>");
     expect(html).toContain('formaction="/desk/Note/My%20Note/comments"');
     expect(html).toContain('name="comment_text"');
   });

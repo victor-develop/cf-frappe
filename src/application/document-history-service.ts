@@ -5,10 +5,12 @@ import type {
   DocumentData,
   DocumentEventPayload,
   DocumentName,
+  DocumentSnapshot,
   DomainEvent,
+  JsonValue,
   TenantId
 } from "../core/types";
-import { foldDocumentAssignments } from "../core/events";
+import { foldDocument, foldDocumentAssignments, foldDocumentFrom } from "../core/events";
 import { badRequest } from "../core/errors";
 import { documentStream } from "../core/streams";
 import type { EventStore } from "../ports/event-store";
@@ -16,10 +18,12 @@ import type { QueryService } from "./query-service";
 
 const DEFAULT_TIMELINE_LIMIT = 50;
 const MAX_TIMELINE_LIMIT = 200;
+const DEFAULT_DIFF_BASELINE_EVENT_LIMIT = 1_000;
 
 export interface DocumentHistoryServiceOptions {
   readonly events: Pick<EventStore, "readStream">;
   readonly queries: Pick<QueryService, "getDocument">;
+  readonly maxDiffBaselineEvents?: number;
 }
 
 export interface GetDocumentTimelineOptions {
@@ -57,17 +61,26 @@ export interface DocumentTimelineEntry {
   readonly actorId: string;
   readonly occurredAt: string;
   readonly summary: string;
+  readonly changes: readonly DocumentTimelineChange[];
   readonly payload: DocumentEventPayload;
   readonly metadata: DocumentData;
+}
+
+export interface DocumentTimelineChange {
+  readonly field: string;
+  readonly oldValue?: JsonValue;
+  readonly newValue?: JsonValue;
 }
 
 export class DocumentHistoryService {
   private readonly events: Pick<EventStore, "readStream">;
   private readonly queries: Pick<QueryService, "getDocument">;
+  private readonly maxDiffBaselineEvents: number;
 
   constructor(options: DocumentHistoryServiceOptions) {
     this.events = options.events;
     this.queries = options.queries;
+    this.maxDiffBaselineEvents = normalizeMaxDiffBaselineEvents(options.maxDiffBaselineEvents);
   }
 
   async getTimeline(
@@ -90,6 +103,7 @@ export class DocumentHistoryService {
     const hasMore = authorizedEvents.length > limit;
     const overflow = hasMore ? authorizedEvents[authorizedEvents.length - limit - 1] : undefined;
     const visibleEvents = hasMore ? authorizedEvents.slice(authorizedEvents.length - limit) : authorizedEvents;
+    const baseline = await this.baselineBefore(stream, visibleEvents[0]?.sequence);
     return {
       tenantId: document.tenantId,
       doctype: document.doctype,
@@ -99,7 +113,7 @@ export class DocumentHistoryService {
       limit,
       beforeSequence,
       ...(overflow ? { nextBeforeSequence: overflow.sequence } : {}),
-      entries: visibleEvents.map(toTimelineEntry)
+      entries: toTimelineEntries(visibleEvents, baseline)
     };
   }
 
@@ -124,20 +138,109 @@ export class DocumentHistoryService {
       assignees: foldDocumentAssignments(events.filter((event) => event.sequence <= document.version))
     };
   }
+
+  private async baselineBefore(stream: string, firstVisibleSequence: number | undefined): Promise<DocumentSnapshot | null> {
+    if (firstVisibleSequence === undefined || firstVisibleSequence <= 1) {
+      return null;
+    }
+    const baselineEventCount = firstVisibleSequence - 1;
+    if (baselineEventCount > this.maxDiffBaselineEvents) {
+      throw badRequest(
+        `Timeline diff baseline needs ${baselineEventCount} prior events, exceeding the configured limit of ${this.maxDiffBaselineEvents}`
+      );
+    }
+    const events = await this.events.readStream(stream, { maxSequence: firstVisibleSequence - 1 });
+    return foldDocument(events);
+  }
 }
 
-function toTimelineEntry(event: DomainEvent): DocumentTimelineEntry {
+function toTimelineEntries(
+  events: readonly DomainEvent[],
+  initialSnapshot: DocumentSnapshot | null
+): readonly DocumentTimelineEntry[] {
+  let before = initialSnapshot;
+  const entries: DocumentTimelineEntry[] = [];
+  for (const event of events) {
+    const after = foldDocumentFrom(before, [event]);
+    entries.push({
+      eventId: event.id,
+      sequence: event.sequence,
+      type: event.type,
+      kind: event.payload.kind,
+      actorId: event.actorId,
+      occurredAt: event.occurredAt,
+      summary: summarize(event.payload),
+      changes: diffEvent(event, before, after),
+      payload: event.payload,
+      metadata: event.metadata
+    });
+    before = after;
+  }
+  return entries;
+}
+
+function diffEvent(
+  event: DomainEvent,
+  before: DocumentSnapshot | null,
+  after: DocumentSnapshot | null
+): readonly DocumentTimelineChange[] {
+  switch (event.payload.kind) {
+    case "DocumentCreated": {
+      const data = event.payload.data;
+      return [
+        change("docstatus", undefined, event.payload.docstatus),
+        ...Object.keys(data)
+          .sort()
+          .map((field) => change(field, undefined, data[field]))
+      ];
+    }
+    case "DocumentUpdated":
+      return diffPatch(event.payload.patch, before, after);
+    case "WorkflowTransitioned":
+    case "DomainCommandApplied":
+      return diffPatch(event.payload.patch, before, after);
+    case "DocumentDeleted":
+    case "DocumentSubmitted":
+    case "DocumentCancelled":
+      return diffDocstatus(before, after);
+    case "DocumentCommentAdded":
+    case "DocumentAssigned":
+    case "DocumentUnassigned":
+    case "SavedListFilterSaved":
+    case "SavedListFilterDeleted":
+      return [];
+  }
+}
+
+function diffPatch(
+  patch: DocumentData,
+  before: DocumentSnapshot | null,
+  after: DocumentSnapshot | null
+): readonly DocumentTimelineChange[] {
+  return Object.keys(patch)
+    .sort()
+    .map((field) => change(field, before?.data[field], after?.data[field]))
+    .filter((item) => !jsonEquals(item.oldValue, item.newValue));
+}
+
+function diffDocstatus(
+  before: DocumentSnapshot | null,
+  after: DocumentSnapshot | null
+): readonly DocumentTimelineChange[] {
+  const item = change("docstatus", before?.docstatus, after?.docstatus);
+  return jsonEquals(item.oldValue, item.newValue) ? [] : [item];
+}
+
+function change(field: string, oldValue: JsonValue | undefined, newValue: JsonValue | undefined): DocumentTimelineChange {
   return {
-    eventId: event.id,
-    sequence: event.sequence,
-    type: event.type,
-    kind: event.payload.kind,
-    actorId: event.actorId,
-    occurredAt: event.occurredAt,
-    summary: summarize(event.payload),
-    payload: event.payload,
-    metadata: event.metadata
+    field,
+    ...(oldValue !== undefined ? { oldValue } : {}),
+    ...(newValue !== undefined ? { newValue } : {})
   };
+}
+
+function jsonEquals(left: JsonValue | undefined, right: JsonValue | undefined): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function summarize(payload: DocumentEventPayload): string {
@@ -211,6 +314,16 @@ function normalizeLimit(limit: number | undefined): number {
     throw badRequest("Timeline limit must be a positive integer");
   }
   return Math.min(limit, MAX_TIMELINE_LIMIT);
+}
+
+function normalizeMaxDiffBaselineEvents(value: number | undefined): number {
+  if (value === undefined) {
+    return DEFAULT_DIFF_BASELINE_EVENT_LIMIT;
+  }
+  if (!Number.isInteger(value) || value < 0) {
+    throw badRequest("Timeline diff baseline event limit must be a non-negative integer");
+  }
+  return value;
 }
 
 function normalizeBeforeSequence(beforeSequence: number | undefined, authorizedVersion: number): number {

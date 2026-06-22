@@ -463,7 +463,7 @@ export function renderDocumentTimeline(
     .map(
       (entry) => `<tr>
         <td>${String(entry.sequence)}</td>
-        <td><strong>${escapeHtml(entry.summary)}</strong><small>${escapeHtml(entry.type)}</small></td>
+        <td><strong>${escapeHtml(entry.summary)}</strong><small>${escapeHtml(entry.type)}</small>${renderTimelineChanges(entry.changes)}</td>
         <td>${escapeHtml(entry.actorId)}</td>
         <td>${escapeHtml(entry.occurredAt)}</td>
       </tr>`
@@ -487,6 +487,22 @@ export function renderDocumentTimeline(
     </div>
     ${commentForm}
   </section>`;
+}
+
+function renderTimelineChanges(changes: DocumentTimeline["entries"][number]["changes"]): string {
+  if (changes.length === 0) {
+    return "";
+  }
+  return `<ul class="timeline-changes">${changes.map(renderTimelineChange).join("")}</ul>`;
+}
+
+function renderTimelineChange(change: DocumentTimeline["entries"][number]["changes"][number]): string {
+  return `<li>
+    <span>${escapeHtml(change.field)}</span>
+    <span>${escapeHtml(formatValue(change.oldValue))}</span>
+    <span aria-hidden="true">&rarr;</span>
+    <span>${escapeHtml(formatValue(change.newValue))}</span>
+  </li>`;
 }
 
 function renderAssignmentPanel(
@@ -1099,6 +1115,27 @@ tr:last-child td { border-bottom: 0; }
 .form-head p, .timeline-head p { margin: 0; color: var(--muted); }
 .timeline strong { display: block; }
 .timeline small { color: var(--muted); }
+.timeline-changes {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.timeline-changes li {
+  display: grid;
+  grid-template-columns: minmax(64px, 0.7fr) minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+.timeline-changes li span {
+  overflow-wrap: anywhere;
+}
+.timeline-changes li span:first-child {
+  color: var(--text);
+  font-weight: 600;
+}
 .timeline-assignments {
   padding: 0 18px 18px;
   border-bottom: 1px solid var(--border);

@@ -66,8 +66,27 @@ describe("DocumentHistoryService", () => {
       eventId: "evt_update-1",
       actorId: owner.id,
       occurredAt: "2026-01-01T00:00:00.000Z",
-      payload: { kind: "DocumentUpdated", patch: { body: "Updated" } }
+      payload: { kind: "DocumentUpdated", patch: { body: "Updated" } },
+      changes: [{ field: "body", oldValue: "Body", newValue: "Updated" }]
     });
+    expect(timeline.entries[0]!.changes).toEqual(
+      expect.arrayContaining([
+        { field: "docstatus", newValue: "draft" },
+        { field: "title", newValue: "Timeline Note" },
+        { field: "body", newValue: "Body" },
+        { field: "priority", newValue: "Medium" },
+        { field: "count", newValue: 0 },
+        { field: "workflow_state", newValue: "Open" },
+        { field: "created_by", newValue: owner.id }
+      ])
+    );
+    expect(timeline.entries[2]!.changes).toEqual([
+      { field: "workflow_state", oldValue: "Open", newValue: "Closed" }
+    ]);
+    expect(timeline.entries[3]!.changes).toEqual([
+      { field: "body", oldValue: "Updated", newValue: "Commanded" }
+    ]);
+    expect(timeline.entries[4]!.changes).toEqual([]);
   });
 
   it("requires normal document read permission before exposing stream history", async () => {
@@ -155,7 +174,23 @@ describe("DocumentHistoryService", () => {
       nextBeforeSequence: 2
     });
     expect(firstPage.entries.map((entry) => entry.sequence)).toEqual([3, 4]);
+    expect(firstPage.entries.map((entry) => entry.changes)).toEqual([
+      [{ field: "body", oldValue: "One", newValue: "Two" }],
+      [{ field: "body", oldValue: "Two", newValue: "Three" }]
+    ]);
     expect(secondPage.entries.map((entry) => entry.sequence)).toEqual([1, 2]);
     expect(secondPage.nextBeforeSequence).toBeUndefined();
+  });
+
+  it("rejects timeline diff pages that exceed the configured baseline event budget", async () => {
+    const { documents, events, queries } = createServices(["create-1", "update-1", "update-2"]);
+    const history = new DocumentHistoryService({ events, queries, maxDiffBaselineEvents: 1 });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Budgeted Note" }) });
+    await documents.update({ actor: owner, doctype: "Note", name: "Budgeted Note", patch: { body: "One" } });
+    await documents.update({ actor: owner, doctype: "Note", name: "Budgeted Note", patch: { body: "Two" } });
+
+    await expect(history.getTimeline(owner, "Note", "Budgeted Note", { limit: 1 })).rejects.toMatchObject({
+      code: "BAD_REQUEST"
+    });
   });
 });
