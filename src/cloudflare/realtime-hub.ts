@@ -4,7 +4,8 @@ import type { RealtimePublisher, RealtimePublishResult } from "../ports/realtime
 
 export interface RealtimeHubRpc {
   presence(): Promise<RealtimePresenceSnapshot>;
-  publish(event: RealtimeEvent): Promise<number>;
+  publish(topic: RealtimeTopic, event: RealtimeEvent): Promise<number>;
+  replay(request?: RealtimeReplayRequest): Promise<RealtimeReplaySnapshot>;
 }
 
 export interface RealtimeHubStub extends RealtimeHubRpc {
@@ -30,6 +31,27 @@ export interface RealtimePresenceSnapshot {
   readonly connections: readonly RealtimePresenceConnection[];
 }
 
+export interface RealtimeReplayRequest {
+  readonly after?: number;
+  readonly limit?: number;
+}
+
+export interface RealtimeReplayEntry {
+  readonly cursor: number;
+  readonly event: RealtimeEvent;
+}
+
+export interface RealtimeReplaySnapshot {
+  readonly topic: RealtimeTopic;
+  readonly events: readonly RealtimeReplayEntry[];
+  readonly nextCursor: number | null;
+}
+
+export interface RealtimeHubOptions {
+  readonly replayBatchLimit?: number;
+  readonly replayRetentionLimit?: number;
+}
+
 interface RealtimeSocketAttachment extends RealtimePresenceConnection {
   readonly topic: RealtimeTopic;
 }
@@ -46,13 +68,24 @@ interface PresenceBroadcastFailures {
   readonly sockets: Set<WebSocket>;
 }
 
+interface RealtimeEventRow extends Record<string, SqlStorageValue> {
+  readonly sequence: number;
+  readonly topic: string;
+  readonly event_json: string;
+}
+
+interface RealtimeMetaRow extends Record<string, SqlStorageValue> {
+  readonly value: string;
+}
+
 export type RealtimeHubClass = new (
   ctx: DurableObjectState,
   env: RealtimeHubEnv
 ) => {
   fetch(request: Request): Promise<Response>;
   presence(): Promise<RealtimePresenceSnapshot>;
-  publish(event: RealtimeEvent): Promise<number>;
+  publish(topic: RealtimeTopic, event: RealtimeEvent): Promise<number>;
+  replay(request?: RealtimeReplayRequest): Promise<RealtimeReplaySnapshot>;
   webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void | Promise<void>;
   webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean): void | Promise<void>;
 };
@@ -71,18 +104,33 @@ export class DurableObjectRealtimePublisher implements RealtimePublisher {
 
   private publishToTopic(topic: RealtimeTopic, event: RealtimeEvent): Promise<number> {
     const id = this.namespace.idFromName(topic);
-    return this.namespace.get(id).publish(event);
+    return this.namespace.get(id).publish(topic, event);
   }
 }
 
-export function createRealtimeHubClass(): RealtimeHubClass {
+const defaultReplayBatchLimit = 100;
+const defaultReplayRetentionLimit = 1000;
+
+export function createRealtimeHubClass(options: RealtimeHubOptions = {}): RealtimeHubClass {
+  const replayBatchLimit = boundedPositiveInteger(options.replayBatchLimit, defaultReplayBatchLimit);
+  const replayRetentionLimit = boundedPositiveInteger(options.replayRetentionLimit, defaultReplayRetentionLimit);
   return class CloudFrappeRealtimeHub extends DurableObject<RealtimeHubEnv> {
+    constructor(ctx: DurableObjectState, env: RealtimeHubEnv) {
+      super(ctx, env);
+      void ctx.blockConcurrencyWhile(async () => {
+        migrateRealtimeStorage(ctx.storage.sql);
+      });
+    }
+
     override async fetch(request: Request): Promise<Response> {
       if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
         return new Response("Expected WebSocket upgrade", { status: 426 });
       }
       const url = new URL(request.url);
       const topic = url.searchParams.get("topic") ?? "";
+      if (!rememberReplayTopic(this.ctx.storage.sql, topic)) {
+        return new Response("Realtime hub topic mismatch", { status: 409 });
+      }
       const attachment = socketAttachment(url, topic);
       const pair = new WebSocketPair();
       const client = pair[0];
@@ -90,6 +138,7 @@ export function createRealtimeHubClass(): RealtimeHubClass {
       server.serializeAttachment(attachment);
       this.ctx.acceptWebSocket(server, [topic]);
       server.send(JSON.stringify({ type: "cf-frappe.realtime.connected", topic }));
+      this.sendReplay(server, replayRequestFromUrl(url));
       this.broadcastPresence("join");
       return new Response(null, { status: 101, webSocket: client });
     }
@@ -98,8 +147,13 @@ export function createRealtimeHubClass(): RealtimeHubClass {
       return presenceSnapshot(this.ctx.getWebSockets());
     }
 
-    async publish(event: RealtimeEvent): Promise<number> {
-      const message = JSON.stringify({ type: "cf-frappe.realtime.event", event });
+    async replay(request: RealtimeReplayRequest = {}): Promise<RealtimeReplaySnapshot> {
+      return replayEvents(this.ctx.storage.sql, request, replayBatchLimit);
+    }
+
+    async publish(topic: RealtimeTopic, event: RealtimeEvent): Promise<number> {
+      const cursor = storeRealtimeEvent(this.ctx.storage.sql, topic, event, replayRetentionLimit);
+      const message = JSON.stringify({ type: "cf-frappe.realtime.event", cursor, event });
       let delivered = 0;
       const failedConnectionIds = new Set<string>();
       const failedSockets = new Set<WebSocket>();
@@ -164,6 +218,16 @@ export function createRealtimeHubClass(): RealtimeHubClass {
       this.sendPresence("leave", excludingConnectionIds, excludingSockets);
     }
 
+    private sendReplay(socket: WebSocket, request: RealtimeReplayRequest | null): void {
+      if (request === null) {
+        return;
+      }
+      socket.send(JSON.stringify({
+        type: "cf-frappe.realtime.replay",
+        replay: replayEvents(this.ctx.storage.sql, request, replayBatchLimit)
+      }));
+    }
+
     private sendPresence(
       action: "join" | "leave",
       excludingConnectionIds: ReadonlySet<string>,
@@ -203,6 +267,159 @@ export function createRealtimeHubClass(): RealtimeHubClass {
       return failures;
     }
   };
+}
+
+function migrateRealtimeStorage(sql: SqlStorage): void {
+  sql.exec(`
+    CREATE TABLE IF NOT EXISTS realtime_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS realtime_events (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      topic TEXT NOT NULL,
+      event_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      occurred_at TEXT NOT NULL,
+      event_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_realtime_events_sequence ON realtime_events(sequence);
+  `);
+}
+
+function storeRealtimeEvent(
+  sql: SqlStorage,
+  topic: RealtimeTopic,
+  event: RealtimeEvent,
+  retentionLimit: number
+): number {
+  if (!rememberReplayTopic(sql, topic)) {
+    throw new Error("Realtime hub topic mismatch");
+  }
+  const row = sql.exec<{ sequence: number }>(
+    `
+      INSERT INTO realtime_events (topic, event_id, event_type, occurred_at, event_json)
+      VALUES (?, ?, ?, ?, ?)
+      RETURNING sequence
+    `,
+    topic,
+    event.id,
+    event.type,
+    event.occurredAt,
+    JSON.stringify(event)
+  ).one();
+  pruneReplayEvents(sql, retentionLimit);
+  return row.sequence;
+}
+
+function replayEvents(
+  sql: SqlStorage,
+  request: RealtimeReplayRequest,
+  batchLimit: number
+): RealtimeReplaySnapshot {
+  const after = normalizeReplayCursor(request.after);
+  const limit = Math.min(boundedPositiveInteger(request.limit, batchLimit), batchLimit);
+  const topic = rememberedReplayTopic(sql);
+  if (topic === undefined) {
+    return { topic: "", events: [], nextCursor: null };
+  }
+  const rows = sql.exec<RealtimeEventRow>(
+    `
+      SELECT sequence, topic, event_json
+      FROM realtime_events
+      WHERE topic = ? AND sequence > ?
+      ORDER BY sequence ASC
+      LIMIT ?
+    `,
+    topic,
+    after,
+    limit
+  ).toArray();
+  const events = rows.flatMap(replayEntryFromRow);
+  return {
+    topic: rows[0]?.topic ?? topic ?? "",
+    events,
+    nextCursor: events.at(-1)?.cursor ?? null
+  };
+}
+
+function replayEntryFromRow(row: RealtimeEventRow): readonly RealtimeReplayEntry[] {
+  try {
+    return [{ cursor: row.sequence, event: JSON.parse(row.event_json) as RealtimeEvent }];
+  } catch {
+    return [];
+  }
+}
+
+function pruneReplayEvents(sql: SqlStorage, retentionLimit: number): void {
+  sql.exec(
+    `
+      DELETE FROM realtime_events
+      WHERE sequence NOT IN (
+        SELECT sequence
+        FROM realtime_events
+        ORDER BY sequence DESC
+        LIMIT ?
+      )
+    `,
+    retentionLimit
+  );
+}
+
+function rememberReplayTopic(sql: SqlStorage, topic: RealtimeTopic): boolean {
+  const rememberedTopic = rememberedReplayTopic(sql);
+  if (rememberedTopic !== undefined && rememberedTopic !== topic) {
+    return false;
+  }
+  if (!topic || rememberedTopic === topic) {
+    return true;
+  }
+  sql.exec(
+    `
+      INSERT INTO realtime_meta (key, value)
+      VALUES ('topic', ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `,
+    topic
+  );
+  return true;
+}
+
+function rememberedReplayTopic(sql: SqlStorage): RealtimeTopic | undefined {
+  return sql.exec<RealtimeMetaRow>(
+    "SELECT value FROM realtime_meta WHERE key = 'topic' LIMIT 1"
+  ).toArray()[0]?.value;
+}
+
+function replayRequestFromUrl(url: URL): RealtimeReplayRequest | null {
+  const after = optionalIntegerParam(url.searchParams.get("replayAfter"));
+  const limit = optionalIntegerParam(url.searchParams.get("replayLimit"));
+  if (after === undefined && limit === undefined) {
+    return null;
+  }
+  return {
+    ...(after === undefined ? {} : { after }),
+    ...(limit === undefined ? {} : { limit })
+  };
+}
+
+function optionalIntegerParam(value: string | null): number | undefined {
+  if (value === null || value.trim() === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.trunc(parsed) : undefined;
+}
+
+function normalizeReplayCursor(value: number | undefined): number {
+  return value === undefined || !Number.isFinite(value) || value < 0 ? 0 : Math.trunc(value);
+}
+
+function boundedPositiveInteger(value: number | undefined, fallback: number): number {
+  if (value === undefined || !Number.isFinite(value) || value < 1) {
+    return fallback;
+  }
+  return Math.trunc(value);
 }
 
 function socketAttachment(url: URL, topic: RealtimeTopic): RealtimeSocketAttachment {

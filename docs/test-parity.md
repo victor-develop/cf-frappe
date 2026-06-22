@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the realtime presence slice:
+As of the durable realtime replay slice:
 
 - Vitest files: `59`
-- Vitest cases: `468`
+- Vitest cases: `474`
 
 ## Implication
 

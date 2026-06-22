@@ -9,36 +9,36 @@ interface DeskClientRuntime {
     readonly tenantId?: string;
   };
   readonly realtime: {
-    readonly doctypeUrl: (doctype: string, options: { readonly tenantId: string }) => string;
-    readonly documentUrl: (doctype: string, name: string, options: { readonly tenantId: string }) => string;
+    readonly doctypeUrl: (doctype: string, options: DeskRealtimeOptions) => string;
+    readonly documentUrl: (doctype: string, name: string, options: DeskRealtimeOptions) => string;
     readonly subscribe: (
       topic: string,
       handlers: DeskRealtimeHandlers,
-      options?: { readonly protocols?: string | readonly string[] }
+      options?: DeskRealtimeOptions
     ) => DeskRealtimeSubscription;
     readonly subscribeDoctype: (
       doctype: string,
       handlers: DeskRealtimeHandlers,
-      options: { readonly tenantId: string; readonly protocols?: string | readonly string[] }
+      options: DeskRealtimeOptions
     ) => DeskRealtimeSubscription;
     readonly subscribeDocument: (
       doctype: string,
       name: string,
       handlers: DeskRealtimeHandlers,
-      options: { readonly tenantId: string; readonly protocols?: string | readonly string[] }
+      options: DeskRealtimeOptions
     ) => DeskRealtimeSubscription;
     readonly subscribeTenant: (
       handlers: DeskRealtimeHandlers,
-      options: { readonly tenantId: string; readonly protocols?: string | readonly string[] }
+      options: DeskRealtimeOptions
     ) => DeskRealtimeSubscription;
     readonly subscribeUser: (
       userId: string,
       handlers: DeskRealtimeHandlers,
-      options: { readonly tenantId: string; readonly protocols?: string | readonly string[] }
+      options: DeskRealtimeOptions
     ) => DeskRealtimeSubscription;
-    readonly tenantUrl: (options: { readonly tenantId: string }) => string;
-    readonly userUrl: (userId: string, options: { readonly tenantId: string }) => string;
-    readonly url: (topic: string) => string;
+    readonly tenantUrl: (options: DeskRealtimeOptions) => string;
+    readonly userUrl: (userId: string, options: DeskRealtimeOptions) => string;
+    readonly url: (topic: string, options?: DeskRealtimeOptions) => string;
   };
   readonly form: {
     readonly current: () => DeskFormRuntime | null;
@@ -95,6 +95,18 @@ interface DeskRealtimeHandlers {
     message: unknown,
     subscription: DeskRealtimeSubscription
   ) => void;
+  readonly replay?: (
+    replay: Record<string, unknown>,
+    message: unknown,
+    subscription: DeskRealtimeSubscription
+  ) => void;
+}
+
+interface DeskRealtimeOptions {
+  readonly tenantId?: string;
+  readonly protocols?: string | readonly string[];
+  readonly replayAfter?: number;
+  readonly replayLimit?: number;
 }
 
 interface DeskRealtimeSubscription {
@@ -226,6 +238,9 @@ describe("Desk client runtime", () => {
     expect(runtime.realtime.url("document:acme:Task:TASK-1")).toBe(
       "wss://app.example/api/realtime?topic=document%3Aacme%3ATask%3ATASK-1"
     );
+    expect(runtime.realtime.url("document:acme:Task:TASK-1", { replayAfter: 12, replayLimit: 25 })).toBe(
+      "wss://app.example/api/realtime?topic=document%3Aacme%3ATask%3ATASK-1&replayAfter=12&replayLimit=25"
+    );
     expect(runtime.realtime.documentUrl("Task Type", "TASK:1", { tenantId: "acme:west" })).toBe(
       "wss://app.example/api/realtime?topic=document%3Aacme%253Awest%3ATask%2520Type%3ATASK%253A1"
     );
@@ -248,11 +263,14 @@ describe("Desk client runtime", () => {
       connected: (message, sub) => {
         seen.push(`connected:${String((message as { topic?: string }).topic)}:${sub.topic}`);
       },
-      event: (event, _message, sub) => {
-        seen.push(`event:${String(event.type)}:${sub.url}`);
+      event: (event, message, sub) => {
+        seen.push(`event:${String(event.type)}:${String((message as { readonly cursor?: number }).cursor)}:${sub.url}`);
       },
       notification: (notification, event) => {
         seen.push(`notification:${String(notification.recipientId)}:${String(event.id)}`);
+      },
+      replay: (replay, _message, sub) => {
+        seen.push(`replay:${String(replay.nextCursor)}:${sub.topic}`);
       },
       presence: (presence, _message, sub) => {
         const connections = presence.connections as Array<{ readonly userId?: string }>;
@@ -275,6 +293,7 @@ describe("Desk client runtime", () => {
     sockets[0]?.emitMessage(JSON.stringify({ type: "cf-frappe.realtime.connected", topic: subscription.topic }));
     sockets[0]?.emitMessage(JSON.stringify({
       type: "cf-frappe.realtime.event",
+      cursor: 1,
       event: {
         id: "evt1:user:owner%40example.com",
         type: "NoteAssigned",
@@ -282,6 +301,26 @@ describe("Desk client runtime", () => {
           kind: "DocumentUserNotification",
           recipientId: "owner@example.com"
         }
+      }
+    }));
+    sockets[0]?.emitMessage(JSON.stringify({
+      type: "cf-frappe.realtime.replay",
+      replay: {
+        topic: subscription.topic,
+        events: [
+          {
+            cursor: 2,
+            event: {
+              id: "evt2:user:owner%40example.com",
+              type: "NoteFollowed",
+              payload: {
+                kind: "DocumentUserNotification",
+                recipientId: "owner@example.com"
+              }
+            }
+          }
+        ],
+        nextCursor: 2
       }
     }));
     sockets[0]?.emitMessage(JSON.stringify({
@@ -299,8 +338,12 @@ describe("Desk client runtime", () => {
       `message:cf-frappe.realtime.connected`,
       `connected:user:acme:owner%40example.com:user:acme:owner%40example.com`,
       `message:cf-frappe.realtime.event`,
-      `event:NoteAssigned:wss://app.example/api/realtime?topic=user%3Aacme%3Aowner%2540example.com`,
+      `event:NoteAssigned:1:wss://app.example/api/realtime?topic=user%3Aacme%3Aowner%2540example.com`,
       `notification:owner@example.com:evt1:user:owner%40example.com`,
+      `message:cf-frappe.realtime.replay`,
+      `replay:2:user:acme:owner%40example.com`,
+      `event:NoteFollowed:2:wss://app.example/api/realtime?topic=user%3Aacme%3Aowner%2540example.com`,
+      `notification:owner@example.com:evt2:user:owner%40example.com`,
       `message:cf-frappe.realtime.presence`,
       `presence:join:owner@example.com:user:acme:owner%40example.com`,
       "malformed:SyntaxError:{"

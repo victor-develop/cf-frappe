@@ -559,15 +559,21 @@ export function renderDeskClientScript(): string {
     return result;
   }
 
-  function realtimeUrl(topic) {
+  function realtimeUrl(topic, options) {
     var url = new URL("/api/realtime", root.location.href);
     url.searchParams.set("topic", topic);
+    if (options && options.replayAfter !== undefined && options.replayAfter !== null) {
+      url.searchParams.set("replayAfter", String(options.replayAfter));
+    }
+    if (options && options.replayLimit !== undefined && options.replayLimit !== null) {
+      url.searchParams.set("replayLimit", String(options.replayLimit));
+    }
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     return url;
   }
 
   function realtimeSubscribe(topic, handlers, options) {
-    var url = realtimeUrl(topic).toString();
+    var url = realtimeUrl(topic, options).toString();
     var socket = new WebSocket(url, options && options.protocols);
     var subscription = {
       close: function (code, reason) {
@@ -611,15 +617,33 @@ export function renderDeskClientScript(): string {
       return;
     }
     if (parsed.type === "cf-frappe.realtime.event" && parsed.event) {
-      callRealtimeHandler(callbacks.event, [parsed.event, parsed, subscription]);
-      var payload = parsed.event && parsed.event.payload;
-      if (payload && payload.kind === "DocumentUserNotification") {
-        callRealtimeHandler(callbacks.notification, [payload, parsed.event, parsed, subscription]);
-      }
+      dispatchRealtimeEvent(parsed.event, parsed, subscription, callbacks);
+      return;
+    }
+    if (parsed.type === "cf-frappe.realtime.replay" && parsed.replay) {
+      callRealtimeHandler(callbacks.replay, [parsed.replay, parsed, subscription]);
+      var events = Array.isArray(parsed.replay.events) ? parsed.replay.events : [];
+      events.forEach(function (entry) {
+        if (entry && entry.event) {
+          dispatchRealtimeEvent(entry.event, Object.assign({}, parsed, {
+            type: "cf-frappe.realtime.event",
+            cursor: entry.cursor,
+            event: entry.event
+          }), subscription, callbacks);
+        }
+      });
       return;
     }
     if (parsed.type === "cf-frappe.realtime.presence" && parsed.presence) {
       callRealtimeHandler(callbacks.presence, [parsed.presence, parsed, subscription]);
+    }
+  }
+
+  function dispatchRealtimeEvent(event, message, subscription, callbacks) {
+    callRealtimeHandler(callbacks.event, [event, message, subscription]);
+    var payload = event && event.payload;
+    if (payload && payload.kind === "DocumentUserNotification") {
+      callRealtimeHandler(callbacks.notification, [payload, event, message, subscription]);
     }
   }
 
@@ -682,31 +706,31 @@ export function renderDeskClientScript(): string {
     }),
     realtime: Object.freeze({
       connect: function (topic, options) {
-        return new WebSocket(realtimeUrl(topic), options && options.protocols);
+        return new WebSocket(realtimeUrl(topic, options), options && options.protocols);
       },
       doctype: function (doctype, options) {
-        return new WebSocket(realtimeUrl(doctypeTopicFromOptions(doctype, options)), options && options.protocols);
+        return new WebSocket(realtimeUrl(doctypeTopicFromOptions(doctype, options), options), options && options.protocols);
       },
       doctypeUrl: function (doctype, options) {
-        return realtimeUrl(doctypeTopicFromOptions(doctype, options)).toString();
+        return realtimeUrl(doctypeTopicFromOptions(doctype, options), options).toString();
       },
       document: function (doctype, name, options) {
-        return new WebSocket(realtimeUrl(documentTopicFromOptions(doctype, name, options)), options && options.protocols);
+        return new WebSocket(realtimeUrl(documentTopicFromOptions(doctype, name, options), options), options && options.protocols);
       },
       documentUrl: function (doctype, name, options) {
-        return realtimeUrl(documentTopicFromOptions(doctype, name, options)).toString();
+        return realtimeUrl(documentTopicFromOptions(doctype, name, options), options).toString();
       },
       tenant: function (options) {
-        return new WebSocket(realtimeUrl(tenantTopicFromOptions(options)), options && options.protocols);
+        return new WebSocket(realtimeUrl(tenantTopicFromOptions(options), options), options && options.protocols);
       },
       tenantUrl: function (options) {
-        return realtimeUrl(tenantTopicFromOptions(options)).toString();
+        return realtimeUrl(tenantTopicFromOptions(options), options).toString();
       },
       user: function (userId, options) {
-        return new WebSocket(realtimeUrl(userTopicFromOptions(userId, options)), options && options.protocols);
+        return new WebSocket(realtimeUrl(userTopicFromOptions(userId, options), options), options && options.protocols);
       },
       userUrl: function (userId, options) {
-        return realtimeUrl(userTopicFromOptions(userId, options)).toString();
+        return realtimeUrl(userTopicFromOptions(userId, options), options).toString();
       },
       subscribe: function (topic, handlers, options) {
         return realtimeSubscribe(topic, handlers, options);
@@ -723,8 +747,8 @@ export function renderDeskClientScript(): string {
       subscribeUser: function (userId, handlers, options) {
         return realtimeSubscribe(userTopicFromOptions(userId, options), handlers, options);
       },
-      url: function (topic) {
-        return realtimeUrl(topic).toString();
+      url: function (topic, options) {
+        return realtimeUrl(topic, options).toString();
       }
     }),
     report: Object.freeze({

@@ -19,7 +19,7 @@ describe("CloudFrappe Worker realtime", () => {
     });
 
     const response = await worker.fetch!(
-      cfRequest("http://localhost/api/realtime?topic=document:acme:Note:My%20Note", {
+      cfRequest("http://localhost/api/realtime?topic=document:acme:Note:My%20Note&replayAfter=3&replayLimit=25", {
         headers: { upgrade: "websocket" }
       }),
       { DB: fakeD1(), AGGREGATES: fakeAggregateNamespace() },
@@ -31,6 +31,8 @@ describe("CloudFrappe Worker realtime", () => {
     expect(fetches).toHaveLength(1);
     expect(new URL(fetches[0]!.url).searchParams.get("tenantId")).toBe("acme");
     expect(new URL(fetches[0]!.url).searchParams.get("userId")).toBe("owner@example.com");
+    expect(new URL(fetches[0]!.url).searchParams.get("replayAfter")).toBe("3");
+    expect(new URL(fetches[0]!.url).searchParams.get("replayLimit")).toBe("25");
   });
 
   it("routes authorized doctype websocket subscriptions to the topic hub", async () => {
@@ -320,6 +322,9 @@ function fakeRealtimeNamespace(topics: string[], fetches: Request[]): RealtimeHu
         },
         async publish() {
           return 0;
+        },
+        async replay() {
+          return { topic: topics.at(-1) ?? "", events: [], nextCursor: null };
         }
       };
     }
