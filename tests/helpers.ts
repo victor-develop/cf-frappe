@@ -59,7 +59,7 @@ export const noteDocType = defineDocType({
   },
   listView: {
     columns: ["title", "priority", "workflow_state"],
-    filterFields: ["title", "priority", "workflow_state"],
+    filterFields: ["title", "priority", "workflow_state", "count"],
     filters: [{ field: "workflow_state", value: "Open" }],
     pageSize: 25
   },

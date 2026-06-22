@@ -45,6 +45,54 @@ describe("D1ProjectionStore", () => {
     expect(count?.params).toEqual(["acme", "Note", "%50\\%\\_off%"]);
   });
 
+  it("renders advanced scalar operators with bound filter parameters", async () => {
+    const db = new FakeD1Database([
+      documentRow({ name: "D1 High", data: { title: "D1 High", priority: "High", count: 5 } })
+    ]);
+    const store = new D1ProjectionStore(db as unknown as D1Database);
+
+    await store.list({
+      tenantId: "acme",
+      doctype: "Note",
+      filters: [
+        { field: "priority", operator: "ne", value: "Low" },
+        { field: "count", operator: "gt", value: 2 },
+        { field: "count", operator: "lt", value: 9 }
+      ]
+    });
+
+    const [rows, count] = db.statements;
+    expect(rows?.sql).toContain("json_extract(data_json, '$.priority') IS NOT NULL AND json_extract(data_json, '$.priority') != ?");
+    expect(rows?.sql).toContain("json_extract(data_json, '$.count') > ?");
+    expect(rows?.sql).toContain("json_extract(data_json, '$.count') < ?");
+    expect(rows?.params).toEqual(["acme", "Note", "Low", 2, 9, 50, 0]);
+    expect(count?.params).toEqual(["acme", "Note", "Low", 2, 9]);
+  });
+
+  it("applies advanced scalar operators to D1 rows and counts", async () => {
+    const db = new FakeD1Database([
+      documentRow({ name: "D1 Match", data: { title: "D1 Match", priority: "High", count: 5 } }),
+      documentRow({ name: "D1 Low", data: { title: "D1 Low", priority: "Low", count: 5 } }),
+      documentRow({ name: "D1 Boundary Low", data: { title: "D1 Boundary Low", priority: "High", count: 2 } }),
+      documentRow({ name: "D1 Boundary High", data: { title: "D1 Boundary High", priority: "High", count: 9 } }),
+      documentRow({ name: "D1 Missing Priority", data: { title: "D1 Missing Priority", count: 5 } }),
+      documentRow({ name: "D1 Null Count", data: { title: "D1 Null Count", priority: "High", count: null } })
+    ]);
+    const store = new D1ProjectionStore(db as unknown as D1Database);
+
+    const result = await store.list({
+      tenantId: "acme",
+      doctype: "Note",
+      filters: [
+        { field: "priority", operator: "ne", value: "Low" },
+        { field: "count", operator: "gt", value: 2 },
+        { field: "count", operator: "lt", value: 9 }
+      ]
+    });
+
+    expect(result).toMatchObject({ data: [{ name: "D1 Match" }], total: 1 });
+  });
+
   it("escapes filter fields embedded in JSON path SQL literals", async () => {
     const db = new FakeD1Database([
       documentRow({ name: "D1 High", data: { title: "D1 High", priority: "High" } })
@@ -132,15 +180,53 @@ class FakeD1PreparedStatement {
   }
 
   private applyFilters(rows: readonly FakeDocumentRow[]): readonly FakeDocumentRow[] {
-    const [tenantId, doctype, filterValue] = this.params;
+    const [tenantId, doctype, ...rawFilterParams] = this.params;
+    const filterParams = this.sql.includes("LIMIT ? OFFSET ?") ? rawFilterParams.slice(0, -2) : rawFilterParams;
     return rows.filter((row) => {
       if (row.tenant_id !== tenantId || row.doctype !== doctype) {
         return false;
       }
+      const data = JSON.parse(row.data_json) as DocumentData;
       if (this.sql.includes("json_extract(data_json, '$.priority') = ?")) {
-        return (JSON.parse(row.data_json) as DocumentData).priority === filterValue;
+        return data.priority === filterParams[0];
+      }
+      let paramIndex = 0;
+      if (this.sql.includes("json_extract(data_json, '$.priority') IS NOT NULL AND json_extract(data_json, '$.priority') != ?")) {
+        if (data.priority === undefined || data.priority === null || data.priority === filterParams[paramIndex]) {
+          return false;
+        }
+        paramIndex += 1;
+      }
+      if (this.sql.includes("json_extract(data_json, '$.count') > ?")) {
+        if (!compares(data.count, filterParams[paramIndex], (actual, expected) => actual > expected)) {
+          return false;
+        }
+        paramIndex += 1;
+      }
+      if (this.sql.includes("json_extract(data_json, '$.count') >= ?")) {
+        if (!compares(data.count, filterParams[paramIndex], (actual, expected) => actual >= expected)) {
+          return false;
+        }
+        paramIndex += 1;
+      }
+      if (this.sql.includes("json_extract(data_json, '$.count') < ?")) {
+        if (!compares(data.count, filterParams[paramIndex], (actual, expected) => actual < expected)) {
+          return false;
+        }
+        paramIndex += 1;
+      }
+      if (this.sql.includes("json_extract(data_json, '$.count') <= ?")) {
+        return compares(data.count, filterParams[paramIndex], (actual, expected) => actual <= expected);
       }
       return true;
     });
   }
+}
+
+function compares(
+  actual: unknown,
+  expected: unknown,
+  predicate: (actual: number, expected: number) => boolean
+): boolean {
+  return typeof actual === "number" && typeof expected === "number" && predicate(actual, expected);
 }

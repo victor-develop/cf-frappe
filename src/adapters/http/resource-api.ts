@@ -11,8 +11,9 @@ import { QueryService } from "../../application/query-service";
 import type { ReportService } from "../../application/report-service";
 import type { SavedListFilterService } from "../../application/saved-list-filter-service";
 import type { UserPermissionService } from "../../application/user-permission-service";
-import type { ModelRegistry } from "../../core/registry";
 import { badRequest } from "../../core/errors";
+import { isListFilterOperator } from "../../core/list-view";
+import type { ModelRegistry } from "../../core/registry";
 import type { DocumentData, JsonPrimitive, ListDocumentsFilter, MutableDocumentData } from "../../core/types";
 import type { ActorResolver } from "./actor";
 import { createAuditApi } from "./audit-api";
@@ -525,7 +526,7 @@ function filtersValue(value: unknown): readonly ListDocumentsFilter[] {
     if (typeof field !== "string") {
       throw badRequest("Saved filter field must be a string");
     }
-    if (operator !== undefined && operator !== "eq" && operator !== "contains" && operator !== "gte" && operator !== "lte") {
+    if (operator !== undefined && !isListFilterOperator(operator)) {
       throw badRequest("Saved filter operator is invalid");
     }
     if (!isJsonPrimitive(filterValue)) {

@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk form event hooks slice:
+As of the Desk advanced filter operators slice:
 
 - Vitest files: `50`
-- Vitest cases: `363`
+- Vitest cases: `366`
 
 ## Implication
 

@@ -106,8 +106,9 @@ describe("in-memory adapters", () => {
         tenantId: "acme",
         doctype: "Note",
         filters: [
-          { field: "priority", value: "High" },
-          { field: "count", operator: "gte", value: 2 }
+          { field: "priority", operator: "ne", value: "Low" },
+          { field: "count", operator: "gt", value: 2 },
+          { field: "count", operator: "lt", value: 10 }
         ],
         limit: 1
       })

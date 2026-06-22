@@ -686,17 +686,17 @@ describe("resource api", () => {
     await app.request("/api/resource/Note", {
       method: "POST",
       headers: userHeaders,
-      body: JSON.stringify({ title: "HTTP High", priority: "High", body: "Escalated" })
+      body: JSON.stringify({ title: "HTTP High", priority: "High", body: "Escalated", count: 7 })
     });
     await app.request("/api/resource/Note", {
       method: "POST",
       headers: userHeaders,
-      body: JSON.stringify({ title: "HTTP Low", priority: "Low", body: "Routine" })
+      body: JSON.stringify({ title: "HTTP Low", priority: "Low", body: "Routine", count: 1 })
     });
     await app.request("/api/resource/Note", {
       method: "POST",
       headers: userHeaders,
-      body: JSON.stringify({ title: "HTTP Closed High", priority: "High", workflow_state: "Closed", body: "Closed" })
+      body: JSON.stringify({ title: "HTTP Closed High", priority: "High", workflow_state: "Closed", body: "Closed", count: 3 })
     });
 
     const response = await app.request("/api/resource/Note?filter_priority=High", { headers: userHeaders });
@@ -727,6 +727,15 @@ describe("resource api", () => {
       "HTTP Closed High",
       "HTTP High"
     ]);
+
+    const advanced = await app.request("/api/resource/Note?filter_priority__ne=Low&filter_count__gt=2&filter_count__lt=9", {
+      headers: userHeaders
+    });
+    expect(advanced.status).toBe(200);
+    await expect(advanced.json()).resolves.toMatchObject({
+      data: [{ name: "HTTP High" }],
+      total: 1
+    });
   });
 
   it("saves and applies resource list filters through the API", async () => {

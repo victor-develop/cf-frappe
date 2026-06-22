@@ -343,17 +343,17 @@ describe("Desk app", () => {
     await services.documents.create({
       actor: owner,
       doctype: "Note",
-      data: data({ title: "Desk High", priority: "High", body: "Hidden body" })
+      data: data({ title: "Desk High", priority: "High", body: "Hidden body", count: 7 })
     });
     await services.documents.create({
       actor: owner,
       doctype: "Note",
-      data: data({ title: "Desk Low", priority: "Low", body: "Routine" })
+      data: data({ title: "Desk Low", priority: "Low", body: "Routine", count: 1 })
     });
     await services.documents.create({
       actor: owner,
       doctype: "Note",
-      data: data({ title: "Desk Closed High", priority: "High", workflow_state: "Closed", body: "Closed" })
+      data: data({ title: "Desk Closed High", priority: "High", workflow_state: "Closed", body: "Closed", count: 3 })
     });
 
     const response = await app.request("/desk/Note?filter_priority=High");
@@ -366,7 +366,11 @@ describe("Desk app", () => {
     expect(html).not.toContain("Hidden body");
     expect(html).toContain("<th>title</th><th>priority</th><th>workflow_state</th>");
     expect(html).toContain('name="filter_title__contains"');
+    expect(html).toContain('name="filter_title__ne"');
     expect(html).toContain('name="filter_priority"');
+    expect(html).toContain('name="filter_priority__ne"');
+    expect(html).toContain('name="filter_count__gte"');
+    expect(html).toContain('name="filter_count__lte"');
     expect(html).toContain('<option value="High" selected>High</option>');
     expect(html).toContain('<option value="Open" selected>Open</option>');
     expect(html).toContain("/desk/Note?default_filters=0");
@@ -377,6 +381,16 @@ describe("Desk app", () => {
     expect(closedHtml).toContain("Desk Closed High");
     expect(closedHtml).not.toContain("Desk High");
     expect(closedHtml).toContain('<option value="Closed" selected>Closed</option>');
+
+    const advanced = await app.request("/desk/Note?filter_priority__ne=Low&filter_count__gte=2&filter_count__lte=8");
+    expect(advanced.status).toBe(200);
+    const advancedHtml = await advanced.text();
+    expect(advancedHtml).toContain("Desk High");
+    expect(advancedHtml).not.toContain("Desk Low");
+    expect(advancedHtml).not.toContain("Desk Closed High");
+    expect(advancedHtml).toContain('<option value="Low" selected>Low</option>');
+    expect(advancedHtml).toContain('name="filter_count__gte" value="2"');
+    expect(advancedHtml).toContain('name="filter_count__lte" value="8"');
   });
 
   it("saves, applies, and deletes Desk list filters", async () => {

@@ -58,6 +58,19 @@ describe("QueryService", () => {
     await expect(
       queries.listDocuments(owner, "Note", { filters: [{ field: "count", operator: "gte", value: "2" }] })
     ).resolves.toMatchObject({ data: [{ name: "Urgent Launch" }], total: 1 });
+
+    await expect(
+      queries.listDocuments(owner, "Note", { filters: [{ field: "priority", operator: "ne", value: "Low" }] })
+    ).resolves.toMatchObject({ data: [{ name: "Urgent Launch" }], total: 1 });
+
+    await expect(
+      queries.listDocuments(owner, "Note", {
+        filters: [
+          { field: "count", operator: "gt", value: 2 },
+          { field: "count", operator: "lt", value: 9 }
+        ]
+      })
+    ).resolves.toMatchObject({ data: [{ name: "Urgent Launch" }], total: 1 });
   });
 
   it("rejects list filters that are not declared by the DocType", async () => {
@@ -79,6 +92,13 @@ describe("QueryService", () => {
     ).rejects.toMatchObject({
       code: "BAD_REQUEST",
       message: "Filter 'count' must be an integer"
+    });
+
+    await expect(
+      queries.listDocuments(owner, "Note", { filters: [{ field: "count", operator: "contains", value: "2" }] })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Filter 'count' does not support contains"
     });
   });
 

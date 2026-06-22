@@ -1160,12 +1160,20 @@ function inputType(field: FieldDefinition): string {
 }
 
 function renderFilterField(field: FieldDefinition, filters: readonly ListDocumentsFilter[]): string {
+  return filterControlsForField(field).map((control) => renderFilterControl(field, filters, control)).join("");
+}
+
+function renderFilterControl(
+  field: FieldDefinition,
+  filters: readonly ListDocumentsFilter[],
+  control: { readonly operator: ListFilterOperator; readonly labelSuffix?: string }
+): string {
   const id = `filter-${slug(field.name)}`;
-  const label = escapeHtml(field.label ?? field.name);
-  const operator = filterOperatorForField(field);
+  const label = escapeHtml(`${field.label ?? field.name}${control.labelSuffix ? ` ${control.labelSuffix}` : ""}`);
+  const operator = control.operator;
   const name = `filter_${field.name}${operator === "eq" ? "" : `__${operator}`}`;
   const value = currentFilterValue(filters, field.name, operator);
-  const common = `id="${id}" name="${escapeHtml(name)}"`;
+  const common = `id="${id}-${operator}" name="${escapeHtml(name)}"`;
   if (field.type === "select") {
     const options = [`<option value=""></option>`]
       .concat(
@@ -1175,7 +1183,7 @@ function renderFilterField(field: FieldDefinition, filters: readonly ListDocumen
         )
       )
       .join("");
-    return `<label class="field" for="${id}"><span>${label}</span><select ${common}>${options}</select></label>`;
+    return `<label class="field" for="${id}-${operator}"><span>${label}</span><select ${common}>${options}</select></label>`;
   }
   if (field.type === "boolean") {
     const options = [
@@ -1183,13 +1191,36 @@ function renderFilterField(field: FieldDefinition, filters: readonly ListDocumen
       `<option value="true"${value === "true" ? " selected" : ""}>True</option>`,
       `<option value="false"${value === "false" ? " selected" : ""}>False</option>`
     ].join("");
-    return `<label class="field" for="${id}"><span>${label}</span><select ${common}>${options}</select></label>`;
+    return `<label class="field" for="${id}-${operator}"><span>${label}</span><select ${common}>${options}</select></label>`;
   }
-  return `<label class="field" for="${id}"><span>${label}</span><input type="${inputType(field)}" ${common} value="${escapeHtml(value)}"></label>`;
+  return `<label class="field" for="${id}-${operator}"><span>${label}</span><input type="${inputType(field)}" ${common} value="${escapeHtml(value)}"></label>`;
 }
 
-function filterOperatorForField(field: FieldDefinition): ListFilterOperator {
-  return field.type === "text" || field.type === "longText" || field.type === "link" ? "contains" : "eq";
+function filterControlsForField(
+  field: FieldDefinition
+): readonly { readonly operator: ListFilterOperator; readonly labelSuffix?: string }[] {
+  switch (field.type) {
+    case "text":
+    case "longText":
+    case "link":
+      return [
+        { operator: "contains" },
+        { operator: "ne", labelSuffix: "is not" }
+      ];
+    case "integer":
+    case "number":
+    case "date":
+    case "datetime":
+      return [
+        { operator: "gte", labelSuffix: "from" },
+        { operator: "lte", labelSuffix: "to" }
+      ];
+    default:
+      return [
+        { operator: "eq" },
+        { operator: "ne", labelSuffix: "is not" }
+      ];
+  }
 }
 
 function currentFilterValue(

@@ -1,4 +1,5 @@
 import { badRequest } from "../../core/errors";
+import { LIST_FILTER_OPERATORS } from "../../core/list-view";
 import type { DocumentData, ListDocumentsFilter, ListFilterOperator, MutableDocumentData } from "../../core/types";
 
 export function parseOptionalInteger(value: string | undefined): number | undefined {
@@ -111,7 +112,7 @@ function parseFilterKey(key: string): { readonly field: string; readonly operato
     return null;
   }
   const raw = key.slice("filter_".length);
-  for (const operator of ["contains", "gte", "lte"] as const) {
+  for (const operator of LIST_FILTER_OPERATORS.filter((item) => item !== "eq")) {
     const suffix = `__${operator}`;
     if (raw.endsWith(suffix)) {
       return { field: raw.slice(0, -suffix.length), operator };

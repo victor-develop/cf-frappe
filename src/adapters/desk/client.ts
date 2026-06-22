@@ -49,12 +49,28 @@ export function renderDeskClientScript(): string {
       }
     });
     Object.entries((options && options.filters) || {}).forEach(function (entry) {
-      var value = entry[1];
-      if (value !== undefined && value !== null) {
-        params["filter_" + entry[0]] = value;
-      }
+      appendFilterParams(params, entry[0], entry[1]);
     });
     return params;
+  }
+
+  function appendFilterParams(params, field, value) {
+    if (value === undefined || value === null) {
+      return;
+    }
+    if (isPlainObject(value)) {
+      Object.entries(value).forEach(function (entry) {
+        if (entry[1] !== undefined && entry[1] !== null) {
+          params["filter_" + field + (entry[0] === "eq" ? "" : "__" + entry[0])] = entry[1];
+        }
+      });
+      return;
+    }
+    params["filter_" + field] = value;
+  }
+
+  function isPlainObject(value) {
+    return Object.prototype.toString.call(value) === "[object Object]";
   }
 
   async function request(path, options) {

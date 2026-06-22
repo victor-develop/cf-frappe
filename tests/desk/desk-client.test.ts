@@ -30,6 +30,7 @@ interface DeskClientRuntime {
       action: string,
       options: { readonly expectedVersion: number }
     ) => Promise<unknown>;
+    readonly list: (doctype: string, options: { readonly filters: Record<string, unknown> }) => Promise<unknown>;
     readonly update: (
       doctype: string,
       name: string,
@@ -94,6 +95,28 @@ describe("Desk client runtime", () => {
       JSON.stringify({ title: "Queued", expectedVersion: 8 }),
       JSON.stringify({ assignee: "ops", expectedVersion: 9 })
     ]);
+  });
+
+  it("maps resource list filter operators to query parameters", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: [] }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await runtime.resource.list("Task", {
+      filters: {
+        priority: { ne: "Low" },
+        count: { gt: 2, lt: 9 },
+        title: "Launch"
+      }
+    });
+
+    expect(calls[0]?.url).toBe(
+      "/api/resource/Task?filter_priority__ne=Low&filter_count__gt=2&filter_count__lt=9&filter_title=Launch"
+    );
   });
 
   it("exposes client-script context and WebSocket realtime URLs", () => {

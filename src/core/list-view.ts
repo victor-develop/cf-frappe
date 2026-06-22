@@ -10,6 +10,11 @@ import type {
 
 export const DEFAULT_LIST_PAGE_SIZE = 50;
 export const MAX_LIST_PAGE_SIZE = 200;
+export const LIST_FILTER_OPERATORS = ["eq", "ne", "contains", "gt", "gte", "lt", "lte"] as const;
+
+export function isListFilterOperator(operator: unknown): operator is ListFilterOperator {
+  return typeof operator === "string" && LIST_FILTER_OPERATORS.includes(operator as ListFilterOperator);
+}
 
 interface NormalizeListFiltersOptions {
   readonly errorCode?: FrameworkErrorCode;
@@ -52,8 +57,8 @@ export function normalizeListFilters(
       });
     }
     const operator = normalizeFilterOperator(filter.operator, errorCode);
-    if (field.type === "boolean" && operator !== "eq") {
-      throw new FrameworkError(errorCode, `Boolean filter '${filter.field}' only supports eq`, {
+    if (!operatorAllowedForField(field, operator)) {
+      throw new FrameworkError(errorCode, `Filter '${filter.field}' does not support ${operator}`, {
         status: 400
       });
     }
@@ -75,8 +80,19 @@ export function mergeListFilters(
   if (overrides.length === 0) {
     return defaults;
   }
-  const overrideFields = new Set(overrides.map((filter) => filter.field));
-  return [...defaults.filter((filter) => !overrideFields.has(filter.field)), ...overrides];
+  return [
+    ...defaults.filter((filter) => !overrides.some((override) => filterIsOverridden(filter, override))),
+    ...overrides
+  ];
+}
+
+function filterIsOverridden(defaultFilter: ListDocumentsFilter, overrideFilter: ListDocumentsFilter): boolean {
+  if (defaultFilter.field !== overrideFilter.field) {
+    return false;
+  }
+  const defaultOperator = defaultFilter.operator ?? "eq";
+  const overrideOperator = overrideFilter.operator ?? "eq";
+  return defaultOperator === overrideOperator || defaultOperator === "eq" || overrideOperator === "eq";
 }
 
 function resolveListColumns(doctype: DocTypeDefinition): readonly FieldDefinition[] {
@@ -151,10 +167,20 @@ function normalizeFilterOperator(operator: unknown, errorCode: FrameworkErrorCod
   if (operator === undefined) {
     return "eq";
   }
-  if (operator === "eq" || operator === "contains" || operator === "gte" || operator === "lte") {
+  if (isListFilterOperator(operator)) {
     return operator;
   }
   throw new FrameworkError(errorCode, `Unsupported list filter operator '${String(operator)}'`, { status: 400 });
+}
+
+function operatorAllowedForField(field: FieldDefinition, operator: ListFilterOperator): boolean {
+  if (operator === "eq" || operator === "ne") {
+    return true;
+  }
+  if (operator === "contains") {
+    return field.type === "text" || field.type === "longText" || field.type === "link";
+  }
+  return field.type === "integer" || field.type === "number" || field.type === "date" || field.type === "datetime";
 }
 
 function coerceFilterValue(

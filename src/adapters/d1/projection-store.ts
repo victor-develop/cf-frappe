@@ -104,12 +104,24 @@ function listFilterWhere(filters: readonly ListDocumentsFilter[]): ListFilterWhe
         conditions.push(`${expression} = ?`);
         params.push(sqliteJsonValue(filter.value));
         break;
+      case "ne":
+        conditions.push(`${expression} IS NOT NULL AND ${expression} != ?`);
+        params.push(sqliteJsonValue(filter.value));
+        break;
       case "contains":
         conditions.push(`LOWER(CAST(${expression} AS TEXT)) LIKE ? ESCAPE '\\'`);
         params.push(`%${escapeLike(String(filter.value).toLowerCase())}%`);
         break;
+      case "gt":
+        conditions.push(`${expression} > ?`);
+        params.push(sqliteJsonValue(filter.value));
+        break;
       case "gte":
         conditions.push(`${expression} >= ?`);
+        params.push(sqliteJsonValue(filter.value));
+        break;
+      case "lt":
+        conditions.push(`${expression} < ?`);
         params.push(sqliteJsonValue(filter.value));
         break;
       case "lte":
