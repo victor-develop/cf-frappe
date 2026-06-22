@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the event-sourced user account/login slice:
+As of the generated Desk user account administration slice:
 
 - Vitest files: `55`
-- Vitest cases: `430`
+- Vitest cases: `434`
 
 ## Implication
 

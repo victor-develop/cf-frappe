@@ -10,6 +10,7 @@ import { QueryService } from "../../application/query-service";
 import type { ReportService } from "../../application/report-service";
 import type { SavedListFilterService } from "../../application/saved-list-filter-service";
 import type { SavedReportDefinition, SavedReportService } from "../../application/saved-report-service";
+import type { UserAccountService } from "../../application/user-account-service";
 import type { UserPermissionService } from "../../application/user-permission-service";
 import { FrameworkError } from "../../core/errors";
 import { can } from "../../core/permissions";
@@ -55,6 +56,7 @@ import {
   renderReportView,
   renderSavedReportBuilder,
   renderSavedReportView,
+  renderUserAccountAdmin,
   renderUserPermissionAdmin,
   type FormLifecycleAction,
   type FormLinkOptions,
@@ -94,6 +96,7 @@ export interface DeskAppOptions {
   readonly timeline?: DocumentHistoryService;
   readonly savedFilters?: SavedListFilterService;
   readonly savedReports?: SavedReportService;
+  readonly userAccounts?: UserAccountService;
   readonly userPermissions?: UserPermissionService;
   readonly reports?: ReportService;
   readonly jobs?: JobHistoryService;
@@ -243,6 +246,29 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     );
   });
 
+  app.get("/desk/admin/users", async (c) => {
+    const userAccounts = requireUserAccounts(options);
+    const actor = await options.actor(c.req.raw);
+    userAccounts.authorizeAdministration(actor);
+    const url = new URL(c.req.url);
+    const selectedUserId = url.searchParams.get("user")?.trim() ?? "";
+    if (!selectedUserId) {
+      return renderDeskUserAccountPage(options, actor, { selectedUserId });
+    }
+    try {
+      const account = await userAccounts.get(actor, selectedUserId);
+      return renderDeskUserAccountPage(options, actor, { selectedUserId, account });
+    } catch (error) {
+      if (error instanceof FrameworkError && error.status === 404) {
+        return renderDeskUserAccountPage(options, actor, {
+          selectedUserId,
+          error: error.message
+        });
+      }
+      throw error;
+    }
+  });
+
   app.get("/desk/admin/jobs", async (c) => {
     const jobs = requireJobs(options);
     const actor = await options.actor(c.req.raw);
@@ -341,6 +367,107 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       metadata: requestMetadata(c.req.raw)
     });
     return c.redirect(`/desk/admin/user-permissions?user=${encodeURIComponent(form.userId)}`, 303);
+  });
+
+  app.post("/desk/admin/users", async (c) => {
+    const userAccounts = requireUserAccounts(options);
+    const actor = await options.actor(c.req.raw);
+    userAccounts.authorizeAdministration(actor);
+    let form: ParsedDeskCreateUserAccount | undefined;
+    try {
+      form = await parseDeskCreateUserAccount(c.req.raw);
+      await userAccounts.create({
+        actor,
+        userId: form.userId,
+        ...(form.email === undefined ? {} : { email: form.email }),
+        password: form.password,
+        roles: form.roles,
+        ...(form.enabled === undefined ? {} : { enabled: form.enabled }),
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(`/desk/admin/users?user=${encodeURIComponent(form.userId)}`, 303);
+    } catch (error) {
+      return renderDeskUserAccountFailure(options, actor, userAccounts, form?.userId ?? "", error);
+    }
+  });
+
+  app.post("/desk/admin/users/password", async (c) => {
+    const userAccounts = requireUserAccounts(options);
+    const actor = await options.actor(c.req.raw);
+    userAccounts.authorizeAdministration(actor);
+    let form: ParsedDeskChangeUserPassword | undefined;
+    try {
+      form = await parseDeskChangeUserPassword(c.req.raw);
+      await userAccounts.changePassword({
+        actor,
+        userId: form.userId,
+        password: form.password,
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(`/desk/admin/users?user=${encodeURIComponent(form.userId)}`, 303);
+    } catch (error) {
+      return renderDeskUserAccountFailure(options, actor, userAccounts, form?.userId ?? "", error);
+    }
+  });
+
+  app.post("/desk/admin/users/roles", async (c) => {
+    const userAccounts = requireUserAccounts(options);
+    const actor = await options.actor(c.req.raw);
+    userAccounts.authorizeAdministration(actor);
+    let form: ParsedDeskChangeUserRoles | undefined;
+    try {
+      form = await parseDeskChangeUserRoles(c.req.raw);
+      await userAccounts.changeRoles({
+        actor,
+        userId: form.userId,
+        roles: form.roles,
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(`/desk/admin/users?user=${encodeURIComponent(form.userId)}`, 303);
+    } catch (error) {
+      return renderDeskUserAccountFailure(options, actor, userAccounts, form?.userId ?? "", error);
+    }
+  });
+
+  app.post("/desk/admin/users/enable", async (c) => {
+    const userAccounts = requireUserAccounts(options);
+    const actor = await options.actor(c.req.raw);
+    userAccounts.authorizeAdministration(actor);
+    let form: ParsedDeskSetUserEnabled | undefined;
+    try {
+      form = await parseDeskSetUserEnabled(c.req.raw);
+      await userAccounts.enable({
+        actor,
+        userId: form.userId,
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(`/desk/admin/users?user=${encodeURIComponent(form.userId)}`, 303);
+    } catch (error) {
+      return renderDeskUserAccountFailure(options, actor, userAccounts, form?.userId ?? "", error);
+    }
+  });
+
+  app.post("/desk/admin/users/disable", async (c) => {
+    const userAccounts = requireUserAccounts(options);
+    const actor = await options.actor(c.req.raw);
+    userAccounts.authorizeAdministration(actor);
+    let form: ParsedDeskSetUserEnabled | undefined;
+    try {
+      form = await parseDeskSetUserEnabled(c.req.raw);
+      await userAccounts.disable({
+        actor,
+        userId: form.userId,
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(`/desk/admin/users?user=${encodeURIComponent(form.userId)}`, 303);
+    } catch (error) {
+      return renderDeskUserAccountFailure(options, actor, userAccounts, form?.userId ?? "", error);
+    }
   });
 
   app.get("/desk/report-builder/:doctype", async (c) => {
@@ -992,6 +1119,13 @@ function requireUserPermissions(options: DeskAppOptions): UserPermissionService 
   return options.userPermissions;
 }
 
+function requireUserAccounts(options: DeskAppOptions): UserAccountService {
+  if (!options.userAccounts) {
+    throw new FrameworkError("DOCUMENT_NOT_FOUND", "User accounts are not enabled", { status: 404 });
+  }
+  return options.userAccounts;
+}
+
 function requireJobs(options: DeskAppOptions): JobHistoryService {
   if (!options.jobs) {
     throw new FrameworkError("JOB_NOT_FOUND", "Jobs are not enabled", { status: 404 });
@@ -1085,6 +1219,51 @@ async function renderDeskSavedReportBuilderFailure(
       showFiles: options.files !== undefined,
       body: renderSavedReportBuilder(doctype, saved, { error: message })
     }),
+    error instanceof FrameworkError ? error.status : 500
+  );
+}
+
+async function renderDeskUserAccountPage(
+  options: DeskAppOptions,
+  actor: Actor,
+  state: Parameters<typeof renderUserAccountAdmin>[0],
+  status = 200
+): Promise<Response> {
+  const doctypes = options.queries.listDoctypes(actor);
+  const reports = listReports(options, actor);
+  return html(
+    renderDeskLayout({
+      title: "Users",
+      doctypes,
+      reports,
+      body: renderUserAccountAdmin(state)
+    }),
+    status
+  );
+}
+
+async function renderDeskUserAccountFailure(
+  options: DeskAppOptions,
+  actor: Actor,
+  userAccounts: UserAccountService,
+  selectedUserId: string,
+  error: unknown
+): Promise<Response> {
+  if (error instanceof FrameworkError && error.status === 403) {
+    throw error;
+  }
+  const account = selectedUserId
+    ? await userAccounts.get(actor, selectedUserId).catch(() => undefined)
+    : undefined;
+  const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
+  return renderDeskUserAccountPage(
+    options,
+    actor,
+    {
+      selectedUserId,
+      ...(account === undefined ? {} : { account }),
+      error: message
+    },
     error instanceof FrameworkError ? error.status : 500
   );
 }
@@ -1193,6 +1372,32 @@ interface ParsedDeskUserPermission {
   readonly targetDoctype: string;
   readonly targetName: string;
   readonly applicableDoctypes: readonly string[];
+  readonly expectedVersion?: number;
+}
+
+interface ParsedDeskCreateUserAccount {
+  readonly userId: string;
+  readonly email?: string;
+  readonly password: string;
+  readonly roles: readonly string[];
+  readonly enabled?: boolean;
+  readonly expectedVersion?: number;
+}
+
+interface ParsedDeskChangeUserPassword {
+  readonly userId: string;
+  readonly password: string;
+  readonly expectedVersion?: number;
+}
+
+interface ParsedDeskChangeUserRoles {
+  readonly userId: string;
+  readonly roles: readonly string[];
+  readonly expectedVersion?: number;
+}
+
+interface ParsedDeskSetUserEnabled {
+  readonly userId: string;
   readonly expectedVersion?: number;
 }
 
@@ -1336,6 +1541,50 @@ async function parseDeskUserPermission(request: Request): Promise<ParsedDeskUser
   };
 }
 
+async function parseDeskCreateUserAccount(request: Request): Promise<ParsedDeskCreateUserAccount> {
+  const form = await readUrlEncodedDeskForm(request);
+  const email = stringSearchParamValue(form, "email");
+  const enabled = optionalBooleanSearchParamValue(form, "enabled", "enabled");
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  return {
+    userId: form.get("user") ?? "",
+    ...(email === undefined ? {} : { email }),
+    password: form.get("password") ?? "",
+    roles: commaListFormValue(form.get("roles")),
+    ...(enabled === undefined ? {} : { enabled }),
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
+async function parseDeskChangeUserPassword(request: Request): Promise<ParsedDeskChangeUserPassword> {
+  const form = await readUrlEncodedDeskForm(request);
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  return {
+    userId: form.get("user") ?? "",
+    password: form.get("password") ?? "",
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
+async function parseDeskChangeUserRoles(request: Request): Promise<ParsedDeskChangeUserRoles> {
+  const form = await readUrlEncodedDeskForm(request);
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  return {
+    userId: form.get("user") ?? "",
+    roles: commaListFormValue(form.get("roles")),
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
+async function parseDeskSetUserEnabled(request: Request): Promise<ParsedDeskSetUserEnabled> {
+  const form = await readUrlEncodedDeskForm(request);
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  return {
+    userId: form.get("user") ?? "",
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
 async function parseDeskForm(
   request: Request,
   doctype: DocTypeDefinition,
@@ -1395,6 +1644,20 @@ function uniqueFormValues(form: URLSearchParams, key: string): readonly string[]
 function stringSearchParamValue(form: URLSearchParams, key: string): string | undefined {
   const value = form.get(key)?.trim();
   return value ? value : undefined;
+}
+
+function optionalBooleanSearchParamValue(form: URLSearchParams, key: string, label: string): boolean | undefined {
+  const value = stringSearchParamValue(form, key);
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === "true" || value === "1") {
+    return true;
+  }
+  if (value === "false" || value === "0") {
+    return false;
+  }
+  throw new FrameworkError("BAD_REQUEST", `${label} must be true or false`, { status: 400 });
 }
 
 function reportColumnFor(

@@ -164,6 +164,59 @@ describe("CloudFrappe Worker routing", () => {
     expect(response.headers.get("set-cookie")).toContain("cf_frappe_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
   });
 
+  it("mounts auth-backed Desk user account administration in the Worker factory", async () => {
+    const worker = createCloudFrappeWorker<CloudFrappeAuthTestEnv>({
+      registry: createTestRegistry(),
+      actor: () => ({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" }),
+      auth: {
+        sessionSecret: (env) => env.SESSION_SECRET,
+        sessionMaxAgeSeconds: 60,
+        secure: false,
+        passwords: deterministicPasswords(),
+        ids: deterministicIds(["account-1"]),
+        clock: fixedClock(now)
+      }
+    });
+    const env = { DB: fakeEventD1(), AGGREGATES: fakeNamespace(), SESSION_SECRET: "edge-secret" };
+
+    const empty = await worker.fetch!(
+      cfRequest("http://localhost/desk/admin/users"),
+      env,
+      fakeExecutionContext()
+    );
+    expect(empty.status).toBe(200);
+    await expect(empty.text()).resolves.toContain("Create User");
+
+    const created = await worker.fetch!(
+      cfRequest("http://localhost/desk/admin/users", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          user: "worker@example.com",
+          password: "secret-123",
+          roles: "User",
+          enabled: "true",
+          expectedVersion: "0"
+        })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(created.status).toBe(303);
+    expect(created.headers.get("location")).toBe("/desk/admin/users?user=worker%40example.com");
+
+    const loaded = await worker.fetch!(
+      cfRequest("http://localhost/desk/admin/users?user=worker%40example.com"),
+      env,
+      fakeExecutionContext()
+    );
+    expect(loaded.status).toBe(200);
+    const html = await loaded.text();
+    expect(html).toContain("worker@example.com");
+    expect(html).toContain('action="/desk/admin/users/disable"');
+    expect(html).not.toContain("hash:secret-123");
+  });
+
   it("logs in and revalidates account sessions through Worker auth configuration", async () => {
     const worker = createCloudFrappeWorker<CloudFrappeAuthTestEnv>({
       registry: createTestRegistry(),

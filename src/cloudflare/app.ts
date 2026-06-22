@@ -332,6 +332,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     timeline: restrictedHistory,
     savedFilters,
     savedReports,
+    ...(userAccounts === undefined ? {} : { userAccounts }),
     userPermissions,
     reports,
     ...(jobHistory === undefined ? {} : { jobs: jobHistory }),

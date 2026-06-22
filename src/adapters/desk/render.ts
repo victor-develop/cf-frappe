@@ -29,6 +29,7 @@ import type { ReportRunResult } from "../../application/report-service";
 import type { SavedListFilter } from "../../application/saved-list-filter-service";
 import type { SavedReport } from "../../application/saved-report-service";
 import type { PrintFormatDefinition } from "../../core/print-format";
+import type { UserAccount } from "../../core/user-accounts";
 import type { UserPermissionState } from "../../core/user-permissions";
 import { DESK_CLIENT_SCRIPT_PATH } from "./client";
 import {
@@ -450,6 +451,82 @@ export function renderUserPermissionAdmin(state: UserPermissionState): string {
       </table>
     </div>
   </section>`;
+}
+
+export interface UserAccountAdminState {
+  readonly selectedUserId: string;
+  readonly account?: UserAccount;
+  readonly error?: string;
+}
+
+export function renderUserAccountAdmin(state: UserAccountAdminState): string {
+  const account = state.account;
+  const selectedUserId = account?.userId ?? state.selectedUserId;
+  const createUserId = account ? "" : selectedUserId;
+  const rows = account
+    ? `<tr>
+        <td>${escapeHtml(account.userId)}</td>
+        <td>${escapeHtml(account.email ?? "")}</td>
+        <td>${escapeHtml(account.roles.join(", "))}</td>
+        <td>${account.enabled ? "enabled" : "disabled"}</td>
+        <td>${String(account.version)}</td>
+        <td>${escapeHtml(account.updatedAt ?? account.createdAt ?? "")}</td>
+      </tr>`
+    : "";
+  const accountTools = account
+    ? `<form class="panel form" method="post" action="/desk/admin/users/password">
+      <input type="hidden" name="user" value="${escapeHtml(account.userId)}">
+      <input type="hidden" name="expectedVersion" value="${String(account.version)}">
+      <div class="form-head"><h2>Password</h2></div>
+      <div class="fields cols-1">
+        <label class="field"><span>New Password</span><input name="password" type="password" autocomplete="new-password"></label>
+      </div>
+      <div class="actions"><button class="button primary" type="submit">Change Password</button></div>
+    </form>
+    <form class="panel form" method="post" action="/desk/admin/users/roles">
+      <input type="hidden" name="user" value="${escapeHtml(account.userId)}">
+      <input type="hidden" name="expectedVersion" value="${String(account.version)}">
+      <div class="form-head"><h2>Roles</h2></div>
+      <div class="fields cols-1">
+        <label class="field"><span>Roles</span><input name="roles" value="${escapeHtml(account.roles.join(", "))}"></label>
+      </div>
+      <div class="actions"><button class="button primary" type="submit">Save Roles</button></div>
+    </form>
+    <form class="panel form" method="post" action="/desk/admin/users/${account.enabled ? "disable" : "enable"}">
+      <input type="hidden" name="user" value="${escapeHtml(account.userId)}">
+      <input type="hidden" name="expectedVersion" value="${String(account.version)}">
+      <div class="form-head"><h2>Status</h2><p>v${String(account.version)} · ${account.enabled ? "enabled" : "disabled"}</p></div>
+      <div class="actions"><button class="button ${account.enabled ? "danger" : "primary"}" type="submit">${account.enabled ? "Disable" : "Enable"}</button></div>
+    </form>`
+    : "";
+  return `<form class="panel form" method="get" action="/desk/admin/users">
+    <div class="fields cols-1">
+      <label class="field"><span>User</span><input name="user" type="email" value="${escapeHtml(selectedUserId)}"></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Load</button></div>
+  </form>
+  ${state.error ? `<p class="error" role="alert">${escapeHtml(state.error)}</p>` : ""}
+  <form class="panel form" method="post" action="/desk/admin/users">
+    <input type="hidden" name="expectedVersion" value="0">
+    <div class="form-head"><h2>Create User</h2></div>
+    <div class="fields">
+      <label class="field"><span>User</span><input name="user" type="email" value="${escapeHtml(createUserId)}"></label>
+      <label class="field"><span>Email</span><input name="email" type="email"></label>
+      <label class="field"><span>Password</span><input name="password" type="password" autocomplete="new-password"></label>
+      <label class="field"><span>Roles</span><input name="roles" value=""></label>
+      <label class="field"><span>Status</span><select name="enabled"><option value="true" selected>Enabled</option><option value="false">Disabled</option></select></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Create</button></div>
+  </form>
+  <section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>User</th><th>Email</th><th>Roles</th><th>Status</th><th>Version</th><th>Updated</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="6" class="empty">No account loaded.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>
+  ${accountTools}`;
 }
 
 export function renderJobAdmin(

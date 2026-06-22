@@ -19,7 +19,9 @@ import {
   JobRetryService,
   JobScheduleService,
   QueryService,
-  SYSTEM_MANAGER_ROLE
+  SYSTEM_MANAGER_ROLE,
+  UserAccountService,
+  type PasswordHasher
 } from "../../src";
 import { createChildTableServices, createLinkedServices, createServices, data, guest, now, owner } from "../helpers";
 
@@ -39,6 +41,30 @@ describe("Desk app", () => {
       actor: () => actor
     });
     return { app, services };
+  }
+
+  function makeAccountDesk(actor = owner) {
+    const services = createServices(["e1", "e2", "e3", "e4"]);
+    const userAccounts = new UserAccountService({
+      events: services.store,
+      passwords: deterministicPasswords(),
+      ids: deterministicIds(["account-1", "password-1", "roles-1", "disable-1", "enable-1"]),
+      clock: fixedClock(now)
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      prints: services.prints,
+      queries: services.queries,
+      reports: services.reports,
+      timeline: services.history,
+      savedFilters: services.savedFilters,
+      savedReports: services.savedReports,
+      userAccounts,
+      userPermissions: services.userPermissions,
+      actor: () => actor
+    });
+    return { app, services: { ...services, userAccounts } };
   }
 
   function makeLinkedDesk() {
@@ -716,6 +742,160 @@ describe("Desk app", () => {
       version: 2,
       grants: []
     });
+  });
+
+  it("renders and mutates user accounts from the Desk admin surface", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
+    const { app, services } = makeAccountDesk(admin);
+
+    const empty = await app.request("/desk/admin/users");
+    expect(empty.status).toBe(200);
+    const emptyHtml = await empty.text();
+    expect(emptyHtml).toContain("Users");
+    expect(emptyHtml).toContain("Create User");
+    expect(emptyHtml).toContain('name="roles"');
+    expect(emptyHtml).toContain("No account loaded.");
+
+    const created = await app.request("/desk/admin/users", {
+      method: "POST",
+      body: new URLSearchParams({
+        user: owner.id,
+        email: "OWNER@EXAMPLE.COM",
+        password: "secret-123",
+        roles: "User, Task Manager",
+        enabled: "true",
+        expectedVersion: "0"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(created.status).toBe(303);
+    expect(created.headers.get("location")).toBe("/desk/admin/users?user=owner%40example.com");
+    await expect(services.userAccounts.get(admin, owner.id)).resolves.toMatchObject({
+      version: 1,
+      email: "owner@example.com",
+      roles: ["Task Manager", "User"],
+      enabled: true
+    });
+
+    const current = await app.request("/desk/admin/users?user=owner%40example.com");
+    expect(current.status).toBe(200);
+    const currentHtml = await current.text();
+    expect(currentHtml).toContain("owner@example.com");
+    expect(currentHtml).toContain("Task Manager, User");
+    expect(currentHtml).toContain('name="expectedVersion" value="1"');
+    expect(currentHtml).toContain('action="/desk/admin/users/password"');
+    expect(currentHtml).toContain('action="/desk/admin/users/roles"');
+    expect(currentHtml).toContain('action="/desk/admin/users/disable"');
+    expect(currentHtml).not.toContain("hash:secret-123");
+
+    const roles = await app.request("/desk/admin/users/roles", {
+      method: "POST",
+      body: new URLSearchParams({
+        user: owner.id,
+        roles: "Support, User",
+        expectedVersion: "1"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(roles.status).toBe(303);
+    await expect(services.userAccounts.get(admin, owner.id)).resolves.toMatchObject({
+      version: 2,
+      roles: ["Support", "User"]
+    });
+
+    const stale = await app.request("/desk/admin/users/roles", {
+      method: "POST",
+      body: new URLSearchParams({
+        user: owner.id,
+        roles: "User",
+        expectedVersion: "1"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(stale.status).toBe(409);
+    const staleHtml = await stale.text();
+    expect(staleHtml).toContain("Expected user account &#39;owner@example.com&#39; at version 1, found 2");
+    expect(staleHtml).toContain('name="expectedVersion" value="2"');
+
+    const password = await app.request("/desk/admin/users/password", {
+      method: "POST",
+      body: new URLSearchParams({
+        user: owner.id,
+        password: "secret-456",
+        expectedVersion: "2"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(password.status).toBe(303);
+    await expect(services.userAccounts.authenticate({
+      tenantId: "acme",
+      userId: owner.id,
+      password: "secret-456"
+    })).resolves.toMatchObject({ id: owner.id, roles: ["Support", "User"] });
+    await expect(services.userAccounts.get(admin, owner.id)).resolves.toMatchObject({ version: 3 });
+
+    const disabled = await app.request("/desk/admin/users/disable", {
+      method: "POST",
+      body: new URLSearchParams({ user: owner.id, expectedVersion: "3" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(disabled.status).toBe(303);
+    await expect(services.userAccounts.get(admin, owner.id)).resolves.toMatchObject({
+      version: 4,
+      enabled: false
+    });
+
+    const disabledPage = await app.request("/desk/admin/users?user=owner%40example.com");
+    expect(disabledPage.status).toBe(200);
+    await expect(disabledPage.text()).resolves.toContain('action="/desk/admin/users/enable"');
+
+    const enabled = await app.request("/desk/admin/users/enable", {
+      method: "POST",
+      body: new URLSearchParams({ user: owner.id, expectedVersion: "4" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(enabled.status).toBe(303);
+    await expect(services.userAccounts.get(admin, owner.id)).resolves.toMatchObject({
+      version: 5,
+      enabled: true
+    });
+  });
+
+  it("requires user-account administrators for the Desk account surface", async () => {
+    const { app } = makeAccountDesk(owner);
+
+    const response = await app.request("/desk/admin/users");
+
+    expect(response.status).toBe(403);
+    const html = await response.text();
+    expect(html).toContain("cannot manage user accounts");
+    expect(html).toContain("cf-frappe Desk");
+  });
+
+  it("authorizes Desk account posts before parsing malformed forms", async () => {
+    const { app } = makeAccountDesk(owner);
+
+    const response = await app.request("/desk/admin/users", {
+      method: "POST",
+      body: new URLSearchParams({
+        user: "owner@example.com",
+        password: "secret-123",
+        roles: "User",
+        enabled: "maybe"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(response.status).toBe(403);
+    const html = await response.text();
+    expect(html).toContain("cannot manage user accounts");
+    expect(html).not.toContain("Create User");
   });
 
   it("renders job definitions and execution history from the Desk admin surface", async () => {
@@ -1442,3 +1622,14 @@ describe("Desk app", () => {
     expect(html).toContain("cf-frappe Desk");
   });
 });
+
+function deterministicPasswords(): PasswordHasher {
+  return {
+    async hash(password) {
+      return `hash:${password}`;
+    },
+    async verify(password, encodedHash) {
+      return encodedHash === `hash:${password}`;
+    }
+  };
+}

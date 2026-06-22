@@ -136,6 +136,11 @@ export class UserAccountService {
     return publicUserAccount(state);
   }
 
+  authorizeAdministration(actor: Actor, tenantId?: TenantId): void {
+    this.ensureAdmin(actor);
+    resolveActorTenant(actor, tenantId);
+  }
+
   async changePassword(command: ChangeUserPasswordCommand): Promise<UserAccount> {
     this.ensureAdmin(command.actor);
     const tenantId = resolveActorTenant(command.actor, command.tenantId);
