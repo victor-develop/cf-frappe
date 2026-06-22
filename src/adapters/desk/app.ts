@@ -394,6 +394,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         reports,
         body: renderJobScheduleAdmin(dashboard, {
           allowRun: schedules.canDispatch(),
+          allowOverride: schedules.canOverride(),
           showHistoryLink: options.jobs !== undefined
         })
       })
@@ -404,6 +405,20 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const schedules = requireJobSchedules(options);
     const actor = await options.actor(c.req.raw);
     await schedules.dispatch(actor, c.req.param("scheduleId"));
+    return c.redirect("/desk/admin/jobs/schedules", 303);
+  });
+
+  app.post("/desk/admin/jobs/schedules/:scheduleId/enable", async (c) => {
+    const schedules = requireJobSchedules(options);
+    const actor = await options.actor(c.req.raw);
+    await schedules.enable(actor, c.req.param("scheduleId"), { metadata: requestMetadata(c.req.raw) });
+    return c.redirect("/desk/admin/jobs/schedules", 303);
+  });
+
+  app.post("/desk/admin/jobs/schedules/:scheduleId/disable", async (c) => {
+    const schedules = requireJobSchedules(options);
+    const actor = await options.actor(c.req.raw);
+    await schedules.disable(actor, c.req.param("scheduleId"), { metadata: requestMetadata(c.req.raw) });
     return c.redirect("/desk/admin/jobs/schedules", 303);
   });
 

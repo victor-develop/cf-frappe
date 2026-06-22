@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file metadata update workflow slice:
+As of the runtime job schedule override slice:
 
 - Vitest files: `64`
-- Vitest cases: `526`
+- Vitest cases: `530`
 
 ## Implication
 

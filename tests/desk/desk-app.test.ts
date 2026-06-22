@@ -12,6 +12,7 @@ import {
   FileService,
   fixedClock,
   createJobRegistry,
+  InMemoryEventStore,
   InMemoryDocumentStore,
   InMemoryDataPatchLog,
   InMemoryFileStorage,
@@ -1429,6 +1430,59 @@ describe("Desk app", () => {
     expect(dispatched.status).toBe(303);
     expect(dispatched.headers.get("location")).toBe("/desk/admin/jobs/schedules");
     expect(runner).toHaveBeenCalledOnce();
+  });
+
+  it("renders and updates job schedule overrides from the Desk admin surface", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const services = createServices();
+    const jobs = createJobRegistry({
+      jobs: [{ name: "reports.daily", description: "Build reports", handler: () => undefined }]
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      jobSchedules: new JobScheduleService({
+        registry: jobs,
+        schedules: [
+          { id: "daily", cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" },
+          { id: "digest", cron: "0 3 * * *", jobName: "reports.daily", tenantId: "acme", enabled: false },
+          { id: "dynamic", cron: "0 4 * * *", jobName: "reports.daily", tenantId: "acme", enabled: () => true }
+        ],
+        events: new InMemoryEventStore(),
+        clock: fixedClock(now),
+        ids: deterministicIds(["disable-1", "enable-2"])
+      }),
+      actor: () => admin
+    });
+
+    const response = await app.request("/desk/admin/jobs/schedules");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("<th>Override</th>");
+    expect(html).toContain('formaction="/desk/admin/jobs/schedules/daily/disable"');
+    expect(html).toContain('formaction="/desk/admin/jobs/schedules/digest/enable"');
+    expect(html).not.toContain('formaction="/desk/admin/jobs/schedules/dynamic/disable"');
+    expect(html).not.toContain('formaction="/desk/admin/jobs/schedules/dynamic/enable"');
+
+    const disabled = await app.request("/desk/admin/jobs/schedules/daily/disable", { method: "POST" });
+    expect(disabled.status).toBe(303);
+    expect(disabled.headers.get("location")).toBe("/desk/admin/jobs/schedules");
+
+    const afterDisable = await app.request("/desk/admin/jobs/schedules");
+    const disabledHtml = await afterDisable.text();
+    expect(disabledHtml).toContain("disabled");
+    expect(disabledHtml).toContain('formaction="/desk/admin/jobs/schedules/daily/enable"');
+
+    const enabled = await app.request("/desk/admin/jobs/schedules/digest/enable", { method: "POST" });
+    expect(enabled.status).toBe(303);
+    expect(enabled.headers.get("location")).toBe("/desk/admin/jobs/schedules");
+
+    const afterEnable = await app.request("/desk/admin/jobs/schedules");
+    const enabledHtml = await afterEnable.text();
+    expect(enabledHtml).toContain("enabled");
+    expect(enabledHtml).toContain('formaction="/desk/admin/jobs/schedules/digest/disable"');
   });
 
   it("hides schedule run actions when dispatch is not configured", async () => {

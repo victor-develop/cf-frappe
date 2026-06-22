@@ -14,6 +14,7 @@ export interface ScheduledJobContext<TEnv = unknown> {
 }
 
 export interface ScheduledJobDefinition<TEnv = unknown> {
+  readonly id?: string;
   readonly cron: string;
   readonly jobName: string;
   readonly enabled?: boolean | ((context: ScheduledJobContext<TEnv>) => MaybePromise<boolean>);

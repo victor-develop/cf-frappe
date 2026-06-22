@@ -32,6 +32,10 @@ export function roleCatalogStream(tenantId: TenantId): StreamName {
   return documentStream(tenantId, "__Roles", "catalog");
 }
 
+export function jobScheduleOverridesStream(tenantId: TenantId): StreamName {
+  return documentStream(tenantId, "__JobSchedules", "overrides");
+}
+
 export function escapePart(value: string): string {
   return encodeURIComponent(value).replaceAll(".", "%2E");
 }

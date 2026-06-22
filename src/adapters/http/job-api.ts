@@ -3,7 +3,7 @@ import type { JobHistoryService } from "../../application/job-history-service.js
 import type { JobRetryPort } from "../../application/job-retry-service.js";
 import type { JobScheduleService } from "../../application/job-schedule-service.js";
 import type { ActorResolver } from "./actor.js";
-import { parseOptionalInteger } from "./request.js";
+import { parseOptionalInteger, requestMetadata } from "./request.js";
 
 export interface JobApiOptions {
   readonly jobs?: JobHistoryService;
@@ -63,6 +63,28 @@ export function createJobApi(options: JobApiOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const data = await options.schedules.dispatch(actor, c.req.param("scheduleId"));
     return c.json({ data }, 201);
+  });
+
+  app.post("/api/jobs/schedules/:scheduleId/enable", async (c) => {
+    if (!options.schedules) {
+      return c.json({ error: { code: "JOB_SCHEDULE_NOT_FOUND", message: "Job schedules are not enabled" } }, 404);
+    }
+    const actor = await options.actor(c.req.raw);
+    const data = await options.schedules.enable(actor, c.req.param("scheduleId"), {
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data });
+  });
+
+  app.post("/api/jobs/schedules/:scheduleId/disable", async (c) => {
+    if (!options.schedules) {
+      return c.json({ error: { code: "JOB_SCHEDULE_NOT_FOUND", message: "Job schedules are not enabled" } }, 404);
+    }
+    const actor = await options.actor(c.req.raw);
+    const data = await options.schedules.disable(actor, c.req.param("scheduleId"), {
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data });
   });
 
   app.post("/api/jobs/executions/:idempotencyKey/retry", async (c) => {

@@ -198,7 +198,9 @@ export function createCloudFrappeWorker<
           controller,
           env,
           dispatcher: runtime.dispatcher,
-          schedules: jobOptions.schedules ?? []
+          schedules: apps.jobSchedules
+            ? await apps.jobSchedules.schedulesForCron(controller.cron)
+            : jobOptions.schedules ?? []
         });
         if (messages.length === 0) {
           controller.noRetry();
@@ -219,6 +221,7 @@ interface RuntimeApps {
   readonly app: ReturnType<typeof createResourceApi>;
   readonly desk: ReturnType<typeof createDeskApp>;
   readonly services: CloudFrappeRuntimeServices;
+  readonly jobSchedules?: JobScheduleService<ScheduledJobDefinition<any>>;
   readonly jobExecutionLog?: JobExecutionLog;
 }
 
@@ -359,6 +362,9 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ? new JobScheduleService({
         registry: jobOptions.registry,
         schedules,
+        events,
+        ...(jobOptions.clock === undefined ? {} : { clock: jobOptions.clock }),
+        ...(jobOptions.ids === undefined ? {} : { ids: jobOptions.ids }),
         runner: {
           async run(schedule, actor) {
             const clock = jobOptions.clock ?? systemClock;
@@ -431,6 +437,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     app,
     desk,
     services: runtimeServices,
+    ...(jobSchedules === undefined ? {} : { jobSchedules }),
     ...(jobExecutionLog === undefined ? {} : { jobExecutionLog })
   };
   cache.set(env, runtimeApps);

@@ -1,16 +1,24 @@
 import { badRequest, notFound, permissionDenied } from "../core/errors.js";
 import type { JobRetryPolicy } from "../core/jobs.js";
+import { jobScheduleOverridesStream } from "../core/streams.js";
 import {
   DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
   type Actor,
+  type DocumentData,
+  type DomainEvent,
+  type NewDomainEvent,
   type TenantId
 } from "../core/types.js";
+import { systemClock, type Clock } from "../ports/clock.js";
+import type { EventStore } from "../ports/event-store.js";
+import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
 import type { JobMessage } from "../ports/job-queue.js";
 
 export type DynamicJobScheduleValue = (...args: never[]) => unknown;
 
 export interface JobScheduleDefinitionForAdmin {
+  readonly id?: string;
   readonly cron: string;
   readonly jobName: string;
   readonly enabled?: boolean | DynamicJobScheduleValue;
@@ -40,6 +48,9 @@ export interface JobScheduleServiceOptions<TSchedule extends JobScheduleDefiniti
   readonly registry: JobScheduleRegistry;
   readonly schedules: readonly TSchedule[];
   readonly runner?: JobScheduleRunner<TSchedule>;
+  readonly events?: EventStore;
+  readonly ids?: IdGenerator;
+  readonly clock?: Clock;
   readonly adminRoles?: readonly string[];
 }
 
@@ -53,6 +64,12 @@ export interface JobScheduleSummary {
   readonly cron: string;
   readonly jobName: string;
   readonly enabled: boolean;
+  readonly configuredEnabled: boolean;
+  readonly overridden: boolean;
+  readonly overrideEnabled?: boolean;
+  readonly overrideUpdatedAt?: string;
+  readonly overrideUpdatedBy?: string;
+  readonly overrideable: boolean;
   readonly registered: boolean;
   readonly dispatchable: boolean;
   readonly description?: string;
@@ -81,28 +98,65 @@ export interface JobScheduleDispatchResult {
   readonly message: JobMessage;
 }
 
+export interface JobScheduleOverrideResult {
+  readonly schedule: JobScheduleSummary;
+}
+
+export interface SetJobScheduleEnabledCommand {
+  readonly actor: Actor;
+  readonly scheduleId: string;
+  readonly enabled: boolean;
+  readonly tenantId?: TenantId;
+  readonly metadata?: DocumentData;
+}
+
+interface JobScheduleOverrideRecord {
+  readonly scheduleId: string;
+  readonly enabled: boolean;
+  readonly updatedAt: string;
+  readonly updatedBy: string;
+}
+
+interface JobScheduleOverrideState {
+  readonly tenantId: TenantId;
+  readonly version: number;
+  readonly overrides: ReadonlyMap<string, JobScheduleOverrideRecord>;
+}
+
 export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin = JobScheduleDefinitionForAdmin> {
   private readonly registry: JobScheduleRegistry;
   private readonly schedules: readonly TSchedule[];
   private readonly runner: JobScheduleRunner<TSchedule> | undefined;
+  private readonly events: EventStore | undefined;
+  private readonly ids: IdGenerator;
+  private readonly clock: Clock;
   private readonly adminRoles: readonly string[];
 
   constructor(options: JobScheduleServiceOptions<TSchedule>) {
     this.registry = options.registry;
     this.schedules = options.schedules;
     this.runner = options.runner;
+    this.events = options.events;
+    this.ids = options.ids ?? cryptoIdGenerator;
+    this.clock = options.clock ?? systemClock;
     this.adminRoles = options.adminRoles ?? [SYSTEM_MANAGER_ROLE];
+    ensureUniqueScheduleIds(options.schedules);
   }
 
   canDispatch(): boolean {
     return this.runner !== undefined;
   }
 
+  canOverride(): boolean {
+    return this.events !== undefined;
+  }
+
   async dashboard(actor: Actor, query: JobScheduleQuery = {}): Promise<JobScheduleDashboard> {
     const tenantId = this.authorize(actor);
     const filters = normalizeQuery(query);
+    const overrides = await this.overrideState(tenantId);
     return {
-      schedules: this.summarizeSchedules()
+      schedules: this.summarizeSchedules(overrides)
         .filter((schedule) => canInspectSchedule(schedule, tenantId))
         .filter((schedule) => filters.cron === undefined || schedule.cron === filters.cron)
         .filter((schedule) => filters.jobName === undefined || schedule.jobName === filters.jobName),
@@ -115,7 +169,7 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
     if (!this.runner) {
       throw notFound("Job schedule dispatch is not enabled", "JOB_SCHEDULE_NOT_FOUND");
     }
-    const { schedule, summary } = this.requireSchedule(scheduleId);
+    const { schedule, summary } = await this.requireSchedule(scheduleId, tenantId);
     if (!canInspectSchedule(summary, tenantId)) {
       throw notFound(`Job schedule '${scheduleId}' was not found`, "JOB_SCHEDULE_NOT_FOUND");
     }
@@ -131,37 +185,129 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
     if (!summary.registered) {
       throw badRequest(`Scheduled job '${schedule.jobName}' is not registered`);
     }
-    const message = await this.runner.run(schedule, actor);
+    const message = await this.runner.run(effectiveSchedule(schedule, summary), actor);
     return { schedule: summary, message };
   }
 
-  private authorize(actor: Actor): TenantId {
+  async enable(
+    actor: Actor,
+    scheduleId: string,
+    command: Omit<SetJobScheduleEnabledCommand, "actor" | "scheduleId" | "enabled"> = {}
+  ): Promise<JobScheduleOverrideResult> {
+    return this.setEnabled({ actor, scheduleId, enabled: true, ...command });
+  }
+
+  async disable(
+    actor: Actor,
+    scheduleId: string,
+    command: Omit<SetJobScheduleEnabledCommand, "actor" | "scheduleId" | "enabled"> = {}
+  ): Promise<JobScheduleOverrideResult> {
+    return this.setEnabled({ actor, scheduleId, enabled: false, ...command });
+  }
+
+  async schedulesForCron(cron: string): Promise<readonly TSchedule[]> {
+    const states = new Map<TenantId, JobScheduleOverrideState>();
+    const resolved: TSchedule[] = [];
+    for (const [index, schedule] of this.schedules.entries()) {
+      if (schedule.cron !== cron) {
+        continue;
+      }
+      const tenantId = staticTenantId(schedule);
+      if (tenantId === undefined) {
+        resolved.push(schedule);
+        continue;
+      }
+      const state = states.get(tenantId) ?? await this.overrideState(tenantId);
+      states.set(tenantId, state);
+      resolved.push(effectiveSchedule(schedule, this.summaryFor(schedule, index, state)));
+    }
+    return resolved;
+  }
+
+  private async setEnabled(command: SetJobScheduleEnabledCommand): Promise<JobScheduleOverrideResult> {
+    const tenantId = this.authorize(command.actor, command.tenantId);
+    const events = this.requireOverrides();
+    const { schedule, index, summary } = await this.requireSchedule(command.scheduleId, tenantId);
+    if (!canInspectSchedule(summary, tenantId)) {
+      throw notFound(`Job schedule '${command.scheduleId}' was not found`, "JOB_SCHEDULE_NOT_FOUND");
+    }
+    if (summary.dynamic.tenantId) {
+      throw badRequest("Dynamic tenant job schedules cannot be overridden");
+    }
+    if (summary.dynamic.enabled) {
+      throw badRequest("Dynamic enabled job schedules cannot be overridden");
+    }
+    if (schedule.id === undefined) {
+      throw badRequest("Job schedule id is required for runtime overrides");
+    }
+    const state = await this.overrideState(tenantId);
+    const current = state.overrides.get(summary.id);
+    if ((current?.enabled ?? summary.configuredEnabled) === command.enabled) {
+      return { schedule: this.summaryFor(schedule, index, state) };
+    }
+    const stream = jobScheduleOverridesStream(tenantId);
+    const event: NewDomainEvent = {
+      id: this.ids.next("evt_"),
+      tenantId,
+      stream,
+      type: "JobScheduleOverrideSet",
+      doctype: "__JobSchedules",
+      documentName: "overrides",
+      actorId: command.actor.id,
+      occurredAt: this.clock.now(),
+      payload: {
+        kind: "JobScheduleOverrideSet",
+        scheduleId: summary.id,
+        enabled: command.enabled
+      },
+      metadata: command.metadata ?? {}
+    };
+    await events.append(stream, state.version, [event]);
+    return {
+      schedule: this.summaryFor(schedule, index, await this.overrideState(tenantId))
+    };
+  }
+
+  private authorize(actor: Actor, explicitTenantId?: TenantId): TenantId {
     if (!this.adminRoles.some((role) => actor.roles.includes(role))) {
       throw permissionDenied(`Actor '${actor.id}' cannot inspect job schedules`);
     }
-    return actor.tenantId ?? DEFAULT_TENANT_ID;
+    const actorTenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
+    const tenantId = explicitTenantId ?? actorTenantId;
+    if (tenantId !== actorTenantId) {
+      throw permissionDenied(`Actor '${actor.id}' cannot inspect job schedules for tenant '${tenantId}'`);
+    }
+    return tenantId;
   }
 
-  private requireSchedule(scheduleId: string): {
+  private async requireSchedule(scheduleId: string, tenantId: TenantId): Promise<{
     readonly schedule: TSchedule;
+    readonly index: number;
     readonly summary: JobScheduleSummary;
-  } {
-    const index = Number(scheduleId) - 1;
-    if (!Number.isInteger(index) || index < 0 || index >= this.schedules.length) {
+  }> {
+    const index = this.schedules.findIndex(
+      (schedule, candidateIndex) => scheduleIdentity(schedule, candidateIndex) === scheduleId
+    );
+    if (index < 0) {
       throw notFound(`Job schedule '${scheduleId}' was not found`, "JOB_SCHEDULE_NOT_FOUND");
     }
     const schedule = this.schedules[index]!;
-    return { schedule, summary: this.summaryFor(schedule, index) };
+    return { schedule, index, summary: this.summaryFor(schedule, index, await this.overrideState(tenantId)) };
   }
 
-  private summarizeSchedules(): readonly JobScheduleSummary[] {
-    return this.schedules.map((schedule, index) => this.summaryFor(schedule, index));
+  private summarizeSchedules(overrides: JobScheduleOverrideState): readonly JobScheduleSummary[] {
+    return this.schedules.map((schedule, index) => this.summaryFor(schedule, index, overrides));
   }
 
-  private summaryFor(schedule: TSchedule, index: number): JobScheduleSummary {
+  private summaryFor(
+    schedule: TSchedule,
+    index: number,
+    overrides: JobScheduleOverrideState
+  ): JobScheduleSummary {
     const registered = this.registry.has(schedule.jobName);
     const job = registered ? this.registry.get(schedule.jobName) : undefined;
     const tenantId = staticTenantId(schedule);
+    const id = scheduleIdentity(schedule, index);
     const dynamic = {
       enabled: isDynamic(schedule.enabled),
       tenantId: isDynamic(schedule.tenantId),
@@ -169,15 +315,29 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       metadata: isDynamic(schedule.metadata),
       idempotencyKey: isDynamic(schedule.idempotencyKey)
     };
+    const overrideable = this.canOverride() && schedule.id !== undefined && !dynamic.tenantId && !dynamic.enabled;
+    const override = overrideable && tenantId === overrides.tenantId ? overrides.overrides.get(id) : undefined;
+    const configuredEnabled = schedule.enabled !== false;
+    const enabled = override?.enabled ?? configuredEnabled;
     return {
-      id: String(index + 1),
+      id,
       cron: schedule.cron,
       jobName: schedule.jobName,
-      enabled: schedule.enabled !== false,
+      enabled,
+      configuredEnabled,
+      overridden: override !== undefined,
+      ...(override === undefined
+        ? {}
+        : {
+            overrideEnabled: override.enabled,
+            overrideUpdatedAt: override.updatedAt,
+            overrideUpdatedBy: override.updatedBy
+          }),
+      overrideable,
       registered,
       dispatchable:
         registered &&
-        schedule.enabled !== false &&
+        enabled &&
         this.canDispatch() &&
         !dynamic.tenantId &&
         !dynamic.enabled,
@@ -187,6 +347,20 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       ...(tenantId === undefined ? {} : { tenantId }),
       dynamic
     };
+  }
+
+  private requireOverrides(): EventStore {
+    if (!this.events) {
+      throw notFound("Job schedule overrides are not enabled", "JOB_SCHEDULE_NOT_FOUND");
+    }
+    return this.events;
+  }
+
+  private async overrideState(tenantId: TenantId): Promise<JobScheduleOverrideState> {
+    if (!this.events) {
+      return { tenantId, version: 0, overrides: new Map() };
+    }
+    return foldJobScheduleOverrides(tenantId, await this.events.readStream(jobScheduleOverridesStream(tenantId)));
   }
 }
 
@@ -213,4 +387,58 @@ function canInspectSchedule(schedule: JobScheduleSummary, tenantId: TenantId): b
     return tenantId === DEFAULT_TENANT_ID;
   }
   return schedule.tenantId === tenantId;
+}
+
+function scheduleIdentity(schedule: JobScheduleDefinitionForAdmin, index: number): string {
+  return schedule.id ?? String(index + 1);
+}
+
+function ensureUniqueScheduleIds(schedules: readonly JobScheduleDefinitionForAdmin[]): void {
+  const seen = new Set<string>();
+  schedules.forEach((schedule, index) => {
+    const id = scheduleIdentity(schedule, index);
+    if (id.trim() === "") {
+      throw badRequest("Job schedule id is required");
+    }
+    if (seen.has(id)) {
+      throw badRequest(`Job schedule id '${id}' is duplicated`);
+    }
+    seen.add(id);
+  });
+}
+
+function effectiveSchedule<TSchedule extends JobScheduleDefinitionForAdmin>(
+  schedule: TSchedule,
+  summary: JobScheduleSummary
+): TSchedule {
+  if (!summary.overridden) {
+    return schedule;
+  }
+  return {
+    ...schedule,
+    enabled: summary.enabled
+  };
+}
+
+function foldJobScheduleOverrides(
+  tenantId: TenantId,
+  events: readonly DomainEvent[]
+): JobScheduleOverrideState {
+  const overrides = new Map<string, JobScheduleOverrideRecord>();
+  for (const event of events) {
+    if (event.payload.kind !== "JobScheduleOverrideSet") {
+      continue;
+    }
+    overrides.set(event.payload.scheduleId, {
+      scheduleId: event.payload.scheduleId,
+      enabled: event.payload.enabled,
+      updatedAt: event.occurredAt,
+      updatedBy: event.actorId
+    });
+  }
+  return {
+    tenantId,
+    version: events.at(-1)?.sequence ?? 0,
+    overrides
+  };
 }

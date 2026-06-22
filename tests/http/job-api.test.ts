@@ -3,6 +3,7 @@ import {
   createResourceApi,
   deterministicIds,
   fixedClock,
+  InMemoryEventStore,
   InMemoryJobExecutionLog,
   InMemoryJobQueue,
   JobDispatcher,
@@ -138,6 +139,7 @@ describe("job api", () => {
 
   it("returns configured schedules and manually dispatches a schedule without execution history", async () => {
     const services = createServices();
+    const scheduleEvents = new InMemoryEventStore();
     const registry = createJobRegistry({
       jobs: [{ name: "reports.daily", description: "Build reports", handler: () => undefined }]
     });
@@ -157,10 +159,13 @@ describe("job api", () => {
       jobSchedules: new JobScheduleService({
         registry,
         schedules: [
-          { cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" },
-          { cron: "0 3 * * *", jobName: "reports.daily", tenantId: "acme", enabled: false }
+          { id: "daily", cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" },
+          { id: "digest", cron: "0 3 * * *", jobName: "reports.daily", tenantId: "acme", enabled: false }
         ],
-        runner: { run: runner }
+        runner: { run: runner },
+        events: scheduleEvents,
+        clock: fixedClock(now),
+        ids: deterministicIds(["disable-1", "enable-2"])
       }),
       actor: unsafeHeaderActorResolver
     });
@@ -173,7 +178,7 @@ describe("job api", () => {
         filters: { jobName: "reports.daily" },
         schedules: [
           {
-            id: "1",
+            id: "daily",
             cron: "0 2 * * *",
             jobName: "reports.daily",
             tenantId: "acme",
@@ -181,7 +186,7 @@ describe("job api", () => {
             registered: true
           },
           {
-            id: "2",
+            id: "digest",
             cron: "0 3 * * *",
             jobName: "reports.daily",
             tenantId: "acme",
@@ -192,7 +197,7 @@ describe("job api", () => {
       }
     });
 
-    const run = await app.request("/api/jobs/schedules/1/run", {
+    const run = await app.request("/api/jobs/schedules/daily/run", {
       method: "POST",
       headers: adminHeaders
     });
@@ -208,7 +213,7 @@ describe("job api", () => {
       }
     });
 
-    const disabledRun = await app.request("/api/jobs/schedules/2/run", {
+    const disabledRun = await app.request("/api/jobs/schedules/digest/run", {
       method: "POST",
       headers: adminHeaders
     });
@@ -216,6 +221,54 @@ describe("job api", () => {
     await expect(disabledRun.json()).resolves.toMatchObject({
       error: { message: "Disabled job schedules cannot be manually dispatched" }
     });
+
+    const disable = await app.request("/api/jobs/schedules/daily/disable", {
+      method: "POST",
+      headers: adminHeaders
+    });
+    expect(disable.status).toBe(200);
+    await expect(disable.json()).resolves.toMatchObject({
+      data: {
+        schedule: {
+          id: "daily",
+          enabled: false,
+          configuredEnabled: true,
+          overridden: true,
+          overrideEnabled: false,
+          overrideUpdatedAt: now,
+          overrideUpdatedBy: "admin@example.com",
+          dispatchable: false
+        }
+      }
+    });
+
+    const disabledOverrideRun = await app.request("/api/jobs/schedules/daily/run", {
+      method: "POST",
+      headers: adminHeaders
+    });
+    expect(disabledOverrideRun.status).toBe(400);
+    await expect(disabledOverrideRun.json()).resolves.toMatchObject({
+      error: { message: "Disabled job schedules cannot be manually dispatched" }
+    });
+
+    const enable = await app.request("/api/jobs/schedules/digest/enable", {
+      method: "POST",
+      headers: adminHeaders
+    });
+    expect(enable.status).toBe(200);
+    await expect(enable.json()).resolves.toMatchObject({
+      data: {
+        schedule: {
+          id: "digest",
+          enabled: true,
+          configuredEnabled: false,
+          overridden: true,
+          overrideEnabled: true,
+          dispatchable: true
+        }
+      }
+    });
+
     expect(runner).toHaveBeenCalledOnce();
   });
 });

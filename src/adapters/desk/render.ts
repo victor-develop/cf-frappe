@@ -766,7 +766,7 @@ function renderJobRetryAction(idempotencyKey: string, status: JobExecutionDashbo
 
 export function renderJobScheduleAdmin(
   dashboard: JobScheduleDashboard,
-  options: { readonly allowRun?: boolean; readonly showHistoryLink?: boolean } = {}
+  options: { readonly allowRun?: boolean; readonly allowOverride?: boolean; readonly showHistoryLink?: boolean } = {}
 ): string {
   const rows = dashboard.schedules
     .map((schedule) => `<tr>
@@ -775,10 +775,11 @@ export function renderJobScheduleAdmin(
         <td>${escapeHtml(schedule.jobName)}</td>
         <td>${escapeHtml(schedule.tenantId ?? (schedule.dynamic.tenantId ? "dynamic" : ""))}</td>
         <td>${schedule.enabled ? "yes" : "no"}</td>
+        <td>${schedule.overridden ? escapeHtml(schedule.overrideEnabled ? "enabled" : "disabled") : ""}</td>
         <td>${schedule.registered ? "yes" : "no"}</td>
         <td>${escapeHtml(schedule.delaySeconds === undefined ? "" : String(schedule.delaySeconds))}</td>
         <td>${escapeHtml(dynamicScheduleFields(schedule))}</td>
-        <td>${options.allowRun ? renderScheduleRunAction(schedule.id, schedule.dispatchable) : ""}</td>
+        <td>${options.allowRun ? renderScheduleRunAction(schedule.id, schedule.dispatchable) : ""}${options.allowOverride ? renderScheduleOverrideAction(schedule) : ""}</td>
       </tr>`)
     .join("");
   return `<form class="panel form list-filters" method="get" action="/desk/admin/jobs/schedules">
@@ -794,8 +795,8 @@ export function renderJobScheduleAdmin(
   <section class="panel">
     <div class="table-wrap">
       <table>
-        <thead><tr><th>ID</th><th>Cron</th><th>Job</th><th>Tenant</th><th>Enabled</th><th>Registered</th><th>Delay</th><th>Dynamic</th><th>Action</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="9" class="empty">No schedules configured.</td></tr>`}</tbody>
+        <thead><tr><th>ID</th><th>Cron</th><th>Job</th><th>Tenant</th><th>Enabled</th><th>Override</th><th>Registered</th><th>Delay</th><th>Dynamic</th><th>Action</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="10" class="empty">No schedules configured.</td></tr>`}</tbody>
       </table>
     </div>
   </section>`;
@@ -807,6 +808,17 @@ function renderScheduleRunAction(scheduleId: string, dispatchable: boolean): str
   }
   return `<form class="inline-action" method="post">
     <button class="button" type="submit" formaction="/desk/admin/jobs/schedules/${encodeURIComponent(scheduleId)}/run">Run</button>
+  </form>`;
+}
+
+function renderScheduleOverrideAction(schedule: JobScheduleDashboard["schedules"][number]): string {
+  if (!schedule.overrideable) {
+    return "";
+  }
+  const action = schedule.enabled ? "disable" : "enable";
+  const label = schedule.enabled ? "Disable" : "Enable";
+  return `<form class="inline-action" method="post">
+    <button class="button" type="submit" formaction="/desk/admin/jobs/schedules/${encodeURIComponent(schedule.id)}/${action}">${label}</button>
   </form>`;
 }
 

@@ -358,6 +358,11 @@ export type DocumentEventPayload =
       readonly ownerId: string;
     }
   | {
+      readonly kind: "JobScheduleOverrideSet";
+      readonly scheduleId: string;
+      readonly enabled: boolean;
+    }
+  | {
       readonly kind: "WorkflowTransitioned";
       readonly action: string;
       readonly from: string;

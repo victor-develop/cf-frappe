@@ -4,6 +4,7 @@ import {
   createJobRegistry,
   deterministicIds,
   fixedClock,
+  InMemoryEventStore,
   InMemoryJobExecutionLog,
   InMemoryJobQueue,
   JobHistoryService,
@@ -327,6 +328,9 @@ describe("JobScheduleService", () => {
           cron: "0 2 * * *",
           jobName: "reports.daily",
           enabled: true,
+          configuredEnabled: true,
+          overridden: false,
+          overrideable: false,
           registered: true,
           dispatchable: false,
           description: "Build daily reports",
@@ -370,6 +374,172 @@ describe("JobScheduleService", () => {
       { cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" },
       admin
     );
+  });
+
+  it("overrides static schedules through the event store for admin, manual, and cron dispatch", async () => {
+    const registry = createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] });
+    const events = new InMemoryEventStore();
+    const runner = vi.fn(async () => jobMessage("reports.daily", "job_manual", "acme"));
+    const service = new JobScheduleService({
+      registry,
+      schedules: [
+        { id: "daily-reports", cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" },
+        { id: "initially-off", cron: "0 3 * * *", jobName: "reports.daily", tenantId: "acme", enabled: false }
+      ],
+      runner: { run: runner },
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["disable-daily", "enable-daily", "enable-static-off"])
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+
+    await expect(service.disable(admin, "daily-reports")).resolves.toMatchObject({
+      schedule: {
+        id: "daily-reports",
+        enabled: false,
+        configuredEnabled: true,
+        overridden: true,
+        overrideEnabled: false,
+        overrideUpdatedAt: now,
+        overrideUpdatedBy: "admin@example.com",
+        overrideable: true,
+        dispatchable: false
+      }
+    });
+    await expect(service.dispatch(admin, "daily-reports")).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Disabled job schedules cannot be manually dispatched"
+    });
+    await expect(service.schedulesForCron("0 2 * * *")).resolves.toMatchObject([{ enabled: false }]);
+
+    await expect(service.enable(admin, "daily-reports")).resolves.toMatchObject({
+      schedule: {
+        id: "daily-reports",
+        enabled: true,
+        configuredEnabled: true,
+        overridden: true,
+        overrideEnabled: true,
+        dispatchable: true
+      }
+    });
+    await expect(service.dispatch(admin, "daily-reports")).resolves.toMatchObject({
+      schedule: { id: "daily-reports", enabled: true },
+      message: { tenantId: "acme", idempotencyKey: "reports.daily:job_manual" }
+    });
+    expect(runner).toHaveBeenCalledWith(
+      { id: "daily-reports", cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme", enabled: true },
+      admin
+    );
+    await expect(service.schedulesForCron("0 2 * * *")).resolves.toMatchObject([{ enabled: true }]);
+
+    await expect(service.enable(admin, "initially-off")).resolves.toMatchObject({
+      schedule: {
+        id: "initially-off",
+        enabled: true,
+        configuredEnabled: false,
+        overridden: true,
+        overrideEnabled: true,
+        dispatchable: true
+      }
+    });
+  });
+
+  it("keeps dynamic schedules immutable and validates configured schedule ids", async () => {
+    const registry = createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const defaultAdmin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: DEFAULT_TENANT_ID };
+    const service = new JobScheduleService({
+      registry,
+      schedules: [
+        { id: "tenant-dynamic", cron: "0 2 * * *", jobName: "reports.daily", tenantId: () => "acme" },
+        { id: "enabled-dynamic", cron: "0 3 * * *", jobName: "reports.daily", tenantId: "acme", enabled: () => true },
+        { id: "static", cron: "0 4 * * *", jobName: "reports.daily", tenantId: "acme" }
+      ],
+      events: new InMemoryEventStore(),
+      clock: fixedClock(now),
+      ids: deterministicIds(["unused"])
+    });
+
+    await expect(service.disable(defaultAdmin, "tenant-dynamic")).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Dynamic tenant job schedules cannot be overridden"
+    });
+    await expect(service.disable(admin, "enabled-dynamic")).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Dynamic enabled job schedules cannot be overridden"
+    });
+    expect(() =>
+      new JobScheduleService({ registry, schedules: [{ id: " ", cron: "* * * * *", jobName: "reports.daily" }] })
+    ).toThrow("Job schedule id is required");
+    expect(() =>
+      new JobScheduleService({
+        registry,
+        schedules: [
+          { id: "duplicate", cron: "0 2 * * *", jobName: "reports.daily" },
+          { id: "duplicate", cron: "0 3 * * *", jobName: "reports.daily" }
+        ]
+      })
+    ).toThrow("Job schedule id 'duplicate' is duplicated");
+    await expect(
+      new JobScheduleService({ registry, schedules: [{ id: "static", cron: "0 4 * * *", jobName: "reports.daily" }] })
+        .disable(admin, "static")
+    ).rejects.toMatchObject({
+      code: "JOB_SCHEDULE_NOT_FOUND",
+      message: "Job schedule overrides are not enabled"
+    });
+
+    const generatedIdService = new JobScheduleService({
+      registry,
+      schedules: [{ cron: "0 7 * * *", jobName: "reports.daily", tenantId: "acme" }],
+      events: new InMemoryEventStore()
+    });
+    await expect(generatedIdService.dashboard(admin)).resolves.toMatchObject({
+      schedules: [{ id: "1", overrideable: false }]
+    });
+    await expect(generatedIdService.disable(admin, "1")).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Job schedule id is required for runtime overrides"
+    });
+  });
+
+  it("ignores stale overrides when app metadata changes a schedule to dynamic enabled", async () => {
+    const registry = createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] });
+    const events = new InMemoryEventStore();
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const staticService = new JobScheduleService({
+      registry,
+      schedules: [{ id: "daily", cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" }],
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["disable-daily"])
+    });
+    await staticService.disable(admin, "daily");
+
+    const runner = vi.fn(async () => jobMessage("reports.daily", "job_manual", "acme"));
+    const evolvedService = new JobScheduleService({
+      registry,
+      schedules: [{ id: "daily", cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme", enabled: () => false }],
+      runner: { run: runner },
+      events
+    });
+
+    await expect(evolvedService.dashboard(admin)).resolves.toMatchObject({
+      schedules: [
+        {
+          id: "daily",
+          overridden: false,
+          overrideable: false,
+          dynamic: { enabled: true }
+        }
+      ]
+    });
+    const [schedule] = await evolvedService.schedulesForCron("0 2 * * *");
+    expect(typeof schedule?.enabled).toBe("function");
+    await expect(evolvedService.dispatch(admin, "daily")).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Dynamic enabled job schedules cannot be manually dispatched"
+    });
+    expect(runner).not.toHaveBeenCalled();
   });
 
   it("rejects non-admin, cross-tenant, and invalid schedule dispatch", async () => {
