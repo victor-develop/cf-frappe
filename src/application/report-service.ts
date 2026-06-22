@@ -5,6 +5,8 @@ import {
   canReadReport,
   type ReportColumnDefinition,
   type ReportChartDefinition,
+  type ReportChartOrder,
+  type ReportChartOrderBy,
   type ReportChartType,
   type ReportDefinition,
   type ReportGroupDefinition,
@@ -19,6 +21,7 @@ export type ReportFilters = Readonly<Record<string, JsonPrimitive | undefined>>;
 export type ReportRow = Readonly<Record<string, JsonValue>>;
 
 const DEFAULT_CSV_EXPORT_LIMIT = 10_000;
+const EMPTY_CHART_COLORS: readonly string[] = Object.freeze([]);
 
 export interface ReportSummaryValue {
   readonly name: string;
@@ -55,6 +58,10 @@ export interface ReportChartResult {
   readonly type: ReportChartType;
   readonly group: string;
   readonly summary: string;
+  readonly orderBy: ReportChartOrderBy;
+  readonly order: ReportChartOrder;
+  readonly colors: readonly string[];
+  readonly showValues: boolean;
   readonly points: readonly ReportChartPoint[];
 }
 
@@ -338,15 +345,20 @@ function buildReportCharts(
 ): readonly ReportChartResult[] {
   return charts.map((chart) => {
     const group = groups.find((item) => item.name === chart.group);
-    const points = (group?.rows ?? [])
-      .map((row) => {
+    const orderBy = chart.orderBy ?? "key";
+    const order = chart.order ?? "asc";
+    const points = sortChartPoints(
+      (group?.rows ?? []).map((row) => {
         const summary = row.summaries.find((item) => item.name === chart.summary);
         return {
           key: row.key,
           label: row.label,
           value: typeof summary?.value === "number" ? summary.value : null
         };
-      })
+      }),
+      orderBy,
+      order
+    )
       .slice(0, chart.maxPoints ?? Number.POSITIVE_INFINITY);
     return {
       name: chart.name,
@@ -354,9 +366,52 @@ function buildReportCharts(
       type: chart.type,
       group: chart.group,
       summary: chart.summary,
+      orderBy,
+      order,
+      colors: chart.colors ?? EMPTY_CHART_COLORS,
+      showValues: chart.showValues ?? true,
       points
     };
   });
+}
+
+function sortChartPoints(
+  points: readonly ReportChartPoint[],
+  orderBy: ReportChartOrderBy,
+  order: ReportChartOrder
+): readonly ReportChartPoint[] {
+  const direction = order === "desc" ? -1 : 1;
+  return [...points].sort((left, right) => {
+    const comparison = compareChartPoints(left, right, orderBy, direction);
+    return comparison === 0
+      ? compareValues(left.label, right.label) || compareValues(left.key, right.key)
+      : comparison;
+  });
+}
+
+function compareChartPoints(
+  left: ReportChartPoint,
+  right: ReportChartPoint,
+  orderBy: ReportChartOrderBy,
+  direction: number
+): number {
+  if (orderBy === "value") {
+    return compareChartValues(left.value, right.value, direction);
+  }
+  if (orderBy === "label") {
+    return compareValues(left.label, right.label) * direction;
+  }
+  return compareValues(left.key, right.key) * direction;
+}
+
+function compareChartValues(left: number | null, right: number | null, direction: number): number {
+  if (left === null || right === null) {
+    if (left === right) {
+      return 0;
+    }
+    return left === null ? 1 : -1;
+  }
+  return compareValues(left, right) * direction;
 }
 
 function summaryValue(

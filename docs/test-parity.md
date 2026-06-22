@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the parsed Desk realtime subscriptions slice:
+As of the metadata-driven report chart controls slice:
 
 - Vitest files: `50`
-- Vitest cases: `381`
+- Vitest cases: `385`
 
 ## Implication
 

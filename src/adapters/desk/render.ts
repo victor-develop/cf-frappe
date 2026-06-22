@@ -13,7 +13,7 @@ import {
   type ResolvedFormView,
   type ResolvedListView
 } from "../../core/types";
-import type { ReportDefinition } from "../../core/reports";
+import { isReportChartColor, type ReportDefinition } from "../../core/reports";
 import type { ClientScriptDefinition, ClientScriptScope } from "../../core/client-script";
 import type {
   DocumentAssignments,
@@ -431,17 +431,20 @@ function renderReportChart(chart: ReportRunResult["charts"][number]): string {
   const svg = points.length === 0
     ? `<p class="empty">No chart data.</p>`
     : chart.type === "line"
-      ? renderLineChart(points, chart.label)
+      ? renderLineChart(chart, points)
       : chart.type === "pie"
-        ? renderPieChart(points, chart.label)
-        : renderBarChart(points, chart.label);
+        ? renderPieChart(chart, points)
+        : renderBarChart(chart, points);
   return `<section class="panel report-chart">
     <h2>${escapeHtml(chart.label)}</h2>
     ${svg}
   </section>`;
 }
 
-function renderBarChart(points: readonly ReportRunResult["charts"][number]["points"][number][], label: string): string {
+function renderBarChart(
+  chart: ReportRunResult["charts"][number],
+  points: readonly ReportRunResult["charts"][number]["points"][number][]
+): string {
   const width = 520;
   const height = 220;
   const chartHeight = 150;
@@ -456,17 +459,23 @@ function renderBarChart(points: readonly ReportRunResult["charts"][number]["poin
       const valueY = chartY(value, scale, chartHeight);
       const y = Math.min(valueY, baseline);
       const barHeight = Math.max(1, Math.abs(baseline - valueY));
+      const valueLabel = chart.showValues
+        ? `<text x="${x + barWidth / 2}" y="${Math.max(14, y - 6)}" text-anchor="middle">${escapeHtml(formatValue(value))}</text>`
+        : "";
       return `<g>
-        <rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="3"></rect>
-        <text x="${x + barWidth / 2}" y="${Math.max(14, y - 6)}" text-anchor="middle">${escapeHtml(formatValue(value))}</text>
+        <rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="3" style="fill: ${chartColor(chart, index)}"></rect>
+        ${valueLabel}
         <text x="${x + barWidth / 2}" y="202" text-anchor="middle">${escapeHtml(point.label)}</text>
       </g>`;
     })
     .join("");
-  return `<svg class="chart-svg chart-bar" role="img" aria-label="${escapeHtml(label)}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet">${bars}</svg>`;
+  return `<svg class="chart-svg chart-bar" role="img" aria-label="${escapeHtml(chart.label)}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet">${bars}</svg>`;
 }
 
-function renderLineChart(points: readonly ReportRunResult["charts"][number]["points"][number][], label: string): string {
+function renderLineChart(
+  chart: ReportRunResult["charts"][number],
+  points: readonly ReportRunResult["charts"][number]["points"][number][]
+): string {
   const width = 520;
   const height = 220;
   const scale = chartScale(points);
@@ -479,17 +488,20 @@ function renderLineChart(points: readonly ReportRunResult["charts"][number]["poi
   const path = coords.map((coord, index) => `${index === 0 ? "M" : "L"} ${coord.x} ${coord.y}`).join(" ");
   const markers = coords
     .map(
-      ({ point, x, y }) => `<g>
-        <circle cx="${x}" cy="${y}" r="4"></circle>
-        <text x="${x}" y="${Math.max(14, y - 8)}" text-anchor="middle">${escapeHtml(formatValue(point.value ?? 0))}</text>
+      ({ point, x, y }, index) => `<g>
+        <circle cx="${x}" cy="${y}" r="4" style="fill: ${chartColor(chart, index)}"></circle>
+        ${chart.showValues ? `<text x="${x}" y="${Math.max(14, y - 8)}" text-anchor="middle">${escapeHtml(formatValue(point.value ?? 0))}</text>` : ""}
         <text x="${x}" y="202" text-anchor="middle">${escapeHtml(point.label)}</text>
       </g>`
     )
     .join("");
-  return `<svg class="chart-svg chart-line" role="img" aria-label="${escapeHtml(label)}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet"><path d="${path}"></path>${markers}</svg>`;
+  return `<svg class="chart-svg chart-line" role="img" aria-label="${escapeHtml(chart.label)}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet"><path d="${path}" style="stroke: ${chartColor(chart, 0)}"></path>${markers}</svg>`;
 }
 
-function renderPieChart(points: readonly ReportRunResult["charts"][number]["points"][number][], label: string): string {
+function renderPieChart(
+  chart: ReportRunResult["charts"][number],
+  points: readonly ReportRunResult["charts"][number]["points"][number][]
+): string {
   const positivePoints = points.filter((point) => (point.value ?? 0) > 0);
   const total = positivePoints.reduce((sum, point) => sum + (point.value ?? 0), 0);
   if (total <= 0) {
@@ -497,18 +509,29 @@ function renderPieChart(points: readonly ReportRunResult["charts"][number]["poin
   }
   let offset = 0;
   const rings = positivePoints
-    .map((point) => {
+    .map((point, index) => {
       const value = point.value ?? 0;
       const dash = (value / total) * 100;
-      const circle = `<circle r="70" cx="110" cy="110" stroke-dasharray="${dash} ${100 - dash}" stroke-dashoffset="${-offset}"></circle>`;
+      const circle = `<circle r="70" cx="110" cy="110" stroke-dasharray="${dash} ${100 - dash}" stroke-dashoffset="${-offset}" style="stroke: ${chartColor(chart, index)}"></circle>`;
       offset += dash;
       return circle;
     })
     .join("");
   const legend = positivePoints
-    .map((point, index) => `<li><span class="chart-swatch chart-swatch-${index % 6}"></span>${escapeHtml(point.label)} (${escapeHtml(formatValue(point.value ?? 0))})</li>`)
+    .map((point, index) => {
+      const value = chart.showValues ? ` (${escapeHtml(formatValue(point.value ?? 0))})` : "";
+      return `<li><span class="chart-swatch chart-swatch-${index % 6}" style="background: ${chartColor(chart, index)}"></span>${escapeHtml(point.label)}${value}</li>`;
+    })
     .join("");
-  return `<div class="chart-pie-wrap"><svg class="chart-svg chart-pie" role="img" aria-label="${escapeHtml(label)}" viewBox="0 0 220 220">${rings}</svg><ul>${legend}</ul></div>`;
+  return `<div class="chart-pie-wrap"><svg class="chart-svg chart-pie" role="img" aria-label="${escapeHtml(chart.label)}" viewBox="0 0 220 220">${rings}</svg><ul>${legend}</ul></div>`;
+}
+
+const chartPalette = ["#1f6feb", "#2e7d32", "#ad1457", "#ef6c00", "#00695c", "#6a1b9a"];
+
+function chartColor(chart: ReportRunResult["charts"][number], index: number): string {
+  const fallback = chartPalette[index % chartPalette.length]!;
+  const color = chart.colors.length > 0 ? chart.colors[index % chart.colors.length] : undefined;
+  return color && isReportChartColor(color) ? color : fallback;
 }
 
 function chartScale(points: readonly ReportRunResult["charts"][number]["points"][number][]): { readonly min: number; readonly max: number } {

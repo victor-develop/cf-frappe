@@ -6,7 +6,7 @@ import { FrameworkError } from "./errors";
 import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-format";
 import { assertPrintFormatMatchesDocType, assertPrintLetterheadValid } from "./print-format";
 import type { ReportDefinition } from "./reports";
-import { assertReportMatchesDocType } from "./reports";
+import { assertReportDefinition, assertReportMatchesDocType } from "./reports";
 import type { InstalledAppDefinition } from "./app";
 import type {
   DocTypeDefinition,
@@ -160,6 +160,7 @@ export class ModelRegistry {
         status: 409
       });
     }
+    assertReportDefinition(report);
     assertReportMatchesDocType(report, doctype);
     this.reports.set(report.name, report);
   }

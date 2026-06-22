@@ -5,6 +5,10 @@ import { SYSTEM_MANAGER_ROLE } from "./types";
 export type ReportFilterOperator = "eq" | "contains" | "gte" | "lte";
 export type ReportSummaryAggregate = "count" | "sum" | "avg" | "min" | "max";
 export type ReportChartType = "bar" | "line" | "pie";
+export type ReportChartOrderBy = "key" | "label" | "value";
+export type ReportChartOrder = "asc" | "desc";
+
+const REPORT_CHART_COLOR_PATTERN = /^#[0-9A-Fa-f]{3}(?:[0-9A-Fa-f]{3})?$/;
 
 export interface ReportColumnDefinition {
   readonly name: string;
@@ -46,6 +50,10 @@ export interface ReportChartDefinition {
   readonly group: string;
   readonly summary: string;
   readonly maxPoints?: number;
+  readonly orderBy?: ReportChartOrderBy;
+  readonly order?: ReportChartOrder;
+  readonly colors?: readonly string[];
+  readonly showValues?: boolean;
 }
 
 export interface ReportDefinition {
@@ -64,6 +72,39 @@ export interface ReportDefinition {
 }
 
 export function defineReport(definition: ReportDefinition): ReportDefinition {
+  assertReportDefinition(definition);
+  const summaries = definition.summaries ? Object.freeze([...definition.summaries]) : undefined;
+  const groups = definition.groups
+    ? Object.freeze(
+        definition.groups.map((group) =>
+          Object.freeze({
+            ...group,
+            summaries: Object.freeze([...group.summaries])
+          })
+        )
+      )
+    : undefined;
+  const charts = definition.charts
+    ? Object.freeze(
+        definition.charts.map((chart) =>
+          Object.freeze({
+            ...chart,
+            ...(chart.colors ? { colors: Object.freeze([...chart.colors]) } : {})
+          })
+        )
+      )
+    : undefined;
+  return Object.freeze({
+    ...definition,
+    columns: Object.freeze([...definition.columns]),
+    ...(definition.filters ? { filters: Object.freeze([...definition.filters]) } : {}),
+    ...(summaries ? { summaries } : {}),
+    ...(groups ? { groups } : {}),
+    ...(charts ? { charts } : {})
+  });
+}
+
+export function assertReportDefinition(definition: ReportDefinition): void {
   assertIdentifier(definition.name, "report name");
   if (definition.columns.length === 0) {
     throw new FrameworkError("REPORT_INVALID", `Report '${definition.name}' must define at least one column`, {
@@ -84,26 +125,6 @@ export function defineReport(definition: ReportDefinition): ReportDefinition {
     assertUnique(group.summaries.map((summary) => summary.name), `summary on group '${group.name}'`, definition.name);
   }
   assertChartsReferenceGroups(definition);
-  const summaries = definition.summaries ? Object.freeze([...definition.summaries]) : undefined;
-  const groups = definition.groups
-    ? Object.freeze(
-        definition.groups.map((group) =>
-          Object.freeze({
-            ...group,
-            summaries: Object.freeze([...group.summaries])
-          })
-        )
-      )
-    : undefined;
-  const charts = definition.charts ? Object.freeze([...definition.charts]) : undefined;
-  return Object.freeze({
-    ...definition,
-    columns: Object.freeze([...definition.columns]),
-    ...(definition.filters ? { filters: Object.freeze([...definition.filters]) } : {}),
-    ...(summaries ? { summaries } : {}),
-    ...(groups ? { groups } : {}),
-    ...(charts ? { charts } : {})
-  });
 }
 
 export function canReadReport(actor: Actor, report: ReportDefinition): boolean {
@@ -111,6 +132,10 @@ export function canReadReport(actor: Actor, report: ReportDefinition): boolean {
     return true;
   }
   return report.roles === undefined || report.roles.some((role) => actor.roles.includes(role));
+}
+
+export function isReportChartColor(value: string): boolean {
+  return REPORT_CHART_COLOR_PATTERN.test(value);
 }
 
 export function assertReportMatchesDocType(report: ReportDefinition, doctype: DocTypeDefinition): void {
@@ -198,6 +223,29 @@ function assertChartsReferenceGroups(report: ReportDefinition): void {
         `Report '${report.name}' chart '${chart.name}' maxPoints must be a positive integer`,
         { status: 400 }
       );
+    }
+    if (chart.orderBy !== undefined && chart.orderBy !== "key" && chart.orderBy !== "label" && chart.orderBy !== "value") {
+      throw new FrameworkError(
+        "REPORT_INVALID",
+        `Report '${report.name}' chart '${chart.name}' has invalid orderBy '${String(chart.orderBy)}'`,
+        { status: 400 }
+      );
+    }
+    if (chart.order !== undefined && chart.order !== "asc" && chart.order !== "desc") {
+      throw new FrameworkError(
+        "REPORT_INVALID",
+        `Report '${report.name}' chart '${chart.name}' has invalid order '${String(chart.order)}'`,
+        { status: 400 }
+      );
+    }
+    for (const color of chart.colors ?? []) {
+      if (!isReportChartColor(color)) {
+        throw new FrameworkError(
+          "REPORT_INVALID",
+          `Report '${report.name}' chart '${chart.name}' has invalid color '${color}'`,
+          { status: 400 }
+        );
+      }
     }
   }
 }

@@ -49,6 +49,10 @@ describe("ReportService", () => {
           type: "bar",
           group: "by_priority",
           summary: "note_count",
+          orderBy: "key",
+          order: "asc",
+          colors: [],
+          showValues: true,
           points: [{ key: "High", label: "High", value: 1 }]
         }
       ],
@@ -99,6 +103,133 @@ describe("ReportService", () => {
         points: [
           { key: "High", value: 2 },
           { key: "Low", value: 1 }
+        ]
+      }
+    ]);
+  });
+
+  it("sorts chart points by metadata before applying maxPoints", async () => {
+    const { documents, registry, reports } = createServices(["e1", "e2", "e3", "e4", "e5", "e6"]);
+    registry.registerReport(
+      defineReport({
+        name: "Priority Leaderboard",
+        doctype: "Note",
+        columns: [{ name: "title" }],
+        groups: [
+          {
+            name: "by_priority",
+            field: "priority",
+            summaries: [{ name: "rows", aggregate: "count" }]
+          }
+        ],
+        charts: [
+          {
+            name: "priority_counts",
+            label: "Priority Counts",
+            type: "bar",
+            group: "by_priority",
+            summary: "rows",
+            maxPoints: 2,
+            orderBy: "value",
+            order: "desc",
+            colors: ["#123", "#abcdef"],
+            showValues: false
+          }
+        ],
+        roles: ["User"]
+      })
+    );
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "High 1", priority: "High" }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Low 1", priority: "Low" }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Low 2", priority: "Low" }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Medium 1", priority: "Medium" }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Medium 2", priority: "Medium" }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Medium 3", priority: "Medium" }) });
+
+    const result = await reports.runReport(owner, "Priority Leaderboard");
+
+    expect(result.charts).toMatchObject([
+      {
+        name: "priority_counts",
+        orderBy: "value",
+        order: "desc",
+        colors: ["#123", "#abcdef"],
+        showValues: false,
+        points: [
+          { key: "Medium", label: "Medium", value: 3 },
+          { key: "Low", label: "Low", value: 2 }
+        ]
+      }
+    ]);
+  });
+
+  it("keeps null chart values behind numeric points before applying maxPoints", async () => {
+    const { registry, reports, store } = createServices();
+    registry.registerReport(
+      defineReport({
+        name: "Priority Average",
+        doctype: "Note",
+        columns: [{ name: "title" }],
+        groups: [
+          {
+            name: "by_priority",
+            field: "priority",
+            summaries: [{ name: "average_count", aggregate: "avg", field: "count" }]
+          }
+        ],
+        charts: [
+          {
+            name: "average_priority_count",
+            type: "bar",
+            group: "by_priority",
+            summary: "average_count",
+            maxPoints: 2,
+            orderBy: "value",
+            order: "asc"
+          }
+        ],
+        roles: ["User"]
+      })
+    );
+    await store.save({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "High without Count",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "High without Count", priority: "High", created_by: owner.id },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    });
+    await store.save({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "Low Count",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "Low Count", priority: "Low", count: 1, created_by: owner.id },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:01.000Z"
+    });
+    await store.save({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "Medium Count",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "Medium Count", priority: "Medium", count: 2, created_by: owner.id },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:02.000Z"
+    });
+
+    const result = await reports.runReport(owner, "Priority Average");
+
+    expect(result.charts).toMatchObject([
+      {
+        name: "average_priority_count",
+        points: [
+          { key: "Low", value: 1 },
+          { key: "Medium", value: 2 }
         ]
       }
     ]);

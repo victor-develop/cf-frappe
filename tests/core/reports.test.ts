@@ -118,5 +118,139 @@ describe("reports", () => {
         charts: [{ name: "priority_chart", type: "bar", group: "by_priority", summary: "first_title" }]
       })
     ).toThrow("Report 'Broken Min Chart' chart 'priority_chart' requires a numeric count, sum, or avg summary");
+
+    const controlledChart = defineReport({
+      name: "Controlled Chart",
+      doctype: "Note",
+      columns: [{ name: "title" }],
+      groups: [
+        {
+          name: "by_priority",
+          field: "priority",
+          summaries: [{ name: "rows", aggregate: "count" }]
+        }
+      ],
+      charts: [
+        {
+          name: "priority_chart",
+          type: "bar",
+          group: "by_priority",
+          summary: "rows",
+          orderBy: "value",
+          order: "desc",
+          colors: ["#1f6feb", "#2e7d32"],
+          showValues: false
+        }
+      ]
+    }).charts?.[0];
+
+    expect(controlledChart).toMatchObject({
+      orderBy: "value",
+      order: "desc",
+      colors: ["#1f6feb", "#2e7d32"],
+      showValues: false
+    });
+    expect(Object.isFrozen(controlledChart?.colors)).toBe(true);
+
+    expect(() =>
+      defineReport({
+        name: "Broken Sort Chart",
+        doctype: "Note",
+        columns: [{ name: "title" }],
+        groups: [
+          {
+            name: "by_priority",
+            field: "priority",
+            summaries: [{ name: "rows", aggregate: "count" }]
+          }
+        ],
+        charts: [
+          {
+            name: "priority_chart",
+            type: "bar",
+            group: "by_priority",
+            summary: "rows",
+            orderBy: "total" as "value"
+          }
+        ]
+      })
+    ).toThrow("Report 'Broken Sort Chart' chart 'priority_chart' has invalid orderBy 'total'");
+
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        reports: [
+          {
+            name: "Raw Broken Sort Chart",
+            doctype: "Note",
+            columns: [{ name: "title" }],
+            groups: [
+              {
+                name: "by_priority",
+                field: "priority",
+                summaries: [{ name: "rows", aggregate: "count" }]
+              }
+            ],
+            charts: [
+              {
+                name: "priority_chart",
+                type: "bar",
+                group: "by_priority",
+                summary: "rows",
+                orderBy: "total" as "value"
+              }
+            ]
+          }
+        ]
+      })
+    ).toThrow("Report 'Raw Broken Sort Chart' chart 'priority_chart' has invalid orderBy 'total'");
+
+    expect(() =>
+      defineReport({
+        name: "Broken Direction Chart",
+        doctype: "Note",
+        columns: [{ name: "title" }],
+        groups: [
+          {
+            name: "by_priority",
+            field: "priority",
+            summaries: [{ name: "rows", aggregate: "count" }]
+          }
+        ],
+        charts: [
+          {
+            name: "priority_chart",
+            type: "bar",
+            group: "by_priority",
+            summary: "rows",
+            order: "sideways" as "asc"
+          }
+        ]
+      })
+    ).toThrow("Report 'Broken Direction Chart' chart 'priority_chart' has invalid order 'sideways'");
+
+    expect(() =>
+      defineReport({
+        name: "Broken Color Chart",
+        doctype: "Note",
+        columns: [{ name: "title" }],
+        groups: [
+          {
+            name: "by_priority",
+            field: "priority",
+            summaries: [{ name: "rows", aggregate: "count" }]
+          }
+        ],
+        charts: [
+          {
+            name: "priority_chart",
+            type: "bar",
+            group: "by_priority",
+            summary: "rows",
+            colors: ["blue"]
+          }
+        ]
+      })
+    ).toThrow("Report 'Broken Color Chart' chart 'priority_chart' has invalid color 'blue'");
   });
 });

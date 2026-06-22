@@ -1,4 +1,4 @@
-import { createResourceApi, unsafeHeaderActorResolver } from "../../src";
+import { createResourceApi, defineReport, unsafeHeaderActorResolver } from "../../src";
 import { createServices, data } from "../helpers";
 
 describe("report api", () => {
@@ -48,6 +48,57 @@ describe("report api", () => {
       groups: [{ name: "by_priority", rows: [{ key: "High" }] }],
       charts: [{ name: "notes_by_priority", points: [{ key: "High", value: 1 }] }],
       total: 1
+    });
+  });
+
+  it("returns report chart controls through the JSON API", async () => {
+    const { app, services } = makeApp();
+    services.registry.registerReport(
+      defineReport({
+        name: "Priority Leaderboard",
+        doctype: "Note",
+        columns: [{ name: "title" }],
+        groups: [
+          {
+            name: "by_priority",
+            field: "priority",
+            summaries: [{ name: "rows", aggregate: "count" }]
+          }
+        ],
+        charts: [
+          {
+            name: "priority_counts",
+            type: "bar",
+            group: "by_priority",
+            summary: "rows",
+            maxPoints: 1,
+            orderBy: "value",
+            order: "desc",
+            colors: ["#123456"],
+            showValues: false
+          }
+        ],
+        roles: ["User"]
+      })
+    );
+    await services.documents.create({ actor: { id: "owner@example.com", roles: ["User"], tenantId: "acme" }, doctype: "Note", data: data({ title: "Low Note", priority: "Low" }) });
+    await services.documents.create({ actor: { id: "owner@example.com", roles: ["User"], tenantId: "acme" }, doctype: "Note", data: data({ title: "High Note A", priority: "High" }) });
+    await services.documents.create({ actor: { id: "owner@example.com", roles: ["User"], tenantId: "acme" }, doctype: "Note", data: data({ title: "High Note B", priority: "High" }) });
+
+    const response = await app.request("/api/report/Priority%20Leaderboard/run", { headers: userHeaders });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      charts: [
+        {
+          name: "priority_counts",
+          orderBy: "value",
+          order: "desc",
+          colors: ["#123456"],
+          showValues: false,
+          points: [{ key: "High", value: 2 }]
+        }
+      ]
     });
   });
 
