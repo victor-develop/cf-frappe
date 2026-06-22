@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the signed session actor resolver slice:
+As of the starter CLI scaffold slice:
 
-- Test files: `43`
-- Vitest cases: `306`
+- Test files: `44`
+- Vitest cases: `309`
 
 ## Implication
 

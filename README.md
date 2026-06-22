@@ -27,6 +27,7 @@ The current slice is a working kernel:
 - Cloudflare Queue/Cron background job primitives
 - R2-backed file attachments with event-sourced `File` metadata
 - Durable Object WebSocket realtime topics for document events
+- installable `cf-frappe init` starter scaffold for new Cloudflare apps
 - a runnable `Task` example under `examples/todos`
 
 ## Why
@@ -53,11 +54,26 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | Database tables | D1 append-only events plus current projections |
 | Migrations | metadata-planned D1 migrations with applied checksum journal |
 | Concurrency boundary | Durable Object command coordinator per aggregate stream |
+| App starter | `cf-frappe init` scaffold with Worker, D1, Durable Object, and signed-session wiring |
 
 See [docs/frappe-assessment.md](docs/frappe-assessment.md) for the assessment and parity map.
 See [docs/test-parity.md](docs/test-parity.md) for the current upstream Frappe test-count target.
 
 ## Quick Start
+
+Create a new app:
+
+```bash
+npx cf-frappe init my-app
+cd my-app
+npm install
+cp .dev.vars.example .dev.vars
+npm run cf:types
+npm run d1:migrate:local
+npm run dev
+```
+
+Work on this repository:
 
 ```bash
 npm install
@@ -676,11 +692,11 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 306 tests across schema, permissions, signed sessions, user permissions, events, registry, services, naming series, document lifecycle, document timelines and diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, saved user filters, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, print templates, print letterheads, reports, report summaries, report charts, report exports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
+Current suite: 309 tests across schema, permissions, signed sessions, user permissions, events, registry, services, naming series, document lifecycle, document timelines and diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, saved user filters, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, print templates, print letterheads, reports, report summaries, report charts, report exports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, D1 schema planning/migration application, and CLI starter scaffolding.
 
 ## Status
 
-This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, permissioned document timelines with field diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, signed session actor resolution, event-sourced user permissions with admin API/Desk management, saved user filters, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, report charts/exports, custom print templates, reusable letterheads, and Durable Object realtime topics exist, but richer chart controls, durable job dashboards, richer realtime presence, full user/login management, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
+This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, permissioned document timelines with field diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, signed session actor resolution, event-sourced user permissions with admin API/Desk management, saved user filters, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, report charts/exports, custom print templates, reusable letterheads, Durable Object realtime topics, and an initial starter CLI exist, but richer chart controls, durable job dashboards, richer realtime presence, full user/login management, advanced file workflows, richer app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
 
 ## References
 

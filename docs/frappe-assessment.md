@@ -45,18 +45,19 @@ That model is powerful, but it is not event-sourcing first. cf-frappe keeps the 
 | Realtime notifications | `publish_realtime`/Socket.IO | document commit events over Durable Object WebSocket topics |
 | Session auth | sessions | signed cookie actor resolver with env-backed Worker composition |
 | Cloudflare runtime | not native | Worker, D1, Durable Object command routing |
+| App starter | bench/new app setup | initial `cf-frappe init` scaffold with Worker, D1, Durable Object, and signed-session wiring |
 
 ## Current Gaps
 
 - Generated Desk UI now covers basic list/form/report/print pages, model-defined form sections and field order, list columns, default list filters, saved user filters, filter controls, link-field select controls, child table row grids, submit/cancel lifecycle actions, document timelines with field diffs/comments/assignments/tags/followers, user-permission administration, report summaries/charts/exports, custom print templates, reusable letterheads, and page size. Advanced filter builders, report builder, broader admin tools, richer chart controls, and client scripting are not implemented.
-- DocType metadata now plans and applies D1 projection-index migrations with a checksum journal, but destructive/renaming migrations, data backfills, and an installable CLI are still future work.
+- DocType metadata now plans and applies D1 projection-index migrations with a checksum journal, but destructive/renaming migrations, data backfills, and richer CLI-driven app installation are still future work.
 - Background jobs now have basic Queue/Cron support, but durable dashboards, job result storage, worker pools, retry administration, and scheduler admin views are not implemented.
 - Document history now exposes permissioned timeline entries with bounded event-sourced field-level old/new diffs, comment events, activity feed entries, assignment events, tag events, follower events, admin-only audit search, and deleted-document audit recovery from the event stream.
 - Realtime notifications now have basic Durable Object WebSocket document topics, but presence, tenant/doctype filtered fan-out, per-user rooms, Desk client integration, and durable replay are not implemented.
 - Auth providers remain adapter seams; signed cookie actor resolution exists, but full user/login management and provider-specific integrations are still future work.
 - User permissions now restrict reads, link options, link validation, and existing-document commands from event-sourced per-user grants, with admin API and Desk management over the same event stream plus model-backed grant validation.
 - File storage now has basic R2-backed attachments, but multipart uploads, presigned browser uploads, virus scanning hooks, image transforms, and file manager Desk views are not implemented.
-- There is no installable CLI yet.
+- The CLI now creates a Cloudflare-ready starter app, but it does not yet manage installed apps, generated model migrations, data backfills, or auth-provider setup.
 - Test volume is intentionally focused on the new kernel and is not close to Frappe's project-wide test count.
 
 ## Design Direction

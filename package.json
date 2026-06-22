@@ -7,6 +7,9 @@
   "license": "MIT",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "cf-frappe": "./dist/cli.js"
+  },
   "files": [
     "dist",
     "migrations",
@@ -14,7 +17,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run test && npm run build",
@@ -36,6 +40,8 @@
     "hono": "^4.6.17"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260621.1",
+    "@types/node": "^26.0.0",
     "typescript": "^5.7.2",
     "vitest": "^4.1.9",
     "wrangler": "^4.103.0"
