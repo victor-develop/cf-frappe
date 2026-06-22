@@ -11,6 +11,7 @@ export type ReportChartOrder = ReportOrder;
 
 const REPORT_FILTER_OPERATORS = ["eq", "contains", "gte", "lte"] as const;
 const REPORT_FILTER_TYPES = ["text", "longText", "integer", "number", "boolean", "date", "datetime", "select", "link"] as const;
+const REPORT_FIELD_TYPES = ["text", "longText", "integer", "number", "boolean", "date", "datetime", "json", "select", "link", "table"] as const;
 const REPORT_ORDERS = ["asc", "desc"] as const;
 const REPORT_SUMMARY_AGGREGATES = ["count", "sum", "avg", "min", "max"] as const;
 const REPORT_CHART_COLOR_PATTERN = /^#[0-9A-Fa-f]{3}(?:[0-9A-Fa-f]{3})?$/;
@@ -133,6 +134,7 @@ export function assertReportDefinition(definition: ReportDefinition): void {
   }
   assertFiltersValid(definition);
   assertSummariesValid(definition);
+  assertDisplayTypesValid(definition);
   assertReportOrderValid(definition);
   assertChartsReferenceGroups(definition);
 }
@@ -272,6 +274,26 @@ function assertSummariesValid(report: ReportDefinition): void {
   }
 }
 
+function assertDisplayTypesValid(report: ReportDefinition): void {
+  for (const column of report.columns) {
+    if (column.type !== undefined && !(REPORT_FIELD_TYPES as readonly string[]).includes(column.type)) {
+      throw new FrameworkError(
+        "REPORT_INVALID",
+        `Report '${report.name}' column '${column.name}' has invalid type '${String(column.type)}'`,
+        { status: 400 }
+      );
+    }
+  }
+  for (const summary of report.summaries ?? []) {
+    assertSummaryTypeValid(report.name, summary);
+  }
+  for (const group of report.groups ?? []) {
+    for (const summary of group.summaries) {
+      assertSummaryTypeValid(report.name, summary, ` on group '${group.name}'`);
+    }
+  }
+}
+
 function assertSummaryAggregateValid(
   reportName: string,
   summary: ReportSummaryDefinition,
@@ -281,6 +303,20 @@ function assertSummaryAggregateValid(
     throw new FrameworkError(
       "REPORT_INVALID",
       `Report '${reportName}' summary '${summary.name}'${context} has invalid aggregate '${String(summary.aggregate)}'`,
+      { status: 400 }
+    );
+  }
+}
+
+function assertSummaryTypeValid(
+  reportName: string,
+  summary: ReportSummaryDefinition,
+  context = ""
+): void {
+  if (summary.type !== undefined && !(REPORT_FIELD_TYPES as readonly string[]).includes(summary.type)) {
+    throw new FrameworkError(
+      "REPORT_INVALID",
+      `Report '${reportName}' summary '${summary.name}'${context} has invalid type '${String(summary.type)}'`,
       { status: 400 }
     );
   }

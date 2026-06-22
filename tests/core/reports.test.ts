@@ -103,6 +103,40 @@ describe("reports", () => {
     ).toThrow("Report 'Broken Group Aggregate' summary 'median_count' on group 'by_title' has invalid aggregate 'median'");
   });
 
+  it("validates report column and summary display types", () => {
+    expect(() =>
+      defineReport({
+        name: "Broken Column Type",
+        doctype: "Note",
+        columns: [{ name: "title", type: "currency" as "text" }]
+      })
+    ).toThrow("Report 'Broken Column Type' column 'title' has invalid type 'currency'");
+
+    expect(() =>
+      defineReport({
+        name: "Broken Summary Type",
+        doctype: "Note",
+        columns: [{ name: "title" }],
+        summaries: [{ name: "total_count", aggregate: "sum", field: "count", type: "currency" as "integer" }]
+      })
+    ).toThrow("Report 'Broken Summary Type' summary 'total_count' has invalid type 'currency'");
+
+    expect(() =>
+      defineReport({
+        name: "Broken Group Summary Type",
+        doctype: "Note",
+        columns: [{ name: "title" }],
+        groups: [
+          {
+            name: "by_title",
+            field: "title",
+            summaries: [{ name: "total_count", aggregate: "sum", field: "count", type: "currency" as "integer" }]
+          }
+        ]
+      })
+    ).toThrow("Report 'Broken Group Summary Type' summary 'total_count' on group 'by_title' has invalid type 'currency'");
+  });
+
   it("validates report filters against supported operators, types, and fields", () => {
     const Note = defineDocType({
       name: "Note",

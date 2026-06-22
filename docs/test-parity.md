@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the saved report definitions slice:
+As of the saved report HTTP API slice:
 
-- Vitest files: `51`
-- Vitest cases: `403`
+- Vitest files: `52`
+- Vitest cases: `411`
 
 ## Implication
 

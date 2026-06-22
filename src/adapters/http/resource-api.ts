@@ -10,6 +10,7 @@ import type { PrintService } from "../../application/print-service";
 import { QueryService } from "../../application/query-service";
 import type { ReportService } from "../../application/report-service";
 import type { SavedListFilterService } from "../../application/saved-list-filter-service";
+import type { SavedReportService } from "../../application/saved-report-service";
 import type { UserPermissionService } from "../../application/user-permission-service";
 import { badRequest } from "../../core/errors";
 import { isListFilterOperator } from "../../core/list-view";
@@ -23,6 +24,7 @@ import { createJobApi } from "./job-api";
 import { createPrintApi } from "./print-api";
 import { createReportApi } from "./report-api";
 import { listFiltersFromUrl, parseOptionalInteger, readJsonObject, requestMetadata } from "./request";
+import { createSavedReportApi } from "./saved-report-api";
 import { createUserPermissionApi } from "./user-permission-api";
 
 export interface ResourceApiOptions {
@@ -36,6 +38,7 @@ export interface ResourceApiOptions {
   readonly files?: FileService;
   readonly prints?: PrintService;
   readonly reports?: ReportService;
+  readonly savedReports?: SavedReportService;
   readonly audit?: AuditService;
   readonly jobs?: JobHistoryService;
   readonly jobRetry?: JobRetryPort;
@@ -107,6 +110,17 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       createReportApi({
         reports: options.reports,
         actor: resolveActor
+      })
+    );
+  }
+
+  if (options.savedReports) {
+    app.route(
+      "/",
+      createSavedReportApi({
+        savedReports: options.savedReports,
+        actor: resolveActor,
+        maxJsonBytes
       })
     );
   }

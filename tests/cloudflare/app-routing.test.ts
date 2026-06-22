@@ -62,6 +62,26 @@ describe("CloudFrappe Worker routing", () => {
     await expect(response.json()).resolves.toMatchObject({ data: { tenantId: "acme", events: [] } });
   });
 
+  it("mounts saved report-builder definitions on the Worker API", async () => {
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => owner
+    });
+    const env = {
+      DB: fakeD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/api/report-builder/Note"),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ data: [] });
+  });
+
   it("mounts user-permission admin API and Desk routes on the Worker", async () => {
     const worker = createCloudFrappeWorker({
       registry: createTestRegistry(),

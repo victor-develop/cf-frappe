@@ -10,6 +10,7 @@ import { PrintService } from "../application/print-service";
 import { QueryService } from "../application/query-service";
 import { ReportService } from "../application/report-service";
 import { SavedListFilterService } from "../application/saved-list-filter-service";
+import { SavedReportService } from "../application/saved-report-service";
 import { UserPermissionService } from "../application/user-permission-service";
 import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator";
 import type { DocumentCommandExecutor } from "../application/document-service";
@@ -58,6 +59,7 @@ export interface CloudFrappeRuntimeServices {
   readonly prints: PrintService;
   readonly queries: QueryService;
   readonly reports: ReportService;
+  readonly savedReports: SavedReportService;
   readonly files?: FileService;
   readonly realtime?: RealtimePublisher;
 }
@@ -197,6 +199,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
   const restrictedHistory = new DocumentHistoryService({ events, queries: restrictedQueries });
   const prints = new PrintService({ registry: options.registry, queries: restrictedQueries });
   const reports = new ReportService({ registry: options.registry, queries: restrictedQueries });
+  const savedReports = new SavedReportService({ registry: options.registry, events, reports });
   const baseServices: Omit<CloudFrappeRuntimeServices, "files"> = {
     registry: options.registry,
     documents,
@@ -206,7 +209,8 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     userPermissions,
     prints,
     queries: restrictedQueries,
-    reports
+    reports,
+    savedReports
   };
   const files = options.files
     ? new FileService({
@@ -277,6 +281,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     timeline: restrictedHistory,
     audit,
     savedFilters,
+    savedReports,
     userPermissions,
     reports,
     actor,
