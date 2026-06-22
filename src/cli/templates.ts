@@ -164,10 +164,9 @@ The starter keeps installed app manifests in \`src/apps/index.ts\`. Save an app 
 
 \`\`\`bash
 npx cf-frappe install @acme/cf-frappe-crm
-npm install
 \`\`\`
 
-Use \`--version <range>\` to pin the package, \`--export <name>\` for named exports, \`--as <localName>\` when you want a specific local identifier, and \`--no-save\` for local or workspace modules that are already managed outside \`package.json\`.
+The install command saves package metadata, runs the detected package manager (\`pnpm\`, \`yarn\`, \`bun\`, or \`npm\`) to update \`node_modules\` and the lockfile, then wires the app into the registry. Use \`--version <range>\` to pin the package, \`--export <name>\` for named exports, \`--as <localName>\` when you want a specific local identifier, \`--package-manager <npm|pnpm|yarn|bun>\` to override lockfile detection, \`--no-install\` to skip package-manager execution, and \`--no-save\` for local or workspace modules that are already managed outside \`package.json\`.
 
 ## Deploy
 

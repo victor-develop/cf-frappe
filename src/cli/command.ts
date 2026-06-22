@@ -1,11 +1,25 @@
 /// <reference types="node" />
 import { relative } from "node:path";
-import { installAppModule, AppInstallError } from "./app-install.js";
+import {
+  AppInstallError,
+  planInstallAppModule,
+  writeInstallDependency,
+  writeInstallRegistry,
+  type InstallAppModuleResult
+} from "./app-install.js";
 import { PackageJsonError } from "./package-json.js";
+import {
+  createNodePackageManagerRunner,
+  PackageManagerError,
+  type PackageManagerInstallResult,
+  type PackageManagerName,
+  type PackageManagerRunner
+} from "./package-manager.js";
 import { scaffoldProject, ScaffoldError } from "./scaffold.js";
 
 export interface CliIo {
   readonly cwd: () => string;
+  readonly packageManager?: PackageManagerRunner;
   readonly stderr: WritableText;
   readonly stdout: WritableText;
 }
@@ -26,6 +40,8 @@ interface InstallCommand {
   readonly exportName?: string;
   readonly dependencyVersion?: string;
   readonly localName?: string;
+  readonly packageManager?: PackageManagerName;
+  readonly runPackageManager: boolean;
   readonly saveDependency: boolean;
   readonly registryFile?: string;
 }
@@ -54,7 +70,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
 
   try {
     if (command.kind === "install") {
-      const result = await installAppModule({
+      const installOptions = {
         cwd: io.cwd(),
         moduleSpecifier: command.moduleSpecifier,
         saveDependency: command.saveDependency,
@@ -62,8 +78,23 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
         ...(command.exportName === undefined ? {} : { exportName: command.exportName }),
         ...(command.localName === undefined ? {} : { localName: command.localName }),
         ...(command.registryFile === undefined ? {} : { registryFile: command.registryFile })
-      });
-      io.stdout.write(installSuccessText(result));
+      };
+      const result = await planInstallAppModule(installOptions);
+      await writeInstallDependency(result);
+      const packageManagerResult = command.runPackageManager && result.dependency !== undefined
+        ? await (io.packageManager ?? createNodePackageManagerRunner(io)).install({
+            cwd: io.cwd(),
+            ...(command.packageManager === undefined ? {} : { packageManager: command.packageManager })
+          })
+        : undefined;
+      const registryResult = packageManagerResult === undefined
+        ? result
+        : await planInstallAppModule(installOptions);
+      await writeInstallRegistry(registryResult);
+      io.stdout.write(installSuccessText(result, {
+        runPackageManager: command.runPackageManager,
+        ...(packageManagerResult === undefined ? {} : { packageManager: packageManagerResult })
+      }));
       return 0;
     }
     const result = await scaffoldProject({
@@ -88,7 +119,12 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     );
     return 0;
   } catch (error) {
-    if (error instanceof ScaffoldError || error instanceof AppInstallError || error instanceof PackageJsonError) {
+    if (
+      error instanceof ScaffoldError ||
+      error instanceof AppInstallError ||
+      error instanceof PackageJsonError ||
+      error instanceof PackageManagerError
+    ) {
       io.stderr.write(`cf-frappe: ${error.message}\n`);
       return 1;
     }
@@ -142,6 +178,8 @@ function parseInstallArgs(argv: readonly string[]): ParsedCommand {
   let dependencyVersion: string | undefined;
   let exportName: string | undefined;
   let localName: string | undefined;
+  let packageManager: PackageManagerName | undefined;
+  let runPackageManager = true;
   let saveDependency = true;
   let registryFile: string | undefined;
 
@@ -184,6 +222,23 @@ function parseInstallArgs(argv: readonly string[]): ParsedCommand {
       saveDependency = false;
       continue;
     }
+    if (arg === "--no-install") {
+      runPackageManager = false;
+      continue;
+    }
+    if (arg === "--package-manager") {
+      const value = argv[index + 1];
+      if (value === undefined) {
+        return { kind: "invalid", message: "Missing value for --package-manager" };
+      }
+      const parsed = packageManagerName(value);
+      if (parsed === undefined) {
+        return { kind: "invalid", message: `Unsupported package manager '${value}'` };
+      }
+      packageManager = parsed;
+      index += 1;
+      continue;
+    }
     if (arg === "--registry") {
       const value = argv[index + 1];
       if (value === undefined) {
@@ -208,13 +263,18 @@ function parseInstallArgs(argv: readonly string[]): ParsedCommand {
   if (!saveDependency && dependencyVersion !== undefined) {
     return { kind: "invalid", message: "Cannot combine --version with --no-save" };
   }
+  if (!runPackageManager && packageManager !== undefined) {
+    return { kind: "invalid", message: "Cannot combine --package-manager with --no-install" };
+  }
   return {
     kind: "install",
     moduleSpecifier,
+    runPackageManager,
     saveDependency,
     ...(dependencyVersion === undefined ? {} : { dependencyVersion }),
     ...(exportName === undefined ? {} : { exportName }),
     ...(localName === undefined ? {} : { localName }),
+    ...(packageManager === undefined ? {} : { packageManager }),
     ...(registryFile === undefined ? {} : { registryFile })
   };
 }
@@ -225,26 +285,40 @@ function helpText(): string {
     "",
     "Usage:",
     "  cf-frappe init <directory> [--force]",
-    "  cf-frappe install <module> [--version <range>] [--export <name>] [--as <localName>] [--registry <path>] [--no-save]",
+    "  cf-frappe install <module> [--version <range>] [--export <name>] [--as <localName>] [--registry <path>] [--package-manager <npm|pnpm|yarn|bun>] [--no-install] [--no-save]",
     "  cf-frappe --help",
     "",
     "Commands:",
     "  init   Create a Cloudflare-ready cf-frappe starter app",
-    "  install   Save and wire an app module into a generated app registry",
+    "  install   Save, install, and wire an app module into a generated app registry",
     ""
   ].join("\n");
 }
 
-function installSuccessText(result: Awaited<ReturnType<typeof installAppModule>>): string {
+function installSuccessText(
+  result: InstallAppModuleResult,
+  options: {
+    readonly runPackageManager: boolean;
+    readonly packageManager?: PackageManagerInstallResult;
+  }
+): string {
   const lines = [`Wired ${result.moduleSpecifier} as ${result.localName} into ${result.registryFile}`];
   if (result.dependency !== undefined) {
     const status = result.dependency.changed ? "Saved" : "Kept";
-    lines.push(
-      `${status} dependency ${result.dependency.packageName}@${result.dependency.version} in ${result.dependency.packageJsonFile}`,
-      "Run your package manager to update node_modules and lockfile."
-    );
+    lines.push(`${status} dependency ${result.dependency.packageName}@${result.dependency.version} in ${result.dependency.packageJsonFile}`);
+    if (options.packageManager !== undefined) {
+      lines.push(`Ran ${options.packageManager.command} ${options.packageManager.args.join(" ")} to update node_modules and lockfile.`);
+    } else if (options.runPackageManager) {
+      lines.push("No package manager run was needed.");
+    } else {
+      lines.push("Skipped package manager install; run your package manager to update node_modules and lockfile.");
+    }
   }
   return `${lines.join("\n")}\n`;
+}
+
+function packageManagerName(value: string): PackageManagerName | undefined {
+  return value === "npm" || value === "pnpm" || value === "yarn" || value === "bun" ? value : undefined;
 }
 
 function displayPath(cwd: string, projectDirectory: string): string {

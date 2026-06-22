@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the durable realtime replay slice:
+As of the CLI package-manager install slice:
 
 - Vitest files: `59`
-- Vitest cases: `474`
+- Vitest cases: `477`
 
 ## Implication
 

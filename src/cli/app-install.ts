@@ -29,6 +29,13 @@ export interface InstallAppModuleResult {
   readonly dependency?: InstallDependencyResult;
 }
 
+export interface InstallAppModulePlan extends InstallAppModuleResult {
+  readonly registryPath: string;
+  readonly registryContents: string;
+  readonly dependencyPackageJsonPath?: string;
+  readonly dependencyPlan?: PackageDependencyPlan;
+}
+
 export interface InstallDependencyResult {
   readonly packageJsonFile: string;
   readonly packageName: string;
@@ -47,6 +54,13 @@ export class AppInstallError extends Error {
 }
 
 export async function installAppModule(options: InstallAppModuleOptions): Promise<InstallAppModuleResult> {
+  const plan = await planInstallAppModule(options);
+  await writeInstallDependency(plan);
+  await writeInstallRegistry(plan);
+  return installResult(plan);
+}
+
+export async function planInstallAppModule(options: InstallAppModuleOptions): Promise<InstallAppModulePlan> {
   const moduleSpecifier = options.moduleSpecifier.trim();
   if (moduleSpecifier.length === 0) {
     throw new AppInstallError("App module is required", "invalid-module");
@@ -73,17 +87,31 @@ export async function installAppModule(options: InstallAppModuleOptions): Promis
       });
   const withImport = insertBeforeMarker(source, IMPORTS_END, `${importLine}\n`);
   const withApp = insertBeforeMarker(withImport, APPS_END, `  ${localName},\n`);
-  if (dependencyPlan !== undefined && dependencyPlan.changed) {
-    await writeFile(resolve(options.cwd ?? ".", dependencyPlan.packageJsonFile), dependencyPlan.contents, "utf8");
-  }
-  await writeFile(registryPath, withApp, "utf8");
   return {
     registryFile,
+    registryPath,
+    registryContents: withApp,
     moduleSpecifier,
     localName,
     ...(exportName === undefined ? {} : { exportName }),
-    ...(dependencyPlan === undefined ? {} : { dependency: dependencyResult(dependencyPlan) })
+    ...(dependencyPlan === undefined
+      ? {}
+      : {
+          dependency: dependencyResult(dependencyPlan),
+          dependencyPackageJsonPath: resolve(options.cwd ?? ".", dependencyPlan.packageJsonFile),
+          dependencyPlan
+        })
   };
+}
+
+export async function writeInstallDependency(plan: InstallAppModulePlan): Promise<void> {
+  if (plan.dependencyPlan !== undefined && plan.dependencyPlan.changed && plan.dependencyPackageJsonPath !== undefined) {
+    await writeFile(plan.dependencyPackageJsonPath, plan.dependencyPlan.contents, "utf8");
+  }
+}
+
+export async function writeInstallRegistry(plan: InstallAppModulePlan): Promise<void> {
+  await writeFile(plan.registryPath, plan.registryContents, "utf8");
 }
 
 function appImportLine(options: {
@@ -99,6 +127,16 @@ function appImportLine(options: {
     return `import { ${options.exportName} } from ${specifier};`;
   }
   return `import { ${options.exportName} as ${options.localName} } from ${specifier};`;
+}
+
+function installResult(plan: InstallAppModulePlan): InstallAppModuleResult {
+  return {
+    registryFile: plan.registryFile,
+    moduleSpecifier: plan.moduleSpecifier,
+    localName: plan.localName,
+    ...(plan.exportName === undefined ? {} : { exportName: plan.exportName }),
+    ...(plan.dependency === undefined ? {} : { dependency: plan.dependency })
+  };
 }
 
 function dependencyResult(plan: PackageDependencyPlan): InstallDependencyResult {

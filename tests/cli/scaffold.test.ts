@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseCliArgs, runCli, type WritableText } from "../../src/cli/command";
+import { detectPackageManager, PackageManagerError, type PackageManagerRunner } from "../../src/cli/package-manager";
 import { scaffoldProject, ScaffoldError } from "../../src/cli/scaffold";
 
 describe("cf-frappe CLI scaffold", () => {
@@ -137,6 +138,7 @@ describe("cf-frappe CLI scaffold", () => {
 
   it("wires installed app modules into generated app registries", async () => {
     const target = join(tempRoot, "installable");
+    const packageManager = packageManagerRecorder();
     await scaffoldProject({
       targetDirectory: target,
       cfFrappeVersion: "0.1.0",
@@ -148,9 +150,21 @@ describe("cf-frappe CLI scaffold", () => {
     const stdout = textBuffer();
     const stderr = textBuffer();
     const exitCode = await runCli(
-      ["install", "@acme/cf-frappe-crm", "--version", "^1.2.3", "--export", "crmApp", "--as", "crm"],
+      [
+        "install",
+        "@acme/cf-frappe-crm",
+        "--version",
+        "^1.2.3",
+        "--export",
+        "crmApp",
+        "--as",
+        "crm",
+        "--package-manager",
+        "pnpm"
+      ],
       {
         cwd: () => target,
+        packageManager,
         stdout,
         stderr
       }
@@ -160,7 +174,8 @@ describe("cf-frappe CLI scaffold", () => {
     expect(stderr.text()).toBe("");
     expect(stdout.text()).toContain("Wired @acme/cf-frappe-crm as crm into src/apps/index.ts");
     expect(stdout.text()).toContain("Saved dependency @acme/cf-frappe-crm@^1.2.3 in package.json");
-    expect(stdout.text()).toContain("Run your package manager to update node_modules and lockfile.");
+    expect(stdout.text()).toContain("Ran pnpm install to update node_modules and lockfile.");
+    expect(packageManager.calls).toEqual([{ cwd: target, packageManager: "pnpm" }]);
     await expect(readFile(join(target, "src/apps/index.ts"), "utf8")).resolves.toContain(
       'import { crmApp as crm } from "@acme/cf-frappe-crm";'
     );
@@ -189,6 +204,7 @@ describe("cf-frappe CLI scaffold", () => {
     const customStdout = textBuffer();
     const custom = await runCli(["install", "@acme/cf-frappe-helpdesk", "--registry", "src/custom-apps.ts"], {
       cwd: () => target,
+      packageManager,
       stdout: customStdout,
       stderr: textBuffer()
     });
@@ -206,6 +222,10 @@ describe("cf-frappe CLI scaffold", () => {
       readonly dependencies: Record<string, string>;
     };
     expect(packageJsonAfterHelpdesk.dependencies["@acme/cf-frappe-helpdesk"]).toBe("latest");
+    expect(packageManager.calls).toEqual([
+      { cwd: target, packageManager: "pnpm" },
+      { cwd: target, packageManager: undefined }
+    ]);
 
     const localStdout = textBuffer();
     const local = await runCli(["install", "./apps/local", "--as", "localApp", "--no-save"], {
@@ -220,11 +240,27 @@ describe("cf-frappe CLI scaffold", () => {
       readonly dependencies: Record<string, string>;
     };
     expect(packageJsonAfterLocal.dependencies["./apps/local"]).toBeUndefined();
+    expect(packageManager.calls).toHaveLength(2);
+
+    const noInstallStdout = textBuffer();
+    const noInstall = await runCli(["install", "@acme/cf-frappe-reports", "--no-install"], {
+      cwd: () => target,
+      packageManager,
+      stdout: noInstallStdout,
+      stderr: textBuffer()
+    });
+    expect(noInstall).toBe(0);
+    expect(noInstallStdout.text()).toContain("Skipped package manager install");
+    expect(packageManager.calls).toHaveLength(2);
+    const packageJsonAfterNoInstall = JSON.parse(await readFile(join(target, "package.json"), "utf8")) as {
+      readonly dependencies: Record<string, string>;
+    };
+    expect(packageJsonAfterNoInstall.dependencies["@acme/cf-frappe-reports"]).toBe("latest");
 
     const registryBeforeMalformedPackage = await readFile(join(target, "src/apps/index.ts"), "utf8");
     await writeFile(
       join(target, "package.json"),
-      `${JSON.stringify({ ...packageJsonAfterLocal, dependencies: [] }, null, 2)}\n`
+      `${JSON.stringify({ ...packageJsonAfterNoInstall, dependencies: [] }, null, 2)}\n`
     );
     const malformedPackageErr = textBuffer();
     const malformedPackage = await runCli(["install", "@acme/cf-frappe-billing"], {
@@ -235,7 +271,7 @@ describe("cf-frappe CLI scaffold", () => {
     expect(malformedPackage).toBe(1);
     expect(malformedPackageErr.text()).toContain("has non-object dependencies");
     await expect(readFile(join(target, "src/apps/index.ts"), "utf8")).resolves.toBe(registryBeforeMalformedPackage);
-    await writeFile(join(target, "package.json"), `${JSON.stringify(packageJsonAfterLocal, null, 2)}\n`);
+    await writeFile(join(target, "package.json"), `${JSON.stringify(packageJsonAfterNoInstall, null, 2)}\n`);
 
     await writeFile(
       join(target, "src/dollar-apps.ts"),
@@ -286,24 +322,120 @@ describe("cf-frappe CLI scaffold", () => {
     expect(invalidErr.text()).toContain("App registry install markers are invalid");
   });
 
+  it("keeps registry wiring atomic when package-manager installation fails", async () => {
+    const target = join(tempRoot, "install-failure");
+    await scaffoldProject({
+      targetDirectory: target,
+      cfFrappeVersion: "0.1.0",
+      nodeTypesVersion: "^26.0.0",
+      typescriptVersion: "^5.7.2",
+      wranglerVersion: "^4.103.0"
+    });
+    const registryBefore = await readFile(join(target, "src/apps/index.ts"), "utf8");
+    const failingStderr = textBuffer();
+    const failing = await runCli(["install", "@acme/cf-frappe-crm"], {
+      cwd: () => target,
+      packageManager: packageManagerFailure("network offline"),
+      stdout: textBuffer(),
+      stderr: failingStderr
+    });
+
+    expect(failing).toBe(1);
+    expect(failingStderr.text()).toContain("network offline");
+    await expect(readFile(join(target, "src/apps/index.ts"), "utf8")).resolves.toBe(registryBefore);
+    const packageJsonAfterFailure = JSON.parse(await readFile(join(target, "package.json"), "utf8")) as {
+      readonly dependencies: Record<string, string>;
+    };
+    expect(packageJsonAfterFailure.dependencies["@acme/cf-frappe-crm"]).toBe("latest");
+
+    const packageManager = packageManagerRecorder();
+    const retryStdout = textBuffer();
+    const retry = await runCli(["install", "@acme/cf-frappe-crm"], {
+      cwd: () => target,
+      packageManager,
+      stdout: retryStdout,
+      stderr: textBuffer()
+    });
+
+    expect(retry).toBe(0);
+    expect(retryStdout.text()).toContain("Kept dependency @acme/cf-frappe-crm@latest in package.json");
+    expect(retryStdout.text()).toContain("Wired @acme/cf-frappe-crm as cfFrappeCrmApp into src/apps/index.ts");
+    expect(packageManager.calls).toEqual([{ cwd: target, packageManager: undefined }]);
+    await expect(readFile(join(target, "src/apps/index.ts"), "utf8")).resolves.toContain(
+      'import cfFrappeCrmApp from "@acme/cf-frappe-crm";'
+    );
+  });
+
+  it("re-plans registry wiring after package-manager lifecycle changes", async () => {
+    const target = join(tempRoot, "install-lifecycle");
+    await scaffoldProject({
+      targetDirectory: target,
+      cfFrappeVersion: "0.1.0",
+      nodeTypesVersion: "^26.0.0",
+      typescriptVersion: "^5.7.2",
+      wranglerVersion: "^4.103.0"
+    });
+    const registryFile = join(target, "src/apps/index.ts");
+    const registryBefore = await readFile(registryFile, "utf8");
+    const registryDuringInstall = registryBefore
+      .replace("/* cf-frappe app imports:end */", 'import lifecycleApp from "./lifecycle";\n/* cf-frappe app imports:end */')
+      .replace("  /* cf-frappe apps:end */", "  lifecycleApp,\n  /* cf-frappe apps:end */");
+
+    const install = await runCli(["install", "@acme/cf-frappe-crm"], {
+      cwd: () => target,
+      packageManager: packageManagerRegistryEdit(registryFile, registryDuringInstall),
+      stdout: textBuffer(),
+      stderr: textBuffer()
+    });
+
+    expect(install).toBe(0);
+    const registryAfter = await readFile(registryFile, "utf8");
+    expect(registryAfter).toContain('import lifecycleApp from "./lifecycle";');
+    expect(registryAfter).toContain("  lifecycleApp,");
+    expect(registryAfter).toContain('import cfFrappeCrmApp from "@acme/cf-frappe-crm";');
+    expect(registryAfter).toContain("  cfFrappeCrmApp,");
+  });
+
   it("parses init commands and reports next steps", async () => {
     expect(parseCliArgs(["init", "demo", "--force"])).toEqual({
       kind: "init",
       targetDirectory: "demo",
       force: true
     });
-    expect(parseCliArgs(["install", "@acme/cf-frappe-crm", "--version", "^1.2.3", "--export", "crmApp", "--as", "crm"])).toEqual({
+    expect(parseCliArgs([
+      "install",
+      "@acme/cf-frappe-crm",
+      "--version",
+      "^1.2.3",
+      "--export",
+      "crmApp",
+      "--as",
+      "crm",
+      "--package-manager",
+      "pnpm"
+    ])).toEqual({
       kind: "install",
       moduleSpecifier: "@acme/cf-frappe-crm",
+      runPackageManager: true,
       saveDependency: true,
       dependencyVersion: "^1.2.3",
       exportName: "crmApp",
-      localName: "crm"
+      localName: "crm",
+      packageManager: "pnpm"
     });
     expect(parseCliArgs(["install", "./apps/local", "--no-save"])).toEqual({
       kind: "install",
       moduleSpecifier: "./apps/local",
+      runPackageManager: true,
       saveDependency: false
+    });
+    expect(parseCliArgs(["install", "@acme/cf-frappe-crm", "--package-manager", "pip"])).toEqual({
+      kind: "invalid",
+      message: "Unsupported package manager 'pip'"
+    });
+    expect(parseCliArgs(["install", "@acme/cf-frappe-crm", "--package-manager", "npm", "--no-install"])).toEqual({
+      kind: "invalid",
+      message: "Cannot combine --package-manager with --no-install"
     });
 
     const stdout = textBuffer();
@@ -319,6 +451,22 @@ describe("cf-frappe CLI scaffold", () => {
     expect(stdout.text()).toContain("Created cf-frappe app at demo");
     expect(stdout.text()).toContain("npm run d1:migrate:local");
   });
+
+  it("detects package managers from lockfiles", async () => {
+    await expect(detectPackageManager(tempRoot)).resolves.toBe("npm");
+    await writeFile(join(tempRoot, "package.json"), `${JSON.stringify({ packageManager: "pnpm@10.1.0" })}\n`);
+    await expect(detectPackageManager(tempRoot)).resolves.toBe("pnpm");
+    await writeFile(join(tempRoot, "package-lock.json"), "{}");
+    await expect(detectPackageManager(tempRoot)).resolves.toBe("npm");
+    await writeFile(join(tempRoot, "pnpm-lock.yaml"), "");
+    await expect(detectPackageManager(tempRoot)).resolves.toBe("pnpm");
+    await rm(join(tempRoot, "pnpm-lock.yaml"));
+    await writeFile(join(tempRoot, "yarn.lock"), "");
+    await expect(detectPackageManager(tempRoot)).resolves.toBe("yarn");
+    await rm(join(tempRoot, "yarn.lock"));
+    await writeFile(join(tempRoot, "bun.lockb"), "");
+    await expect(detectPackageManager(tempRoot)).resolves.toBe("bun");
+  });
 });
 
 function textBuffer(): WritableText & { readonly text: () => string } {
@@ -329,6 +477,45 @@ function textBuffer(): WritableText & { readonly text: () => string } {
     },
     text() {
       return value;
+    }
+  };
+}
+
+function packageManagerFailure(message: string): PackageManagerRunner {
+  return {
+    async install() {
+      throw new PackageManagerError(message, "install-failed");
+    }
+  };
+}
+
+function packageManagerRegistryEdit(path: string, contents: string): PackageManagerRunner {
+  return {
+    async install() {
+      await writeFile(path, contents, "utf8");
+      return {
+        packageManager: "npm",
+        command: "npm",
+        args: ["install"]
+      };
+    }
+  };
+}
+
+function packageManagerRecorder(): PackageManagerRunner & {
+  readonly calls: Array<{ readonly cwd: string; readonly packageManager: string | undefined }>;
+} {
+  const calls: Array<{ readonly cwd: string; readonly packageManager: string | undefined }> = [];
+  return {
+    calls,
+    async install(options) {
+      calls.push({ cwd: options.cwd, packageManager: options.packageManager });
+      const packageManager = options.packageManager ?? "npm";
+      return {
+        packageManager,
+        command: packageManager,
+        args: ["install"]
+      };
     }
   };
 }
