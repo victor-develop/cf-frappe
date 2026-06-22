@@ -10,6 +10,7 @@ import {
   defineDocType,
   planD1Migrations,
   planD1ProjectionIndexes,
+  planD1RetiredProjectionIndexes,
   renderD1Migration,
   renderD1Migrations,
   renderD1ProjectionIndexMigration
@@ -112,6 +113,99 @@ describe("D1 schema planner", () => {
         }
       ]
     });
+  });
+
+  it("plans retired projection indexes before replacement indexes", () => {
+    const Lead = defineDocType({
+      name: "Lead",
+      version: 2,
+      fields: [
+        { name: "status", type: "select", options: ["Open", "Qualified"] },
+        { name: "account_manager", type: "text" }
+      ],
+      retiredIndexes: [
+        ["owner"],
+        { doctype: "CRM Lead", fields: ["customer id", "status"] }
+      ],
+      indexes: [["account_manager", "status"]]
+    });
+
+    const retired = planD1RetiredProjectionIndexes([Lead]);
+
+    expect(retired).toHaveLength(2);
+    expect(retired[0]!.name).toMatch(/^drop_idx_cf_frappe_documents_lead_owner_[a-f0-9]{8}$/);
+    expect(retired[0]!.sql).toBe(`DROP INDEX IF EXISTS ${retired[0]!.name.slice("drop_".length)};`);
+    expect(retired[1]!.name).toMatch(/^drop_idx_cf_frappe_documents_crm_lead_customer_id_status_[a-f0-9]{8}$/);
+
+    const migrations = planD1Migrations([Lead], { includeCore: false });
+
+    expect(migrations).toHaveLength(1);
+    expect(migrations[0]).toMatchObject({
+      id: "doctype_lead_v2_indexes",
+      label: "Lead projection indexes",
+      statements: [
+        { name: retired[0]!.name },
+        { name: retired[1]!.name },
+        { name: expect.stringMatching(/^idx_cf_frappe_documents_lead_account_manager_status_[a-f0-9]{8}$/) }
+      ]
+    });
+    expect(renderD1Migrations(migrations)).toContain("DROP INDEX IF EXISTS");
+    expect(renderD1ProjectionIndexMigration([Lead])).toContain("DROP INDEX IF EXISTS");
+  });
+
+  it("rejects projection indexes declared as both active and retired", () => {
+    const Task = defineDocType({
+      name: "Task",
+      fields: [{ name: "status", type: "text" }],
+      indexes: [["status"]],
+      retiredIndexes: [["status"]]
+    });
+
+    expect(() => planD1Migrations([Task], { includeCore: false })).toThrow("cannot be both declared and retired");
+  });
+
+  it("rejects retired projection indexes that are still active on another DocType", () => {
+    const LegacyLead = defineDocType({
+      name: "Legacy Lead",
+      fields: [{ name: "status", type: "text" }],
+      indexes: [["status"]]
+    });
+    const Cleanup = defineDocType({
+      name: "Cleanup",
+      fields: [{ name: "status", type: "text" }],
+      retiredIndexes: [{ doctype: "Legacy Lead", fields: ["status"] }]
+    });
+
+    expect(() => planD1Migrations([LegacyLead, Cleanup], { includeCore: false })).toThrow(
+      "is still declared by DocType 'Legacy Lead'"
+    );
+  });
+
+  it("rejects duplicate retired projection indexes across DocTypes", () => {
+    const CleanupA = defineDocType({
+      name: "Cleanup A",
+      fields: [{ name: "status", type: "text" }],
+      retiredIndexes: [{ doctype: "Legacy Lead", fields: ["status"] }]
+    });
+    const CleanupB = defineDocType({
+      name: "Cleanup B",
+      fields: [{ name: "status", type: "text" }],
+      retiredIndexes: [{ doctype: "Legacy Lead", fields: ["status"] }]
+    });
+
+    expect(() => planD1RetiredProjectionIndexes([CleanupA, CleanupB])).toThrow(
+      "is planned for retirement by both DocType 'Cleanup A' and 'Cleanup B'"
+    );
+  });
+
+  it("rejects malformed retired projection index metadata", () => {
+    const Task = defineDocType({
+      name: "Task",
+      fields: [{ name: "status", type: "text" }],
+      retiredIndexes: [["old status", "old status"]]
+    });
+
+    expect(() => planD1RetiredProjectionIndexes([Task])).toThrow("repeats field 'old status'");
   });
 
   it("renders ordered migration bundles for reviewable files", () => {

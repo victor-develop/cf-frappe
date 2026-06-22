@@ -122,6 +122,13 @@ export type NamingStrategy =
   | { readonly kind: "provided"; readonly field?: string }
   | { readonly kind: "series"; readonly pattern: string };
 
+export type RetiredIndexDefinition =
+  | readonly string[]
+  | {
+      readonly doctype?: DocTypeName;
+      readonly fields: readonly string[];
+    };
+
 export interface DocTypeDefinition<TData extends DocumentData = DocumentData> {
   readonly name: DocTypeName;
   readonly module?: string;
@@ -136,6 +143,7 @@ export interface DocTypeDefinition<TData extends DocumentData = DocumentData> {
   readonly naming?: NamingStrategy;
   readonly allowUnknownFields?: boolean;
   readonly indexes?: readonly (readonly string[])[];
+  readonly retiredIndexes?: readonly RetiredIndexDefinition[];
   readonly events?: {
     readonly create?: string;
     readonly update?: string;

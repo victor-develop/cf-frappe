@@ -1,4 +1,4 @@
-import type { DocTypeDefinition } from "../../core/types.js";
+import type { DocTypeDefinition, RetiredIndexDefinition } from "../../core/types.js";
 import { FrameworkError } from "../../core/errors.js";
 
 export interface PlannedSqlStatement {
@@ -191,6 +191,22 @@ export function planD1ProjectionIndexes(
   });
 }
 
+export function planD1RetiredProjectionIndexes(
+  doctypes: readonly DocTypeDefinition[]
+): readonly PlannedSqlStatement[] {
+  assertRetiredProjectionIndexPlan(doctypes);
+  return doctypes.flatMap((doctype) => {
+    return (doctype.retiredIndexes ?? []).map((retired) => {
+      const source = normalizeRetiredIndex(doctype, retired);
+      const name = indexName(source.doctype, source.fields);
+      return {
+        name: `drop_${name}`,
+        sql: `DROP INDEX IF EXISTS ${name};`
+      };
+    });
+  });
+}
+
 export function planD1Migrations(
   doctypes: readonly DocTypeDefinition[],
   options: D1MigrationPlanOptions = {}
@@ -221,8 +237,12 @@ export function planD1Migrations(
       ]
     : [];
 
+  assertRetiredProjectionIndexPlan(doctypes);
   for (const doctype of [...doctypes].sort((left, right) => left.name.localeCompare(right.name))) {
-    const statements = planD1ProjectionIndexes([doctype]);
+    const statements = [
+      ...planD1RetiredProjectionIndexes([doctype]),
+      ...planD1ProjectionIndexes([doctype])
+    ];
     if (statements.length === 0) {
       continue;
     }
@@ -257,7 +277,10 @@ export function defineD1Migration(input: D1MigrationInput): D1Migration {
 export function renderD1ProjectionIndexMigration(
   doctypes: readonly DocTypeDefinition[]
 ): string {
-  return planD1ProjectionIndexes(doctypes)
+  return [
+    ...planD1RetiredProjectionIndexes(doctypes),
+    ...planD1ProjectionIndexes(doctypes)
+  ]
     .map((statement) => statement.sql)
     .join("\n\n");
 }
@@ -334,6 +357,99 @@ function validateIndexedFields(doctype: DocTypeDefinition, fields: readonly stri
       );
     }
     indexedFields.add(field);
+  }
+}
+
+function activeProjectionIndexOwners(doctypes: readonly DocTypeDefinition[]): ReadonlyMap<string, string> {
+  const owners = new Map<string, string>();
+  for (const doctype of doctypes) {
+    for (const fields of doctype.indexes ?? []) {
+      owners.set(indexName(doctype.name, fields), doctype.name);
+    }
+  }
+  return owners;
+}
+
+function assertRetiredProjectionIndexPlan(doctypes: readonly DocTypeDefinition[]): void {
+  const activeIndexOwners = activeProjectionIndexOwners(doctypes);
+  const retiredIndexOwners = new Map<string, string>();
+  for (const doctype of doctypes) {
+    for (const retired of doctype.retiredIndexes ?? []) {
+      const source = normalizeRetiredIndex(doctype, retired);
+      validateRetiredIndexedFields(doctype, source.doctype, source.fields);
+      const name = indexName(source.doctype, source.fields);
+      const activeOwner = activeIndexOwners.get(name);
+      if (activeOwner !== undefined) {
+        const message =
+          activeOwner === doctype.name
+            ? `D1 index '${name}' on DocType '${doctype.name}' cannot be both declared and retired`
+            : `D1 index '${name}' retired by DocType '${doctype.name}' is still declared by DocType '${activeOwner}'`;
+        throw new FrameworkError("MIGRATION_INDEX_CONFLICT", message, { status: 409 });
+      }
+      const retiredOwner = retiredIndexOwners.get(name);
+      if (retiredOwner !== undefined) {
+        throw new FrameworkError(
+          "MIGRATION_INDEX_DUPLICATE",
+          `D1 index '${name}' is planned for retirement by both DocType '${retiredOwner}' and '${doctype.name}'`,
+          { status: 409 }
+        );
+      }
+      retiredIndexOwners.set(name, doctype.name);
+    }
+  }
+}
+
+interface NormalizedRetiredIndex {
+  readonly doctype: string;
+  readonly fields: readonly string[];
+}
+
+function normalizeRetiredIndex(
+  doctype: DocTypeDefinition,
+  retired: RetiredIndexDefinition
+): NormalizedRetiredIndex {
+  if (isRetiredIndexFieldList(retired)) {
+    return { doctype: doctype.name, fields: retired };
+  }
+  return { doctype: retired.doctype ?? doctype.name, fields: retired.fields };
+}
+
+function isRetiredIndexFieldList(retired: RetiredIndexDefinition): retired is readonly string[] {
+  return Array.isArray(retired);
+}
+
+function validateRetiredIndexedFields(
+  currentDoctype: DocTypeDefinition,
+  sourceDoctype: string,
+  fields: readonly string[]
+): void {
+  assertMigrationIdentifier(sourceDoctype, `retired DocType name on ${currentDoctype.name}`);
+  if (fields.length === 0) {
+    throw new FrameworkError(
+      "MIGRATION_INDEX_INVALID",
+      `Retired D1 index on DocType '${currentDoctype.name}' must include at least one field`,
+      { status: 400 }
+    );
+  }
+  const indexedFields = new Set<string>();
+  for (const field of fields) {
+    assertMigrationIdentifier(field, `retired index field on ${currentDoctype.name}`);
+    if (indexedFields.has(field)) {
+      throw new FrameworkError(
+        "MIGRATION_INDEX_DUPLICATE",
+        `Retired D1 index on DocType '${currentDoctype.name}' repeats field '${field}'`,
+        { status: 409 }
+      );
+    }
+    indexedFields.add(field);
+  }
+}
+
+function assertMigrationIdentifier(value: string, label: string): void {
+  if (!/^[A-Za-z][A-Za-z0-9_ ]*$/.test(value)) {
+    throw new FrameworkError("MIGRATION_INDEX_INVALID", `Invalid ${label}: '${value}'`, {
+      status: 400
+    });
   }
 }
 
