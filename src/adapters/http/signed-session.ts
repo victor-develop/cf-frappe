@@ -10,10 +10,12 @@ export interface SignedSessionOptions {
 
 export interface SignedSessionActorResolverOptions extends SignedSessionOptions {
   readonly fallback?: ActorResolver;
+  readonly validate?: (session: SignedSessionValidation) => Actor | Promise<Actor>;
 }
 
 export interface CreateSignedSessionCookieOptions extends SignedSessionOptions {
   readonly maxAgeSeconds: number;
+  readonly accountVersion?: number;
   readonly path?: string;
   readonly sameSite?: "Lax" | "Strict" | "None";
   readonly secure?: boolean;
@@ -29,10 +31,17 @@ export interface ClearSignedSessionCookieOptions {
 interface SignedSessionPayload {
   readonly version: 1;
   readonly actor: Actor;
+  readonly accountVersion?: number;
   readonly expiresAt: number;
 }
 
 const DEFAULT_SESSION_COOKIE = "cf_frappe_session";
+
+export interface SignedSessionValidation {
+  readonly actor: Actor;
+  readonly accountVersion?: number;
+  readonly expiresAt: number;
+}
 
 export function signedSessionActorResolver(options: SignedSessionActorResolverOptions): ActorResolver {
   ensureSecret(options.secret);
@@ -44,7 +53,15 @@ export function signedSessionActorResolver(options: SignedSessionActorResolverOp
       }
       throw permissionDenied("Session cookie is required");
     }
-    return (await verifySignedSession(token, options)).actor;
+    const session = await verifySignedSession(token, options);
+    if (options.validate) {
+      return options.validate({
+        actor: session.actor,
+        ...(session.accountVersion === undefined ? {} : { accountVersion: session.accountVersion }),
+        expiresAt: session.expiresAt
+      });
+    }
+    return session.actor;
   };
 }
 
@@ -60,6 +77,7 @@ export async function createSignedSessionCookie(
   const payload = {
     version: 1,
     actor: normalizeActor(actor),
+    ...(options.accountVersion === undefined ? {} : { accountVersion: normalizeAccountVersion(options.accountVersion) }),
     expiresAt: now + options.maxAgeSeconds
   } satisfies SignedSessionPayload;
   const token = await signSessionPayload(payload, options.secret);
@@ -144,6 +162,7 @@ function parseSessionPayload(payloadPart: string): SignedSessionPayload {
   return {
     version: 1,
     actor: normalizeActor(value.actor),
+    ...(value.accountVersion === undefined ? {} : { accountVersion: normalizeAccountVersion(value.accountVersion) }),
     expiresAt
   };
 }
@@ -213,6 +232,13 @@ function ensureSecret(secret: string): void {
   if (secret.trim().length === 0) {
     throw badRequest("Session secret is required");
   }
+}
+
+function normalizeAccountVersion(value: unknown): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw permissionDenied("Session account version is invalid");
+  }
+  return value;
 }
 
 function base64UrlEncode(bytes: Uint8Array): string {

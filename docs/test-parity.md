@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the saved report Desk builder summary/group/chart slice:
+As of the event-sourced user account/login slice:
 
-- Vitest files: `52`
-- Vitest cases: `417`
+- Vitest files: `55`
+- Vitest cases: `430`
 
 ## Implication
 

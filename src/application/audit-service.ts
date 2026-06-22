@@ -31,6 +31,11 @@ const DOCUMENT_EVENT_KINDS = new Set<DocumentEventPayload["kind"]>([
   "DocumentUnfollowed",
   "UserPermissionAllowed",
   "UserPermissionRevoked",
+  "UserAccountCreated",
+  "UserPasswordChanged",
+  "UserRolesChanged",
+  "UserAccountEnabled",
+  "UserAccountDisabled",
   "SavedListFilterSaved",
   "SavedListFilterDeleted",
   "SavedReportSaved",
@@ -123,7 +128,7 @@ export class AuditService {
       ...(filters.until !== undefined ? { until: filters.until } : {}),
       limit
     });
-    return { tenantId, limit, filters, events };
+    return { tenantId, limit, filters, events: events.map(redactSensitiveAuditPayload) };
   }
 
   async recoverDeletedDocument(
@@ -204,4 +209,27 @@ function normalizeMaxDeletedDocumentEvents(value: number | undefined): number {
     throw badRequest("Deleted document recovery event limit must be a positive integer");
   }
   return value;
+}
+
+function redactSensitiveAuditPayload(event: DomainEvent): DomainEvent {
+  switch (event.payload.kind) {
+    case "UserAccountCreated":
+      return {
+        ...event,
+        payload: {
+          ...event.payload,
+          passwordHash: "[redacted]"
+        }
+      };
+    case "UserPasswordChanged":
+      return {
+        ...event,
+        payload: {
+          ...event.payload,
+          passwordHash: "[redacted]"
+        }
+      };
+    default:
+      return event;
+  }
 }

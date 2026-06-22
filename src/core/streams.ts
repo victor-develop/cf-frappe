@@ -20,6 +20,10 @@ export function userPermissionsStream(tenantId: TenantId, userId: string): Strea
   return documentStream(tenantId, "__UserPermissions", userId);
 }
 
+export function userAccountsStream(tenantId: TenantId, userId: string): StreamName {
+  return documentStream(tenantId, "__UserAccounts", userId);
+}
+
 export function escapePart(value: string): string {
   return encodeURIComponent(value).replaceAll(".", "%2E");
 }

@@ -1,4 +1,11 @@
-import { AuditService, SYSTEM_MANAGER_ROLE } from "../../src";
+import {
+  AuditService,
+  SYSTEM_MANAGER_ROLE,
+  UserAccountService,
+  deterministicIds,
+  fixedClock,
+  type PasswordHasher
+} from "../../src";
 import { createServices, data, manager, owner } from "../helpers";
 
 describe("AuditService", () => {
@@ -195,6 +202,46 @@ describe("AuditService", () => {
     });
   });
 
+  it("redacts account password hashes from audit search results", async () => {
+    const { audit, events } = createServices(["create-1"]);
+    const userAccounts = new UserAccountService({
+      events,
+      passwords: deterministicPasswords(),
+      ids: deterministicIds(["account-1", "password-1"]),
+      clock: fixedClock("2026-01-02T00:00:00.000Z")
+    });
+    await userAccounts.create({
+      actor: admin,
+      userId: "owner@example.com",
+      password: "secret-123",
+      roles: ["User"]
+    });
+    await userAccounts.changePassword({
+      actor: admin,
+      userId: "owner@example.com",
+      password: "secret-456",
+      expectedVersion: 1
+    });
+
+    const created = await audit.search(admin, {
+      doctype: "__UserAccounts",
+      name: "owner@example.com",
+      kind: "UserAccountCreated"
+    });
+    const changed = await audit.search(admin, {
+      doctype: "__UserAccounts",
+      name: "owner@example.com",
+      kind: "UserPasswordChanged"
+    });
+
+    expect(created.events[0]).toMatchObject({
+      payload: { kind: "UserAccountCreated", passwordHash: "[redacted]" }
+    });
+    expect(changed.events[0]).toMatchObject({
+      payload: { kind: "UserPasswordChanged", passwordHash: "[redacted]" }
+    });
+  });
+
   it("rejects non-system managers before querying audit events", async () => {
     const { audit, documents } = createServices(["create-1"]);
     await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Private Audit" }) });
@@ -336,3 +383,14 @@ describe("AuditService", () => {
     });
   });
 });
+
+function deterministicPasswords(): PasswordHasher {
+  return {
+    async hash(password) {
+      return `hash:${password}`;
+    },
+    async verify(password, encodedHash) {
+      return encodedHash === `hash:${password}`;
+    }
+  };
+}

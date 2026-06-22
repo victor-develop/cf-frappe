@@ -1,4 +1,5 @@
 export * from "./actor";
+export * from "./auth-api";
 export * from "./audit-api";
 export * from "./errors";
 export * from "./file-api";
@@ -9,4 +10,5 @@ export * from "./request";
 export * from "./resource-api";
 export * from "./saved-report-api";
 export * from "./signed-session";
+export * from "./user-account-api";
 export * from "./user-permission-api";

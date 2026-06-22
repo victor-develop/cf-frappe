@@ -25,6 +25,7 @@ The current slice is a working kernel:
 - metadata-defined print formats with reusable letterheads, field sections, or HTML templates with escaped substitutions
 - metadata-defined reports with typed filters, row ordering, summaries, and ordered/colored charts over current projections
 - event-sourced saved report definitions for per-user report-builder presets with generated HTTP and Desk report-builder APIs
+- event-sourced user accounts with Web Crypto password hashing and signed-cookie login/logout/me APIs
 - metadata-defined same-origin client scripts with a built-in Desk browser API
 - Cloudflare Queue/Cron background job primitives
 - R2-backed file attachments with event-sourced `File` metadata and Desk file manager workflows
@@ -51,6 +52,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | Desk list/forms | generated `/desk` pages, list/form layouts, columns, saved filters, and filters from DocType metadata |
 | Print formats | metadata-defined printable document pages, letterheads, and escaped templates |
 | Reports | metadata-defined report columns, typed filters, row ordering, summaries, ordered/colored charts, saved definitions, HTTP/Desk report-builder APIs, and Desk pages |
+| Users/login | event-sourced account streams, PBKDF2 password hashing, and signed-cookie auth routes |
 | Client scripts | `defineClientScript(...)` browser bundles attached to Desk list/form pages |
 | Background jobs | `JobRegistry`, Queue producers/consumers, and Cron dispatch |
 | File attachments | `File` DocType metadata plus R2 object storage and generated Desk file manager |
@@ -385,7 +387,23 @@ export default createCloudFrappeWorker<Env>({
 });
 ```
 
-Apps can still pass a resolver backed by Cloudflare Access JWTs, API tokens, or another authenticated source.
+Apps that want framework-owned login can also pass `auth` to `createCloudFrappeWorker(...)`. That mounts `/api/auth/login`, `/api/auth/logout`, `/api/auth/me`, and `/api/users/:userId` account-management routes, backed by per-user `__UserAccounts` event streams and a Web Crypto PBKDF2 password hasher. The `actor` resolver remains explicit so apps can use the same signed cookie resolver, Cloudflare Access JWTs, API tokens, or another authenticated source.
+
+```ts
+export default createCloudFrappeWorker<Env>({
+  registry,
+  actor: (request, env) =>
+    signedSessionActorResolver({
+      secret: env.SESSION_SECRET,
+      fallback: () => ({ id: "guest", roles: ["Guest"], tenantId: "default" })
+    })(request),
+  auth: {
+    sessionSecret: (env) => env.SESSION_SECRET,
+    sessionMaxAgeSeconds: 60 * 60 * 8,
+    revalidateSignedSessions: true
+  }
+});
+```
 
 The checked-in Wrangler demo uses a read-only guest actor. For local demos only, `unsafeHeaderActorResolver` reads caller-controlled headers:
 
@@ -437,6 +455,12 @@ Link fields declare relationships in DocType metadata:
 `defineDocType(...)` requires every link field to name a target, and `ModelRegistry` verifies that the target DocType is registered. On create, update, and model-declared domain commands, `DocumentService` folds the target document's event stream and rejects missing, deleted, or unreadable targets with `VALIDATION_FAILED` / `link_not_found`. Projection state is not used as write authority for link integrity.
 
 Generated clients can call `QueryService.listLinkOptions(...)` or `GET /api/link-options/:doctype/:field?q=apollo&limit=20` to retrieve readable target documents as `{ value, label }` options. Desk forms render visible link fields as select controls populated from the same query boundary.
+
+## User Accounts
+
+`UserAccountService` appends `UserAccountCreated`, `UserPasswordChanged`, `UserRolesChanged`, `UserAccountEnabled`, and `UserAccountDisabled` events to a per-tenant, per-user stream, then folds that stream into the current account state. The public account state never returns password hashes.
+
+System managers can manage accounts through `GET /api/users/:userId`, `POST /api/users/:userId`, `PUT /api/users/:userId/password`, `PUT /api/users/:userId/roles`, `POST /api/users/:userId/enable`, and `POST /api/users/:userId/disable`. Login accepts the account `userId`, verifies the folded account's password hash, rejects disabled accounts with the same public response as invalid credentials, and issues the existing signed session cookie with the current account stream version. Apps can enable signed-session revalidation so password, role, enable, and disable events invalidate older account cookies.
 
 ## User Permissions
 
@@ -770,11 +794,11 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 417 tests across 52 Vitest files covering app manifests, client scripts, Desk browser APIs, Desk form event hooks, schema, permissions, signed sessions, user permissions, events, registry, services, naming series, workflow helpers, document lifecycle, generated workflow actions, document timelines and diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, saved user filters, saved report definitions, saved report HTTP and Desk APIs, metadata-driven Desk saved report builder summaries/groups/charts, metadata-configured form/list views, child table validation, metadata-validated and operator-aware list filters, filter-builder metadata, print formats, print templates, print letterheads, reports, typed report filters, report ordering controls, report summaries, report group row caps, report charts, report chart controls, report exports, jobs, durable job execution history, retry administration, scheduler administration, files, Desk file manager workflows, realtime topic fan-out, redacted per-user room notifications, parsed Desk realtime subscriptions, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, D1 schema planning/migration application, and CLI starter scaffolding.
+Current suite: 430 tests across 55 Vitest files covering app manifests, client scripts, Desk browser APIs, Desk form event hooks, schema, permissions, signed sessions, event-sourced user accounts, login/logout/me APIs, account-version session revalidation across HTTP and realtime auth, audit redaction for password hash events, user permissions, events, registry, services, naming series, workflow helpers, document lifecycle, generated workflow actions, document timelines and diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, saved user filters, saved report definitions, saved report HTTP and Desk APIs, metadata-driven Desk saved report builder summaries/groups/charts, metadata-configured form/list views, child table validation, metadata-validated and operator-aware list filters, filter-builder metadata, print formats, print templates, print letterheads, reports, typed report filters, report ordering controls, report summaries, report group row caps, report charts, report chart controls, report exports, jobs, durable job execution history, retry administration, scheduler administration, files, Desk file manager workflows, realtime topic fan-out, redacted per-user room notifications, parsed Desk realtime subscriptions, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, D1 schema planning/migration application, and CLI starter scaffolding.
 
 ## Status
 
-This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, generated workflow transition actions, permissioned document timelines with field diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, signed session actor resolution, event-sourced user permissions with admin API/Desk management, app manifest composition, declarative client script injection with a built-in Desk browser API and basic form event hooks, parsed realtime subscription helpers, saved user filters, event-sourced saved report definitions with HTTP and Desk report-builder APIs, Desk saved report builder summary/group/chart controls, bounded report group rows, metadata-configured form and list views with operator-aware filters and resolved filter-builder metadata, metadata-planned D1 migrations, Cloudflare-native background job primitives with durable execution history, retry administration, and basic scheduler administration, R2-backed file attachments with a Desk file manager, typed report filters, report row ordering, report charts/exports with metadata-driven ordering/palette/value-label controls, custom print templates, reusable letterheads, Durable Object realtime tenant/DocType/document topics plus redacted user notifications, and an initial starter CLI exist, but richer visual filter builders, advanced report-builder controls, advanced chart controls, worker pools, richer scheduler controls, richer realtime presence, durable realtime replay, full user/login management, advanced file workflows, CLI-managed app installation, broader browser-side client APIs, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
+This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, generated workflow transition actions, permissioned document timelines with field diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, signed session actor resolution, event-sourced user accounts with login/logout/me APIs, event-sourced user permissions with admin API/Desk management, app manifest composition, declarative client script injection with a built-in Desk browser API and basic form event hooks, parsed realtime subscription helpers, saved user filters, event-sourced saved report definitions with HTTP and Desk report-builder APIs, Desk saved report builder summary/group/chart controls, bounded report group rows, metadata-configured form and list views with operator-aware filters and resolved filter-builder metadata, metadata-planned D1 migrations, Cloudflare-native background job primitives with durable execution history, retry administration, and basic scheduler administration, R2-backed file attachments with a Desk file manager, typed report filters, report row ordering, report charts/exports with metadata-driven ordering/palette/value-label controls, custom print templates, reusable letterheads, Durable Object realtime tenant/DocType/document topics plus redacted user notifications, and an initial starter CLI exist, but richer visual filter builders, advanced report-builder controls, advanced chart controls, worker pools, richer scheduler controls, richer realtime presence, durable realtime replay, richer Desk user administration, password reset/email verification/provider integrations, advanced file workflows, CLI-managed app installation, broader browser-side client APIs, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
 
 ## References
 

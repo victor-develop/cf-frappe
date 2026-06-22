@@ -242,6 +242,32 @@ export type DocumentEventPayload =
       readonly applicableDoctypes?: readonly DocTypeName[];
     }
   | {
+      readonly kind: "UserAccountCreated";
+      readonly userId: string;
+      readonly email?: string;
+      readonly roles: readonly string[];
+      readonly passwordHash: string;
+      readonly enabled: boolean;
+    }
+  | {
+      readonly kind: "UserPasswordChanged";
+      readonly userId: string;
+      readonly passwordHash: string;
+    }
+  | {
+      readonly kind: "UserRolesChanged";
+      readonly userId: string;
+      readonly roles: readonly string[];
+    }
+  | {
+      readonly kind: "UserAccountEnabled";
+      readonly userId: string;
+    }
+  | {
+      readonly kind: "UserAccountDisabled";
+      readonly userId: string;
+    }
+  | {
       readonly kind: "SavedListFilterSaved";
       readonly filterId: string;
       readonly label: string;

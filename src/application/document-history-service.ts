@@ -285,6 +285,11 @@ function diffEvent(
     case "SavedReportDeleted":
     case "UserPermissionAllowed":
     case "UserPermissionRevoked":
+    case "UserAccountCreated":
+    case "UserPasswordChanged":
+    case "UserRolesChanged":
+    case "UserAccountEnabled":
+    case "UserAccountDisabled":
       return [];
   }
 }
@@ -360,6 +365,16 @@ function summarize(payload: DocumentEventPayload): string {
       return `Allowed ${payload.userId} to access ${payload.targetDoctype}/${payload.targetName}`;
     case "UserPermissionRevoked":
       return `Revoked ${payload.userId} access to ${payload.targetDoctype}/${payload.targetName}`;
+    case "UserAccountCreated":
+      return `Created user account ${payload.userId}`;
+    case "UserPasswordChanged":
+      return `Changed password for ${payload.userId}`;
+    case "UserRolesChanged":
+      return `Changed roles for ${payload.userId}`;
+    case "UserAccountEnabled":
+      return `Enabled user account ${payload.userId}`;
+    case "UserAccountDisabled":
+      return `Disabled user account ${payload.userId}`;
     case "WorkflowTransitioned":
       return workflowSummary(payload);
     case "DomainCommandApplied":

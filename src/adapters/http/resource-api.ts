@@ -11,12 +11,14 @@ import { QueryService } from "../../application/query-service";
 import type { ReportService } from "../../application/report-service";
 import type { SavedListFilterService } from "../../application/saved-list-filter-service";
 import type { SavedReportService } from "../../application/saved-report-service";
+import type { UserAccountService } from "../../application/user-account-service";
 import type { UserPermissionService } from "../../application/user-permission-service";
 import { badRequest } from "../../core/errors";
 import { isListFilterOperator } from "../../core/list-view";
 import type { ModelRegistry } from "../../core/registry";
 import type { DocumentData, JsonPrimitive, ListDocumentsFilter, MutableDocumentData } from "../../core/types";
 import type { ActorResolver } from "./actor";
+import { createAuthApi, type AuthSessionOptions } from "./auth-api";
 import { createAuditApi } from "./audit-api";
 import { toErrorResponse } from "./errors";
 import { createFileApi } from "./file-api";
@@ -25,6 +27,7 @@ import { createPrintApi } from "./print-api";
 import { createReportApi } from "./report-api";
 import { listFiltersFromUrl, parseOptionalInteger, readJsonObject, requestMetadata } from "./request";
 import { createSavedReportApi } from "./saved-report-api";
+import { createUserAccountApi } from "./user-account-api";
 import { createUserPermissionApi } from "./user-permission-api";
 
 export interface ResourceApiOptions {
@@ -43,6 +46,8 @@ export interface ResourceApiOptions {
   readonly jobs?: JobHistoryService;
   readonly jobRetry?: JobRetryPort;
   readonly jobSchedules?: JobScheduleService;
+  readonly userAccounts?: UserAccountService;
+  readonly auth?: AuthSessionOptions;
   readonly userPermissions?: UserPermissionService;
   readonly maxFileBytes?: number;
 }
@@ -66,6 +71,28 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
   );
 
   app.get("/health", (c) => c.json({ ok: true }));
+
+  if (options.userAccounts) {
+    if (options.auth) {
+      app.route(
+        "/",
+        createAuthApi({
+          userAccounts: options.userAccounts,
+          actor: resolveActor,
+          session: options.auth,
+          maxJsonBytes
+        })
+      );
+    }
+    app.route(
+      "/",
+      createUserAccountApi({
+        userAccounts: options.userAccounts,
+        actor: resolveActor,
+        maxJsonBytes
+      })
+    );
+  }
 
   app.get("/api/meta/doctypes", async (c) => {
     const actor = await resolveActor(c.req.raw);

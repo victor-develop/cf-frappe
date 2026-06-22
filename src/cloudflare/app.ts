@@ -11,14 +11,16 @@ import { QueryService } from "../application/query-service";
 import { ReportService } from "../application/report-service";
 import { SavedListFilterService } from "../application/saved-list-filter-service";
 import { SavedReportService } from "../application/saved-report-service";
+import { UserAccountService } from "../application/user-account-service";
 import { UserPermissionService } from "../application/user-permission-service";
 import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator";
 import type { DocumentCommandExecutor } from "../application/document-service";
 import { FileService } from "../application/file-service";
+import { webCryptoPbkdf2PasswordHasher } from "../adapters/crypto";
 import { D1EventStore, D1ProjectionStore } from "../adapters/d1";
 import { createDeskApp } from "../adapters/desk";
-import { createResourceApi } from "../adapters/http";
-import type { ActorResolver } from "../adapters/http";
+import { createResourceApi, userAccountSessionActorResolver } from "../adapters/http";
+import type { ActorResolver, AuthSessionOptions } from "../adapters/http";
 import type { Actor } from "../core/types";
 import { FrameworkError } from "../core/errors";
 import type { JobRegistry, JobRetryPolicy } from "../core/jobs";
@@ -29,6 +31,7 @@ import type { FileStorage } from "../ports/file-storage";
 import type { IdGenerator } from "../ports/id-generator";
 import type { JobExecutionLog } from "../ports/job-execution-log";
 import type { JobMessage, JobQueue } from "../ports/job-queue";
+import type { PasswordHasher } from "../ports/password-hasher";
 import type { RealtimePublisher } from "../ports/realtime";
 import {
   DurableObjectCommandExecutor,
@@ -55,6 +58,7 @@ export interface CloudFrappeRuntimeServices {
   readonly audit: AuditService;
   readonly history: DocumentHistoryService;
   readonly savedFilters: SavedListFilterService;
+  readonly userAccounts?: UserAccountService;
   readonly userPermissions: UserPermissionService;
   readonly prints: PrintService;
   readonly queries: QueryService;
@@ -75,6 +79,20 @@ export interface CloudFrappeFileOptions<TEnv extends CloudFrappeEnv = CloudFrapp
 export interface CloudFrappeRealtimeOptions<TEnv extends CloudFrappeEnv = CloudFrappeEnv> {
   readonly namespace: (env: TEnv) => RealtimeHubNamespace;
   readonly route?: string;
+}
+
+export interface CloudFrappeAuthOptions<TEnv extends CloudFrappeEnv = CloudFrappeEnv> {
+  readonly sessionSecret: (env: TEnv) => string;
+  readonly sessionMaxAgeSeconds?: number;
+  readonly revalidateSignedSessions?: boolean;
+  readonly cookieName?: string;
+  readonly cookiePath?: string;
+  readonly sameSite?: "Lax" | "Strict" | "None";
+  readonly secure?: boolean;
+  readonly passwords?: PasswordHasher;
+  readonly clock?: Clock;
+  readonly ids?: IdGenerator;
+  readonly adminRoles?: readonly string[];
 }
 
 export interface CloudFrappeJobOptions<
@@ -98,6 +116,7 @@ export interface CloudFrappeWorkerOptions<
   readonly registry: ModelRegistry;
   readonly actor: CloudFrappeActorResolver<TEnv>;
   readonly maxJsonBytes?: number;
+  readonly auth?: CloudFrappeAuthOptions<TEnv>;
   readonly files?: CloudFrappeFileOptions<TEnv>;
   readonly realtime?: CloudFrappeRealtimeOptions<TEnv>;
   readonly jobs?: CloudFrappeJobOptions<TEnv, TJobResources>;
@@ -195,6 +214,15 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     events,
     validator: new ModelBackedUserPermissionGrantValidator({ registry: options.registry, events })
   });
+  const userAccounts = options.auth
+    ? new UserAccountService({
+        events,
+        passwords: options.auth.passwords ?? webCryptoPbkdf2PasswordHasher(),
+        ...(options.auth.clock === undefined ? {} : { clock: options.auth.clock }),
+        ...(options.auth.ids === undefined ? {} : { ids: options.auth.ids }),
+        ...(options.auth.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
+      })
+    : undefined;
   const restrictedQueries = new QueryService({ registry: options.registry, projections, userPermissions });
   const restrictedHistory = new DocumentHistoryService({ events, queries: restrictedQueries });
   const prints = new PrintService({ registry: options.registry, queries: restrictedQueries });
@@ -206,6 +234,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     audit,
     history: restrictedHistory,
     savedFilters,
+    ...(userAccounts === undefined ? {} : { userAccounts }),
     userPermissions,
     prints,
     queries: restrictedQueries,
@@ -272,7 +301,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
         }
       })
     : undefined;
-  const actor = (request: Request) => options.actor(request, env);
+  const actor = actorResolverForEnv(options, env, userAccounts);
   const app = createResourceApi({
     registry: options.registry,
     documents,
@@ -282,6 +311,8 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     audit,
     savedFilters,
     savedReports,
+    ...(userAccounts === undefined ? {} : { userAccounts }),
+    ...(userAccounts === undefined || options.auth === undefined ? {} : { auth: authSessionOptions(options.auth, env) }),
     userPermissions,
     reports,
     actor,
@@ -351,6 +382,37 @@ function jobsForEnv<TEnv extends CloudFrappeEnv, TResources>(
   return runtime;
 }
 
+function authSessionOptions<TEnv extends CloudFrappeEnv>(
+  options: CloudFrappeAuthOptions<TEnv>,
+  env: TEnv
+): AuthSessionOptions {
+  return {
+    secret: options.sessionSecret(env),
+    maxAgeSeconds: options.sessionMaxAgeSeconds ?? 28_800,
+    ...(options.cookieName === undefined ? {} : { cookieName: options.cookieName }),
+    ...(options.cookiePath === undefined ? {} : { path: options.cookiePath }),
+    ...(options.sameSite === undefined ? {} : { sameSite: options.sameSite }),
+    ...(options.secure === undefined ? {} : { secure: options.secure })
+  };
+}
+
+function actorResolverForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
+  options: CloudFrappeWorkerOptions<TEnv, TJobResources>,
+  env: TEnv,
+  userAccounts: UserAccountService | undefined
+): ActorResolver {
+  const fallbackActor = (request: Request) => options.actor(request, env);
+  if (!userAccounts || !options.auth?.revalidateSignedSessions) {
+    return fallbackActor;
+  }
+  return userAccountSessionActorResolver({
+    userAccounts,
+    secret: options.auth.sessionSecret(env),
+    ...(options.auth.cookieName === undefined ? {} : { cookieName: options.auth.cookieName }),
+    fallback: fallbackActor
+  });
+}
+
 function isDeskPath(pathname: string): boolean {
   return pathname === "/desk" || pathname.startsWith("/desk/");
 }
@@ -381,16 +443,16 @@ async function handleRealtimeRequest<TEnv extends CloudFrappeEnv, TJobResources>
     return Response.json({ error: { code: "BAD_REQUEST", message: "topic is invalid" } }, { status: 400 });
   }
   const topic = realtimeTopicFromScope(parsedTopic);
+  const { services } = appsForEnv(cache, jobRuntimeCache, options, env);
   let actor;
   try {
-    actor = await options.actor(request, env);
+    actor = await actorResolverForEnv(options, env, services.userAccounts)(request);
   } catch (error) {
     return jsonErrorResponse(error);
   }
   if (!canSubscribeToRealtimeTopic(actor, topic)) {
     return Response.json({ error: { code: "PERMISSION_DENIED", message: "Permission denied" } }, { status: 403 });
   }
-  const { services } = appsForEnv(cache, jobRuntimeCache, options, env);
   try {
     if (parsedTopic.kind === "document") {
       await services.queries.getDocument(actor, parsedTopic.doctype, parsedTopic.name, parsedTopic.tenantId);

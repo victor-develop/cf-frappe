@@ -100,6 +100,13 @@ export function foldDocumentFrom(
       case "SavedListFilterDeleted":
       case "UserPermissionAllowed":
       case "UserPermissionRevoked":
+      case "UserAccountCreated":
+      case "UserPasswordChanged":
+      case "UserRolesChanged":
+      case "UserAccountEnabled":
+      case "UserAccountDisabled":
+      case "SavedReportSaved":
+      case "SavedReportDeleted":
         break;
     }
   }
