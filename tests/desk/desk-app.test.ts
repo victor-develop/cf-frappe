@@ -34,6 +34,7 @@ describe("Desk app", () => {
       reports: services.reports,
       timeline: services.history,
       savedFilters: services.savedFilters,
+      savedReports: services.savedReports,
       userPermissions: services.userPermissions,
       actor: () => actor
     });
@@ -151,6 +152,109 @@ describe("Desk app", () => {
     expect(csv.headers.get("x-cf-frappe-exported")).toBe("2");
     expect(csv.headers.get("x-cf-frappe-export-truncated")).toBe("false");
     await expect(csv.text()).resolves.toBe("Title,Priority,Body\nReport Note,High,For reporting\nAlpha Report,High,Earlier title");
+  });
+
+  it("builds, runs, exports, and deletes saved reports in Desk", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Low Count", priority: "Low", count: 1 })
+    });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "High Count A", priority: "High", count: 3 })
+    });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "High Count B", priority: "High", count: 7 })
+    });
+
+    const reports = await app.request("/desk/reports");
+    expect(reports.status).toBe(200);
+    await expect(reports.text()).resolves.toContain("/desk/report-builder/Note");
+
+    const builder = await app.request("/desk/report-builder/Note");
+    expect(builder.status).toBe(200);
+    const builderHtml = await builder.text();
+    expect(builderHtml).toContain("Note Report Builder");
+    expect(builderHtml).toContain('name="column" value="title"');
+    expect(builderHtml).toContain('name="filter" value="priority"');
+
+    const body = new URLSearchParams();
+    body.set("label", "High count desk report");
+    body.append("column", "title");
+    body.append("column", "count");
+    body.append("filter", "priority");
+    body.set("orderBy", "count");
+    body.set("order", "desc");
+    const saved = await app.request("/desk/report-builder/Note", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body
+    });
+
+    expect(saved.status).toBe(303);
+    expect(saved.headers.get("location")).toBe("/desk/report-builder/Note/report_saved-report-1");
+
+    const run = await app.request(
+      "/desk/report-builder/Note/report_saved-report-1?filter_priority=High&order_by=count&order=desc"
+    );
+    expect(run.status).toBe(200);
+    const html = await run.text();
+    expect(html).toContain("High count desk report");
+    expect(html).toContain("High Count B");
+    expect(html.indexOf("High Count B")).toBeLessThan(html.indexOf("High Count A"));
+    expect(html).toContain('<select id="filter-priority" name="filter_priority">');
+    expect(html).toContain("/desk/report-builder/Note/report_saved-report-1/export.csv?filter_priority=High&amp;order_by=count&amp;order=desc");
+    expect(html).toContain('action="/desk/report-builder/Note/report_saved-report-1/delete"');
+
+    const csv = await app.request(
+      "/desk/report-builder/Note/report_saved-report-1/export.csv?filter_priority=High&order_by=count&order=desc"
+    );
+    expect(csv.status).toBe(200);
+    expect(csv.headers.get("content-disposition")).toBe('attachment; filename="Saved-Report-report_saved-report-1.csv"');
+    await expect(csv.text()).resolves.toBe("title,count\nHigh Count B,7\nHigh Count A,3");
+
+    const deleted = await app.request("/desk/report-builder/Note/report_saved-report-1/delete", {
+      method: "POST"
+    });
+    expect(deleted.status).toBe(303);
+    expect(deleted.headers.get("location")).toBe("/desk/report-builder/Note");
+    const afterDelete = await app.request("/desk/report-builder/Note");
+    await expect(afterDelete.text()).resolves.toContain("No saved reports.");
+  });
+
+  it("escapes saved report builder labels and rejects invalid builder fields", async () => {
+    const { app } = makeDesk();
+    const xssBody = new URLSearchParams();
+    xssBody.set("label", "<script>alert('report')</script>");
+    xssBody.append("column", "title");
+    const saved = await app.request("/desk/report-builder/Note", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: xssBody
+    });
+    expect(saved.status).toBe(303);
+
+    const builder = await app.request("/desk/report-builder/Note");
+    const html = await builder.text();
+    expect(html).not.toContain("<script>alert");
+    expect(html).toContain("&lt;script&gt;alert(&#39;report&#39;)&lt;/script&gt;");
+
+    const invalidBody = new URLSearchParams();
+    invalidBody.set("label", "Invalid report");
+    invalidBody.append("column", "missing");
+    const invalid = await app.request("/desk/report-builder/Note", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: invalidBody
+    });
+
+    expect(invalid.status).toBe(400);
+    await expect(invalid.text()).resolves.toContain("Unknown report column &#39;missing&#39;");
   });
 
   it("renders a Desk file manager for upload, download, and delete workflows", async () => {

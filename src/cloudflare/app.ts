@@ -300,6 +300,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     queries: restrictedQueries,
     timeline: restrictedHistory,
     savedFilters,
+    savedReports,
     userPermissions,
     reports,
     ...(jobHistory === undefined ? {} : { jobs: jobHistory }),

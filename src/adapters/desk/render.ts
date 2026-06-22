@@ -27,6 +27,7 @@ import type { JobExecutionDashboard } from "../../application/job-history-servic
 import type { JobScheduleDashboard } from "../../application/job-schedule-service";
 import type { ReportRunResult } from "../../application/report-service";
 import type { SavedListFilter } from "../../application/saved-list-filter-service";
+import type { SavedReport } from "../../application/saved-report-service";
 import type { PrintFormatDefinition } from "../../core/print-format";
 import type { UserPermissionState } from "../../core/user-permissions";
 import { DESK_CLIENT_SCRIPT_PATH } from "./client";
@@ -186,7 +187,10 @@ function attachmentLabel(file: FileDashboard["files"][number]): string {
   return `${file.attachedTo.doctype}/${file.attachedTo.name}`;
 }
 
-export function renderReportList(reports: readonly ReportDefinition[]): string {
+export function renderReportList(
+  reports: readonly ReportDefinition[],
+  options: { readonly builderDoctypes?: readonly DocTypeDefinition[] } = {}
+): string {
   const rows = reports
     .map(
       (report) => `<tr>
@@ -197,6 +201,25 @@ export function renderReportList(reports: readonly ReportDefinition[]): string {
       </tr>`
     )
     .join("");
+  const builderRows = (options.builderDoctypes ?? [])
+    .map(
+      (doctype) => `<tr>
+        <td><a href="/desk/report-builder/${encodeURIComponent(doctype.name)}">${escapeHtml(labelFor(doctype))}</a></td>
+        <td>${escapeHtml(doctype.name)}</td>
+        <td>${String(doctype.fields.filter((field) => !field.hidden).length)}</td>
+      </tr>`
+    )
+    .join("");
+  const builder = options.builderDoctypes
+    ? `<section class="panel report-builder-list">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Build Report</th><th>DocType</th><th>Fields</th></tr></thead>
+          <tbody>${builderRows || `<tr><td colspan="3" class="empty">No readable DocTypes.</td></tr>`}</tbody>
+        </table>
+      </div>
+    </section>`
+    : "";
   return `<section class="panel">
     <div class="table-wrap">
       <table>
@@ -204,7 +227,107 @@ export function renderReportList(reports: readonly ReportDefinition[]): string {
         <tbody>${rows || `<tr><td colspan="4" class="empty">No readable reports.</td></tr>`}</tbody>
       </table>
     </div>
+  </section>${builder}`;
+}
+
+export function renderSavedReportBuilder(
+  doctype: DocTypeDefinition,
+  savedReports: readonly SavedReport[],
+  options: { readonly error?: string } = {}
+): string {
+  const rows = savedReports
+    .map((saved) => {
+      const href = `/desk/report-builder/${encodeURIComponent(doctype.name)}/${encodeURIComponent(saved.id)}`;
+      const exportHref = `${href}/export.csv`;
+      return `<tr>
+        <td><a href="${href}">${escapeHtml(saved.label)}</a></td>
+        <td>${escapeHtml(saved.definition.columns.map((column) => column.label ?? column.name).join(", "))}</td>
+        <td>${escapeHtml(saved.updatedAt)}</td>
+        <td>
+          <a class="button" href="${exportHref}">Export CSV</a>
+          <form class="inline-action" method="post" action="${href}/delete">
+            <button class="button danger" type="submit">Delete</button>
+          </form>
+        </td>
+      </tr>`;
+    })
+    .join("");
+  const visibleFields = doctype.fields.filter((field) => !field.hidden);
+  const defaultColumns = new Set(doctype.listView?.columns ?? visibleFields.slice(0, 3).map((field) => field.name));
+  const columnOptions = visibleFields
+    .map((field) => renderReportBuilderCheckbox("column", field, defaultColumns.has(field.name)))
+    .join("");
+  const filterOptions = visibleFields
+    .filter((field) => field.type !== "json" && field.type !== "table")
+    .map((field) => renderReportBuilderCheckbox("filter", field, false))
+    .join("");
+  const orderOptions = [
+    `<option value=""></option>`,
+    ...visibleFields.map((field) => `<option value="${escapeHtml(field.name)}">${escapeHtml(field.label ?? field.name)}</option>`)
+  ].join("");
+  return `${options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : ""}
+  <form class="panel form report-builder-form" method="post" action="/desk/report-builder/${encodeURIComponent(doctype.name)}">
+    <div class="fields cols-1">
+      <label class="field"><span>Label</span><input name="label" required></label>
+    </div>
+    <fieldset class="choice-grid">
+      <legend>Columns</legend>
+      ${columnOptions}
+    </fieldset>
+    <fieldset class="choice-grid">
+      <legend>Filters</legend>
+      ${filterOptions}
+    </fieldset>
+    <div class="fields">
+      <label class="field"><span>Order By</span><select name="orderBy">${orderOptions}</select></label>
+      <label class="field"><span>Order</span><select name="order">
+        <option value="asc">Ascending</option>
+        <option value="desc">Descending</option>
+      </select></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Save Report</button></div>
+  </form>
+  <section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Saved Report</th><th>Columns</th><th>Updated</th><th>Actions</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="4" class="empty">No saved reports.</td></tr>`}</tbody>
+      </table>
+    </div>
   </section>`;
+}
+
+export function renderSavedReportView(
+  saved: SavedReport,
+  result: ReportRunResult,
+  options: {
+    readonly listHref: string;
+    readonly exportHref: string;
+    readonly deleteAction: string;
+  }
+): string {
+  return `<section class="toolbar saved-report-toolbar">
+    <a class="button" href="${escapeHtml(options.listHref)}">Back</a>
+    <a class="button" href="${escapeHtml(options.exportHref)}">Export CSV</a>
+    <form class="inline-action" method="post" action="${escapeHtml(options.deleteAction)}">
+      <button class="button danger" type="submit">Delete</button>
+    </form>
+  </section>
+  <section class="panel saved-report-meta">
+    <dl>
+      <div><dt>DocType</dt><dd>${escapeHtml(saved.doctype)}</dd></div>
+      <div><dt>Columns</dt><dd>${escapeHtml(saved.definition.columns.map((column) => column.label ?? column.name).join(", "))}</dd></div>
+      <div><dt>Updated</dt><dd>${escapeHtml(saved.updatedAt)}</dd></div>
+    </dl>
+  </section>
+  ${renderReportView(result, { exportHref: options.exportHref })}`;
+}
+
+function renderReportBuilderCheckbox(name: string, field: FieldDefinition, checked: boolean): string {
+  return `<label class="choice">
+    <input type="checkbox" name="${name}" value="${escapeHtml(field.name)}"${checked ? " checked" : ""}>
+    <span>${escapeHtml(field.label ?? field.name)}</span>
+  </label>`;
 }
 
 export function renderUserPermissionAdmin(state: UserPermissionState): string {
@@ -1680,6 +1803,30 @@ tr:last-child td { border-bottom: 0; }
 .field { display: grid; gap: 6px; }
 .field span { font-weight: 650; }
 .field small { color: var(--muted); }
+.choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin: 18px 0 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.choice-grid legend {
+  padding: 0 6px;
+  color: var(--muted);
+  font-weight: 700;
+}
+.choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+.choice input {
+  width: auto;
+  min-height: auto;
+}
 input, select, textarea {
   width: 100%;
   min-height: 44px;

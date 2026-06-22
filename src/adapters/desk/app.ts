@@ -9,6 +9,7 @@ import type { PrintService } from "../../application/print-service";
 import { QueryService } from "../../application/query-service";
 import type { ReportService } from "../../application/report-service";
 import type { SavedListFilterService } from "../../application/saved-list-filter-service";
+import type { SavedReportDefinition, SavedReportService } from "../../application/saved-report-service";
 import type { UserPermissionService } from "../../application/user-permission-service";
 import { FrameworkError } from "../../core/errors";
 import { can } from "../../core/permissions";
@@ -21,12 +22,13 @@ import {
   type DocumentData,
   type DocumentSnapshot,
   type FieldDefinition,
+  type FieldType,
   type ListDocumentsFilter,
   type MutableDocumentData,
   type ResolvedFormView
 } from "../../core/types";
 import type { ActorResolver } from "../http/actor";
-import { listFiltersFromUrl, parseOptionalInteger } from "../http/request";
+import { listFiltersFromUrl, parseOptionalInteger, readBoundedText } from "../http/request";
 import { writeReportCsvHeaders } from "../http/report-export";
 import { reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request";
 import { renderPrintDocument } from "../print";
@@ -44,12 +46,16 @@ import {
   renderNotFound,
   renderReportList,
   renderReportView,
+  renderSavedReportBuilder,
+  renderSavedReportView,
   renderUserPermissionAdmin,
   type FormLifecycleAction,
   type FormLinkOptions,
   type FormTableDefinitions,
   type FormWorkflowAction
 } from "./render";
+
+const MAX_DESK_FORM_BYTES = 1_048_576;
 
 export interface DeskAppOptions {
   readonly registry: ModelRegistry;
@@ -59,6 +65,7 @@ export interface DeskAppOptions {
   readonly queries: QueryService;
   readonly timeline?: DocumentHistoryService;
   readonly savedFilters?: SavedListFilterService;
+  readonly savedReports?: SavedReportService;
   readonly userPermissions?: UserPermissionService;
   readonly reports?: ReportService;
   readonly jobs?: JobHistoryService;
@@ -107,7 +114,9 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         doctypes,
         reports,
         showFiles: options.files !== undefined,
-        body: renderReportList(reports)
+        body: renderReportList(reports, {
+          ...(options.savedReports === undefined ? {} : { builderDoctypes: doctypes })
+        })
       })
     );
   });
@@ -304,6 +313,112 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       metadata: requestMetadata(c.req.raw)
     });
     return c.redirect(`/desk/admin/user-permissions?user=${encodeURIComponent(form.userId)}`, 303);
+  });
+
+  app.get("/desk/report-builder/:doctype", async (c) => {
+    const savedReports = requireSavedReports(options);
+    const actor = await options.actor(c.req.raw);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const doctypes = options.queries.listDoctypes(actor);
+    const reports = listReports(options, actor);
+    const saved = await savedReports.list(actor, doctype.name);
+    return html(
+      renderDeskLayout({
+        title: `${doctype.label ?? doctype.name} Report Builder`,
+        active: doctype.name,
+        doctypes,
+        reports,
+        showFiles: options.files !== undefined,
+        body: renderSavedReportBuilder(doctype, saved)
+      })
+    );
+  });
+
+  app.post("/desk/report-builder/:doctype", async (c) => {
+    const savedReports = requireSavedReports(options);
+    const actor = await options.actor(c.req.raw);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    try {
+      const form = await parseDeskSavedReport(c.req.raw, doctype);
+      const saved = await savedReports.save({
+        actor,
+        doctype: doctype.name,
+        label: form.label,
+        definition: form.definition
+      });
+      return c.redirect(
+        `/desk/report-builder/${encodeURIComponent(doctype.name)}/${encodeURIComponent(saved.id)}`,
+        303
+      );
+    } catch (error) {
+      return renderDeskSavedReportBuilderFailure(options, c.req.raw, actor, doctype, error);
+    }
+  });
+
+  app.get("/desk/report-builder/:doctype/:id/export.csv", async (c) => {
+    const savedReports = requireSavedReports(options);
+    const actor = await options.actor(c.req.raw);
+    const url = new URL(c.req.url);
+    const limit = parseOptionalInteger(url.searchParams.get("limit") ?? undefined);
+    const csv = await savedReports.exportCsv({
+      actor,
+      doctype: c.req.param("doctype"),
+      id: c.req.param("id"),
+      options: {
+        filters: reportFiltersFromUrl(url),
+        ...reportOrderingFromUrl(url),
+        ...(limit !== undefined ? { limit } : {})
+      }
+    });
+    writeReportCsvHeaders(c, csv);
+    return c.body(csv.body);
+  });
+
+  app.post("/desk/report-builder/:doctype/:id/delete", async (c) => {
+    const savedReports = requireSavedReports(options);
+    const actor = await options.actor(c.req.raw);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    await savedReports.delete({
+      actor,
+      doctype: doctype.name,
+      id: c.req.param("id")
+    });
+    return c.redirect(`/desk/report-builder/${encodeURIComponent(doctype.name)}`, 303);
+  });
+
+  app.get("/desk/report-builder/:doctype/:id", async (c) => {
+    const savedReports = requireSavedReports(options);
+    const actor = await options.actor(c.req.raw);
+    const url = new URL(c.req.url);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const doctypes = options.queries.listDoctypes(actor);
+    const reports = listReports(options, actor);
+    const saved = await savedReports.get(actor, doctype.name, c.req.param("id"));
+    const result = await savedReports.run({
+      actor,
+      doctype: doctype.name,
+      id: saved.id,
+      options: {
+        filters: reportFiltersFromUrl(url),
+        ...reportOrderingFromUrl(url),
+        limit: 100
+      }
+    });
+    const base = `/desk/report-builder/${encodeURIComponent(doctype.name)}/${encodeURIComponent(saved.id)}`;
+    return html(
+      renderDeskLayout({
+        title: saved.label,
+        active: doctype.name,
+        doctypes,
+        reports,
+        showFiles: options.files !== undefined,
+        body: renderSavedReportView(saved, result, {
+          listHref: `/desk/report-builder/${encodeURIComponent(doctype.name)}`,
+          exportHref: `${base}/export.csv${url.search}`,
+          deleteAction: `${base}/delete`
+        })
+      })
+    );
   });
 
   app.get("/desk/reports/:report", async (c) => {
@@ -870,6 +985,13 @@ function requireJobSchedules(options: DeskAppOptions): JobScheduleService {
   return options.jobSchedules;
 }
 
+function requireSavedReports(options: DeskAppOptions): SavedReportService {
+  if (!options.savedReports) {
+    throw new FrameworkError("REPORT_NOT_FOUND", "Saved reports are not enabled", { status: 404 });
+  }
+  return options.savedReports;
+}
+
 function requireFiles(options: DeskAppOptions): FileService {
   if (!options.files) {
     throw new FrameworkError("DOCUMENT_NOT_FOUND", "Files are not enabled", { status: 404 });
@@ -909,6 +1031,31 @@ async function renderDeskFileFailure(
       reports,
       showFiles: true,
       body: renderFileManager(dashboard, { error: message })
+    }),
+    error instanceof FrameworkError ? error.status : 500
+  );
+}
+
+async function renderDeskSavedReportBuilderFailure(
+  options: DeskAppOptions,
+  request: Request,
+  actor: Actor,
+  doctype: DocTypeDefinition,
+  error: unknown
+): Promise<Response> {
+  const savedReports = requireSavedReports(options);
+  const saved = await savedReports.list(actor, doctype.name).catch(() => []);
+  const doctypes = options.queries.listDoctypes(actor);
+  const reports = listReports(options, actor);
+  const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
+  return html(
+    renderDeskLayout({
+      title: `${doctype.label ?? doctype.name} Report Builder`,
+      active: doctype.name,
+      doctypes,
+      reports,
+      showFiles: options.files !== undefined,
+      body: renderSavedReportBuilder(doctype, saved, { error: message })
     }),
     error instanceof FrameworkError ? error.status : 500
   );
@@ -1008,6 +1155,11 @@ interface ParsedDeskSavedFilter {
   readonly filters: readonly ListDocumentsFilter[];
 }
 
+interface ParsedDeskSavedReport {
+  readonly label: string;
+  readonly definition: SavedReportDefinition;
+}
+
 interface ParsedDeskUserPermission {
   readonly userId: string;
   readonly targetDoctype: string;
@@ -1085,6 +1237,29 @@ async function parseDeskSavedFilter(request: Request): Promise<ParsedDeskSavedFi
   };
 }
 
+async function parseDeskSavedReport(
+  request: Request,
+  doctype: DocTypeDefinition
+): Promise<ParsedDeskSavedReport> {
+  const form = await readUrlEncodedDeskForm(request);
+  const fields = new Map(doctype.fields.map((field) => [field.name, field]));
+  const columnNames = uniqueFormValues(form, "column");
+  const filterNames = uniqueFormValues(form, "filter");
+  const columns = columnNames.map((name) => reportColumnFor(fields, name));
+  const filters = filterNames.map((name) => reportFilterFor(fields, name));
+  const orderBy = stringSearchParamValue(form, "orderBy");
+  const order = stringSearchParamValue(form, "order");
+  return {
+    label: form.get("label") ?? "",
+    definition: {
+      columns,
+      ...(filters.length === 0 ? {} : { filters }),
+      ...(orderBy && columnNames.includes(orderBy) ? { orderBy } : {}),
+      ...(order === "asc" || order === "desc" ? { order } : {})
+    }
+  };
+}
+
 async function parseDeskAssignment(request: Request): Promise<ParsedDeskAssignment> {
   const form = await request.formData();
   const assignee = form.get("assignee");
@@ -1158,6 +1333,56 @@ function commaListFormValue(value: FormDataEntryValue | null): readonly string[]
 async function parseDeskExpectedVersion(request: Request): Promise<number | undefined> {
   const form = await request.formData();
   return coerceExpectedVersion(form.get("expectedVersion"));
+}
+
+async function readUrlEncodedDeskForm(request: Request): Promise<URLSearchParams> {
+  const text = await readBoundedText(
+    request,
+    MAX_DESK_FORM_BYTES,
+    `Form body exceeds ${MAX_DESK_FORM_BYTES} bytes`
+  );
+  return new URLSearchParams(text);
+}
+
+function uniqueFormValues(form: URLSearchParams, key: string): readonly string[] {
+  return [...new Set(form.getAll(key).map((value) => value.trim()).filter(Boolean))];
+}
+
+function stringSearchParamValue(form: URLSearchParams, key: string): string | undefined {
+  const value = form.get(key)?.trim();
+  return value ? value : undefined;
+}
+
+function reportColumnFor(
+  fields: ReadonlyMap<string, FieldDefinition>,
+  name: string
+): SavedReportDefinition["columns"][number] {
+  const field = fields.get(name);
+  if (!field || field.hidden) {
+    throw new FrameworkError("BAD_REQUEST", `Unknown report column '${name}'`, { status: 400 });
+  }
+  return {
+    name: field.name,
+    label: field.label ?? field.name,
+    type: field.type
+  };
+}
+
+function reportFilterFor(
+  fields: ReadonlyMap<string, FieldDefinition>,
+  name: string
+): NonNullable<SavedReportDefinition["filters"]>[number] {
+  const field = fields.get(name);
+  if (!field || field.hidden || field.type === "json" || field.type === "table") {
+    throw new FrameworkError("BAD_REQUEST", `Unknown report filter '${name}'`, { status: 400 });
+  }
+  return {
+    name: field.name,
+    label: field.label ?? field.name,
+    field: field.name,
+    type: field.type as Exclude<FieldType, "json" | "table">,
+    ...(field.type === "text" || field.type === "longText" ? { operator: "contains" } : {})
+  };
 }
 
 function coerceTableFormValue(
