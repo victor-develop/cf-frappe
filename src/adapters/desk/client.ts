@@ -609,6 +609,14 @@ export function renderDeskClientScript(): string {
     return url;
   }
 
+  function realtimePresenceUrl(topic) {
+    return withQuery("/api/realtime/presence", { topic: topic });
+  }
+
+  function realtimePresence(topic) {
+    return request(realtimePresenceUrl(topic)).then(unwrapData);
+  }
+
   function realtimeSubscribe(topic, handlers, options) {
     var url = realtimeUrl(topic, options).toString();
     var socket = new WebSocket(url, options && options.protocols);
@@ -768,6 +776,20 @@ export function renderDeskClientScript(): string {
       },
       userUrl: function (userId, options) {
         return realtimeUrl(userTopicFromOptions(userId, options), options).toString();
+      },
+      presence: realtimePresence,
+      presenceDoctype: function (doctype, options) {
+        return realtimePresence(doctypeTopicFromOptions(doctype, options));
+      },
+      presenceDocument: function (doctype, name, options) {
+        return realtimePresence(documentTopicFromOptions(doctype, name, options));
+      },
+      presenceTenant: function (options) {
+        return realtimePresence(tenantTopicFromOptions(options));
+      },
+      presenceUrl: realtimePresenceUrl,
+      presenceUser: function (userId, options) {
+        return realtimePresence(userTopicFromOptions(userId, options));
       },
       subscribe: function (topic, handlers, options) {
         return realtimeSubscribe(topic, handlers, options);

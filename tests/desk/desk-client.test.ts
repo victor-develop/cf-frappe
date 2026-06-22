@@ -36,6 +36,12 @@ interface DeskClientRuntime {
       handlers: DeskRealtimeHandlers,
       options: DeskRealtimeOptions
     ) => DeskRealtimeSubscription;
+    readonly presence: (topic: string) => Promise<unknown>;
+    readonly presenceDoctype: (doctype: string, options: DeskRealtimeOptions) => Promise<unknown>;
+    readonly presenceDocument: (doctype: string, name: string, options: DeskRealtimeOptions) => Promise<unknown>;
+    readonly presenceTenant: (options: DeskRealtimeOptions) => Promise<unknown>;
+    readonly presenceUrl: (topic: string) => string;
+    readonly presenceUser: (userId: string, options: DeskRealtimeOptions) => Promise<unknown>;
     readonly tenantUrl: (options: DeskRealtimeOptions) => string;
     readonly userUrl: (userId: string, options: DeskRealtimeOptions) => string;
     readonly url: (topic: string, options?: DeskRealtimeOptions) => string;
@@ -383,6 +389,35 @@ describe("Desk client runtime", () => {
     expect(runtime.realtime.userUrl("owner@example.com", { tenantId: "acme:west" })).toBe(
       "wss://app.example/api/realtime?topic=user%3Aacme%253Awest%3Aowner%2540example.com"
     );
+    expect(runtime.realtime.presenceUrl("document:acme:Task:TASK-1")).toBe(
+      "/api/realtime/presence?topic=document%3Aacme%3ATask%3ATASK-1"
+    );
+  });
+
+  it("fetches authorized realtime presence snapshots for Desk collaboration surfaces", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { topic: "document:acme:Task:TASK-1", connections: [] } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.realtime.presenceDocument("Task", "TASK-1", { tenantId: "acme" })).resolves.toEqual({
+      topic: "document:acme:Task:TASK-1",
+      connections: []
+    });
+    await runtime.realtime.presenceDoctype("Task", { tenantId: "acme" });
+    await runtime.realtime.presenceTenant({ tenantId: "acme" });
+    await runtime.realtime.presenceUser("owner@example.com", { tenantId: "acme" });
+
+    expect(calls.map((call) => call.url)).toEqual([
+      "/api/realtime/presence?topic=document%3Aacme%3ATask%3ATASK-1",
+      "/api/realtime/presence?topic=doctype%3Aacme%3ATask",
+      "/api/realtime/presence?topic=tenant%3Aacme",
+      "/api/realtime/presence?topic=user%3Aacme%3Aowner%2540example.com"
+    ]);
+    expect(calls.every((call) => call.init.credentials === "same-origin")).toBe(true);
   });
 
   it("parses realtime subscriptions into events and redacted user notifications", () => {

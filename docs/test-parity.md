@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the event-sourced profile preference field slice:
+As of the permissioned realtime presence snapshot slice:
 
 - Vitest files: `65`
-- Vitest cases: `533`
+- Vitest cases: `537`
 
 ## Implication
 

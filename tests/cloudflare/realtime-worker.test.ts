@@ -6,6 +6,7 @@ import {
   createCloudFrappeWorker,
   type AggregateCoordinatorRpc,
   type RealtimeHubNamespace,
+  type RealtimePresenceConnection,
   type RpcDurableObjectNamespace
 } from "../../src/cloudflare";
 import { createTestRegistry, owner } from "../helpers";
@@ -103,6 +104,50 @@ describe("CloudFrappe Worker realtime", () => {
     expect(fetches).toHaveLength(1);
   });
 
+  it("returns authorized realtime presence snapshots without opening a websocket", async () => {
+    const topics: string[] = [];
+    const fetches: Request[] = [];
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => owner,
+      realtime: {
+        namespace: () => fakeRealtimeNamespace(topics, fetches, {
+          connections: [
+            {
+              connectionId: "conn-1",
+              connectedAt: "2026-06-23T00:00:00.000Z",
+              tenantId: "acme",
+              userId: "owner@example.com"
+            }
+          ]
+        })
+      }
+    });
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/api/realtime/presence?topic=document:acme:Note:My%20Note"),
+      { DB: fakeD1(), AGGREGATES: fakeAggregateNamespace() },
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(200);
+    expect(topics).toEqual(["document:acme:Note:My%20Note"]);
+    expect(fetches).toEqual([]);
+    await expect(response.json()).resolves.toEqual({
+      data: {
+        topic: "document:acme:Note:My%20Note",
+        connections: [
+          {
+            connectionId: "conn-1",
+            connectedAt: "2026-06-23T00:00:00.000Z",
+            tenantId: "acme",
+            userId: "owner@example.com"
+          }
+        ]
+      }
+    });
+  });
+
   it("rejects websocket subscriptions for another user's realtime room", async () => {
     const topics: string[] = [];
     const fetches: Request[] = [];
@@ -121,6 +166,51 @@ describe("CloudFrappe Worker realtime", () => {
     );
 
     expect(response.status).toBe(403);
+    expect(topics).toEqual([]);
+    expect(fetches).toEqual([]);
+  });
+
+  it("rejects unauthorized realtime presence snapshots before reaching the hub", async () => {
+    const topics: string[] = [];
+    const fetches: Request[] = [];
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => owner,
+      realtime: { namespace: () => fakeRealtimeNamespace(topics, fetches) }
+    });
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/api/realtime/presence?topic=tenant:acme"),
+      { DB: fakeD1(), AGGREGATES: fakeAggregateNamespace() },
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(403);
+    expect(topics).toEqual([]);
+    expect(fetches).toEqual([]);
+  });
+
+  it("rejects non-GET realtime presence snapshots before authorization or hub access", async () => {
+    const topics: string[] = [];
+    const fetches: Request[] = [];
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => {
+        throw new Error("Actor should not be resolved for invalid presence methods");
+      },
+      realtime: { namespace: () => fakeRealtimeNamespace(topics, fetches) }
+    });
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/api/realtime/presence?topic=document:acme:Note:My%20Note", {
+        method: "POST"
+      }),
+      { DB: fakeD1(), AGGREGATES: fakeAggregateNamespace() },
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("GET");
     expect(topics).toEqual([]);
     expect(fetches).toEqual([]);
   });
@@ -307,7 +397,11 @@ interface RealtimeAuthEnv {
   readonly SESSION_SECRET: string;
 }
 
-function fakeRealtimeNamespace(topics: string[], fetches: Request[]): RealtimeHubNamespace {
+function fakeRealtimeNamespace(
+  topics: string[],
+  fetches: Request[],
+  presence: { readonly connections: readonly RealtimePresenceConnection[] } = { connections: [] }
+): RealtimeHubNamespace {
   return {
     idFromName(name: string) {
       topics.push(name);
@@ -320,7 +414,7 @@ function fakeRealtimeNamespace(topics: string[], fetches: Request[]): RealtimeHu
           return { status: 101 } as Response;
         },
         async presence() {
-          return { topic: topics.at(-1) ?? "", connections: [] };
+          return { topic: topics.at(-1) ?? "", connections: presence.connections };
         },
         async publish() {
           return 0;

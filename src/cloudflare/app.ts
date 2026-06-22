@@ -565,10 +565,14 @@ async function handleRealtimeRequest<TEnv extends CloudFrappeEnv, TJobResources,
   if (!realtime) {
     return new Response("Realtime is not enabled", { status: 404 });
   }
-  if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+  const url = new URL(request.url);
+  const isPresenceRequest = isRealtimePresencePath(url.pathname, realtime.route);
+  if (isPresenceRequest && request.method !== "GET") {
+    return new Response("Method Not Allowed", { status: 405, headers: { allow: "GET" } });
+  }
+  if (!isPresenceRequest && request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
     return new Response("Expected WebSocket upgrade", { status: 426 });
   }
-  const url = new URL(request.url);
   const requestedTopics = [rawQueryValue(url, "topic"), url.searchParams.get("topic")].filter(
     (value): value is string => value !== undefined && value !== null && value !== ""
   );
@@ -602,11 +606,24 @@ async function handleRealtimeRequest<TEnv extends CloudFrappeEnv, TJobResources,
   }
   const namespace = realtime.namespace(env);
   const stub = namespace.get(namespace.idFromName(topic));
+  if (isPresenceRequest) {
+    const presence = await stub.presence();
+    return Response.json({
+      data: {
+        topic,
+        connections: presence.connections
+      }
+    });
+  }
   return stub.fetch(requestWithRealtimeTopic(request, topic, actor));
 }
 
 function isRealtimePath(pathname: string, route = "/api/realtime"): boolean {
-  return pathname === route;
+  return pathname === route || isRealtimePresencePath(pathname, route);
+}
+
+function isRealtimePresencePath(pathname: string, route = "/api/realtime"): boolean {
+  return pathname === `${route.replace(/\/$/, "")}/presence`;
 }
 
 function rawQueryValue(url: URL, key: string): string | undefined {
