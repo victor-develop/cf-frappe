@@ -121,6 +121,29 @@ describe("D1DocumentStore", () => {
     ]);
   });
 
+  it("reads one audit document stream chronologically through the stream index", async () => {
+    const db = new FakeD1Database();
+    const store = new D1EventStore(db as unknown as D1Database);
+    await store.append(stream, 0, [
+      event,
+      updateEvent("evt2", "Two"),
+      assignmentEvent("evt3", "DocumentAssigned")
+    ]);
+
+    const results = await store.readDocumentEvents({
+      tenantId: "acme",
+      doctype: "Note",
+      documentName: "One",
+      limit: 2
+    });
+
+    expect(results.map((item) => item.id)).toEqual(["evt1", "evt2"]);
+    const read = db.statements.at(-1);
+    expect(read?.sql).toContain("WHERE stream = ?");
+    expect(read?.sql).toContain("ORDER BY sequence ASC LIMIT ?");
+    expect(read?.params).toEqual([stream, 2]);
+  });
+
   it("translates event append constraint races into document conflicts", async () => {
     const db = new FakeD1Database({ failEventInsertAsConstraint: true });
     const store = new D1EventStore(db as unknown as D1Database);

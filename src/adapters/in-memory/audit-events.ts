@@ -1,5 +1,6 @@
 import type { DomainEvent } from "../../core/types";
-import type { AuditEventQuery } from "../../ports/audit-event-store";
+import { documentStream } from "../../core/streams";
+import type { AuditDocumentEventQuery, AuditEventQuery } from "../../ports/audit-event-store";
 
 export function searchInMemoryAuditEvents(
   streams: Iterable<readonly DomainEvent[]>,
@@ -16,6 +17,16 @@ export function searchInMemoryAuditEvents(
     .filter((event) => query.until === undefined || event.occurredAt <= query.until)
     .filter((event) => payloadKinds === undefined || payloadKinds.has(event.payload.kind))
     .sort(byAuditOrder);
+  return query.limit === undefined ? events : events.slice(0, query.limit);
+}
+
+export function readInMemoryAuditDocumentEvents(
+  streams: ReadonlyMap<string, readonly DomainEvent[]>,
+  query: AuditDocumentEventQuery
+): readonly DomainEvent[] {
+  const stream = documentStream(query.tenantId, query.doctype, query.documentName);
+  const events = [...(streams.get(stream) ?? [])]
+    .sort((left, right) => left.sequence - right.sequence);
   return query.limit === undefined ? events : events.slice(0, query.limit);
 }
 

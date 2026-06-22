@@ -34,5 +34,16 @@ export function createAuditApi(options: AuditApiOptions): Hono {
     return c.json({ data });
   });
 
+  app.get("/api/audit/deleted/:doctype/:name", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const tenantId = c.req.query("tenant");
+    const data = await options.audit.recoverDeletedDocument(actor, {
+      ...(tenantId !== undefined ? { tenantId } : {}),
+      doctype: c.req.param("doctype"),
+      name: c.req.param("name")
+    });
+    return c.json({ data });
+  });
+
   return app;
 }

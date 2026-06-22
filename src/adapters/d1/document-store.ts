@@ -5,9 +5,9 @@ import type {
   NewDomainEvent,
   StreamName
 } from "../../core/types";
-import type { AuditEventQuery, AuditEventStore } from "../../ports/audit-event-store";
+import type { AuditDocumentEventQuery, AuditEventQuery, AuditEventStore } from "../../ports/audit-event-store";
 import type { DocumentCommit, DocumentStore, ReadStreamOptions } from "../../ports/document-store";
-import { auditEventQuery } from "./audit-event-query";
+import { auditDocumentEventQuery, auditEventQuery } from "./audit-event-query";
 import { isD1ConstraintError } from "./constraint-error";
 import { eventStreamQuery } from "./read-stream-query";
 import { eventFromRow, type EventRow } from "./serde";
@@ -106,6 +106,15 @@ export class D1DocumentStore implements DocumentStore, AuditEventStore {
 
   async searchEvents(query: AuditEventQuery): Promise<readonly DomainEvent[]> {
     const prepared = auditEventQuery(query);
+    const result = await this.db
+      .prepare(prepared.sql)
+      .bind(...prepared.params)
+      .all<EventRow>();
+    return (result.results ?? []).map(eventFromRow);
+  }
+
+  async readDocumentEvents(query: AuditDocumentEventQuery): Promise<readonly DomainEvent[]> {
+    const prepared = auditDocumentEventQuery(query);
     const result = await this.db
       .prepare(prepared.sql)
       .bind(...prepared.params)

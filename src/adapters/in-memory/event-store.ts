@@ -1,9 +1,9 @@
 import { conflict } from "../../core/errors";
 import type { DomainEvent, NewDomainEvent, StreamName } from "../../core/types";
-import type { AuditEventQuery, AuditEventStore } from "../../ports/audit-event-store";
+import type { AuditDocumentEventQuery, AuditEventQuery, AuditEventStore } from "../../ports/audit-event-store";
 import type { EventStore } from "../../ports/event-store";
 import type { ReadStreamOptions } from "../../ports/document-store";
-import { searchInMemoryAuditEvents } from "./audit-events";
+import { readInMemoryAuditDocumentEvents, searchInMemoryAuditEvents } from "./audit-events";
 
 export class InMemoryEventStore implements EventStore, AuditEventStore {
   private readonly streams = new Map<StreamName, DomainEvent[]>();
@@ -40,6 +40,10 @@ export class InMemoryEventStore implements EventStore, AuditEventStore {
 
   async searchEvents(query: AuditEventQuery): Promise<readonly DomainEvent[]> {
     return searchInMemoryAuditEvents(this.streams.values(), query);
+  }
+
+  async readDocumentEvents(query: AuditDocumentEventQuery): Promise<readonly DomainEvent[]> {
+    return readInMemoryAuditDocumentEvents(this.streams, query);
   }
 
   clear(): void {

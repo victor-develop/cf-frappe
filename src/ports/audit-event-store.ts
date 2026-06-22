@@ -11,6 +11,14 @@ export interface AuditEventQuery {
   readonly limit?: number;
 }
 
+export interface AuditDocumentEventQuery {
+  readonly tenantId: TenantId;
+  readonly doctype: DocTypeName;
+  readonly documentName: DocumentName;
+  readonly limit?: number;
+}
+
 export interface AuditEventStore {
   searchEvents(query: AuditEventQuery): Promise<readonly DomainEvent[]>;
+  readDocumentEvents(query: AuditDocumentEventQuery): Promise<readonly DomainEvent[]>;
 }

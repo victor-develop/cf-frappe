@@ -244,6 +244,54 @@ describe("resource api", () => {
     await expect(response.json()).resolves.toMatchObject({ error: { code: "PERMISSION_DENIED" } });
   });
 
+  it("recovers deleted document audit data for system managers", async () => {
+    const app = makeApp();
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Deleted Audit", body: "Body" })
+    });
+    await app.request("/api/resource/Note/HTTP%20Deleted%20Audit", {
+      method: "PUT",
+      headers: userHeaders,
+      body: JSON.stringify({ body: "Before delete", expectedVersion: 1 })
+    });
+    const deleted = await app.request("/api/resource/Note/HTTP%20Deleted%20Audit", {
+      method: "DELETE",
+      headers: {
+        ...userHeaders,
+        "x-cf-frappe-roles": "Task Manager"
+      },
+      body: JSON.stringify({ expectedVersion: 2 })
+    });
+    expect(deleted.status).toBe(200);
+
+    const response = await app.request("/api/audit/deleted/Note/HTTP%20Deleted%20Audit", {
+      headers: adminHeaders
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        tenantId: "acme",
+        doctype: "Note",
+        name: "HTTP Deleted Audit",
+        deletedBy: "owner@example.com",
+        deleteEventId: "evt_e3",
+        snapshot: {
+          version: 3,
+          docstatus: "deleted",
+          data: { body: "Before delete" }
+        },
+        events: [
+          { id: "evt_e1", payload: { kind: "DocumentCreated" } },
+          { id: "evt_e2", payload: { kind: "DocumentUpdated" } },
+          { id: "evt_e3", payload: { kind: "DocumentDeleted" } }
+        ]
+      }
+    });
+  });
+
   it("adds comments through the resource API and returns them in the timeline", async () => {
     const app = makeApp();
     await app.request("/api/resource/Note", {
