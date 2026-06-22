@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the durable job execution history slice:
+As of the job retry administration slice:
 
 - Test files: `48`
-- Vitest cases: `332`
+- Vitest cases: `336`
 
 ## Implication
 

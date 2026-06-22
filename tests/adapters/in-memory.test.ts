@@ -1,5 +1,5 @@
-import { conflict, documentStream, InMemoryEventStore, InMemoryProjectionStore } from "../../src";
-import type { NewDomainEvent } from "../../src";
+import { conflict, documentStream, InMemoryEventStore, InMemoryJobExecutionLog, InMemoryProjectionStore } from "../../src";
+import type { DocumentData, JobMessage, NewDomainEvent } from "../../src";
 
 describe("in-memory adapters", () => {
   const stream = documentStream("acme", "Note", "One");
@@ -160,6 +160,39 @@ describe("in-memory adapters", () => {
     ).resolves.toMatchObject({
       data: [],
       total: 0
+    });
+  });
+
+  it("snapshots job execution message data by value", async () => {
+    const log = new InMemoryJobExecutionLog();
+    const payload = { nested: { count: 1 } };
+    const metadata = { source: "test" };
+    const message: JobMessage = {
+      tenantId: "acme",
+      jobName: "reports.daily",
+      payload,
+      runId: "job_001",
+      idempotencyKey: "reports.daily:job_001",
+      enqueuedAt: "2026-01-01T00:00:00.000Z",
+      metadata
+    };
+
+    await log.begin(message, "2026-01-01T00:01:00.000Z");
+    payload.nested.count = 2;
+    metadata.source = "mutated";
+
+    const firstRead = await log.get("reports.daily:job_001", { tenantId: "acme" });
+    expect(firstRead).toMatchObject({
+      payload: { nested: { count: 1 } },
+      metadata: { source: "test" }
+    });
+
+    (firstRead!.payload as DocumentData).nested = { count: 3 };
+    (firstRead!.metadata as DocumentData).source = "read mutation";
+
+    await expect(log.get("reports.daily:job_001", { tenantId: "acme" })).resolves.toMatchObject({
+      payload: { nested: { count: 1 } },
+      metadata: { source: "test" }
     });
   });
 });

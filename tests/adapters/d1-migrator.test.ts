@@ -49,7 +49,8 @@ describe("D1MigrationRunner", () => {
     expect(result.applied).toEqual([]);
     expect(result.skipped.map((migration) => migration.id)).toEqual([
       "0001_cf_frappe_core",
-      "0002_cf_frappe_job_executions"
+      "0002_cf_frappe_job_executions",
+      "0003_cf_frappe_job_execution_messages"
     ]);
   });
 

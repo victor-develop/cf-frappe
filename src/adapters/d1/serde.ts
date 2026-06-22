@@ -31,6 +31,9 @@ export interface JobExecutionRow {
   readonly idempotency_key: string;
   readonly job_name: string;
   readonly run_id: string;
+  readonly payload_json: string | null;
+  readonly metadata_json: string | null;
+  readonly enqueued_at: string | null;
   readonly status: JobExecutionRecord["status"];
   readonly started_at: string;
   readonly finished_at: string | null;
@@ -70,11 +73,16 @@ export function documentFromRow(row: DocumentRow): DocumentSnapshot {
 
 export function jobExecutionFromRow(row: JobExecutionRow): JobExecutionRecord {
   const result = row.result_json === null ? undefined : JSON.parse(row.result_json) as JsonValue;
+  const payload = row.payload_json === null ? undefined : JSON.parse(row.payload_json) as JobExecutionRecord["payload"];
+  const metadata = row.metadata_json === null ? undefined : JSON.parse(row.metadata_json) as JobExecutionRecord["metadata"];
   return {
     idempotencyKey: row.idempotency_key,
     tenantId: row.tenant_id,
     jobName: row.job_name,
     runId: row.run_id,
+    ...(payload === undefined ? {} : { payload }),
+    ...(metadata === undefined ? {} : { metadata }),
+    ...(row.enqueued_at === null ? {} : { enqueuedAt: row.enqueued_at }),
     status: row.status,
     startedAt: row.started_at,
     ...(row.finished_at === null ? {} : { finishedAt: row.finished_at }),

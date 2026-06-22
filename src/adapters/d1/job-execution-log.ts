@@ -32,6 +32,9 @@ export class D1JobExecutionLog implements JobExecutionLog {
       idempotencyKey: message.idempotencyKey,
       jobName: message.jobName,
       runId: message.runId,
+      payload: previous?.payload ?? message.payload,
+      metadata: previous?.metadata ?? message.metadata,
+      enqueuedAt: previous?.enqueuedAt ?? message.enqueuedAt,
       status: "succeeded",
       startedAt: previous?.startedAt ?? finishedAt,
       finishedAt,
@@ -47,6 +50,9 @@ export class D1JobExecutionLog implements JobExecutionLog {
       idempotencyKey: message.idempotencyKey,
       jobName: message.jobName,
       runId: message.runId,
+      payload: previous?.payload ?? message.payload,
+      metadata: previous?.metadata ?? message.metadata,
+      enqueuedAt: previous?.enqueuedAt ?? message.enqueuedAt,
       status: "failed",
       startedAt: previous?.startedAt ?? finishedAt,
       finishedAt,
@@ -65,7 +71,7 @@ export class D1JobExecutionLog implements JobExecutionLog {
     const params = options.tenantId === undefined ? [idempotencyKey] : [options.tenantId, idempotencyKey];
     const row = await this.db
       .prepare(
-        `SELECT tenant_id, idempotency_key, job_name, run_id, status, started_at, finished_at, result_json, error
+        `SELECT tenant_id, idempotency_key, job_name, run_id, payload_json, metadata_json, enqueued_at, status, started_at, finished_at, result_json, error
          FROM cf_frappe_job_executions
          WHERE ${where}
          LIMIT 1`
@@ -88,12 +94,15 @@ export class D1JobExecutionLog implements JobExecutionLog {
     await this.db
       .prepare(
         `INSERT INTO cf_frappe_job_executions
-         (tenant_id, idempotency_key, job_name, run_id, status, started_at, finished_at, result_json, error)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (tenant_id, idempotency_key, job_name, run_id, payload_json, metadata_json, enqueued_at, status, started_at, finished_at, result_json, error)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(tenant_id, idempotency_key)
          DO UPDATE SET
            job_name = excluded.job_name,
            run_id = excluded.run_id,
+           payload_json = excluded.payload_json,
+           metadata_json = excluded.metadata_json,
+           enqueued_at = excluded.enqueued_at,
            status = excluded.status,
            started_at = excluded.started_at,
            finished_at = excluded.finished_at,
@@ -105,6 +114,9 @@ export class D1JobExecutionLog implements JobExecutionLog {
         record.idempotencyKey,
         record.jobName,
         record.runId,
+        record.payload === undefined ? null : JSON.stringify(record.payload),
+        record.metadata === undefined ? null : JSON.stringify(record.metadata),
+        record.enqueuedAt ?? null,
         record.status,
         record.startedAt,
         record.finishedAt ?? null,
@@ -122,21 +134,33 @@ export class D1JobExecutionLog implements JobExecutionLog {
     const row = await this.db
       .prepare(
         `INSERT INTO cf_frappe_job_executions
-         (tenant_id, idempotency_key, job_name, run_id, status, started_at, finished_at, result_json, error)
-         VALUES (?, ?, ?, ?, 'running', ?, NULL, NULL, NULL)
+         (tenant_id, idempotency_key, job_name, run_id, payload_json, metadata_json, enqueued_at, status, started_at, finished_at, result_json, error)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, NULL, NULL, NULL)
          ON CONFLICT(tenant_id, idempotency_key)
          DO UPDATE SET
            job_name = excluded.job_name,
            run_id = excluded.run_id,
+           payload_json = excluded.payload_json,
+           metadata_json = excluded.metadata_json,
+           enqueued_at = excluded.enqueued_at,
            status = excluded.status,
            started_at = excluded.started_at,
            finished_at = NULL,
            result_json = NULL,
            error = NULL
          WHERE cf_frappe_job_executions.status = 'failed'
-         RETURNING tenant_id, idempotency_key, job_name, run_id, status, started_at, finished_at, result_json, error`
+         RETURNING tenant_id, idempotency_key, job_name, run_id, payload_json, metadata_json, enqueued_at, status, started_at, finished_at, result_json, error`
       )
-      .bind(tenantId, message.idempotencyKey, message.jobName, message.runId, startedAt)
+      .bind(
+        tenantId,
+        message.idempotencyKey,
+        message.jobName,
+        message.runId,
+        JSON.stringify(message.payload),
+        JSON.stringify(message.metadata),
+        message.enqueuedAt,
+        startedAt
+      )
       .first<JobExecutionRow>();
     return row ? jobExecutionFromRow(row) : undefined;
   }
@@ -170,7 +194,7 @@ function jobExecutionListQuery(options: ListJobExecutionsOptions): PreparedJobEx
   params.push(options.limit ?? 50);
   return {
     sql:
-      `SELECT tenant_id, idempotency_key, job_name, run_id, status, started_at, finished_at, result_json, error ` +
+      `SELECT tenant_id, idempotency_key, job_name, run_id, payload_json, metadata_json, enqueued_at, status, started_at, finished_at, result_json, error ` +
       `FROM cf_frappe_job_executions ${where} ` +
       "ORDER BY started_at DESC, idempotency_key ASC LIMIT ?",
     params

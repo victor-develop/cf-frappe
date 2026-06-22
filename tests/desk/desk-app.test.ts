@@ -10,7 +10,10 @@ import {
   createJobRegistry,
   InMemoryDocumentStore,
   InMemoryJobExecutionLog,
+  InMemoryJobQueue,
+  JobDispatcher,
   JobHistoryService,
+  JobRetryService,
   QueryService,
   SYSTEM_MANAGER_ROLE
 } from "../../src";
@@ -315,6 +318,7 @@ describe("Desk app", () => {
     const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
     const services = createServices();
     const executionLog = new InMemoryJobExecutionLog();
+    const queue = new InMemoryJobQueue();
     const jobs = createJobRegistry({
       jobs: [{ name: "reports.daily", description: "Build reports", handler: () => undefined }]
     });
@@ -323,6 +327,16 @@ describe("Desk app", () => {
       documents: services.documents,
       queries: services.queries,
       jobs: new JobHistoryService({ registry: jobs, executionLog }),
+      jobRetry: new JobRetryService({
+        executionLog,
+        dispatcher: new JobDispatcher({
+          registry: jobs,
+          queue,
+          clock: fixedClock(now),
+          ids: deterministicIds(["retry-001"])
+        }),
+        clock: fixedClock(now)
+      }),
       actor: () => admin
     });
     const message = {
@@ -336,17 +350,39 @@ describe("Desk app", () => {
     };
     await executionLog.begin(message, now);
     await executionLog.complete(message, "2026-01-01T00:01:00.000Z", { rows: 3 });
+    const failedMessage = {
+      tenantId: "acme",
+      jobName: "reports.daily",
+      payload: { stale: true },
+      runId: "job_002",
+      idempotencyKey: "reports.daily:job_002",
+      enqueuedAt: now,
+      metadata: {}
+    };
+    await executionLog.begin(failedMessage, "2026-01-01T00:02:00.000Z");
+    await executionLog.fail(failedMessage, "2026-01-01T00:03:00.000Z", "down");
 
-    const response = await app.request("/desk/admin/jobs?status=succeeded");
+    const response = await app.request("/desk/admin/jobs?status=failed");
 
     expect(response.status).toBe(200);
     const html = await response.text();
     expect(html).toContain("Jobs");
     expect(html).toContain("reports.daily");
     expect(html).toContain("Build reports");
-    expect(html).toContain("reports.daily:job_001");
-    expect(html).toContain("succeeded");
-    expect(html).toContain("{&quot;rows&quot;:3}");
+    expect(html).toContain("reports.daily:job_002");
+    expect(html).toContain("failed");
+    expect(html).toContain('formaction="/desk/admin/jobs/reports.daily%3Ajob_002/retry"');
+
+    const retried = await app.request("/desk/admin/jobs/reports.daily%3Ajob_002/retry", {
+      method: "POST"
+    });
+    expect(retried.status).toBe(303);
+    expect(retried.headers.get("location")).toBe("/desk/admin/jobs?status=failed");
+    expect(queue.queued()[0]?.message).toMatchObject({
+      tenantId: "acme",
+      runId: "job_retry-001",
+      idempotencyKey: "reports.daily:job_002"
+    });
   });
 
   it("uses the Desk error boundary for non-admin user-permission access", async () => {

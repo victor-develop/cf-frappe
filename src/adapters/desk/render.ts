@@ -177,7 +177,10 @@ export function renderUserPermissionAdmin(state: UserPermissionState): string {
   </section>`;
 }
 
-export function renderJobAdmin(dashboard: JobExecutionDashboard): string {
+export function renderJobAdmin(
+  dashboard: JobExecutionDashboard,
+  options: { readonly allowRetry?: boolean } = {}
+): string {
   const jobRows = dashboard.jobs
     .map((job) => {
       const retry = job.retry ? JSON.stringify(job.retry) : "";
@@ -198,6 +201,7 @@ export function renderJobAdmin(dashboard: JobExecutionDashboard): string {
         <td>${escapeHtml(record.startedAt)}</td>
         <td>${escapeHtml(record.finishedAt ?? "")}</td>
         <td>${escapeHtml(record.result === undefined ? record.error ?? "" : JSON.stringify(record.result))}</td>
+        <td>${options.allowRetry ? renderJobRetryAction(record.idempotencyKey, record.status) : ""}</td>
       </tr>`
     )
     .join("");
@@ -221,11 +225,20 @@ export function renderJobAdmin(dashboard: JobExecutionDashboard): string {
   <section class="panel job-history">
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Idempotency Key</th><th>Job</th><th>Run ID</th><th>Status</th><th>Started</th><th>Finished</th><th>Result / Error</th></tr></thead>
-        <tbody>${executionRows || `<tr><td colspan="7" class="empty">No executions recorded.</td></tr>`}</tbody>
+        <thead><tr><th>Idempotency Key</th><th>Job</th><th>Run ID</th><th>Status</th><th>Started</th><th>Finished</th><th>Result / Error</th><th>Action</th></tr></thead>
+        <tbody>${executionRows || `<tr><td colspan="8" class="empty">No executions recorded.</td></tr>`}</tbody>
       </table>
     </div>
   </section>`;
+}
+
+function renderJobRetryAction(idempotencyKey: string, status: JobExecutionDashboard["executions"][number]["status"]): string {
+  if (status !== "failed") {
+    return "";
+  }
+  return `<form class="inline-action" method="post">
+    <button class="button" type="submit" formaction="/desk/admin/jobs/${encodeURIComponent(idempotencyKey)}/retry">Retry</button>
+  </form>`;
 }
 
 export function renderReportView(

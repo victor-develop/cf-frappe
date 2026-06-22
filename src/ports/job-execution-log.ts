@@ -1,4 +1,5 @@
-import type { JsonValue } from "../core/types";
+import type { DocumentData, JsonValue } from "../core/types";
+import type { JobPayload } from "../core/jobs";
 import type { JobMessage } from "./job-queue";
 
 export type JobExecutionStatus = "running" | "succeeded" | "failed";
@@ -8,6 +9,9 @@ export interface JobExecutionRecord {
   readonly idempotencyKey: string;
   readonly jobName: string;
   readonly runId: string;
+  readonly payload?: JobPayload;
+  readonly metadata?: DocumentData;
+  readonly enqueuedAt?: string;
   readonly status: JobExecutionStatus;
   readonly startedAt: string;
   readonly finishedAt?: string;

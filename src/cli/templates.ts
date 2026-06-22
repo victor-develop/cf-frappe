@@ -27,7 +27,8 @@ export function starterProjectFiles(input: StarterProjectTemplateInput): readonl
     { path: "src/worker.ts", contents: workerTs() },
     { path: "migrations/0001_cf_frappe_core.sql", contents: coreMigrationSql() },
     { path: "migrations/0002_cf_frappe_job_executions.sql", contents: jobExecutionMigrationSql() },
-    { path: "migrations/0003_task_indexes.sql", contents: taskIndexesMigrationSql() }
+    { path: "migrations/0003_cf_frappe_job_execution_messages.sql", contents: jobExecutionMessageMigrationSql() },
+    { path: "migrations/0004_task_indexes.sql", contents: taskIndexesMigrationSql() }
   ];
 }
 
@@ -429,6 +430,15 @@ CREATE INDEX IF NOT EXISTS idx_cf_frappe_job_executions_history
 
 CREATE INDEX IF NOT EXISTS idx_cf_frappe_job_executions_started_at
   ON cf_frappe_job_executions(tenant_id, started_at);
+`;
+}
+
+function jobExecutionMessageMigrationSql(): string {
+  return `ALTER TABLE cf_frappe_job_executions ADD COLUMN payload_json TEXT;
+
+ALTER TABLE cf_frappe_job_executions ADD COLUMN metadata_json TEXT;
+
+ALTER TABLE cf_frappe_job_executions ADD COLUMN enqueued_at TEXT;
 `;
 }
 

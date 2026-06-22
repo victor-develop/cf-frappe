@@ -9,10 +9,12 @@ import {
   JobHistoryService,
   JobDispatcher,
   JobExecutor,
+  JobRetryService,
   permanentJobError,
   retryableJobError,
   SYSTEM_MANAGER_ROLE
 } from "../../src";
+import type { DocumentData, JobMessage } from "../../src";
 import { now } from "../helpers";
 
 describe("JobDispatcher", () => {
@@ -184,6 +186,94 @@ describe("JobHistoryService", () => {
   });
 });
 
+describe("JobRetryService", () => {
+  it("requeues failed executions for tenant admins with the original message snapshot", async () => {
+    const registry = createJobRegistry({
+      jobs: [{ name: "email.digest", handler: () => undefined }]
+    });
+    const queue = new InMemoryJobQueue();
+    const executionLog = new InMemoryJobExecutionLog();
+    const dispatcher = new JobDispatcher({
+      registry,
+      queue,
+      clock: fixedClock(now),
+      ids: deterministicIds(["retry-001"])
+    });
+    const retry = new JobRetryService({ executionLog, dispatcher, clock: fixedClock(now) });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const failedMessage = jobMessage("email.digest", "job_001", "acme", {
+      payload: { account: "acme" },
+      metadata: { source: "cron" }
+    });
+
+    await executionLog.begin(failedMessage, "2026-01-01T00:00:00.000Z");
+    await executionLog.fail(failedMessage, "2026-01-01T00:01:00.000Z", "smtp timeout");
+
+    await expect(retry.retry(admin, "email.digest:job_001")).resolves.toMatchObject({
+      original: {
+        tenantId: "acme",
+        status: "failed",
+        payload: { account: "acme" },
+        metadata: { source: "cron" }
+      },
+      message: {
+        tenantId: "acme",
+        jobName: "email.digest",
+        payload: { account: "acme" },
+        runId: "job_retry-001",
+        idempotencyKey: "email.digest:job_001",
+        metadata: {
+          source: "cron",
+          retriedAt: now,
+          retriedBy: "admin@example.com",
+          retriedFromRunId: "job_001"
+        }
+      }
+    });
+    expect(queue.queued()).toEqual([
+      expect.objectContaining({
+        message: expect.objectContaining({
+          idempotencyKey: "email.digest:job_001",
+          runId: "job_retry-001"
+        })
+      })
+    ]);
+  });
+
+  it("rejects retry attempts for non-failed or cross-tenant executions", async () => {
+    const registry = createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] });
+    const queue = new InMemoryJobQueue();
+    const executionLog = new InMemoryJobExecutionLog();
+    const retry = new JobRetryService({
+      executionLog,
+      dispatcher: new JobDispatcher({
+        registry,
+        queue,
+        clock: fixedClock(now),
+        ids: deterministicIds(["retry-001"])
+      }),
+      clock: fixedClock(now)
+    });
+    const acmeAdmin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const otherAdmin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "other" };
+    const succeededMessage = jobMessage("reports.daily", "job_001", "acme");
+    const failedMessage = jobMessage("reports.daily", "job_002", "acme");
+
+    await executionLog.begin(succeededMessage, "2026-01-01T00:00:00.000Z");
+    await executionLog.complete(succeededMessage, "2026-01-01T00:01:00.000Z", undefined);
+    await executionLog.begin(failedMessage, "2026-01-01T00:02:00.000Z");
+    await executionLog.fail(failedMessage, "2026-01-01T00:03:00.000Z", "down");
+
+    await expect(retry.retry(acmeAdmin, "reports.daily:job_001")).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Only failed job executions can be retried"
+    });
+    await expect(retry.retry(otherAdmin, "reports.daily:job_002")).rejects.toMatchObject({
+      code: "JOB_EXECUTION_NOT_FOUND"
+    });
+  });
+});
+
 describe("job retry classification", () => {
   it("uses exponential backoff for retryable failures", () => {
     expect(
@@ -207,14 +297,19 @@ describe("job retry classification", () => {
   });
 });
 
-function jobMessage(jobName: string, runId: string, tenantId?: string) {
+function jobMessage(
+  jobName: string,
+  runId: string,
+  tenantId?: string,
+  options: { readonly payload?: DocumentData; readonly metadata?: DocumentData } = {}
+): JobMessage {
   return {
     ...(tenantId === undefined ? {} : { tenantId }),
     jobName,
-    payload: {},
+    payload: options.payload ?? {},
     runId,
     idempotencyKey: `${jobName}:${runId}`,
     enqueuedAt: now,
-    metadata: {}
+    metadata: options.metadata ?? {}
   };
 }

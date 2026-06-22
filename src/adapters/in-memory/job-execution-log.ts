@@ -5,7 +5,8 @@ import type {
   ListJobExecutionsOptions
 } from "../../ports/job-execution-log";
 import type { JobMessage } from "../../ports/job-queue";
-import { DEFAULT_TENANT_ID } from "../../core/types";
+import { DEFAULT_TENANT_ID, type JsonValue } from "../../core/types";
+import type { JobPayload } from "../../core/jobs";
 
 export class InMemoryJobExecutionLog implements JobExecutionLog {
   private readonly records = new Map<string, JobExecutionRecord>();
@@ -15,7 +16,7 @@ export class InMemoryJobExecutionLog implements JobExecutionLog {
     const key = recordKey(tenantId, message.idempotencyKey);
     const existing = this.records.get(key);
     if (existing?.status === "running" || existing?.status === "succeeded") {
-      return { status: "duplicate", record: existing };
+      return { status: "duplicate", record: cloneRecord(existing) };
     }
 
     const record: JobExecutionRecord = {
@@ -23,11 +24,14 @@ export class InMemoryJobExecutionLog implements JobExecutionLog {
       idempotencyKey: message.idempotencyKey,
       jobName: message.jobName,
       runId: message.runId,
+      payload: cloneJson(message.payload),
+      metadata: cloneJson(message.metadata),
+      enqueuedAt: message.enqueuedAt,
       status: "running",
       startedAt
     };
     this.records.set(key, record);
-    return { status: "started", record };
+    return { status: "started", record: cloneRecord(record) };
   }
 
   async complete(message: JobMessage, finishedAt: string, result: JobExecutionRecord["result"]): Promise<void> {
@@ -39,10 +43,13 @@ export class InMemoryJobExecutionLog implements JobExecutionLog {
       idempotencyKey: message.idempotencyKey,
       jobName: message.jobName,
       runId: message.runId,
+      payload: cloneJson(previous?.payload ?? message.payload),
+      metadata: cloneJson(previous?.metadata ?? message.metadata),
+      enqueuedAt: previous?.enqueuedAt ?? message.enqueuedAt,
       status: "succeeded",
       startedAt: previous?.startedAt ?? finishedAt,
       finishedAt,
-      ...(result === undefined ? {} : { result })
+      ...(result === undefined ? {} : { result: cloneJson(result) })
     };
     this.records.set(recordKey(record.tenantId, record.idempotencyKey), record);
   }
@@ -56,6 +63,9 @@ export class InMemoryJobExecutionLog implements JobExecutionLog {
       idempotencyKey: message.idempotencyKey,
       jobName: message.jobName,
       runId: message.runId,
+      payload: cloneJson(previous?.payload ?? message.payload),
+      metadata: cloneJson(previous?.metadata ?? message.metadata),
+      enqueuedAt: previous?.enqueuedAt ?? message.enqueuedAt,
       status: "failed",
       startedAt: previous?.startedAt ?? finishedAt,
       finishedAt,
@@ -69,9 +79,11 @@ export class InMemoryJobExecutionLog implements JobExecutionLog {
     options: { readonly tenantId?: string } = {}
   ): Promise<JobExecutionRecord | undefined> {
     if (options.tenantId !== undefined) {
-      return this.records.get(recordKey(options.tenantId, idempotencyKey));
+      const record = this.records.get(recordKey(options.tenantId, idempotencyKey));
+      return record ? cloneRecord(record) : undefined;
     }
-    return [...this.records.values()].find((record) => record.idempotencyKey === idempotencyKey);
+    const record = [...this.records.values()].find((item) => item.idempotencyKey === idempotencyKey);
+    return record ? cloneRecord(record) : undefined;
   }
 
   async list(options: ListJobExecutionsOptions = {}): Promise<readonly JobExecutionRecord[]> {
@@ -85,10 +97,32 @@ export class InMemoryJobExecutionLog implements JobExecutionLog {
         const started = right.startedAt.localeCompare(left.startedAt);
         return started === 0 ? left.idempotencyKey.localeCompare(right.idempotencyKey) : started;
       })
-      .slice(0, limit);
+      .slice(0, limit)
+      .map(cloneRecord);
   }
 }
 
 function recordKey(tenantId: string, idempotencyKey: string): string {
   return `${tenantId}\0${idempotencyKey}`;
+}
+
+function cloneRecord(record: JobExecutionRecord): JobExecutionRecord {
+  return {
+    tenantId: record.tenantId,
+    idempotencyKey: record.idempotencyKey,
+    jobName: record.jobName,
+    runId: record.runId,
+    ...(record.payload === undefined ? {} : { payload: cloneJson(record.payload) }),
+    ...(record.metadata === undefined ? {} : { metadata: cloneJson(record.metadata) }),
+    ...(record.enqueuedAt === undefined ? {} : { enqueuedAt: record.enqueuedAt }),
+    status: record.status,
+    startedAt: record.startedAt,
+    ...(record.finishedAt === undefined ? {} : { finishedAt: record.finishedAt }),
+    ...(record.result === undefined ? {} : { result: cloneJson(record.result) }),
+    ...(record.error === undefined ? {} : { error: record.error })
+  };
+}
+
+function cloneJson<TValue extends JobPayload | JsonValue>(value: TValue): TValue {
+  return JSON.parse(JSON.stringify(value)) as TValue;
 }

@@ -3,6 +3,7 @@ import { JobExecutionError } from "../application/job-errors";
 import { JobDispatcher } from "../application/job-dispatcher";
 import { JobExecutor } from "../application/job-executor";
 import { JobHistoryService } from "../application/job-history-service";
+import { JobRetryService } from "../application/job-retry-service";
 import { DocumentHistoryService } from "../application/document-history-service";
 import { PrintService } from "../application/print-service";
 import { QueryService } from "../application/query-service";
@@ -109,9 +110,9 @@ export function createCloudFrappeWorker<
   const handler: ExportedHandler<TEnv, JobMessage> = {
     fetch(request, env) {
       if (options.realtime && isRealtimePath(new URL(request.url).pathname, options.realtime.route)) {
-        return handleRealtimeRequest(runtimeApps, request, env, options);
+        return handleRealtimeRequest(runtimeApps, jobRuntimes, request, env, options);
       }
-      const { app, desk } = appsForEnv(runtimeApps, options, env);
+      const { app, desk } = appsForEnv(runtimeApps, jobRuntimes, options, env);
       if (isDeskPath(new URL(request.url).pathname)) {
         return desk.fetch(request, env);
       }
@@ -121,7 +122,7 @@ export function createCloudFrappeWorker<
   const jobOptions = options.jobs;
   if (jobOptions) {
     handler.queue = (batch, env) => {
-      const apps = appsForEnv(runtimeApps, options, env);
+      const apps = appsForEnv(runtimeApps, jobRuntimes, options, env);
       const runtime = jobsForEnv(jobRuntimes, jobOptions, env, apps.services, apps.jobExecutionLog);
       return processCloudflareJobBatch(batch, {
         executor: runtime.executor,
@@ -129,7 +130,7 @@ export function createCloudFrappeWorker<
       });
     };
     handler.scheduled = async (controller, env) => {
-      const apps = appsForEnv(runtimeApps, options, env);
+      const apps = appsForEnv(runtimeApps, jobRuntimes, options, env);
       const runtime = jobsForEnv(jobRuntimes, jobOptions, env, apps.services, apps.jobExecutionLog);
       try {
         const messages = await dispatchScheduledJobs({
@@ -167,6 +168,7 @@ interface JobRuntime<TResources> {
 
 function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
   cache: WeakMap<object, RuntimeApps>,
+  jobRuntimeCache: WeakMap<object, JobRuntime<TJobResources>>,
   options: CloudFrappeWorkerOptions<TEnv, TJobResources>,
   env: TEnv
 ): RuntimeApps {
@@ -225,6 +227,16 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
   const jobHistory = jobExecutionLog && jobOptions
     ? new JobHistoryService({ registry: jobOptions.registry, executionLog: jobExecutionLog })
     : undefined;
+  const jobRuntime = jobExecutionLog && jobOptions
+    ? jobsForEnv(jobRuntimeCache, jobOptions, env, servicesWithRealtime, jobExecutionLog)
+    : undefined;
+  const jobRetry = jobExecutionLog && jobOptions && jobRuntime
+    ? new JobRetryService({
+        executionLog: jobExecutionLog,
+        dispatcher: jobRuntime.dispatcher,
+        ...(jobOptions.clock === undefined ? {} : { clock: jobOptions.clock })
+      })
+    : undefined;
   const actor = (request: Request) => options.actor(request, env);
   const app = createResourceApi({
     registry: options.registry,
@@ -240,6 +252,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     ...(options.maxJsonBytes ? { maxJsonBytes: options.maxJsonBytes } : {}),
     ...(files === undefined ? {} : { files }),
     ...(jobHistory === undefined ? {} : { jobs: jobHistory }),
+    ...(jobRetry === undefined ? {} : { jobRetry }),
     ...(options.files?.maxFileBytes === undefined ? {} : { maxFileBytes: options.files.maxFileBytes })
   });
   const desk = createDeskApp({
@@ -252,6 +265,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     userPermissions,
     reports,
     ...(jobHistory === undefined ? {} : { jobs: jobHistory }),
+    ...(jobRetry === undefined ? {} : { jobRetry }),
     actor
   });
   const runtimeApps = {
@@ -302,6 +316,7 @@ function isDeskPath(pathname: string): boolean {
 
 async function handleRealtimeRequest<TEnv extends CloudFrappeEnv, TJobResources>(
   cache: WeakMap<object, RuntimeApps>,
+  jobRuntimeCache: WeakMap<object, JobRuntime<TJobResources>>,
   request: Request,
   env: TEnv,
   options: CloudFrappeWorkerOptions<TEnv, TJobResources>
@@ -334,7 +349,7 @@ async function handleRealtimeRequest<TEnv extends CloudFrappeEnv, TJobResources>
   if (!canSubscribeToRealtimeTopic(actor, topic)) {
     return Response.json({ error: { code: "PERMISSION_DENIED", message: "Permission denied" } }, { status: 403 });
   }
-  const { services } = appsForEnv(cache, options, env);
+  const { services } = appsForEnv(cache, jobRuntimeCache, options, env);
   if (parsedTopic.kind !== "document") {
     return Response.json({ error: { code: "BAD_REQUEST", message: "Only document realtime topics are subscribable" } }, { status: 400 });
   }

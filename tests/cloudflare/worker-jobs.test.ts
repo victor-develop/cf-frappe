@@ -96,6 +96,7 @@ describe("CloudFrappe Worker jobs", () => {
 
   it("shares configured job execution history with the Desk admin surface", async () => {
     const executionLog = new InMemoryJobExecutionLog();
+    const queue = new InMemoryJobQueue();
     const worker = createCloudFrappeWorker({
       registry: createTestRegistry(),
       actor: () => ({ id: "admin@example.com", roles: ["System Manager"], tenantId: "acme" }),
@@ -103,9 +104,10 @@ describe("CloudFrappe Worker jobs", () => {
         registry: createJobRegistry<CloudFrappeRuntimeServices>({
           jobs: [{ name: "reports.daily", handler: () => "done" }]
         }),
-        queue: () => new InMemoryJobQueue(),
+        queue: () => queue,
         executionLog: () => executionLog,
-        clock: fixedClock(now)
+        clock: fixedClock(now),
+        ids: deterministicIds(["retry-001"])
       }
     });
     const env = { DB: fakeD1(), AGGREGATES: fakeNamespace() };
@@ -149,6 +151,27 @@ describe("CloudFrappe Worker jobs", () => {
     const html = await response.text();
     expect(html).toContain("reports.daily:job_001");
     expect(html).toContain("succeeded");
+
+    const failedMessage = {
+      ...message,
+      runId: "job_002",
+      idempotencyKey: "reports.daily:job_002"
+    };
+    await executionLog.begin(failedMessage, "2026-01-01T00:02:00.000Z");
+    await executionLog.fail(failedMessage, "2026-01-01T00:03:00.000Z", "down");
+
+    const retried = await worker.fetch!(
+      cfRequest("http://localhost/api/jobs/executions/reports.daily%3Ajob_002/retry", { method: "POST" }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(retried.status).toBe(201);
+    expect(queue.queued().at(-1)?.message).toMatchObject({
+      tenantId: "acme",
+      runId: "job_retry-001",
+      idempotencyKey: "reports.daily:job_002"
+    });
   });
 });
 

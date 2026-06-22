@@ -1,5 +1,5 @@
 import { D1JobExecutionLog } from "../../src";
-import type { JobExecutionRecord, JsonValue } from "../../src";
+import type { DocumentData, JobExecutionRecord, JobMessage, JsonValue } from "../../src";
 import { now } from "../helpers";
 
 describe("D1JobExecutionLog", () => {
@@ -17,6 +17,9 @@ describe("D1JobExecutionLog", () => {
         tenantId: "default",
         idempotencyKey: "reports.daily:job_001",
         status: "succeeded",
+        payload: {},
+        metadata: {},
+        enqueuedAt: now,
         result: { rows: 3 }
       }
     });
@@ -58,7 +61,10 @@ describe("D1JobExecutionLog", () => {
   it("reclaims failed records for retry attempts", async () => {
     const db = new FakeD1Database();
     const log = new D1JobExecutionLog(db as unknown as D1Database);
-    const message = jobMessage("email.digest", "job_003", "acme");
+    const message = jobMessage("email.digest", "job_003", "acme", {
+      payload: { account: "acme" },
+      metadata: { source: "manual" }
+    });
 
     await log.begin(message, now);
     await log.fail(message, "2026-01-01T00:01:00.000Z", "smtp timeout");
@@ -68,6 +74,8 @@ describe("D1JobExecutionLog", () => {
       record: {
         tenantId: "acme",
         status: "running",
+        payload: { account: "acme" },
+        metadata: { source: "manual" },
         startedAt: "2026-01-01T00:02:00.000Z"
       }
     });
@@ -100,15 +108,20 @@ describe("D1JobExecutionLog", () => {
   });
 });
 
-function jobMessage(jobName: string, runId: string, tenantId?: string) {
+function jobMessage(
+  jobName: string,
+  runId: string,
+  tenantId?: string,
+  options: { readonly payload?: DocumentData; readonly metadata?: DocumentData } = {}
+): JobMessage {
   return {
     ...(tenantId === undefined ? {} : { tenantId }),
     jobName,
-    payload: {},
+    payload: options.payload ?? {},
     runId,
     idempotencyKey: `${jobName}:${runId}`,
     enqueuedAt: now,
-    metadata: {}
+    metadata: options.metadata ?? {}
   };
 }
 
@@ -138,17 +151,22 @@ class FakeD1PreparedStatement {
 
   async first(): Promise<JobExecutionRow | null> {
     if (this.sql.includes("INSERT INTO cf_frappe_job_executions")) {
-      const [tenantId, idempotencyKey, jobName, runId, startedAt] = this.params;
+      const [tenantId, idempotencyKey, jobName, runId, payloadJson, metadataJson, enqueuedAt, startedAt] = this.params;
       const key = recordKey(String(tenantId), String(idempotencyKey));
       const existing = this.db.records.get(key);
       if (existing && existing.status !== "failed") {
         return null;
       }
+      const payload = JSON.parse(String(payloadJson)) as DocumentData;
+      const metadata = JSON.parse(String(metadataJson)) as DocumentData;
       const record: JobExecutionRecord = {
         tenantId: String(tenantId),
         idempotencyKey: String(idempotencyKey),
         jobName: String(jobName),
         runId: String(runId),
+        payload,
+        metadata,
+        enqueuedAt: String(enqueuedAt),
         status: "running",
         startedAt: String(startedAt)
       };
@@ -191,18 +209,26 @@ class FakeD1PreparedStatement {
       idempotencyKey,
       jobName,
       runId,
+      payloadJson,
+      metadataJson,
+      enqueuedAt,
       status,
       startedAt,
       finishedAt,
       resultJson,
       error
     ] = this.params;
+    const payload = payloadJson === null ? undefined : JSON.parse(String(payloadJson)) as JobExecutionRecord["payload"];
+    const metadata = metadataJson === null ? undefined : JSON.parse(String(metadataJson)) as JobExecutionRecord["metadata"];
     const result = resultJson === null ? undefined : JSON.parse(String(resultJson)) as JsonValue;
     this.db.records.set(recordKey(String(tenantId), String(idempotencyKey)), {
       tenantId: String(tenantId),
       idempotencyKey: String(idempotencyKey),
       jobName: String(jobName),
       runId: String(runId),
+      ...(payload === undefined ? {} : { payload }),
+      ...(metadata === undefined ? {} : { metadata }),
+      ...(enqueuedAt === null ? {} : { enqueuedAt: String(enqueuedAt) }),
       status: status as JobExecutionRecord["status"],
       startedAt: String(startedAt),
       ...(finishedAt === null ? {} : { finishedAt: String(finishedAt) }),
@@ -218,6 +244,9 @@ interface JobExecutionRow {
   readonly idempotency_key: string;
   readonly job_name: string;
   readonly run_id: string;
+  readonly payload_json: string | null;
+  readonly metadata_json: string | null;
+  readonly enqueued_at: string | null;
   readonly status: JobExecutionRecord["status"];
   readonly started_at: string;
   readonly finished_at: string | null;
@@ -231,6 +260,9 @@ function rowFromRecord(record: JobExecutionRecord): JobExecutionRow {
     idempotency_key: record.idempotencyKey,
     job_name: record.jobName,
     run_id: record.runId,
+    payload_json: record.payload === undefined ? null : JSON.stringify(record.payload),
+    metadata_json: record.metadata === undefined ? null : JSON.stringify(record.metadata),
+    enqueued_at: record.enqueuedAt ?? null,
     status: record.status,
     started_at: record.startedAt,
     finished_at: record.finishedAt ?? null,

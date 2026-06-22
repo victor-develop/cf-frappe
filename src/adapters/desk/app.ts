@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { DocumentCommandExecutor } from "../../application/document-service";
 import type { DocumentHistoryService } from "../../application/document-history-service";
 import type { JobHistoryService } from "../../application/job-history-service";
+import type { JobRetryPort } from "../../application/job-retry-service";
 import type { PrintService } from "../../application/print-service";
 import { QueryService } from "../../application/query-service";
 import type { ReportFilters, ReportService } from "../../application/report-service";
@@ -53,6 +54,7 @@ export interface DeskAppOptions {
   readonly userPermissions?: UserPermissionService;
   readonly reports?: ReportService;
   readonly jobs?: JobHistoryService;
+  readonly jobRetry?: JobRetryPort;
   readonly actor: ActorResolver;
 }
 
@@ -128,9 +130,16 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         title: "Jobs",
         doctypes,
         reports,
-        body: renderJobAdmin(dashboard)
+        body: renderJobAdmin(dashboard, { allowRetry: options.jobRetry !== undefined })
       })
     );
+  });
+
+  app.post("/desk/admin/jobs/:idempotencyKey/retry", async (c) => {
+    const retry = requireJobRetry(options);
+    const actor = await options.actor(c.req.raw);
+    await retry.retry(actor, c.req.param("idempotencyKey"));
+    return c.redirect("/desk/admin/jobs?status=failed", 303);
   });
 
   app.post("/desk/admin/user-permissions", async (c) => {
@@ -688,6 +697,13 @@ function requireJobs(options: DeskAppOptions): JobHistoryService {
     throw new FrameworkError("JOB_NOT_FOUND", "Jobs are not enabled", { status: 404 });
   }
   return options.jobs;
+}
+
+function requireJobRetry(options: DeskAppOptions): JobRetryPort {
+  if (!options.jobRetry) {
+    throw new FrameworkError("JOB_NOT_FOUND", "Job retry is not enabled", { status: 404 });
+  }
+  return options.jobRetry;
 }
 
 function lifecycleActionsFor(

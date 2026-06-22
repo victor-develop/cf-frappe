@@ -1,10 +1,12 @@
 import { Hono } from "hono";
 import type { JobHistoryService } from "../../application/job-history-service";
+import type { JobRetryPort } from "../../application/job-retry-service";
 import type { ActorResolver } from "./actor";
 import { parseOptionalInteger } from "./request";
 
 export interface JobApiOptions {
   readonly jobs: JobHistoryService;
+  readonly retry?: JobRetryPort;
   readonly actor: ActorResolver;
 }
 
@@ -30,6 +32,15 @@ export function createJobApi(options: JobApiOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const data = await options.jobs.get(actor, c.req.param("idempotencyKey"));
     return c.json({ data });
+  });
+
+  app.post("/api/jobs/executions/:idempotencyKey/retry", async (c) => {
+    if (!options.retry) {
+      return c.json({ error: { code: "JOB_NOT_FOUND", message: "Job retry is not enabled" } }, 404);
+    }
+    const actor = await options.actor(c.req.raw);
+    const data = await options.retry.retry(actor, c.req.param("idempotencyKey"));
+    return c.json({ data }, 201);
   });
 
   return app;

@@ -25,6 +25,7 @@ export interface D1MigrationPlanOptions {
 
 export const D1_CORE_MIGRATION_ID = "0001_cf_frappe_core";
 export const D1_JOB_EXECUTION_MIGRATION_ID = "0002_cf_frappe_job_executions";
+export const D1_JOB_EXECUTION_MESSAGE_MIGRATION_ID = "0003_cf_frappe_job_execution_messages";
 
 export const D1_CORE_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
   {
@@ -127,6 +128,21 @@ export const D1_JOB_EXECUTION_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] 
   }
 ];
 
+export const D1_JOB_EXECUTION_MESSAGE_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
+  {
+    name: "add_payload_json_to_cf_frappe_job_executions",
+    sql: "ALTER TABLE cf_frappe_job_executions ADD COLUMN payload_json TEXT;"
+  },
+  {
+    name: "add_metadata_json_to_cf_frappe_job_executions",
+    sql: "ALTER TABLE cf_frappe_job_executions ADD COLUMN metadata_json TEXT;"
+  },
+  {
+    name: "add_enqueued_at_to_cf_frappe_job_executions",
+    sql: "ALTER TABLE cf_frappe_job_executions ADD COLUMN enqueued_at TEXT;"
+  }
+];
+
 export function planD1ProjectionIndexes(
   doctypes: readonly DocTypeDefinition[]
 ): readonly PlannedSqlStatement[] {
@@ -171,6 +187,11 @@ export function planD1Migrations(
           id: D1_JOB_EXECUTION_MIGRATION_ID,
           label: "cf-frappe job execution history",
           statements: D1_JOB_EXECUTION_SCHEMA_STATEMENTS
+        }),
+        defineD1Migration({
+          id: D1_JOB_EXECUTION_MESSAGE_MIGRATION_ID,
+          label: "cf-frappe job execution message snapshots",
+          statements: D1_JOB_EXECUTION_MESSAGE_SCHEMA_STATEMENTS
         })
       ]
     : [];

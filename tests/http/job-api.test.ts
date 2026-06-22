@@ -1,8 +1,13 @@
 import {
   createJobRegistry,
   createResourceApi,
+  deterministicIds,
+  fixedClock,
   InMemoryJobExecutionLog,
+  InMemoryJobQueue,
+  JobDispatcher,
   JobHistoryService,
+  JobRetryService,
   SYSTEM_MANAGER_ROLE,
   unsafeHeaderActorResolver
 } from "../../src";
@@ -12,6 +17,7 @@ describe("job api", () => {
   it("returns admin job definitions and execution history", async () => {
     const services = createServices();
     const executionLog = new InMemoryJobExecutionLog();
+    const queue = new InMemoryJobQueue();
     const registry = createJobRegistry({
       jobs: [{ name: "reports.daily", description: "Build reports", handler: () => undefined }]
     });
@@ -20,6 +26,16 @@ describe("job api", () => {
       documents: services.documents,
       queries: services.queries,
       jobs: new JobHistoryService({ registry, executionLog }),
+      jobRetry: new JobRetryService({
+        executionLog,
+        dispatcher: new JobDispatcher({
+          registry,
+          queue,
+          clock: fixedClock(now),
+          ids: deterministicIds(["retry-001"])
+        }),
+        clock: fixedClock(now)
+      }),
       actor: unsafeHeaderActorResolver
     });
     const message = {
@@ -51,6 +67,34 @@ describe("job api", () => {
         ]
       }
     });
+
+    const retried = await app.request("/api/jobs/executions/reports.daily%3Ajob_001/retry", {
+      method: "POST",
+      headers: adminHeaders
+    });
+    expect(retried.status).toBe(400);
+
+    await executionLog.fail(message, "2026-01-01T00:02:00.000Z", "down");
+    const retryResponse = await app.request("/api/jobs/executions/reports.daily%3Ajob_001/retry", {
+      method: "POST",
+      headers: adminHeaders
+    });
+
+    expect(retryResponse.status).toBe(201);
+    await expect(retryResponse.json()).resolves.toMatchObject({
+      data: {
+        message: {
+          tenantId: "acme",
+          runId: "job_retry-001",
+          idempotencyKey: "reports.daily:job_001",
+          metadata: {
+            retriedBy: "admin@example.com",
+            retriedFromRunId: "job_001"
+          }
+        }
+      }
+    });
+    expect(queue.queued()).toHaveLength(1);
   });
 
   it("returns one job execution by idempotency key", async () => {

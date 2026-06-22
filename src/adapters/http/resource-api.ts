@@ -4,6 +4,7 @@ import type { DocumentCommandExecutor } from "../../application/document-service
 import type { DocumentHistoryService } from "../../application/document-history-service";
 import type { FileService } from "../../application/file-service";
 import type { JobHistoryService } from "../../application/job-history-service";
+import type { JobRetryPort } from "../../application/job-retry-service";
 import type { PrintService } from "../../application/print-service";
 import { QueryService } from "../../application/query-service";
 import type { ReportService } from "../../application/report-service";
@@ -35,6 +36,7 @@ export interface ResourceApiOptions {
   readonly reports?: ReportService;
   readonly audit?: AuditService;
   readonly jobs?: JobHistoryService;
+  readonly jobRetry?: JobRetryPort;
   readonly userPermissions?: UserPermissionService;
   readonly maxFileBytes?: number;
 }
@@ -126,6 +128,7 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       "/",
       createJobApi({
         jobs: options.jobs,
+        ...(options.jobRetry === undefined ? {} : { retry: options.jobRetry }),
         actor: resolveActor
       })
     );

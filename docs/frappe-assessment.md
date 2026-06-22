@@ -40,7 +40,7 @@ That model is powerful, but it is not event-sourcing first. cf-frappe keeps the 
 | Current reads | SQL document tables | D1/in-memory projections plus metadata-planned D1 indexes |
 | Migrations | patches and schema migrations | D1 migration plans, rendered SQL bundles, and applied checksum journal |
 | Workflow | Workflow DocType | metadata transitions and transition events |
-| Background jobs | scheduler and queue workers | `JobRegistry`, queue dispatch/consume, Cron mapping, and D1-backed execution history |
+| Background jobs | scheduler and queue workers | `JobRegistry`, queue dispatch/consume, Cron mapping, D1-backed execution history, and failed-job retry admin |
 | File attachments | File DocType plus file store | `File` metadata DocType plus R2/in-memory `FileStorage` |
 | Realtime notifications | `publish_realtime`/Socket.IO | document commit events over Durable Object WebSocket topics |
 | Session auth | sessions | signed cookie actor resolver with env-backed Worker composition |
@@ -53,7 +53,7 @@ That model is powerful, but it is not event-sourcing first. cf-frappe keeps the 
 
 - Generated Desk UI now covers basic list/form/report/print pages, model-defined form sections and field order, list columns, default list filters, saved user filters, filter controls, link-field select controls, child table row grids, submit/cancel lifecycle actions, document timelines with field diffs/comments/assignments/tags/followers, user-permission administration, report summaries/charts/exports, custom print templates, reusable letterheads, same-origin client script injection, and page size. Advanced filter builders, report builder, broader admin tools, richer chart controls, and richer browser-side client APIs are not implemented.
 - DocType metadata now plans and applies D1 projection-index migrations with a checksum journal, and app manifests compose DocTypes/hooks/reports/print formats, but destructive/renaming migrations, data backfills, and CLI-driven app installation are still future work.
-- Background jobs now have Queue/Cron support plus D1-backed execution history with API and Desk admin dashboards, but worker pools, retry administration, and scheduler admin views are not implemented.
+- Background jobs now have Queue/Cron support plus D1-backed execution history with API/Desk admin dashboards and failed-execution retry actions, but worker pools and scheduler admin views are not implemented.
 - Document history now exposes permissioned timeline entries with bounded event-sourced field-level old/new diffs, comment events, activity feed entries, assignment events, tag events, follower events, admin-only audit search, and deleted-document audit recovery from the event stream.
 - Realtime notifications now have basic Durable Object WebSocket document topics, but presence, tenant/doctype filtered fan-out, per-user rooms, Desk client integration, and durable replay are not implemented.
 - Auth providers remain adapter seams; signed cookie actor resolution exists, but full user/login management and provider-specific integrations are still future work.
