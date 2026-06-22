@@ -24,6 +24,10 @@ export function userAccountsStream(tenantId: TenantId, userId: string): StreamNa
   return documentStream(tenantId, "__UserAccounts", userId);
 }
 
+export function userProfilesStream(tenantId: TenantId, userId: string): StreamName {
+  return documentStream(tenantId, "__UserProfiles", userId);
+}
+
 export function roleCatalogStream(tenantId: TenantId): StreamName {
   return documentStream(tenantId, "__Roles", "catalog");
 }

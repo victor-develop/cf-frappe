@@ -335,6 +335,130 @@ describe("CloudFrappe Worker routing", () => {
     ]);
   });
 
+  it("mounts user profile API routes with Worker auth configuration", async () => {
+    const worker = createCloudFrappeWorker<CloudFrappeAuthTestEnv>({
+      registry: createTestRegistry(),
+      actor: unsafeHeaderActorResolver,
+      auth: {
+        sessionSecret: (env) => env.SESSION_SECRET,
+        sessionMaxAgeSeconds: 60,
+        secure: false,
+        passwords: deterministicPasswords(),
+        ids: deterministicIds(["account-1", "profile-1"]),
+        clock: fixedClock(now)
+      }
+    });
+    const env = { DB: fakeEventD1(), AGGREGATES: fakeNamespace(), SESSION_SECRET: "edge-secret" };
+    const adminHeaders = {
+      "content-type": "application/json",
+      "x-cf-frappe-user": "admin@example.com",
+      "x-cf-frappe-roles": SYSTEM_MANAGER_ROLE,
+      "x-cf-frappe-tenant": "acme"
+    };
+
+    const created = await worker.fetch!(
+      cfRequest("http://localhost/api/users/owner%40example.com", {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({ password: "secret-123", roles: ["User"] })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(created.status).toBe(201);
+
+    const profile = await worker.fetch!(
+      cfRequest("http://localhost/api/users/owner%40example.com/profile", {
+        method: "PUT",
+        headers: adminHeaders,
+        body: JSON.stringify({ fullName: "Ada Lovelace", expectedVersion: 0 })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(profile.status).toBe(200);
+    await expect(profile.json()).resolves.toMatchObject({
+      data: {
+        userId: "owner@example.com",
+        version: 1,
+        profile: { fullName: "Ada Lovelace" }
+      }
+    });
+  });
+
+  it("revalidates signed account sessions before profile routes", async () => {
+    const worker = createCloudFrappeWorker<CloudFrappeAuthTestEnv>({
+      registry: createTestRegistry(),
+      actor: unsafeHeaderActorResolver,
+      auth: {
+        sessionSecret: (env) => env.SESSION_SECRET,
+        sessionMaxAgeSeconds: 60,
+        revalidateSignedSessions: true,
+        secure: false,
+        passwords: deterministicPasswords(),
+        ids: deterministicIds(["account-1", "profile-1", "roles-1"]),
+        clock: fixedClock(now)
+      }
+    });
+    const env = { DB: fakeEventD1(), AGGREGATES: fakeNamespace(), SESSION_SECRET: "edge-secret" };
+    const adminHeaders = {
+      "content-type": "application/json",
+      "x-cf-frappe-user": "admin@example.com",
+      "x-cf-frappe-roles": SYSTEM_MANAGER_ROLE,
+      "x-cf-frappe-tenant": "acme"
+    };
+    await worker.fetch!(
+      cfRequest("http://localhost/api/users/owner%40example.com", {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({ password: "secret-123", roles: ["User"] })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+    const login = await worker.fetch!(
+      cfRequest("http://localhost/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId: "owner@example.com", password: "secret-123", tenantId: "acme" })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+    const cookie = login.headers.get("set-cookie") ?? "";
+    const profile = await worker.fetch!(
+      cfRequest("http://localhost/api/users/owner%40example.com/profile", {
+        method: "PUT",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({ fullName: "Ada Lovelace", expectedVersion: 0 })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(profile.status).toBe(200);
+    await worker.fetch!(
+      cfRequest("http://localhost/api/users/owner%40example.com/roles", {
+        method: "PUT",
+        headers: adminHeaders,
+        body: JSON.stringify({ roles: ["Task Manager"], expectedVersion: 1 })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+
+    const stale = await worker.fetch!(
+      cfRequest("http://localhost/api/users/owner%40example.com/profile", { headers: { cookie } }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(stale.status).toBe(403);
+    await expect(stale.json()).resolves.toMatchObject({
+      error: { code: "PERMISSION_DENIED", message: "Session is no longer valid" }
+    });
+  });
+
   it("mounts auth-backed Desk user account administration in the Worker factory", async () => {
     const worker = createCloudFrappeWorker<CloudFrappeAuthTestEnv>({
       registry: createTestRegistry(),

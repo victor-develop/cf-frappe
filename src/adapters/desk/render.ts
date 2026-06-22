@@ -31,6 +31,7 @@ import type { SavedListFilter } from "../../application/saved-list-filter-servic
 import type { SavedReport } from "../../application/saved-report-service";
 import type { PrintFormatDefinition } from "../../core/print-format";
 import type { UserAccount } from "../../core/user-accounts";
+import { USER_PROFILE_FIELDS, type UserProfileState } from "../../core/user-profiles";
 import type { UserPermissionState } from "../../core/user-permissions";
 import { DESK_CLIENT_SCRIPT_PATH } from "./client";
 import {
@@ -457,6 +458,7 @@ export function renderUserPermissionAdmin(state: UserPermissionState): string {
 export interface UserAccountAdminState {
   readonly selectedUserId: string;
   readonly account?: UserAccount;
+  readonly profile?: UserProfileState;
   readonly error?: string;
 }
 
@@ -468,6 +470,7 @@ export function renderUserAccountAdmin(state: UserAccountAdminState): string {
     ? `<tr>
         <td>${escapeHtml(account.userId)}</td>
         <td>${escapeHtml(account.email ?? "")}</td>
+        <td>${escapeHtml(state.profile?.profile.fullName ?? "")}</td>
         <td>${escapeHtml(account.roles.join(", "))}</td>
         <td>${account.enabled ? "enabled" : "disabled"}</td>
         <td>${String(account.version)}</td>
@@ -475,7 +478,8 @@ export function renderUserAccountAdmin(state: UserAccountAdminState): string {
       </tr>`
     : "";
   const accountTools = account
-    ? `<form class="panel form" method="post" action="/desk/admin/users/password">
+    ? `${state.profile ? renderUserProfileForm(account, state.profile) : ""}
+    <form class="panel form" method="post" action="/desk/admin/users/password">
       <input type="hidden" name="user" value="${escapeHtml(account.userId)}">
       <input type="hidden" name="expectedVersion" value="${String(account.version)}">
       <div class="form-head"><h2>Password</h2></div>
@@ -522,12 +526,47 @@ export function renderUserAccountAdmin(state: UserAccountAdminState): string {
   <section class="panel">
     <div class="table-wrap">
       <table>
-        <thead><tr><th>User</th><th>Email</th><th>Roles</th><th>Status</th><th>Version</th><th>Updated</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="6" class="empty">No account loaded.</td></tr>`}</tbody>
+        <thead><tr><th>User</th><th>Email</th><th>Full Name</th><th>Roles</th><th>Status</th><th>Version</th><th>Updated</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="7" class="empty">No account loaded.</td></tr>`}</tbody>
       </table>
     </div>
   </section>
   ${accountTools}`;
+}
+
+function renderUserProfileForm(account: UserAccount, profile: UserProfileState): string {
+  const fields = USER_PROFILE_FIELDS.map((field) => {
+    const label = userProfileFieldLabel(field);
+    return `<label class="field"><span>${escapeHtml(label)}</span><input name="${field}" value="${escapeHtml(profile.profile[field] ?? "")}"></label>`;
+  }).join("");
+  return `<form class="panel form" method="post" action="/desk/admin/users/profile">
+    <input type="hidden" name="user" value="${escapeHtml(account.userId)}">
+    <input type="hidden" name="expectedVersion" value="${String(profile.version)}">
+    <div class="form-head"><h2>Profile</h2><p>v${String(profile.version)}</p></div>
+    <div class="fields">${fields}</div>
+    <div class="actions"><button class="button primary" type="submit">Save Profile</button></div>
+  </form>`;
+}
+
+function userProfileFieldLabel(field: (typeof USER_PROFILE_FIELDS)[number]): string {
+  switch (field) {
+    case "firstName":
+      return "First Name";
+    case "middleName":
+      return "Middle Name";
+    case "lastName":
+      return "Last Name";
+    case "fullName":
+      return "Full Name";
+    case "userImage":
+      return "User Image";
+    case "mobileNo":
+      return "Mobile No";
+    case "timeZone":
+      return "Time Zone";
+    default:
+      return `${field.slice(0, 1).toUpperCase()}${field.slice(1)}`;
+  }
 }
 
 export function renderRoleAdmin(

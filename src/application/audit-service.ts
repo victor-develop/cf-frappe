@@ -42,6 +42,7 @@ const DOCUMENT_EVENT_KINDS = new Set<DocumentEventPayload["kind"]>([
   "UserRolesChanged",
   "UserAccountEnabled",
   "UserAccountDisabled",
+  "UserProfileChanged",
   "RoleCreated",
   "RoleDescriptionChanged",
   "RoleEnabled",

@@ -296,6 +296,7 @@ function diffEvent(
     case "UserRolesChanged":
     case "UserAccountEnabled":
     case "UserAccountDisabled":
+    case "UserProfileChanged":
     case "RoleCreated":
     case "RoleDescriptionChanged":
     case "RoleEnabled":
@@ -397,6 +398,8 @@ function summarize(payload: DocumentEventPayload): string {
       return `Enabled user account ${payload.userId}`;
     case "UserAccountDisabled":
       return `Disabled user account ${payload.userId}`;
+    case "UserProfileChanged":
+      return `Changed profile for ${payload.userId}`;
     case "RoleCreated":
       return `Created role ${payload.role}`;
     case "RoleDescriptionChanged":

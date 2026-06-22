@@ -13,3 +13,4 @@ export * from "./saved-report-api";
 export * from "./signed-session";
 export * from "./user-account-api";
 export * from "./user-permission-api";
+export * from "./user-profile-api";

@@ -14,7 +14,7 @@ describe("cf-frappe CLI scaffold", () => {
 
   afterEach(async () => {
     await rm(tempRoot, { recursive: true, force: true });
-  });
+  }, 60_000);
 
   it("creates a Cloudflare-ready starter app", async () => {
     const target = join(tempRoot, "Demo App");

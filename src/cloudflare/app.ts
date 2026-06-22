@@ -13,6 +13,7 @@ import { RoleService } from "../application/role-service";
 import { SavedListFilterService } from "../application/saved-list-filter-service";
 import { SavedReportService } from "../application/saved-report-service";
 import { UserAccountService } from "../application/user-account-service";
+import { UserProfileService } from "../application/user-profile-service";
 import { UserPermissionService } from "../application/user-permission-service";
 import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator";
 import { RoleCatalogUserRoleValidator } from "../application/user-role-validator";
@@ -62,6 +63,7 @@ export interface CloudFrappeRuntimeServices {
   readonly history: DocumentHistoryService;
   readonly savedFilters: SavedListFilterService;
   readonly userAccounts?: UserAccountService;
+  readonly userProfiles?: UserProfileService;
   readonly userPermissions: UserPermissionService;
   readonly prints: PrintService;
   readonly queries: QueryService;
@@ -246,6 +248,14 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
         ...(roleValidator === undefined ? {} : { roleValidator })
       })
     : undefined;
+  const userProfiles = options.auth
+    ? new UserProfileService({
+        events,
+        ...(options.auth.clock === undefined ? {} : { clock: options.auth.clock }),
+        ...(options.auth.ids === undefined ? {} : { ids: options.auth.ids }),
+        ...(options.auth.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
+      })
+    : undefined;
   const restrictedQueries = new QueryService({ registry: options.registry, projections, userPermissions });
   const restrictedHistory = new DocumentHistoryService({ events, queries: restrictedQueries });
   const prints = new PrintService({ registry: options.registry, queries: restrictedQueries });
@@ -262,6 +272,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     history: restrictedHistory,
     savedFilters,
     ...(userAccounts === undefined ? {} : { userAccounts }),
+    ...(userProfiles === undefined ? {} : { userProfiles }),
     userPermissions,
     prints,
     queries: restrictedQueries,
@@ -340,6 +351,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     savedFilters,
     savedReports,
     ...(userAccounts === undefined ? {} : { userAccounts }),
+    ...(userProfiles === undefined ? {} : { userProfiles }),
     ...(userAccounts === undefined || options.auth === undefined ? {} : { auth: authSessionOptions(options.auth, env) }),
     userPermissions,
     reports,
@@ -362,6 +374,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     savedFilters,
     savedReports,
     ...(userAccounts === undefined ? {} : { userAccounts }),
+    ...(userProfiles === undefined ? {} : { userProfiles }),
     userPermissions,
     reports,
     roles,

@@ -13,9 +13,11 @@ import type { SavedListFilterService } from "../../application/saved-list-filter
 import type { SavedReportDefinition, SavedReportService } from "../../application/saved-report-service";
 import type { UserAccountService } from "../../application/user-account-service";
 import type { UserPermissionService } from "../../application/user-permission-service";
+import type { UserProfileService } from "../../application/user-profile-service";
 import { FrameworkError } from "../../core/errors";
 import { can } from "../../core/permissions";
 import type { ModelRegistry } from "../../core/registry";
+import { USER_PROFILE_FIELDS, type UserProfileInput } from "../../core/user-profiles";
 import { allowedWorkflowTransitions } from "../../core/workflow";
 import {
   CHILD_TABLE_ROW_INDEX_FIELD,
@@ -100,6 +102,7 @@ export interface DeskAppOptions {
   readonly savedReports?: SavedReportService;
   readonly roles?: RoleService;
   readonly userAccounts?: UserAccountService;
+  readonly userProfiles?: UserProfileService;
   readonly userPermissions?: UserPermissionService;
   readonly reports?: ReportService;
   readonly jobs?: JobHistoryService;
@@ -433,6 +436,27 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         actor,
         userId: form.userId,
         roles: form.roles,
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(`/desk/admin/users?user=${encodeURIComponent(form.userId)}`, 303);
+    } catch (error) {
+      return renderDeskUserAccountFailure(options, actor, userAccounts, form?.userId ?? "", error);
+    }
+  });
+
+  app.post("/desk/admin/users/profile", async (c) => {
+    const userAccounts = requireUserAccounts(options);
+    const userProfiles = requireUserProfiles(options);
+    const actor = await options.actor(c.req.raw);
+    userAccounts.authorizeAdministration(actor);
+    let form: ParsedDeskChangeUserProfile | undefined;
+    try {
+      form = await parseDeskChangeUserProfile(c.req.raw);
+      await userProfiles.change({
+        actor,
+        userId: form.userId,
+        profile: form.profile,
         ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
         metadata: requestMetadata(c.req.raw)
       });
@@ -1211,6 +1235,13 @@ function requireUserAccounts(options: DeskAppOptions): UserAccountService {
   return options.userAccounts;
 }
 
+function requireUserProfiles(options: DeskAppOptions): UserProfileService {
+  if (!options.userProfiles) {
+    throw new FrameworkError("DOCUMENT_NOT_FOUND", "User profiles are not enabled", { status: 404 });
+  }
+  return options.userProfiles;
+}
+
 function requireRoles(options: DeskAppOptions): RoleService {
   if (!options.roles) {
     throw new FrameworkError("DOCUMENT_NOT_FOUND", "Roles are not enabled", { status: 404 });
@@ -1323,12 +1354,18 @@ async function renderDeskUserAccountPage(
 ): Promise<Response> {
   const doctypes = options.queries.listDoctypes(actor);
   const reports = listReports(options, actor);
+  const profile = state.account && options.userProfiles
+    ? await options.userProfiles.get(actor, state.account.userId).catch(() => undefined)
+    : undefined;
   return html(
     renderDeskLayout({
       title: "Users",
       doctypes,
       reports,
-      body: renderUserAccountAdmin(state)
+      body: renderUserAccountAdmin({
+        ...state,
+        ...(profile === undefined ? {} : { profile })
+      })
     }),
     status
   );
@@ -1519,6 +1556,12 @@ interface ParsedDeskChangeUserPassword {
 interface ParsedDeskChangeUserRoles {
   readonly userId: string;
   readonly roles: readonly string[];
+  readonly expectedVersion?: number;
+}
+
+interface ParsedDeskChangeUserProfile {
+  readonly userId: string;
+  readonly profile: UserProfileInput;
   readonly expectedVersion?: number;
 }
 
@@ -1714,6 +1757,23 @@ async function parseDeskChangeUserRoles(request: Request): Promise<ParsedDeskCha
   return {
     userId: form.get("user") ?? "",
     roles: commaListFormValue(form.get("roles")),
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
+async function parseDeskChangeUserProfile(request: Request): Promise<ParsedDeskChangeUserProfile> {
+  const form = await readUrlEncodedDeskForm(request);
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  const profile: Record<string, string | null> = {};
+  for (const field of USER_PROFILE_FIELDS) {
+    if (form.has(field)) {
+      const value = form.get(field) ?? "";
+      profile[field] = value === "" ? null : value;
+    }
+  }
+  return {
+    userId: form.get("user") ?? "",
+    profile,
     ...(expectedVersion !== undefined ? { expectedVersion } : {})
   };
 }

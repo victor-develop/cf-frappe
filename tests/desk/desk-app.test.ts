@@ -22,6 +22,7 @@ import {
   RoleService,
   SYSTEM_MANAGER_ROLE,
   UserAccountService,
+  UserProfileService,
   type PasswordHasher
 } from "../../src";
 import { createChildTableServices, createLinkedServices, createServices, data, guest, now, owner } from "../helpers";
@@ -52,6 +53,11 @@ describe("Desk app", () => {
       ids: deterministicIds(["account-1", "password-1", "roles-1", "disable-1", "enable-1"]),
       clock: fixedClock(now)
     });
+    const userProfiles = new UserProfileService({
+      events: services.store,
+      ids: deterministicIds(["profile-1", "profile-2"]),
+      clock: fixedClock(now)
+    });
     const app = createDeskApp({
       registry: services.registry,
       documents: services.documents,
@@ -62,10 +68,11 @@ describe("Desk app", () => {
       savedFilters: services.savedFilters,
       savedReports: services.savedReports,
       userAccounts,
+      userProfiles,
       userPermissions: services.userPermissions,
       actor: () => actor
     });
-    return { app, services: { ...services, userAccounts } };
+    return { app, services: { ...services, userAccounts, userProfiles } };
   }
 
   function makeRoleDesk(actor = owner) {
@@ -919,10 +926,70 @@ describe("Desk app", () => {
     expect(currentHtml).toContain("owner@example.com");
     expect(currentHtml).toContain("Task Manager, User");
     expect(currentHtml).toContain('name="expectedVersion" value="1"');
+    expect(currentHtml).toContain('action="/desk/admin/users/profile"');
     expect(currentHtml).toContain('action="/desk/admin/users/password"');
     expect(currentHtml).toContain('action="/desk/admin/users/roles"');
     expect(currentHtml).toContain('action="/desk/admin/users/disable"');
     expect(currentHtml).not.toContain("hash:secret-123");
+
+    const profile = await app.request("/desk/admin/users/profile", {
+      method: "POST",
+      body: new URLSearchParams({
+        user: owner.id,
+        expectedVersion: "0",
+        fullName: "Ada Lovelace",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        username: "ada",
+        language: "en",
+        timeZone: "Europe/London",
+        userImage: "",
+        phone: "+44 20 1234",
+        mobileNo: "+44 7000",
+        location: "London",
+        bio: "Analytical engine notes"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(profile.status).toBe(303);
+    await expect(services.userProfiles.get(admin, owner.id)).resolves.toMatchObject({
+      version: 1,
+      profile: {
+        fullName: "Ada Lovelace",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        username: "ada",
+        language: "en",
+        timeZone: "Europe/London",
+        phone: "+44 20 1234",
+        mobileNo: "+44 7000",
+        location: "London",
+        bio: "Analytical engine notes"
+      }
+    });
+
+    const profiled = await app.request("/desk/admin/users?user=owner%40example.com");
+    expect(profiled.status).toBe(200);
+    const profiledHtml = await profiled.text();
+    expect(profiledHtml).toContain("Ada Lovelace");
+    expect(profiledHtml).toContain('action="/desk/admin/users/profile"');
+
+    const staleProfile = await app.request("/desk/admin/users/profile", {
+      method: "POST",
+      body: new URLSearchParams({
+        user: owner.id,
+        expectedVersion: "0",
+        fullName: "Grace Hopper"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(staleProfile.status).toBe(409);
+    const staleProfileHtml = await staleProfile.text();
+    expect(staleProfileHtml).toContain("Expected user profile &#39;owner@example.com&#39; at version 0, found 1");
+    expect(staleProfileHtml).toContain('name="expectedVersion" value="1"');
+    expect(staleProfileHtml).toContain("Ada Lovelace");
 
     const roles = await app.request("/desk/admin/users/roles", {
       method: "POST",
@@ -1031,6 +1098,16 @@ describe("Desk app", () => {
     const html = await response.text();
     expect(html).toContain("cannot manage user accounts");
     expect(html).not.toContain("Create User");
+
+    const profile = await app.request("/desk/admin/users/profile", {
+      method: "POST",
+      body: "{",
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(profile.status).toBe(403);
+    const profileHtml = await profile.text();
+    expect(profileHtml).toContain("cannot manage user accounts");
+    expect(profileHtml).not.toContain("Save Profile");
   });
 
   it("renders job definitions and execution history from the Desk admin surface", async () => {

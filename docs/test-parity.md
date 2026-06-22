@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the account recovery token flow slice:
+As of the event-sourced user profile slice:
 
-- Vitest files: `57`
-- Vitest cases: `453`
+- Vitest files: `59`
+- Vitest cases: `460`
 
 ## Implication
 

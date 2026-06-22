@@ -14,6 +14,7 @@ import type { SavedListFilterService } from "../../application/saved-list-filter
 import type { SavedReportService } from "../../application/saved-report-service";
 import type { UserAccountService } from "../../application/user-account-service";
 import type { UserPermissionService } from "../../application/user-permission-service";
+import type { UserProfileService } from "../../application/user-profile-service";
 import { badRequest } from "../../core/errors";
 import { isListFilterOperator } from "../../core/list-view";
 import type { ModelRegistry } from "../../core/registry";
@@ -31,6 +32,7 @@ import { createRoleApi } from "./role-api";
 import { createSavedReportApi } from "./saved-report-api";
 import { createUserAccountApi } from "./user-account-api";
 import { createUserPermissionApi } from "./user-permission-api";
+import { createUserProfileApi } from "./user-profile-api";
 
 export interface ResourceApiOptions {
   readonly registry: ModelRegistry;
@@ -50,6 +52,7 @@ export interface ResourceApiOptions {
   readonly jobRetry?: JobRetryPort;
   readonly jobSchedules?: JobScheduleService;
   readonly userAccounts?: UserAccountService;
+  readonly userProfiles?: UserProfileService;
   readonly auth?: AuthSessionOptions;
   readonly userPermissions?: UserPermissionService;
   readonly maxFileBytes?: number;
@@ -91,6 +94,17 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       "/",
       createUserAccountApi({
         userAccounts: options.userAccounts,
+        actor: resolveActor,
+        maxJsonBytes
+      })
+    );
+  }
+
+  if (options.userProfiles) {
+    app.route(
+      "/",
+      createUserProfileApi({
+        userProfiles: options.userProfiles,
         actor: resolveActor,
         maxJsonBytes
       })

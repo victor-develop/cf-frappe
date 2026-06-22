@@ -300,6 +300,11 @@ export type DocumentEventPayload =
       readonly userId: string;
     }
   | {
+      readonly kind: "UserProfileChanged";
+      readonly userId: string;
+      readonly profile: DocumentData;
+    }
+  | {
       readonly kind: "RoleCreated";
       readonly role: string;
       readonly enabled: boolean;
