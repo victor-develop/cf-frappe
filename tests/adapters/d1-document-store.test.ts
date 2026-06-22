@@ -78,6 +78,16 @@ describe("D1DocumentStore", () => {
     expect(read?.params).toEqual([stream, 4, "DocumentAssigned", "DocumentUnassigned"]);
   });
 
+  it("translates event append constraint races into document conflicts", async () => {
+    const db = new FakeD1Database({ failEventInsertAsConstraint: true });
+    const store = new D1EventStore(db as unknown as D1Database);
+
+    await expect(store.append(stream, 0, [event])).rejects.toMatchObject({
+      code: "DOCUMENT_CONFLICT",
+      message: `Stream '${stream}' changed while appending`
+    });
+  });
+
   function updateEvent(id: string, title: string): NewDomainEvent {
     return {
       ...event,
@@ -115,9 +125,11 @@ class FakeD1Database {
   readonly documents = new Map<string, any>();
   readonly statements: FakeD1PreparedStatement[] = [];
   readonly failDocumentUpsert: boolean;
+  readonly failEventInsertAsConstraint: boolean;
 
-  constructor(options: { readonly failDocumentUpsert?: boolean } = {}) {
+  constructor(options: { readonly failDocumentUpsert?: boolean; readonly failEventInsertAsConstraint?: boolean } = {}) {
     this.failDocumentUpsert = options.failDocumentUpsert ?? false;
+    this.failEventInsertAsConstraint = options.failEventInsertAsConstraint ?? false;
   }
 
   prepare(sql: string) {
@@ -197,6 +209,9 @@ class FakeD1PreparedStatement {
 
   async run() {
     if (this.sql.includes("INSERT INTO cf_frappe_events")) {
+      if (this.db.failEventInsertAsConstraint) {
+        throw new Error("UNIQUE constraint failed");
+      }
       const [
         id,
         tenant_id,

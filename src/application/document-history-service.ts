@@ -158,6 +158,10 @@ function summarize(payload: DocumentEventPayload): string {
       return `Assigned ${payload.assigneeId}`;
     case "DocumentUnassigned":
       return `Unassigned ${payload.assigneeId}`;
+    case "SavedListFilterSaved":
+      return `Saved list filter ${payload.label}`;
+    case "SavedListFilterDeleted":
+      return "Deleted list filter";
     case "WorkflowTransitioned":
       return workflowSummary(payload);
     case "DomainCommandApplied":

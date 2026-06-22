@@ -10,7 +10,8 @@ import {
   InMemoryDocumentStore,
   PrintService,
   QueryService,
-  ReportService
+  ReportService,
+  SavedListFilterService
 } from "../src";
 import type { Actor, DocumentData, DomainEvent, ModelRegistry } from "../src";
 import type { AfterCommitContext } from "../src";
@@ -251,6 +252,7 @@ export function createServices(
   options: {
     readonly afterCommit?: (context: AfterCommitContext) => void | Promise<void>;
     readonly onHookError?: (error: unknown, event: DomainEvent) => void | Promise<void>;
+    readonly savedFilterIds?: readonly string[];
   } = {}
 ) {
   const registry = createTestRegistry();
@@ -265,9 +267,15 @@ export function createServices(
   });
   const queries = new QueryService({ registry, projections: store });
   const history = new DocumentHistoryService({ events: store, queries });
+  const savedFilters = new SavedListFilterService({
+    registry,
+    events: store,
+    clock: fixedClock(now),
+    ids: deterministicIds(options.savedFilterIds ?? ["saved-filter-1", "saved-filter-event-1", "saved-filter-event-2"])
+  });
   const prints = new PrintService({ registry, queries });
   const reports = new ReportService({ registry, queries });
-  return { registry, store, events: store, projections: store, documents, history, prints, queries, reports };
+  return { registry, store, events: store, projections: store, documents, history, savedFilters, prints, queries, reports };
 }
 
 export function createLinkedServices(ids: readonly string[] = ["evt1", "evt2", "evt3", "evt4"]) {

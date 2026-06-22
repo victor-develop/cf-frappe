@@ -9,6 +9,7 @@ describe("resource api", () => {
       documents: services.documents,
       queries: services.queries,
       timeline: services.history,
+      savedFilters: services.savedFilters,
       actor: unsafeHeaderActorResolver
     });
   }
@@ -337,6 +338,51 @@ describe("resource api", () => {
       "HTTP Closed High",
       "HTTP High"
     ]);
+  });
+
+  it("saves and applies resource list filters through the API", async () => {
+    const app = makeApp();
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "API High", priority: "High", body: "High" })
+    });
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "API Low", priority: "Low", body: "Low" })
+    });
+
+    const saved = await app.request("/api/resource/Note/saved-filters", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({
+        label: "High API notes",
+        filters: [{ field: "priority", value: "High" }]
+      })
+    });
+
+    expect(saved.status).toBe(201);
+    const savedJson = await saved.json() as { data: { id: string; label: string } };
+    expect(savedJson.data).toMatchObject({ label: "High API notes" });
+
+    const filtered = await app.request(`/api/resource/Note?saved_filter=${savedJson.data.id}`, {
+      headers: userHeaders
+    });
+    expect(filtered.status).toBe(200);
+    await expect(filtered.json()).resolves.toMatchObject({
+      data: [{ name: "API High" }],
+      total: 1
+    });
+
+    const listed = await app.request("/api/resource/Note/saved-filters", { headers: userHeaders });
+    await expect(listed.json()).resolves.toMatchObject({ data: [{ id: savedJson.data.id }] });
+
+    const deleted = await app.request(`/api/resource/Note/saved-filters/${savedJson.data.id}`, {
+      method: "DELETE",
+      headers: userHeaders
+    });
+    expect(deleted.status).toBe(204);
   });
 
   it("maps invalid resource list filters to JSON bad requests", async () => {

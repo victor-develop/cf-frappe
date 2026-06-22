@@ -15,6 +15,7 @@ import {
 import type { ReportDefinition } from "../../core/reports";
 import type { DocumentAssignments, DocumentTimeline } from "../../application/document-history-service";
 import type { ReportRunResult } from "../../application/report-service";
+import type { SavedListFilter } from "../../application/saved-list-filter-service";
 import type { PrintFormatDefinition } from "../../core/print-format";
 
 export type FormLinkOptions = Readonly<Record<string, readonly LinkOption[]>>;
@@ -152,11 +153,16 @@ export function renderListView(
   doctype: DocTypeDefinition,
   listView: ResolvedListView,
   documents: readonly DocumentSnapshot[],
-  filters: readonly ListDocumentsFilter[] = []
+  filters: readonly ListDocumentsFilter[] = [],
+  options: {
+    readonly savedFilters?: readonly SavedListFilter[];
+    readonly selectedSavedFilterId?: string;
+  } = {}
 ): string {
   const fields = listView.columns;
   const filterFields = listView.filterFields;
   const filterForm = filterFields.map((field) => renderFilterField(field, filters)).join("");
+  const savedFilterPanel = renderSavedFilters(doctype, options.savedFilters ?? [], options.selectedSavedFilterId);
   const header = fields.map((field) => `<th>${escapeHtml(field.label ?? field.name)}</th>`).join("");
   const rows = documents
     .map((document) => {
@@ -174,7 +180,8 @@ export function renderListView(
   return `<section class="toolbar">
     <a class="button primary" href="/desk/${encodeURIComponent(doctype.name)}/new">New ${escapeHtml(labelFor(doctype))}</a>
   </section>
-  ${filterForm ? `<form class="panel form list-filters" method="get"><div class="fields">${filterForm}</div><div class="actions"><button class="button primary" type="submit">Filter</button><a class="button" href="/desk/${encodeURIComponent(doctype.name)}?default_filters=0">Clear</a></div></form>` : ""}
+  ${savedFilterPanel}
+  ${filterForm ? `<form class="panel form list-filters" method="get"><div class="fields">${filterForm}<label class="field" for="saved-filter-label"><span>Saved filter name</span><input id="saved-filter-label" name="saved_filter_label" type="text"></label></div><div class="actions"><button class="button primary" type="submit">Filter</button><button class="button" type="submit" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/saved-filters">Save filter</button><a class="button" href="/desk/${encodeURIComponent(doctype.name)}?default_filters=0">Clear</a></div></form>` : ""}
   <section class="panel">
     <div class="table-wrap">
       <table>
@@ -182,6 +189,32 @@ export function renderListView(
         <tbody>${rows || `<tr><td colspan="${fields.length + 3}" class="empty">No documents yet.</td></tr>`}</tbody>
       </table>
     </div>
+  </section>`;
+}
+
+function renderSavedFilters(
+  doctype: DocTypeDefinition,
+  savedFilters: readonly SavedListFilter[],
+  selectedId: string | undefined
+): string {
+  if (savedFilters.length === 0) {
+    return "";
+  }
+  const items = savedFilters
+    .map((filter) => {
+      const href = `/desk/${encodeURIComponent(doctype.name)}?saved_filter=${encodeURIComponent(filter.id)}`;
+      const deleteAction = `/desk/${encodeURIComponent(doctype.name)}/saved-filters/${encodeURIComponent(filter.id)}/delete`;
+      return `<li>
+        <a class="saved-filter-link${filter.id === selectedId ? " is-active" : ""}" href="${href}">${escapeHtml(filter.label)}</a>
+        <form class="inline-action" method="post">
+          <button class="button" type="submit" formaction="${deleteAction}">Delete</button>
+        </form>
+      </li>`;
+    })
+    .join("");
+  return `<section class="panel saved-filters" aria-label="Saved filters">
+    <h2>Saved filters</h2>
+    <ul>${items}</ul>
   </section>`;
 }
 
@@ -776,6 +809,36 @@ tr:last-child td { border-bottom: 0; }
 .timeline { margin-top: 16px; max-width: 860px; }
 .list-filters { max-width: none; margin-bottom: 16px; }
 .list-filters .actions { justify-content: flex-start; }
+.saved-filters {
+  max-width: none;
+  margin-bottom: 16px;
+  padding: 14px 18px;
+}
+.saved-filters h2 { margin-bottom: 10px; font-size: 16px; }
+.saved-filters ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.saved-filters li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.saved-filter-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  text-decoration: none;
+}
+.saved-filter-link.is-active { background: #e9eef7; border-color: var(--primary); }
 .form-head, .timeline-head {
   display: flex;
   justify-content: space-between;

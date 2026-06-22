@@ -6,6 +6,7 @@ import type {
   StreamName
 } from "../../core/types";
 import type { DocumentCommit, DocumentStore, ReadStreamOptions } from "../../ports/document-store";
+import { isD1ConstraintError } from "./constraint-error";
 import { eventStreamQuery } from "./read-stream-query";
 import { eventFromRow, type EventRow } from "./serde";
 
@@ -75,7 +76,7 @@ export class D1DocumentStore implements DocumentStore {
           )
       ]);
     } catch (error) {
-      if (isConstraintError(error)) {
+      if (isD1ConstraintError(error)) {
         throw conflict(`Stream '${stream}' changed while committing`);
       }
       throw error;
@@ -100,8 +101,4 @@ export class D1DocumentStore implements DocumentStore {
       .first<{ version: number }>();
     return Number(row?.version ?? 0);
   }
-}
-
-function isConstraintError(error: unknown): boolean {
-  return error instanceof Error && /constraint|unique/i.test(error.message);
 }

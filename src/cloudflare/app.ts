@@ -5,6 +5,7 @@ import { DocumentHistoryService } from "../application/document-history-service"
 import { PrintService } from "../application/print-service";
 import { QueryService } from "../application/query-service";
 import { ReportService } from "../application/report-service";
+import { SavedListFilterService } from "../application/saved-list-filter-service";
 import type { DocumentCommandExecutor } from "../application/document-service";
 import { FileService } from "../application/file-service";
 import { D1EventStore, D1ProjectionStore } from "../adapters/d1";
@@ -40,6 +41,7 @@ export interface CloudFrappeRuntimeServices {
   readonly registry: ModelRegistry;
   readonly documents: DocumentCommandExecutor;
   readonly history: DocumentHistoryService;
+  readonly savedFilters: SavedListFilterService;
   readonly prints: PrintService;
   readonly queries: QueryService;
   readonly reports: ReportService;
@@ -165,12 +167,14 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
   });
   const queries = new QueryService({ registry: options.registry, projections });
   const history = new DocumentHistoryService({ events, queries });
+  const savedFilters = new SavedListFilterService({ registry: options.registry, events });
   const prints = new PrintService({ registry: options.registry, queries });
   const reports = new ReportService({ registry: options.registry, queries });
   const baseServices: Omit<CloudFrappeRuntimeServices, "files"> = {
     registry: options.registry,
     documents,
     history,
+    savedFilters,
     prints,
     queries,
     reports
@@ -200,6 +204,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     prints,
     queries,
     timeline: history,
+    savedFilters,
     reports,
     actor: options.actor,
     ...(options.maxJsonBytes ? { maxJsonBytes: options.maxJsonBytes } : {}),
@@ -212,6 +217,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     prints,
     queries,
     timeline: history,
+    savedFilters,
     reports,
     actor: options.actor
   });

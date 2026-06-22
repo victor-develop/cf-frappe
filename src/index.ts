@@ -13,6 +13,7 @@ export * from "./application/print-service";
 export * from "./application/query-service";
 export * from "./application/realtime";
 export * from "./application/report-service";
+export * from "./application/saved-list-filter-service";
 export * from "./cloudflare";
 export * from "./core/errors";
 export * from "./core/events";

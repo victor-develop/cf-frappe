@@ -1,6 +1,6 @@
 import { FrameworkError, notFound, permissionDenied } from "../core/errors";
 import { resolveFormView } from "../core/form-view";
-import { normalizeListFilters, resolveListView } from "../core/list-view";
+import { mergeListFilters, normalizeListFilters, resolveListView } from "../core/list-view";
 import { can } from "../core/permissions";
 import type { ModelRegistry } from "../core/registry";
 import {
@@ -208,14 +208,7 @@ function mergeDefaultFilters(
   defaults: readonly ListDocumentsFilter[],
   overrides: readonly ListDocumentsFilter[]
 ): readonly ListDocumentsFilter[] {
-  if (defaults.length === 0) {
-    return overrides;
-  }
-  if (overrides.length === 0) {
-    return defaults;
-  }
-  const overrideFields = new Set(overrides.map((filter) => filter.field));
-  return [...defaults.filter((filter) => !overrideFields.has(filter.field)), ...overrides];
+  return mergeListFilters(defaults, overrides);
 }
 
 function clampLimit(limit?: number): number {

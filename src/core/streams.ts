@@ -8,6 +8,10 @@ export function namingSeriesStream(tenantId: TenantId, doctype: DocTypeName, pat
   return documentStream(tenantId, "__NamingSeries", `${doctype}:${pattern}`);
 }
 
+export function savedListFiltersStream(tenantId: TenantId, doctype: DocTypeName, ownerId: string): StreamName {
+  return documentStream(tenantId, "__SavedListFilters", `${doctype}:${ownerId}`);
+}
+
 export function escapePart(value: string): string {
   return encodeURIComponent(value).replaceAll(".", "%2E");
 }

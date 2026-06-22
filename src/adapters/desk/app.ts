@@ -4,6 +4,7 @@ import type { DocumentHistoryService } from "../../application/document-history-
 import type { PrintService } from "../../application/print-service";
 import { QueryService } from "../../application/query-service";
 import type { ReportFilters, ReportService } from "../../application/report-service";
+import type { SavedListFilterService } from "../../application/saved-list-filter-service";
 import { FrameworkError } from "../../core/errors";
 import { can } from "../../core/permissions";
 import type { ModelRegistry } from "../../core/registry";
@@ -15,6 +16,7 @@ import {
   type DocumentSnapshot,
   type FieldDefinition,
   type JsonPrimitive,
+  type ListDocumentsFilter,
   type MutableDocumentData,
   type ResolvedFormView
 } from "../../core/types";
@@ -42,6 +44,7 @@ export interface DeskAppOptions {
   readonly prints?: PrintService;
   readonly queries: QueryService;
   readonly timeline?: DocumentHistoryService;
+  readonly savedFilters?: SavedListFilterService;
   readonly reports?: ReportService;
   readonly actor: ActorResolver;
 }
@@ -117,23 +120,66 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
     const filters = listFiltersFromUrl(url);
+    const savedFilterId = url.searchParams.get("saved_filter") ?? undefined;
+    const savedFilter = savedFilterId && options.savedFilters
+      ? await options.savedFilters.get(actor, doctype.name, savedFilterId)
+      : undefined;
+    const effectiveRequestedFilters = options.savedFilters?.mergeSavedFilter(savedFilter, filters) ?? filters;
     const limit = parseOptionalInteger(url.searchParams.get("limit") ?? undefined);
     const offset = parseOptionalInteger(url.searchParams.get("offset") ?? undefined);
     const { listView, filters: effectiveFilters, result } = await options.queries.listDocumentsForView(actor, doctype.name, {
-      filters,
-      useDefaultFilters: url.searchParams.get("default_filters") !== "0",
+      filters: effectiveRequestedFilters,
+      useDefaultFilters: savedFilter ? false : url.searchParams.get("default_filters") !== "0",
       ...(limit !== undefined ? { limit } : {}),
       ...(offset !== undefined ? { offset } : {})
     });
+    const savedFilters = await options.savedFilters?.list(actor, doctype.name);
     return html(
       renderDeskLayout({
         title: doctype.label ?? doctype.name,
         active: doctype.name,
         doctypes,
         reports,
-        body: renderListView(doctype, listView, result.data, effectiveFilters)
+        body: renderListView(doctype, listView, result.data, effectiveFilters, {
+          ...(savedFilters ? { savedFilters } : {}),
+          ...(savedFilter ? { selectedSavedFilterId: savedFilter.id } : {})
+        })
       })
     );
+  });
+
+  app.post("/desk/:doctype/saved-filters", async (c) => {
+    if (!options.savedFilters) {
+      throw new FrameworkError("DOCUMENT_NOT_FOUND", "Saved filters are not enabled", { status: 404 });
+    }
+    const actor = await options.actor(c.req.raw);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    try {
+      const form = await parseDeskSavedFilter(c.req.raw);
+      const saved = await options.savedFilters.save({
+        actor,
+        doctype: doctype.name,
+        label: form.label,
+        filters: form.filters
+      });
+      return c.redirect(`/desk/${encodeURIComponent(doctype.name)}?saved_filter=${encodeURIComponent(saved.id)}`, 303);
+    } catch (error) {
+      return renderDeskFailure(options, c.req.raw, error);
+    }
+  });
+
+  app.post("/desk/:doctype/saved-filters/:filterId/delete", async (c) => {
+    if (!options.savedFilters) {
+      throw new FrameworkError("DOCUMENT_NOT_FOUND", "Saved filters are not enabled", { status: 404 });
+    }
+    const actor = await options.actor(c.req.raw);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    await options.savedFilters.delete({
+      actor,
+      doctype: doctype.name,
+      id: c.req.param("filterId")
+    });
+    return c.redirect(`/desk/${encodeURIComponent(doctype.name)}`, 303);
   });
 
   app.get("/desk/:doctype/new", async (c) => {
@@ -511,6 +557,11 @@ interface ParsedDeskAssignment {
   readonly expectedVersion?: number;
 }
 
+interface ParsedDeskSavedFilter {
+  readonly label: string;
+  readonly filters: readonly ListDocumentsFilter[];
+}
+
 async function parseDeskComment(request: Request): Promise<ParsedDeskComment> {
   const form = await request.formData();
   const text = form.get("comment_text");
@@ -518,6 +569,21 @@ async function parseDeskComment(request: Request): Promise<ParsedDeskComment> {
   return {
     text: typeof text === "string" ? text : "",
     ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
+async function parseDeskSavedFilter(request: Request): Promise<ParsedDeskSavedFilter> {
+  const form = await request.formData();
+  const label = form.get("saved_filter_label");
+  const params = new URLSearchParams();
+  form.forEach((value, key) => {
+    if (typeof value === "string") {
+      params.append(key, value);
+    }
+  });
+  return {
+    label: typeof label === "string" ? label : "",
+    filters: listFiltersFromUrl(new URL(`https://desk.local/?${params.toString()}`))
   };
 }
 

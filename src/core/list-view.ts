@@ -65,6 +65,20 @@ export function normalizeListFilters(
   });
 }
 
+export function mergeListFilters(
+  defaults: readonly ListDocumentsFilter[],
+  overrides: readonly ListDocumentsFilter[]
+): readonly ListDocumentsFilter[] {
+  if (defaults.length === 0) {
+    return overrides;
+  }
+  if (overrides.length === 0) {
+    return defaults;
+  }
+  const overrideFields = new Set(overrides.map((filter) => filter.field));
+  return [...defaults.filter((filter) => !overrideFields.has(filter.field)), ...overrides];
+}
+
 function resolveListColumns(doctype: DocTypeDefinition): readonly FieldDefinition[] {
   if (doctype.listView?.columns) {
     return resolveFields(doctype, doctype.listView.columns, "column");

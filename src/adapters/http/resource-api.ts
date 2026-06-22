@@ -5,9 +5,10 @@ import type { FileService } from "../../application/file-service";
 import type { PrintService } from "../../application/print-service";
 import { QueryService } from "../../application/query-service";
 import type { ReportService } from "../../application/report-service";
+import type { SavedListFilterService } from "../../application/saved-list-filter-service";
 import type { ModelRegistry } from "../../core/registry";
 import { badRequest } from "../../core/errors";
-import type { DocumentData, MutableDocumentData } from "../../core/types";
+import type { DocumentData, JsonPrimitive, ListDocumentsFilter, MutableDocumentData } from "../../core/types";
 import type { ActorResolver } from "./actor";
 import { toErrorResponse } from "./errors";
 import { createFileApi } from "./file-api";
@@ -20,6 +21,7 @@ export interface ResourceApiOptions {
   readonly documents: DocumentCommandExecutor;
   readonly queries: QueryService;
   readonly timeline?: DocumentHistoryService;
+  readonly savedFilters?: SavedListFilterService;
   readonly actor: ActorResolver;
   readonly maxJsonBytes?: number;
   readonly files?: FileService;
@@ -105,9 +107,12 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     const url = new URL(c.req.url);
     const limit = parseOptionalInteger(c.req.query("limit"));
     const offset = parseOptionalInteger(c.req.query("offset"));
+    const savedFilter = await savedFilterFromUrl(options, actor, c.req.param("doctype"), url);
+    const urlFilters = listFiltersFromUrl(url);
+    const filters = options.savedFilters?.mergeSavedFilter(savedFilter, urlFilters) ?? urlFilters;
     const { result } = await options.queries.listDocumentsForView(actor, c.req.param("doctype"), {
-      filters: listFiltersFromUrl(url),
-      useDefaultFilters: url.searchParams.get("default_filters") !== "0",
+      filters,
+      useDefaultFilters: savedFilter ? false : url.searchParams.get("default_filters") !== "0",
       ...(limit !== undefined ? { limit } : {}),
       ...(offset !== undefined ? { offset } : {})
     });
@@ -146,6 +151,40 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       const actor = await resolveActor(c.req.raw);
       const data = await timeline.getAssignments(actor, c.req.param("doctype"), c.req.param("name"));
       return c.json({ data });
+    });
+  }
+
+  if (options.savedFilters) {
+    const savedFilters = options.savedFilters;
+    app.get("/api/resource/:doctype/saved-filters", async (c) => {
+      const actor = await resolveActor(c.req.raw);
+      const data = await savedFilters.list(actor, c.req.param("doctype"));
+      return c.json({ data });
+    });
+
+    app.post("/api/resource/:doctype/saved-filters", async (c) => {
+      const actor = await resolveActor(c.req.raw);
+      const body = await readJson(c.req.raw, { maxJsonBytes });
+      if (isRecord(body) && body.id !== undefined) {
+        throw badRequest("Saved filter id is server-generated");
+      }
+      const data = await savedFilters.save({
+        actor,
+        doctype: c.req.param("doctype"),
+        label: stringValue(body.label) ?? "",
+        filters: filtersValue(body.filters)
+      });
+      return c.json({ data }, 201);
+    });
+
+    app.delete("/api/resource/:doctype/saved-filters/:filterId", async (c) => {
+      const actor = await resolveActor(c.req.raw);
+      await savedFilters.delete({
+        actor,
+        doctype: c.req.param("doctype"),
+        id: c.req.param("filterId")
+      });
+      return c.body(null, 204);
     });
   }
 
@@ -335,6 +374,58 @@ function numberValue(value: unknown): number | undefined {
     throw badRequest("expectedVersion must be an integer");
   }
   return value;
+}
+
+async function savedFilterFromUrl(
+  options: ResourceApiOptions,
+  actor: Awaited<ReturnType<ActorResolver>>,
+  doctype: string,
+  url: URL
+) {
+  const id = url.searchParams.get("saved_filter") ?? undefined;
+  if (!id) {
+    return undefined;
+  }
+  if (!options.savedFilters) {
+    throw badRequest("Saved filters are not enabled");
+  }
+  return options.savedFilters.get(actor, doctype, id);
+}
+
+function filtersValue(value: unknown): readonly ListDocumentsFilter[] {
+  if (!Array.isArray(value)) {
+    throw badRequest("Saved filter filters must be an array");
+  }
+  return value.map((item) => {
+    if (!isRecord(item)) {
+      throw badRequest("Saved filter entries must be objects");
+    }
+    const field = item.field;
+    const operator = item.operator;
+    const filterValue = item.value;
+    if (typeof field !== "string") {
+      throw badRequest("Saved filter field must be a string");
+    }
+    if (operator !== undefined && operator !== "eq" && operator !== "contains" && operator !== "gte" && operator !== "lte") {
+      throw badRequest("Saved filter operator is invalid");
+    }
+    if (!isJsonPrimitive(filterValue)) {
+      throw badRequest("Saved filter value must be scalar");
+    }
+    return {
+      field,
+      ...(operator === undefined || operator === "eq" ? {} : { operator }),
+      value: filterValue
+    };
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isJsonPrimitive(value: unknown): value is JsonPrimitive {
+  return value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean";
 }
 
 function withoutKeys(data: MutableDocumentData, keys: readonly string[]): MutableDocumentData {

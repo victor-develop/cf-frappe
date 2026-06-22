@@ -19,7 +19,7 @@ The current slice is a working kernel:
 - D1 schema migration planner/runner from DocType `indexes`
 - generated Desk list/form UI from DocType metadata
 - metadata-configured form sections, field order, and form column layout
-- metadata-configured list columns, default filters, filter controls, and page size
+- metadata-configured list columns, default filters, saved user filters, filter controls, and page size
 - metadata-defined print formats for documents
 - metadata-defined reports over current projections
 - Cloudflare Queue/Cron background job primitives
@@ -42,7 +42,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | Permissions | role and predicate rules attached to DocTypes |
 | Hooks/controllers | pure hook contracts registered in `ModelRegistry` |
 | REST resources | generated `/api/resource/:doctype` routes |
-| Desk list/forms | generated `/desk` pages, list/form layouts, columns, and filters from DocType metadata |
+| Desk list/forms | generated `/desk` pages, list/form layouts, columns, saved filters, and filters from DocType metadata |
 | Print formats | metadata-defined printable document pages |
 | Reports | metadata-defined report columns, filters, API, and Desk pages |
 | Background jobs | `JobRegistry`, Queue producers/consumers, and Cron dispatch |
@@ -185,17 +185,20 @@ The generated API includes:
 - `GET /api/link-options/:doctype/:field`
 - `POST /api/resource/:doctype`
 - `GET /api/resource/:doctype`
+- `GET /api/resource/:doctype/saved-filters`
 - `GET /api/resource/:doctype/:name`
 - `GET /api/resource/:doctype/:name/timeline`
 - `GET /api/resource/:doctype/:name/assignments`
 - `PUT /api/resource/:doctype/:name`
 - `POST /api/resource/:doctype/:name/comments`
+- `POST /api/resource/:doctype/saved-filters`
 - `POST /api/resource/:doctype/:name/assignments`
 - `POST /api/resource/:doctype/:name/submit`
 - `POST /api/resource/:doctype/:name/cancel`
 - `POST /api/resource/:doctype/:name/transition/:action`
 - `POST /api/resource/:doctype/:name/command/:command`
 - `DELETE /api/resource/:doctype/:name/assignments/:assignee`
+- `DELETE /api/resource/:doctype/saved-filters/:filterId`
 - `DELETE /api/resource/:doctype/:name`
 
 When file support is enabled, the generated API also includes:
@@ -363,7 +366,13 @@ const result = await services.reports.runReport(actor, "Open Tasks", {
 });
 ```
 
-HTTP clients can call `/api/report/Open%20Tasks/run?filter_priority=High`. Desk renders the same report at `/desk/reports/Open%20Tasks`. This first report slice is projection-backed and read-only; grouped summaries, charts, saved filters, exports, and custom query adapters are future report layers over the same service boundary.
+HTTP clients can call `/api/report/Open%20Tasks/run?filter_priority=High`. Desk renders the same report at `/desk/reports/Open%20Tasks`. This first report slice is projection-backed and read-only; grouped summaries, charts, exports, and custom query adapters are future report layers over the same service boundary.
+
+## Saved List Filters
+
+`SavedListFilterService` stores per-user list filters as append-only events in a tenant/DocType/owner stream, validates every saved filter against the DocType list-filter metadata, and folds the stream into the current saved-filter list. The generated resource API exposes `GET`, `POST`, and `DELETE` routes under `/api/resource/:doctype/saved-filters`, and `/api/resource/:doctype?saved_filter=<id>` applies a saved filter through the normal `QueryService.listDocumentsForView(...)` path.
+
+Desk list pages render saved filter links, a save-filter control attached to the generated filter form, and delete controls for the current actor's saved filters. URL filters still override saved filters field-by-field, so a saved filter can be refined without creating a second query pipeline.
 
 ## Print Formats
 
@@ -593,11 +602,11 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 222 tests across schema, permissions, events, registry, services, naming series, document lifecycle, document timelines, comments, and assignments, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, reports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
+Current suite: 228 tests across schema, permissions, events, registry, services, naming series, document lifecycle, document timelines, comments, assignments, saved user filters, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, reports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
 
 ## Status
 
-This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, permissioned document timelines, comments, and assignments, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, and Durable Object realtime topics exist, but saved filters, custom print templates, grouped report summaries, charts, durable job dashboards, richer realtime presence, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
+This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, permissioned document timelines, comments, assignments, saved user filters, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, and Durable Object realtime topics exist, but custom print templates, grouped report summaries, charts, durable job dashboards, richer realtime presence, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
 
 ## References
 

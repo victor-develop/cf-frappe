@@ -33,7 +33,7 @@ That model is powerful, but it is not event-sourcing first. cf-frappe keeps the 
 | Document lifecycle | docstatus draft/submitted/cancelled | first-class submit/cancel events with command-side status guards |
 | Lifecycle behavior | hooks/controllers | registry hooks: `beforeValidate`, `validate`, `afterCommit` |
 | REST resources | `/api/resource/:doctype` | generated Hono routes with metadata-configured list views and filters |
-| Desk views | list/form views from metadata | generated server-rendered `/desk` list/forms with model-defined form sections, columns, list columns, filters, and page size |
+| Desk views | list/form views from metadata | generated server-rendered `/desk` list/forms with model-defined form sections, columns, list columns, saved filters, filters, and page size |
 | Print formats | printable document views | metadata-defined printable document pages |
 | Reports | Report DocType/query reports | metadata-defined report columns, filters, API, and Desk pages |
 | Audit trail | document versioning/activity | permissioned timelines, comments, and assignments projected from append-only events plus model-declared domain commands |
@@ -47,7 +47,7 @@ That model is powerful, but it is not event-sourcing first. cf-frappe keeps the 
 
 ## Current Gaps
 
-- Generated Desk UI now covers basic list/form/report/print pages, model-defined form sections and field order, list columns, default list filters, filter controls, link-field select controls, child table row grids, submit/cancel lifecycle actions, document timelines/comments/assignments, and page size. Saved user filters, advanced filter builders, report builder, custom print templates, letterheads, richer admin tools, grouped summaries, charts, and client scripting are not implemented.
+- Generated Desk UI now covers basic list/form/report/print pages, model-defined form sections and field order, list columns, default list filters, saved user filters, filter controls, link-field select controls, child table row grids, submit/cancel lifecycle actions, document timelines/comments/assignments, and page size. Advanced filter builders, report builder, custom print templates, letterheads, richer admin tools, grouped summaries, charts, and client scripting are not implemented.
 - DocType metadata now plans and applies D1 projection-index migrations with a checksum journal, but destructive/renaming migrations, data backfills, and an installable CLI are still future work.
 - Background jobs now have basic Queue/Cron support, but durable dashboards, job result storage, worker pools, retry administration, and scheduler admin views are not implemented.
 - Document history now exposes permissioned timeline, comment, and assignment events from the event stream, but deleted-document audit recovery, diff rendering, email/activity feed entries, and admin-only audit search are not implemented.

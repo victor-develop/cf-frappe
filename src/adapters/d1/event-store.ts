@@ -2,6 +2,7 @@ import { conflict } from "../../core/errors";
 import type { DomainEvent, NewDomainEvent, StreamName } from "../../core/types";
 import type { EventStore } from "../../ports/event-store";
 import type { ReadStreamOptions } from "../../ports/document-store";
+import { isD1ConstraintError } from "./constraint-error";
 import { eventStreamQuery } from "./read-stream-query";
 import { eventFromRow, type EventRow } from "./serde";
 
@@ -22,29 +23,36 @@ export class D1EventStore implements EventStore {
       ...event,
       sequence: expectedVersion + index + 1
     }));
-    await this.db.batch(
-      saved.map((event) =>
-        this.db
-          .prepare(
-            `INSERT INTO cf_frappe_events
-             (id, tenant_id, stream, sequence, type, doctype, document_name, actor_id, occurred_at, payload_json, metadata_json)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-          )
-          .bind(
-            event.id,
-            event.tenantId,
-            event.stream,
-            event.sequence,
-            event.type,
-            event.doctype,
-            event.documentName,
-            event.actorId,
-            event.occurredAt,
-            JSON.stringify(event.payload),
-            JSON.stringify(event.metadata)
-          )
-      )
-    );
+    try {
+      await this.db.batch(
+        saved.map((event) =>
+          this.db
+            .prepare(
+              `INSERT INTO cf_frappe_events
+               (id, tenant_id, stream, sequence, type, doctype, document_name, actor_id, occurred_at, payload_json, metadata_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            )
+            .bind(
+              event.id,
+              event.tenantId,
+              event.stream,
+              event.sequence,
+              event.type,
+              event.doctype,
+              event.documentName,
+              event.actorId,
+              event.occurredAt,
+              JSON.stringify(event.payload),
+              JSON.stringify(event.metadata)
+            )
+        )
+      );
+    } catch (error) {
+      if (isD1ConstraintError(error)) {
+        throw conflict(`Stream '${stream}' changed while appending`);
+      }
+      throw error;
+    }
     return saved;
   }
 

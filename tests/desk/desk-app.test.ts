@@ -21,6 +21,7 @@ describe("Desk app", () => {
       queries: services.queries,
       reports: services.reports,
       timeline: services.history,
+      savedFilters: services.savedFilters,
       actor: () => owner
     });
     return { app, services };
@@ -140,6 +141,45 @@ describe("Desk app", () => {
     expect(closedHtml).toContain("Desk Closed High");
     expect(closedHtml).not.toContain("Desk High");
     expect(closedHtml).toContain('<option value="Closed" selected>Closed</option>');
+  });
+
+  it("saves, applies, and deletes Desk list filters", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Desk Saved High", priority: "High", body: "High" })
+    });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Desk Saved Low", priority: "Low", body: "Low" })
+    });
+
+    const saved = await app.request("/desk/Note/saved-filters", {
+      method: "POST",
+      body: new URLSearchParams({ saved_filter_label: "High notes", filter_priority: "High" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(saved.status).toBe(303);
+    const location = saved.headers.get("location") ?? "";
+    expect(location).toContain("/desk/Note?saved_filter=");
+
+    const list = await app.request(location);
+    expect(list.status).toBe(200);
+    const html = await list.text();
+    expect(html).toContain("High notes");
+    expect(html).toContain("Desk Saved High");
+    expect(html).not.toContain("Desk Saved Low");
+    expect(html).toContain("/desk/Note/saved-filters/");
+    expect(html).toContain("/delete");
+
+    const id = new URL(`http://localhost${location}`).searchParams.get("saved_filter");
+    const deleted = await app.request(`/desk/Note/saved-filters/${id}/delete`, { method: "POST" });
+
+    expect(deleted.status).toBe(303);
+    await expect(services.savedFilters.list(owner, "Note")).resolves.toEqual([]);
   });
 
   it("renders expectedVersion in edit forms", async () => {
