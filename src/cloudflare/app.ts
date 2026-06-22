@@ -28,6 +28,7 @@ import { FrameworkError } from "../core/errors";
 import type { JobRegistry, JobRetryPolicy } from "../core/jobs";
 import { canSubscribeToRealtimeTopic, parseRealtimeTopic, realtimeTopicFromScope } from "../core/realtime";
 import type { ModelRegistry } from "../core/registry";
+import type { AccountRecoveryNotifier } from "../ports/account-recovery";
 import { systemClock, type Clock } from "../ports/clock";
 import type { FileStorage } from "../ports/file-storage";
 import type { IdGenerator } from "../ports/id-generator";
@@ -93,6 +94,11 @@ export interface CloudFrappeAuthOptions<TEnv extends CloudFrappeEnv = CloudFrapp
   readonly sameSite?: "Lax" | "Strict" | "None";
   readonly secure?: boolean;
   readonly passwords?: PasswordHasher;
+  readonly tokenSecrets?: PasswordHasher;
+  readonly recovery?: AccountRecoveryNotifier;
+  readonly recoveryTokens?: IdGenerator;
+  readonly passwordResetExpiresInSeconds?: number;
+  readonly emailVerificationExpiresInSeconds?: number;
   readonly clock?: Clock;
   readonly ids?: IdGenerator;
   readonly adminRoles?: readonly string[];
@@ -225,6 +231,15 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     ? new UserAccountService({
         events,
         passwords: options.auth.passwords ?? webCryptoPbkdf2PasswordHasher(),
+        ...(options.auth.tokenSecrets === undefined ? {} : { tokenSecrets: options.auth.tokenSecrets }),
+        ...(options.auth.recovery === undefined ? {} : { recovery: options.auth.recovery }),
+        ...(options.auth.recoveryTokens === undefined ? {} : { recoveryTokens: options.auth.recoveryTokens }),
+        ...(options.auth.passwordResetExpiresInSeconds === undefined
+          ? {}
+          : { passwordResetExpiresInSeconds: options.auth.passwordResetExpiresInSeconds }),
+        ...(options.auth.emailVerificationExpiresInSeconds === undefined
+          ? {}
+          : { emailVerificationExpiresInSeconds: options.auth.emailVerificationExpiresInSeconds }),
         ...(options.auth.clock === undefined ? {} : { clock: options.auth.clock }),
         ...(options.auth.ids === undefined ? {} : { ids: options.auth.ids }),
         ...(options.auth.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles }),

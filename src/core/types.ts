@@ -255,6 +255,38 @@ export type DocumentEventPayload =
       readonly passwordHash: string;
     }
   | {
+      readonly kind: "UserPasswordResetRequested";
+      readonly userId: string;
+      readonly tokenHash: string;
+      readonly expiresAt: string;
+    }
+  | {
+      readonly kind: "UserPasswordResetCompleted";
+      readonly userId: string;
+      readonly passwordHash: string;
+    }
+  | {
+      readonly kind: "UserPasswordResetDeliveryFailed";
+      readonly userId: string;
+    }
+  | {
+      readonly kind: "UserEmailVerificationRequested";
+      readonly userId: string;
+      readonly email: string;
+      readonly tokenHash: string;
+      readonly expiresAt: string;
+    }
+  | {
+      readonly kind: "UserEmailVerified";
+      readonly userId: string;
+      readonly email: string;
+    }
+  | {
+      readonly kind: "UserEmailVerificationDeliveryFailed";
+      readonly userId: string;
+      readonly email: string;
+    }
+  | {
       readonly kind: "UserRolesChanged";
       readonly userId: string;
       readonly roles: readonly string[];

@@ -9,7 +9,7 @@ import {
   signedSessionActorResolver,
   type SignedSessionOptions
 } from "./signed-session";
-import { readJsonObject } from "./request";
+import { readJsonObject, requestMetadata } from "./request";
 
 export interface AuthSessionOptions {
   readonly secret: string;
@@ -62,6 +62,53 @@ export function createAuthApi(options: AuthApiOptions): Hono {
   app.post("/api/auth/logout", (c) => {
     c.header("Set-Cookie", clearSessionCookie(options.session));
     return c.body(null, 204);
+  });
+
+  app.post("/api/auth/password-reset/request", async (c) => {
+    const body = await readJsonObject(c.req.raw, { maxJsonBytes });
+    const tenantId = optionalString(body.tenantId, "tenantId");
+    await options.userAccounts.requestPasswordReset({
+      userId: requiredString(body.userId, "userId"),
+      ...(tenantId === undefined ? {} : { tenantId }),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: { accepted: true } }, 202);
+  });
+
+  app.post("/api/auth/password-reset/complete", async (c) => {
+    const body = await readJsonObject(c.req.raw, { maxJsonBytes });
+    const tenantId = optionalString(body.tenantId, "tenantId");
+    const data = await options.userAccounts.resetPassword({
+      userId: requiredString(body.userId, "userId"),
+      token: requiredString(body.token, "token"),
+      password: requiredString(body.password, "password"),
+      ...(tenantId === undefined ? {} : { tenantId }),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data });
+  });
+
+  app.post("/api/auth/email-verification/request", async (c) => {
+    const body = await readJsonObject(c.req.raw, { maxJsonBytes });
+    const tenantId = optionalString(body.tenantId, "tenantId");
+    await options.userAccounts.requestEmailVerification({
+      userId: requiredString(body.userId, "userId"),
+      ...(tenantId === undefined ? {} : { tenantId }),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: { accepted: true } }, 202);
+  });
+
+  app.post("/api/auth/email-verification/complete", async (c) => {
+    const body = await readJsonObject(c.req.raw, { maxJsonBytes });
+    const tenantId = optionalString(body.tenantId, "tenantId");
+    const data = await options.userAccounts.verifyEmail({
+      userId: requiredString(body.userId, "userId"),
+      token: requiredString(body.token, "token"),
+      ...(tenantId === undefined ? {} : { tenantId }),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data });
   });
 
   app.get("/api/auth/me", async (c) => {

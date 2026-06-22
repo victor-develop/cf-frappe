@@ -1,5 +1,6 @@
 import {
   AuditService,
+  createInMemoryAccountRecoveryNotifier,
   RoleService,
   SYSTEM_MANAGER_ROLE,
   UserAccountService,
@@ -203,17 +204,27 @@ describe("AuditService", () => {
     });
   });
 
-  it("redacts account password hashes from audit search results", async () => {
+  it("redacts account password and recovery hashes from audit search results", async () => {
     const { audit, events } = createServices(["create-1"]);
+    const recovery = createInMemoryAccountRecoveryNotifier();
     const userAccounts = new UserAccountService({
       events,
       passwords: deterministicPasswords(),
-      ids: deterministicIds(["account-1", "password-1"]),
+      recovery,
+      ids: deterministicIds([
+        "account-1",
+        "password-1",
+        "reset-request-1",
+        "reset-complete-1",
+        "verify-request-1"
+      ]),
+      recoveryTokens: deterministicIds(["reset-token-1", "verify-token-1"]),
       clock: fixedClock("2026-01-02T00:00:00.000Z")
     });
     await userAccounts.create({
       actor: admin,
       userId: "owner@example.com",
+      email: "owner@example.com",
       password: "secret-123",
       roles: ["User"]
     });
@@ -223,6 +234,14 @@ describe("AuditService", () => {
       password: "secret-456",
       expectedVersion: 1
     });
+    await userAccounts.requestPasswordReset({ tenantId: "acme", userId: "owner@example.com" });
+    await userAccounts.resetPassword({
+      tenantId: "acme",
+      userId: "owner@example.com",
+      token: "tok_reset-token-1",
+      password: "secret-789"
+    });
+    await userAccounts.requestEmailVerification({ tenantId: "acme", userId: "owner@example.com" });
 
     const created = await audit.search(admin, {
       doctype: "__UserAccounts",
@@ -234,12 +253,36 @@ describe("AuditService", () => {
       name: "owner@example.com",
       kind: "UserPasswordChanged"
     });
+    const resetRequested = await audit.search(admin, {
+      doctype: "__UserAccounts",
+      name: "owner@example.com",
+      kind: "UserPasswordResetRequested"
+    });
+    const resetCompleted = await audit.search(admin, {
+      doctype: "__UserAccounts",
+      name: "owner@example.com",
+      kind: "UserPasswordResetCompleted"
+    });
+    const emailRequested = await audit.search(admin, {
+      doctype: "__UserAccounts",
+      name: "owner@example.com",
+      kind: "UserEmailVerificationRequested"
+    });
 
     expect(created.events[0]).toMatchObject({
       payload: { kind: "UserAccountCreated", passwordHash: "[redacted]" }
     });
     expect(changed.events[0]).toMatchObject({
       payload: { kind: "UserPasswordChanged", passwordHash: "[redacted]" }
+    });
+    expect(resetRequested.events[0]).toMatchObject({
+      payload: { kind: "UserPasswordResetRequested", tokenHash: "[redacted]" }
+    });
+    expect(resetCompleted.events[0]).toMatchObject({
+      payload: { kind: "UserPasswordResetCompleted", passwordHash: "[redacted]" }
+    });
+    expect(emailRequested.events[0]).toMatchObject({
+      payload: { kind: "UserEmailVerificationRequested", tokenHash: "[redacted]" }
     });
   });
 

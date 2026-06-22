@@ -1,4 +1,4 @@
-import { badRequest, conflict, notFound, permissionDenied } from "../core/errors";
+import { badRequest, conflict, FrameworkError, notFound, permissionDenied } from "../core/errors";
 import { userAccountsStream } from "../core/streams";
 import {
   DEFAULT_TENANT_ID,
@@ -15,8 +15,11 @@ import {
   publicUserAccount,
   userAccountActor,
   type UserAccount,
+  type UserAccountEmailVerificationChallenge,
+  type UserAccountRecoveryChallenge,
   type UserAccountState
 } from "../core/user-accounts";
+import type { AccountRecoveryNotifier } from "../ports/account-recovery";
 import { systemClock, type Clock } from "../ports/clock";
 import type { EventStore } from "../ports/event-store";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator";
@@ -24,11 +27,20 @@ import type { PasswordHasher } from "../ports/password-hasher";
 import type { UserRoleValidator } from "./user-role-validator";
 
 const MIN_PASSWORD_LENGTH = 8;
+const DEFAULT_PASSWORD_RESET_EXPIRY_SECONDS = 3_600;
+const DEFAULT_EMAIL_VERIFICATION_EXPIRY_SECONDS = 86_400;
+const MAX_ACCOUNT_RECOVERY_EXPIRY_SECONDS = 604_800;
+const RECOVERY_ACTOR_ID = "anonymous";
 
 export interface UserAccountServiceOptions {
   readonly events: EventStore;
   readonly passwords: PasswordHasher;
+  readonly tokenSecrets?: PasswordHasher;
+  readonly recovery?: AccountRecoveryNotifier;
   readonly ids?: IdGenerator;
+  readonly recoveryTokens?: IdGenerator;
+  readonly passwordResetExpiresInSeconds?: number;
+  readonly emailVerificationExpiresInSeconds?: number;
   readonly clock?: Clock;
   readonly adminRoles?: readonly string[];
   readonly roleValidator?: UserRoleValidator;
@@ -78,6 +90,39 @@ export interface AuthenticateUserAccountCommand {
   readonly tenantId?: TenantId;
 }
 
+export interface RequestUserPasswordResetCommand {
+  readonly userId: string;
+  readonly tenantId?: TenantId;
+  readonly metadata?: DocumentData;
+}
+
+export interface ResetUserPasswordCommand {
+  readonly userId: string;
+  readonly token: string;
+  readonly password: string;
+  readonly tenantId?: TenantId;
+  readonly metadata?: DocumentData;
+}
+
+export interface RequestUserEmailVerificationCommand {
+  readonly userId: string;
+  readonly tenantId?: TenantId;
+  readonly metadata?: DocumentData;
+}
+
+export interface VerifyUserEmailCommand {
+  readonly userId: string;
+  readonly token: string;
+  readonly tenantId?: TenantId;
+  readonly metadata?: DocumentData;
+}
+
+export interface AccountRecoveryRequestResult {
+  readonly tenantId: TenantId;
+  readonly userId: string;
+  readonly delivered: boolean;
+}
+
 export interface AuthenticatedUserAccount {
   readonly actor: Actor;
   readonly account: UserAccount;
@@ -86,7 +131,12 @@ export interface AuthenticatedUserAccount {
 export class UserAccountService {
   private readonly events: EventStore;
   private readonly passwords: PasswordHasher;
+  private readonly tokenSecrets: PasswordHasher;
+  private readonly recovery: AccountRecoveryNotifier | undefined;
   private readonly ids: IdGenerator;
+  private readonly recoveryTokens: IdGenerator;
+  private readonly passwordResetExpiresInSeconds: number;
+  private readonly emailVerificationExpiresInSeconds: number;
   private readonly clock: Clock;
   private readonly adminRoles: readonly string[];
   private readonly roleValidator: UserRoleValidator | undefined;
@@ -94,7 +144,18 @@ export class UserAccountService {
   constructor(options: UserAccountServiceOptions) {
     this.events = options.events;
     this.passwords = options.passwords;
+    this.tokenSecrets = options.tokenSecrets ?? options.passwords;
+    this.recovery = options.recovery;
     this.ids = options.ids ?? cryptoIdGenerator;
+    this.recoveryTokens = options.recoveryTokens ?? cryptoIdGenerator;
+    this.passwordResetExpiresInSeconds = normalizeRecoveryExpirySeconds(
+      options.passwordResetExpiresInSeconds,
+      DEFAULT_PASSWORD_RESET_EXPIRY_SECONDS
+    );
+    this.emailVerificationExpiresInSeconds = normalizeRecoveryExpirySeconds(
+      options.emailVerificationExpiresInSeconds,
+      DEFAULT_EMAIL_VERIFICATION_EXPIRY_SECONDS
+    );
     this.clock = options.clock ?? systemClock;
     this.adminRoles = options.adminRoles ?? [SYSTEM_MANAGER_ROLE];
     this.roleValidator = options.roleValidator;
@@ -229,6 +290,168 @@ export class UserAccountService {
     return { actor: userAccountActor(state), account: publicUserAccount(state) };
   }
 
+  async requestPasswordReset(command: RequestUserPasswordResetCommand): Promise<AccountRecoveryRequestResult> {
+    const tenantId = command.tenantId ?? DEFAULT_TENANT_ID;
+    const userId = normalizeRequired(command.userId, "User id");
+    const state = await this.stateFor(tenantId, userId);
+    const recovery = this.recovery;
+    const email = state.email;
+    if (!state.exists || !state.enabled || email === undefined || recovery === undefined) {
+      return { tenantId, userId, delivered: false };
+    }
+    const token = this.recoveryTokens.next("tok_");
+    const expiresAt = expiresAtFrom(this.clock.now(), this.passwordResetExpiresInSeconds);
+    const tokenHash = await this.tokenSecrets.hash(token);
+    let saved: readonly DomainEvent[];
+    try {
+      saved = await this.appendEvent({
+        tenantId,
+        stream: userAccountsStream(tenantId, userId),
+        expectedVersion: state.version,
+        type: "UserPasswordResetRequested",
+        documentName: userId,
+        actorId: RECOVERY_ACTOR_ID,
+        metadata: command.metadata,
+        payload: {
+          kind: "UserPasswordResetRequested",
+          userId,
+          tokenHash,
+          expiresAt
+        }
+      });
+    } catch (error) {
+      if (isConflict(error)) {
+        return { tenantId, userId, delivered: false };
+      }
+      throw error;
+    }
+    try {
+      await recovery.sendPasswordReset({ tenantId, userId, email, token, expiresAt });
+    } catch {
+      await this.markRecoveryDeliveryFailed({
+        tenantId,
+        userId,
+        expectedVersion: lastSequence(saved, state.version),
+        type: "UserPasswordResetDeliveryFailed",
+        metadata: command.metadata,
+        payload: {
+          kind: "UserPasswordResetDeliveryFailed",
+          userId
+        }
+      });
+      return { tenantId, userId, delivered: false };
+    }
+    return { tenantId, userId, delivered: true };
+  }
+
+  async resetPassword(command: ResetUserPasswordCommand): Promise<UserAccount> {
+    const tenantId = command.tenantId ?? DEFAULT_TENANT_ID;
+    const userId = normalizeRequired(command.userId, "User id");
+    const token = normalizeRecoveryToken(command.token);
+    const password = normalizePassword(command.password);
+    const state = await this.stateFor(tenantId, userId);
+    await this.ensureValidRecoveryChallenge(state, state.passwordReset, token);
+    const passwordHash = await this.passwords.hash(password);
+    const saved = await this.appendEvent({
+      tenantId,
+      stream: userAccountsStream(tenantId, userId),
+      expectedVersion: state.version,
+      type: "UserPasswordResetCompleted",
+      documentName: userId,
+      actorId: RECOVERY_ACTOR_ID,
+      metadata: command.metadata,
+      payload: {
+        kind: "UserPasswordResetCompleted",
+        userId,
+        passwordHash
+      }
+    });
+    return this.refold(tenantId, userId, state.version, saved);
+  }
+
+  async requestEmailVerification(command: RequestUserEmailVerificationCommand): Promise<AccountRecoveryRequestResult> {
+    const tenantId = command.tenantId ?? DEFAULT_TENANT_ID;
+    const userId = normalizeRequired(command.userId, "User id");
+    const state = await this.stateFor(tenantId, userId);
+    const recovery = this.recovery;
+    const email = state.email;
+    if (!state.exists || !state.enabled || email === undefined || state.emailVerifiedAt !== undefined || recovery === undefined) {
+      return { tenantId, userId, delivered: false };
+    }
+    const token = this.recoveryTokens.next("tok_");
+    const expiresAt = expiresAtFrom(this.clock.now(), this.emailVerificationExpiresInSeconds);
+    const tokenHash = await this.tokenSecrets.hash(token);
+    let saved: readonly DomainEvent[];
+    try {
+      saved = await this.appendEvent({
+        tenantId,
+        stream: userAccountsStream(tenantId, userId),
+        expectedVersion: state.version,
+        type: "UserEmailVerificationRequested",
+        documentName: userId,
+        actorId: RECOVERY_ACTOR_ID,
+        metadata: command.metadata,
+        payload: {
+          kind: "UserEmailVerificationRequested",
+          userId,
+          email,
+          tokenHash,
+          expiresAt
+        }
+      });
+    } catch (error) {
+      if (isConflict(error)) {
+        return { tenantId, userId, delivered: false };
+      }
+      throw error;
+    }
+    try {
+      await recovery.sendEmailVerification({ tenantId, userId, email, token, expiresAt });
+    } catch {
+      await this.markRecoveryDeliveryFailed({
+        tenantId,
+        userId,
+        expectedVersion: lastSequence(saved, state.version),
+        type: "UserEmailVerificationDeliveryFailed",
+        metadata: command.metadata,
+        payload: {
+          kind: "UserEmailVerificationDeliveryFailed",
+          userId,
+          email
+        }
+      });
+      return { tenantId, userId, delivered: false };
+    }
+    return { tenantId, userId, delivered: true };
+  }
+
+  async verifyEmail(command: VerifyUserEmailCommand): Promise<UserAccount> {
+    const tenantId = command.tenantId ?? DEFAULT_TENANT_ID;
+    const userId = normalizeRequired(command.userId, "User id");
+    const token = normalizeRecoveryToken(command.token);
+    const state = await this.stateFor(tenantId, userId);
+    const challenge = state.emailVerification;
+    await this.ensureValidRecoveryChallenge(state, challenge, token);
+    if (challenge === undefined) {
+      throw invalidRecoveryToken();
+    }
+    const saved = await this.appendEvent({
+      tenantId,
+      stream: userAccountsStream(tenantId, userId),
+      expectedVersion: state.version,
+      type: "UserEmailVerified",
+      documentName: userId,
+      actorId: RECOVERY_ACTOR_ID,
+      metadata: command.metadata,
+      payload: {
+        kind: "UserEmailVerified",
+        userId,
+        email: challenge.email
+      }
+    });
+    return this.refold(tenantId, userId, state.version, saved);
+  }
+
   async resolveSessionActor(actor: Actor, accountVersion: number | undefined): Promise<Actor> {
     if (accountVersion === undefined) {
       throw permissionDenied("Session is no longer valid");
@@ -306,6 +529,33 @@ export class UserAccountService {
     return this.events.append(options.stream, options.expectedVersion, [event]);
   }
 
+  private async markRecoveryDeliveryFailed<TPayload extends NewDomainEvent["payload"]>(options: {
+    readonly tenantId: TenantId;
+    readonly userId: string;
+    readonly expectedVersion: number;
+    readonly type: string;
+    readonly metadata: DocumentData | undefined;
+    readonly payload: TPayload;
+  }): Promise<void> {
+    try {
+      await this.appendEvent({
+        tenantId: options.tenantId,
+        stream: userAccountsStream(options.tenantId, options.userId),
+        expectedVersion: options.expectedVersion,
+        type: options.type,
+        documentName: options.userId,
+        actorId: RECOVERY_ACTOR_ID,
+        metadata: options.metadata,
+        payload: options.payload
+      });
+    } catch (error) {
+      if (isConflict(error)) {
+        return;
+      }
+      throw error;
+    }
+  }
+
   private async existingStateFor(tenantId: TenantId, userId: string): Promise<UserAccountState> {
     const state = await this.stateFor(tenantId, userId);
     if (!state.exists) {
@@ -326,6 +576,19 @@ export class UserAccountService {
 
   private async validateRoles(tenantId: TenantId, roles: readonly string[]): Promise<void> {
     await this.roleValidator?.validateRoles({ tenantId, roles });
+  }
+
+  private async ensureValidRecoveryChallenge(
+    state: UserAccountState,
+    challenge: UserAccountRecoveryChallenge | UserAccountEmailVerificationChallenge | undefined,
+    token: string
+  ): Promise<void> {
+    if (!state.exists || !state.enabled || challenge === undefined || isExpired(challenge.expiresAt, this.clock.now())) {
+      throw invalidRecoveryToken();
+    }
+    if (!(await this.tokenSecrets.verify(token, challenge.tokenHash))) {
+      throw invalidRecoveryToken();
+    }
   }
 }
 
@@ -374,6 +637,46 @@ function normalizeLoginPassword(password: string): string {
     throw permissionDenied("Invalid credentials");
   }
   return password;
+}
+
+function normalizeRecoveryToken(token: string): string {
+  const normalized = token.trim();
+  if (normalized.length === 0) {
+    throw invalidRecoveryToken();
+  }
+  return normalized;
+}
+
+function normalizeRecoveryExpirySeconds(value: number | undefined, defaultSeconds: number): number {
+  const seconds = value ?? defaultSeconds;
+  if (!Number.isInteger(seconds) || seconds < 1 || seconds > MAX_ACCOUNT_RECOVERY_EXPIRY_SECONDS) {
+    throw badRequest(`Recovery token expiry must be between 1 and ${MAX_ACCOUNT_RECOVERY_EXPIRY_SECONDS} seconds`);
+  }
+  return seconds;
+}
+
+function expiresAtFrom(now: string, seconds: number): string {
+  const nowMillis = Date.parse(now);
+  if (!Number.isFinite(nowMillis)) {
+    throw new Error(`Clock returned invalid timestamp '${now}'`);
+  }
+  return new Date(nowMillis + seconds * 1_000).toISOString();
+}
+
+function isExpired(expiresAt: string, now: string): boolean {
+  return Date.parse(expiresAt) <= Date.parse(now);
+}
+
+function invalidRecoveryToken(): Error {
+  return permissionDenied("Invalid recovery token");
+}
+
+function isConflict(error: unknown): boolean {
+  return error instanceof FrameworkError && error.code === "DOCUMENT_CONFLICT";
+}
+
+function lastSequence(events: readonly DomainEvent[], fallback: number): number {
+  return events.at(-1)?.sequence ?? fallback;
 }
 
 function ensureExpectedVersion(state: UserAccountState, expectedVersion: number | undefined): void {

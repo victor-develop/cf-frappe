@@ -1,4 +1,5 @@
 import {
+  createInMemoryAccountRecoveryNotifier,
   InMemoryEventStore,
   RoleCatalogUserRoleValidator,
   RoleService,
@@ -337,6 +338,247 @@ describe("UserAccountService", () => {
       userAccounts.authenticate({ tenantId: "acme", userId: "owner@example.com", password: "secret-123" })
     ).rejects.toMatchObject({ code: "PERMISSION_DENIED", message: "Invalid credentials" });
     await expect(userAccounts.get(admin, "missing@example.com")).rejects.toMatchObject({ code: "DOCUMENT_NOT_FOUND" });
+  });
+
+  it("requests and consumes password reset tokens through account stream events", async () => {
+    const events = new InMemoryEventStore();
+    const notifier = createInMemoryAccountRecoveryNotifier();
+    const userAccounts = new UserAccountService({
+      events,
+      passwords: deterministicPasswords(),
+      recovery: notifier,
+      ids: deterministicIds(["create-1", "reset-request-1", "reset-complete-1"]),
+      recoveryTokens: deterministicIds(["reset-token"]),
+      passwordResetExpiresInSeconds: 900,
+      clock: fixedClock("2026-01-02T00:00:00.000Z")
+    });
+    await userAccounts.create({
+      actor: admin,
+      userId: "owner@example.com",
+      email: "owner@example.com",
+      password: "secret-123",
+      roles: ["User"]
+    });
+
+    const requested = await userAccounts.requestPasswordReset({
+      tenantId: "acme",
+      userId: "owner@example.com"
+    });
+
+    expect(requested).toEqual({
+      tenantId: "acme",
+      userId: "owner@example.com",
+      delivered: true
+    });
+    expect(notifier.passwordResetMessages).toEqual([
+      {
+        tenantId: "acme",
+        userId: "owner@example.com",
+        email: "owner@example.com",
+        token: "tok_reset-token",
+        expiresAt: "2026-01-02T00:15:00.000Z"
+      }
+    ]);
+    await expect(events.readStream(userAccountsStream("acme", "owner@example.com"))).resolves.toMatchObject([
+      { payload: { kind: "UserAccountCreated" } },
+      {
+        payload: {
+          kind: "UserPasswordResetRequested",
+          userId: "owner@example.com",
+          tokenHash: "hash:tok_reset-token",
+          expiresAt: "2026-01-02T00:15:00.000Z"
+        }
+      }
+    ]);
+
+    const reset = await userAccounts.resetPassword({
+      tenantId: "acme",
+      userId: "owner@example.com",
+      token: "tok_reset-token",
+      password: "secret-456"
+    });
+
+    expect(reset).toMatchObject({ version: 3 });
+    await expect(
+      userAccounts.authenticate({ tenantId: "acme", userId: "owner@example.com", password: "secret-456" })
+    ).resolves.toMatchObject({ id: "owner@example.com" });
+    await expect(
+      userAccounts.resetPassword({
+        tenantId: "acme",
+        userId: "owner@example.com",
+        token: "tok_reset-token",
+        password: "secret-789"
+      })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+  });
+
+  it("requests and consumes email verification tokens through account stream events", async () => {
+    const events = new InMemoryEventStore();
+    const notifier = createInMemoryAccountRecoveryNotifier();
+    const userAccounts = new UserAccountService({
+      events,
+      passwords: deterministicPasswords(),
+      recovery: notifier,
+      ids: deterministicIds(["create-1", "verify-request-1", "verify-complete-1"]),
+      recoveryTokens: deterministicIds(["verify-token"]),
+      emailVerificationExpiresInSeconds: 600,
+      clock: fixedClock("2026-01-02T00:00:00.000Z")
+    });
+    await userAccounts.create({
+      actor: admin,
+      userId: "owner@example.com",
+      email: "Owner@Example.COM",
+      password: "secret-123",
+      roles: ["User"]
+    });
+
+    const requested = await userAccounts.requestEmailVerification({
+      tenantId: "acme",
+      userId: "owner@example.com"
+    });
+    const verified = await userAccounts.verifyEmail({
+      tenantId: "acme",
+      userId: "owner@example.com",
+      token: "tok_verify-token"
+    });
+
+    expect(requested.delivered).toBe(true);
+    expect(notifier.emailVerificationMessages).toEqual([
+      {
+        tenantId: "acme",
+        userId: "owner@example.com",
+        email: "owner@example.com",
+        token: "tok_verify-token",
+        expiresAt: "2026-01-02T00:10:00.000Z"
+      }
+    ]);
+    expect(verified).toMatchObject({
+      email: "owner@example.com",
+      emailVerifiedAt: "2026-01-02T00:00:00.000Z",
+      version: 3
+    });
+    await expect(
+      userAccounts.verifyEmail({
+        tenantId: "acme",
+        userId: "owner@example.com",
+        token: "tok_verify-token"
+      })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+  });
+
+  it("keeps recovery requests generic for missing, disabled, or undeliverable accounts", async () => {
+    const events = new InMemoryEventStore();
+    const notifier = createInMemoryAccountRecoveryNotifier();
+    const userAccounts = new UserAccountService({
+      events,
+      passwords: deterministicPasswords(),
+      recovery: notifier,
+      ids: deterministicIds(["create-1", "disable-1"]),
+      clock: fixedClock("2026-01-02T00:00:00.000Z")
+    });
+    await userAccounts.create({
+      actor: admin,
+      userId: "no-email@example.com",
+      password: "secret-123",
+      roles: ["User"]
+    });
+    await userAccounts.disable({ actor: admin, userId: "no-email@example.com", expectedVersion: 1 });
+
+    await expect(
+      userAccounts.requestPasswordReset({ tenantId: "acme", userId: "missing@example.com" })
+    ).resolves.toEqual({ tenantId: "acme", userId: "missing@example.com", delivered: false });
+    await expect(
+      userAccounts.requestPasswordReset({ tenantId: "acme", userId: "no-email@example.com" })
+    ).resolves.toEqual({ tenantId: "acme", userId: "no-email@example.com", delivered: false });
+    await expect(
+      userAccounts.requestEmailVerification({ tenantId: "acme", userId: "no-email@example.com" })
+    ).resolves.toEqual({ tenantId: "acme", userId: "no-email@example.com", delivered: false });
+    await expect(
+      userAccounts.resetPassword({
+        tenantId: "acme",
+        userId: "no-email@example.com",
+        token: "missing",
+        password: "secret-456"
+      })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+    expect(notifier.passwordResetMessages).toEqual([]);
+    expect(notifier.emailVerificationMessages).toEqual([]);
+    await expect(events.readStream(userAccountsStream("acme", "missing@example.com"))).resolves.toEqual([]);
+  });
+
+  it("invalidates pending recovery challenges when an account is disabled", async () => {
+    const events = new InMemoryEventStore();
+    const notifier = createInMemoryAccountRecoveryNotifier();
+    const userAccounts = new UserAccountService({
+      events,
+      passwords: deterministicPasswords(),
+      recovery: notifier,
+      ids: deterministicIds(["create-1", "reset-request-1", "disable-1", "enable-1"]),
+      recoveryTokens: deterministicIds(["reset-token"]),
+      clock: fixedClock("2026-01-02T00:00:00.000Z")
+    });
+    await userAccounts.create({
+      actor: admin,
+      userId: "owner@example.com",
+      email: "owner@example.com",
+      password: "secret-123",
+      roles: ["User"]
+    });
+    await userAccounts.requestPasswordReset({ tenantId: "acme", userId: "owner@example.com" });
+    await userAccounts.disable({ actor: admin, userId: "owner@example.com", expectedVersion: 2 });
+    await userAccounts.enable({ actor: admin, userId: "owner@example.com", expectedVersion: 3 });
+
+    await expect(
+      userAccounts.resetPassword({
+        tenantId: "acme",
+        userId: "owner@example.com",
+        token: "tok_reset-token",
+        password: "secret-456"
+      })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+  });
+
+  it("clears requested recovery challenges when delivery fails", async () => {
+    const events = new InMemoryEventStore();
+    const userAccounts = new UserAccountService({
+      events,
+      passwords: deterministicPasswords(),
+      recovery: {
+        sendPasswordReset() {
+          throw new Error("delivery unavailable");
+        },
+        sendEmailVerification() {
+          throw new Error("delivery unavailable");
+        }
+      },
+      ids: deterministicIds(["create-1", "reset-request-1", "reset-failed-1"]),
+      recoveryTokens: deterministicIds(["reset-token"]),
+      clock: fixedClock("2026-01-02T00:00:00.000Z")
+    });
+    await userAccounts.create({
+      actor: admin,
+      userId: "owner@example.com",
+      email: "owner@example.com",
+      password: "secret-123",
+      roles: ["User"]
+    });
+
+    await expect(
+      userAccounts.requestPasswordReset({ tenantId: "acme", userId: "owner@example.com" })
+    ).resolves.toEqual({ tenantId: "acme", userId: "owner@example.com", delivered: false });
+    await expect(
+      userAccounts.resetPassword({
+        tenantId: "acme",
+        userId: "owner@example.com",
+        token: "tok_reset-token",
+        password: "secret-456"
+      })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+    await expect(events.readStream(userAccountsStream("acme", "owner@example.com"))).resolves.toMatchObject([
+      { payload: { kind: "UserAccountCreated" } },
+      { payload: { kind: "UserPasswordResetRequested" } },
+      { payload: { kind: "UserPasswordResetDeliveryFailed" } }
+    ]);
   });
 });
 

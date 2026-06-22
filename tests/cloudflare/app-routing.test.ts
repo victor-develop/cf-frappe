@@ -1,5 +1,6 @@
 import {
   createCloudFrappeWorker,
+  createInMemoryAccountRecoveryNotifier,
   createSignedSessionCookie,
   deterministicIds,
   fixedClock,
@@ -282,6 +283,56 @@ describe("CloudFrappe Worker routing", () => {
 
     expect(response.status).toBe(204);
     expect(response.headers.get("set-cookie")).toContain("cf_frappe_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+  });
+
+  it("mounts account recovery auth routes with Worker auth configuration", async () => {
+    const recovery = createInMemoryAccountRecoveryNotifier();
+    const worker = createCloudFrappeWorker<CloudFrappeAuthTestEnv>({
+      registry: createTestRegistry(),
+      actor: () => ({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" }),
+      auth: {
+        sessionSecret: (env) => env.SESSION_SECRET,
+        sessionMaxAgeSeconds: 60,
+        secure: false,
+        passwords: deterministicPasswords(),
+        recovery,
+        ids: deterministicIds(["account-1", "reset-request-1"]),
+        recoveryTokens: deterministicIds(["reset-token-1"]),
+        clock: fixedClock(now)
+      }
+    });
+    const env = { DB: fakeEventD1(), AGGREGATES: fakeNamespace(), SESSION_SECRET: "edge-secret" };
+
+    await worker.fetch!(
+      cfRequest("http://localhost/api/users/owner%40example.com", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "owner@example.com", password: "secret-123", roles: ["User"] })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/api/auth/password-reset/request", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId: "owner@example.com", tenantId: "acme" })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({ data: { accepted: true } });
+    expect(recovery.passwordResetMessages).toEqual([
+      {
+        tenantId: "acme",
+        userId: "owner@example.com",
+        email: "owner@example.com",
+        token: "tok_reset-token-1",
+        expiresAt: "2026-01-01T01:00:00.000Z"
+      }
+    ]);
   });
 
   it("mounts auth-backed Desk user account administration in the Worker factory", async () => {

@@ -2,6 +2,8 @@ import { badRequest } from "../../core/errors";
 import { LIST_FILTER_OPERATORS } from "../../core/list-view";
 import type { DocumentData, ListDocumentsFilter, ListFilterOperator, MutableDocumentData } from "../../core/types";
 
+const SENSITIVE_QUERY_KEYS = new Set(["token", "password", "secret", "api_key", "apikey", "key"]);
+
 export function parseOptionalInteger(value: string | undefined): number | undefined {
   if (value === undefined) {
     return undefined;
@@ -16,7 +18,7 @@ export function parseOptionalInteger(value: string | undefined): number | undefi
 export function requestMetadata(request: Request): DocumentData {
   return {
     method: request.method,
-    url: request.url
+    url: redactedRequestUrl(request.url)
   };
 }
 
@@ -119,4 +121,14 @@ function parseFilterKey(key: string): { readonly field: string; readonly operato
     }
   }
   return { field: raw, operator: "eq" };
+}
+
+function redactedRequestUrl(value: string): string {
+  const url = new URL(value);
+  for (const key of [...url.searchParams.keys()]) {
+    if (SENSITIVE_QUERY_KEYS.has(key.toLowerCase())) {
+      url.searchParams.set(key, "[redacted]");
+    }
+  }
+  return url.toString();
 }

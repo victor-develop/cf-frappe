@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the catalog-backed account role validation slice:
+As of the account recovery token flow slice:
 
 - Vitest files: `57`
-- Vitest cases: `445`
+- Vitest cases: `453`
 
 ## Implication
 

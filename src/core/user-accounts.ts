@@ -7,8 +7,11 @@ export interface UserAccountState {
   readonly version: number;
   readonly exists: boolean;
   readonly email?: string;
+  readonly emailVerifiedAt?: string;
   readonly roles: readonly string[];
   readonly passwordHash?: string;
+  readonly passwordReset?: UserAccountRecoveryChallenge;
+  readonly emailVerification?: UserAccountEmailVerificationChallenge;
   readonly enabled: boolean;
   readonly createdAt?: string;
   readonly updatedAt?: string;
@@ -19,10 +22,21 @@ export interface UserAccount {
   readonly userId: string;
   readonly version: number;
   readonly email?: string;
+  readonly emailVerifiedAt?: string;
   readonly roles: readonly string[];
   readonly enabled: boolean;
   readonly createdAt?: string;
   readonly updatedAt?: string;
+}
+
+export interface UserAccountRecoveryChallenge {
+  readonly tokenHash: string;
+  readonly expiresAt: string;
+  readonly requestedAt: string;
+}
+
+export interface UserAccountEmailVerificationChallenge extends UserAccountRecoveryChallenge {
+  readonly email: string;
 }
 
 export function foldUserAccount(
@@ -62,12 +76,100 @@ export function foldUserAccount(
         if (event.payload.userId !== userId || !state.exists) {
           break;
         }
+        {
+          const { passwordReset: _passwordReset, ...withoutReset } = state;
+          state = {
+            ...withoutReset,
+            version: event.sequence,
+            passwordHash: event.payload.passwordHash,
+            updatedAt: event.occurredAt
+          };
+        }
+        break;
+      case "UserPasswordResetRequested":
+        if (event.payload.userId !== userId || !state.exists) {
+          break;
+        }
         state = {
           ...state,
           version: event.sequence,
-          passwordHash: event.payload.passwordHash,
+          passwordReset: {
+            tokenHash: event.payload.tokenHash,
+            expiresAt: event.payload.expiresAt,
+            requestedAt: event.occurredAt
+          },
           updatedAt: event.occurredAt
         };
+        break;
+      case "UserPasswordResetCompleted":
+        if (event.payload.userId !== userId || !state.exists) {
+          break;
+        }
+        {
+          const { passwordReset: _passwordReset, ...withoutReset } = state;
+          state = {
+            ...withoutReset,
+            version: event.sequence,
+            passwordHash: event.payload.passwordHash,
+            updatedAt: event.occurredAt
+          };
+        }
+        break;
+      case "UserPasswordResetDeliveryFailed":
+        if (event.payload.userId !== userId || !state.exists) {
+          break;
+        }
+        {
+          const { passwordReset: _passwordReset, ...withoutReset } = state;
+          state = {
+            ...withoutReset,
+            version: event.sequence,
+            updatedAt: event.occurredAt
+          };
+        }
+        break;
+      case "UserEmailVerificationRequested":
+        if (event.payload.userId !== userId || !state.exists) {
+          break;
+        }
+        state = {
+          ...state,
+          version: event.sequence,
+          emailVerification: {
+            email: event.payload.email,
+            tokenHash: event.payload.tokenHash,
+            expiresAt: event.payload.expiresAt,
+            requestedAt: event.occurredAt
+          },
+          updatedAt: event.occurredAt
+        };
+        break;
+      case "UserEmailVerified":
+        if (event.payload.userId !== userId || !state.exists) {
+          break;
+        }
+        {
+          const { emailVerification: _emailVerification, ...withoutVerification } = state;
+          state = {
+            ...withoutVerification,
+            version: event.sequence,
+            emailVerifiedAt: event.occurredAt,
+            updatedAt: event.occurredAt
+          };
+        }
+        break;
+      case "UserEmailVerificationDeliveryFailed":
+        if (event.payload.userId !== userId || !state.exists) {
+          break;
+        }
+        {
+          const { emailVerification: _emailVerification, ...withoutVerification } = state;
+          state = {
+            ...withoutVerification,
+            version: event.sequence,
+            updatedAt: event.occurredAt
+          };
+        }
         break;
       case "UserRolesChanged":
         if (event.payload.userId !== userId || !state.exists) {
@@ -95,12 +197,19 @@ export function foldUserAccount(
         if (event.payload.userId !== userId || !state.exists) {
           break;
         }
-        state = {
-          ...state,
-          version: event.sequence,
-          enabled: false,
-          updatedAt: event.occurredAt
-        };
+        {
+          const {
+            passwordReset: _passwordReset,
+            emailVerification: _emailVerification,
+            ...withoutChallenges
+          } = state;
+          state = {
+            ...withoutChallenges,
+            version: event.sequence,
+            enabled: false,
+            updatedAt: event.occurredAt
+          };
+        }
         break;
     }
   }
@@ -122,6 +231,7 @@ export function publicUserAccount(state: UserAccountState): UserAccount {
     userId: state.userId,
     version: state.version,
     ...(state.email === undefined ? {} : { email: state.email }),
+    ...(state.emailVerifiedAt === undefined ? {} : { emailVerifiedAt: state.emailVerifiedAt }),
     roles: state.roles,
     enabled: state.enabled,
     ...(state.createdAt === undefined ? {} : { createdAt: state.createdAt }),

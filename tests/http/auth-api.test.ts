@@ -1,10 +1,12 @@
 import {
+  createInMemoryAccountRecoveryNotifier,
   SYSTEM_MANAGER_ROLE,
   UserAccountService,
   createResourceApi,
   deterministicIds,
   fixedClock,
   userAccountSessionActorResolver,
+  userAccountsStream,
   unsafeHeaderActorResolver,
   type ActorResolver,
   type PasswordHasher
@@ -199,6 +201,100 @@ describe("auth and user account api", () => {
       error: { code: "PERMISSION_DENIED", message: "Session is no longer valid" }
     });
   });
+
+  it("exposes generic password reset and email verification auth routes", async () => {
+    const { app, recovery, services } = makeAuthApp();
+    await app.request("/api/users/owner%40example.com", {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        email: "owner@example.com",
+        password: "secret-123",
+        roles: ["User"]
+      })
+    });
+
+    const resetRequest = await app.request("/api/auth/password-reset/request", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId: "owner@example.com", tenantId: "acme", expiresInSeconds: 1 })
+    });
+    expect(resetRequest.status).toBe(202);
+    await expect(resetRequest.json()).resolves.toEqual({ data: { accepted: true } });
+    expect(recovery.passwordResetMessages).toHaveLength(1);
+    expect(recovery.passwordResetMessages[0]?.expiresAt).toBe("2026-01-01T01:00:00.000Z");
+
+    const resetComplete = await app.request("/api/auth/password-reset/complete?token=should-not-persist", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        userId: "owner@example.com",
+        tenantId: "acme",
+        token: recovery.passwordResetMessages[0]?.token,
+        password: "secret-456"
+      })
+    });
+    expect(resetComplete.status).toBe(200);
+    await expect(resetComplete.json()).resolves.toMatchObject({
+      data: { userId: "owner@example.com", version: 3 }
+    });
+    await expect(services.events.readStream(userAccountsStream("acme", "owner@example.com"))).resolves.toMatchObject([
+      { payload: { kind: "UserAccountCreated" } },
+      { payload: { kind: "UserPasswordResetRequested" } },
+      {
+        payload: { kind: "UserPasswordResetCompleted" },
+        metadata: { url: "http://localhost/api/auth/password-reset/complete?token=%5Bredacted%5D" }
+      }
+    ]);
+
+    const verifyRequest = await app.request("/api/auth/email-verification/request", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId: "owner@example.com", tenantId: "acme", expiresInSeconds: 1 })
+    });
+    expect(verifyRequest.status).toBe(202);
+    await expect(verifyRequest.json()).resolves.toEqual({ data: { accepted: true } });
+    expect(recovery.emailVerificationMessages).toHaveLength(1);
+    expect(recovery.emailVerificationMessages[0]?.expiresAt).toBe("2026-01-02T00:00:00.000Z");
+
+    const verifyComplete = await app.request("/api/auth/email-verification/complete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        userId: "owner@example.com",
+        tenantId: "acme",
+        token: recovery.emailVerificationMessages[0]?.token
+      })
+    });
+    expect(verifyComplete.status).toBe(200);
+    await expect(verifyComplete.json()).resolves.toMatchObject({
+      data: {
+        userId: "owner@example.com",
+        emailVerifiedAt: now
+      }
+    });
+  });
+
+  it("does not expose account existence through recovery request routes", async () => {
+    const { app, recovery } = makeAuthApp();
+
+    const missing = await app.request("/api/auth/password-reset/request", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId: "missing@example.com", tenantId: "acme" })
+    });
+    expect(missing.status).toBe(202);
+    await expect(missing.json()).resolves.toEqual({ data: { accepted: true } });
+
+    const malformed = await app.request("/api/auth/password-reset/complete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId: "missing@example.com", tenantId: "acme", token: "bad", password: "secret-456" })
+    });
+    expect(malformed.status).toBe(403);
+    await expect(malformed.json()).resolves.toMatchObject({ error: { code: "PERMISSION_DENIED" } });
+    expect(recovery.passwordResetMessages).toEqual([]);
+  });
 });
 
 function makeAuthApp(maxJsonBytes = 1_048_576) {
@@ -206,10 +302,23 @@ function makeAuthApp(maxJsonBytes = 1_048_576) {
     savedFilterIds: ["sf1", "sfe1"],
     savedReportIds: ["sr1", "sre1"]
   });
+  const recovery = createInMemoryAccountRecoveryNotifier();
   const userAccounts = new UserAccountService({
     events: services.events,
     passwords: deterministicPasswords(),
-    ids: deterministicIds(["account-1", "roles-1", "password-1", "disable-1", "enable-1"]),
+    recovery,
+    ids: deterministicIds([
+      "account-1",
+      "roles-1",
+      "password-1",
+      "disable-1",
+      "enable-1",
+      "reset-request-1",
+      "reset-complete-1",
+      "verify-request-1",
+      "verify-complete-1"
+    ]),
+    recoveryTokens: deterministicIds(["reset-token-1", "verify-token-1"]),
     clock: fixedClock(now)
   });
   const actor: ActorResolver = userAccountSessionActorResolver({
@@ -220,6 +329,7 @@ function makeAuthApp(maxJsonBytes = 1_048_576) {
   return {
     services,
     userAccounts,
+    recovery,
     app: createResourceApi({
       registry: services.registry,
       documents: services.documents,

@@ -287,6 +287,12 @@ function diffEvent(
     case "UserPermissionRevoked":
     case "UserAccountCreated":
     case "UserPasswordChanged":
+    case "UserPasswordResetRequested":
+    case "UserPasswordResetCompleted":
+    case "UserPasswordResetDeliveryFailed":
+    case "UserEmailVerificationRequested":
+    case "UserEmailVerified":
+    case "UserEmailVerificationDeliveryFailed":
     case "UserRolesChanged":
     case "UserAccountEnabled":
     case "UserAccountDisabled":
@@ -373,6 +379,18 @@ function summarize(payload: DocumentEventPayload): string {
       return `Created user account ${payload.userId}`;
     case "UserPasswordChanged":
       return `Changed password for ${payload.userId}`;
+    case "UserPasswordResetRequested":
+      return `Requested password reset for ${payload.userId}`;
+    case "UserPasswordResetCompleted":
+      return `Reset password for ${payload.userId}`;
+    case "UserPasswordResetDeliveryFailed":
+      return `Password reset delivery failed for ${payload.userId}`;
+    case "UserEmailVerificationRequested":
+      return `Requested email verification for ${payload.userId}`;
+    case "UserEmailVerified":
+      return `Verified email for ${payload.userId}`;
+    case "UserEmailVerificationDeliveryFailed":
+      return `Email verification delivery failed for ${payload.userId}`;
     case "UserRolesChanged":
       return `Changed roles for ${payload.userId}`;
     case "UserAccountEnabled":

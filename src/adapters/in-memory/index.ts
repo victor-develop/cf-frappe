@@ -1,3 +1,4 @@
+export * from "./account-recovery";
 export * from "./audit-events";
 export * from "./document-store";
 export * from "./event-store";

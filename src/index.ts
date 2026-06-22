@@ -47,6 +47,7 @@ export * from "./core/user-accounts";
 export * from "./core/user-permissions";
 export * from "./core/workflow";
 export * from "./ports/audit-event-store";
+export * from "./ports/account-recovery";
 export * from "./ports/clock";
 export * from "./ports/document-store";
 export * from "./ports/event-store";
