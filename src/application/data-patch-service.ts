@@ -1,6 +1,6 @@
 import { DataPatchRunner, type DataPatchRunResult } from "./data-patch-runner.js";
-import { FrameworkError, permissionDenied } from "../core/errors.js";
-import { defineDataPatch, type DataPatchDefinition } from "../core/data-patch.js";
+import { FrameworkError, badRequest, notFound, permissionDenied } from "../core/errors.js";
+import { assertDataPatchId, defineDataPatch, type DataPatchDefinition } from "../core/data-patch.js";
 import { SYSTEM_MANAGER_ROLE, type Actor, type JsonValue } from "../core/types.js";
 import type { Clock } from "../ports/clock.js";
 import type { DataPatchLog, RecordedDataPatch } from "../ports/data-patch-log.js";
@@ -33,7 +33,12 @@ export interface DataPatchDashboard {
 
 export interface DataPatchAdminPort {
   dashboard(actor: Actor): Promise<DataPatchDashboard>;
-  apply(actor: Actor): Promise<DataPatchRunResult>;
+  apply(actor: Actor, options?: DataPatchApplyOptions): Promise<DataPatchRunResult>;
+}
+
+export interface DataPatchApplyOptions {
+  readonly patchIds?: readonly string[];
+  readonly limit?: number;
 }
 
 export interface DataPatchServiceOptions<TResources = unknown> {
@@ -69,20 +74,61 @@ export class DataPatchService<TResources = unknown> {
     return { patches, totals: dashboardTotals(patches) };
   }
 
-  async apply(actor: Actor): Promise<DataPatchRunResult> {
+  async apply(actor: Actor, options: DataPatchApplyOptions = {}): Promise<DataPatchRunResult> {
     this.authorize(actor);
+    assertApplyLimit(options.limit);
+    const runner = this.runner();
+    const selected = selectPatches(this.patches, options.patchIds);
+    if (options.patchIds !== undefined) {
+      await this.assertPredecessorsApplied(selected);
+    }
+    if (options.limit === undefined) {
+      return runner.apply(selected);
+    }
+    const pending = await runner.pendingPatches(selected);
+    return runner.apply(pending.slice(0, options.limit));
+  }
+
+  private runner(): DataPatchRunner<TResources> {
     return new DataPatchRunner({
       log: this.log,
       patches: this.patches,
       resources: this.resources,
       ...(this.clock === undefined ? {} : { clock: this.clock }),
       ...(this.ids === undefined ? {} : { ids: this.ids })
-    }).apply();
+    });
   }
 
   authorize(actor: Actor): void {
     if (!this.adminRoles.some((role) => actor.roles.includes(role))) {
       throw permissionDenied(`Actor '${actor.id}' cannot manage data patches`);
+    }
+  }
+
+  private async assertPredecessorsApplied(selected: readonly DataPatchDefinition<TResources>[]): Promise<void> {
+    const selectedIds = new Set(selected.map((patch) => patch.id));
+    const recordedById = new Map((await this.log.recordedDataPatches()).map((patch) => [patch.id, patch]));
+    let blocker: DataPatchDefinition<TResources> | undefined;
+    for (const patch of this.patches) {
+      if (selectedIds.has(patch.id)) {
+        if (blocker !== undefined) {
+          throw new FrameworkError(
+            "DATA_PATCH_ORDER_VIOLATION",
+            `Data patch '${patch.id}' cannot run before earlier patch '${blocker.id}' is applied`,
+            { status: 409 }
+          );
+        }
+        continue;
+      }
+      const recorded = recordedById.get(patch.id);
+      if (recorded === undefined) {
+        blocker ??= patch;
+        continue;
+      }
+      assertChecksumMatches(patch, recorded);
+      if (recorded.status !== "applied") {
+        blocker ??= patch;
+      }
     }
   }
 }
@@ -101,6 +147,39 @@ function normalizePatches<TResources>(
     seen.add(definition.id);
     return definition;
   }));
+}
+
+function selectPatches<TResources>(
+  patches: readonly DataPatchDefinition<TResources>[],
+  patchIds: readonly string[] | undefined
+): readonly DataPatchDefinition<TResources>[] {
+  if (patchIds === undefined) {
+    return patches;
+  }
+  if (patchIds.length === 0) {
+    throw badRequest("At least one data patch id is required");
+  }
+  const requested = new Set<string>();
+  for (const id of patchIds) {
+    assertDataPatchId(id);
+    requested.add(id);
+  }
+  const selected = patches.filter((patch) => requested.has(patch.id));
+  const known = new Set(selected.map((patch) => patch.id));
+  const missing = [...requested].filter((id) => !known.has(id));
+  if (missing.length > 0) {
+    throw notFound(`Data patch '${missing[0]}' is not registered`, "DATA_PATCH_NOT_FOUND");
+  }
+  return selected;
+}
+
+function assertApplyLimit(limit: number | undefined): void {
+  if (limit === undefined) {
+    return;
+  }
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw badRequest("Data patch apply limit must be a positive integer");
+  }
 }
 
 function dashboardEntry<TResources>(

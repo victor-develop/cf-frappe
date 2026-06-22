@@ -208,7 +208,8 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       "/",
       createDataPatchApi({
         dataPatches: options.dataPatches,
-        actor: resolveActor
+        actor: resolveActor,
+        maxJsonBytes
       })
     );
   }

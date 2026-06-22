@@ -99,4 +99,57 @@ describe("DataPatchService", () => {
     });
     await expect(service.apply(admin)).rejects.toMatchObject({ code: "DATA_PATCH_PENDING" });
   });
+
+  it("applies bounded pending batches and selected patches in registry order", async () => {
+    const resources = { touched: [] as string[] };
+    const service = new DataPatchService({
+      log: new InMemoryDataPatchLog(),
+      resources,
+      patches: [
+        defineDataPatch<typeof resources>({
+          id: "core.first",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.touched.push("first");
+          }
+        }),
+        defineDataPatch<typeof resources>({
+          id: "crm.second",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.touched.push("second");
+          }
+        }),
+        defineDataPatch<typeof resources>({
+          id: "crm.third",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.touched.push("third");
+          }
+        })
+      ],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-first", "claim-second", "claim-third"])
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+
+    await expect(service.apply(admin, { patchIds: ["crm.third"] })).rejects.toMatchObject({
+      code: "DATA_PATCH_ORDER_VIOLATION",
+      status: 409
+    });
+    await expect(service.apply(admin, { limit: 1 })).resolves.toMatchObject({
+      applied: [{ id: "core.first" }],
+      skipped: []
+    });
+    await expect(service.apply(admin, { patchIds: ["crm.third", "crm.second"] })).resolves.toMatchObject({
+      applied: [{ id: "crm.second" }, { id: "crm.third" }],
+      skipped: []
+    });
+    await expect(service.apply(admin, { limit: 1 })).resolves.toEqual({ applied: [], skipped: [] });
+    await expect(service.apply(admin, { patchIds: ["crm.missing"] })).rejects.toMatchObject({
+      code: "DATA_PATCH_NOT_FOUND",
+      status: 404
+    });
+    expect(resources.touched).toEqual(["first", "second", "third"]);
+  });
 });
