@@ -1,3 +1,24 @@
+import {
+  D1_CORE_MIGRATION_ID,
+  D1_JOB_EXECUTION_MESSAGE_MIGRATION_ID,
+  D1_JOB_EXECUTION_MIGRATION_ID,
+  planD1Migrations,
+  renderD1MigrationFile
+} from "../adapters/d1/schema-planner.js";
+import type { DocTypeDefinition } from "../core/types";
+
+const STARTER_TASK_INDEX_MIGRATION_ID = "doctype_task_v1_indexes";
+const STARTER_TASK_DOCTYPE: DocTypeDefinition = {
+  name: "Task",
+  version: 1,
+  fields: [
+    { name: "priority", type: "select", options: ["Low", "Medium", "High"] },
+    { name: "workflow_state", type: "select", options: ["Open", "Doing", "Done"] }
+  ],
+  indexes: [["priority"], ["workflow_state", "priority"]]
+};
+const STARTER_MIGRATIONS = planD1Migrations([STARTER_TASK_DOCTYPE]);
+
 export interface StarterProjectTemplateInput {
   readonly projectName: string;
   readonly packageName: string;
@@ -6,6 +27,7 @@ export interface StarterProjectTemplateInput {
   readonly cfFrappeVersion: string;
   readonly nodeTypesVersion: string;
   readonly typescriptVersion: string;
+  readonly tsxVersion: string;
   readonly wranglerVersion: string;
 }
 
@@ -26,10 +48,13 @@ export function starterProjectFiles(input: StarterProjectTemplateInput): readonl
     { path: "src/apps/tasks.ts", contents: taskAppTs() },
     { path: "src/apps/index.ts", contents: appsIndexTs() },
     { path: "src/worker.ts", contents: workerTs() },
-    { path: "migrations/0001_cf_frappe_core.sql", contents: coreMigrationSql() },
-    { path: "migrations/0002_cf_frappe_job_executions.sql", contents: jobExecutionMigrationSql() },
-    { path: "migrations/0003_cf_frappe_job_execution_messages.sql", contents: jobExecutionMessageMigrationSql() },
-    { path: "migrations/0004_task_indexes.sql", contents: taskIndexesMigrationSql() }
+    { path: "migrations/0001_cf_frappe_core.sql", contents: starterMigrationSql(D1_CORE_MIGRATION_ID) },
+    { path: "migrations/0002_cf_frappe_job_executions.sql", contents: starterMigrationSql(D1_JOB_EXECUTION_MIGRATION_ID) },
+    {
+      path: "migrations/0003_cf_frappe_job_execution_messages.sql",
+      contents: starterMigrationSql(D1_JOB_EXECUTION_MESSAGE_MIGRATION_ID)
+    },
+    { path: "migrations/0004_doctype_task_v1_indexes.sql", contents: starterMigrationSql(STARTER_TASK_INDEX_MIGRATION_ID) }
   ];
 }
 
@@ -45,6 +70,7 @@ function packageJson(input: StarterProjectTemplateInput): string {
         "cf:types": "wrangler types",
         typecheck: "wrangler types && tsc --noEmit",
         check: "npm run typecheck",
+        "d1:generate": "node --import tsx ./node_modules/cf-frappe/dist/cli.js migrate generate",
         "d1:create": `wrangler d1 create ${input.databaseName}`,
         "d1:migrate:local": `wrangler d1 migrations apply ${input.databaseName} --local`,
         "d1:migrate:remote": `wrangler d1 migrations apply ${input.databaseName} --remote`
@@ -54,6 +80,7 @@ function packageJson(input: StarterProjectTemplateInput): string {
       },
       devDependencies: {
         "@types/node": input.nodeTypesVersion,
+        tsx: input.tsxVersion,
         typescript: input.typescriptVersion,
         wrangler: input.wranglerVersion
       }
@@ -151,6 +178,7 @@ Cloudflare-native cf-frappe starter app with D1 projections, a Durable Object co
 npm install
 cp .dev.vars.example .dev.vars
 npm run cf:types
+npm run d1:generate
 npm run d1:migrate:local
 npm run dev
 \`\`\`
@@ -167,6 +195,8 @@ npx cf-frappe install @acme/cf-frappe-crm
 \`\`\`
 
 The install command saves package metadata, runs the detected package manager (\`pnpm\`, \`yarn\`, \`bun\`, or \`npm\`) to update \`node_modules\` and the lockfile, then wires the app into the registry. Use \`--version <range>\` to pin the package, \`--export <name>\` for named exports, \`--as <localName>\` when you want a specific local identifier, \`--package-manager <npm|pnpm|yarn|bun>\` to override lockfile detection, \`--no-install\` to skip package-manager execution, and \`--no-save\` for local or workspace modules that are already managed outside \`package.json\`.
+
+After adding app DocType indexes, or changing them with a DocType version bump, generate reviewable D1 migration files with \`npm run d1:generate\`, then apply them locally or remotely with the existing migration scripts.
 
 ## Deploy
 
@@ -400,95 +430,12 @@ function taskFormJs(): string {
 `;
 }
 
-function coreMigrationSql(): string {
-  return `CREATE TABLE IF NOT EXISTS cf_frappe_events (
-  id TEXT PRIMARY KEY,
-  tenant_id TEXT NOT NULL,
-  stream TEXT NOT NULL,
-  sequence INTEGER NOT NULL,
-  type TEXT NOT NULL,
-  doctype TEXT NOT NULL,
-  document_name TEXT NOT NULL,
-  actor_id TEXT NOT NULL,
-  occurred_at TEXT NOT NULL,
-  payload_json TEXT NOT NULL,
-  metadata_json TEXT NOT NULL DEFAULT '{}',
-  UNIQUE(stream, sequence)
-);
-
-CREATE INDEX IF NOT EXISTS idx_cf_frappe_events_stream_sequence
-  ON cf_frappe_events(stream, sequence);
-
-CREATE INDEX IF NOT EXISTS idx_cf_frappe_events_doctype_time
-  ON cf_frappe_events(tenant_id, doctype, occurred_at);
-
-CREATE INDEX IF NOT EXISTS idx_cf_frappe_events_tenant_time
-  ON cf_frappe_events(tenant_id, occurred_at, stream, sequence);
-
-CREATE TABLE IF NOT EXISTS cf_frappe_documents (
-  tenant_id TEXT NOT NULL,
-  doctype TEXT NOT NULL,
-  name TEXT NOT NULL,
-  version INTEGER NOT NULL,
-  docstatus TEXT NOT NULL,
-  data_json TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  PRIMARY KEY (tenant_id, doctype, name)
-);
-
-CREATE INDEX IF NOT EXISTS idx_cf_frappe_documents_list
-  ON cf_frappe_documents(tenant_id, doctype, updated_at);
-
-CREATE TABLE IF NOT EXISTS cf_frappe_migrations (
-  id TEXT PRIMARY KEY,
-  checksum TEXT NOT NULL,
-  statement_count INTEGER NOT NULL,
-  applied_at TEXT NOT NULL
-);
-`;
-}
-
-function jobExecutionMigrationSql(): string {
-  return `CREATE TABLE IF NOT EXISTS cf_frappe_job_executions (
-  tenant_id TEXT NOT NULL,
-  idempotency_key TEXT NOT NULL,
-  job_name TEXT NOT NULL,
-  run_id TEXT NOT NULL,
-  status TEXT NOT NULL,
-  started_at TEXT NOT NULL,
-  finished_at TEXT,
-  result_json TEXT,
-  error TEXT,
-  PRIMARY KEY (tenant_id, idempotency_key)
-);
-
-CREATE INDEX IF NOT EXISTS idx_cf_frappe_job_executions_history
-  ON cf_frappe_job_executions(tenant_id, job_name, status, started_at);
-
-CREATE INDEX IF NOT EXISTS idx_cf_frappe_job_executions_started_at
-  ON cf_frappe_job_executions(tenant_id, started_at);
-`;
-}
-
-function jobExecutionMessageMigrationSql(): string {
-  return `ALTER TABLE cf_frappe_job_executions ADD COLUMN payload_json TEXT;
-
-ALTER TABLE cf_frappe_job_executions ADD COLUMN metadata_json TEXT;
-
-ALTER TABLE cf_frappe_job_executions ADD COLUMN enqueued_at TEXT;
-`;
-}
-
-function taskIndexesMigrationSql(): string {
-  return `CREATE INDEX IF NOT EXISTS idx_cf_frappe_documents_task_priority_f991a892
-  ON cf_frappe_documents (tenant_id, doctype, json_extract(data_json, '$.priority'))
-  WHERE doctype = 'Task';
-
-CREATE INDEX IF NOT EXISTS idx_cf_frappe_documents_task_workflow_state_priority_ea45bef5
-  ON cf_frappe_documents (tenant_id, doctype, json_extract(data_json, '$.workflow_state'), json_extract(data_json, '$.priority'))
-  WHERE doctype = 'Task';
-`;
+function starterMigrationSql(id: string): string {
+  const migration = STARTER_MIGRATIONS.find((candidate) => candidate.id === id);
+  if (migration === undefined) {
+    throw new Error(`Starter migration '${id}' is not planned`);
+  }
+  return renderD1MigrationFile(migration);
 }
 
 function json(value: string): string {

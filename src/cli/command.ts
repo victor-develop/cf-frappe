@@ -7,6 +7,12 @@ import {
   writeInstallRegistry,
   type InstallAppModuleResult
 } from "./app-install.js";
+import {
+  generateD1MigrationFiles,
+  MigrationGenerateError,
+  type GenerateD1MigrationFilesResult,
+  type MigrationRegistryLoader
+} from "./migration-generate.js";
 import { PackageJsonError } from "./package-json.js";
 import {
   createNodePackageManagerRunner,
@@ -19,6 +25,7 @@ import { scaffoldProject, ScaffoldError } from "./scaffold.js";
 
 export interface CliIo {
   readonly cwd: () => string;
+  readonly migrationRegistryLoader?: MigrationRegistryLoader;
   readonly packageManager?: PackageManagerRunner;
   readonly stderr: WritableText;
   readonly stdout: WritableText;
@@ -46,6 +53,13 @@ interface InstallCommand {
   readonly registryFile?: string;
 }
 
+interface MigrateGenerateCommand {
+  readonly kind: "migrate-generate";
+  readonly includeCore: boolean;
+  readonly migrationsDir?: string;
+  readonly registryFile?: string;
+}
+
 interface HelpCommand {
   readonly kind: "help";
 }
@@ -55,7 +69,7 @@ interface InvalidCommand {
   readonly message: string;
 }
 
-type ParsedCommand = InitCommand | InstallCommand | HelpCommand | InvalidCommand;
+type ParsedCommand = InitCommand | InstallCommand | MigrateGenerateCommand | HelpCommand | InvalidCommand;
 
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
   const command = parseCliArgs(argv);
@@ -97,6 +111,17 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       }));
       return 0;
     }
+    if (command.kind === "migrate-generate") {
+      const result = await generateD1MigrationFiles({
+        cwd: io.cwd(),
+        includeCore: command.includeCore,
+        ...(command.migrationsDir === undefined ? {} : { migrationsDir: command.migrationsDir }),
+        ...(command.registryFile === undefined ? {} : { registryFile: command.registryFile }),
+        ...(io.migrationRegistryLoader === undefined ? {} : { registryLoader: io.migrationRegistryLoader })
+      });
+      io.stdout.write(migrationGenerateSuccessText(result));
+      return 0;
+    }
     const result = await scaffoldProject({
       cwd: io.cwd(),
       force: command.force,
@@ -122,6 +147,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     if (
       error instanceof ScaffoldError ||
       error instanceof AppInstallError ||
+      error instanceof MigrationGenerateError ||
       error instanceof PackageJsonError ||
       error instanceof PackageManagerError
     ) {
@@ -140,10 +166,64 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   if (command === "install") {
     return parseInstallArgs(rest);
   }
+  if (command === "migrate") {
+    return parseMigrateArgs(rest);
+  }
   if (command !== "init") {
     return { kind: "invalid", message: `Unknown command '${command}'` };
   }
   return parseInitArgs(rest);
+}
+
+function parseMigrateArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  if (subcommand !== "generate") {
+    return { kind: "invalid", message: `Unknown migrate command '${subcommand}'` };
+  }
+  let includeCore = true;
+  let migrationsDir: string | undefined;
+  let registryFile: string | undefined;
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--no-core") {
+      includeCore = false;
+      continue;
+    }
+    if (arg === "--registry") {
+      const value = rest[index + 1];
+      if (value === undefined) {
+        return { kind: "invalid", message: "Missing value for --registry" };
+      }
+      registryFile = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--migrations") {
+      const value = rest[index + 1];
+      if (value === undefined) {
+        return { kind: "invalid", message: "Missing value for --migrations" };
+      }
+      migrationsDir = value;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown migrate generate option '${arg}'` };
+  }
+  return {
+    kind: "migrate-generate",
+    includeCore,
+    ...(migrationsDir === undefined ? {} : { migrationsDir }),
+    ...(registryFile === undefined ? {} : { registryFile })
+  };
 }
 
 function parseInitArgs(argv: readonly string[]): ParsedCommand {
@@ -286,13 +366,27 @@ function helpText(): string {
     "Usage:",
     "  cf-frappe init <directory> [--force]",
     "  cf-frappe install <module> [--version <range>] [--export <name>] [--as <localName>] [--registry <path>] [--package-manager <npm|pnpm|yarn|bun>] [--no-install] [--no-save]",
+    "  cf-frappe migrate generate [--registry <path>] [--migrations <dir>] [--no-core]",
     "  cf-frappe --help",
     "",
     "Commands:",
     "  init   Create a Cloudflare-ready cf-frappe starter app",
     "  install   Save, install, and wire an app module into a generated app registry",
+    "  migrate generate   Write reviewable D1 migration files from app metadata",
     ""
   ].join("\n");
+}
+
+function migrationGenerateSuccessText(result: GenerateD1MigrationFilesResult): string {
+  const lines = [`Planned D1 migrations from ${result.registryFile} into ${result.migrationsDir}`];
+  if (result.generated.length === 0) {
+    lines.push("No new migration files were needed.");
+    return `${lines.join("\n")}\n`;
+  }
+  for (const file of result.generated) {
+    lines.push(`Wrote ${file.path} (${file.migration.statements.length} statements)`);
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 function installSuccessText(

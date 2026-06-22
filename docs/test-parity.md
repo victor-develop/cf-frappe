@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the CLI package-manager install slice:
+As of the CLI D1 migration generation slice:
 
 - Vitest files: `59`
-- Vitest cases: `477`
+- Vitest cases: `481`
 
 ## Implication
 

@@ -1,5 +1,5 @@
 import type { DocTypeDefinition } from "../../core/types";
-import { FrameworkError } from "../../core/errors";
+import { FrameworkError } from "../../core/errors.js";
 
 export interface PlannedSqlStatement {
   readonly name: string;
@@ -239,6 +239,15 @@ export function renderD1ProjectionIndexMigration(
 
 export function renderD1Migration(migration: D1Migration): string {
   return migration.statements.map((statement) => statement.sql).join("\n\n");
+}
+
+export function renderD1MigrationFile(migration: D1Migration): string {
+  return [
+    `-- ${migration.id}: ${migration.label ?? migration.id}`,
+    `-- checksum: ${migration.checksum}`,
+    renderD1Migration(migration),
+    ""
+  ].join("\n");
 }
 
 export function renderD1Migrations(migrations: readonly D1Migration[]): string {

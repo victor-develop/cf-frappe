@@ -13,6 +13,7 @@ export interface ScaffoldProjectOptions {
   readonly cfFrappeVersion?: string;
   readonly nodeTypesVersion?: string;
   readonly typescriptVersion?: string;
+  readonly tsxVersion?: string;
   readonly wranglerVersion?: string;
 }
 
@@ -36,6 +37,7 @@ interface PackageMetadata {
   readonly cfFrappeVersion: string;
   readonly nodeTypesVersion: string;
   readonly typescriptVersion: string;
+  readonly tsxVersion: string;
   readonly wranglerVersion: string;
 }
 
@@ -67,6 +69,7 @@ export async function scaffoldProject(options: ScaffoldProjectOptions): Promise<
     packageName: projectName,
     projectName,
     typescriptVersion: metadata.typescriptVersion,
+    tsxVersion: metadata.tsxVersion,
     wranglerVersion: metadata.wranglerVersion
   });
 
@@ -115,6 +118,7 @@ async function packageMetadata(options: ScaffoldProjectOptions): Promise<Package
     cfFrappeVersion: options.cfFrappeVersion ?? stringField(rootPackage.version, "0.1.0"),
     nodeTypesVersion: options.nodeTypesVersion ?? dependencyVersion(rootPackage, "@types/node", "^26.0.0"),
     typescriptVersion: options.typescriptVersion ?? dependencyVersion(rootPackage, "typescript", "^5.7.2"),
+    tsxVersion: options.tsxVersion ?? dependencyVersion(rootPackage, "tsx", "^4.20.6"),
     wranglerVersion: options.wranglerVersion ?? dependencyVersion(rootPackage, "wrangler", "^4.103.0")
   };
 }

@@ -3,6 +3,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseCliArgs, runCli, type WritableText } from "../../src/cli/command";
+import { createRegistry, defineDocType } from "../../src";
+import type { ModelRegistry } from "../../src";
 import { detectPackageManager, PackageManagerError, type PackageManagerRunner } from "../../src/cli/package-manager";
 import { scaffoldProject, ScaffoldError } from "../../src/cli/scaffold";
 
@@ -44,7 +46,7 @@ describe("cf-frappe CLI scaffold", () => {
       "migrations/0001_cf_frappe_core.sql",
       "migrations/0002_cf_frappe_job_executions.sql",
       "migrations/0003_cf_frappe_job_execution_messages.sql",
-      "migrations/0004_task_indexes.sql"
+      "migrations/0004_doctype_task_v1_indexes.sql"
     ]);
 
     const packageJson = JSON.parse(await readFile(join(target, "package.json"), "utf8")) as {
@@ -55,9 +57,11 @@ describe("cf-frappe CLI scaffold", () => {
     };
     expect(packageJson.name).toBe("demo-app");
     expect(packageJson.scripts["cf:types"]).toBe("wrangler types");
+    expect(packageJson.scripts["d1:generate"]).toBe("node --import tsx ./node_modules/cf-frappe/dist/cli.js migrate generate");
     expect(packageJson.scripts["d1:migrate:local"]).toBe("wrangler d1 migrations apply demo-app-db --local");
     expect(packageJson.dependencies["cf-frappe"]).toBe("^0.1.0");
     expect(packageJson.devDependencies["@types/node"]).toBe("^26.0.0");
+    expect(packageJson.devDependencies.tsx).toBe("^4.20.6");
 
     await expect(readFile(join(target, "wrangler.jsonc"), "utf8")).resolves.toContain(
       '"new_sqlite_classes": ["AggregateCoordinator"]'
@@ -98,8 +102,11 @@ describe("cf-frappe CLI scaffold", () => {
     await expect(readFile(join(target, "migrations/0003_cf_frappe_job_execution_messages.sql"), "utf8")).resolves.toContain(
       "ADD COLUMN payload_json"
     );
-    await expect(readFile(join(target, "migrations/0004_task_indexes.sql"), "utf8")).resolves.toContain(
+    await expect(readFile(join(target, "migrations/0004_doctype_task_v1_indexes.sql"), "utf8")).resolves.toContain(
       "idx_cf_frappe_documents_task_workflow_state_priority_ea45bef5"
+    );
+    await expect(readFile(join(target, "migrations/0004_doctype_task_v1_indexes.sql"), "utf8")).resolves.toContain(
+      "-- checksum: fnv1a32:"
     );
   });
 
@@ -437,6 +444,12 @@ describe("cf-frappe CLI scaffold", () => {
       kind: "invalid",
       message: "Cannot combine --package-manager with --no-install"
     });
+    expect(parseCliArgs(["migrate", "generate", "--registry", "src/apps/index.ts", "--migrations", "migrations", "--no-core"])).toEqual({
+      kind: "migrate-generate",
+      includeCore: false,
+      registryFile: "src/apps/index.ts",
+      migrationsDir: "migrations"
+    });
 
     const stdout = textBuffer();
     const stderr = textBuffer();
@@ -450,6 +463,161 @@ describe("cf-frappe CLI scaffold", () => {
     expect(stderr.text()).toBe("");
     expect(stdout.text()).toContain("Created cf-frappe app at demo");
     expect(stdout.text()).toContain("npm run d1:migrate:local");
+  });
+
+  it("generates missing D1 migration files from app metadata", async () => {
+    const target = join(tempRoot, "migration-generation");
+    await scaffoldProject({
+      targetDirectory: target,
+      cfFrappeVersion: "0.1.0",
+      nodeTypesVersion: "^26.0.0",
+      typescriptVersion: "^5.7.2",
+      tsxVersion: "^4.20.6",
+      wranglerVersion: "^4.103.0"
+    });
+    const registry = createRegistry({
+      doctypes: [
+        defineDocType({
+          name: "Task",
+          version: 1,
+          fields: [
+            { name: "priority", type: "text" },
+            { name: "workflow_state", type: "text" }
+          ],
+          indexes: [["priority"], ["workflow_state", "priority"]]
+        }),
+        defineDocType({
+          name: "Customer",
+          version: 2,
+          fields: [{ name: "email", type: "text" }],
+          indexes: [["email"]]
+        })
+      ]
+    });
+    const stdout = textBuffer();
+    const first = await runCli(["migrate", "generate"], {
+      cwd: () => target,
+      migrationRegistryLoader: registryLoader(registry),
+      stdout,
+      stderr: textBuffer()
+    });
+
+    expect(first).toBe(0);
+    expect(stdout.text()).toContain("Planned D1 migrations from src/apps/index.ts into migrations");
+    expect(stdout.text()).toContain("Wrote migrations/0005_doctype_customer_v2_indexes.sql (1 statements)");
+    const generated = await readFile(join(target, "migrations/0005_doctype_customer_v2_indexes.sql"), "utf8");
+    expect(generated).toContain("-- doctype_customer_v2_indexes: Customer projection indexes");
+    expect(generated).toContain("-- checksum: fnv1a32:");
+    expect(generated).toContain("WHERE doctype = 'Customer';");
+
+    const secondStdout = textBuffer();
+    const second = await runCli(["migrate", "generate"], {
+      cwd: () => target,
+      migrationRegistryLoader: registryLoader(registry),
+      stdout: secondStdout,
+      stderr: textBuffer()
+    });
+
+    expect(second).toBe(0);
+    expect(secondStdout.text()).toContain("No new migration files were needed.");
+  });
+
+  it("reports checksum drift for scaffolded starter migration files", async () => {
+    const target = join(tempRoot, "starter-checksum-drift");
+    await scaffoldProject({
+      targetDirectory: target,
+      cfFrappeVersion: "0.1.0",
+      nodeTypesVersion: "^26.0.0",
+      typescriptVersion: "^5.7.2",
+      tsxVersion: "^4.20.6",
+      wranglerVersion: "^4.103.0"
+    });
+    const registry = createRegistry({
+      doctypes: [
+        defineDocType({
+          name: "Task",
+          version: 1,
+          fields: [{ name: "priority", type: "text" }],
+          indexes: [["priority"]]
+        })
+      ]
+    });
+    const stderr = textBuffer();
+    const exitCode = await runCli(["migrate", "generate"], {
+      cwd: () => target,
+      migrationRegistryLoader: registryLoader(registry),
+      stdout: textBuffer(),
+      stderr
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stderr.text()).toContain("Existing migration file '0004_doctype_task_v1_indexes.sql' has checksum");
+    expect(stderr.text()).toContain("Bump the DocType version for a new migration");
+  });
+
+  it("uses stable core migration filenames when generating into an empty directory", async () => {
+    const registry = createRegistry({
+      doctypes: [
+        defineDocType({
+          name: "Task",
+          version: 1,
+          fields: [{ name: "priority", type: "text" }],
+          indexes: [["priority"]]
+        })
+      ]
+    });
+    const stdout = textBuffer();
+    const exitCode = await runCli(["migrate", "generate", "--migrations", "fresh-migrations"], {
+      cwd: () => tempRoot,
+      migrationRegistryLoader: registryLoader(registry),
+      stdout,
+      stderr: textBuffer()
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stdout.text()).toContain("Wrote fresh-migrations/0001_cf_frappe_core.sql");
+    expect(stdout.text()).toContain("Wrote fresh-migrations/0004_doctype_task_v1_indexes.sql");
+    await expect(readFile(join(tempRoot, "fresh-migrations/0001_cf_frappe_core.sql"), "utf8")).resolves.toContain(
+      "-- 0001_cf_frappe_core: cf-frappe event/projection tables"
+    );
+    await expect(readFile(join(tempRoot, "fresh-migrations/0001_0001_cf_frappe_core.sql"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+  });
+
+  it("reports checksum drift for generated migration files", async () => {
+    const registry = createRegistry({
+      doctypes: [
+        defineDocType({
+          name: "Customer",
+          version: 2,
+          fields: [{ name: "email", type: "text" }],
+          indexes: [["email"]]
+        })
+      ]
+    });
+    const first = await runCli(["migrate", "generate", "--no-core"], {
+      cwd: () => tempRoot,
+      migrationRegistryLoader: registryLoader(registry),
+      stdout: textBuffer(),
+      stderr: textBuffer()
+    });
+    expect(first).toBe(0);
+
+    const migrationPath = join(tempRoot, "migrations/0001_doctype_customer_v2_indexes.sql");
+    const generated = await readFile(migrationPath, "utf8");
+    await writeFile(migrationPath, generated.replace(/^-- checksum: .+$/mu, "-- checksum: fnv1a32:00000000"));
+    const stderr = textBuffer();
+    const second = await runCli(["migrate", "generate", "--no-core"], {
+      cwd: () => tempRoot,
+      migrationRegistryLoader: registryLoader(registry),
+      stdout: textBuffer(),
+      stderr
+    });
+
+    expect(second).toBe(1);
+    expect(stderr.text()).toContain("Existing migration file '0001_doctype_customer_v2_indexes.sql' has checksum");
+    expect(stderr.text()).toContain("Bump the DocType version for a new migration");
   });
 
   it("detects package managers from lockfiles", async () => {
@@ -516,6 +684,14 @@ function packageManagerRecorder(): PackageManagerRunner & {
         command: packageManager,
         args: ["install"]
       };
+    }
+  };
+}
+
+function registryLoader(registry: ModelRegistry) {
+  return {
+    async load() {
+      return registry;
     }
   };
 }
