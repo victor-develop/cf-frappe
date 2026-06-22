@@ -199,6 +199,49 @@ export function renderFileManager(
   </section>`;
 }
 
+export function renderFileAttachmentPanel(
+  doctype: string,
+  documentName: string,
+  dashboard: FileDashboard,
+  options: { readonly error?: string } = {}
+): string {
+  const rows = dashboard.files
+    .map(
+      (file) => `<tr>
+        <td><a href="/desk/files/${encodeURIComponent(file.name)}/content">${escapeHtml(file.filename)}</a></td>
+        <td>${escapeHtml(file.contentType)}</td>
+        <td>${escapeHtml(formatBytes(file.size))}</td>
+        <td>${file.isPrivate ? "yes" : "no"}</td>
+        <td>${escapeHtml(file.uploadedBy)}</td>
+        <td>${escapeHtml(file.uploadedAt)}</td>
+        <td>${file.deletable ? renderAttachedFileDeleteAction(doctype, documentName, file) : ""}</td>
+      </tr>`
+    )
+    .join("");
+  const documentHref = `/desk/${encodeURIComponent(doctype)}/${encodeURIComponent(documentName)}`;
+  const managerHref = `/desk/files?attached_to_doctype=${encodeURIComponent(doctype)}&attached_to_name=${encodeURIComponent(documentName)}`;
+  return `<section class="panel attachments" aria-labelledby="document-attachments">
+    <div class="attachment-head">
+      <h2 id="document-attachments">Attachments</h2>
+      <a class="button" href="${escapeHtml(managerHref)}">Open file manager</a>
+    </div>
+    <form class="form attachment-upload" method="post" action="${escapeHtml(documentHref)}/files" enctype="multipart/form-data">
+      ${options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : ""}
+      <div class="fields">
+        <label class="field"><span>File</span><input name="file" type="file" required></label>
+        <label class="field checkbox-field"><span>Private</span><input name="is_private" type="checkbox" value="1" checked></label>
+      </div>
+      <div class="actions"><button class="button primary" type="submit">Upload</button></div>
+    </form>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Filename</th><th>Content Type</th><th>Size</th><th>Private</th><th>Uploaded By</th><th>Uploaded At</th><th>Action</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="7" class="empty">No files attached.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
 function renderFileMetadataAction(file: FileDashboard["files"][number]): string {
   return `<form class="inline-action file-metadata-action" method="post" action="/desk/files/${encodeURIComponent(file.name)}/metadata">
     <input type="hidden" name="expectedVersion" value="${String(file.expectedVersion)}">
@@ -214,6 +257,17 @@ function renderFileDeleteAction(file: FileDashboard["files"][number]): string {
   return `<form class="inline-action" method="post">
     <input type="hidden" name="expectedVersion" value="${String(file.expectedVersion)}">
     <button class="button danger" type="submit" formaction="/desk/files/${encodeURIComponent(file.name)}/delete">Delete</button>
+  </form>`;
+}
+
+function renderAttachedFileDeleteAction(
+  doctype: string,
+  documentName: string,
+  file: FileDashboard["files"][number]
+): string {
+  return `<form class="inline-action" method="post">
+    <input type="hidden" name="expectedVersion" value="${String(file.expectedVersion)}">
+    <button class="button danger" type="submit" formaction="/desk/${encodeURIComponent(doctype)}/${encodeURIComponent(documentName)}/files/${encodeURIComponent(file.name)}/delete">Delete</button>
   </form>`;
 }
 
@@ -2052,13 +2106,18 @@ tr:last-child td { border-bottom: 0; }
   text-decoration: none;
 }
 .saved-filter-link.is-active { background: #e9eef7; border-color: var(--primary); }
-.form-head, .timeline-head {
+.form-head, .timeline-head, .attachment-head {
   display: flex;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 18px;
 }
 .timeline-head { padding: 18px 18px 0; }
+.attachments { margin-top: 16px; max-width: 860px; }
+.attachment-upload {
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
 .form-head p, .timeline-head p { margin: 0; color: var(--muted); }
 .timeline strong { display: block; }
 .timeline small { color: var(--muted); }

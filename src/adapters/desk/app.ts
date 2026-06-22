@@ -50,6 +50,7 @@ import {
   renderDeskHome,
   renderDeskLayout,
   renderErrorPanel,
+  renderFileAttachmentPanel,
   renderFileManager,
   renderDataPatchAdmin,
   renderDocumentTimeline,
@@ -933,56 +934,55 @@ export function createDeskApp(options: DeskAppOptions): Hono {
   app.get("/desk/:doctype/:name", async (c) => {
     const actor = await options.actor(c.req.raw);
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
-    const doctypes = options.queries.listDoctypes(actor);
-    const reports = listReports(options, actor);
-    const printFormats = listPrintFormats(options, actor, doctype.name);
-    const formView = options.queries.getFormView(actor, doctype.name);
-    const document = await options.queries.getDocument(actor, doctype.name, c.req.param("name"));
-    const linkOptions = await linkOptionsForForm(options, actor, doctype, formView);
-    const tableDefinitions = tableDefinitionsForForm(options, formView);
-    const lifecycleActions = lifecycleActionsFor(actor, doctype, document);
-    const workflowActions = workflowActionsFor(actor, doctype, document);
-    const timeline = await options.timeline?.getTimeline(actor, doctype.name, document.name, { limit: 25 });
-    const assignments = await options.timeline?.getAssignments(actor, doctype.name, document.name);
-    const tags = await options.timeline?.getTags(actor, doctype.name, document.name);
-    const followers = await options.timeline?.getFollowers(actor, doctype.name, document.name);
-    const canComment = can(actor, doctype, "comment", document);
-    const canAssign = can(actor, doctype, "assign", document);
-    const canTag = can(actor, doctype, "tag", document);
-    const canFollow = can(actor, doctype, "follow", document);
-    const form = renderFormView(doctype, formView, {
-      mode: "update",
-      document,
-      linkOptions,
-      tableDefinitions,
-      lifecycleActions,
-      workflowActions,
-      printFormats,
-      clientScripts: options.registry.listClientScripts(doctype.name, "form")
+    return renderDeskDocumentPage(options, actor, doctype, c.req.param("name"));
+  });
+
+  app.post("/desk/:doctype/:name/files", async (c) => {
+    const files = requireFiles(options);
+    const actor = await options.actor(c.req.raw);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const name = c.req.param("name");
+    try {
+      preflightDeskFileUpload(c.req.raw, options.maxFileBytes ?? 25 * 1024 * 1024);
+      const form = await parseDeskFileUpload(c.req.raw);
+      await files.upload({
+        actor,
+        filename: form.filename,
+        body: form.body,
+        contentType: form.contentType,
+        isPrivate: form.isPrivate,
+        attachedTo: { doctype: doctype.name, name },
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(`/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(name)}`, 303);
+    } catch (error) {
+      return renderDeskDocumentPage(options, actor, doctype, name, {
+        attachmentError: error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed",
+        status: error instanceof FrameworkError ? error.status : 500
+      });
+    }
+  });
+
+  app.post("/desk/:doctype/:name/files/:fileName/delete", async (c) => {
+    const files = requireFiles(options);
+    const actor = await options.actor(c.req.raw);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const name = c.req.param("name");
+    const fileName = c.req.param("fileName");
+    const file = await files.get(actor, fileName);
+    if (file.attachedTo?.doctype !== doctype.name || file.attachedTo.name !== name) {
+      throw new FrameworkError("DOCUMENT_NOT_FOUND", `${fileName} is not attached to ${doctype.name}/${name}`, {
+        status: 404
+      });
+    }
+    const expectedVersion = await parseDeskExpectedVersion(c.req.raw);
+    await files.delete({
+      actor,
+      name: fileName,
+      ...(expectedVersion === undefined ? {} : { expectedVersion }),
+      metadata: requestMetadata(c.req.raw)
     });
-    return html(
-      renderDeskLayout({
-        title: document.name,
-        adminLinks: adminLinksFor(options, actor),
-        active: doctype.name,
-        doctypes,
-        reports,
-        body: `${form}${
-          timeline
-            ? renderDocumentTimeline(timeline, {
-                allowComment: canComment,
-                allowAssign: canAssign,
-                allowTag: canTag,
-                allowFollow: canFollow,
-                actorId: actor.id,
-                ...(assignments ? { assignments } : {}),
-                ...(tags ? { tags } : {}),
-                ...(followers ? { followers } : {})
-              })
-            : ""
-        }`
-      })
-    );
+    return c.redirect(`/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(name)}`, 303);
   });
 
   app.post("/desk/:doctype/:name/comments", async (c) => {
@@ -1596,6 +1596,79 @@ async function renderDeskRoleFailure(
   const state = await roles.list(actor);
   const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
   return renderDeskRolePage(options, actor, state, error instanceof FrameworkError ? error.status : 500, message);
+}
+
+async function renderDeskDocumentPage(
+  options: DeskAppOptions,
+  actor: Actor,
+  doctype: DocTypeDefinition,
+  name: string,
+  result: { readonly attachmentError?: string; readonly status?: number } = {}
+): Promise<Response> {
+  const doctypes = options.queries.listDoctypes(actor);
+  const reports = listReports(options, actor);
+  const printFormats = listPrintFormats(options, actor, doctype.name);
+  const formView = options.queries.getFormView(actor, doctype.name);
+  const document = await options.queries.getDocument(actor, doctype.name, name);
+  const linkOptions = await linkOptionsForForm(options, actor, doctype, formView);
+  const tableDefinitions = tableDefinitionsForForm(options, formView);
+  const lifecycleActions = lifecycleActionsFor(actor, doctype, document);
+  const workflowActions = workflowActionsFor(actor, doctype, document);
+  const timeline = await options.timeline?.getTimeline(actor, doctype.name, document.name, { limit: 25 });
+  const assignments = await options.timeline?.getAssignments(actor, doctype.name, document.name);
+  const tags = await options.timeline?.getTags(actor, doctype.name, document.name);
+  const followers = await options.timeline?.getFollowers(actor, doctype.name, document.name);
+  const canComment = can(actor, doctype, "comment", document);
+  const canAssign = can(actor, doctype, "assign", document);
+  const canTag = can(actor, doctype, "tag", document);
+  const canFollow = can(actor, doctype, "follow", document);
+  const form = renderFormView(doctype, formView, {
+    mode: "update",
+    document,
+    linkOptions,
+    tableDefinitions,
+    lifecycleActions,
+    workflowActions,
+    printFormats,
+    clientScripts: options.registry.listClientScripts(doctype.name, "form")
+  });
+  const attachments = options.files === undefined
+    ? ""
+    : renderFileAttachmentPanel(
+        doctype.name,
+        document.name,
+        await options.files.dashboard(actor, {
+          attachedToDoctype: doctype.name,
+          attachedToName: document.name,
+          limit: 25
+        }),
+        result.attachmentError === undefined ? {} : { error: result.attachmentError }
+      );
+  return html(
+    renderDeskLayout({
+      title: document.name,
+      adminLinks: adminLinksFor(options, actor),
+      active: doctype.name,
+      doctypes,
+      reports,
+      showFiles: options.files !== undefined,
+      body: `${form}${attachments}${
+        timeline
+          ? renderDocumentTimeline(timeline, {
+              allowComment: canComment,
+              allowAssign: canAssign,
+              allowTag: canTag,
+              allowFollow: canFollow,
+              actorId: actor.id,
+              ...(assignments ? { assignments } : {}),
+              ...(tags ? { tags } : {}),
+              ...(followers ? { followers } : {})
+            })
+          : ""
+      }`
+    }),
+    result.status ?? 200
+  );
 }
 
 function lifecycleActionsFor(

@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the runtime job schedule override slice:
+As of the Desk record attachment panel slice:
 
 - Vitest files: `64`
-- Vitest cases: `530`
+- Vitest cases: `531`
 
 ## Implication
 

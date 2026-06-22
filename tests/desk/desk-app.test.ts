@@ -27,9 +27,10 @@ import {
   SYSTEM_MANAGER_ROLE,
   UserAccountService,
   UserProfileService,
+  type DocTypeDefinition,
   type PasswordHasher
 } from "../../src";
-import { createChildTableServices, createLinkedServices, createServices, data, guest, now, owner } from "../helpers";
+import { createChildTableServices, createLinkedServices, createServices, data, guest, noteDocType, now, owner } from "../helpers";
 
 describe("Desk app", () => {
   function makeDesk(actor = owner) {
@@ -126,9 +127,14 @@ describe("Desk app", () => {
 
   function makeFileDesk(
     actor = owner,
-    options: { readonly maxFileBytes?: number; readonly ids?: readonly string[]; readonly fileIds?: readonly string[] } = {}
+    options: {
+      readonly maxFileBytes?: number;
+      readonly ids?: readonly string[];
+      readonly fileIds?: readonly string[];
+      readonly doctypes?: readonly DocTypeDefinition[];
+    } = {}
   ) {
-    const registry = createRegistry({ doctypes: [fileDocType] });
+    const registry = createRegistry({ doctypes: options.doctypes ?? [fileDocType] });
     const store = new InMemoryDocumentStore();
     const storage = new InMemoryFileStorage();
     const documents = new DocumentService({
@@ -483,6 +489,82 @@ describe("Desk app", () => {
     });
     expect(deleted.status).toBe(303);
     expect(storage.has("acme/files/file_object-hello.txt")).toBe(false);
+  });
+
+  it("manages record attachments directly from generated Desk document forms", async () => {
+    const { app, storage, documents, files } = makeFileDesk(owner, {
+      doctypes: [noteDocType, fileDocType],
+      ids: ["note-create", "file-create", "other-create", "request-delete", "delete"],
+      fileIds: ["attachment", "other"]
+    });
+    await documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    const emptyForm = await app.request("/desk/Note/My%20Note");
+    expect(emptyForm.status).toBe(200);
+    const emptyHtml = await emptyForm.text();
+    expect(emptyHtml).toContain("Attachments");
+    expect(emptyHtml).toContain('action="/desk/Note/My%20Note/files"');
+    expect(emptyHtml).toContain("No files attached.");
+
+    const uploadForm = new FormData();
+    uploadForm.append("file", new Blob(["proposal"], { type: "text/plain" }), "proposal.txt");
+    uploadForm.set("is_private", "1");
+    const uploaded = await app.request("/desk/Note/My%20Note/files", {
+      method: "POST",
+      headers: { "content-length": "512" },
+      body: uploadForm
+    });
+    expect(uploaded.status).toBe(303);
+    expect(uploaded.headers.get("location")).toBe("/desk/Note/My%20Note");
+
+    const form = await app.request("/desk/Note/My%20Note");
+    const html = await form.text();
+    expect(html).toContain("proposal.txt");
+    expect(html).toContain("/desk/files/file_attachment/content");
+    expect(html).toContain("/desk/files?attached_to_doctype=Note&amp;attached_to_name=My%20Note");
+    expect(html).toContain('formaction="/desk/Note/My%20Note/files/file_attachment/delete"');
+
+    const attachmentDashboard = await files.dashboard(owner, {
+      attachedToDoctype: "Note",
+      attachedToName: "My Note"
+    });
+    expect(attachmentDashboard.files).toMatchObject([
+      {
+        name: "file_attachment",
+        filename: "proposal.txt",
+        attachedTo: { doctype: "Note", name: "My Note" }
+      }
+    ]);
+
+    const other = await files.upload({
+      actor: owner,
+      filename: "loose.txt",
+      body: "loose",
+      contentType: "text/plain"
+    });
+    const wrongDelete = await app.request(`/desk/Note/My%20Note/files/${other.snapshot.name}/delete`, {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(wrongDelete.status).toBe(404);
+    expect(storage.has("acme/files/file_other-loose.txt")).toBe(true);
+
+    const downloaded = await app.request("/desk/files/file_attachment/content");
+    expect(downloaded.status).toBe(200);
+    await expect(downloaded.text()).resolves.toBe("proposal");
+
+    const deleted = await app.request("/desk/Note/My%20Note/files/file_attachment/delete", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(deleted.status).toBe(303);
+    expect(deleted.headers.get("location")).toBe("/desk/Note/My%20Note");
+    expect(storage.has("acme/files/file_attachment-proposal.txt")).toBe(false);
+
+    const afterDelete = await app.request("/desk/Note/My%20Note");
+    await expect(afterDelete.text()).resolves.toContain("No files attached.");
   });
 
   it("rejects oversized Desk file uploads before parsing multipart content", async () => {

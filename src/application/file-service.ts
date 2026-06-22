@@ -247,6 +247,21 @@ export class FileService {
     };
   }
 
+  async get(actor: Actor, name: string, tenantId?: string): Promise<FileDashboardEntry> {
+    const snapshot = await this.queries.getDocument(
+      actor,
+      this.fileDoctype,
+      name,
+      tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID
+    );
+    const doctype = this.registry.get(this.fileDoctype);
+    return {
+      ...fileDashboardEntry(snapshot),
+      editable: can(actor, doctype, "metadata", snapshot),
+      deletable: can(actor, doctype, "delete", snapshot)
+    };
+  }
+
   async updateMetadata(command: UpdateFileMetadataCommand): Promise<DocumentSnapshot> {
     const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
     const current = await this.queries.getDocument(command.actor, this.fileDoctype, command.name, tenantId);
