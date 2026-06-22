@@ -75,6 +75,50 @@ describe("CloudFrappe Worker realtime", () => {
     expect(fetches).toHaveLength(1);
   });
 
+  it("routes same-user websocket subscriptions to the user topic hub", async () => {
+    const topics: string[] = [];
+    const fetches: Request[] = [];
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => owner,
+      realtime: { namespace: () => fakeRealtimeNamespace(topics, fetches) }
+    });
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/api/realtime?topic=user:acme:owner%40example.com", {
+        headers: { upgrade: "websocket" }
+      }),
+      { DB: fakeD1(), AGGREGATES: fakeAggregateNamespace() },
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(101);
+    expect(topics).toEqual(["user:acme:owner%40example.com"]);
+    expect(fetches).toHaveLength(1);
+  });
+
+  it("rejects websocket subscriptions for another user's realtime room", async () => {
+    const topics: string[] = [];
+    const fetches: Request[] = [];
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => owner,
+      realtime: { namespace: () => fakeRealtimeNamespace(topics, fetches) }
+    });
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/api/realtime?topic=user:acme:manager%40example.com", {
+        headers: { upgrade: "websocket" }
+      }),
+      { DB: fakeD1(), AGGREGATES: fakeAggregateNamespace() },
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(403);
+    expect(topics).toEqual([]);
+    expect(fetches).toEqual([]);
+  });
+
   it("rejects doctype realtime subscriptions from non-system actors", async () => {
     const topics: string[] = [];
     const fetches: Request[] = [];

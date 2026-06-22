@@ -127,6 +127,10 @@ export function renderDeskClientScript(): string {
     return "tenant:" + encodePart(tenantId);
   }
 
+  function userTopic(tenantId, userId) {
+    return "user:" + encodePart(tenantId) + ":" + encodePart(userId);
+  }
+
   function tenantIdFromOptions(options, label) {
     var tenantId = options && (options.tenantId || (options.document && options.document.tenantId));
     if (!tenantId) {
@@ -145,6 +149,14 @@ export function renderDeskClientScript(): string {
 
   function tenantTopicFromOptions(options) {
     return tenantTopic(tenantIdFromOptions(options, "tenant"));
+  }
+
+  function userTopicFromOptions(userId, options) {
+    var resolvedUserId = userId || (options && options.userId);
+    if (!resolvedUserId) {
+      throw new Error("userId is required for user realtime subscriptions");
+    }
+    return userTopic(tenantIdFromOptions(options, "user"), resolvedUserId);
   }
 
   function runtimeScript() {
@@ -467,6 +479,12 @@ export function renderDeskClientScript(): string {
       },
       tenantUrl: function (options) {
         return realtimeUrl(tenantTopicFromOptions(options)).toString();
+      },
+      user: function (userId, options) {
+        return new WebSocket(realtimeUrl(userTopicFromOptions(userId, options)), options && options.protocols);
+      },
+      userUrl: function (userId, options) {
+        return realtimeUrl(userTopicFromOptions(userId, options)).toString();
       },
       url: function (topic) {
         return realtimeUrl(topic).toString();

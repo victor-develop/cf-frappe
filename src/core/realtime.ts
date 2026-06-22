@@ -13,6 +13,7 @@ export interface RealtimeEvent {
 
 export type RealtimeTopicScope =
   | { readonly kind: "tenant"; readonly tenantId: string }
+  | { readonly kind: "user"; readonly tenantId: string; readonly userId: string }
   | { readonly kind: "doctype"; readonly tenantId: string; readonly doctype: string }
   | { readonly kind: "document"; readonly tenantId: string; readonly doctype: string; readonly name: string };
 
@@ -22,6 +23,10 @@ export function tenantRealtimeTopic(tenantId: string): RealtimeTopic {
 
 export function doctypeRealtimeTopic(tenantId: string, doctype: string): RealtimeTopic {
   return `doctype:${encodeTopicPart(tenantId)}:${encodeTopicPart(doctype)}`;
+}
+
+export function userRealtimeTopic(tenantId: string, userId: string): RealtimeTopic {
+  return `user:${encodeTopicPart(tenantId)}:${encodeTopicPart(userId)}`;
 }
 
 export function documentRealtimeTopic(tenantId: string, doctype: string, name: string): RealtimeTopic {
@@ -38,6 +43,13 @@ export function parseRealtimeTopic(topic: RealtimeTopic): RealtimeTopicScope | n
       kind: "doctype",
       tenantId: decodeTopicPart(parts[1] ?? ""),
       doctype: decodeTopicPart(parts[2] ?? "")
+    };
+  }
+  if (parts[0] === "user" && parts.length === 3) {
+    return {
+      kind: "user",
+      tenantId: decodeTopicPart(parts[1] ?? ""),
+      userId: decodeTopicPart(parts[2] ?? "")
     };
   }
   if (parts[0] === "document" && parts.length === 4) {
@@ -57,6 +69,8 @@ export function realtimeTopicFromScope(scope: RealtimeTopicScope): RealtimeTopic
       return tenantRealtimeTopic(scope.tenantId);
     case "doctype":
       return doctypeRealtimeTopic(scope.tenantId, scope.doctype);
+    case "user":
+      return userRealtimeTopic(scope.tenantId, scope.userId);
     case "document":
       return documentRealtimeTopic(scope.tenantId, scope.doctype, scope.name);
   }
@@ -73,6 +87,9 @@ export function canSubscribeToRealtimeTopic(actor: Actor, topic: RealtimeTopic):
   }
   if (parsed.kind === "doctype") {
     return parsed.tenantId === actorTenantId && actor.roles.includes(SYSTEM_MANAGER_ROLE);
+  }
+  if (parsed.kind === "user") {
+    return parsed.tenantId === actorTenantId && (parsed.userId === actor.id || actor.roles.includes(SYSTEM_MANAGER_ROLE));
   }
   return parsed.tenantId === actorTenantId || actor.roles.includes(SYSTEM_MANAGER_ROLE);
 }
@@ -93,6 +110,40 @@ export function realtimeEventFromDomainEvent(event: DomainEvent, snapshot: Docum
       snapshot: snapshot as unknown as JsonValue
     }
   };
+}
+
+export function realtimeUserNotificationsFromDomainEvent(event: DomainEvent): readonly RealtimeEvent[] {
+  return realtimeUserNotificationRecipients(event).map((recipientId) => ({
+    id: `${event.id}:user:${encodeTopicPart(recipientId)}`,
+    type: event.type,
+    topics: [userRealtimeTopic(event.tenantId, recipientId)],
+    tenantId: event.tenantId,
+    occurredAt: event.occurredAt,
+    payload: {
+      kind: "DocumentUserNotification",
+      eventId: event.id,
+      eventType: event.type,
+      payloadKind: event.payload.kind,
+      tenantId: event.tenantId,
+      doctype: event.doctype,
+      documentName: event.documentName,
+      actorId: event.actorId,
+      recipientId
+    }
+  }));
+}
+
+function realtimeUserNotificationRecipients(event: DomainEvent): readonly string[] {
+  switch (event.payload.kind) {
+    case "DocumentAssigned":
+    case "DocumentUnassigned":
+      return [event.payload.assigneeId];
+    case "DocumentFollowed":
+    case "DocumentUnfollowed":
+      return [event.payload.followerId];
+    default:
+      return [];
+  }
 }
 
 function encodeTopicPart(value: string): string {

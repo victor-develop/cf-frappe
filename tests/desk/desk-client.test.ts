@@ -12,6 +12,7 @@ interface DeskClientRuntime {
     readonly doctypeUrl: (doctype: string, options: { readonly tenantId: string }) => string;
     readonly documentUrl: (doctype: string, name: string, options: { readonly tenantId: string }) => string;
     readonly tenantUrl: (options: { readonly tenantId: string }) => string;
+    readonly userUrl: (userId: string, options: { readonly tenantId: string }) => string;
     readonly url: (topic: string) => string;
   };
   readonly form: {
@@ -170,6 +171,9 @@ describe("Desk client runtime", () => {
     );
     expect(runtime.realtime.tenantUrl({ tenantId: "acme:west" })).toBe(
       "wss://app.example/api/realtime?topic=tenant%3Aacme%253Awest"
+    );
+    expect(runtime.realtime.userUrl("owner@example.com", { tenantId: "acme:west" })).toBe(
+      "wss://app.example/api/realtime?topic=user%3Aacme%253Awest%3Aowner%2540example.com"
     );
   });
 

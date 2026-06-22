@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the realtime topic fan-out slice:
+As of the per-user realtime rooms slice:
 
 - Vitest files: `50`
-- Vitest cases: `374`
+- Vitest cases: `378`
 
 ## Implication
 

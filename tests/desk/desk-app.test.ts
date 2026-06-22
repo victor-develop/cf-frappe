@@ -333,6 +333,7 @@ describe("Desk app", () => {
     expect(source).toContain("root.cfFrappe");
     expect(source).toContain("form: Object.freeze");
     expect(source).toContain("documentTopic(tenantId, doctype, name)");
+    expect(source).toContain("userTopic(tenantId, userId)");
     expect(source).toContain("resourcePath(doctype, name) + \"/transition/\"");
     expect(source).toContain("new WebSocket(realtimeUrl(topic)");
     expect(() => new Function(source)).not.toThrow();

@@ -42,7 +42,7 @@ That model is powerful, but it is not event-sourcing first. cf-frappe keeps the 
 | Workflow | Workflow DocType | metadata transitions and transition events |
 | Background jobs | scheduler and queue workers | `JobRegistry`, queue dispatch/consume, Cron mapping, schedule admin, D1-backed execution history, and failed-job retry admin |
 | File attachments | File DocType plus file store | `File` metadata DocType plus R2/in-memory `FileStorage` and generated Desk file manager |
-| Realtime notifications | `publish_realtime`/Socket.IO | document commit events over Durable Object WebSocket topics with tenant, DocType, and document fan-out |
+| Realtime notifications | `publish_realtime`/Socket.IO | document commit events over Durable Object WebSocket topics with tenant, DocType, and document fan-out plus redacted user-recipient notifications |
 | Session auth | sessions | signed cookie actor resolver with env-backed Worker composition |
 | Cloudflare runtime | not native | Worker, D1, Durable Object command routing |
 | Apps | installed apps and hooks | `defineApp` manifests composed into one registry with dependency-ordered hooks |
@@ -55,7 +55,7 @@ That model is powerful, but it is not event-sourcing first. cf-frappe keeps the 
 - DocType metadata now plans and applies D1 projection-index migrations with a checksum journal, and app manifests compose DocTypes/hooks/reports/print formats, but destructive/renaming migrations, data backfills, and CLI-driven app installation are still future work.
 - Background jobs now have Queue/Cron support plus schedule admin, D1-backed execution history with API/Desk admin dashboards, manual schedule dispatch, and failed-execution retry actions, but worker pools and richer scheduler controls are not implemented.
 - Document history now exposes permissioned timeline entries with bounded event-sourced field-level old/new diffs, comment events, activity feed entries, assignment events, tag events, follower events, admin-only audit search, and deleted-document audit recovery from the event stream.
-- Realtime notifications now have Durable Object WebSocket tenant, DocType, and document topics with Desk client helpers, but presence, per-user rooms, richer Desk consumption, and durable replay are not implemented.
+- Realtime notifications now have Durable Object WebSocket tenant, DocType, and document topics plus redacted user-recipient notifications with Desk client helpers, but presence, richer Desk consumption, and durable replay are not implemented.
 - Auth providers remain adapter seams; signed cookie actor resolution exists, but full user/login management and provider-specific integrations are still future work.
 - User permissions now restrict reads, link options, link validation, and existing-document commands from event-sourced per-user grants, with admin API and Desk management over the same event stream plus model-backed grant validation.
 - File storage now has basic R2-backed attachments plus generated Desk upload/list/download/delete workflows, but multipart chunking, presigned browser uploads, virus scanning hooks, image transforms, and richer file manager views are not implemented.

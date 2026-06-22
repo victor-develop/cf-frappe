@@ -23,4 +23,46 @@ describe("document realtime hooks", () => {
       topics: ["tenant:acme", "doctype:acme:Note", "document:acme:Note:Realtime"]
     });
   });
+
+  it("publishes redacted per-user notifications for explicit user-recipient events", async () => {
+    const publisher = new InMemoryRealtimePublisher();
+    const hooks = createDocumentRealtimeHooks(publisher);
+    const services = createServices(["create-1", "assign-1"], {
+      afterCommit: async (context) => {
+        await hooks.afterCommit?.(context);
+      }
+    });
+
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Assigned Realtime" }) });
+    await services.documents.assign({
+      actor: owner,
+      doctype: "Note",
+      name: "Assigned Realtime",
+      assignee: "support@example.com",
+      expectedVersion: 1
+    });
+
+    expect(publisher.events()).toHaveLength(3);
+    expect(publisher.events()[1]).toMatchObject({
+      id: "evt_assign-1",
+      type: "NoteAssigned",
+      topics: ["tenant:acme", "doctype:acme:Note", "document:acme:Note:Assigned%20Realtime"]
+    });
+    expect(publisher.events()[2]).toMatchObject({
+      id: "evt_assign-1:user:support%40example.com",
+      type: "NoteAssigned",
+      topics: ["user:acme:support%40example.com"],
+      payload: {
+        kind: "DocumentUserNotification",
+        eventId: "evt_assign-1",
+        payloadKind: "DocumentAssigned",
+        doctype: "Note",
+        documentName: "Assigned Realtime",
+        actorId: owner.id,
+        recipientId: "support@example.com"
+      }
+    });
+    expect(JSON.stringify(publisher.events()[2]?.payload)).not.toContain("snapshot");
+    expect(JSON.stringify(publisher.events()[2]?.payload)).not.toContain('"event":');
+  });
 });
