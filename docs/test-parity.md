@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the starter CLI scaffold slice:
+As of the app manifest composition slice:
 
-- Test files: `44`
-- Vitest cases: `309`
+- Test files: `45`
+- Vitest cases: `314`
 
 ## Implication
 

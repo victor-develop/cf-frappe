@@ -1,6 +1,10 @@
 import type { ValidationIssue } from "./types";
 
 export type FrameworkErrorCode =
+  | "APP_DEPENDENCY_CYCLE"
+  | "APP_DEPENDENCY_MISSING"
+  | "APP_DUPLICATE"
+  | "APP_INVALID"
   | "DOCTYPE_NOT_FOUND"
   | "DOCTYPE_DUPLICATE"
   | "DOCTYPE_LINK_INVALID"

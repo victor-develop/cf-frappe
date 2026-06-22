@@ -1,4 +1,4 @@
-import { createRegistry, defineDocType, definePrintFormat, defineReport } from "../../src";
+import { createRegistryFromApps, defineApp, defineDocType, definePrintFormat, defineReport } from "../../src";
 
 export const Task = defineDocType({
   name: "Task",
@@ -97,7 +97,11 @@ export const TaskPrint = definePrintFormat({
   roles: ["Guest", "User", "Task Manager"]
 });
 
-export const todoRegistry = createRegistry({
+export const todoApp = defineApp({
+  name: "todos",
+  label: "Todos",
+  version: "1.0.0",
+  modules: ["Desk"],
   doctypes: [Task],
   printFormats: [TaskPrint],
   reports: [OpenTasks],
@@ -121,3 +125,5 @@ export const todoRegistry = createRegistry({
     ]
   }
 });
+
+export const todoRegistry = createRegistryFromApps([todoApp]);

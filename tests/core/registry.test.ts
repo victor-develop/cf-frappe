@@ -19,12 +19,18 @@ describe("registry", () => {
   });
 
   it("keeps hooks grouped by doctype", () => {
-    const registry = createRegistry();
+    const registry = createRegistry({ doctypes: [defineDocType({ name: "Note", fields: [] })] });
     const hook = {};
     registry.registerHooks("Note", hook);
 
+    const hooks = registry.hooksFor("Note");
+
+    expect(hooks).toEqual([hook]);
+    expect(Object.isFrozen(hooks)).toBe(true);
+    expect(() => (hooks as unknown as unknown[]).push({})).toThrow(TypeError);
     expect(registry.hooksFor("Note")).toEqual([hook]);
     expect(registry.hooksFor("Other")).toEqual([]);
+    expect(() => registry.registerHooks("Other", {})).toThrow(FrameworkError);
   });
 
   it("allows link fields to reference doctypes registered later in the same registry", () => {

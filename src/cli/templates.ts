@@ -169,7 +169,7 @@ Run \`npm run cf:types\` after changing bindings so \`worker-configuration.d.ts\
 }
 
 function modelsTs(): string {
-  return `import { createRegistry, defineDocType, definePrintFormat, defineReport } from "cf-frappe";
+  return `import { createRegistryFromApps, defineApp, defineDocType, definePrintFormat, defineReport } from "cf-frappe";
 
 export const Task = defineDocType({
   name: "Task",
@@ -280,7 +280,11 @@ export const TaskPrint = definePrintFormat({
   roles: ["Guest", "User", "Task Manager"]
 });
 
-export const registry = createRegistry({
+export const taskApp = defineApp({
+  name: "tasks",
+  label: "Tasks",
+  version: "1.0.0",
+  modules: ["Desk"],
   doctypes: [Task],
   printFormats: [TaskPrint],
   reports: [OpenTasks],
@@ -294,6 +298,8 @@ export const registry = createRegistry({
     ]
   }
 });
+
+export const registry = createRegistryFromApps([taskApp]);
 `;
 }
 

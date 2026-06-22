@@ -27,6 +27,7 @@ The current slice is a working kernel:
 - Cloudflare Queue/Cron background job primitives
 - R2-backed file attachments with event-sourced `File` metadata
 - Durable Object WebSocket realtime topics for document events
+- composable app manifests for packaging DocTypes, reports, print formats, and hooks
 - installable `cf-frappe init` starter scaffold for new Cloudflare apps
 - a runnable `Task` example under `examples/todos`
 
@@ -54,6 +55,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | Database tables | D1 append-only events plus current projections |
 | Migrations | metadata-planned D1 migrations with applied checksum journal |
 | Concurrency boundary | Durable Object command coordinator per aggregate stream |
+| Apps | `defineApp(...)` manifests composed through `createRegistryFromApps(...)` |
 | App starter | `cf-frappe init` scaffold with Worker, D1, Durable Object, and signed-session wiring |
 
 See [docs/frappe-assessment.md](docs/frappe-assessment.md) for the assessment and parity map.
@@ -96,7 +98,7 @@ npm run dev
 ## Define A Model
 
 ```ts
-import { createRegistry, defineDocType, definePrintFormat, defineReport, fileDocType } from "cf-frappe";
+import { createRegistryFromApps, defineApp, defineDocType, definePrintFormat, defineReport, fileDocType } from "cf-frappe";
 
 export const Project = defineDocType({
   name: "Project",
@@ -188,11 +190,26 @@ export const TaskPrint = definePrintFormat({
   roles: ["User"]
 });
 
-export const registry = createRegistry({
+export const projectApp = defineApp({
+  name: "projects",
+  label: "Projects",
+  version: "1.0.0",
+  modules: ["Projects"],
   doctypes: [Project, Task, fileDocType],
   printFormats: [TaskPrint],
   reports: [OpenTasks]
 });
+
+export const registry = createRegistryFromApps([projectApp]);
+```
+
+Apps can depend on other apps, and dependency order controls hook order while still letting cross-app DocType links resolve in one registry:
+
+```ts
+const crm = defineApp({ name: "crm", doctypes: [Customer] });
+const sales = defineApp({ name: "sales", dependencies: ["crm"], doctypes: [Invoice] });
+
+export const registry = createRegistryFromApps([sales, crm]);
 ```
 
 ## Expose It On Workers
@@ -692,11 +709,11 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 309 tests across schema, permissions, signed sessions, user permissions, events, registry, services, naming series, document lifecycle, document timelines and diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, saved user filters, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, print templates, print letterheads, reports, report summaries, report charts, report exports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, D1 schema planning/migration application, and CLI starter scaffolding.
+Current suite: 314 tests across app manifests, schema, permissions, signed sessions, user permissions, events, registry, services, naming series, document lifecycle, document timelines and diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, saved user filters, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, print templates, print letterheads, reports, report summaries, report charts, report exports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, D1 schema planning/migration application, and CLI starter scaffolding.
 
 ## Status
 
-This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, permissioned document timelines with field diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, signed session actor resolution, event-sourced user permissions with admin API/Desk management, saved user filters, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, report charts/exports, custom print templates, reusable letterheads, Durable Object realtime topics, and an initial starter CLI exist, but richer chart controls, durable job dashboards, richer realtime presence, full user/login management, advanced file workflows, richer app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
+This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, permissioned document timelines with field diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, signed session actor resolution, event-sourced user permissions with admin API/Desk management, app manifest composition, saved user filters, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, report charts/exports, custom print templates, reusable letterheads, Durable Object realtime topics, and an initial starter CLI exist, but richer chart controls, durable job dashboards, richer realtime presence, full user/login management, advanced file workflows, CLI-managed app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
 
 ## References
 

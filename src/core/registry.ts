@@ -1,8 +1,11 @@
+import { assertAppName, assertAppNames } from "./app-name";
+import { resolveAppDependencyOrder } from "./app-graph";
 import { FrameworkError } from "./errors";
 import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-format";
 import { assertPrintFormatMatchesDocType, assertPrintLetterheadValid } from "./print-format";
 import type { ReportDefinition } from "./reports";
 import { assertReportMatchesDocType } from "./reports";
+import type { InstalledAppDefinition } from "./app";
 import type {
   DocTypeDefinition,
   DocumentData,
@@ -32,6 +35,7 @@ export interface DocumentHooks {
 }
 
 export interface RegistryOptions {
+  readonly apps?: readonly InstalledAppDefinition[];
   readonly doctypes?: readonly DocTypeDefinition[];
   readonly letterheads?: readonly PrintLetterheadDefinition[];
   readonly printFormats?: readonly PrintFormatDefinition[];
@@ -40,13 +44,17 @@ export interface RegistryOptions {
 }
 
 export class ModelRegistry {
+  private readonly apps = new Map<string, InstalledAppDefinition>();
   private readonly doctypes = new Map<string, DocTypeDefinition>();
   private readonly letterheads = new Map<string, PrintLetterheadDefinition>();
   private readonly printFormats = new Map<string, PrintFormatDefinition>();
   private readonly reports = new Map<string, ReportDefinition>();
-  private readonly hooks = new Map<string, DocumentHooks[]>();
+  private readonly hooks = new Map<string, readonly DocumentHooks[]>();
 
   constructor(options: RegistryOptions = {}) {
+    for (const app of resolveAppDependencyOrder(options.apps ?? [])) {
+      this.registerApp(app);
+    }
     for (const doctype of options.doctypes ?? []) {
       this.putDocType(doctype);
     }
@@ -65,6 +73,32 @@ export class ModelRegistry {
         this.registerHooks(doctype, hook);
       }
     }
+  }
+
+  registerApp(app: InstalledAppDefinition): void {
+    assertAppName(app.name);
+    assertAppNames(app.dependencies ?? []);
+    for (const dependencyName of app.dependencies ?? []) {
+      if (!this.apps.has(dependencyName)) {
+        throw new FrameworkError(
+          "APP_DEPENDENCY_MISSING",
+          `App '${app.name}' depends on missing app '${dependencyName}'`,
+          { status: 400 }
+        );
+      }
+    }
+    if (this.apps.has(app.name)) {
+      throw new FrameworkError("APP_DUPLICATE", `App '${app.name}' is already registered`, {
+        status: 409
+      });
+    }
+    this.apps.set(app.name, Object.freeze({
+      name: app.name,
+      ...(app.label === undefined ? {} : { label: app.label }),
+      ...(app.version === undefined ? {} : { version: app.version }),
+      modules: Object.freeze([...(app.modules ?? [])]),
+      dependencies: Object.freeze([...(app.dependencies ?? [])])
+    }));
   }
 
   registerDocType(doctype: DocTypeDefinition): void {
@@ -159,7 +193,12 @@ export class ModelRegistry {
   }
 
   registerHooks(doctype: string, hooks: DocumentHooks): void {
-    this.hooks.set(doctype, [...(this.hooks.get(doctype) ?? []), hooks]);
+    if (!this.doctypes.has(doctype)) {
+      throw new FrameworkError("DOCTYPE_NOT_FOUND", `DocType '${doctype}' is not registered`, {
+        status: 404
+      });
+    }
+    this.hooks.set(doctype, Object.freeze([...(this.hooks.get(doctype) ?? []), hooks]));
   }
 
   get(doctype: string): DocTypeDefinition {
@@ -178,6 +217,10 @@ export class ModelRegistry {
 
   list(): readonly DocTypeDefinition[] {
     return [...this.doctypes.values()].sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  listApps(): readonly InstalledAppDefinition[] {
+    return Object.freeze([...this.apps.values()]);
   }
 
   getReport(reportName: string): ReportDefinition {
@@ -223,10 +266,12 @@ export class ModelRegistry {
   }
 
   hooksFor(doctype: string): readonly DocumentHooks[] {
-    return this.hooks.get(doctype) ?? [];
+    return this.hooks.get(doctype) ?? emptyHooks;
   }
 }
 
 export function createRegistry(options: RegistryOptions = {}): ModelRegistry {
   return new ModelRegistry(options);
 }
+
+const emptyHooks: readonly DocumentHooks[] = Object.freeze([]);
