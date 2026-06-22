@@ -37,7 +37,8 @@ describe("cf-frappe CLI scaffold", () => {
       ".dev.vars.example",
       "README.md",
       "public/assets/task-form.js",
-      "src/models.ts",
+      "src/apps/tasks.ts",
+      "src/apps/index.ts",
       "src/worker.ts",
       "migrations/0001_cf_frappe_core.sql",
       "migrations/0002_cf_frappe_job_executions.sql",
@@ -69,8 +70,17 @@ describe("cf-frappe CLI scaffold", () => {
     await expect(readFile(join(target, "src/worker.ts"), "utf8")).resolves.toContain(
       "type Env = Cloudflare.Env & CloudFrappeEnv"
     );
-    await expect(readFile(join(target, "src/models.ts"), "utf8")).resolves.toContain(
+    await expect(readFile(join(target, "src/worker.ts"), "utf8")).resolves.toContain(
+      'import { registry } from "./apps"'
+    );
+    await expect(readFile(join(target, "src/apps/tasks.ts"), "utf8")).resolves.toContain(
       "defineClientScript"
+    );
+    await expect(readFile(join(target, "src/apps/index.ts"), "utf8")).resolves.toContain(
+      "/* cf-frappe app imports:start */"
+    );
+    await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
+      "npx cf-frappe install @acme/cf-frappe-crm"
     );
     await expect(readFile(join(target, "public/assets/task-form.js"), "utf8")).resolves.toContain(
       "window.cfFrappe.form.on"
@@ -125,11 +135,96 @@ describe("cf-frappe CLI scaffold", () => {
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain("# existing");
   });
 
+  it("wires installed app modules into generated app registries", async () => {
+    const target = join(tempRoot, "installable");
+    await scaffoldProject({
+      targetDirectory: target,
+      cfFrappeVersion: "0.1.0",
+      nodeTypesVersion: "^26.0.0",
+      typescriptVersion: "^5.7.2",
+      wranglerVersion: "^4.103.0"
+    });
+
+    const stdout = textBuffer();
+    const stderr = textBuffer();
+    const exitCode = await runCli(["install", "@acme/cf-frappe-crm", "--export", "crmApp", "--as", "crm"], {
+      cwd: () => target,
+      stdout,
+      stderr
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stderr.text()).toBe("");
+    expect(stdout.text()).toContain("Wired @acme/cf-frappe-crm as crm into src/apps/index.ts");
+    await expect(readFile(join(target, "src/apps/index.ts"), "utf8")).resolves.toContain(
+      'import { crmApp as crm } from "@acme/cf-frappe-crm";'
+    );
+    await expect(readFile(join(target, "src/apps/index.ts"), "utf8")).resolves.toContain("  crm,");
+
+    await writeFile(
+      join(target, "src/custom-apps.ts"),
+      [
+        'import { createRegistryFromApps } from "cf-frappe";',
+        "/* cf-frappe app imports:start */",
+        "/* cf-frappe app imports:end */",
+        "",
+        "export const installedApps = [",
+        "  /* cf-frappe apps:start */",
+        "  /* cf-frappe apps:end */",
+        "] as const;",
+        "",
+        "export const registry = createRegistryFromApps(installedApps);",
+        ""
+      ].join("\n")
+    );
+    const customStdout = textBuffer();
+    const custom = await runCli(["install", "@acme/cf-frappe-helpdesk", "--registry", "src/custom-apps.ts"], {
+      cwd: () => target,
+      stdout: customStdout,
+      stderr: textBuffer()
+    });
+    expect(custom).toBe(0);
+    expect(customStdout.text()).toContain(
+      "Wired @acme/cf-frappe-helpdesk as cfFrappeHelpdeskApp into src/custom-apps.ts"
+    );
+    await expect(readFile(join(target, "src/custom-apps.ts"), "utf8")).resolves.toContain(
+      'import cfFrappeHelpdeskApp from "@acme/cf-frappe-helpdesk";'
+    );
+    await expect(readFile(join(target, "src/custom-apps.ts"), "utf8")).resolves.toContain(
+      "  cfFrappeHelpdeskApp,"
+    );
+
+    const duplicateErr = textBuffer();
+    const duplicate = await runCli(["install", "@acme/cf-frappe-crm"], {
+      cwd: () => target,
+      stdout: textBuffer(),
+      stderr: duplicateErr
+    });
+    expect(duplicate).toBe(1);
+    expect(duplicateErr.text()).toContain("already installed");
+
+    await writeFile(join(target, "src/bad-apps.ts"), "export const installedApps = [];\n");
+    const invalidErr = textBuffer();
+    const invalidRegistry = await runCli(["install", "@acme/cf-frappe-bad", "--registry", "src/bad-apps.ts"], {
+      cwd: () => target,
+      stdout: textBuffer(),
+      stderr: invalidErr
+    });
+    expect(invalidRegistry).toBe(1);
+    expect(invalidErr.text()).toContain("App registry install markers are invalid");
+  });
+
   it("parses init commands and reports next steps", async () => {
     expect(parseCliArgs(["init", "demo", "--force"])).toEqual({
       kind: "init",
       targetDirectory: "demo",
       force: true
+    });
+    expect(parseCliArgs(["install", "@acme/cf-frappe-crm", "--export", "crmApp", "--as", "crm"])).toEqual({
+      kind: "install",
+      moduleSpecifier: "@acme/cf-frappe-crm",
+      exportName: "crmApp",
+      localName: "crm"
     });
 
     const stdout = textBuffer();

@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the event-sourced user profile slice:
+As of the CLI app install wiring slice:
 
 - Vitest files: `59`
-- Vitest cases: `460`
+- Vitest cases: `461`
 
 ## Implication
 

@@ -23,7 +23,8 @@ export function starterProjectFiles(input: StarterProjectTemplateInput): readonl
     { path: ".dev.vars.example", contents: devVarsExample() },
     { path: "README.md", contents: readme(input) },
     { path: "public/assets/task-form.js", contents: taskFormJs() },
-    { path: "src/models.ts", contents: modelsTs() },
+    { path: "src/apps/tasks.ts", contents: taskAppTs() },
+    { path: "src/apps/index.ts", contents: appsIndexTs() },
     { path: "src/worker.ts", contents: workerTs() },
     { path: "migrations/0001_cf_frappe_core.sql", contents: coreMigrationSql() },
     { path: "migrations/0002_cf_frappe_job_executions.sql", contents: jobExecutionMigrationSql() },
@@ -155,7 +156,17 @@ npm run dev
 \`\`\`
 
 Open \`/desk\` for the generated Desk UI or \`/api/meta/doctypes/Task\` for the metadata API. The starter falls back to a read-only guest actor when no signed session cookie is present.
-Client scripts live under \`public/assets\`; add them with \`defineClientScript(...)\` in \`src/models.ts\`.
+Client scripts live under \`public/assets\`; add them with \`defineClientScript(...)\` in files under \`src/apps\`.
+
+## Apps
+
+The starter keeps installed app manifests in \`src/apps/index.ts\`. After installing an app package with npm, wire it into the registry with:
+
+\`\`\`bash
+npx cf-frappe install @acme/cf-frappe-crm
+\`\`\`
+
+Use \`--export <name>\` for named exports and \`--as <localName>\` when you want a specific local identifier.
 
 ## Deploy
 
@@ -175,8 +186,8 @@ Run \`npm run cf:types\` after changing bindings so \`worker-configuration.d.ts\
 `;
 }
 
-function modelsTs(): string {
-  return `import { createRegistryFromApps, defineApp, defineClientScript, defineDocType, definePrintFormat, defineReport } from "cf-frappe";
+function taskAppTs(): string {
+  return `import { defineApp, defineClientScript, defineDocType, definePrintFormat, defineReport } from "cf-frappe";
 
 export const Task = defineDocType({
   name: "Task",
@@ -313,8 +324,22 @@ export const taskApp = defineApp({
     ]
   }
 });
+`;
+}
 
-export const registry = createRegistryFromApps([taskApp]);
+function appsIndexTs(): string {
+  return `import { createRegistryFromApps } from "cf-frappe";
+/* cf-frappe app imports:start */
+import { taskApp } from "./tasks";
+/* cf-frappe app imports:end */
+
+export const installedApps = [
+  /* cf-frappe apps:start */
+  taskApp,
+  /* cf-frappe apps:end */
+] as const;
+
+export const registry = createRegistryFromApps(installedApps);
 `;
 }
 
@@ -326,7 +351,7 @@ function workerTs(): string {
   type Actor,
   type CloudFrappeEnv
 } from "cf-frappe";
-import { registry } from "./models";
+import { registry } from "./apps";
 
 type Env = Cloudflare.Env & CloudFrappeEnv;
 
