@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the event-sourced role catalog administration slice:
+As of the catalog-backed account role validation slice:
 
 - Vitest files: `57`
-- Vitest cases: `443`
+- Vitest cases: `445`
 
 ## Implication
 

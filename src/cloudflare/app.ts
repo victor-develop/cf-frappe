@@ -15,6 +15,7 @@ import { SavedReportService } from "../application/saved-report-service";
 import { UserAccountService } from "../application/user-account-service";
 import { UserPermissionService } from "../application/user-permission-service";
 import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator";
+import { RoleCatalogUserRoleValidator } from "../application/user-role-validator";
 import type { DocumentCommandExecutor } from "../application/document-service";
 import { FileService } from "../application/file-service";
 import { webCryptoPbkdf2PasswordHasher } from "../adapters/crypto";
@@ -95,6 +96,7 @@ export interface CloudFrappeAuthOptions<TEnv extends CloudFrappeEnv = CloudFrapp
   readonly clock?: Clock;
   readonly ids?: IdGenerator;
   readonly adminRoles?: readonly string[];
+  readonly validateRolesWithCatalog?: boolean;
 }
 
 export interface CloudFrappeJobOptions<
@@ -216,13 +218,17 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     events,
     validator: new ModelBackedUserPermissionGrantValidator({ registry: options.registry, events })
   });
+  const roleValidator = options.auth?.validateRolesWithCatalog
+    ? new RoleCatalogUserRoleValidator({ events })
+    : undefined;
   const userAccounts = options.auth
     ? new UserAccountService({
         events,
         passwords: options.auth.passwords ?? webCryptoPbkdf2PasswordHasher(),
         ...(options.auth.clock === undefined ? {} : { clock: options.auth.clock }),
         ...(options.auth.ids === undefined ? {} : { ids: options.auth.ids }),
-        ...(options.auth.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
+        ...(options.auth.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles }),
+        ...(roleValidator === undefined ? {} : { roleValidator })
       })
     : undefined;
   const restrictedQueries = new QueryService({ registry: options.registry, projections, userPermissions });

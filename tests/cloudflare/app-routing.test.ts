@@ -187,6 +187,61 @@ describe("CloudFrappe Worker routing", () => {
     await expect(desk.text()).resolves.toContain("Create Role");
   });
 
+  it("can validate account roles against the Worker role catalog", async () => {
+    const worker = createCloudFrappeWorker<CloudFrappeAuthTestEnv>({
+      registry: createTestRegistry(),
+      actor: () => ({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" }),
+      auth: {
+        sessionSecret: (env) => env.SESSION_SECRET,
+        sessionMaxAgeSeconds: 60,
+        secure: false,
+        validateRolesWithCatalog: true,
+        passwords: deterministicPasswords(),
+        ids: deterministicIds(["account-1"])
+      }
+    });
+    const env = { DB: fakeEventD1(), AGGREGATES: fakeNamespace(), SESSION_SECRET: "edge-secret" };
+
+    await worker.fetch!(
+      cfRequest("http://localhost/api/roles/User", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ expectedVersion: 0 })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+
+    const invalid = await worker.fetch!(
+      cfRequest("http://localhost/api/users/ghost%40example.com", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: "secret-123", roles: ["Ghost"] })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(invalid.status).toBe(422);
+    await expect(invalid.json()).resolves.toMatchObject({
+      error: {
+        code: "VALIDATION_FAILED",
+        issues: [{ field: "roles", code: "role_not_found" }]
+      }
+    });
+
+    const valid = await worker.fetch!(
+      cfRequest("http://localhost/api/users/owner%40example.com", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: "secret-123", roles: ["User"] })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(valid.status).toBe(201);
+    await expect(valid.json()).resolves.toMatchObject({ data: { roles: ["User"] } });
+  });
+
   it("supports env-backed signed-session actor resolvers in the Worker factory", async () => {
     const cookie = await createSignedSessionCookie(owner, {
       secret: "edge-secret",

@@ -1,5 +1,7 @@
 import {
   InMemoryEventStore,
+  RoleCatalogUserRoleValidator,
+  RoleService,
   SYSTEM_MANAGER_ROLE,
   UserAccountService,
   deterministicIds,
@@ -196,6 +198,69 @@ describe("UserAccountService", () => {
     await userAccounts.disable({ actor: admin, userId: "owner@example.com", expectedVersion: 3 });
     await expect(userAccounts.resolveSessionActor(third.actor, third.account.version)).rejects.toMatchObject({
       code: "PERMISSION_DENIED"
+    });
+  });
+
+  it("can validate assigned account roles against the event-sourced role catalog", async () => {
+    const events = new InMemoryEventStore();
+    const roles = new RoleService({
+      events,
+      ids: deterministicIds(["user-role", "auditor-role"]),
+      clock: fixedClock("2026-01-02T00:00:00.000Z")
+    });
+    await roles.create({ actor: admin, role: "Task Manager", expectedVersion: 0 });
+    await roles.create({ actor: admin, role: "Auditor", enabled: false, expectedVersion: 1 });
+    const userAccounts = new UserAccountService({
+      events,
+      passwords: deterministicPasswords(),
+      ids: deterministicIds(["create-1"]),
+      clock: fixedClock("2026-01-02T00:00:00.000Z"),
+      roleValidator: new RoleCatalogUserRoleValidator({ events })
+    });
+
+    await expect(
+      userAccounts.create({
+        actor: admin,
+        userId: "missing@example.com",
+        password: "secret-123",
+        roles: ["Ghost"]
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [{ field: "roles", code: "role_not_found" }]
+    });
+    await expect(
+      userAccounts.create({
+        actor: admin,
+        userId: "disabled@example.com",
+        password: "secret-123",
+        roles: ["Auditor"]
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [{ field: "roles", code: "role_disabled" }]
+    });
+
+    const created = await userAccounts.create({
+      actor: admin,
+      userId: "owner@example.com",
+      password: "secret-123",
+      roles: [" Task   Manager "]
+    });
+    expect(created).toMatchObject({ roles: ["Task Manager"], version: 1 });
+    await expect(events.readStream(userAccountsStream("acme", "owner@example.com"))).resolves.toMatchObject([
+      { payload: { kind: "UserAccountCreated", roles: ["Task Manager"] } }
+    ]);
+    await expect(
+      userAccounts.changeRoles({
+        actor: admin,
+        userId: "owner@example.com",
+        roles: ["Ghost"],
+        expectedVersion: 1
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [{ field: "roles", code: "role_not_found" }]
     });
   });
 

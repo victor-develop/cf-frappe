@@ -1,3 +1,4 @@
+import { normalizeRoleName } from "./roles";
 import type { Actor, DomainEvent, TenantId } from "./types";
 
 export interface UserAccountState {
@@ -129,7 +130,7 @@ export function publicUserAccount(state: UserAccountState): UserAccount {
 }
 
 export function normalizeUserRoles(roles: readonly string[]): readonly string[] {
-  return uniqueSorted(roles.map((role) => role.trim()).filter(Boolean));
+  return uniqueSorted(roles.map(normalizeRoleName).filter(Boolean));
 }
 
 function uniqueSorted(values: readonly string[]): readonly string[] {

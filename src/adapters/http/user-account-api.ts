@@ -23,8 +23,9 @@ export function createUserAccountApi(options: UserAccountApiOptions): Hono {
 
   app.post("/api/users/:userId", async (c) => {
     const actor = await options.actor(c.req.raw);
-    const body = await readJsonObject(c.req.raw, { maxJsonBytes });
     const tenantId = c.req.query("tenant");
+    options.userAccounts.authorizeAdministration(actor, tenantId);
+    const body = await readJsonObject(c.req.raw, { maxJsonBytes });
     const data = await options.userAccounts.create({
       actor,
       userId: c.req.param("userId"),
@@ -41,8 +42,9 @@ export function createUserAccountApi(options: UserAccountApiOptions): Hono {
 
   app.put("/api/users/:userId/password", async (c) => {
     const actor = await options.actor(c.req.raw);
-    const body = await readJsonObject(c.req.raw, { maxJsonBytes });
     const tenantId = c.req.query("tenant");
+    options.userAccounts.authorizeAdministration(actor, tenantId);
+    const body = await readJsonObject(c.req.raw, { maxJsonBytes });
     const data = await options.userAccounts.changePassword({
       actor,
       userId: c.req.param("userId"),
@@ -56,8 +58,9 @@ export function createUserAccountApi(options: UserAccountApiOptions): Hono {
 
   app.put("/api/users/:userId/roles", async (c) => {
     const actor = await options.actor(c.req.raw);
-    const body = await readJsonObject(c.req.raw, { maxJsonBytes });
     const tenantId = c.req.query("tenant");
+    options.userAccounts.authorizeAdministration(actor, tenantId);
+    const body = await readJsonObject(c.req.raw, { maxJsonBytes });
     const data = await options.userAccounts.changeRoles({
       actor,
       userId: c.req.param("userId"),
@@ -71,8 +74,9 @@ export function createUserAccountApi(options: UserAccountApiOptions): Hono {
 
   app.post("/api/users/:userId/enable", async (c) => {
     const actor = await options.actor(c.req.raw);
-    const body = await readJsonObject(c.req.raw, { allowEmpty: true, maxJsonBytes });
     const tenantId = c.req.query("tenant");
+    options.userAccounts.authorizeAdministration(actor, tenantId);
+    const body = await readJsonObject(c.req.raw, { allowEmpty: true, maxJsonBytes });
     const data = await options.userAccounts.enable({
       actor,
       userId: c.req.param("userId"),
@@ -85,8 +89,9 @@ export function createUserAccountApi(options: UserAccountApiOptions): Hono {
 
   app.post("/api/users/:userId/disable", async (c) => {
     const actor = await options.actor(c.req.raw);
-    const body = await readJsonObject(c.req.raw, { allowEmpty: true, maxJsonBytes });
     const tenantId = c.req.query("tenant");
+    options.userAccounts.authorizeAdministration(actor, tenantId);
+    const body = await readJsonObject(c.req.raw, { allowEmpty: true, maxJsonBytes });
     const data = await options.userAccounts.disable({
       actor,
       userId: c.req.param("userId"),

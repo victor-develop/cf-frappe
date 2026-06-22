@@ -21,6 +21,7 @@ import { systemClock, type Clock } from "../ports/clock";
 import type { EventStore } from "../ports/event-store";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator";
 import type { PasswordHasher } from "../ports/password-hasher";
+import type { UserRoleValidator } from "./user-role-validator";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -30,6 +31,7 @@ export interface UserAccountServiceOptions {
   readonly ids?: IdGenerator;
   readonly clock?: Clock;
   readonly adminRoles?: readonly string[];
+  readonly roleValidator?: UserRoleValidator;
 }
 
 export interface CreateUserAccountCommand {
@@ -87,6 +89,7 @@ export class UserAccountService {
   private readonly ids: IdGenerator;
   private readonly clock: Clock;
   private readonly adminRoles: readonly string[];
+  private readonly roleValidator: UserRoleValidator | undefined;
 
   constructor(options: UserAccountServiceOptions) {
     this.events = options.events;
@@ -94,6 +97,7 @@ export class UserAccountService {
     this.ids = options.ids ?? cryptoIdGenerator;
     this.clock = options.clock ?? systemClock;
     this.adminRoles = options.adminRoles ?? [SYSTEM_MANAGER_ROLE];
+    this.roleValidator = options.roleValidator;
   }
 
   async create(command: CreateUserAccountCommand): Promise<UserAccount> {
@@ -108,6 +112,7 @@ export class UserAccountService {
     if (state.exists) {
       throw conflict(`User account '${userId}' already exists`);
     }
+    await this.validateRoles(tenantId, roles);
     const passwordHash = await this.passwords.hash(password);
     const saved = await this.appendEvent({
       tenantId,
@@ -173,6 +178,7 @@ export class UserAccountService {
     const roles = normalizeRequiredRoles(command.roles);
     const state = await this.existingStateFor(tenantId, userId);
     ensureExpectedVersion(state, command.expectedVersion);
+    await this.validateRoles(tenantId, roles);
     if (arrayEquals(state.roles, roles)) {
       return publicUserAccount(state);
     }
@@ -316,6 +322,10 @@ export class UserAccountService {
     if (!this.adminRoles.some((role) => actor.roles.includes(role))) {
       throw permissionDenied(`Actor '${actor.id}' cannot manage user accounts`);
     }
+  }
+
+  private async validateRoles(tenantId: TenantId, roles: readonly string[]): Promise<void> {
+    await this.roleValidator?.validateRoles({ tenantId, roles });
   }
 }
 

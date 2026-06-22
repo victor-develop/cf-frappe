@@ -142,6 +142,14 @@ describe("auth and user account api", () => {
     expect(denied.status).toBe(403);
     await expect(denied.json()).resolves.toMatchObject({ error: { code: "PERMISSION_DENIED" } });
 
+    const deniedMalformedWrite = await app.request("/api/users/owner%40example.com/roles", {
+      method: "PUT",
+      headers: { ...adminHeaders, "x-cf-frappe-roles": "User" },
+      body: "{"
+    });
+    expect(deniedMalformedWrite.status).toBe(403);
+    await expect(deniedMalformedWrite.json()).resolves.toMatchObject({ error: { code: "PERMISSION_DENIED" } });
+
     const oversized = await app.request("/api/auth/login", {
       method: "POST",
       headers: { "content-type": "application/json", "content-length": "99" },
