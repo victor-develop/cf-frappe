@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Cloudflare Access actor resolver slice:
+As of the disabled scheduler controls slice:
 
 - Vitest files: `64`
-- Vitest cases: `519`
+- Vitest cases: `521`
 
 ## Implication
 

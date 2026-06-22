@@ -156,7 +156,10 @@ describe("job api", () => {
       queries: services.queries,
       jobSchedules: new JobScheduleService({
         registry,
-        schedules: [{ cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" }],
+        schedules: [
+          { cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" },
+          { cron: "0 3 * * *", jobName: "reports.daily", tenantId: "acme", enabled: false }
+        ],
         runner: { run: runner }
       }),
       actor: unsafeHeaderActorResolver
@@ -174,6 +177,15 @@ describe("job api", () => {
             cron: "0 2 * * *",
             jobName: "reports.daily",
             tenantId: "acme",
+            enabled: true,
+            registered: true
+          },
+          {
+            id: "2",
+            cron: "0 3 * * *",
+            jobName: "reports.daily",
+            tenantId: "acme",
+            enabled: false,
             registered: true
           }
         ]
@@ -194,6 +206,15 @@ describe("job api", () => {
           idempotencyKey: "manual:0 2 * * *:1767225600000:reports.daily"
         }
       }
+    });
+
+    const disabledRun = await app.request("/api/jobs/schedules/2/run", {
+      method: "POST",
+      headers: adminHeaders
+    });
+    expect(disabledRun.status).toBe(400);
+    await expect(disabledRun.json()).resolves.toMatchObject({
+      error: { message: "Disabled job schedules cannot be manually dispatched" }
     });
     expect(runner).toHaveBeenCalledOnce();
   });

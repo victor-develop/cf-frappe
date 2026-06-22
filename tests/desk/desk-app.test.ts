@@ -1378,6 +1378,12 @@ describe("Desk app", () => {
             jobName: "reports.daily",
             tenantId: "acme",
             payload: () => ({ scope: "daily" })
+          },
+          {
+            cron: "0 3 * * *",
+            jobName: "reports.daily",
+            tenantId: "acme",
+            enabled: false
           }
         ],
         runner: { run: runner }
@@ -1393,8 +1399,10 @@ describe("Desk app", () => {
     expect(html).toContain("0 2 * * *");
     expect(html).toContain("reports.daily");
     expect(html).toContain("acme");
+    expect(html).toContain("<th>Enabled</th>");
     expect(html).toContain("payload");
     expect(html).toContain('formaction="/desk/admin/jobs/schedules/1/run"');
+    expect(html).not.toContain('formaction="/desk/admin/jobs/schedules/2/run"');
     expect(html).not.toContain('href="/desk/admin/jobs"');
 
     const dispatched = await app.request("/desk/admin/jobs/schedules/1/run", { method: "POST" });

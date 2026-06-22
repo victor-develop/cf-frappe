@@ -763,6 +763,7 @@ export function renderJobScheduleAdmin(
         <td>${escapeHtml(schedule.cron)}</td>
         <td>${escapeHtml(schedule.jobName)}</td>
         <td>${escapeHtml(schedule.tenantId ?? (schedule.dynamic.tenantId ? "dynamic" : ""))}</td>
+        <td>${schedule.enabled ? "yes" : "no"}</td>
         <td>${schedule.registered ? "yes" : "no"}</td>
         <td>${escapeHtml(schedule.delaySeconds === undefined ? "" : String(schedule.delaySeconds))}</td>
         <td>${escapeHtml(dynamicScheduleFields(schedule))}</td>
@@ -782,8 +783,8 @@ export function renderJobScheduleAdmin(
   <section class="panel">
     <div class="table-wrap">
       <table>
-        <thead><tr><th>ID</th><th>Cron</th><th>Job</th><th>Tenant</th><th>Registered</th><th>Delay</th><th>Dynamic</th><th>Action</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="8" class="empty">No schedules configured.</td></tr>`}</tbody>
+        <thead><tr><th>ID</th><th>Cron</th><th>Job</th><th>Tenant</th><th>Enabled</th><th>Registered</th><th>Delay</th><th>Dynamic</th><th>Action</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="9" class="empty">No schedules configured.</td></tr>`}</tbody>
       </table>
     </div>
   </section>`;
@@ -800,6 +801,7 @@ function renderScheduleRunAction(scheduleId: string, dispatchable: boolean): str
 
 function dynamicScheduleFields(schedule: JobScheduleDashboard["schedules"][number]): string {
   return [
+    schedule.dynamic.enabled ? "enabled" : "",
     schedule.dynamic.tenantId ? "tenant" : "",
     schedule.dynamic.payload ? "payload" : "",
     schedule.dynamic.metadata ? "metadata" : "",

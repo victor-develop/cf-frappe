@@ -68,6 +68,31 @@ describe("CloudFrappe Worker jobs", () => {
     expect(noRetry).toHaveBeenCalledOnce();
   });
 
+  it("does not retry disabled scheduled jobs", async () => {
+    const noRetry = vi.fn();
+    const queue = new InMemoryJobQueue();
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => owner,
+      jobs: {
+        registry: createJobRegistry<CloudFrappeRuntimeServices>({
+          jobs: [{ name: "reports.daily", handler: () => undefined }]
+        }),
+        queue: () => queue,
+        schedules: [{ cron: "0 2 * * *", jobName: "reports.daily", enabled: false }]
+      }
+    });
+
+    await worker.scheduled?.(
+      { cron: "0 2 * * *", scheduledTime: Date.parse("2026-01-01T02:00:00.000Z"), noRetry },
+      { DB: fakeD1(), AGGREGATES: fakeNamespace() },
+      fakeExecutionContext()
+    );
+
+    expect(noRetry).toHaveBeenCalledOnce();
+    expect(queue.queued()).toEqual([]);
+  });
+
   it("allows transient scheduled dispatch failures to retry", async () => {
     const noRetry = vi.fn();
     const worker = createCloudFrappeWorker({

@@ -1,5 +1,6 @@
 import type { JobDispatcher } from "../application/job-dispatcher.js";
 import type { JobPayload } from "../core/jobs.js";
+import { badRequest } from "../core/errors.js";
 import type { DocumentData } from "../core/types.js";
 import type { DispatchJobCommand, JobMessage } from "../ports/job-queue.js";
 
@@ -15,6 +16,7 @@ export interface ScheduledJobContext<TEnv = unknown> {
 export interface ScheduledJobDefinition<TEnv = unknown> {
   readonly cron: string;
   readonly jobName: string;
+  readonly enabled?: boolean | ((context: ScheduledJobContext<TEnv>) => MaybePromise<boolean>);
   readonly tenantId?: string | ((context: ScheduledJobContext<TEnv>) => MaybePromise<string>);
   readonly payload?: JobPayload | ((context: ScheduledJobContext<TEnv>) => MaybePromise<JobPayload>);
   readonly metadata?: DocumentData | ((context: ScheduledJobContext<TEnv>) => MaybePromise<DocumentData>);
@@ -51,11 +53,12 @@ export async function dispatchScheduledJobs<TEnv, TResources>(
   const messages: JobMessage[] = [];
 
   for (const schedule of options.schedules.filter((item) => item.cron === options.controller.cron)) {
+    if (!(await isScheduleEnabled(schedule, context))) {
+      continue;
+    }
     messages.push(
-      await dispatchScheduledJob({
-        cron: context.cron,
-        scheduledTime: context.scheduledTime,
-        env: context.env,
+      await dispatchEnabledScheduledJob({
+        context,
         dispatcher: options.dispatcher,
         schedule
       })
@@ -74,8 +77,29 @@ export async function dispatchScheduledJob<TEnv, TResources>(
     scheduledAt: new Date(options.scheduledTime).toISOString(),
     env: options.env
   };
+  if (!(await isScheduleEnabled(options.schedule, context))) {
+    throw badRequest("Disabled job schedules cannot be dispatched");
+  }
+  return await dispatchEnabledScheduledJob({
+    context,
+    dispatcher: options.dispatcher,
+    schedule: options.schedule,
+    ...(options.idempotencyPrefix === undefined ? {} : { idempotencyPrefix: options.idempotencyPrefix }),
+    ...(options.metadata === undefined ? {} : { metadata: options.metadata })
+  });
+}
+
+async function dispatchEnabledScheduledJob<TEnv, TResources>(
+  options: {
+    readonly context: ScheduledJobContext<TEnv>;
+    readonly dispatcher: JobDispatcher<TResources>;
+    readonly schedule: ScheduledJobDefinition<TEnv>;
+    readonly idempotencyPrefix?: string;
+    readonly metadata?: DocumentData;
+  }
+): Promise<JobMessage> {
   return await options.dispatcher.dispatch(
-    await dispatchCommand(options.schedule, context, {
+    await dispatchCommand(options.schedule, options.context, {
       ...(options.idempotencyPrefix === undefined ? {} : { idempotencyPrefix: options.idempotencyPrefix }),
       ...(options.metadata === undefined ? {} : { metadata: options.metadata })
     })
@@ -124,4 +148,11 @@ async function resolveValue<TEnv, TValue>(
     return await (value as (context: ScheduledJobContext<TEnv>) => MaybePromise<TValue>)(context);
   }
   return value;
+}
+
+async function isScheduleEnabled<TEnv>(
+  schedule: ScheduledJobDefinition<TEnv>,
+  context: ScheduledJobContext<TEnv>
+): Promise<boolean> {
+  return await resolveValue(schedule.enabled, context, true);
 }

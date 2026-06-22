@@ -8,9 +8,12 @@ import {
 } from "../core/types.js";
 import type { JobMessage } from "../ports/job-queue.js";
 
+export type DynamicJobScheduleValue = (...args: never[]) => unknown;
+
 export interface JobScheduleDefinitionForAdmin {
   readonly cron: string;
   readonly jobName: string;
+  readonly enabled?: boolean | DynamicJobScheduleValue;
   readonly tenantId?: unknown;
   readonly payload?: unknown;
   readonly metadata?: unknown;
@@ -49,6 +52,7 @@ export interface JobScheduleSummary {
   readonly id: string;
   readonly cron: string;
   readonly jobName: string;
+  readonly enabled: boolean;
   readonly registered: boolean;
   readonly dispatchable: boolean;
   readonly description?: string;
@@ -56,6 +60,7 @@ export interface JobScheduleSummary {
   readonly delaySeconds?: number;
   readonly tenantId?: string;
   readonly dynamic: {
+    readonly enabled: boolean;
     readonly tenantId: boolean;
     readonly payload: boolean;
     readonly metadata: boolean;
@@ -117,6 +122,12 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
     if (summary.dynamic.tenantId) {
       throw badRequest("Dynamic tenant job schedules cannot be manually dispatched");
     }
+    if (summary.dynamic.enabled) {
+      throw badRequest("Dynamic enabled job schedules cannot be manually dispatched");
+    }
+    if (!summary.enabled) {
+      throw badRequest("Disabled job schedules cannot be manually dispatched");
+    }
     if (!summary.registered) {
       throw badRequest(`Scheduled job '${schedule.jobName}' is not registered`);
     }
@@ -152,6 +163,7 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
     const job = registered ? this.registry.get(schedule.jobName) : undefined;
     const tenantId = staticTenantId(schedule);
     const dynamic = {
+      enabled: isDynamic(schedule.enabled),
       tenantId: isDynamic(schedule.tenantId),
       payload: isDynamic(schedule.payload),
       metadata: isDynamic(schedule.metadata),
@@ -161,8 +173,14 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       id: String(index + 1),
       cron: schedule.cron,
       jobName: schedule.jobName,
+      enabled: schedule.enabled !== false,
       registered,
-      dispatchable: registered && this.canDispatch() && !dynamic.tenantId,
+      dispatchable:
+        registered &&
+        schedule.enabled !== false &&
+        this.canDispatch() &&
+        !dynamic.tenantId &&
+        !dynamic.enabled,
       ...(job?.description === undefined ? {} : { description: job.description }),
       ...(job?.retry === undefined ? {} : { retry: job.retry }),
       ...(schedule.delaySeconds === undefined ? {} : { delaySeconds: schedule.delaySeconds }),

@@ -70,6 +70,35 @@ describe("dispatchScheduledJobs", () => {
     expect(queue.queued()).toEqual([]);
   });
 
+  it("skips disabled matching cron schedules", async () => {
+    const queue = new InMemoryJobQueue();
+    const enabled = vi.fn(({ env }: { readonly env: { readonly maintenance: boolean } }) => !env.maintenance);
+    const dispatcher = new JobDispatcher({
+      registry: createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] }),
+      queue,
+      clock: fixedClock(now),
+      ids: deterministicIds(["001"])
+    });
+
+    await expect(
+      dispatchScheduledJobs({
+        controller: scheduledController("0 2 * * *", 1_767_228_400_000),
+        env: { maintenance: true },
+        dispatcher,
+        schedules: [
+          { cron: "0 2 * * *", jobName: "reports.daily", enabled: false },
+          {
+            cron: "0 2 * * *",
+            jobName: "reports.daily",
+            enabled
+          }
+        ]
+      })
+    ).resolves.toEqual([]);
+    expect(enabled).toHaveBeenCalledOnce();
+    expect(queue.queued()).toEqual([]);
+  });
+
   it("dispatches a single schedule with manual idempotency and metadata", async () => {
     const queue = new InMemoryJobQueue();
     const dispatcher = new JobDispatcher({
@@ -119,6 +148,19 @@ describe("dispatchScheduledJobs", () => {
         dispatchedBy: "admin@example.com",
         dispatchedAt: now
       }
+    });
+
+    await expect(
+      dispatchScheduledJob({
+        cron: "0 2 * * *",
+        scheduledTime,
+        env: { region: "test" },
+        dispatcher,
+        schedule: { cron: "0 2 * * *", jobName: "reports.daily", enabled: false }
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Disabled job schedules cannot be dispatched"
     });
   });
 });

@@ -302,7 +302,8 @@ describe("JobScheduleService", () => {
         {
           cron: "0 3 * * *",
           jobName: "email.digest",
-          tenantId: "other"
+          tenantId: "other",
+          enabled: false
         },
         {
           cron: "0 4 * * *",
@@ -325,6 +326,7 @@ describe("JobScheduleService", () => {
           id: "1",
           cron: "0 2 * * *",
           jobName: "reports.daily",
+          enabled: true,
           registered: true,
           dispatchable: false,
           description: "Build daily reports",
@@ -332,6 +334,7 @@ describe("JobScheduleService", () => {
           delaySeconds: 30,
           tenantId: "acme",
           dynamic: {
+            enabled: false,
             tenantId: false,
             payload: true,
             metadata: false,
@@ -377,7 +380,9 @@ describe("JobScheduleService", () => {
       schedules: [
         { cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" },
         { cron: "0 3 * * *", jobName: "missing.job", tenantId: "acme" },
-        { cron: "0 4 * * *", jobName: "reports.daily", tenantId: () => "acme" }
+        { cron: "0 4 * * *", jobName: "reports.daily", tenantId: () => "acme" },
+        { cron: "0 5 * * *", jobName: "reports.daily", tenantId: "acme", enabled: false },
+        { cron: "0 6 * * *", jobName: "reports.daily", tenantId: "acme", enabled: () => true }
       ],
       runner: { run: runner }
     });
@@ -398,6 +403,14 @@ describe("JobScheduleService", () => {
     await expect(service.dispatch(defaultAdmin, "3")).rejects.toMatchObject({
       code: "BAD_REQUEST",
       message: "Dynamic tenant job schedules cannot be manually dispatched"
+    });
+    await expect(service.dispatch(admin, "4")).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Disabled job schedules cannot be manually dispatched"
+    });
+    await expect(service.dispatch(admin, "5")).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Dynamic enabled job schedules cannot be manually dispatched"
     });
     expect(runner).not.toHaveBeenCalled();
   });
