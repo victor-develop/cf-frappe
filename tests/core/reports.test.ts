@@ -68,4 +68,55 @@ describe("reports", () => {
       })
     ).toThrow("Report 'Broken Group' group 'by_meta' cannot group by json field 'meta'");
   });
+
+  it("validates report charts against grouped numeric summaries", () => {
+    const Note = defineDocType({
+      name: "Note",
+      fields: [
+        { name: "title", type: "text" },
+        { name: "priority", type: "select", options: ["Low", "High"] }
+      ]
+    });
+
+    expect(() =>
+      defineReport({
+        name: "Broken Chart",
+        doctype: "Note",
+        columns: [{ name: "title" }],
+        charts: [{ name: "notes_chart", type: "bar", group: "missing", summary: "rows" }]
+      })
+    ).toThrow("Report 'Broken Chart' chart 'notes_chart' references unknown group 'missing'");
+
+    expect(() =>
+      defineReport({
+        name: "Broken Type Chart",
+        doctype: "Note",
+        columns: [{ name: "title" }],
+        groups: [
+          {
+            name: "by_priority",
+            field: "priority",
+            summaries: [{ name: "rows", aggregate: "count" }]
+          }
+        ],
+        charts: [{ name: "priority_chart", type: "scatter" as "bar", group: "by_priority", summary: "rows" }]
+      })
+    ).toThrow("Report 'Broken Type Chart' chart 'priority_chart' has invalid type 'scatter'");
+
+    expect(() =>
+      defineReport({
+        name: "Broken Min Chart",
+        doctype: "Note",
+        columns: [{ name: "title" }],
+        groups: [
+          {
+            name: "by_priority",
+            field: "priority",
+            summaries: [{ name: "first_title", aggregate: "min", field: "title" }]
+          }
+        ],
+        charts: [{ name: "priority_chart", type: "bar", group: "by_priority", summary: "first_title" }]
+      })
+    ).toThrow("Report 'Broken Min Chart' chart 'priority_chart' requires a numeric count, sum, or avg summary");
+  });
 });

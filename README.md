@@ -21,7 +21,7 @@ The current slice is a working kernel:
 - metadata-configured form sections, field order, and form column layout
 - metadata-configured list columns, default filters, saved user filters, filter controls, and page size
 - metadata-defined print formats for documents
-- metadata-defined reports and summaries over current projections
+- metadata-defined reports, summaries, and charts over current projections
 - Cloudflare Queue/Cron background job primitives
 - R2-backed file attachments with event-sourced `File` metadata
 - Durable Object WebSocket realtime topics for document events
@@ -44,7 +44,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | REST resources | generated `/api/resource/:doctype` routes |
 | Desk list/forms | generated `/desk` pages, list/form layouts, columns, saved filters, and filters from DocType metadata |
 | Print formats | metadata-defined printable document pages |
-| Reports | metadata-defined report columns, filters, summaries, API, and Desk pages |
+| Reports | metadata-defined report columns, filters, summaries, charts, API, and Desk pages |
 | Background jobs | `JobRegistry`, Queue producers/consumers, and Cron dispatch |
 | File attachments | `File` DocType metadata plus R2 object storage |
 | Realtime events | document commit events over Durable Object WebSocket topics |
@@ -140,6 +140,15 @@ export const OpenTasks = defineReport({
       label: "By Priority",
       field: "priority",
       summaries: [{ name: "task_count", label: "Tasks", aggregate: "count" }]
+    }
+  ],
+  charts: [
+    {
+      name: "tasks_by_priority",
+      label: "Tasks by Priority",
+      type: "bar",
+      group: "by_priority",
+      summary: "task_count"
     }
   ],
   filters: [{ name: "priority", field: "priority", type: "select" }],
@@ -377,7 +386,7 @@ const result = await services.reports.runReport(actor, "Open Tasks", {
 });
 ```
 
-HTTP clients can call `/api/report/Open%20Tasks/run?filter_priority=High`. Desk renders the same report at `/desk/reports/Open%20Tasks`. Report metadata can declare top-level summaries and grouped summaries, both computed over the filtered result set before pagination. This report slice is projection-backed and read-only; charts, exports, and custom query adapters are future report layers over the same service boundary.
+HTTP clients can call `/api/report/Open%20Tasks/run?filter_priority=High`. Desk renders the same report at `/desk/reports/Open%20Tasks`. Report metadata can declare top-level summaries, grouped summaries, and charts backed by grouped summary metrics, all computed over the filtered result set before pagination. This report slice is projection-backed and read-only; exports, richer chart controls, and custom query adapters are future report layers over the same service boundary.
 
 ## Saved List Filters
 
@@ -613,11 +622,11 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 231 tests across schema, permissions, events, registry, services, naming series, document lifecycle, document timelines, comments, assignments, saved user filters, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, reports and report summaries, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
+Current suite: 233 tests across schema, permissions, events, registry, services, naming series, document lifecycle, document timelines, comments, assignments, saved user filters, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, reports, report summaries, report charts, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
 
 ## Status
 
-This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, permissioned document timelines, comments, assignments, saved user filters, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, and Durable Object realtime topics exist, but custom print templates, charts, durable job dashboards, richer realtime presence, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
+This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, permissioned document timelines, comments, assignments, saved user filters, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, report charts, and Durable Object realtime topics exist, but custom print templates, richer chart controls, durable job dashboards, richer realtime presence, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
 
 ## References
 

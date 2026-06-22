@@ -140,6 +140,7 @@ export function renderReportView(result: ReportRunResult): string {
     .join("");
   return `${filterForm ? `<form class="panel form report-filters" method="get"><div class="fields">${filterForm}</div><div class="actions"><button class="button primary" type="submit">Run</button></div></form>` : ""}
   ${renderReportSummary(result.summary)}
+  ${renderReportCharts(result.charts)}
   ${renderReportGroups(result.groups)}
   <section class="panel">
     <div class="table-wrap">
@@ -149,6 +150,109 @@ export function renderReportView(result: ReportRunResult): string {
       </table>
     </div>
   </section>`;
+}
+
+function renderReportCharts(charts: ReportRunResult["charts"]): string {
+  if (charts.length === 0) {
+    return "";
+  }
+  return `<section class="report-charts">${charts.map(renderReportChart).join("")}</section>`;
+}
+
+function renderReportChart(chart: ReportRunResult["charts"][number]): string {
+  const points = chart.points.filter((point) => point.value !== null);
+  const svg = points.length === 0
+    ? `<p class="empty">No chart data.</p>`
+    : chart.type === "line"
+      ? renderLineChart(points, chart.label)
+      : chart.type === "pie"
+        ? renderPieChart(points, chart.label)
+        : renderBarChart(points, chart.label);
+  return `<section class="panel report-chart">
+    <h2>${escapeHtml(chart.label)}</h2>
+    ${svg}
+  </section>`;
+}
+
+function renderBarChart(points: readonly ReportRunResult["charts"][number]["points"][number][], label: string): string {
+  const width = 520;
+  const height = 220;
+  const chartHeight = 150;
+  const scale = chartScale(points);
+  const gap = 12;
+  const barWidth = Math.max(12, (width - gap * (points.length + 1)) / points.length);
+  const baseline = chartY(0, scale, chartHeight);
+  const bars = points
+    .map((point, index) => {
+      const value = point.value ?? 0;
+      const x = gap + index * (barWidth + gap);
+      const valueY = chartY(value, scale, chartHeight);
+      const y = Math.min(valueY, baseline);
+      const barHeight = Math.max(1, Math.abs(baseline - valueY));
+      return `<g>
+        <rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="3"></rect>
+        <text x="${x + barWidth / 2}" y="${Math.max(14, y - 6)}" text-anchor="middle">${escapeHtml(formatValue(value))}</text>
+        <text x="${x + barWidth / 2}" y="202" text-anchor="middle">${escapeHtml(point.label)}</text>
+      </g>`;
+    })
+    .join("");
+  return `<svg class="chart-svg chart-bar" role="img" aria-label="${escapeHtml(label)}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet">${bars}</svg>`;
+}
+
+function renderLineChart(points: readonly ReportRunResult["charts"][number]["points"][number][], label: string): string {
+  const width = 520;
+  const height = 220;
+  const scale = chartScale(points);
+  const step = points.length <= 1 ? 0 : 440 / (points.length - 1);
+  const coords = points.map((point, index) => {
+    const x = 40 + index * step;
+    const y = chartY(point.value ?? 0, scale, 140);
+    return { point, x, y };
+  });
+  const path = coords.map((coord, index) => `${index === 0 ? "M" : "L"} ${coord.x} ${coord.y}`).join(" ");
+  const markers = coords
+    .map(
+      ({ point, x, y }) => `<g>
+        <circle cx="${x}" cy="${y}" r="4"></circle>
+        <text x="${x}" y="${Math.max(14, y - 8)}" text-anchor="middle">${escapeHtml(formatValue(point.value ?? 0))}</text>
+        <text x="${x}" y="202" text-anchor="middle">${escapeHtml(point.label)}</text>
+      </g>`
+    )
+    .join("");
+  return `<svg class="chart-svg chart-line" role="img" aria-label="${escapeHtml(label)}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet"><path d="${path}"></path>${markers}</svg>`;
+}
+
+function renderPieChart(points: readonly ReportRunResult["charts"][number]["points"][number][], label: string): string {
+  const positivePoints = points.filter((point) => (point.value ?? 0) > 0);
+  const total = positivePoints.reduce((sum, point) => sum + (point.value ?? 0), 0);
+  if (total <= 0) {
+    return `<p class="empty">No chart data.</p>`;
+  }
+  let offset = 0;
+  const rings = positivePoints
+    .map((point) => {
+      const value = point.value ?? 0;
+      const dash = (value / total) * 100;
+      const circle = `<circle r="70" cx="110" cy="110" stroke-dasharray="${dash} ${100 - dash}" stroke-dashoffset="${-offset}"></circle>`;
+      offset += dash;
+      return circle;
+    })
+    .join("");
+  const legend = positivePoints
+    .map((point, index) => `<li><span class="chart-swatch chart-swatch-${index % 6}"></span>${escapeHtml(point.label)} (${escapeHtml(formatValue(point.value ?? 0))})</li>`)
+    .join("");
+  return `<div class="chart-pie-wrap"><svg class="chart-svg chart-pie" role="img" aria-label="${escapeHtml(label)}" viewBox="0 0 220 220">${rings}</svg><ul>${legend}</ul></div>`;
+}
+
+function chartScale(points: readonly ReportRunResult["charts"][number]["points"][number][]): { readonly min: number; readonly max: number } {
+  const values = points.map((point) => point.value ?? 0);
+  const min = Math.min(0, ...values);
+  const max = Math.max(0, ...values);
+  return min === max ? { min: 0, max: 1 } : { min, max };
+}
+
+function chartY(value: number, scale: { readonly min: number; readonly max: number }, height: number): number {
+  return 170 - ((value - scale.min) / (scale.max - scale.min)) * height;
 }
 
 function renderReportSummary(summary: ReportRunResult["summary"]): string {
@@ -878,6 +982,77 @@ tr:last-child td { border-bottom: 0; }
   padding: 14px 18px;
 }
 .report-group h2 { margin-bottom: 10px; font-size: 16px; }
+.report-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+.report-chart {
+  padding: 14px 18px;
+}
+.report-chart h2 { margin-bottom: 10px; font-size: 16px; }
+.chart-svg {
+  width: 100%;
+  max-height: 280px;
+}
+.chart-bar rect { fill: var(--primary); }
+.chart-bar text,
+.chart-line text {
+  fill: var(--muted);
+  font-size: 12px;
+}
+.chart-line path {
+  fill: none;
+  stroke: var(--primary);
+  stroke-width: 3;
+}
+.chart-line circle {
+  fill: var(--surface);
+  stroke: var(--primary);
+  stroke-width: 3;
+}
+.chart-pie-wrap {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) 1fr;
+  gap: 16px;
+  align-items: center;
+}
+.chart-pie {
+  transform: rotate(-90deg);
+}
+.chart-pie circle {
+  fill: none;
+  stroke-width: 45;
+  stroke: var(--primary);
+}
+.chart-pie circle:nth-child(2),
+.chart-swatch-1 { stroke: #2e7d32; background: #2e7d32; }
+.chart-pie circle:nth-child(3),
+.chart-swatch-2 { stroke: #ad1457; background: #ad1457; }
+.chart-pie circle:nth-child(4),
+.chart-swatch-3 { stroke: #ef6c00; background: #ef6c00; }
+.chart-pie circle:nth-child(5),
+.chart-swatch-4 { stroke: #00695c; background: #00695c; }
+.chart-pie circle:nth-child(6),
+.chart-swatch-5 { stroke: #6a1b9a; background: #6a1b9a; }
+.chart-pie-wrap ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.chart-pie-wrap li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.chart-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--primary);
+}
 .saved-filters {
   max-width: none;
   margin-bottom: 16px;

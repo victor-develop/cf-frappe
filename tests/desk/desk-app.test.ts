@@ -81,6 +81,8 @@ describe("Desk app", () => {
     expect(html).toContain("For reporting");
     expect(html).toContain("Total Count");
     expect(html).toContain("By Priority");
+    expect(html).toContain("Notes by Priority");
+    expect(html).toContain("chart-svg chart-bar");
   });
 
   it("renders list and create form pages", async () => {

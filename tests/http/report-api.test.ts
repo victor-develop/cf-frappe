@@ -46,6 +46,7 @@ describe("report api", () => {
         { name: "total_count", value: 7 }
       ],
       groups: [{ name: "by_priority", rows: [{ key: "High" }] }],
+      charts: [{ name: "notes_by_priority", points: [{ key: "High", value: 1 }] }],
       total: 1
     });
   });

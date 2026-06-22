@@ -42,6 +42,16 @@ describe("ReportService", () => {
           ]
         }
       ],
+      charts: [
+        {
+          name: "notes_by_priority",
+          label: "Notes by Priority",
+          type: "bar",
+          group: "by_priority",
+          summary: "note_count",
+          points: [{ key: "High", label: "High", value: 1 }]
+        }
+      ],
       total: 1
     });
   });
@@ -80,6 +90,15 @@ describe("ReportService", () => {
               { name: "total_count", value: 2 }
             ]
           }
+        ]
+      }
+    ]);
+    expect(result.charts).toMatchObject([
+      {
+        name: "notes_by_priority",
+        points: [
+          { key: "High", value: 2 },
+          { key: "Low", value: 1 }
         ]
       }
     ]);

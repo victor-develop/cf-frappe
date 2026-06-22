@@ -114,6 +114,15 @@ export const openNotesReport = defineReport({
       ]
     }
   ],
+  charts: [
+    {
+      name: "notes_by_priority",
+      label: "Notes by Priority",
+      type: "bar",
+      group: "by_priority",
+      summary: "note_count"
+    }
+  ],
   filters: [
     { name: "priority", label: "Priority", field: "priority", type: "select" },
     { name: "title", label: "Title", field: "title", type: "text", operator: "contains" }

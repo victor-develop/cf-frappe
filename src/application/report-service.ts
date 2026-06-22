@@ -4,6 +4,8 @@ import {
   assertReportMatchesDocType,
   canReadReport,
   type ReportColumnDefinition,
+  type ReportChartDefinition,
+  type ReportChartType,
   type ReportDefinition,
   type ReportGroupDefinition,
   type ReportSummaryAggregate,
@@ -39,6 +41,21 @@ export interface ReportGroupResult {
   readonly rows: readonly ReportGroupRow[];
 }
 
+export interface ReportChartPoint {
+  readonly key: JsonPrimitive;
+  readonly label: string;
+  readonly value: number | null;
+}
+
+export interface ReportChartResult {
+  readonly name: string;
+  readonly label: string;
+  readonly type: ReportChartType;
+  readonly group: string;
+  readonly summary: string;
+  readonly points: readonly ReportChartPoint[];
+}
+
 export interface ReportRunOptions {
   readonly filters?: ReportFilters;
   readonly limit?: number;
@@ -50,6 +67,7 @@ export interface ReportRunResult {
   readonly columns: readonly ReportColumnDefinition[];
   readonly summary: readonly ReportSummaryValue[];
   readonly groups: readonly ReportGroupResult[];
+  readonly charts: readonly ReportChartResult[];
   readonly rows: readonly ReportRow[];
   readonly limit: number;
   readonly offset: number;
@@ -90,12 +108,14 @@ export class ReportService {
     const filters = this.materializeFilters(report, options.filters ?? {});
     const documents = await this.listAllReadableDocuments(actor, report.doctype);
     const filtered = documents.filter((document) => matchesReportFilters(document, report, filters));
+    const groups = buildReportGroups(filtered, report.groups ?? []);
     const rows = filtered.slice(offset, offset + limit).map((document) => reportRow(document, report.columns));
     return {
       report,
       columns: report.columns,
       summary: buildReportSummary(filtered, report.summaries ?? []),
-      groups: buildReportGroups(filtered, report.groups ?? []),
+      groups,
+      charts: buildReportCharts(groups, report.charts ?? []),
       rows,
       limit,
       offset,
@@ -198,6 +218,33 @@ function buildReportGroups(
       label: group.label ?? group.name,
       field: group.field,
       rows
+    };
+  });
+}
+
+function buildReportCharts(
+  groups: readonly ReportGroupResult[],
+  charts: readonly ReportChartDefinition[]
+): readonly ReportChartResult[] {
+  return charts.map((chart) => {
+    const group = groups.find((item) => item.name === chart.group);
+    const points = (group?.rows ?? [])
+      .map((row) => {
+        const summary = row.summaries.find((item) => item.name === chart.summary);
+        return {
+          key: row.key,
+          label: row.label,
+          value: typeof summary?.value === "number" ? summary.value : null
+        };
+      })
+      .slice(0, chart.maxPoints ?? Number.POSITIVE_INFINITY);
+    return {
+      name: chart.name,
+      label: chart.label ?? chart.name,
+      type: chart.type,
+      group: chart.group,
+      summary: chart.summary,
+      points
     };
   });
 }
