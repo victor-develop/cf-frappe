@@ -1,4 +1,4 @@
-import { foldDocument, foldDocumentAssignments, foldDocumentTags } from "../core/events";
+import { foldDocument, foldDocumentAssignments, foldDocumentFollowers, foldDocumentTags } from "../core/events";
 import { can } from "../core/permissions";
 import { applyDefaults, compactData, validateDocumentData } from "../core/schema";
 import { documentStream, namingSeriesStream } from "../core/streams";
@@ -165,6 +165,26 @@ export interface UntagDocumentCommand {
   readonly metadata?: DocumentData;
 }
 
+export interface FollowDocumentCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly follower?: string;
+  readonly tenantId?: string;
+  readonly expectedVersion?: number;
+  readonly metadata?: DocumentData;
+}
+
+export interface UnfollowDocumentCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly follower?: string;
+  readonly tenantId?: string;
+  readonly expectedVersion?: number;
+  readonly metadata?: DocumentData;
+}
+
 export interface DocumentCommandExecutor {
   create(command: CreateDocumentCommand): Promise<DocumentSnapshot>;
   update(command: UpdateDocumentCommand): Promise<DocumentSnapshot>;
@@ -179,6 +199,8 @@ export interface DocumentCommandExecutor {
   unassign(command: UnassignDocumentCommand): Promise<DocumentSnapshot>;
   tag(command: TagDocumentCommand): Promise<DocumentSnapshot>;
   untag(command: UntagDocumentCommand): Promise<DocumentSnapshot>;
+  follow(command: FollowDocumentCommand): Promise<DocumentSnapshot>;
+  unfollow(command: UnfollowDocumentCommand): Promise<DocumentSnapshot>;
 }
 
 const NAMING_SERIES_DOCTYPE = "__NamingSeries";
@@ -191,6 +213,7 @@ const MAX_ACTIVITY_CHANNEL_LENGTH = 120;
 const MAX_ACTIVITY_EXTERNAL_ID_LENGTH = 256;
 const MAX_ASSIGNEE_ID_LENGTH = 320;
 const MAX_TAG_LENGTH = 80;
+const MAX_FOLLOWER_ID_LENGTH = 320;
 
 export class DocumentService implements DocumentCommandExecutor {
   private readonly registry: ModelRegistry;
@@ -594,6 +617,24 @@ export class DocumentService implements DocumentCommandExecutor {
     });
   }
 
+  async follow(command: FollowDocumentCommand): Promise<DocumentSnapshot> {
+    return this.changeFollower({
+      command,
+      eventKind: "DocumentFollowed",
+      eventType: (doctype) => doctype.events?.follow ?? `${doctype.name}Followed`,
+      alreadyDone: (followers, followerId) => followers.includes(followerId)
+    });
+  }
+
+  async unfollow(command: UnfollowDocumentCommand): Promise<DocumentSnapshot> {
+    return this.changeFollower({
+      command,
+      eventKind: "DocumentUnfollowed",
+      eventType: (doctype) => doctype.events?.unfollow ?? `${doctype.name}Unfollowed`,
+      alreadyDone: (followers, followerId) => !followers.includes(followerId)
+    });
+  }
+
   async delete(command: DeleteDocumentCommand): Promise<DocumentSnapshot> {
     const doctype = this.registry.get(command.doctype);
     const tenantId = resolveTenant(command.actor, command.tenantId);
@@ -778,6 +819,53 @@ export class DocumentService implements DocumentCommandExecutor {
       actorId: options.command.actor.id,
       occurredAt: now,
       payload: { kind: options.eventKind, tag },
+      metadata: options.command.metadata ?? {}
+    });
+    const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
+      if (!saved) {
+        throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
+      }
+      return {
+        ...existing,
+        version: saved.sequence,
+        updatedAt: saved.occurredAt
+      };
+    });
+    const [saved] = commit.events;
+    if (saved) {
+      await this.runAfterCommit(doctype, saved, commit.snapshot);
+    }
+    return commit.snapshot;
+  }
+
+  private async changeFollower(options: {
+    readonly command: FollowDocumentCommand | UnfollowDocumentCommand;
+    readonly eventKind: "DocumentFollowed" | "DocumentUnfollowed";
+    readonly eventType: (doctype: DocTypeDefinition) => string;
+    readonly alreadyDone: (followers: readonly string[], followerId: string) => boolean;
+  }): Promise<DocumentSnapshot> {
+    const doctype = this.registry.get(options.command.doctype);
+    const tenantId = resolveTenant(options.command.actor, options.command.tenantId);
+    const stream = documentStream(tenantId, doctype.name, options.command.name);
+    const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, options.command.name);
+    if (!can(options.command.actor, doctype, "follow", existing)) {
+      throw permissionDenied(`Actor '${options.command.actor.id}' cannot follow ${doctype.name}/${options.command.name}`);
+    }
+    ensureExpectedVersion(existing, options.command.expectedVersion);
+    const followerId = normalizeFollowerId(options.command.follower ?? options.command.actor.id);
+    if (options.alreadyDone(foldDocumentFollowers(events), followerId)) {
+      return existing;
+    }
+    const now = this.clock.now();
+    const event = this.newEvent({
+      tenantId,
+      stream,
+      type: options.eventType(doctype),
+      doctype: doctype.name,
+      documentName: options.command.name,
+      actorId: options.command.actor.id,
+      occurredAt: now,
+      payload: { kind: options.eventKind, followerId },
       metadata: options.command.metadata ?? {}
     });
     const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
@@ -1244,6 +1332,17 @@ function normalizeTag(tag: string): string {
   }
   if (normalized.length > MAX_TAG_LENGTH) {
     throw badRequest(`Tag exceeds ${MAX_TAG_LENGTH} characters`);
+  }
+  return normalized;
+}
+
+function normalizeFollowerId(follower: string): string {
+  const normalized = follower.trim();
+  if (normalized.length === 0) {
+    throw badRequest("Follower is required");
+  }
+  if (normalized.length > MAX_FOLLOWER_ID_LENGTH) {
+    throw badRequest(`Follower exceeds ${MAX_FOLLOWER_ID_LENGTH} characters`);
   }
   return normalized;
 }

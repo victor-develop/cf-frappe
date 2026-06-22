@@ -121,6 +121,45 @@ describe("AuditService", () => {
     });
   });
 
+  it("searches follow events by audit kind", async () => {
+    const { audit, documents } = createServices(["create-1", "follow-1", "unfollow-1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Follow Audit" }) });
+    await documents.follow({
+      actor: owner,
+      doctype: "Note",
+      name: "Follow Audit",
+      expectedVersion: 1
+    });
+    await documents.unfollow({
+      actor: owner,
+      doctype: "Note",
+      name: "Follow Audit",
+      expectedVersion: 2
+    });
+
+    const followed = await audit.search(admin, {
+      doctype: "Note",
+      name: "Follow Audit",
+      kind: "DocumentFollowed"
+    });
+    const unfollowed = await audit.search(admin, {
+      doctype: "Note",
+      name: "Follow Audit",
+      kind: "DocumentUnfollowed"
+    });
+
+    expect(followed.events).toHaveLength(1);
+    expect(followed.events[0]).toMatchObject({
+      id: "evt_follow-1",
+      payload: { kind: "DocumentFollowed", followerId: owner.id }
+    });
+    expect(unfollowed.events).toHaveLength(1);
+    expect(unfollowed.events[0]).toMatchObject({
+      id: "evt_unfollow-1",
+      payload: { kind: "DocumentUnfollowed", followerId: owner.id }
+    });
+  });
+
   it("rejects non-system managers before querying audit events", async () => {
     const { audit, documents } = createServices(["create-1"]);
     await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Private Audit" }) });

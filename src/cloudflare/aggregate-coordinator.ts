@@ -8,12 +8,14 @@ import type {
   AddDocumentCommentCommand,
   CreateDocumentCommand,
   DeleteDocumentCommand,
+  FollowDocumentCommand,
   RecordDocumentActivityCommand,
   SubmitDocumentCommand,
   TagDocumentCommand,
   TransitionDocumentCommand,
   UnassignDocumentCommand,
   UntagDocumentCommand,
+  UnfollowDocumentCommand,
   UpdateDocumentCommand
 } from "../application/document-service";
 import type { ExecuteDomainCommand } from "../application/document-service";
@@ -36,7 +38,9 @@ export type AggregateCoordinatorCommand =
   | ({ readonly kind: "assign" } & AssignDocumentCommand)
   | ({ readonly kind: "unassign" } & UnassignDocumentCommand)
   | ({ readonly kind: "tag" } & TagDocumentCommand)
-  | ({ readonly kind: "untag" } & UntagDocumentCommand);
+  | ({ readonly kind: "untag" } & UntagDocumentCommand)
+  | ({ readonly kind: "follow" } & FollowDocumentCommand)
+  | ({ readonly kind: "unfollow" } & UnfollowDocumentCommand);
 
 export interface AggregateCoordinatorEnv {
   readonly DB: D1Database;
@@ -103,6 +107,10 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
           return this.service.tag(command);
         case "untag":
           return this.service.untag(command);
+        case "follow":
+          return this.service.follow(command);
+        case "unfollow":
+          return this.service.unfollow(command);
       }
     }
   };

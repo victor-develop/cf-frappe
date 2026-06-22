@@ -345,6 +345,56 @@ describe("Desk app", () => {
     expect(html).not.toContain('formaction="/desk/Note/My%20Note/tags/Urgent/remove"');
   });
 
+  it("renders and submits follower controls from generated edit forms", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    const initial = await app.request("/desk/Note/My%20Note");
+    expect(initial.status).toBe(200);
+    const initialHtml = await initial.text();
+    expect(initialHtml).toContain('<h3 id="document-followers">Followers</h3>');
+    expect(initialHtml).toContain('formaction="/desk/Note/My%20Note/followers"');
+
+    const followed = await app.request("/desk/Note/My%20Note/followers", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(followed.status).toBe(303);
+    await expect(services.queries.getDocument(owner, "Note", "My Note")).resolves.toMatchObject({ version: 2 });
+
+    const withFollower = await app.request("/desk/Note/My%20Note");
+    expect(withFollower.status).toBe(200);
+    const followedHtml = await withFollower.text();
+    expect(followedHtml).toContain(owner.id);
+    expect(followedHtml).toContain('formaction="/desk/Note/My%20Note/followers/owner%40example.com/remove"');
+
+    const unfollowed = await app.request("/desk/Note/My%20Note/followers/owner%40example.com/remove", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "2" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(unfollowed.status).toBe(303);
+    await expect(services.queries.getDocument(owner, "Note", "My Note")).resolves.toMatchObject({ version: 3 });
+  });
+
+  it("hides follower mutation controls from read-only generated edit forms", async () => {
+    const { app, services } = makeDesk(guest);
+    await services.documents.create({ actor: owner, doctype: "Note", data: data() });
+    await services.documents.follow({ actor: owner, doctype: "Note", name: "My Note", expectedVersion: 1 });
+
+    const response = await app.request("/desk/Note/My%20Note");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('<h3 id="document-followers">Followers</h3>');
+    expect(html).toContain(owner.id);
+    expect(html).not.toContain('formaction="/desk/Note/My%20Note/followers"');
+    expect(html).not.toContain('formaction="/desk/Note/My%20Note/followers/owner%40example.com/remove"');
+  });
+
   it("submits and cancels documents from generated edit forms", async () => {
     const { app, services } = makeDesk();
     await services.documents.create({ actor: owner, doctype: "Note", data: data() });

@@ -171,6 +171,12 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       const data = await timeline.getTags(actor, c.req.param("doctype"), c.req.param("name"));
       return c.json({ data });
     });
+
+    app.get("/api/resource/:doctype/:name/followers", async (c) => {
+      const actor = await resolveActor(c.req.raw);
+      const data = await timeline.getFollowers(actor, c.req.param("doctype"), c.req.param("name"));
+      return c.json({ data });
+    });
   }
 
   if (options.savedFilters) {
@@ -321,6 +327,37 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       doctype: c.req.param("doctype"),
       name: c.req.param("name"),
       tag: c.req.param("tag"),
+      ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: snapshot });
+  });
+
+  app.post("/api/resource/:doctype/:name/followers", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    const body = await readJson(c.req.raw, { allowEmpty: true, maxJsonBytes });
+    const expectedVersion = numberValue(body.expectedVersion);
+    const follower = stringValue(body.follower);
+    const snapshot = await options.documents.follow({
+      actor,
+      doctype: c.req.param("doctype"),
+      name: c.req.param("name"),
+      ...(follower !== undefined ? { follower } : {}),
+      ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: snapshot }, 201);
+  });
+
+  app.delete("/api/resource/:doctype/:name/followers/:follower", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    const body = await readJson(c.req.raw, { allowEmpty: true, maxJsonBytes });
+    const expectedVersion = numberValue(body.expectedVersion);
+    const snapshot = await options.documents.unfollow({
+      actor,
+      doctype: c.req.param("doctype"),
+      name: c.req.param("name"),
+      follower: c.req.param("follower"),
       ...(expectedVersion !== undefined ? { expectedVersion } : {}),
       metadata: requestMetadata(c.req.raw)
     });

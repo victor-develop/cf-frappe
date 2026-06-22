@@ -1,4 +1,15 @@
-import { CHILD_TABLE_ROW_INDEX_FIELD, FrameworkError, namingSeriesStream } from "../../src";
+import {
+  CHILD_TABLE_ROW_INDEX_FIELD,
+  DocumentService,
+  FrameworkError,
+  InMemoryDocumentStore,
+  createRegistry,
+  defineDocType,
+  deterministicIds,
+  documentStream,
+  fixedClock,
+  namingSeriesStream
+} from "../../src";
 import {
   createChildTableServices,
   createLinkedServices,
@@ -669,6 +680,119 @@ describe("DocumentService", () => {
 
     await expect(
       documents.tag({ actor: owner, doctype: "Note", name: "My Note", tag: "Urgent", expectedVersion: 0 })
+    ).rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
+  });
+
+  it("follows and unfollows documents as idempotent stream events without mutating document data", async () => {
+    const { documents, events, projections } = createServices(["e1", "follow-1", "unfollow-1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    const followed = await documents.follow({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      expectedVersion: 1
+    });
+    const duplicateFollow = await documents.follow({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      expectedVersion: 2
+    });
+    const unfollowed = await documents.unfollow({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      expectedVersion: 2
+    });
+    const absentUnfollow = await documents.unfollow({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      expectedVersion: 3
+    });
+
+    expect(followed).toMatchObject({ version: 2, docstatus: "draft", data: { body: "Body" } });
+    expect(duplicateFollow.version).toBe(2);
+    expect(unfollowed).toMatchObject({ version: 3, docstatus: "draft", data: { body: "Body" } });
+    expect(absentUnfollow.version).toBe(3);
+    await expect(projections.get("acme", "Note", "My Note")).resolves.toMatchObject({ version: 3 });
+    await expect(events.readStream("acme:Note:My%20Note")).resolves.toMatchObject([
+      expect.anything(),
+      {
+        type: "NoteFollowed",
+        payload: { kind: "DocumentFollowed", followerId: owner.id }
+      },
+      {
+        type: "NoteUnfollowed",
+        payload: { kind: "DocumentUnfollowed", followerId: owner.id }
+      }
+    ]);
+  });
+
+  it("uses DocType event overrides for follow and unfollow events", async () => {
+    const Followable = defineDocType({
+      name: "Followable Note",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "created_by", type: "text", readOnly: true, defaultValue: ({ actor }) => actor.id }
+      ],
+      events: {
+        follow: "FollowableSubscribed",
+        unfollow: "FollowableUnsubscribed"
+      },
+      permissions: [
+        {
+          roles: ["User"],
+          actions: ["read", "create", "follow"],
+          when: ({ actor, document }) => !document || document.data.created_by === actor.id
+        }
+      ]
+    });
+    const registry = createRegistry({ doctypes: [Followable] });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry,
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["create-1", "follow-1", "unfollow-1"])
+    });
+
+    await documents.create({ actor: owner, doctype: "Followable Note", data: { title: "Custom Follow" } });
+    await documents.follow({ actor: owner, doctype: "Followable Note", name: "Custom Follow", expectedVersion: 1 });
+    await documents.unfollow({ actor: owner, doctype: "Followable Note", name: "Custom Follow", expectedVersion: 2 });
+
+    await expect(store.readStream(documentStream("acme", "Followable Note", "Custom Follow"))).resolves.toEqual([
+      expect.objectContaining({ type: "Followable NoteCreated" }),
+      expect.objectContaining({
+        type: "FollowableSubscribed",
+        payload: expect.objectContaining({ kind: "DocumentFollowed" })
+      }),
+      expect.objectContaining({
+        type: "FollowableUnsubscribed",
+        payload: expect.objectContaining({ kind: "DocumentUnfollowed" })
+      })
+    ]);
+  });
+
+  it("requires follow permission, non-empty followers, and current optimistic versions", async () => {
+    const { documents } = createServices(["e1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    await expect(
+      documents.follow({ actor: guest, doctype: "Note", name: "My Note" })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+
+    await expect(
+      documents.follow({ actor: owner, doctype: "Note", name: "My Note", follower: "   " })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Follower is required"
+    });
+
+    await expect(
+      documents.follow({ actor: owner, doctype: "Note", name: "My Note", expectedVersion: 0 })
     ).rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
   });
 

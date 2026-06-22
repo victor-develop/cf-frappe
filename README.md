@@ -10,7 +10,7 @@ The current slice is a working kernel:
 - metadata-defined child table fields validated from child DocType metadata
 - first-class draft/submitted/cancelled document lifecycle events
 - command-side document service that writes immutable events
-- permissioned document timelines with field-level diffs, comments, assignments, and tags derived from append-only event streams
+- permissioned document timelines with field-level diffs, comments, assignments, tags, and followers derived from append-only event streams
 - admin-only audit search over immutable event streams
 - query-side projection service for current document reads and lists
 - in-memory adapters for TDD
@@ -39,7 +39,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | Link fields | registered `type: "link"` targets with write-time existence checks and lookup options |
 | Child tables | registered `type: "table"` child DocTypes embedded in event-sourced document data |
 | Document lifecycle | event-sourced create, update, submit, cancel, and delete commands |
-| Audit trail | permissioned timelines, field diffs, comments, assignments, tags, and admin audit search from immutable events |
+| Audit trail | permissioned timelines, field diffs, comments, assignments, tags, followers, and admin audit search from immutable events |
 | Permissions | role and predicate rules attached to DocTypes |
 | Hooks/controllers | pure hook contracts registered in `ModelRegistry` |
 | REST resources | generated `/api/resource/:doctype` routes |
@@ -214,18 +214,21 @@ The generated API includes:
 - `GET /api/resource/:doctype/:name/timeline`
 - `GET /api/resource/:doctype/:name/assignments`
 - `GET /api/resource/:doctype/:name/tags`
+- `GET /api/resource/:doctype/:name/followers`
 - `PUT /api/resource/:doctype/:name`
 - `POST /api/resource/:doctype/:name/comments`
 - `POST /api/resource/:doctype/:name/activities`
 - `POST /api/resource/:doctype/saved-filters`
 - `POST /api/resource/:doctype/:name/assignments`
 - `POST /api/resource/:doctype/:name/tags`
+- `POST /api/resource/:doctype/:name/followers`
 - `POST /api/resource/:doctype/:name/submit`
 - `POST /api/resource/:doctype/:name/cancel`
 - `POST /api/resource/:doctype/:name/transition/:action`
 - `POST /api/resource/:doctype/:name/command/:command`
 - `DELETE /api/resource/:doctype/:name/assignments/:assignee`
 - `DELETE /api/resource/:doctype/:name/tags/:tag`
+- `DELETE /api/resource/:doctype/:name/followers/:follower`
 - `DELETE /api/resource/:doctype/saved-filters/:filterId`
 - `DELETE /api/resource/:doctype/:name`
 
@@ -381,6 +384,8 @@ Activity feed entries use the same document stream. `DocumentService.recordActiv
 Assignments are also document stream events. `DocumentService.assign(...)`, `DocumentService.unassign(...)`, and the assignment API routes append `DocumentAssigned`/`DocumentUnassigned`, advance the version only when the assignment set changes, and leave document data/status unchanged. `DocumentHistoryService.getAssignments(...)` folds the authorized stream into the current assignee list, and Desk renders assignment controls in the timeline panel for actors with the DocType `assign` permission.
 
 Tags follow the same event-sourced collaboration pattern. `DocumentService.tag(...)`, `DocumentService.untag(...)`, and the tag API routes append `DocumentTagged`/`DocumentUntagged`, normalize whitespace, no-op repeated add/remove commands, and leave document data/status unchanged. `DocumentHistoryService.getTags(...)` folds the stream into the current tag list, and Desk renders tag controls for actors with the DocType `tag` permission.
+
+Followers are collaboration metadata on the same document stream. `DocumentService.follow(...)`, `DocumentService.unfollow(...)`, and the follower API routes append `DocumentFollowed`/`DocumentUnfollowed`, default the follower id to the actor id, no-op repeated follow/unfollow commands, and leave document data/status unchanged. `DocumentHistoryService.getFollowers(...)` folds the stream into the current follower list, and Desk renders follow/unfollow controls for actors with the DocType `follow` permission.
 
 ## Audit Search
 
@@ -643,11 +648,11 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 279 tests across schema, permissions, events, registry, services, naming series, document lifecycle, document timelines and diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, saved user filters, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, print templates, print letterheads, reports, report summaries, report charts, report exports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
+Current suite: 288 tests across schema, permissions, events, registry, services, naming series, document lifecycle, document timelines and diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, saved user filters, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, print templates, print letterheads, reports, report summaries, report charts, report exports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
 
 ## Status
 
-This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, permissioned document timelines with field diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, saved user filters, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, report charts/exports, custom print templates, reusable letterheads, and Durable Object realtime topics exist, but richer chart controls, durable job dashboards, richer realtime presence, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
+This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, permissioned document timelines with field diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, saved user filters, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, report charts/exports, custom print templates, reusable letterheads, and Durable Object realtime topics exist, but richer chart controls, durable job dashboards, richer realtime presence, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
 
 ## References
 

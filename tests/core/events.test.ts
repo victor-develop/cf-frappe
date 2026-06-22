@@ -1,4 +1,4 @@
-import { foldDocument, foldDocumentTags } from "../../src";
+import { foldDocument, foldDocumentFollowers, foldDocumentTags } from "../../src";
 import type { DomainEvent } from "../../src";
 
 describe("event folding", () => {
@@ -143,11 +143,25 @@ describe("event folding", () => {
         sequence: 6,
         type: "DocumentUntagged",
         payload: { kind: "DocumentUntagged", tag: "Urgent" }
+      },
+      {
+        ...base,
+        id: "evt7",
+        sequence: 7,
+        type: "DocumentFollowed",
+        payload: { kind: "DocumentFollowed", followerId: "owner@example.com" }
+      },
+      {
+        ...base,
+        id: "evt8",
+        sequence: 8,
+        type: "DocumentUnfollowed",
+        payload: { kind: "DocumentUnfollowed", followerId: "owner@example.com" }
       }
     ];
 
     expect(foldDocument(events)).toMatchObject({
-      version: 6,
+      version: 8,
       docstatus: "draft",
       data: { title: "One" }
     });
@@ -178,5 +192,32 @@ describe("event folding", () => {
     ];
 
     expect(foldDocumentTags(events)).toEqual(["Customer"]);
+  });
+
+  it("folds current document followers from follow events", () => {
+    const events: DomainEvent[] = [
+      {
+        ...base,
+        sequence: 1,
+        type: "DocumentFollowed",
+        payload: { kind: "DocumentFollowed", followerId: "owner@example.com" }
+      },
+      {
+        ...base,
+        id: "evt2",
+        sequence: 2,
+        type: "DocumentFollowed",
+        payload: { kind: "DocumentFollowed", followerId: "amy@example.com" }
+      },
+      {
+        ...base,
+        id: "evt3",
+        sequence: 3,
+        type: "DocumentUnfollowed",
+        payload: { kind: "DocumentUnfollowed", followerId: "owner@example.com" }
+      }
+    ];
+
+    expect(foldDocumentFollowers(events)).toEqual(["amy@example.com"]);
   });
 });

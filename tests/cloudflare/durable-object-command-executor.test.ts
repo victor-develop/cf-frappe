@@ -59,9 +59,13 @@ describe("DurableObjectCommandExecutor", () => {
     await executor.unassign({ actor: owner, doctype: "Note", name: "My Note", assignee: "support@example.com" });
     await executor.tag({ actor: owner, doctype: "Note", name: "My Note", tag: "Urgent" });
     await executor.untag({ actor: owner, doctype: "Note", name: "My Note", tag: "Urgent" });
+    await executor.follow({ actor: owner, doctype: "Note", name: "My Note" });
+    await executor.unfollow({ actor: owner, doctype: "Note", name: "My Note" });
     await executor.delete({ actor: owner, doctype: "Note", name: "My Note" });
 
     expect(names).toEqual([
+      "acme:Note:My Note",
+      "acme:Note:My Note",
       "acme:Note:My Note",
       "acme:Note:My Note",
       "acme:Note:My Note",
@@ -87,6 +91,8 @@ describe("DurableObjectCommandExecutor", () => {
       { kind: "unassign" },
       { kind: "tag" },
       { kind: "untag" },
+      { kind: "follow" },
+      { kind: "unfollow" },
       { kind: "delete" }
     ]);
   });

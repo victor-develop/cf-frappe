@@ -250,9 +250,11 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const timeline = await options.timeline?.getTimeline(actor, doctype.name, document.name, { limit: 25 });
     const assignments = await options.timeline?.getAssignments(actor, doctype.name, document.name);
     const tags = await options.timeline?.getTags(actor, doctype.name, document.name);
+    const followers = await options.timeline?.getFollowers(actor, doctype.name, document.name);
     const canComment = can(actor, doctype, "comment", document);
     const canAssign = can(actor, doctype, "assign", document);
     const canTag = can(actor, doctype, "tag", document);
+    const canFollow = can(actor, doctype, "follow", document);
     const form = renderFormView(doctype, formView, {
       mode: "update",
       document,
@@ -273,8 +275,11 @@ export function createDeskApp(options: DeskAppOptions): Hono {
                 allowComment: canComment,
                 allowAssign: canAssign,
                 allowTag: canTag,
+                allowFollow: canFollow,
+                actorId: actor.id,
                 ...(assignments ? { assignments } : {}),
-                ...(tags ? { tags } : {})
+                ...(tags ? { tags } : {}),
+                ...(followers ? { followers } : {})
               })
             : ""
         }`
@@ -373,6 +378,45 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         doctype: doctype.name,
         name,
         tag: c.req.param("tag"),
+        ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(`/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(name)}`, 303);
+    } catch (error) {
+      return renderDeskError(options, c.req.raw, actor, doctype, "update", error, name);
+    }
+  });
+
+  app.post("/desk/:doctype/:name/followers", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const name = c.req.param("name");
+    try {
+      const expectedVersion = await parseDeskExpectedVersion(c.req.raw);
+      await options.documents.follow({
+        actor,
+        doctype: doctype.name,
+        name,
+        ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(`/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(name)}`, 303);
+    } catch (error) {
+      return renderDeskError(options, c.req.raw, actor, doctype, "update", error, name);
+    }
+  });
+
+  app.post("/desk/:doctype/:name/followers/:follower/remove", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const name = c.req.param("name");
+    try {
+      const expectedVersion = await parseDeskExpectedVersion(c.req.raw);
+      await options.documents.unfollow({
+        actor,
+        doctype: doctype.name,
+        name,
+        follower: c.req.param("follower"),
         ...(expectedVersion !== undefined ? { expectedVersion } : {}),
         metadata: requestMetadata(c.req.raw)
       });

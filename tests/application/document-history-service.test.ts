@@ -3,7 +3,7 @@ import { createServices, data, owner } from "../helpers";
 
 describe("DocumentHistoryService", () => {
   it("derives chronological timeline entries from the document event stream", async () => {
-    const { documents, events, queries } = createServices(["create-1", "update-1", "transition-1", "command-1", "activity-1", "tag-1", "comment-1"]);
+    const { documents, events, queries } = createServices(["create-1", "update-1", "transition-1", "command-1", "activity-1", "tag-1", "follow-1", "comment-1"]);
     const history = new DocumentHistoryService({ events, queries });
     await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Timeline Note" }) });
     await documents.update({ actor: owner, doctype: "Note", name: "Timeline Note", patch: { body: "Updated" } });
@@ -29,6 +29,11 @@ describe("DocumentHistoryService", () => {
       name: "Timeline Note",
       tag: "Customer"
     });
+    await documents.follow({
+      actor: owner,
+      doctype: "Note",
+      name: "Timeline Note"
+    });
     await documents.comment({
       actor: owner,
       doctype: "Note",
@@ -42,7 +47,7 @@ describe("DocumentHistoryService", () => {
       tenantId: "acme",
       doctype: "Note",
       name: "Timeline Note",
-      version: 7
+      version: 8
     });
     expect(timeline.entries.map(({ sequence, kind, type, summary }) => ({ sequence, kind, type, summary }))).toEqual([
       {
@@ -83,6 +88,12 @@ describe("DocumentHistoryService", () => {
       },
       {
         sequence: 7,
+        kind: "DocumentFollowed",
+        type: "NoteFollowed",
+        summary: `Followed by ${owner.id}`
+      },
+      {
+        sequence: 8,
         kind: "DocumentCommentAdded",
         type: "NoteCommentAdded",
         summary: "Commented: Ship it"
@@ -115,6 +126,7 @@ describe("DocumentHistoryService", () => {
     expect(timeline.entries[4]!.changes).toEqual([]);
     expect(timeline.entries[5]!.changes).toEqual([]);
     expect(timeline.entries[6]!.changes).toEqual([]);
+    expect(timeline.entries[7]!.changes).toEqual([]);
   });
 
   it("requires normal document read permission before exposing stream history", async () => {
@@ -172,6 +184,35 @@ describe("DocumentHistoryService", () => {
       name: "Tagged Note",
       version: 4,
       tags: ["Customer"]
+    });
+  });
+
+  it("summarizes follow activity and derives current followers from the event stream", async () => {
+    const { documents, history } = createServices(["create-1", "follow-1", "follow-2", "unfollow-1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Followed Note" }) });
+    await documents.follow({ actor: owner, doctype: "Note", name: "Followed Note" });
+    await documents.follow({
+      actor: owner,
+      doctype: "Note",
+      name: "Followed Note",
+      follower: "amy@example.com"
+    });
+    await documents.unfollow({ actor: owner, doctype: "Note", name: "Followed Note" });
+
+    const timeline = await history.getTimeline(owner, "Note", "Followed Note");
+    const followers = await history.getFollowers(owner, "Note", "Followed Note");
+
+    expect(timeline.entries.map(({ kind, summary }) => ({ kind, summary }))).toEqual([
+      { kind: "DocumentCreated", summary: "Created document" },
+      { kind: "DocumentFollowed", summary: `Followed by ${owner.id}` },
+      { kind: "DocumentFollowed", summary: "Followed by amy@example.com" },
+      { kind: "DocumentUnfollowed", summary: `Unfollowed by ${owner.id}` }
+    ]);
+    expect(followers).toMatchObject({
+      doctype: "Note",
+      name: "Followed Note",
+      version: 4,
+      followers: ["amy@example.com"]
     });
   });
 

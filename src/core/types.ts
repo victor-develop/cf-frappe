@@ -58,7 +58,8 @@ export type PermissionAction =
   | "comment"
   | "assign"
   | "activity"
-  | "tag";
+  | "tag"
+  | "follow";
 
 export interface Actor {
   readonly id: string;
@@ -147,6 +148,8 @@ export interface DocTypeDefinition<TData extends DocumentData = DocumentData> {
     readonly activity?: string;
     readonly tag?: string;
     readonly untag?: string;
+    readonly follow?: string;
+    readonly unfollow?: string;
   };
   readonly description?: string;
   readonly __data?: TData;
@@ -215,6 +218,14 @@ export type DocumentEventPayload =
   | {
       readonly kind: "DocumentUntagged";
       readonly tag: string;
+    }
+  | {
+      readonly kind: "DocumentFollowed";
+      readonly followerId: string;
+    }
+  | {
+      readonly kind: "DocumentUnfollowed";
+      readonly followerId: string;
     }
   | {
       readonly kind: "SavedListFilterSaved";

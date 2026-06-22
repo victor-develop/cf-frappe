@@ -10,7 +10,13 @@ import type {
   JsonValue,
   TenantId
 } from "../core/types";
-import { foldDocument, foldDocumentAssignments, foldDocumentFrom, foldDocumentTags } from "../core/events";
+import {
+  foldDocument,
+  foldDocumentAssignments,
+  foldDocumentFollowers,
+  foldDocumentFrom,
+  foldDocumentTags
+} from "../core/events";
 import { badRequest } from "../core/errors";
 import { documentStream } from "../core/streams";
 import type { EventStore } from "../ports/event-store";
@@ -60,6 +66,15 @@ export interface DocumentTags {
   readonly version: number;
   readonly docstatus: DocStatus;
   readonly tags: readonly string[];
+}
+
+export interface DocumentFollowers {
+  readonly tenantId: TenantId;
+  readonly doctype: DocTypeName;
+  readonly name: DocumentName;
+  readonly version: number;
+  readonly docstatus: DocStatus;
+  readonly followers: readonly string[];
 }
 
 export interface DocumentTimelineEntry {
@@ -170,6 +185,28 @@ export class DocumentHistoryService {
     };
   }
 
+  async getFollowers(
+    actor: Actor,
+    doctypeName: string,
+    name: string,
+    options: Pick<GetDocumentTimelineOptions, "tenantId"> = {}
+  ): Promise<DocumentFollowers> {
+    const document = await this.queries.getDocument(actor, doctypeName, name, options.tenantId);
+    const stream = documentStream(document.tenantId, document.doctype, document.name);
+    const events = await this.events.readStream(stream, {
+      maxSequence: document.version,
+      payloadKinds: ["DocumentFollowed", "DocumentUnfollowed"]
+    });
+    return {
+      tenantId: document.tenantId,
+      doctype: document.doctype,
+      name: document.name,
+      version: document.version,
+      docstatus: document.docstatus,
+      followers: foldDocumentFollowers(events.filter((event) => event.sequence <= document.version))
+    };
+  }
+
   private async baselineBefore(stream: string, firstVisibleSequence: number | undefined): Promise<DocumentSnapshot | null> {
     if (firstVisibleSequence === undefined || firstVisibleSequence <= 1) {
       return null;
@@ -240,6 +277,8 @@ function diffEvent(
     case "DocumentUnassigned":
     case "DocumentTagged":
     case "DocumentUntagged":
+    case "DocumentFollowed":
+    case "DocumentUnfollowed":
     case "SavedListFilterSaved":
     case "SavedListFilterDeleted":
       return [];
@@ -301,6 +340,10 @@ function summarize(payload: DocumentEventPayload): string {
       return `Tagged ${payload.tag}`;
     case "DocumentUntagged":
       return `Untagged ${payload.tag}`;
+    case "DocumentFollowed":
+      return `Followed by ${payload.followerId}`;
+    case "DocumentUnfollowed":
+      return `Unfollowed by ${payload.followerId}`;
     case "SavedListFilterSaved":
       return `Saved list filter ${payload.label}`;
     case "SavedListFilterDeleted":

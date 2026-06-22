@@ -461,6 +461,82 @@ describe("resource api", () => {
     await expect(empty.json()).resolves.toMatchObject({ data: { tags: [] } });
   });
 
+  it("follows and unfollows resources through event-sourced follower routes", async () => {
+    const app = makeApp();
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Followed", body: "Body" })
+    });
+
+    const followed = await app.request("/api/resource/Note/HTTP%20Followed/followers", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ expectedVersion: 1 })
+    });
+
+    expect(followed.status).toBe(201);
+    await expect(followed.json()).resolves.toMatchObject({ data: { version: 2 } });
+
+    const current = await app.request("/api/resource/Note/HTTP%20Followed/followers", { headers: userHeaders });
+    expect(current.status).toBe(200);
+    await expect(current.json()).resolves.toMatchObject({
+      data: {
+        version: 2,
+        followers: ["owner@example.com"]
+      }
+    });
+
+    const explicit = await app.request("/api/resource/Note/HTTP%20Followed/followers", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ follower: "amy+ops@example.com", expectedVersion: 2 })
+    });
+
+    expect(explicit.status).toBe(201);
+    await expect(explicit.json()).resolves.toMatchObject({ data: { version: 3 } });
+
+    const timeline = await app.request("/api/resource/Note/HTTP%20Followed/timeline", { headers: userHeaders });
+    await expect(timeline.json()).resolves.toMatchObject({
+      data: {
+        entries: [
+          expect.objectContaining({ kind: "DocumentCreated" }),
+          expect.objectContaining({
+            kind: "DocumentFollowed",
+            summary: "Followed by owner@example.com",
+            changes: []
+          }),
+          expect.objectContaining({
+            kind: "DocumentFollowed",
+            summary: "Followed by amy+ops@example.com",
+            changes: []
+          })
+        ]
+      }
+    });
+
+    const explicitUnfollowed = await app.request("/api/resource/Note/HTTP%20Followed/followers/amy%2Bops%40example.com", {
+      method: "DELETE",
+      headers: userHeaders,
+      body: JSON.stringify({ expectedVersion: 3 })
+    });
+
+    expect(explicitUnfollowed.status).toBe(200);
+    await expect(explicitUnfollowed.json()).resolves.toMatchObject({ data: { version: 4 } });
+
+    const unfollowed = await app.request("/api/resource/Note/HTTP%20Followed/followers/owner%40example.com", {
+      method: "DELETE",
+      headers: userHeaders,
+      body: JSON.stringify({ expectedVersion: 4 })
+    });
+
+    expect(unfollowed.status).toBe(200);
+    await expect(unfollowed.json()).resolves.toMatchObject({ data: { version: 5 } });
+
+    const empty = await app.request("/api/resource/Note/HTTP%20Followed/followers", { headers: userHeaders });
+    await expect(empty.json()).resolves.toMatchObject({ data: { followers: [] } });
+  });
+
   it("returns bounded resource timeline pages from query parameters", async () => {
     const app = makeApp();
     await app.request("/api/resource/Note", {

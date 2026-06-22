@@ -13,7 +13,12 @@ import {
   type ResolvedListView
 } from "../../core/types";
 import type { ReportDefinition } from "../../core/reports";
-import type { DocumentAssignments, DocumentTags, DocumentTimeline } from "../../application/document-history-service";
+import type {
+  DocumentAssignments,
+  DocumentFollowers,
+  DocumentTags,
+  DocumentTimeline
+} from "../../application/document-history-service";
 import type { ReportRunResult } from "../../application/report-service";
 import type { SavedListFilter } from "../../application/saved-list-filter-service";
 import type { PrintFormatDefinition } from "../../core/print-format";
@@ -457,8 +462,11 @@ export function renderDocumentTimeline(
     readonly allowComment?: boolean;
     readonly allowAssign?: boolean;
     readonly allowTag?: boolean;
+    readonly allowFollow?: boolean;
+    readonly actorId?: string;
     readonly assignments?: DocumentAssignments;
     readonly tags?: DocumentTags;
+    readonly followers?: DocumentFollowers;
   } = {}
 ): string {
   const rows = timeline.entries
@@ -476,12 +484,19 @@ export function renderDocumentTimeline(
     ? renderAssignmentPanel(timeline, options.assignments, { allowAssign: options.allowAssign ?? false })
     : "";
   const tagPanel = options.tags ? renderTagPanel(timeline, options.tags, { allowTag: options.allowTag ?? false }) : "";
+  const followerPanel = options.followers
+    ? renderFollowerPanel(timeline, options.followers, {
+        allowFollow: options.allowFollow ?? false,
+        ...(options.actorId !== undefined ? { actorId: options.actorId } : {})
+      })
+    : "";
   return `<section class="panel timeline" aria-labelledby="document-timeline">
     <div class="timeline-head">
       <h2 id="document-timeline">Timeline</h2>
       <p>v${String(timeline.version)} · ${escapeHtml(timeline.docstatus)}</p>
     </div>
     ${tagPanel}
+    ${followerPanel}
     ${assignmentPanel}
     <div class="table-wrap">
       <table>
@@ -557,6 +572,44 @@ function renderTagForm(timeline: DocumentTimeline): string {
     <input type="hidden" name="expectedVersion" value="${String(timeline.version)}">
     <label class="field" for="timeline-tag"><span>Tag</span><input id="timeline-tag" name="tag" type="text"></label>
     <button class="button primary" type="submit" formaction="${action}">Add tag</button>
+  </form>`;
+}
+
+function renderFollowerPanel(
+  timeline: DocumentTimeline,
+  followers: DocumentFollowers,
+  options: { readonly actorId?: string; readonly allowFollow?: boolean }
+): string {
+  const followerRows = followers.followers
+    .map(
+      (followerId) => `<li>
+        <span>${escapeHtml(followerId)}</span>
+        ${options.allowFollow && followerId === options.actorId ? renderUnfollowForm(timeline, followerId) : ""}
+      </li>`
+    )
+    .join("");
+  const isFollowing = options.actorId !== undefined && followers.followers.includes(options.actorId);
+  const followForm = options.allowFollow && options.actorId && !isFollowing ? renderFollowForm(timeline) : "";
+  return `<div class="timeline-followers">
+    <h3 id="document-followers">Followers</h3>
+    <ul class="follower-list">${followerRows || `<li class="empty">No followers.</li>`}</ul>
+    ${followForm}
+  </div>`;
+}
+
+function renderFollowForm(timeline: DocumentTimeline): string {
+  const action = `/desk/${encodeURIComponent(timeline.doctype)}/${encodeURIComponent(timeline.name)}/followers`;
+  return `<form class="timeline-follower-form" method="post">
+    <input type="hidden" name="expectedVersion" value="${String(timeline.version)}">
+    <button class="button primary" type="submit" formaction="${action}">Follow</button>
+  </form>`;
+}
+
+function renderUnfollowForm(timeline: DocumentTimeline, followerId: string): string {
+  const action = `/desk/${encodeURIComponent(timeline.doctype)}/${encodeURIComponent(timeline.name)}/followers/${encodeURIComponent(followerId)}/remove`;
+  return `<form class="inline-action" method="post">
+    <input type="hidden" name="expectedVersion" value="${String(timeline.version)}">
+    <button class="button" type="submit" formaction="${action}">Unfollow</button>
   </form>`;
 }
 
@@ -1179,14 +1232,17 @@ tr:last-child td { border-bottom: 0; }
   font-weight: 600;
 }
 .timeline-tags,
+.timeline-followers,
 .timeline-assignments {
   padding: 0 18px 18px;
   border-bottom: 1px solid var(--border);
 }
-.timeline-tags + .timeline-assignments {
+.timeline-tags + .timeline-followers,
+.timeline-followers + .timeline-assignments {
   padding-top: 18px;
 }
 .tag-list,
+.follower-list,
 .assignment-list {
   display: grid;
   gap: 8px;
@@ -1195,6 +1251,7 @@ tr:last-child td { border-bottom: 0; }
   list-style: none;
 }
 .tag-list li,
+.follower-list li,
 .assignment-list li {
   display: flex;
   align-items: center;
@@ -1204,6 +1261,7 @@ tr:last-child td { border-bottom: 0; }
 }
 .inline-action { margin: 0; }
 .timeline-tag-form,
+.timeline-follower-form,
 .timeline-assignment-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
