@@ -1,4 +1,4 @@
-import { CloudflareJobQueue } from "../../src";
+import { CloudflareJobQueue } from "../../src/cloudflare";
 import type { JobMessage } from "../../src";
 import { now } from "../helpers";
 

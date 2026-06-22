@@ -1,5 +1,5 @@
-import { badRequest, notFound, permissionDenied } from "../core/errors";
-import { can } from "../core/permissions";
+import { badRequest, notFound, permissionDenied } from "../core/errors.js";
+import { can } from "../core/permissions.js";
 import {
   assertReportMatchesDocType,
   defineReport,
@@ -11,9 +11,9 @@ import {
   type ReportGroupDefinition,
   type ReportOrder,
   type ReportSummaryDefinition
-} from "../core/reports";
-import type { ModelRegistry } from "../core/registry";
-import { savedReportsStream } from "../core/streams";
+} from "../core/reports.js";
+import type { ModelRegistry } from "../core/registry.js";
+import { savedReportsStream } from "../core/streams.js";
 import {
   DEFAULT_TENANT_ID,
   type Actor,
@@ -24,19 +24,19 @@ import {
   type FieldType,
   type NewDomainEvent,
   type TenantId
-} from "../core/types";
-import type { Clock } from "../ports/clock";
-import { systemClock } from "../ports/clock";
-import type { EventStore } from "../ports/event-store";
-import type { IdGenerator } from "../ports/id-generator";
-import { cryptoIdGenerator } from "../ports/id-generator";
+} from "../core/types.js";
+import type { Clock } from "../ports/clock.js";
+import { systemClock } from "../ports/clock.js";
+import type { EventStore } from "../ports/event-store.js";
+import type { IdGenerator } from "../ports/id-generator.js";
+import { cryptoIdGenerator } from "../ports/id-generator.js";
 import type {
   ReportCsvExport,
   ReportCsvExportOptions,
   ReportRunOptions,
   ReportRunResult
-} from "./report-service";
-import { ReportService } from "./report-service";
+} from "./report-service.js";
+import { ReportService } from "./report-service.js";
 
 const MAX_REPORT_LABEL_LENGTH = 140;
 

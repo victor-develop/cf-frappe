@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { FrameworkError } from "../../core/errors";
+import { FrameworkError } from "../../core/errors.js";
 
 export function toErrorResponse(error: unknown, c: Context): Response {
   if (error instanceof FrameworkError) {

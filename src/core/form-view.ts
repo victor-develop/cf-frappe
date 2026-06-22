@@ -1,11 +1,11 @@
-import { FrameworkError } from "./errors";
+import { FrameworkError } from "./errors.js";
 import type {
   DocTypeDefinition,
   FieldDefinition,
   FormSectionDefinition,
   ResolvedFormSection,
   ResolvedFormView
-} from "./types";
+} from "./types.js";
 
 export function assertFormViewDefinition(doctype: DocTypeDefinition): void {
   resolveFormView(doctype);

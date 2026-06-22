@@ -31,7 +31,7 @@ The current slice is a working kernel:
 - Cloudflare Queue/Cron background job primitives
 - R2-backed file attachments with event-sourced `File` metadata and Desk file manager workflows
 - Durable Object WebSocket realtime topics for tenant, DocType, document, redacted per-user notifications, basic presence snapshots, and bounded durable replay
-- composable app manifests for packaging DocTypes, reports, print formats, and hooks
+- composable app manifests for packaging DocTypes, reports, print formats, hooks, and idempotent data patches/backfills
 - installable `cf-frappe init` starter scaffold plus `cf-frappe install` package-manager, dependency metadata, and app-registry wiring for new Cloudflare apps
 - a runnable `Task` example under `examples/todos`
 
@@ -59,7 +59,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | File attachments | `File` DocType metadata plus R2 object storage and generated Desk file manager |
 | Realtime events | document commit events, basic presence, and bounded replay over Durable Object WebSocket topics |
 | Database tables | D1 append-only events plus current projections |
-| Migrations | metadata-planned D1 migrations with applied checksum journal |
+| Migrations/patches | metadata-planned D1 migrations plus app-declared data patches with applied journals |
 | Concurrency boundary | Durable Object command coordinator per aggregate stream |
 | Apps | `defineApp(...)` manifests composed through `createRegistryFromApps(...)` |
 | App starter | `cf-frappe init` scaffold with Worker, D1, Durable Object, signed-session wiring, and `cf-frappe install` package-manager/dependency/registry wiring |
@@ -77,6 +77,7 @@ cd my-app
 npm install
 cp .dev.vars.example .dev.vars
 npm run cf:types
+npm run d1:generate
 npm run d1:migrate:local
 npm run dev
 ```
@@ -258,7 +259,7 @@ export const registry = createRegistryFromApps([sales, crm]);
 ## Expose It On Workers
 
 ```ts
-import { createAggregateCoordinatorClass, createCloudFrappeWorker } from "cf-frappe";
+import { createAggregateCoordinatorClass, createCloudFrappeWorker } from "cf-frappe/cloudflare";
 import { registry } from "./models";
 
 export class AggregateCoordinator extends createAggregateCoordinatorClass({ registry }) {}
@@ -368,7 +369,8 @@ When changing an existing DocType's D1 indexes, bump the DocType version so the 
 Apply pending D1 migrations from a trusted admin route, deployment task, or CI script:
 
 ```ts
-import { D1MigrationRunner, planD1Migrations, type CloudFrappeEnv } from "cf-frappe";
+import { D1MigrationRunner, planD1Migrations } from "cf-frappe";
+import type { CloudFrappeEnv } from "cf-frappe/cloudflare";
 import { registry } from "./models";
 
 export async function migrate(env: CloudFrappeEnv) {
@@ -377,10 +379,35 @@ export async function migrate(env: CloudFrappeEnv) {
 }
 ```
 
+Declare idempotent data patches in app manifests and run them through a journaled patch runner. Patches should call framework services such as `DocumentService` so backfills append events instead of rewriting projections directly:
+
+```ts
+import { D1DataPatchLog, DataPatchRunner, defineDataPatch, type DocumentService } from "cf-frappe";
+import type { CloudFrappeEnv } from "cf-frappe/cloudflare";
+
+const backfill = defineDataPatch({
+  id: "crm.customer_status_v1",
+  checksum: "v1",
+  async run({ resources }: { resources: { documents: DocumentService } }) {
+    // load targets through query services, then call resources.documents.update(...)
+    return { touched: 0 };
+  }
+});
+
+export async function runDataPatches(env: CloudFrappeEnv, resources: { documents: DocumentService }) {
+  return new DataPatchRunner({
+    log: new D1DataPatchLog(env.DB),
+    patches: registry.listDataPatches(),
+    resources
+  }).apply();
+}
+```
+
 Production apps choose an actor resolver. For cookie-based apps, `signedSessionActorResolver(...)` verifies an HttpOnly HMAC-signed session cookie with Web Crypto, checks expiry, and returns the signed actor. `createSignedSessionCookie(...)` and `clearSignedSessionCookie(...)` issue and clear those cookies without introducing a server-side session projection.
 
 ```ts
-import { createCloudFrappeWorker, signedSessionActorResolver, type CloudFrappeEnv } from "cf-frappe";
+import { signedSessionActorResolver } from "cf-frappe";
+import { createCloudFrappeWorker, type CloudFrappeEnv } from "cf-frappe/cloudflare";
 
 interface Env extends CloudFrappeEnv {
   readonly SESSION_SECRET: string;
@@ -598,15 +625,17 @@ Jobs are registered separately from DocTypes, then dispatched through a `JobQueu
 
 ```ts
 import {
+  createJobRegistry,
+  D1JobExecutionLog,
+  type JobMessage
+} from "cf-frappe";
+import {
   CloudflareJobQueue,
   createAggregateCoordinatorClass,
   createCloudFrappeWorker,
-  createJobRegistry,
-  D1JobExecutionLog,
   type CloudFrappeEnv,
-  type CloudFrappeRuntimeServices,
-  type JobMessage
-} from "cf-frappe";
+  type CloudFrappeRuntimeServices
+} from "cf-frappe/cloudflare";
 import { registry } from "./models";
 
 interface Env extends CloudFrappeEnv {
@@ -652,7 +681,7 @@ import {
   createAggregateCoordinatorClass,
   createCloudFrappeWorker,
   type CloudFrappeEnv
-} from "cf-frappe";
+} from "cf-frappe/cloudflare";
 import { registry } from "./models";
 
 interface Env extends CloudFrappeEnv {
@@ -698,7 +727,7 @@ import {
   createRealtimeHubClass,
   type CloudFrappeEnv,
   type RealtimeHubNamespace
-} from "cf-frappe";
+} from "cf-frappe/cloudflare";
 import { registry } from "./models";
 
 interface Env extends CloudFrappeEnv {
@@ -797,7 +826,7 @@ The dependency direction is one way:
 - `application` orchestrates commands, queries, document history, print views, reports, files, realtime, and job execution through ports
 - `ports` define document storage, projections, file storage, realtime publishing, queues, execution logs, clocks, and id generation
 - `adapters` implement in-memory, D1 stores/migrations, HTTP, Desk, R2, realtime, and Cloudflare integration
-- `cloudflare` packages Worker and Durable Object factories
+- `cf-frappe/cloudflare` packages Worker and Durable Object factories
 
 ## Quality Gate
 
@@ -813,11 +842,11 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 481 tests across 59 Vitest files covering app manifests, client scripts, Desk browser APIs, Desk form event hooks, Desk field controls and user feedback helpers, schema, permissions, signed sessions, event-sourced role catalog administration, catalog-backed account role validation, event-sourced user accounts, event-sourced user profiles, password reset/email verification token flows, login/logout/me APIs, generated Desk account/profile administration, account-version session revalidation across HTTP and realtime auth, audit redaction and filtering for account, profile, and role events, user permissions, events, registry, services, naming series, workflow helpers, document lifecycle, generated workflow actions, document timelines and diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, saved user filters, saved report definitions, saved report HTTP and Desk APIs, metadata-driven Desk saved report builder summaries/groups/charts, metadata-configured form/list views, child table validation, metadata-validated and operator-aware list filters, filter-builder metadata, print formats, print templates, print letterheads, reports, typed report filters, report ordering controls, report summaries, report group row caps, report charts, report chart controls, report exports, jobs, durable job execution history, retry administration, scheduler administration, files, Desk file manager workflows, realtime topic fan-out, redacted per-user room notifications, basic realtime presence snapshots, bounded durable realtime replay, parsed Desk realtime subscriptions, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, D1 schema planning/migration application, and CLI starter scaffolding/package-manager/dependency/app-registry/migration-file generation wiring.
+Current suite: 490 tests across 61 Vitest files covering app manifests, app-declared data patches/backfills, client scripts, Desk browser APIs, Desk form event hooks, Desk field controls and user feedback helpers, schema, permissions, signed sessions, event-sourced role catalog administration, catalog-backed account role validation, event-sourced user accounts, event-sourced user profiles, password reset/email verification token flows, login/logout/me APIs, generated Desk account/profile administration, account-version session revalidation across HTTP and realtime auth, audit redaction and filtering for account, profile, and role events, user permissions, events, registry, services, naming series, workflow helpers, document lifecycle, generated workflow actions, document timelines and diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, saved user filters, saved report definitions, saved report HTTP and Desk APIs, metadata-driven Desk saved report builder summaries/groups/charts, metadata-configured form/list views, child table validation, metadata-validated and operator-aware list filters, filter-builder metadata, print formats, print templates, print letterheads, reports, typed report filters, report ordering controls, report summaries, report group row caps, report charts, report chart controls, report exports, jobs, durable job execution history, retry administration, scheduler administration, files, Desk file manager workflows, realtime topic fan-out, redacted per-user room notifications, basic realtime presence snapshots, bounded durable realtime replay, parsed Desk realtime subscriptions, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, D1 schema planning/migration/application of data-patch journals, and CLI starter scaffolding/package-manager/dependency/app-registry/migration-file generation wiring.
 
 ## Status
 
-This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, generated workflow transition actions, permissioned document timelines with field diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, signed session actor resolution, event-sourced role catalog administration, optional catalog-backed account role validation, event-sourced user accounts with login/logout/me APIs, recovery-token flows, separate profile streams, and Desk account/profile administration, event-sourced user permissions with admin API/Desk management, app manifest composition, declarative client script injection with a built-in Desk browser API, basic form event hooks, basic field controls, user feedback helpers, parsed realtime subscription helpers, saved user filters, event-sourced saved report definitions with HTTP and Desk report-builder APIs, Desk saved report builder summary/group/chart controls, bounded report group rows, metadata-configured form and list views with operator-aware filters and resolved filter-builder metadata, metadata-planned D1 migrations, Cloudflare-native background job primitives with durable execution history, retry administration, and basic scheduler administration, R2-backed file attachments with a Desk file manager, typed report filters, report row ordering, report charts/exports with metadata-driven ordering/palette/value-label controls, custom print templates, reusable letterheads, Durable Object realtime tenant/DocType/document topics plus redacted user notifications, basic presence snapshots, and bounded durable replay, and starter CLI package-manager/dependency/app-registry/migration-file generation wiring exist, but richer visual filter builders, advanced report-builder controls, advanced chart controls, worker pools, richer scheduler controls, richer realtime presence/collaboration, provider-specific auth integrations, richer profile preferences/provider sync, advanced file workflows, destructive/renaming migrations, data backfills, broader browser-side client APIs, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
+This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, generated workflow transition actions, permissioned document timelines with field diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, signed session actor resolution, event-sourced role catalog administration, optional catalog-backed account role validation, event-sourced user accounts with login/logout/me APIs, recovery-token flows, separate profile streams, and Desk account/profile administration, event-sourced user permissions with admin API/Desk management, app manifest composition, declarative client script injection with a built-in Desk browser API, basic form event hooks, basic field controls, user feedback helpers, parsed realtime subscription helpers, saved user filters, event-sourced saved report definitions with HTTP and Desk report-builder APIs, Desk saved report builder summary/group/chart controls, bounded report group rows, metadata-configured form and list views with operator-aware filters and resolved filter-builder metadata, metadata-planned D1 migrations, app-declared data patches/backfills with D1/in-memory applied journals, Cloudflare-native background job primitives with durable execution history, retry administration, and basic scheduler administration, R2-backed file attachments with a Desk file manager, typed report filters, report row ordering, report charts/exports with metadata-driven ordering/palette/value-label controls, custom print templates, reusable letterheads, Durable Object realtime tenant/DocType/document topics plus redacted user notifications, basic presence snapshots, and bounded durable replay, and starter CLI package-manager/dependency/app-registry/migration-file generation wiring exist, but richer visual filter builders, advanced report-builder controls, advanced chart controls, worker pools, richer scheduler controls, richer realtime presence/collaboration, provider-specific auth integrations, richer profile preferences/provider sync, advanced file workflows, destructive/renaming migrations, long-running/chunked data-patch orchestration, broader browser-side client APIs, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
 
 ## References
 

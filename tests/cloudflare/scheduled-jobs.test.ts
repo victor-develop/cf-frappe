@@ -1,12 +1,11 @@
 import {
   createJobRegistry,
   deterministicIds,
-  dispatchScheduledJob,
-  dispatchScheduledJobs,
   fixedClock,
   InMemoryJobQueue,
   JobDispatcher
 } from "../../src";
+import { dispatchScheduledJob, dispatchScheduledJobs } from "../../src/cloudflare";
 import { now } from "../helpers";
 
 describe("dispatchScheduledJobs", () => {

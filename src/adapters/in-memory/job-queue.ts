@@ -1,4 +1,4 @@
-import type { JobQueue, JobQueueSendOptions, JobMessage } from "../../ports/job-queue";
+import type { JobQueue, JobQueueSendOptions, JobMessage } from "../../ports/job-queue.js";
 
 export interface InMemoryQueuedJob {
   readonly message: JobMessage;

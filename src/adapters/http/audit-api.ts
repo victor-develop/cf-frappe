@@ -1,7 +1,7 @@
 import { Hono } from "hono";
-import type { AuditService } from "../../application/audit-service";
-import type { ActorResolver } from "./actor";
-import { parseOptionalInteger } from "./request";
+import type { AuditService } from "../../application/audit-service.js";
+import type { ActorResolver } from "./actor.js";
+import { parseOptionalInteger } from "./request.js";
 
 export interface AuditApiOptions {
   readonly audit: AuditService;

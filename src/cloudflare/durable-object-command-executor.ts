@@ -15,11 +15,11 @@ import type {
   UntagDocumentCommand,
   UnfollowDocumentCommand,
   UpdateDocumentCommand
-} from "../application/document-service";
-import type { ModelRegistry } from "../core/registry";
-import type { DocumentSnapshot } from "../core/types";
-import { DEFAULT_TENANT_ID, type DocTypeDefinition } from "../core/types";
-import type { AggregateCoordinatorCommand } from "./aggregate-coordinator";
+} from "../application/document-service.js";
+import type { ModelRegistry } from "../core/registry.js";
+import type { DocumentSnapshot } from "../core/types.js";
+import { DEFAULT_TENANT_ID, type DocTypeDefinition } from "../core/types.js";
+import type { AggregateCoordinatorCommand } from "./aggregate-coordinator.js";
 
 export interface AggregateCoordinatorRpc {
   transact(command: AggregateCoordinatorCommand): Promise<DocumentSnapshot>;

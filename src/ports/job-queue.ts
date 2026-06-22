@@ -1,5 +1,5 @@
-import type { JobName, JobPayload } from "../core/jobs";
-import type { DocumentData } from "../core/types";
+import type { JobName, JobPayload } from "../core/jobs.js";
+import type { DocumentData } from "../core/types.js";
 
 export interface JobMessage<TPayload extends JobPayload = JobPayload> {
   readonly tenantId?: string;

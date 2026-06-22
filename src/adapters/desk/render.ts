@@ -13,34 +13,34 @@ import {
   type ResolvedFormSection,
   type ResolvedFormView,
   type ResolvedListView
-} from "../../core/types";
-import { isReportChartColor, type ReportDefinition } from "../../core/reports";
-import type { ClientScriptDefinition, ClientScriptScope } from "../../core/client-script";
+} from "../../core/types.js";
+import { isReportChartColor, type ReportDefinition } from "../../core/reports.js";
+import type { ClientScriptDefinition, ClientScriptScope } from "../../core/client-script.js";
 import type {
   DocumentAssignments,
   DocumentFollowers,
   DocumentTags,
   DocumentTimeline
-} from "../../application/document-history-service";
-import type { FileDashboard } from "../../application/file-service";
-import type { JobExecutionDashboard } from "../../application/job-history-service";
-import type { JobScheduleDashboard } from "../../application/job-schedule-service";
-import type { ReportRunResult } from "../../application/report-service";
-import type { RoleCatalogState } from "../../core/roles";
-import type { SavedListFilter } from "../../application/saved-list-filter-service";
-import type { SavedReport } from "../../application/saved-report-service";
-import type { PrintFormatDefinition } from "../../core/print-format";
-import type { UserAccount } from "../../core/user-accounts";
-import { USER_PROFILE_FIELDS, type UserProfileState } from "../../core/user-profiles";
-import type { UserPermissionState } from "../../core/user-permissions";
-import { DESK_CLIENT_SCRIPT_PATH } from "./client";
+} from "../../application/document-history-service.js";
+import type { FileDashboard } from "../../application/file-service.js";
+import type { JobExecutionDashboard } from "../../application/job-history-service.js";
+import type { JobScheduleDashboard } from "../../application/job-schedule-service.js";
+import type { ReportRunResult } from "../../application/report-service.js";
+import type { RoleCatalogState } from "../../core/roles.js";
+import type { SavedListFilter } from "../../application/saved-list-filter-service.js";
+import type { SavedReport } from "../../application/saved-report-service.js";
+import type { PrintFormatDefinition } from "../../core/print-format.js";
+import type { UserAccount } from "../../core/user-accounts.js";
+import { USER_PROFILE_FIELDS, type UserProfileState } from "../../core/user-profiles.js";
+import type { UserPermissionState } from "../../core/user-permissions.js";
+import { DESK_CLIENT_SCRIPT_PATH } from "./client.js";
 import {
   deskReportFieldLabel,
   deskReportSumSummaryLabel,
   deskReportSumSummaryName,
   isDeskGroupableReportField,
   isDeskNumericReportField
-} from "./report-builder";
+} from "./report-builder.js";
 
 export type FormLinkOptions = Readonly<Record<string, readonly LinkOption[]>>;
 export type FormTableDefinitions = Readonly<Record<string, DocTypeDefinition>>;

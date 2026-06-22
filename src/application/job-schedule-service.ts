@@ -1,12 +1,12 @@
-import { badRequest, notFound, permissionDenied } from "../core/errors";
-import type { JobRetryPolicy } from "../core/jobs";
+import { badRequest, notFound, permissionDenied } from "../core/errors.js";
+import type { JobRetryPolicy } from "../core/jobs.js";
 import {
   DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
   type Actor,
   type TenantId
-} from "../core/types";
-import type { JobMessage } from "../ports/job-queue";
+} from "../core/types.js";
+import type { JobMessage } from "../ports/job-queue.js";
 
 export interface JobScheduleDefinitionForAdmin {
   readonly cron: string;

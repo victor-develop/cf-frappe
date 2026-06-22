@@ -1,4 +1,4 @@
-import type { DomainEvent, TenantId } from "./types";
+import type { DomainEvent, TenantId } from "./types.js";
 
 export interface RoleRecord {
   readonly name: string;

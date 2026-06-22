@@ -1,5 +1,5 @@
-import { badRequest, conflict, notFound, permissionDenied } from "../core/errors";
-import { userAccountsStream, userProfilesStream } from "../core/streams";
+import { badRequest, conflict, notFound, permissionDenied } from "../core/errors.js";
+import { userAccountsStream, userProfilesStream } from "../core/streams.js";
 import {
   DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
@@ -8,18 +8,18 @@ import {
   type DomainEvent,
   type NewDomainEvent,
   type TenantId
-} from "../core/types";
-import { foldUserAccount } from "../core/user-accounts";
+} from "../core/types.js";
+import { foldUserAccount } from "../core/user-accounts.js";
 import {
   foldUserProfile,
   normalizeUserProfilePatch,
   type UserProfileInput,
   type UserProfilePatch,
   type UserProfileState
-} from "../core/user-profiles";
-import { systemClock, type Clock } from "../ports/clock";
-import type { EventStore } from "../ports/event-store";
-import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator";
+} from "../core/user-profiles.js";
+import { systemClock, type Clock } from "../ports/clock.js";
+import type { EventStore } from "../ports/event-store.js";
+import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
 
 export interface UserProfileServiceOptions {
   readonly events: EventStore;

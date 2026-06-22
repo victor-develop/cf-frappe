@@ -1,5 +1,5 @@
-import { FrameworkError } from "../core/errors";
-import type { JobRetryPolicy } from "../core/jobs";
+import { FrameworkError } from "../core/errors.js";
+import type { JobRetryPolicy } from "../core/jobs.js";
 
 export type JobFailureKind = "retryable" | "permanent";
 

@@ -1,7 +1,7 @@
-import type { ReportFilters, ReportRunOptions } from "../application/report-service";
-import { badRequest } from "../core/errors";
-import type { ReportOrder } from "../core/reports";
-import type { JsonPrimitive } from "../core/types";
+import type { ReportFilters, ReportRunOptions } from "../application/report-service.js";
+import { badRequest } from "../core/errors.js";
+import type { ReportOrder } from "../core/reports.js";
+import type { JsonPrimitive } from "../core/types.js";
 
 export function reportFiltersFromUrl(url: URL): ReportFilters {
   const filters: Record<string, JsonPrimitive> = {};

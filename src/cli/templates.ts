@@ -1,11 +1,12 @@
 import {
   D1_CORE_MIGRATION_ID,
+  D1_DATA_PATCH_MIGRATION_ID,
   D1_JOB_EXECUTION_MESSAGE_MIGRATION_ID,
   D1_JOB_EXECUTION_MIGRATION_ID,
   planD1Migrations,
   renderD1MigrationFile
 } from "../adapters/d1/schema-planner.js";
-import type { DocTypeDefinition } from "../core/types";
+import type { DocTypeDefinition } from "../core/types.js";
 
 const STARTER_TASK_INDEX_MIGRATION_ID = "doctype_task_v1_indexes";
 const STARTER_TASK_DOCTYPE: DocTypeDefinition = {
@@ -54,7 +55,8 @@ export function starterProjectFiles(input: StarterProjectTemplateInput): readonl
       path: "migrations/0003_cf_frappe_job_execution_messages.sql",
       contents: starterMigrationSql(D1_JOB_EXECUTION_MESSAGE_MIGRATION_ID)
     },
-    { path: "migrations/0004_doctype_task_v1_indexes.sql", contents: starterMigrationSql(STARTER_TASK_INDEX_MIGRATION_ID) }
+    { path: "migrations/0004_cf_frappe_data_patches.sql", contents: starterMigrationSql(D1_DATA_PATCH_MIGRATION_ID) },
+    { path: "migrations/0005_doctype_task_v1_indexes.sql", contents: starterMigrationSql(STARTER_TASK_INDEX_MIGRATION_ID) }
   ];
 }
 
@@ -375,12 +377,14 @@ export const registry = createRegistryFromApps(installedApps);
 
 function workerTs(): string {
   return `import {
+  signedSessionActorResolver,
+  type Actor
+} from "cf-frappe";
+import {
   createAggregateCoordinatorClass,
   createCloudFrappeWorker,
-  signedSessionActorResolver,
-  type Actor,
   type CloudFrappeEnv
-} from "cf-frappe";
+} from "cf-frappe/cloudflare";
 import { registry } from "./apps";
 
 type Env = Cloudflare.Env & CloudFrappeEnv;

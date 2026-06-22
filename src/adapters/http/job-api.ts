@@ -1,9 +1,9 @@
 import { Hono } from "hono";
-import type { JobHistoryService } from "../../application/job-history-service";
-import type { JobRetryPort } from "../../application/job-retry-service";
-import type { JobScheduleService } from "../../application/job-schedule-service";
-import type { ActorResolver } from "./actor";
-import { parseOptionalInteger } from "./request";
+import type { JobHistoryService } from "../../application/job-history-service.js";
+import type { JobRetryPort } from "../../application/job-retry-service.js";
+import type { JobScheduleService } from "../../application/job-schedule-service.js";
+import type { ActorResolver } from "./actor.js";
+import { parseOptionalInteger } from "./request.js";
 
 export interface JobApiOptions {
   readonly jobs?: JobHistoryService;

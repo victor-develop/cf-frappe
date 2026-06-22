@@ -1,6 +1,6 @@
-import { badRequest } from "../../core/errors";
-import { LIST_FILTER_OPERATORS } from "../../core/list-view";
-import type { DocumentData, ListDocumentsFilter, ListFilterOperator, MutableDocumentData } from "../../core/types";
+import { badRequest } from "../../core/errors.js";
+import { LIST_FILTER_OPERATORS } from "../../core/list-view.js";
+import type { DocumentData, ListDocumentsFilter, ListFilterOperator, MutableDocumentData } from "../../core/types.js";
 
 const SENSITIVE_QUERY_KEYS = new Set(["token", "password", "secret", "api_key", "apikey", "key"]);
 

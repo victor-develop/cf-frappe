@@ -1,5 +1,5 @@
-import type { DocumentData, DocumentSnapshot, DomainEvent, JsonValue } from "../../core/types";
-import type { JobExecutionRecord } from "../../ports/job-execution-log";
+import type { DocumentData, DocumentSnapshot, DomainEvent, JsonValue } from "../../core/types.js";
+import type { JobExecutionRecord } from "../../ports/job-execution-log.js";
 
 export interface EventRow {
   readonly id: string;

@@ -1,9 +1,9 @@
 import {
   createRealtimeHubClass,
   DurableObjectRealtimePublisher,
-  type RealtimeEvent,
   type RealtimeHubNamespace
-} from "../../src";
+} from "../../src/cloudflare";
+import type { RealtimeEvent } from "../../src";
 import { now } from "../helpers";
 
 describe("DurableObjectRealtimePublisher", () => {

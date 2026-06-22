@@ -1,4 +1,4 @@
-import type { TenantId } from "../core/types";
+import type { TenantId } from "../core/types.js";
 
 export interface AccountRecoveryMessage {
   readonly tenantId: TenantId;

@@ -1,10 +1,10 @@
-import type { PrintDocumentView, PrintFieldView } from "../../application/print-service";
+import type { PrintDocumentView, PrintFieldView } from "../../application/print-service.js";
 import {
   parsePrintTemplatePath,
   substitutePrintTemplate,
   type PrintTemplateReference
-} from "../../core/print-format";
-import type { JsonValue } from "../../core/types";
+} from "../../core/print-format.js";
+import type { JsonValue } from "../../core/types.js";
 
 export function renderPrintDocument(view: PrintDocumentView): string {
   const title = `${view.format.label ?? view.format.name} - ${view.document.name}`;

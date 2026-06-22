@@ -1,4 +1,4 @@
-import type { DocumentData, DocumentSnapshot, DomainEvent } from "./types";
+import type { DocumentData, DocumentSnapshot, DomainEvent } from "./types.js";
 
 export function foldDocument(events: readonly DomainEvent[]): DocumentSnapshot | null {
   return foldDocumentFrom(null, events);

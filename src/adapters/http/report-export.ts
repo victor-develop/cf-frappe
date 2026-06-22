@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import type { ReportCsvExport } from "../../application/report-service";
+import type { ReportCsvExport } from "../../application/report-service.js";
 
 export function writeReportCsvHeaders(c: Context, csv: ReportCsvExport): void {
   c.header("content-type", csv.contentType);

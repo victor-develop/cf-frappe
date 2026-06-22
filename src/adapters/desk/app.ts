@@ -1,24 +1,24 @@
 import { Hono } from "hono";
-import type { DocumentCommandExecutor } from "../../application/document-service";
-import type { DocumentHistoryService } from "../../application/document-history-service";
-import type { FileService } from "../../application/file-service";
-import type { JobHistoryService } from "../../application/job-history-service";
-import type { JobRetryPort } from "../../application/job-retry-service";
-import type { JobScheduleService } from "../../application/job-schedule-service";
-import type { PrintService } from "../../application/print-service";
-import { QueryService } from "../../application/query-service";
-import type { ReportService } from "../../application/report-service";
-import type { RoleService } from "../../application/role-service";
-import type { SavedListFilterService } from "../../application/saved-list-filter-service";
-import type { SavedReportDefinition, SavedReportService } from "../../application/saved-report-service";
-import type { UserAccountService } from "../../application/user-account-service";
-import type { UserPermissionService } from "../../application/user-permission-service";
-import type { UserProfileService } from "../../application/user-profile-service";
-import { FrameworkError } from "../../core/errors";
-import { can } from "../../core/permissions";
-import type { ModelRegistry } from "../../core/registry";
-import { USER_PROFILE_FIELDS, type UserProfileInput } from "../../core/user-profiles";
-import { allowedWorkflowTransitions } from "../../core/workflow";
+import type { DocumentCommandExecutor } from "../../application/document-service.js";
+import type { DocumentHistoryService } from "../../application/document-history-service.js";
+import type { FileService } from "../../application/file-service.js";
+import type { JobHistoryService } from "../../application/job-history-service.js";
+import type { JobRetryPort } from "../../application/job-retry-service.js";
+import type { JobScheduleService } from "../../application/job-schedule-service.js";
+import type { PrintService } from "../../application/print-service.js";
+import { QueryService } from "../../application/query-service.js";
+import type { ReportService } from "../../application/report-service.js";
+import type { RoleService } from "../../application/role-service.js";
+import type { SavedListFilterService } from "../../application/saved-list-filter-service.js";
+import type { SavedReportDefinition, SavedReportService } from "../../application/saved-report-service.js";
+import type { UserAccountService } from "../../application/user-account-service.js";
+import type { UserPermissionService } from "../../application/user-permission-service.js";
+import type { UserProfileService } from "../../application/user-profile-service.js";
+import { FrameworkError } from "../../core/errors.js";
+import { can } from "../../core/permissions.js";
+import type { ModelRegistry } from "../../core/registry.js";
+import { USER_PROFILE_FIELDS, type UserProfileInput } from "../../core/user-profiles.js";
+import { allowedWorkflowTransitions } from "../../core/workflow.js";
 import {
   CHILD_TABLE_ROW_INDEX_FIELD,
   type Actor,
@@ -30,20 +30,20 @@ import {
   type ListDocumentsFilter,
   type MutableDocumentData,
   type ResolvedFormView
-} from "../../core/types";
-import type { ActorResolver } from "../http/actor";
-import { listFiltersFromUrl, parseOptionalInteger, readBoundedText } from "../http/request";
-import { writeReportCsvHeaders } from "../http/report-export";
-import { reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request";
-import { renderPrintDocument } from "../print";
-import { DESK_CLIENT_SCRIPT_PATH, renderDeskClientScript } from "./client";
+} from "../../core/types.js";
+import type { ActorResolver } from "../http/actor.js";
+import { listFiltersFromUrl, parseOptionalInteger, readBoundedText } from "../http/request.js";
+import { writeReportCsvHeaders } from "../http/report-export.js";
+import { reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request.js";
+import { renderPrintDocument } from "../print/index.js";
+import { DESK_CLIENT_SCRIPT_PATH, renderDeskClientScript } from "./client.js";
 import {
   deskReportFieldLabel,
   deskReportSumSummaryLabel,
   deskReportSumSummaryName,
   isDeskGroupableReportField,
   isDeskNumericReportField
-} from "./report-builder";
+} from "./report-builder.js";
 import {
   renderDeskHome,
   renderDeskLayout,
@@ -66,7 +66,7 @@ import {
   type FormLinkOptions,
   type FormTableDefinitions,
   type FormWorkflowAction
-} from "./render";
+} from "./render.js";
 
 const MAX_DESK_FORM_BYTES = 1_048_576;
 const DEFAULT_DESK_REPORT_GROUP_MAX_ROWS = 50;

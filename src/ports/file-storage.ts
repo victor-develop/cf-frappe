@@ -1,4 +1,4 @@
-import type { DocumentData } from "../core/types";
+import type { DocumentData } from "../core/types.js";
 
 export type FileContent = ArrayBuffer | ArrayBufferView | string | Blob;
 

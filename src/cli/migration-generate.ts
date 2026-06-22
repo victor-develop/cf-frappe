@@ -2,8 +2,8 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
-import type { DocTypeDefinition } from "../core/types";
-import type { ModelRegistry } from "../core/registry";
+import type { DocTypeDefinition } from "../core/types.js";
+import type { ModelRegistry } from "../core/registry.js";
 import { planD1Migrations, renderD1MigrationFile, type D1Migration } from "../adapters/d1/schema-planner.js";
 
 const DEFAULT_REGISTRY_FILE = "src/apps/index.ts";
@@ -100,7 +100,10 @@ export function dynamicMigrationRegistryLoader(): MigrationRegistryLoader {
 
 function migrationFileName(sequence: number, id: string): string {
   const sequencePrefix = `${String(sequence).padStart(4, "0")}_`;
-  return id.startsWith(sequencePrefix) ? `${id}.sql` : `${sequencePrefix}${id}.sql`;
+  if (id.startsWith(sequencePrefix)) {
+    return `${id}.sql`;
+  }
+  return `${sequencePrefix}${id.replace(/^\d{4}_/u, "")}.sql`;
 }
 
 interface ExistingMigrationFile {
@@ -130,15 +133,25 @@ async function readExistingMigrationFiles(
     const basename = entry.slice(0, -".sql".length);
     return [{ filename: entry, sequence: Number(match[1]), migrationIds: [basename, match[2]!] }];
   });
-  return Promise.all(files.map(async (file) => ({
-    ...file,
-    ...checksumFromFile(await readFile(resolve(migrationsPath, file.filename), "utf8"))
-  })));
+  return Promise.all(files.map(async (file) => {
+    const metadata = metadataFromFile(await readFile(resolve(migrationsPath, file.filename), "utf8"));
+    return {
+      ...file,
+      ...(metadata.checksum === undefined ? {} : { checksum: metadata.checksum }),
+      migrationIds: [...new Set([...file.migrationIds, ...(metadata.migrationIds ?? [])])]
+    };
+  }));
 }
 
-function checksumFromFile(contents: string): { readonly checksum?: string } {
-  const match = /^-- checksum:\s*(\S+)\s*$/mu.exec(contents);
-  return match === null ? {} : { checksum: match[1]! };
+function metadataFromFile(
+  contents: string
+): { readonly checksum?: string; readonly migrationIds?: readonly string[] } {
+  const checksumMatch = /^-- checksum:\s*(\S+)\s*$/mu.exec(contents);
+  const migrationIdMatch = /^--\s+(?!checksum\b)([a-z0-9_.-]+):/mu.exec(contents);
+  return {
+    ...(checksumMatch === null ? {} : { checksum: checksumMatch[1]! }),
+    ...(migrationIdMatch === null ? {} : { migrationIds: [migrationIdMatch[1]!] })
+  };
 }
 
 function assertExistingMigrationChecksum(migration: D1Migration, file: ExistingMigrationFile): void {

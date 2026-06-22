@@ -1,7 +1,7 @@
-import { FrameworkError } from "../../core/errors";
-import type { Clock } from "../../ports/clock";
-import { systemClock } from "../../ports/clock";
-import type { D1Migration } from "./schema-planner";
+import { FrameworkError } from "../../core/errors.js";
+import type { Clock } from "../../ports/clock.js";
+import { systemClock } from "../../ports/clock.js";
+import type { D1Migration } from "./schema-planner.js";
 
 export interface AppliedD1Migration {
   readonly id: string;

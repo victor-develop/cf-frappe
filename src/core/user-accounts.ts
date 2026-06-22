@@ -1,5 +1,5 @@
-import { normalizeRoleName } from "./roles";
-import type { Actor, DomainEvent, TenantId } from "./types";
+import { normalizeRoleName } from "./roles.js";
+import type { Actor, DomainEvent, TenantId } from "./types.js";
 
 export interface UserAccountState {
   readonly tenantId: TenantId;

@@ -1,14 +1,16 @@
 import {
-  createCloudFrappeWorker,
   createRegistry,
   deterministicIds,
   fileDocType,
   fixedClock,
-  InMemoryFileStorage,
-  type AggregateCoordinatorRpc,
-  type RpcDurableObjectNamespace
+  InMemoryFileStorage
 } from "../../src";
-import type { AggregateCoordinatorCommand } from "../../src";
+import {
+  createCloudFrappeWorker,
+  type AggregateCoordinatorRpc,
+  type AggregateCoordinatorCommand,
+  type RpcDurableObjectNamespace
+} from "../../src/cloudflare";
 import type { DocumentData } from "../../src";
 import { now, owner } from "../helpers";
 

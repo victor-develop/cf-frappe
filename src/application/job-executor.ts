@@ -1,9 +1,9 @@
-import type { JobHandlerResult, JobRegistry } from "../core/jobs";
-import { DEFAULT_TENANT_ID } from "../core/types";
-import type { Clock } from "../ports/clock";
-import { systemClock } from "../ports/clock";
-import type { JobExecutionLog } from "../ports/job-execution-log";
-import type { JobMessage } from "../ports/job-queue";
+import type { JobHandlerResult, JobRegistry } from "../core/jobs.js";
+import { DEFAULT_TENANT_ID } from "../core/types.js";
+import type { Clock } from "../ports/clock.js";
+import { systemClock } from "../ports/clock.js";
+import type { JobExecutionLog } from "../ports/job-execution-log.js";
+import type { JobMessage } from "../ports/job-queue.js";
 
 export interface JobExecutorOptions<TResources = unknown> {
   readonly registry: JobRegistry<TResources>;

@@ -1,8 +1,8 @@
-import { classifyJobError } from "../application/job-errors";
-import type { JobExecutor } from "../application/job-executor";
-import type { JobRetryPolicy } from "../core/jobs";
-import type { DocumentData, JsonValue } from "../core/types";
-import type { JobMessage } from "../ports/job-queue";
+import { classifyJobError } from "../application/job-errors.js";
+import type { JobExecutor } from "../application/job-executor.js";
+import type { JobRetryPolicy } from "../core/jobs.js";
+import type { DocumentData, JsonValue } from "../core/types.js";
+import type { JobMessage } from "../ports/job-queue.js";
 
 export interface CloudflareJobBatchOptions<TResources = unknown> {
   readonly executor: JobExecutor<TResources>;

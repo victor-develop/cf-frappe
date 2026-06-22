@@ -1,7 +1,7 @@
 import { Hono } from "hono";
-import type { PrintService } from "../../application/print-service";
-import { renderPrintDocument } from "../print";
-import type { ActorResolver } from "./actor";
+import type { PrintService } from "../../application/print-service.js";
+import { renderPrintDocument } from "../print/index.js";
+import type { ActorResolver } from "./actor.js";
 
 export interface PrintApiOptions {
   readonly prints: PrintService;

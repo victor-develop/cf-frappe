@@ -1,4 +1,4 @@
-import type { Actor, DocumentSnapshot, WorkflowDefinition, WorkflowTransition } from "./types";
+import type { Actor, DocumentSnapshot, WorkflowDefinition, WorkflowTransition } from "./types.js";
 
 export interface WorkflowTransitionContext {
   readonly actor: Actor;

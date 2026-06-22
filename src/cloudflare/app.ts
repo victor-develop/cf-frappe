@@ -1,55 +1,55 @@
-import { AuditService } from "../application/audit-service";
-import { JobExecutionError } from "../application/job-errors";
-import { JobDispatcher } from "../application/job-dispatcher";
-import { JobExecutor } from "../application/job-executor";
-import { JobHistoryService } from "../application/job-history-service";
-import { JobRetryService } from "../application/job-retry-service";
-import { JobScheduleService } from "../application/job-schedule-service";
-import { DocumentHistoryService } from "../application/document-history-service";
-import { PrintService } from "../application/print-service";
-import { QueryService } from "../application/query-service";
-import { ReportService } from "../application/report-service";
-import { RoleService } from "../application/role-service";
-import { SavedListFilterService } from "../application/saved-list-filter-service";
-import { SavedReportService } from "../application/saved-report-service";
-import { UserAccountService } from "../application/user-account-service";
-import { UserProfileService } from "../application/user-profile-service";
-import { UserPermissionService } from "../application/user-permission-service";
-import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator";
-import { RoleCatalogUserRoleValidator } from "../application/user-role-validator";
-import type { DocumentCommandExecutor } from "../application/document-service";
-import { FileService } from "../application/file-service";
-import { webCryptoPbkdf2PasswordHasher } from "../adapters/crypto";
-import { D1EventStore, D1ProjectionStore } from "../adapters/d1";
-import { createDeskApp } from "../adapters/desk";
-import { createResourceApi, userAccountSessionActorResolver } from "../adapters/http";
-import type { ActorResolver, AuthSessionOptions } from "../adapters/http";
-import { DEFAULT_TENANT_ID, type Actor } from "../core/types";
-import { FrameworkError } from "../core/errors";
-import type { JobRegistry, JobRetryPolicy } from "../core/jobs";
-import { canSubscribeToRealtimeTopic, parseRealtimeTopic, realtimeTopicFromScope } from "../core/realtime";
-import type { ModelRegistry } from "../core/registry";
-import type { AccountRecoveryNotifier } from "../ports/account-recovery";
-import { systemClock, type Clock } from "../ports/clock";
-import type { FileStorage } from "../ports/file-storage";
-import type { IdGenerator } from "../ports/id-generator";
-import type { JobExecutionLog } from "../ports/job-execution-log";
-import type { JobMessage, JobQueue } from "../ports/job-queue";
-import type { PasswordHasher } from "../ports/password-hasher";
-import type { RealtimePublisher } from "../ports/realtime";
+import { AuditService } from "../application/audit-service.js";
+import { JobExecutionError } from "../application/job-errors.js";
+import { JobDispatcher } from "../application/job-dispatcher.js";
+import { JobExecutor } from "../application/job-executor.js";
+import { JobHistoryService } from "../application/job-history-service.js";
+import { JobRetryService } from "../application/job-retry-service.js";
+import { JobScheduleService } from "../application/job-schedule-service.js";
+import { DocumentHistoryService } from "../application/document-history-service.js";
+import { PrintService } from "../application/print-service.js";
+import { QueryService } from "../application/query-service.js";
+import { ReportService } from "../application/report-service.js";
+import { RoleService } from "../application/role-service.js";
+import { SavedListFilterService } from "../application/saved-list-filter-service.js";
+import { SavedReportService } from "../application/saved-report-service.js";
+import { UserAccountService } from "../application/user-account-service.js";
+import { UserProfileService } from "../application/user-profile-service.js";
+import { UserPermissionService } from "../application/user-permission-service.js";
+import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator.js";
+import { RoleCatalogUserRoleValidator } from "../application/user-role-validator.js";
+import type { DocumentCommandExecutor } from "../application/document-service.js";
+import { FileService } from "../application/file-service.js";
+import { webCryptoPbkdf2PasswordHasher } from "../adapters/crypto/index.js";
+import { D1EventStore, D1ProjectionStore } from "../adapters/d1/index.js";
+import { createDeskApp } from "../adapters/desk/index.js";
+import { createResourceApi, userAccountSessionActorResolver } from "../adapters/http/index.js";
+import type { ActorResolver, AuthSessionOptions } from "../adapters/http/index.js";
+import { DEFAULT_TENANT_ID, type Actor } from "../core/types.js";
+import { FrameworkError } from "../core/errors.js";
+import type { JobRegistry, JobRetryPolicy } from "../core/jobs.js";
+import { canSubscribeToRealtimeTopic, parseRealtimeTopic, realtimeTopicFromScope } from "../core/realtime.js";
+import type { ModelRegistry } from "../core/registry.js";
+import type { AccountRecoveryNotifier } from "../ports/account-recovery.js";
+import { systemClock, type Clock } from "../ports/clock.js";
+import type { FileStorage } from "../ports/file-storage.js";
+import type { IdGenerator } from "../ports/id-generator.js";
+import type { JobExecutionLog } from "../ports/job-execution-log.js";
+import type { JobMessage, JobQueue } from "../ports/job-queue.js";
+import type { PasswordHasher } from "../ports/password-hasher.js";
+import type { RealtimePublisher } from "../ports/realtime.js";
 import {
   DurableObjectCommandExecutor,
   type AggregateCoordinatorRpc,
   type RpcDurableObjectNamespace
-} from "./durable-object-command-executor";
-import { processCloudflareJobBatch } from "./job-consumer";
-import { DurableObjectRealtimePublisher, type RealtimeHubNamespace } from "./realtime-hub";
+} from "./durable-object-command-executor.js";
+import { processCloudflareJobBatch } from "./job-consumer.js";
+import { DurableObjectRealtimePublisher, type RealtimeHubNamespace } from "./realtime-hub.js";
 import {
   dispatchScheduledJob,
   dispatchScheduledJobs,
   type ScheduledJobDefinition
-} from "./scheduled-jobs";
-import { toErrorResponse } from "../adapters/http";
+} from "./scheduled-jobs.js";
+import { toErrorResponse } from "../adapters/http/index.js";
 
 export interface CloudFrappeEnv {
   readonly DB: D1Database;

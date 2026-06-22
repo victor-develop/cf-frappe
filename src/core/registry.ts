@@ -1,13 +1,14 @@
-import { assertAppName, assertAppNames } from "./app-name";
-import { resolveAppDependencyOrder } from "./app-graph";
-import { clientScriptAppliesTo, defineClientScript } from "./client-script";
-import type { ClientScriptDefinition, ClientScriptScope } from "./client-script";
-import { FrameworkError } from "./errors";
-import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-format";
-import { assertPrintFormatMatchesDocType, assertPrintLetterheadValid } from "./print-format";
-import type { ReportDefinition } from "./reports";
-import { assertReportDefinition, assertReportMatchesDocType } from "./reports";
-import type { InstalledAppDefinition } from "./app";
+import { assertAppName, assertAppNames } from "./app-name.js";
+import { resolveAppDependencyOrder } from "./app-graph.js";
+import { clientScriptAppliesTo, defineClientScript } from "./client-script.js";
+import type { ClientScriptDefinition, ClientScriptScope } from "./client-script.js";
+import { assertDataPatchId, defineDataPatch, type DataPatchDefinition } from "./data-patch.js";
+import { FrameworkError } from "./errors.js";
+import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-format.js";
+import { assertPrintFormatMatchesDocType, assertPrintLetterheadValid } from "./print-format.js";
+import type { ReportDefinition } from "./reports.js";
+import { assertReportDefinition, assertReportMatchesDocType } from "./reports.js";
+import type { InstalledAppDefinition } from "./app.js";
 import type {
   DocTypeDefinition,
   DocumentData,
@@ -15,7 +16,7 @@ import type {
   DomainEvent,
   MutableDocumentData,
   ValidationIssue
-} from "./types";
+} from "./types.js";
 
 export type MaybePromise<T> = T | Promise<T>;
 
@@ -43,6 +44,7 @@ export interface RegistryOptions {
   readonly printFormats?: readonly PrintFormatDefinition[];
   readonly reports?: readonly ReportDefinition[];
   readonly clientScripts?: readonly ClientScriptDefinition[];
+  readonly dataPatches?: readonly DataPatchDefinition[];
   readonly hooks?: Readonly<Record<string, readonly DocumentHooks[]>>;
 }
 
@@ -53,6 +55,7 @@ export class ModelRegistry {
   private readonly printFormats = new Map<string, PrintFormatDefinition>();
   private readonly reports = new Map<string, ReportDefinition>();
   private readonly clientScripts = new Map<string, ClientScriptDefinition>();
+  private readonly dataPatches = new Map<string, DataPatchDefinition>();
   private readonly hooks = new Map<string, readonly DocumentHooks[]>();
 
   constructor(options: RegistryOptions = {}) {
@@ -74,6 +77,9 @@ export class ModelRegistry {
     }
     for (const script of options.clientScripts ?? []) {
       this.registerClientScript(script);
+    }
+    for (const patch of options.dataPatches ?? []) {
+      this.registerDataPatch(patch);
     }
     for (const [doctype, hooks] of Object.entries(options.hooks ?? {})) {
       for (const hook of hooks) {
@@ -215,6 +221,17 @@ export class ModelRegistry {
     this.clientScripts.set(definition.name, definition);
   }
 
+  registerDataPatch(patch: DataPatchDefinition): void {
+    assertDataPatchId(patch.id);
+    const definition = defineDataPatch(patch);
+    if (this.dataPatches.has(definition.id)) {
+      throw new FrameworkError("DATA_PATCH_DUPLICATE", `Data patch '${definition.id}' is already registered`, {
+        status: 409
+      });
+    }
+    this.dataPatches.set(definition.id, definition);
+  }
+
   registerHooks(doctype: string, hooks: DocumentHooks): void {
     if (!this.doctypes.has(doctype)) {
       throw new FrameworkError("DOCTYPE_NOT_FOUND", `DocType '${doctype}' is not registered`, {
@@ -296,6 +313,10 @@ export class ModelRegistry {
       .filter((script) => doctype === undefined || script.doctype === doctype)
       .filter((script) => scope === undefined || clientScriptAppliesTo(script, scope))
       .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  listDataPatches(): readonly DataPatchDefinition[] {
+    return [...this.dataPatches.values()];
   }
 
   hooksFor(doctype: string): readonly DocumentHooks[] {

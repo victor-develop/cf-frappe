@@ -3,10 +3,10 @@ import type {
   JobExecutionLog,
   JobExecutionRecord,
   ListJobExecutionsOptions
-} from "../../ports/job-execution-log";
-import type { JobMessage } from "../../ports/job-queue";
-import { DEFAULT_TENANT_ID, type JsonValue } from "../../core/types";
-import type { JobPayload } from "../../core/jobs";
+} from "../../ports/job-execution-log.js";
+import type { JobMessage } from "../../ports/job-queue.js";
+import { DEFAULT_TENANT_ID, type JsonValue } from "../../core/types.js";
+import type { JobPayload } from "../../core/jobs.js";
 
 export class InMemoryJobExecutionLog implements JobExecutionLog {
   private readonly records = new Map<string, JobExecutionRecord>();

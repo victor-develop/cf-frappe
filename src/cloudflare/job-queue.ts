@@ -1,4 +1,4 @@
-import type { JobQueue, JobQueueSendOptions, JobMessage } from "../ports/job-queue";
+import type { JobQueue, JobQueueSendOptions, JobMessage } from "../ports/job-queue.js";
 
 export class CloudflareJobQueue implements JobQueue {
   private readonly queue: Queue<JobMessage>;

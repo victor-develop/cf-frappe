@@ -1,8 +1,8 @@
-import { badRequest, notFound, permissionDenied } from "../core/errors";
-import { mergeListFilters, normalizeListFilters } from "../core/list-view";
-import { can } from "../core/permissions";
-import type { ModelRegistry } from "../core/registry";
-import { savedListFiltersStream } from "../core/streams";
+import { badRequest, notFound, permissionDenied } from "../core/errors.js";
+import { mergeListFilters, normalizeListFilters } from "../core/list-view.js";
+import { can } from "../core/permissions.js";
+import type { ModelRegistry } from "../core/registry.js";
+import { savedListFiltersStream } from "../core/streams.js";
 import {
   DEFAULT_TENANT_ID,
   type Actor,
@@ -11,12 +11,12 @@ import {
   type ListDocumentsFilter,
   type NewDomainEvent,
   type TenantId
-} from "../core/types";
-import type { Clock } from "../ports/clock";
-import { systemClock } from "../ports/clock";
-import type { EventStore } from "../ports/event-store";
-import type { IdGenerator } from "../ports/id-generator";
-import { cryptoIdGenerator } from "../ports/id-generator";
+} from "../core/types.js";
+import type { Clock } from "../ports/clock.js";
+import { systemClock } from "../ports/clock.js";
+import type { EventStore } from "../ports/event-store.js";
+import type { IdGenerator } from "../ports/id-generator.js";
+import { cryptoIdGenerator } from "../ports/id-generator.js";
 
 const MAX_FILTER_LABEL_LENGTH = 140;
 

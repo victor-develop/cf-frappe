@@ -1,5 +1,5 @@
-import type { DomainEvent, NewDomainEvent, StreamName } from "../core/types";
-import type { DocumentStore, ReadStreamOptions } from "./document-store";
+import type { DomainEvent, NewDomainEvent, StreamName } from "../core/types.js";
+import type { DocumentStore, ReadStreamOptions } from "./document-store.js";
 
 export interface EventStore extends Pick<DocumentStore, "readStream"> {
   append(

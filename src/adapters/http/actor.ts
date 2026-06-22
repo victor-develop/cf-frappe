@@ -1,4 +1,4 @@
-import { DEFAULT_TENANT_ID, type Actor } from "../../core/types";
+import { DEFAULT_TENANT_ID, type Actor } from "../../core/types.js";
 
 export type ActorResolver = (request: Request) => Actor | Promise<Actor>;
 

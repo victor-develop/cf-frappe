@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the CLI D1 migration generation slice:
+As of the app-declared data patches slice:
 
-- Vitest files: `59`
-- Vitest cases: `481`
+- Vitest files: `61`
+- Vitest cases: `490`
 
 ## Implication
 

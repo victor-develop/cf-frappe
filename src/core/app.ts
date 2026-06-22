@@ -1,10 +1,11 @@
-import { assertAppName, assertAppNames } from "./app-name";
-import { resolveAppDependencyOrder } from "./app-graph";
-import type { ClientScriptDefinition } from "./client-script";
-import { createRegistry, type DocumentHooks, type ModelRegistry, type RegistryOptions } from "./registry";
-import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-format";
-import type { ReportDefinition } from "./reports";
-import type { DocTypeDefinition } from "./types";
+import { assertAppName, assertAppNames } from "./app-name.js";
+import { resolveAppDependencyOrder } from "./app-graph.js";
+import type { ClientScriptDefinition } from "./client-script.js";
+import type { DataPatchDefinition } from "./data-patch.js";
+import { createRegistry, type DocumentHooks, type ModelRegistry, type RegistryOptions } from "./registry.js";
+import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-format.js";
+import type { ReportDefinition } from "./reports.js";
+import type { DocTypeDefinition } from "./types.js";
 
 export interface FrameworkAppDefinition {
   readonly name: string;
@@ -17,6 +18,7 @@ export interface FrameworkAppDefinition {
   readonly printFormats?: readonly PrintFormatDefinition[];
   readonly reports?: readonly ReportDefinition[];
   readonly clientScripts?: readonly ClientScriptDefinition[];
+  readonly dataPatches?: readonly DataPatchDefinition[];
   readonly hooks?: Readonly<Record<string, readonly DocumentHooks[]>>;
 }
 
@@ -40,6 +42,7 @@ export function defineApp(input: FrameworkAppDefinition): FrameworkAppDefinition
     printFormats: Object.freeze([...(input.printFormats ?? [])]),
     reports: Object.freeze([...(input.reports ?? [])]),
     clientScripts: Object.freeze([...(input.clientScripts ?? [])]),
+    dataPatches: Object.freeze([...(input.dataPatches ?? [])]),
     hooks: freezeHooks(input.hooks ?? {})
   });
 }
@@ -63,6 +66,7 @@ export function registryOptionsFromApps(apps: readonly FrameworkAppDefinition[])
     printFormats: orderedApps.flatMap((app) => app.printFormats ?? []),
     reports: orderedApps.flatMap((app) => app.reports ?? []),
     clientScripts: orderedApps.flatMap((app) => app.clientScripts ?? []),
+    dataPatches: orderedApps.flatMap((app) => app.dataPatches ?? []),
     hooks
   };
 }

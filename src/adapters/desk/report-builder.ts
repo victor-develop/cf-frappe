@@ -1,4 +1,4 @@
-import type { FieldDefinition } from "../../core/types";
+import type { FieldDefinition } from "../../core/types.js";
 
 export function deskReportFieldLabel(field: FieldDefinition): string {
   return field.label ?? field.name;

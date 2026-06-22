@@ -1,9 +1,9 @@
 import { Hono } from "hono";
-import type { ReportService } from "../../application/report-service";
-import type { ActorResolver } from "./actor";
-import { parseOptionalInteger } from "./request";
-import { writeReportCsvHeaders } from "./report-export";
-import { reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request";
+import type { ReportService } from "../../application/report-service.js";
+import type { ActorResolver } from "./actor.js";
+import { parseOptionalInteger } from "./request.js";
+import { writeReportCsvHeaders } from "./report-export.js";
+import { reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request.js";
 
 export interface ReportApiOptions {
   readonly reports: ReportService;

@@ -1,14 +1,14 @@
-import { FrameworkError, notFound, permissionDenied } from "../core/errors";
-import { resolveFormView } from "../core/form-view";
-import { mergeListFilters, normalizeListFilters, resolveListView } from "../core/list-view";
-import { can } from "../core/permissions";
-import type { ModelRegistry } from "../core/registry";
+import { FrameworkError, notFound, permissionDenied } from "../core/errors.js";
+import { resolveFormView } from "../core/form-view.js";
+import { mergeListFilters, normalizeListFilters, resolveListView } from "../core/list-view.js";
+import { can } from "../core/permissions.js";
+import type { ModelRegistry } from "../core/registry.js";
 import {
   documentMatchesUserPermissions,
   linkTargetMatchesUserPermissions,
   type UserPermissionGrant,
   type UserPermissionProvider
-} from "../core/user-permissions";
+} from "../core/user-permissions.js";
 import {
   DEFAULT_TENANT_ID,
   type Actor,
@@ -21,8 +21,8 @@ import {
   type LinkOptionsResult,
   type ResolvedFormView,
   type ResolvedListView
-} from "../core/types";
-import type { ProjectionStore } from "../ports/projection-store";
+} from "../core/types.js";
+import type { ProjectionStore } from "../ports/projection-store.js";
 
 export interface QueryServiceOptions {
   readonly registry: ModelRegistry;

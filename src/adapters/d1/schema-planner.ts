@@ -1,4 +1,4 @@
-import type { DocTypeDefinition } from "../../core/types";
+import type { DocTypeDefinition } from "../../core/types.js";
 import { FrameworkError } from "../../core/errors.js";
 
 export interface PlannedSqlStatement {
@@ -26,6 +26,7 @@ export interface D1MigrationPlanOptions {
 export const D1_CORE_MIGRATION_ID = "0001_cf_frappe_core";
 export const D1_JOB_EXECUTION_MIGRATION_ID = "0002_cf_frappe_job_executions";
 export const D1_JOB_EXECUTION_MESSAGE_MIGRATION_ID = "0003_cf_frappe_job_execution_messages";
+export const D1_DATA_PATCH_MIGRATION_ID = "0004_cf_frappe_data_patches";
 
 export const D1_CORE_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
   {
@@ -143,6 +144,25 @@ export const D1_JOB_EXECUTION_MESSAGE_SCHEMA_STATEMENTS: readonly PlannedSqlStat
   }
 ];
 
+export const D1_DATA_PATCH_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
+  {
+    name: "create_cf_frappe_data_patches",
+    sql:
+      "CREATE TABLE IF NOT EXISTS cf_frappe_data_patches (" +
+      "id TEXT PRIMARY KEY, " +
+      "checksum TEXT NOT NULL, " +
+      "status TEXT NOT NULL CHECK (status IN ('pending', 'applied', 'failed')), " +
+      "claim_id TEXT, " +
+      "claimed_at TEXT, " +
+      "applied_at TEXT, " +
+      "failed_at TEXT, " +
+      "error TEXT, " +
+      "result_json TEXT, " +
+      "result_present INTEGER NOT NULL DEFAULT 0" +
+      ");"
+  }
+];
+
 export function planD1ProjectionIndexes(
   doctypes: readonly DocTypeDefinition[]
 ): readonly PlannedSqlStatement[] {
@@ -192,6 +212,11 @@ export function planD1Migrations(
           id: D1_JOB_EXECUTION_MESSAGE_MIGRATION_ID,
           label: "cf-frappe job execution message snapshots",
           statements: D1_JOB_EXECUTION_MESSAGE_SCHEMA_STATEMENTS
+        }),
+        defineD1Migration({
+          id: D1_DATA_PATCH_MIGRATION_ID,
+          label: "cf-frappe data patch journal",
+          statements: D1_DATA_PATCH_SCHEMA_STATEMENTS
         })
       ]
     : [];

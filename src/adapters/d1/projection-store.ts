@@ -7,9 +7,9 @@ import type {
   ListDocumentsQuery,
   ListDocumentsResult,
   TenantId
-} from "../../core/types";
-import type { ProjectionStore } from "../../ports/projection-store";
-import { documentFromRow, type DocumentRow } from "./serde";
+} from "../../core/types.js";
+import type { ProjectionStore } from "../../ports/projection-store.js";
+import { documentFromRow, type DocumentRow } from "./serde.js";
 
 export class D1ProjectionStore implements ProjectionStore {
   constructor(private readonly db: D1Database) {}

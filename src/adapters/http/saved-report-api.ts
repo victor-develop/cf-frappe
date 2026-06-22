@@ -1,6 +1,6 @@
 import { Hono } from "hono";
-import type { SavedReportDefinition, SavedReportService } from "../../application/saved-report-service";
-import { badRequest } from "../../core/errors";
+import type { SavedReportDefinition, SavedReportService } from "../../application/saved-report-service.js";
+import { badRequest } from "../../core/errors.js";
 import type {
   ReportChartDefinition,
   ReportChartOrderBy,
@@ -9,12 +9,12 @@ import type {
   ReportGroupDefinition,
   ReportOrder,
   ReportSummaryDefinition
-} from "../../core/reports";
-import type { FieldType, JsonPrimitive } from "../../core/types";
-import { reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request";
-import type { ActorResolver } from "./actor";
-import { parseOptionalInteger, readJsonObject } from "./request";
-import { writeReportCsvHeaders } from "./report-export";
+} from "../../core/reports.js";
+import type { FieldType, JsonPrimitive } from "../../core/types.js";
+import { reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request.js";
+import type { ActorResolver } from "./actor.js";
+import { parseOptionalInteger, readJsonObject } from "./request.js";
+import { writeReportCsvHeaders } from "./report-export.js";
 
 export interface SavedReportApiOptions {
   readonly savedReports: SavedReportService;

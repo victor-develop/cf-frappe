@@ -1,12 +1,12 @@
-import { badRequest, notFound, permissionDenied } from "../core/errors";
-import type { JobRetryPolicy } from "../core/jobs";
-import { DEFAULT_TENANT_ID, SYSTEM_MANAGER_ROLE, type Actor, type TenantId } from "../core/types";
+import { badRequest, notFound, permissionDenied } from "../core/errors.js";
+import type { JobRetryPolicy } from "../core/jobs.js";
+import { DEFAULT_TENANT_ID, SYSTEM_MANAGER_ROLE, type Actor, type TenantId } from "../core/types.js";
 import type {
   JobExecutionLogReader,
   JobExecutionRecord,
   JobExecutionStatus,
   ListJobExecutionsOptions
-} from "../ports/job-execution-log";
+} from "../ports/job-execution-log.js";
 
 const DEFAULT_JOB_HISTORY_LIMIT = 50;
 const MAX_JOB_HISTORY_LIMIT = 200;

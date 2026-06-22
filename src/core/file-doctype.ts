@@ -1,5 +1,5 @@
-import { defineDocType } from "./schema";
-import { SYSTEM_MANAGER_ROLE, type DocTypeDefinition, type DocumentData } from "./types";
+import { defineDocType } from "./schema.js";
+import { SYSTEM_MANAGER_ROLE, type DocTypeDefinition, type DocumentData } from "./types.js";
 
 export const FILE_DOCTYPE_NAME = "File";
 

@@ -1,5 +1,5 @@
-import { badRequest, notFound, permissionDenied } from "../core/errors";
-import { foldDocument } from "../core/events";
+import { badRequest, notFound, permissionDenied } from "../core/errors.js";
+import { foldDocument } from "../core/events.js";
 import {
   DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
@@ -8,8 +8,8 @@ import {
   type DocumentSnapshot,
   type DomainEvent,
   type TenantId
-} from "../core/types";
-import type { AuditEventStore } from "../ports/audit-event-store";
+} from "../core/types.js";
+import type { AuditEventStore } from "../ports/audit-event-store.js";
 
 const DEFAULT_AUDIT_LIMIT = 50;
 const MAX_AUDIT_LIMIT = 200;

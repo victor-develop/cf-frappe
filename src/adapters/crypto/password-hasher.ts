@@ -1,4 +1,4 @@
-import type { PasswordHasher } from "../../ports/password-hasher";
+import type { PasswordHasher } from "../../ports/password-hasher.js";
 
 export interface WebCryptoPbkdf2PasswordHasherOptions {
   readonly iterations?: number;

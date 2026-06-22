@@ -1,10 +1,10 @@
-import { foldDocument } from "../core/events";
-import { badRequest } from "../core/errors";
-import type { ModelRegistry } from "../core/registry";
-import { documentStream } from "../core/streams";
-import type { TenantId } from "../core/types";
-import type { UserPermissionGrant } from "../core/user-permissions";
-import type { EventStore } from "../ports/event-store";
+import { foldDocument } from "../core/events.js";
+import { badRequest } from "../core/errors.js";
+import type { ModelRegistry } from "../core/registry.js";
+import { documentStream } from "../core/streams.js";
+import type { TenantId } from "../core/types.js";
+import type { UserPermissionGrant } from "../core/user-permissions.js";
+import type { EventStore } from "../ports/event-store.js";
 
 export interface UserPermissionGrantValidation {
   readonly tenantId: TenantId;

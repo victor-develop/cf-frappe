@@ -7,6 +7,17 @@
   "license": "MIT",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./cloudflare": {
+      "types": "./dist/cloudflare/index.d.ts",
+      "import": "./dist/cloudflare/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "cf-frappe": "./dist/cli.js"
   },

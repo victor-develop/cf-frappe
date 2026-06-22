@@ -6,10 +6,10 @@ import type {
   JsonValue,
   MutableDocumentData,
   ValidationIssue
-} from "./types";
-import { FrameworkError } from "./errors";
-import { assertFormViewDefinition } from "./form-view";
-import { assertListViewDefinition } from "./list-view";
+} from "./types.js";
+import { FrameworkError } from "./errors.js";
+import { assertFormViewDefinition } from "./form-view.js";
+import { assertListViewDefinition } from "./list-view.js";
 
 export interface ValidationOptions {
   readonly partial?: boolean;

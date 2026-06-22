@@ -1,6 +1,6 @@
-import type { DocumentData, JsonValue } from "../core/types";
-import type { JobPayload } from "../core/jobs";
-import type { JobMessage } from "./job-queue";
+import type { DocumentData, JsonValue } from "../core/types.js";
+import type { JobPayload } from "../core/jobs.js";
+import type { JobMessage } from "./job-queue.js";
 
 export type JobExecutionStatus = "running" | "succeeded" | "failed";
 

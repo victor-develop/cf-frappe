@@ -1,4 +1,4 @@
-import type { AccountRecoveryMessage, AccountRecoveryNotifier } from "../../ports/account-recovery";
+import type { AccountRecoveryMessage, AccountRecoveryNotifier } from "../../ports/account-recovery.js";
 
 export interface InMemoryAccountRecoveryNotifier extends AccountRecoveryNotifier {
   readonly passwordResetMessages: AccountRecoveryMessage[];

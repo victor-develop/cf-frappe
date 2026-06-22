@@ -1,8 +1,8 @@
-import { validationFailed } from "../core/errors";
-import { foldRoleCatalog, normalizeRoleName } from "../core/roles";
-import { roleCatalogStream } from "../core/streams";
-import type { TenantId, ValidationIssue } from "../core/types";
-import type { EventStore } from "../ports/event-store";
+import { validationFailed } from "../core/errors.js";
+import { foldRoleCatalog, normalizeRoleName } from "../core/roles.js";
+import { roleCatalogStream } from "../core/streams.js";
+import type { TenantId, ValidationIssue } from "../core/types.js";
+import type { EventStore } from "../ports/event-store.js";
 
 export interface UserRoleValidationContext {
   readonly tenantId: TenantId;

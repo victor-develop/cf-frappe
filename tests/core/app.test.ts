@@ -3,6 +3,7 @@ import {
   createRegistryFromApps,
   defineApp,
   defineClientScript,
+  defineDataPatch,
   defineDocType,
   definePrintFormat,
   definePrintLetterhead,
@@ -22,6 +23,12 @@ describe("app manifests", () => {
     const beforeValidate = vi.fn();
     const auditHook = { beforeValidate };
     const coreHook = { validate: () => [] };
+    const projectPatch = defineDataPatch({ id: "projects.seed_statuses", checksum: "v1", run: () => ({ seeded: true }) });
+    const taskPatch = defineDataPatch({
+      id: "tasks.backfill_project_links",
+      checksum: "v1",
+      run: () => ({ touched: 0 })
+    });
 
     const projects = defineApp({
       name: "projects",
@@ -29,6 +36,7 @@ describe("app manifests", () => {
       version: "1.0.0",
       modules: ["Projects"],
       doctypes: [Project],
+      dataPatches: [projectPatch],
       hooks: { Task: [coreHook] }
     });
     const tasks = defineApp({
@@ -36,6 +44,7 @@ describe("app manifests", () => {
       dependencies: ["projects"],
       modules: ["Tasks"],
       doctypes: [Task],
+      dataPatches: [taskPatch],
       hooks: { Task: [auditHook] }
     });
 
@@ -43,6 +52,10 @@ describe("app manifests", () => {
 
     expect(registry.listApps().map((app) => app.name)).toEqual(["projects", "tasks"]);
     expect(registry.list().map((doctype) => doctype.name)).toEqual(["Project", "Task"]);
+    expect(registry.listDataPatches().map((patch) => patch.id)).toEqual([
+      "projects.seed_statuses",
+      "tasks.backfill_project_links"
+    ]);
     expect(registry.get("Task").fields).toMatchObject([{ linkTo: "Project" }]);
     expect(registry.hooksFor("Task")).toEqual([coreHook, auditHook]);
   });
@@ -141,5 +154,13 @@ describe("app manifests", () => {
     expect(() => createRegistryFromApps([defineApp({ name: "notes", hooks: { Ntoe: [{}] } })])).toThrow(
       "DocType 'Ntoe' is not registered"
     );
+  });
+
+  it("rejects duplicate and invalid data patch ids", () => {
+    const patch = defineDataPatch({ id: "notes.seed", checksum: "v1", run: () => undefined });
+
+    expect(() => defineDataPatch({ id: "Bad Patch", checksum: "v1", run: () => undefined })).toThrow(FrameworkError);
+    expect(() => defineDataPatch({ id: "notes.empty", checksum: "", run: () => undefined })).toThrow(FrameworkError);
+    expect(() => createRegistry({ dataPatches: [patch, patch] })).toThrow("already registered");
   });
 });

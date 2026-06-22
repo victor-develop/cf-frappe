@@ -1,15 +1,15 @@
-import { permissionDenied } from "../core/errors";
-import { can } from "../core/permissions";
+import { permissionDenied } from "../core/errors.js";
+import { can } from "../core/permissions.js";
 import {
   canReadPrintLetterhead,
   canReadPrintFormat,
   type PrintFormatDefinition,
   type PrintLetterheadDefinition,
   type PrintSectionDefinition
-} from "../core/print-format";
-import type { ModelRegistry } from "../core/registry";
-import type { Actor, DocumentSnapshot, JsonValue } from "../core/types";
-import { QueryService } from "./query-service";
+} from "../core/print-format.js";
+import type { ModelRegistry } from "../core/registry.js";
+import type { Actor, DocumentSnapshot, JsonValue } from "../core/types.js";
+import { QueryService } from "./query-service.js";
 
 export interface PrintFieldView {
   readonly field: string;

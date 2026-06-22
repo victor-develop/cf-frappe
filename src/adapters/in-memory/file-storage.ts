@@ -4,7 +4,7 @@ import type {
   FileStorage,
   PutFileObjectCommand,
   StoredFileObject
-} from "../../ports/file-storage";
+} from "../../ports/file-storage.js";
 
 interface StoredEntry {
   readonly bytes: Uint8Array;

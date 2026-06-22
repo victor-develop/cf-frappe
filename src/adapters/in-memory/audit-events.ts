@@ -1,6 +1,6 @@
-import type { DomainEvent } from "../../core/types";
-import { documentStream } from "../../core/streams";
-import type { AuditDocumentEventQuery, AuditEventQuery } from "../../ports/audit-event-store";
+import type { DomainEvent } from "../../core/types.js";
+import { documentStream } from "../../core/streams.js";
+import type { AuditDocumentEventQuery, AuditEventQuery } from "../../ports/audit-event-store.js";
 
 export function searchInMemoryAuditEvents(
   streams: Iterable<readonly DomainEvent[]>,

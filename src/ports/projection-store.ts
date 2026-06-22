@@ -5,7 +5,7 @@ import type {
   ListDocumentsQuery,
   ListDocumentsResult,
   TenantId
-} from "../core/types";
+} from "../core/types.js";
 
 export interface ProjectionStore {
   get(

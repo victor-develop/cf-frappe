@@ -1,8 +1,8 @@
 import { Hono } from "hono";
-import type { FileService } from "../../application/file-service";
-import { badRequest } from "../../core/errors";
-import type { ActorResolver } from "./actor";
-import { parseOptionalInteger, readBoundedBytes, requestMetadata } from "./request";
+import type { FileService } from "../../application/file-service.js";
+import { badRequest } from "../../core/errors.js";
+import type { ActorResolver } from "./actor.js";
+import { parseOptionalInteger, readBoundedBytes, requestMetadata } from "./request.js";
 
 export interface FileApiOptions {
   readonly files: FileService;

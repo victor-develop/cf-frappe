@@ -1,4 +1,4 @@
-import type { RealtimeEvent } from "../core/realtime";
+import type { RealtimeEvent } from "../core/realtime.js";
 
 export interface RealtimePublishResult {
   readonly delivered: number;

@@ -1,4 +1,4 @@
-import type { DocumentSnapshot, JsonPrimitive, JsonValue, ListDocumentsFilter } from "../../core/types";
+import type { DocumentSnapshot, JsonPrimitive, JsonValue, ListDocumentsFilter } from "../../core/types.js";
 
 export function matchesListFilters(
   document: DocumentSnapshot,

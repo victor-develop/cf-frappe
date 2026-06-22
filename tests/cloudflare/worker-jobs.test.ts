@@ -1,16 +1,18 @@
 import {
-  createCloudFrappeWorker,
   createJobRegistry,
   deterministicIds,
   fixedClock,
   InMemoryJobExecutionLog,
   InMemoryJobQueue,
+  type JobMessage,
+  type JobQueue
+} from "../../src";
+import {
+  createCloudFrappeWorker,
   type AggregateCoordinatorRpc,
   type CloudFrappeRuntimeServices,
-  type JobMessage,
-  type JobQueue,
   type RpcDurableObjectNamespace
-} from "../../src";
+} from "../../src/cloudflare";
 import { createTestRegistry, now, owner } from "../helpers";
 
 describe("CloudFrappe Worker jobs", () => {

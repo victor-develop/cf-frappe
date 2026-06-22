@@ -1,9 +1,9 @@
 import { Hono } from "hono";
-import type { UserAccountService } from "../../application/user-account-service";
-import { badRequest } from "../../core/errors";
-import type { JsonValue } from "../../core/types";
-import type { ActorResolver } from "./actor";
-import { readJsonObject, requestMetadata } from "./request";
+import type { UserAccountService } from "../../application/user-account-service.js";
+import { badRequest } from "../../core/errors.js";
+import type { JsonValue } from "../../core/types.js";
+import type { ActorResolver } from "./actor.js";
+import { readJsonObject, requestMetadata } from "./request.js";
 
 export interface UserAccountApiOptions {
   readonly userAccounts: UserAccountService;

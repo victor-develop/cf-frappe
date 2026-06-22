@@ -1,20 +1,20 @@
-import { foldDocument, foldDocumentAssignments, foldDocumentFollowers, foldDocumentTags } from "../core/events";
-import { can } from "../core/permissions";
-import { applyDefaults, compactData, validateDocumentData } from "../core/schema";
-import { documentStream, namingSeriesStream } from "../core/streams";
+import { foldDocument, foldDocumentAssignments, foldDocumentFollowers, foldDocumentTags } from "../core/events.js";
+import { can } from "../core/permissions.js";
+import { applyDefaults, compactData, validateDocumentData } from "../core/schema.js";
+import { documentStream, namingSeriesStream } from "../core/streams.js";
 import {
   documentMatchesUserPermissions,
   linkTargetMatchesUserPermissions,
   type UserPermissionProvider
-} from "../core/user-permissions";
-import { allowedWorkflowTransitions, currentWorkflowState } from "../core/workflow";
-import type { ModelRegistry } from "../core/registry";
-import type { AfterCommitContext } from "../core/registry";
-import type { Clock } from "../ports/clock";
-import { systemClock } from "../ports/clock";
-import type { DocumentStore } from "../ports/document-store";
-import type { IdGenerator } from "../ports/id-generator";
-import { cryptoIdGenerator } from "../ports/id-generator";
+} from "../core/user-permissions.js";
+import { allowedWorkflowTransitions, currentWorkflowState } from "../core/workflow.js";
+import type { ModelRegistry } from "../core/registry.js";
+import type { AfterCommitContext } from "../core/registry.js";
+import type { Clock } from "../ports/clock.js";
+import { systemClock } from "../ports/clock.js";
+import type { DocumentStore } from "../ports/document-store.js";
+import type { IdGenerator } from "../ports/id-generator.js";
+import { cryptoIdGenerator } from "../ports/id-generator.js";
 import {
   DEFAULT_TENANT_ID,
   CHILD_TABLE_ROW_INDEX_FIELD,
@@ -28,8 +28,8 @@ import {
   type MutableDocumentData,
   type NewDomainEvent,
   type ValidationIssue
-} from "../core/types";
-import { badRequest, conflict, FrameworkError, notFound, permissionDenied, validationFailed } from "../core/errors";
+} from "../core/types.js";
+import { badRequest, conflict, FrameworkError, notFound, permissionDenied, validationFailed } from "../core/errors.js";
 
 export interface DocumentServiceOptions {
   readonly registry: ModelRegistry;

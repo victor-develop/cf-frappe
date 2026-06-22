@@ -1,2 +1,2 @@
-export * from "./app";
-export * from "./render";
+export * from "./app.js";
+export * from "./render.js";

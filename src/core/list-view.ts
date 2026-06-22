@@ -1,4 +1,4 @@
-import { FrameworkError, type FrameworkErrorCode } from "./errors";
+import { FrameworkError, type FrameworkErrorCode } from "./errors.js";
 import type {
   DocTypeDefinition,
   FieldDefinition,
@@ -10,7 +10,7 @@ import type {
   ListFilterOperator,
   ListFilterOperatorOption,
   ResolvedListView
-} from "./types";
+} from "./types.js";
 
 export const DEFAULT_LIST_PAGE_SIZE = 50;
 export const MAX_LIST_PAGE_SIZE = 200;

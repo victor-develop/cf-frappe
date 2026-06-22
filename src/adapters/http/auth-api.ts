@@ -1,15 +1,15 @@
 import { Hono } from "hono";
-import type { UserAccountService } from "../../application/user-account-service";
-import { badRequest } from "../../core/errors";
-import type { Actor, JsonValue } from "../../core/types";
-import type { ActorResolver } from "./actor";
+import type { UserAccountService } from "../../application/user-account-service.js";
+import { badRequest } from "../../core/errors.js";
+import type { Actor, JsonValue } from "../../core/types.js";
+import type { ActorResolver } from "./actor.js";
 import {
   clearSignedSessionCookie,
   createSignedSessionCookie,
   signedSessionActorResolver,
   type SignedSessionOptions
-} from "./signed-session";
-import { readJsonObject, requestMetadata } from "./request";
+} from "./signed-session.js";
+import { readJsonObject, requestMetadata } from "./request.js";
 
 export interface AuthSessionOptions {
   readonly secret: string;

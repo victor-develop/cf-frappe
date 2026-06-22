@@ -1,4 +1,4 @@
-import type { DocTypeName, DocumentEventPayload, DocumentName, DomainEvent, TenantId } from "../core/types";
+import type { DocTypeName, DocumentEventPayload, DocumentName, DomainEvent, TenantId } from "../core/types.js";
 
 export interface AuditEventQuery {
   readonly tenantId: TenantId;

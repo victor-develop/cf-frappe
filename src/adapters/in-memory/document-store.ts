@@ -1,4 +1,4 @@
-import { conflict } from "../../core/errors";
+import { conflict } from "../../core/errors.js";
 import type {
   DocTypeName,
   DocumentName,
@@ -9,14 +9,14 @@ import type {
   NewDomainEvent,
   StreamName,
   TenantId
-} from "../../core/types";
-import type { DocumentCommit, DocumentStore } from "../../ports/document-store";
-import type { ReadStreamOptions } from "../../ports/document-store";
-import type { AuditDocumentEventQuery, AuditEventQuery, AuditEventStore } from "../../ports/audit-event-store";
-import type { EventStore } from "../../ports/event-store";
-import type { ProjectionStore } from "../../ports/projection-store";
-import { readInMemoryAuditDocumentEvents, searchInMemoryAuditEvents } from "./audit-events";
-import { matchesListFilters } from "./list-filters";
+} from "../../core/types.js";
+import type { DocumentCommit, DocumentStore } from "../../ports/document-store.js";
+import type { ReadStreamOptions } from "../../ports/document-store.js";
+import type { AuditDocumentEventQuery, AuditEventQuery, AuditEventStore } from "../../ports/audit-event-store.js";
+import type { EventStore } from "../../ports/event-store.js";
+import type { ProjectionStore } from "../../ports/projection-store.js";
+import { readInMemoryAuditDocumentEvents, searchInMemoryAuditEvents } from "./audit-events.js";
+import { matchesListFilters } from "./list-filters.js";
 
 export class InMemoryDocumentStore implements DocumentStore, EventStore, ProjectionStore, AuditEventStore {
   private readonly streams = new Map<StreamName, DomainEvent[]>();

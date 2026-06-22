@@ -1,6 +1,6 @@
-import { FrameworkError } from "./errors";
-import type { Actor, DocTypeDefinition, PermissionAction } from "./types";
-import { SYSTEM_MANAGER_ROLE } from "./types";
+import { FrameworkError } from "./errors.js";
+import type { Actor, DocTypeDefinition, PermissionAction } from "./types.js";
+import { SYSTEM_MANAGER_ROLE } from "./types.js";
 
 export interface PrintFieldDefinition {
   readonly field: string;

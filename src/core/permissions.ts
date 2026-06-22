@@ -1,5 +1,5 @@
-import type { Actor, DocTypeDefinition, DocumentSnapshot, PermissionAction } from "./types";
-import { SYSTEM_MANAGER_ROLE } from "./types";
+import type { Actor, DocTypeDefinition, DocumentSnapshot, PermissionAction } from "./types.js";
+import { SYSTEM_MANAGER_ROLE } from "./types.js";
 
 export function can(
   actor: Actor,

@@ -1,6 +1,6 @@
-import { badRequest, permissionDenied } from "../../core/errors";
-import { DEFAULT_TENANT_ID, type Actor } from "../../core/types";
-import type { ActorResolver } from "./actor";
+import { badRequest, permissionDenied } from "../../core/errors.js";
+import { DEFAULT_TENANT_ID, type Actor } from "../../core/types.js";
+import type { ActorResolver } from "./actor.js";
 
 export interface SignedSessionOptions {
   readonly secret: string;

@@ -2,9 +2,9 @@ import {
   createJobRegistry,
   JobExecutor,
   permanentJobError,
-  processCloudflareJobBatch,
   retryableJobError
 } from "../../src";
+import { processCloudflareJobBatch } from "../../src/cloudflare";
 import { now } from "../helpers";
 
 describe("processCloudflareJobBatch", () => {

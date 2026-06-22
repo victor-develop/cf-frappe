@@ -9,18 +9,18 @@ import type {
   DomainEvent,
   JsonValue,
   TenantId
-} from "../core/types";
+} from "../core/types.js";
 import {
   foldDocument,
   foldDocumentAssignments,
   foldDocumentFollowers,
   foldDocumentFrom,
   foldDocumentTags
-} from "../core/events";
-import { badRequest } from "../core/errors";
-import { documentStream } from "../core/streams";
-import type { EventStore } from "../ports/event-store";
-import type { QueryService } from "./query-service";
+} from "../core/events.js";
+import { badRequest } from "../core/errors.js";
+import { documentStream } from "../core/streams.js";
+import type { EventStore } from "../ports/event-store.js";
+import type { QueryService } from "./query-service.js";
 
 const DEFAULT_TIMELINE_LIMIT = 50;
 const MAX_TIMELINE_LIMIT = 200;

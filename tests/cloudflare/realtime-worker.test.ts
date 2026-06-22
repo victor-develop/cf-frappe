@@ -1,11 +1,13 @@
 import {
-  createCloudFrappeWorker,
   createSignedSessionCookie,
   signedSessionActorResolver,
+} from "../../src";
+import {
+  createCloudFrappeWorker,
   type AggregateCoordinatorRpc,
   type RealtimeHubNamespace,
   type RpcDurableObjectNamespace
-} from "../../src";
+} from "../../src/cloudflare";
 import { createTestRegistry, owner } from "../helpers";
 
 describe("CloudFrappe Worker realtime", () => {

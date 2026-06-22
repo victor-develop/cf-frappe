@@ -1,22 +1,22 @@
-import type { DocumentCommandExecutor } from "./document-service";
-import { QueryService } from "./query-service";
-import { badRequest, conflict, FrameworkError, notFound, permissionDenied, validationFailed } from "../core/errors";
-import { FILE_DOCTYPE_NAME } from "../core/file-doctype";
-import { can } from "../core/permissions";
-import type { ModelRegistry } from "../core/registry";
-import { validateDocumentData } from "../core/schema";
+import type { DocumentCommandExecutor } from "./document-service.js";
+import { QueryService } from "./query-service.js";
+import { badRequest, conflict, FrameworkError, notFound, permissionDenied, validationFailed } from "../core/errors.js";
+import { FILE_DOCTYPE_NAME } from "../core/file-doctype.js";
+import { can } from "../core/permissions.js";
+import type { ModelRegistry } from "../core/registry.js";
+import { validateDocumentData } from "../core/schema.js";
 import {
   DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
   type Actor,
   type DocumentData,
   type DocumentSnapshot
-} from "../core/types";
-import type { Clock } from "../ports/clock";
-import { systemClock } from "../ports/clock";
-import type { FileContent, FileStorage, StoredFileObject } from "../ports/file-storage";
-import type { IdGenerator } from "../ports/id-generator";
-import { cryptoIdGenerator } from "../ports/id-generator";
+} from "../core/types.js";
+import type { Clock } from "../ports/clock.js";
+import { systemClock } from "../ports/clock.js";
+import type { FileContent, FileStorage, StoredFileObject } from "../ports/file-storage.js";
+import type { IdGenerator } from "../ports/id-generator.js";
+import { cryptoIdGenerator } from "../ports/id-generator.js";
 
 export interface FileServiceOptions {
   readonly registry: ModelRegistry;

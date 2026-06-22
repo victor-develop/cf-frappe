@@ -1,5 +1,5 @@
-import { FrameworkError } from "./errors";
-import type { DocumentData, JsonValue } from "./types";
+import { FrameworkError } from "./errors.js";
+import type { DocumentData, JsonValue } from "./types.js";
 
 type JobMaybePromise<T> = T | Promise<T>;
 export type JobName = string;

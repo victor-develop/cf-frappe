@@ -1,4 +1,4 @@
-import type { ReadStreamOptions } from "../../ports/document-store";
+import type { ReadStreamOptions } from "../../ports/document-store.js";
 
 export interface EventStreamQuery {
   readonly sql: string;

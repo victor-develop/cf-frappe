@@ -1,10 +1,10 @@
-import { badRequest, notFound, permissionDenied } from "../core/errors";
-import { DEFAULT_TENANT_ID, SYSTEM_MANAGER_ROLE, type Actor, type DocumentData, type TenantId } from "../core/types";
-import type { Clock } from "../ports/clock";
-import { systemClock } from "../ports/clock";
-import type { JobExecutionLogReader, JobExecutionRecord } from "../ports/job-execution-log";
-import type { JobMessage } from "../ports/job-queue";
-import type { JobDispatcher } from "./job-dispatcher";
+import { badRequest, notFound, permissionDenied } from "../core/errors.js";
+import { DEFAULT_TENANT_ID, SYSTEM_MANAGER_ROLE, type Actor, type DocumentData, type TenantId } from "../core/types.js";
+import type { Clock } from "../ports/clock.js";
+import { systemClock } from "../ports/clock.js";
+import type { JobExecutionLogReader, JobExecutionRecord } from "../ports/job-execution-log.js";
+import type { JobMessage } from "../ports/job-queue.js";
+import type { JobDispatcher } from "./job-dispatcher.js";
 
 export interface JobRetryServiceOptions<TResources = unknown> {
   readonly executionLog: JobExecutionLogReader;

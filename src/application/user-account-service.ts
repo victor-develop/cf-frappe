@@ -1,5 +1,5 @@
-import { badRequest, conflict, FrameworkError, notFound, permissionDenied } from "../core/errors";
-import { userAccountsStream } from "../core/streams";
+import { badRequest, conflict, FrameworkError, notFound, permissionDenied } from "../core/errors.js";
+import { userAccountsStream } from "../core/streams.js";
 import {
   DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
@@ -8,7 +8,7 @@ import {
   type DomainEvent,
   type NewDomainEvent,
   type TenantId
-} from "../core/types";
+} from "../core/types.js";
 import {
   foldUserAccount,
   normalizeUserRoles,
@@ -18,13 +18,13 @@ import {
   type UserAccountEmailVerificationChallenge,
   type UserAccountRecoveryChallenge,
   type UserAccountState
-} from "../core/user-accounts";
-import type { AccountRecoveryNotifier } from "../ports/account-recovery";
-import { systemClock, type Clock } from "../ports/clock";
-import type { EventStore } from "../ports/event-store";
-import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator";
-import type { PasswordHasher } from "../ports/password-hasher";
-import type { UserRoleValidator } from "./user-role-validator";
+} from "../core/user-accounts.js";
+import type { AccountRecoveryNotifier } from "../ports/account-recovery.js";
+import { systemClock, type Clock } from "../ports/clock.js";
+import type { EventStore } from "../ports/event-store.js";
+import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
+import type { PasswordHasher } from "../ports/password-hasher.js";
+import type { UserRoleValidator } from "./user-role-validator.js";
 
 const MIN_PASSWORD_LENGTH = 8;
 const DEFAULT_PASSWORD_RESET_EXPIRY_SECONDS = 3_600;

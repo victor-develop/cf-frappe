@@ -1,9 +1,9 @@
 import { Hono } from "hono";
-import type { UserPermissionService } from "../../application/user-permission-service";
-import { badRequest } from "../../core/errors";
-import type { DocTypeName, DocumentName, JsonValue } from "../../core/types";
-import type { ActorResolver } from "./actor";
-import { readJsonObject, requestMetadata } from "./request";
+import type { UserPermissionService } from "../../application/user-permission-service.js";
+import { badRequest } from "../../core/errors.js";
+import type { DocTypeName, DocumentName, JsonValue } from "../../core/types.js";
+import type { ActorResolver } from "./actor.js";
+import { readJsonObject, requestMetadata } from "./request.js";
 
 export interface UserPermissionApiOptions {
   readonly userPermissions: UserPermissionService;

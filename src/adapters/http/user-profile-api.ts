@@ -1,10 +1,10 @@
 import { Hono } from "hono";
-import type { UserProfileService } from "../../application/user-profile-service";
-import { badRequest } from "../../core/errors";
-import { isUserProfileField, USER_PROFILE_FIELDS, type UserProfileInput } from "../../core/user-profiles";
-import type { JsonValue } from "../../core/types";
-import type { ActorResolver } from "./actor";
-import { readJsonObject, requestMetadata } from "./request";
+import type { UserProfileService } from "../../application/user-profile-service.js";
+import { badRequest } from "../../core/errors.js";
+import { isUserProfileField, USER_PROFILE_FIELDS, type UserProfileInput } from "../../core/user-profiles.js";
+import type { JsonValue } from "../../core/types.js";
+import type { ActorResolver } from "./actor.js";
+import { readJsonObject, requestMetadata } from "./request.js";
 
 export interface UserProfileApiOptions {
   readonly userProfiles: UserProfileService;

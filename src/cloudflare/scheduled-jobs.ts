@@ -1,7 +1,7 @@
-import type { JobDispatcher } from "../application/job-dispatcher";
-import type { JobPayload } from "../core/jobs";
-import type { DocumentData } from "../core/types";
-import type { DispatchJobCommand, JobMessage } from "../ports/job-queue";
+import type { JobDispatcher } from "../application/job-dispatcher.js";
+import type { JobPayload } from "../core/jobs.js";
+import type { DocumentData } from "../core/types.js";
+import type { DispatchJobCommand, JobMessage } from "../ports/job-queue.js";
 
 type MaybePromise<T> = T | Promise<T>;
 

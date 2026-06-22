@@ -1,4 +1,4 @@
-import { R2FileStorage } from "../../src";
+import { R2FileStorage } from "../../src/cloudflare";
 import { now } from "../helpers";
 
 describe("R2FileStorage", () => {

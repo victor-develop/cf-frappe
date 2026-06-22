@@ -1,16 +1,16 @@
-import { conflict } from "../../core/errors";
+import { conflict } from "../../core/errors.js";
 import type {
   DocumentSnapshot,
   DomainEvent,
   NewDomainEvent,
   StreamName
-} from "../../core/types";
-import type { AuditDocumentEventQuery, AuditEventQuery, AuditEventStore } from "../../ports/audit-event-store";
-import type { DocumentCommit, DocumentStore, ReadStreamOptions } from "../../ports/document-store";
-import { auditDocumentEventQuery, auditEventQuery } from "./audit-event-query";
-import { isD1ConstraintError } from "./constraint-error";
-import { eventStreamQuery } from "./read-stream-query";
-import { eventFromRow, type EventRow } from "./serde";
+} from "../../core/types.js";
+import type { AuditDocumentEventQuery, AuditEventQuery, AuditEventStore } from "../../ports/audit-event-store.js";
+import type { DocumentCommit, DocumentStore, ReadStreamOptions } from "../../ports/document-store.js";
+import { auditDocumentEventQuery, auditEventQuery } from "./audit-event-query.js";
+import { isD1ConstraintError } from "./constraint-error.js";
+import { eventStreamQuery } from "./read-stream-query.js";
+import { eventFromRow, type EventRow } from "./serde.js";
 
 export class D1DocumentStore implements DocumentStore, AuditEventStore {
   constructor(private readonly db: D1Database) {}

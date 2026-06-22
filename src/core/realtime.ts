@@ -1,4 +1,4 @@
-import { DEFAULT_TENANT_ID, SYSTEM_MANAGER_ROLE, type Actor, type DocumentSnapshot, type DomainEvent, type JsonValue } from "./types";
+import { DEFAULT_TENANT_ID, SYSTEM_MANAGER_ROLE, type Actor, type DocumentSnapshot, type DomainEvent, type JsonValue } from "./types.js";
 
 export type RealtimeTopic = string;
 

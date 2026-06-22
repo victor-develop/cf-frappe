@@ -1,9 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
-import { DocumentService } from "../application/document-service";
-import { UserPermissionService } from "../application/user-permission-service";
-import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator";
-import type { DomainEvent } from "../core/types";
-import { createDocumentRealtimeHooks } from "../application/realtime";
+import { DocumentService } from "../application/document-service.js";
+import { UserPermissionService } from "../application/user-permission-service.js";
+import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator.js";
+import type { DomainEvent } from "../core/types.js";
+import { createDocumentRealtimeHooks } from "../application/realtime.js";
 import type {
   AssignDocumentCommand,
   CancelDocumentCommand,
@@ -19,13 +19,13 @@ import type {
   UntagDocumentCommand,
   UnfollowDocumentCommand,
   UpdateDocumentCommand
-} from "../application/document-service";
-import type { ExecuteDomainCommand } from "../application/document-service";
-import { D1DocumentStore, D1EventStore } from "../adapters/d1";
-import type { ModelRegistry } from "../core/registry";
-import type { Clock } from "../ports/clock";
-import type { IdGenerator } from "../ports/id-generator";
-import type { RealtimePublisher } from "../ports/realtime";
+} from "../application/document-service.js";
+import type { ExecuteDomainCommand } from "../application/document-service.js";
+import { D1DocumentStore, D1EventStore } from "../adapters/d1/index.js";
+import type { ModelRegistry } from "../core/registry.js";
+import type { Clock } from "../ports/clock.js";
+import type { IdGenerator } from "../ports/id-generator.js";
+import type { RealtimePublisher } from "../ports/realtime.js";
 
 export type AggregateCoordinatorCommand =
   | ({ readonly kind: "create" } & CreateDocumentCommand)

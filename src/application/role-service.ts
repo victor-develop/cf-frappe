@@ -1,12 +1,12 @@
-import { badRequest, conflict, notFound, permissionDenied } from "../core/errors";
+import { badRequest, conflict, notFound, permissionDenied } from "../core/errors.js";
 import {
   foldRoleCatalog,
   normalizeRoleDescription,
   normalizeRoleName,
   type RoleCatalogState,
   type RoleRecord
-} from "../core/roles";
-import { roleCatalogStream } from "../core/streams";
+} from "../core/roles.js";
+import { roleCatalogStream } from "../core/streams.js";
 import {
   DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
@@ -14,10 +14,10 @@ import {
   type DocumentData,
   type NewDomainEvent,
   type TenantId
-} from "../core/types";
-import { systemClock, type Clock } from "../ports/clock";
-import type { EventStore } from "../ports/event-store";
-import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator";
+} from "../core/types.js";
+import { systemClock, type Clock } from "../ports/clock.js";
+import type { EventStore } from "../ports/event-store.js";
+import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
 
 export interface RoleServiceOptions {
   readonly events: EventStore;

@@ -5,9 +5,9 @@ import type {
   ListDocumentsQuery,
   ListDocumentsResult,
   TenantId
-} from "../../core/types";
-import type { ProjectionStore } from "../../ports/projection-store";
-import { matchesListFilters } from "./list-filters";
+} from "../../core/types.js";
+import type { ProjectionStore } from "../../ports/projection-store.js";
+import { matchesListFilters } from "./list-filters.js";
 
 export class InMemoryProjectionStore implements ProjectionStore {
   private readonly documents = new Map<string, DocumentSnapshot>();

@@ -1,5 +1,5 @@
-import { assertAppName, assertAppNames } from "./app-name";
-import { FrameworkError } from "./errors";
+import { assertAppName, assertAppNames } from "./app-name.js";
+import { FrameworkError } from "./errors.js";
 
 export interface AppDependencyNode {
   readonly name: string;

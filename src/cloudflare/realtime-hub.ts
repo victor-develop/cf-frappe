@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
-import type { RealtimeEvent, RealtimeTopic } from "../core/realtime";
-import type { RealtimePublisher, RealtimePublishResult } from "../ports/realtime";
+import type { RealtimeEvent, RealtimeTopic } from "../core/realtime.js";
+import type { RealtimePublisher, RealtimePublishResult } from "../ports/realtime.js";
 
 export interface RealtimeHubRpc {
   presence(): Promise<RealtimePresenceSnapshot>;

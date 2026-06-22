@@ -1,12 +1,12 @@
-import { DEFAULT_TENANT_ID, type JsonValue } from "../../core/types";
+import { DEFAULT_TENANT_ID, type JsonValue } from "../../core/types.js";
 import type {
   JobExecutionBeginResult,
   JobExecutionLog,
   JobExecutionRecord,
   ListJobExecutionsOptions
-} from "../../ports/job-execution-log";
-import type { JobMessage } from "../../ports/job-queue";
-import { jobExecutionFromRow, type JobExecutionRow } from "./serde";
+} from "../../ports/job-execution-log.js";
+import type { JobMessage } from "../../ports/job-queue.js";
+import { jobExecutionFromRow, type JobExecutionRow } from "./serde.js";
 
 export class D1JobExecutionLog implements JobExecutionLog {
   constructor(private readonly db: D1Database) {}

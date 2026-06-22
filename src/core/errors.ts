@@ -1,4 +1,4 @@
-import type { ValidationIssue } from "./types";
+import type { ValidationIssue } from "./types.js";
 
 export type FrameworkErrorCode =
   | "APP_DEPENDENCY_CYCLE"
@@ -7,6 +7,11 @@ export type FrameworkErrorCode =
   | "APP_INVALID"
   | "CLIENT_SCRIPT_DUPLICATE"
   | "CLIENT_SCRIPT_INVALID"
+  | "DATA_PATCH_CHECKSUM_MISMATCH"
+  | "DATA_PATCH_DUPLICATE"
+  | "DATA_PATCH_FAILED"
+  | "DATA_PATCH_INVALID"
+  | "DATA_PATCH_PENDING"
   | "DOCTYPE_NOT_FOUND"
   | "DOCTYPE_DUPLICATE"
   | "DOCTYPE_LINK_INVALID"

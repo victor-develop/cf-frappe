@@ -3,8 +3,8 @@ import type {
   FileStorage,
   PutFileObjectCommand,
   StoredFileObject
-} from "../ports/file-storage";
-import type { DocumentData, JsonValue } from "../core/types";
+} from "../ports/file-storage.js";
+import type { DocumentData, JsonValue } from "../core/types.js";
 
 export class R2FileStorage implements FileStorage {
   private readonly bucket: R2Bucket;

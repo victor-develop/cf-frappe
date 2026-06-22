@@ -1,6 +1,6 @@
-import type { DocumentHooks } from "../core/registry";
-import { realtimeEventFromDomainEvent, realtimeUserNotificationsFromDomainEvent } from "../core/realtime";
-import type { RealtimePublisher } from "../ports/realtime";
+import type { DocumentHooks } from "../core/registry.js";
+import { realtimeEventFromDomainEvent, realtimeUserNotificationsFromDomainEvent } from "../core/realtime.js";
+import type { RealtimePublisher } from "../ports/realtime.js";
 
 export function createDocumentRealtimeHooks(publisher: RealtimePublisher): DocumentHooks {
   return {

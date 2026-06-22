@@ -1,12 +1,12 @@
-import { conflict } from "../../core/errors";
-import type { DomainEvent, NewDomainEvent, StreamName } from "../../core/types";
-import type { AuditDocumentEventQuery, AuditEventQuery, AuditEventStore } from "../../ports/audit-event-store";
-import type { EventStore } from "../../ports/event-store";
-import type { ReadStreamOptions } from "../../ports/document-store";
-import { auditDocumentEventQuery, auditEventQuery } from "./audit-event-query";
-import { isD1ConstraintError } from "./constraint-error";
-import { eventStreamQuery } from "./read-stream-query";
-import { eventFromRow, type EventRow } from "./serde";
+import { conflict } from "../../core/errors.js";
+import type { DomainEvent, NewDomainEvent, StreamName } from "../../core/types.js";
+import type { AuditDocumentEventQuery, AuditEventQuery, AuditEventStore } from "../../ports/audit-event-store.js";
+import type { EventStore } from "../../ports/event-store.js";
+import type { ReadStreamOptions } from "../../ports/document-store.js";
+import { auditDocumentEventQuery, auditEventQuery } from "./audit-event-query.js";
+import { isD1ConstraintError } from "./constraint-error.js";
+import { eventStreamQuery } from "./read-stream-query.js";
+import { eventFromRow, type EventRow } from "./serde.js";
 
 export class D1EventStore implements EventStore, AuditEventStore {
   constructor(private readonly db: D1Database) {}

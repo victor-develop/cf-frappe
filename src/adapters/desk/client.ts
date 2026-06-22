@@ -1,4 +1,4 @@
-import { CHILD_TABLE_ROW_INDEX_FIELD } from "../../core/types";
+import { CHILD_TABLE_ROW_INDEX_FIELD } from "../../core/types.js";
 
 export const DESK_CLIENT_SCRIPT_PATH = "/desk/client.js";
 

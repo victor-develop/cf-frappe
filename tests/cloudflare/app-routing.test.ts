@@ -1,5 +1,4 @@
 import {
-  createCloudFrappeWorker,
   createInMemoryAccountRecoveryNotifier,
   createSignedSessionCookie,
   deterministicIds,
@@ -7,11 +6,14 @@ import {
   signedSessionActorResolver,
   SYSTEM_MANAGER_ROLE,
   unsafeHeaderActorResolver,
-  type AggregateCoordinatorRpc,
   type PasswordHasher,
+} from "../../src";
+import {
+  createCloudFrappeWorker,
+  type AggregateCoordinatorRpc,
   type RealtimeHubNamespace,
   type RpcDurableObjectNamespace
-} from "../../src";
+} from "../../src/cloudflare";
 import { createTestRegistry, now, owner } from "../helpers";
 
 describe("CloudFrappe Worker routing", () => {

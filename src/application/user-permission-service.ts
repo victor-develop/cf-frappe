@@ -1,5 +1,5 @@
-import { badRequest, conflict, permissionDenied } from "../core/errors";
-import { userPermissionsStream } from "../core/streams";
+import { badRequest, conflict, permissionDenied } from "../core/errors.js";
+import { userPermissionsStream } from "../core/streams.js";
 import {
   DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
@@ -9,7 +9,7 @@ import {
   type DocumentName,
   type NewDomainEvent,
   type TenantId
-} from "../core/types";
+} from "../core/types.js";
 import {
   foldUserPermissions,
   normalizeUserPermissionGrant,
@@ -17,11 +17,11 @@ import {
   type UserPermissionGrant,
   type UserPermissionProvider,
   type UserPermissionState
-} from "../core/user-permissions";
-import { systemClock, type Clock } from "../ports/clock";
-import type { EventStore } from "../ports/event-store";
-import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator";
-import type { UserPermissionGrantValidator } from "./user-permission-grant-validator";
+} from "../core/user-permissions.js";
+import { systemClock, type Clock } from "../ports/clock.js";
+import type { EventStore } from "../ports/event-store.js";
+import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
+import type { UserPermissionGrantValidator } from "./user-permission-grant-validator.js";
 
 export interface UserPermissionServiceOptions {
   readonly events: EventStore;

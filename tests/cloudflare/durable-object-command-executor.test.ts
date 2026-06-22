@@ -1,4 +1,5 @@
-import { createRegistry, DurableObjectCommandExecutor, type RpcDurableObjectNamespace } from "../../src";
+import { createRegistry } from "../../src";
+import { DurableObjectCommandExecutor, type RpcDurableObjectNamespace } from "../../src/cloudflare";
 import { createTestRegistry, data, owner, supportTicketDocType } from "../helpers";
 
 describe("DurableObjectCommandExecutor", () => {

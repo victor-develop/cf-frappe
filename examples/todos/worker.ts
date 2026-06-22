@@ -1,4 +1,5 @@
-import { createAggregateCoordinatorClass, createCloudFrappeWorker, type Actor } from "../../src";
+import type { Actor } from "../../src";
+import { createAggregateCoordinatorClass, createCloudFrappeWorker } from "../../src/cloudflare";
 import { todoRegistry } from "./models";
 
 const readOnlyDemoActor: Actor = {

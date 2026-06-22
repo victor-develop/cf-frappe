@@ -1,6 +1,6 @@
-import type { AuditEventQuery } from "../../ports/audit-event-store";
-import type { AuditDocumentEventQuery } from "../../ports/audit-event-store";
-import { documentStream } from "../../core/streams";
+import type { AuditEventQuery } from "../../ports/audit-event-store.js";
+import type { AuditDocumentEventQuery } from "../../ports/audit-event-store.js";
+import { documentStream } from "../../core/streams.js";
 
 export interface AuditEventD1Query {
   readonly sql: string;

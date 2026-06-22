@@ -1,4 +1,4 @@
-import type { DocumentEventPayload, DocumentSnapshot, DomainEvent, NewDomainEvent, StreamName } from "../core/types";
+import type { DocumentEventPayload, DocumentSnapshot, DomainEvent, NewDomainEvent, StreamName } from "../core/types.js";
 
 export interface ReadStreamOptions {
   readonly maxSequence?: number;

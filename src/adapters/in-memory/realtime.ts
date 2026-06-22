@@ -1,5 +1,5 @@
-import type { RealtimeEvent } from "../../core/realtime";
-import type { RealtimePublisher, RealtimePublishResult } from "../../ports/realtime";
+import type { RealtimeEvent } from "../../core/realtime.js";
+import type { RealtimePublisher, RealtimePublishResult } from "../../ports/realtime.js";
 
 export class InMemoryRealtimePublisher implements RealtimePublisher {
   private readonly published: RealtimeEvent[] = [];

@@ -1,4 +1,4 @@
-import { FrameworkError } from "./errors";
+import { FrameworkError } from "./errors.js";
 
 const appNamePattern = /^[a-z][a-z0-9_-]*$/;
 

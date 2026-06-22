@@ -1,4 +1,4 @@
-import type { DocTypeName, DocumentName, StreamName, TenantId } from "./types";
+import type { DocTypeName, DocumentName, StreamName, TenantId } from "./types.js";
 
 export function documentStream(tenantId: TenantId, doctype: DocTypeName, name: DocumentName): StreamName {
   return `${escapePart(tenantId)}:${escapePart(doctype)}:${escapePart(name)}`;

@@ -1,4 +1,4 @@
-import { FrameworkError } from "./errors";
+import { FrameworkError } from "./errors.js";
 
 export type ClientScriptScope = "form" | "list" | "both";
 export type ClientScriptType = "module" | "classic";

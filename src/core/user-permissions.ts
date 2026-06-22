@@ -7,7 +7,7 @@ import type {
   DomainEvent,
   FieldDefinition,
   TenantId
-} from "./types";
+} from "./types.js";
 
 export interface UserPermissionGrant {
   readonly targetDoctype: DocTypeName;
