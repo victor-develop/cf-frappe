@@ -290,6 +290,10 @@ function diffEvent(
     case "UserRolesChanged":
     case "UserAccountEnabled":
     case "UserAccountDisabled":
+    case "RoleCreated":
+    case "RoleDescriptionChanged":
+    case "RoleEnabled":
+    case "RoleDisabled":
       return [];
   }
 }
@@ -375,6 +379,14 @@ function summarize(payload: DocumentEventPayload): string {
       return `Enabled user account ${payload.userId}`;
     case "UserAccountDisabled":
       return `Disabled user account ${payload.userId}`;
+    case "RoleCreated":
+      return `Created role ${payload.role}`;
+    case "RoleDescriptionChanged":
+      return `Changed description for role ${payload.role}`;
+    case "RoleEnabled":
+      return `Enabled role ${payload.role}`;
+    case "RoleDisabled":
+      return `Disabled role ${payload.role}`;
     case "WorkflowTransitioned":
       return workflowSummary(payload);
     case "DomainCommandApplied":

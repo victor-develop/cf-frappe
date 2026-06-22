@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the generated Desk user account administration slice:
+As of the event-sourced role catalog administration slice:
 
-- Vitest files: `55`
-- Vitest cases: `434`
+- Vitest files: `57`
+- Vitest cases: `443`
 
 ## Implication
 

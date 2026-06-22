@@ -9,6 +9,7 @@ import { DocumentHistoryService } from "../application/document-history-service"
 import { PrintService } from "../application/print-service";
 import { QueryService } from "../application/query-service";
 import { ReportService } from "../application/report-service";
+import { RoleService } from "../application/role-service";
 import { SavedListFilterService } from "../application/saved-list-filter-service";
 import { SavedReportService } from "../application/saved-report-service";
 import { UserAccountService } from "../application/user-account-service";
@@ -63,6 +64,7 @@ export interface CloudFrappeRuntimeServices {
   readonly prints: PrintService;
   readonly queries: QueryService;
   readonly reports: ReportService;
+  readonly roles: RoleService;
   readonly savedReports: SavedReportService;
   readonly files?: FileService;
   readonly realtime?: RealtimePublisher;
@@ -227,6 +229,10 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
   const restrictedHistory = new DocumentHistoryService({ events, queries: restrictedQueries });
   const prints = new PrintService({ registry: options.registry, queries: restrictedQueries });
   const reports = new ReportService({ registry: options.registry, queries: restrictedQueries });
+  const roles = new RoleService({
+    events,
+    ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
+  });
   const savedReports = new SavedReportService({ registry: options.registry, events, reports });
   const baseServices: Omit<CloudFrappeRuntimeServices, "files"> = {
     registry: options.registry,
@@ -239,6 +245,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     prints,
     queries: restrictedQueries,
     reports,
+    roles,
     savedReports
   };
   const files = options.files
@@ -315,6 +322,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     ...(userAccounts === undefined || options.auth === undefined ? {} : { auth: authSessionOptions(options.auth, env) }),
     userPermissions,
     reports,
+    roles,
     actor,
     ...(options.maxJsonBytes ? { maxJsonBytes: options.maxJsonBytes } : {}),
     ...(files === undefined ? {} : { files }),
@@ -335,6 +343,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     ...(userAccounts === undefined ? {} : { userAccounts }),
     userPermissions,
     reports,
+    roles,
     ...(jobHistory === undefined ? {} : { jobs: jobHistory }),
     ...(jobRetry === undefined ? {} : { jobRetry }),
     ...(jobSchedules === undefined ? {} : { jobSchedules }),

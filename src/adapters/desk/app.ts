@@ -8,6 +8,7 @@ import type { JobScheduleService } from "../../application/job-schedule-service"
 import type { PrintService } from "../../application/print-service";
 import { QueryService } from "../../application/query-service";
 import type { ReportService } from "../../application/report-service";
+import type { RoleService } from "../../application/role-service";
 import type { SavedListFilterService } from "../../application/saved-list-filter-service";
 import type { SavedReportDefinition, SavedReportService } from "../../application/saved-report-service";
 import type { UserAccountService } from "../../application/user-account-service";
@@ -54,6 +55,7 @@ import {
   renderNotFound,
   renderReportList,
   renderReportView,
+  renderRoleAdmin,
   renderSavedReportBuilder,
   renderSavedReportView,
   renderUserAccountAdmin,
@@ -96,6 +98,7 @@ export interface DeskAppOptions {
   readonly timeline?: DocumentHistoryService;
   readonly savedFilters?: SavedListFilterService;
   readonly savedReports?: SavedReportService;
+  readonly roles?: RoleService;
   readonly userAccounts?: UserAccountService;
   readonly userPermissions?: UserPermissionService;
   readonly reports?: ReportService;
@@ -267,6 +270,13 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       }
       throw error;
     }
+  });
+
+  app.get("/desk/admin/roles", async (c) => {
+    const roles = requireRoles(options);
+    const actor = await options.actor(c.req.raw);
+    const state = await roles.list(actor);
+    return renderDeskRolePage(options, actor, state);
   });
 
   app.get("/desk/admin/jobs", async (c) => {
@@ -467,6 +477,81 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       return c.redirect(`/desk/admin/users?user=${encodeURIComponent(form.userId)}`, 303);
     } catch (error) {
       return renderDeskUserAccountFailure(options, actor, userAccounts, form?.userId ?? "", error);
+    }
+  });
+
+  app.post("/desk/admin/roles", async (c) => {
+    const roles = requireRoles(options);
+    const actor = await options.actor(c.req.raw);
+    roles.authorizeAdministration(actor);
+    try {
+      const form = await parseDeskCreateRole(c.req.raw);
+      await roles.create({
+        actor,
+        role: form.role,
+        ...(form.description === undefined ? {} : { description: form.description }),
+        ...(form.enabled === undefined ? {} : { enabled: form.enabled }),
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect("/desk/admin/roles", 303);
+    } catch (error) {
+      return renderDeskRoleFailure(options, actor, roles, error);
+    }
+  });
+
+  app.post("/desk/admin/roles/:role/description", async (c) => {
+    const roles = requireRoles(options);
+    const actor = await options.actor(c.req.raw);
+    roles.authorizeAdministration(actor);
+    try {
+      const form = await parseDeskRoleDescription(c.req.raw);
+      await roles.changeDescription({
+        actor,
+        role: c.req.param("role"),
+        ...(form.description === undefined ? {} : { description: form.description }),
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect("/desk/admin/roles", 303);
+    } catch (error) {
+      return renderDeskRoleFailure(options, actor, roles, error);
+    }
+  });
+
+  app.post("/desk/admin/roles/:role/enable", async (c) => {
+    const roles = requireRoles(options);
+    const actor = await options.actor(c.req.raw);
+    roles.authorizeAdministration(actor);
+    try {
+      const form = await parseDeskRoleStatus(c.req.raw);
+      await roles.enable({
+        actor,
+        role: c.req.param("role"),
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect("/desk/admin/roles", 303);
+    } catch (error) {
+      return renderDeskRoleFailure(options, actor, roles, error);
+    }
+  });
+
+  app.post("/desk/admin/roles/:role/disable", async (c) => {
+    const roles = requireRoles(options);
+    const actor = await options.actor(c.req.raw);
+    roles.authorizeAdministration(actor);
+    try {
+      const form = await parseDeskRoleStatus(c.req.raw);
+      await roles.disable({
+        actor,
+        role: c.req.param("role"),
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect("/desk/admin/roles", 303);
+    } catch (error) {
+      return renderDeskRoleFailure(options, actor, roles, error);
     }
   });
 
@@ -1126,6 +1211,13 @@ function requireUserAccounts(options: DeskAppOptions): UserAccountService {
   return options.userAccounts;
 }
 
+function requireRoles(options: DeskAppOptions): RoleService {
+  if (!options.roles) {
+    throw new FrameworkError("DOCUMENT_NOT_FOUND", "Roles are not enabled", { status: 404 });
+  }
+  return options.roles;
+}
+
 function requireJobs(options: DeskAppOptions): JobHistoryService {
   if (!options.jobs) {
     throw new FrameworkError("JOB_NOT_FOUND", "Jobs are not enabled", { status: 404 });
@@ -1268,6 +1360,40 @@ async function renderDeskUserAccountFailure(
   );
 }
 
+async function renderDeskRolePage(
+  options: DeskAppOptions,
+  actor: Actor,
+  state: Parameters<typeof renderRoleAdmin>[0],
+  status = 200,
+  error?: string
+): Promise<Response> {
+  const doctypes = options.queries.listDoctypes(actor);
+  const reports = listReports(options, actor);
+  return html(
+    renderDeskLayout({
+      title: "Roles",
+      doctypes,
+      reports,
+      body: renderRoleAdmin(state, error === undefined ? {} : { error })
+    }),
+    status
+  );
+}
+
+async function renderDeskRoleFailure(
+  options: DeskAppOptions,
+  actor: Actor,
+  roles: RoleService,
+  error: unknown
+): Promise<Response> {
+  if (error instanceof FrameworkError && error.status === 403) {
+    throw error;
+  }
+  const state = await roles.list(actor);
+  const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
+  return renderDeskRolePage(options, actor, state, error instanceof FrameworkError ? error.status : 500, message);
+}
+
 function lifecycleActionsFor(
   actor: Actor,
   doctype: DocTypeDefinition,
@@ -1398,6 +1524,22 @@ interface ParsedDeskChangeUserRoles {
 
 interface ParsedDeskSetUserEnabled {
   readonly userId: string;
+  readonly expectedVersion?: number;
+}
+
+interface ParsedDeskCreateRole {
+  readonly role: string;
+  readonly description?: string;
+  readonly enabled?: boolean;
+  readonly expectedVersion?: number;
+}
+
+interface ParsedDeskRoleDescription {
+  readonly description?: string;
+  readonly expectedVersion?: number;
+}
+
+interface ParsedDeskRoleStatus {
   readonly expectedVersion?: number;
 }
 
@@ -1581,6 +1723,37 @@ async function parseDeskSetUserEnabled(request: Request): Promise<ParsedDeskSetU
   const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
   return {
     userId: form.get("user") ?? "",
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
+async function parseDeskCreateRole(request: Request): Promise<ParsedDeskCreateRole> {
+  const form = await readUrlEncodedDeskForm(request);
+  const description = stringSearchParamValue(form, "description");
+  const enabled = optionalBooleanSearchParamValue(form, "enabled", "enabled");
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  return {
+    role: form.get("role") ?? "",
+    ...(description === undefined ? {} : { description }),
+    ...(enabled === undefined ? {} : { enabled }),
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
+async function parseDeskRoleDescription(request: Request): Promise<ParsedDeskRoleDescription> {
+  const form = await readUrlEncodedDeskForm(request);
+  const description = stringSearchParamValue(form, "description");
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  return {
+    ...(description === undefined ? {} : { description }),
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
+async function parseDeskRoleStatus(request: Request): Promise<ParsedDeskRoleStatus> {
+  const form = await readUrlEncodedDeskForm(request);
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  return {
     ...(expectedVersion !== undefined ? { expectedVersion } : {})
   };
 }

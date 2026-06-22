@@ -105,6 +105,10 @@ export function foldDocumentFrom(
       case "UserRolesChanged":
       case "UserAccountEnabled":
       case "UserAccountDisabled":
+      case "RoleCreated":
+      case "RoleDescriptionChanged":
+      case "RoleEnabled":
+      case "RoleDisabled":
       case "SavedReportSaved":
       case "SavedReportDeleted":
         break;

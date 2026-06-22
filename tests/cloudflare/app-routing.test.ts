@@ -122,6 +122,71 @@ describe("CloudFrappe Worker routing", () => {
     expect(html).toContain("No grants configured.");
   });
 
+  it("mounts role catalog API and Desk routes on the Worker", async () => {
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => ({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" })
+    });
+    const env = {
+      DB: fakeEventD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const empty = await worker.fetch!(cfRequest("http://localhost/api/roles"), env, fakeExecutionContext());
+    expect(empty.status).toBe(200);
+    await expect(empty.json()).resolves.toMatchObject({
+      data: { tenantId: "acme", version: 0, roles: [] }
+    });
+
+    const created = await worker.fetch!(
+      cfRequest("http://localhost/api/roles/Support%20Lead", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ description: "Escalation owner", expectedVersion: 0 })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(created.status).toBe(201);
+
+    const desk = await worker.fetch!(
+      cfRequest("http://localhost/desk/admin/roles"),
+      env,
+      fakeExecutionContext()
+    );
+    expect(desk.status).toBe(200);
+    const html = await desk.text();
+    expect(html).toContain("Support Lead");
+    expect(html).toContain("Escalation owner");
+    expect(html).toContain('action="/desk/admin/roles/Support%20Lead/disable"');
+  });
+
+  it("uses custom auth admin roles for Worker role catalog administration", async () => {
+    const worker = createCloudFrappeWorker<CloudFrappeAuthTestEnv>({
+      registry: createTestRegistry(),
+      actor: () => ({ id: "desk-admin@example.com", roles: ["Desk Admin"], tenantId: "acme" }),
+      auth: {
+        sessionSecret: (env) => env.SESSION_SECRET,
+        sessionMaxAgeSeconds: 60,
+        secure: false,
+        adminRoles: ["Desk Admin"]
+      }
+    });
+    const env = { DB: fakeEventD1(), AGGREGATES: fakeNamespace(), SESSION_SECRET: "edge-secret" };
+
+    const api = await worker.fetch!(cfRequest("http://localhost/api/roles"), env, fakeExecutionContext());
+    expect(api.status).toBe(200);
+    await expect(api.json()).resolves.toMatchObject({ data: { tenantId: "acme", roles: [] } });
+
+    const desk = await worker.fetch!(
+      cfRequest("http://localhost/desk/admin/roles"),
+      env,
+      fakeExecutionContext()
+    );
+    expect(desk.status).toBe(200);
+    await expect(desk.text()).resolves.toContain("Create Role");
+  });
+
   it("supports env-backed signed-session actor resolvers in the Worker factory", async () => {
     const cookie = await createSignedSessionCookie(owner, {
       secret: "edge-secret",

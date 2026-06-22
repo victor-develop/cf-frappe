@@ -24,6 +24,10 @@ export function userAccountsStream(tenantId: TenantId, userId: string): StreamNa
   return documentStream(tenantId, "__UserAccounts", userId);
 }
 
+export function roleCatalogStream(tenantId: TenantId): StreamName {
+  return documentStream(tenantId, "__Roles", "catalog");
+}
+
 export function escapePart(value: string): string {
   return encodeURIComponent(value).replaceAll(".", "%2E");
 }

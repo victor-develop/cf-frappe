@@ -9,6 +9,7 @@ import type { JobScheduleService } from "../../application/job-schedule-service"
 import type { PrintService } from "../../application/print-service";
 import { QueryService } from "../../application/query-service";
 import type { ReportService } from "../../application/report-service";
+import type { RoleService } from "../../application/role-service";
 import type { SavedListFilterService } from "../../application/saved-list-filter-service";
 import type { SavedReportService } from "../../application/saved-report-service";
 import type { UserAccountService } from "../../application/user-account-service";
@@ -26,6 +27,7 @@ import { createJobApi } from "./job-api";
 import { createPrintApi } from "./print-api";
 import { createReportApi } from "./report-api";
 import { listFiltersFromUrl, parseOptionalInteger, readJsonObject, requestMetadata } from "./request";
+import { createRoleApi } from "./role-api";
 import { createSavedReportApi } from "./saved-report-api";
 import { createUserAccountApi } from "./user-account-api";
 import { createUserPermissionApi } from "./user-permission-api";
@@ -41,6 +43,7 @@ export interface ResourceApiOptions {
   readonly files?: FileService;
   readonly prints?: PrintService;
   readonly reports?: ReportService;
+  readonly roles?: RoleService;
   readonly savedReports?: SavedReportService;
   readonly audit?: AuditService;
   readonly jobs?: JobHistoryService;
@@ -137,6 +140,17 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       createReportApi({
         reports: options.reports,
         actor: resolveActor
+      })
+    );
+  }
+
+  if (options.roles) {
+    app.route(
+      "/",
+      createRoleApi({
+        roles: options.roles,
+        actor: resolveActor,
+        maxJsonBytes
       })
     );
   }

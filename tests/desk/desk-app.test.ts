@@ -19,6 +19,7 @@ import {
   JobRetryService,
   JobScheduleService,
   QueryService,
+  RoleService,
   SYSTEM_MANAGER_ROLE,
   UserAccountService,
   type PasswordHasher
@@ -65,6 +66,29 @@ describe("Desk app", () => {
       actor: () => actor
     });
     return { app, services: { ...services, userAccounts } };
+  }
+
+  function makeRoleDesk(actor = owner) {
+    const services = createServices(["e1", "e2", "e3", "e4"]);
+    const roles = new RoleService({
+      events: services.store,
+      ids: deterministicIds(["role-1", "describe-1", "disable-1", "enable-1"]),
+      clock: fixedClock(now)
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      prints: services.prints,
+      queries: services.queries,
+      reports: services.reports,
+      timeline: services.history,
+      savedFilters: services.savedFilters,
+      savedReports: services.savedReports,
+      roles,
+      userPermissions: services.userPermissions,
+      actor: () => actor
+    });
+    return { app, services: { ...services, roles } };
   }
 
   function makeLinkedDesk() {
@@ -742,6 +766,117 @@ describe("Desk app", () => {
       version: 2,
       grants: []
     });
+  });
+
+  it("renders and mutates roles from the Desk admin surface", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
+    const { app, services } = makeRoleDesk(admin);
+
+    const empty = await app.request("/desk/admin/roles");
+    expect(empty.status).toBe(200);
+    const emptyHtml = await empty.text();
+    expect(emptyHtml).toContain("Roles");
+    expect(emptyHtml).toContain("Create Role");
+    expect(emptyHtml).toContain("No roles configured.");
+    expect(emptyHtml).toContain('name="expectedVersion" value="0"');
+
+    const created = await app.request("/desk/admin/roles", {
+      method: "POST",
+      body: new URLSearchParams({
+        role: "Support Lead",
+        description: "Escalation owner",
+        enabled: "true",
+        expectedVersion: "0"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(created.status).toBe(303);
+    expect(created.headers.get("location")).toBe("/desk/admin/roles");
+    await expect(services.roles.list(admin)).resolves.toMatchObject({
+      version: 1,
+      roles: [{ name: "Support Lead", description: "Escalation owner", enabled: true, version: 1 }]
+    });
+
+    const current = await app.request("/desk/admin/roles");
+    expect(current.status).toBe(200);
+    const currentHtml = await current.text();
+    expect(currentHtml).toContain("Support Lead");
+    expect(currentHtml).toContain("Escalation owner");
+    expect(currentHtml).toContain('action="/desk/admin/roles/Support%20Lead/description"');
+    expect(currentHtml).toContain('action="/desk/admin/roles/Support%20Lead/disable"');
+    expect(currentHtml).toContain('name="expectedVersion" value="1"');
+
+    const stale = await app.request("/desk/admin/roles/Support%20Lead/description", {
+      method: "POST",
+      body: new URLSearchParams({
+        description: "Stale",
+        expectedVersion: "0"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(stale.status).toBe(409);
+    const staleHtml = await stale.text();
+    expect(staleHtml).toContain("Expected role catalog at version 0, found 1");
+    expect(staleHtml).toContain("Escalation owner");
+
+    const described = await app.request("/desk/admin/roles/Support%20Lead/description", {
+      method: "POST",
+      body: new URLSearchParams({
+        description: "Owns escalations",
+        expectedVersion: "1"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(described.status).toBe(303);
+    await expect(services.roles.list(admin)).resolves.toMatchObject({
+      version: 2,
+      roles: [{ name: "Support Lead", description: "Owns escalations" }]
+    });
+
+    const disabled = await app.request("/desk/admin/roles/Support%20Lead/disable", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "2" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(disabled.status).toBe(303);
+    await expect(services.roles.list(admin)).resolves.toMatchObject({
+      version: 3,
+      roles: [{ name: "Support Lead", enabled: false }]
+    });
+
+    const disabledPage = await app.request("/desk/admin/roles");
+    expect(disabledPage.status).toBe(200);
+    await expect(disabledPage.text()).resolves.toContain('action="/desk/admin/roles/Support%20Lead/enable"');
+
+    const enabled = await app.request("/desk/admin/roles/Support%20Lead/enable", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "3" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(enabled.status).toBe(303);
+    await expect(services.roles.list(admin)).resolves.toMatchObject({
+      version: 4,
+      roles: [{ name: "Support Lead", enabled: true }]
+    });
+  });
+
+  it("requires role administrators before parsing malformed Desk role forms", async () => {
+    const { app } = makeRoleDesk(owner);
+
+    const response = await app.request("/desk/admin/roles", {
+      method: "POST",
+      body: new URLSearchParams({
+        role: "Support",
+        enabled: "maybe"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(response.status).toBe(403);
+    const html = await response.text();
+    expect(html).toContain("cannot manage roles");
+    expect(html).not.toContain("Create Role");
   });
 
   it("renders and mutates user accounts from the Desk admin surface", async () => {

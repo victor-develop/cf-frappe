@@ -26,6 +26,7 @@ import type { FileDashboard } from "../../application/file-service";
 import type { JobExecutionDashboard } from "../../application/job-history-service";
 import type { JobScheduleDashboard } from "../../application/job-schedule-service";
 import type { ReportRunResult } from "../../application/report-service";
+import type { RoleCatalogState } from "../../core/roles";
 import type { SavedListFilter } from "../../application/saved-list-filter-service";
 import type { SavedReport } from "../../application/saved-report-service";
 import type { PrintFormatDefinition } from "../../core/print-format";
@@ -527,6 +528,53 @@ export function renderUserAccountAdmin(state: UserAccountAdminState): string {
     </div>
   </section>
   ${accountTools}`;
+}
+
+export function renderRoleAdmin(
+  state: RoleCatalogState,
+  options: { readonly error?: string } = {}
+): string {
+  const rows = state.roles
+    .map((role) => {
+      const action = role.enabled ? "disable" : "enable";
+      return `<tr>
+        <td>${escapeHtml(role.name)}</td>
+        <td>${escapeHtml(role.description ?? "")}</td>
+        <td>${role.enabled ? "enabled" : "disabled"}</td>
+        <td>${String(role.version)}</td>
+        <td>
+          <form class="inline-action" method="post" action="/desk/admin/roles/${encodeURIComponent(role.name)}/description">
+            <input type="hidden" name="expectedVersion" value="${String(state.version)}">
+            <input name="description" value="${escapeHtml(role.description ?? "")}">
+            <button class="button" type="submit">Save</button>
+          </form>
+          <form class="inline-action" method="post" action="/desk/admin/roles/${encodeURIComponent(role.name)}/${action}">
+            <input type="hidden" name="expectedVersion" value="${String(state.version)}">
+            <button class="button ${role.enabled ? "danger" : "primary"}" type="submit">${role.enabled ? "Disable" : "Enable"}</button>
+          </form>
+        </td>
+      </tr>`;
+    })
+    .join("");
+  return `${options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : ""}
+  <form class="panel form" method="post" action="/desk/admin/roles">
+    <input type="hidden" name="expectedVersion" value="${String(state.version)}">
+    <div class="form-head"><h2>Create Role</h2><p>v${String(state.version)}</p></div>
+    <div class="fields">
+      <label class="field"><span>Role</span><input name="role"></label>
+      <label class="field"><span>Description</span><input name="description"></label>
+      <label class="field"><span>Status</span><select name="enabled"><option value="true" selected>Enabled</option><option value="false">Disabled</option></select></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Create</button></div>
+  </form>
+  <section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Role</th><th>Description</th><th>Status</th><th>Role Version</th><th>Actions</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="5" class="empty">No roles configured.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>`;
 }
 
 export function renderJobAdmin(

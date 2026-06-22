@@ -1,5 +1,6 @@
 import {
   AuditService,
+  RoleService,
   SYSTEM_MANAGER_ROLE,
   UserAccountService,
   deterministicIds,
@@ -239,6 +240,32 @@ describe("AuditService", () => {
     });
     expect(changed.events[0]).toMatchObject({
       payload: { kind: "UserPasswordChanged", passwordHash: "[redacted]" }
+    });
+  });
+
+  it("searches role catalog events by audit kind", async () => {
+    const { audit, events } = createServices(["unused"]);
+    const roles = new RoleService({
+      events,
+      ids: deterministicIds(["role-1"]),
+      clock: fixedClock("2026-01-02T00:00:00.000Z")
+    });
+    await roles.create({
+      actor: admin,
+      role: "Support Lead",
+      description: "Escalation owner"
+    });
+
+    const result = await audit.search(admin, {
+      doctype: "__Roles",
+      name: "catalog",
+      kind: "RoleCreated"
+    });
+
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({
+      id: "evt_role-1",
+      payload: { kind: "RoleCreated", role: "Support Lead", description: "Escalation owner" }
     });
   });
 

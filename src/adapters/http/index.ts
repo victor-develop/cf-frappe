@@ -8,6 +8,7 @@ export * from "./print-api";
 export * from "./report-api";
 export * from "./request";
 export * from "./resource-api";
+export * from "./role-api";
 export * from "./saved-report-api";
 export * from "./signed-session";
 export * from "./user-account-api";
