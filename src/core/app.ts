@@ -1,5 +1,6 @@
 import { assertAppName, assertAppNames } from "./app-name";
 import { resolveAppDependencyOrder } from "./app-graph";
+import type { ClientScriptDefinition } from "./client-script";
 import { createRegistry, type DocumentHooks, type ModelRegistry, type RegistryOptions } from "./registry";
 import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-format";
 import type { ReportDefinition } from "./reports";
@@ -15,6 +16,7 @@ export interface FrameworkAppDefinition {
   readonly letterheads?: readonly PrintLetterheadDefinition[];
   readonly printFormats?: readonly PrintFormatDefinition[];
   readonly reports?: readonly ReportDefinition[];
+  readonly clientScripts?: readonly ClientScriptDefinition[];
   readonly hooks?: Readonly<Record<string, readonly DocumentHooks[]>>;
 }
 
@@ -37,6 +39,7 @@ export function defineApp(input: FrameworkAppDefinition): FrameworkAppDefinition
     letterheads: Object.freeze([...(input.letterheads ?? [])]),
     printFormats: Object.freeze([...(input.printFormats ?? [])]),
     reports: Object.freeze([...(input.reports ?? [])]),
+    clientScripts: Object.freeze([...(input.clientScripts ?? [])]),
     hooks: freezeHooks(input.hooks ?? {})
   });
 }
@@ -59,6 +62,7 @@ export function registryOptionsFromApps(apps: readonly FrameworkAppDefinition[])
     letterheads: orderedApps.flatMap((app) => app.letterheads ?? []),
     printFormats: orderedApps.flatMap((app) => app.printFormats ?? []),
     reports: orderedApps.flatMap((app) => app.reports ?? []),
+    clientScripts: orderedApps.flatMap((app) => app.clientScripts ?? []),
     hooks
   };
 }

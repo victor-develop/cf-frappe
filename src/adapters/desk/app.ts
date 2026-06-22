@@ -213,7 +213,8 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         reports,
         body: renderListView(doctype, listView, result.data, effectiveFilters, {
           ...(savedFilters ? { savedFilters } : {}),
-          ...(savedFilter ? { selectedSavedFilterId: savedFilter.id } : {})
+          ...(savedFilter ? { selectedSavedFilterId: savedFilter.id } : {}),
+          clientScripts: options.registry.listClientScripts(doctype.name, "list")
         })
       })
     );
@@ -267,7 +268,12 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         active: doctype.name,
         doctypes,
         reports,
-        body: renderFormView(doctype, formView, { mode: "create", linkOptions, tableDefinitions })
+        body: renderFormView(doctype, formView, {
+          mode: "create",
+          linkOptions,
+          tableDefinitions,
+          clientScripts: options.registry.listClientScripts(doctype.name, "form")
+        })
       })
     );
   });
@@ -314,7 +320,8 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       linkOptions,
       tableDefinitions,
       lifecycleActions,
-      printFormats
+      printFormats,
+      clientScripts: options.registry.listClientScripts(doctype.name, "form")
     });
     return html(
       renderDeskLayout({
@@ -624,6 +631,7 @@ async function renderDeskError(
         tableDefinitions,
         ...(document ? { lifecycleActions: lifecycleActionsFor(actor, doctype, document) } : {}),
         ...(document ? { printFormats: listPrintFormats(options, actor, doctype.name) } : {}),
+        clientScripts: options.registry.listClientScripts(doctype.name, "form"),
         error: message
       })
     }),

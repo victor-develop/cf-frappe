@@ -1,5 +1,7 @@
 import { assertAppName, assertAppNames } from "./app-name";
 import { resolveAppDependencyOrder } from "./app-graph";
+import { clientScriptAppliesTo, defineClientScript } from "./client-script";
+import type { ClientScriptDefinition, ClientScriptScope } from "./client-script";
 import { FrameworkError } from "./errors";
 import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-format";
 import { assertPrintFormatMatchesDocType, assertPrintLetterheadValid } from "./print-format";
@@ -40,6 +42,7 @@ export interface RegistryOptions {
   readonly letterheads?: readonly PrintLetterheadDefinition[];
   readonly printFormats?: readonly PrintFormatDefinition[];
   readonly reports?: readonly ReportDefinition[];
+  readonly clientScripts?: readonly ClientScriptDefinition[];
   readonly hooks?: Readonly<Record<string, readonly DocumentHooks[]>>;
 }
 
@@ -49,6 +52,7 @@ export class ModelRegistry {
   private readonly letterheads = new Map<string, PrintLetterheadDefinition>();
   private readonly printFormats = new Map<string, PrintFormatDefinition>();
   private readonly reports = new Map<string, ReportDefinition>();
+  private readonly clientScripts = new Map<string, ClientScriptDefinition>();
   private readonly hooks = new Map<string, readonly DocumentHooks[]>();
 
   constructor(options: RegistryOptions = {}) {
@@ -67,6 +71,9 @@ export class ModelRegistry {
     }
     for (const format of options.printFormats ?? []) {
       this.registerPrintFormat(format);
+    }
+    for (const script of options.clientScripts ?? []) {
+      this.registerClientScript(script);
     }
     for (const [doctype, hooks] of Object.entries(options.hooks ?? {})) {
       for (const hook of hooks) {
@@ -192,6 +199,21 @@ export class ModelRegistry {
     this.printFormats.set(format.name, format);
   }
 
+  registerClientScript(script: ClientScriptDefinition): void {
+    const definition = defineClientScript(script);
+    if (!this.doctypes.has(definition.doctype)) {
+      throw new FrameworkError("DOCTYPE_NOT_FOUND", `DocType '${definition.doctype}' is not registered`, {
+        status: 404
+      });
+    }
+    if (this.clientScripts.has(definition.name)) {
+      throw new FrameworkError("CLIENT_SCRIPT_DUPLICATE", `Client script '${definition.name}' is already registered`, {
+        status: 409
+      });
+    }
+    this.clientScripts.set(definition.name, definition);
+  }
+
   registerHooks(doctype: string, hooks: DocumentHooks): void {
     if (!this.doctypes.has(doctype)) {
       throw new FrameworkError("DOCTYPE_NOT_FOUND", `DocType '${doctype}' is not registered`, {
@@ -263,6 +285,16 @@ export class ModelRegistry {
 
   listPrintLetterheads(): readonly PrintLetterheadDefinition[] {
     return [...this.letterheads.values()].sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  listClientScripts(
+    doctype?: string,
+    scope?: Exclude<ClientScriptScope, "both">
+  ): readonly ClientScriptDefinition[] {
+    return [...this.clientScripts.values()]
+      .filter((script) => doctype === undefined || script.doctype === doctype)
+      .filter((script) => scope === undefined || clientScriptAppliesTo(script, scope))
+      .sort((left, right) => left.name.localeCompare(right.name));
   }
 
   hooksFor(doctype: string): readonly DocumentHooks[] {

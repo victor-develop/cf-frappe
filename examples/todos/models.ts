@@ -1,4 +1,4 @@
-import { createRegistryFromApps, defineApp, defineDocType, definePrintFormat, defineReport } from "../../src";
+import { createRegistryFromApps, defineApp, defineClientScript, defineDocType, definePrintFormat, defineReport } from "../../src";
 
 export const Task = defineDocType({
   name: "Task",
@@ -97,6 +97,13 @@ export const TaskPrint = definePrintFormat({
   roles: ["Guest", "User", "Task Manager"]
 });
 
+export const TaskFormScript = defineClientScript({
+  name: "task-form",
+  doctype: "Task",
+  src: "/assets/task-form.js",
+  scope: "form"
+});
+
 export const todoApp = defineApp({
   name: "todos",
   label: "Todos",
@@ -105,6 +112,7 @@ export const todoApp = defineApp({
   doctypes: [Task],
   printFormats: [TaskPrint],
   reports: [OpenTasks],
+  clientScripts: [TaskFormScript],
   hooks: {
     Task: [
       {

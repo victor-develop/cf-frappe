@@ -36,6 +36,7 @@ describe("cf-frappe CLI scaffold", () => {
       ".gitignore",
       ".dev.vars.example",
       "README.md",
+      "public/assets/task-form.js",
       "src/models.ts",
       "src/worker.ts",
       "migrations/0001_cf_frappe_core.sql",
@@ -57,8 +58,20 @@ describe("cf-frappe CLI scaffold", () => {
     await expect(readFile(join(target, "wrangler.jsonc"), "utf8")).resolves.toContain(
       '"new_sqlite_classes": ["AggregateCoordinator"]'
     );
+    await expect(readFile(join(target, "wrangler.jsonc"), "utf8")).resolves.toContain(
+      '"directory": "./public"'
+    );
     await expect(readFile(join(target, "src/worker.ts"), "utf8")).resolves.toContain(
       "signedSessionActorResolver"
+    );
+    await expect(readFile(join(target, "src/worker.ts"), "utf8")).resolves.toContain(
+      "type Env = Cloudflare.Env & CloudFrappeEnv"
+    );
+    await expect(readFile(join(target, "src/models.ts"), "utf8")).resolves.toContain(
+      "defineClientScript"
+    );
+    await expect(readFile(join(target, "public/assets/task-form.js"), "utf8")).resolves.toContain(
+      "document.currentScript"
     );
     await expect(readFile(join(target, "migrations/0001_cf_frappe_core.sql"), "utf8")).resolves.toContain(
       "CREATE TABLE IF NOT EXISTS cf_frappe_events"

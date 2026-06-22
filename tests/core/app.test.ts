@@ -2,6 +2,7 @@ import {
   createRegistry,
   createRegistryFromApps,
   defineApp,
+  defineClientScript,
   defineDocType,
   definePrintFormat,
   definePrintLetterhead,
@@ -56,6 +57,7 @@ describe("app manifests", () => {
       sections: [{ fields: [{ field: "title" }] }]
     });
     const report = defineReport({ name: "All Notes", doctype: "Note", columns: [{ name: "title" }] });
+    const clientScript = defineClientScript({ name: "note-form", doctype: "Note", src: "/assets/note-form.js" });
 
     const registry = createRegistryFromApps([
       defineApp({
@@ -63,13 +65,15 @@ describe("app manifests", () => {
         doctypes: [Note],
         letterheads: [letterhead],
         printFormats: [printFormat],
-        reports: [report]
+        reports: [report],
+        clientScripts: [clientScript]
       })
     ]);
 
     expect(registry.getPrintLetterhead("Standard")).toBe(letterhead);
     expect(registry.getPrintFormat("Note Standard")).toBe(printFormat);
     expect(registry.getReport("All Notes")).toBe(report);
+    expect(registry.listClientScripts("Note")).toEqual([clientScript]);
   });
 
   it("rejects duplicate apps and invalid dependency graphs", () => {
@@ -109,13 +113,15 @@ describe("app manifests", () => {
       name: "notes",
       modules: ["Notes"],
       doctypes: [defineDocType({ name: "Note", fields: [] })],
-      hooks: { Note: [hook] }
+      hooks: { Note: [hook] },
+      clientScripts: [defineClientScript({ name: "note-form", doctype: "Note", src: "/assets/note-form.js" })]
     });
 
     const options = registryOptionsFromApps([app]);
 
     expect(options.apps).toEqual([{ name: "notes", modules: ["Notes"], dependencies: [] }]);
     expect(options.doctypes?.map((doctype) => doctype.name)).toEqual(["Note"]);
+    expect(options.clientScripts?.map((script) => script.name)).toEqual(["note-form"]);
     expect(options.hooks?.Note).toEqual([hook]);
   });
 

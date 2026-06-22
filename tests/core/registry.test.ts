@@ -1,4 +1,4 @@
-import { createRegistry, defineDocType, FrameworkError } from "../../src";
+import { createRegistry, defineClientScript, defineDocType, FrameworkError } from "../../src";
 
 describe("registry", () => {
   it("lists doctypes in stable name order", () => {
@@ -31,6 +31,46 @@ describe("registry", () => {
     expect(registry.hooksFor("Note")).toEqual([hook]);
     expect(registry.hooksFor("Other")).toEqual([]);
     expect(() => registry.registerHooks("Other", {})).toThrow(FrameworkError);
+  });
+
+  it("registers client scripts for known doctypes and filters them by scope", () => {
+    const registry = createRegistry({ doctypes: [defineDocType({ name: "Note", fields: [] })] });
+    const formScript = defineClientScript({ name: "note-form", doctype: "Note", src: "/assets/note-form.js" });
+    const listScript = defineClientScript({
+      name: "note-list",
+      doctype: "Note",
+      src: "/assets/note-list.js",
+      scope: "list"
+    });
+    const sharedScript = defineClientScript({
+      name: "note-shared",
+      doctype: "Note",
+      src: "/assets/note-shared.js",
+      scope: "both"
+    });
+
+    registry.registerClientScript(listScript);
+    registry.registerClientScript(formScript);
+    registry.registerClientScript(sharedScript);
+
+    expect(registry.listClientScripts("Note").map((script) => script.name)).toEqual([
+      "note-form",
+      "note-list",
+      "note-shared"
+    ]);
+    expect(registry.listClientScripts("Note", "form").map((script) => script.name)).toEqual([
+      "note-form",
+      "note-shared"
+    ]);
+    expect(registry.listClientScripts("Note", "list").map((script) => script.name)).toEqual([
+      "note-list",
+      "note-shared"
+    ]);
+    expect(Object.isFrozen(registry.listClientScripts("Note")[0])).toBe(true);
+    expect(() => registry.registerClientScript(formScript)).toThrow("already registered");
+    expect(() =>
+      registry.registerClientScript(defineClientScript({ name: "missing", doctype: "Missing", src: "/missing.js" }))
+    ).toThrow(FrameworkError);
   });
 
   it("allows link fields to reference doctypes registered later in the same registry", () => {

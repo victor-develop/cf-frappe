@@ -21,6 +21,7 @@ export * from "./cloudflare";
 export * from "./core/errors";
 export * from "./core/events";
 export * from "./core/app";
+export * from "./core/client-script";
 export * from "./core/file-doctype";
 export * from "./core/form-view";
 export * from "./core/jobs";

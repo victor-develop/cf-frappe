@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the app manifest composition slice:
+As of the client script metadata slice:
 
-- Test files: `45`
-- Vitest cases: `314`
+- Test files: `46`
+- Vitest cases: `319`
 
 ## Implication
 

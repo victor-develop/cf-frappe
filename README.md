@@ -24,6 +24,7 @@ The current slice is a working kernel:
 - metadata-configured list columns, default filters, saved user filters, filter controls, and page size
 - metadata-defined print formats with reusable letterheads, field sections, or HTML templates with escaped substitutions
 - metadata-defined reports, summaries, and charts over current projections
+- metadata-defined same-origin client scripts injected into generated Desk list/form pages
 - Cloudflare Queue/Cron background job primitives
 - R2-backed file attachments with event-sourced `File` metadata
 - Durable Object WebSocket realtime topics for document events
@@ -49,6 +50,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | Desk list/forms | generated `/desk` pages, list/form layouts, columns, saved filters, and filters from DocType metadata |
 | Print formats | metadata-defined printable document pages, letterheads, and escaped templates |
 | Reports | metadata-defined report columns, filters, summaries, charts, API, and Desk pages |
+| Client scripts | `defineClientScript(...)` browser bundles attached to Desk list/form pages |
 | Background jobs | `JobRegistry`, Queue producers/consumers, and Cron dispatch |
 | File attachments | `File` DocType metadata plus R2 object storage |
 | Realtime events | document commit events over Durable Object WebSocket topics |
@@ -98,7 +100,7 @@ npm run dev
 ## Define A Model
 
 ```ts
-import { createRegistryFromApps, defineApp, defineDocType, definePrintFormat, defineReport, fileDocType } from "cf-frappe";
+import { createRegistryFromApps, defineApp, defineClientScript, defineDocType, definePrintFormat, defineReport, fileDocType } from "cf-frappe";
 
 export const Project = defineDocType({
   name: "Project",
@@ -190,6 +192,13 @@ export const TaskPrint = definePrintFormat({
   roles: ["User"]
 });
 
+export const TaskFormScript = defineClientScript({
+  name: "task-form",
+  doctype: "Task",
+  src: "/assets/task-form.js",
+  scope: "form"
+});
+
 export const projectApp = defineApp({
   name: "projects",
   label: "Projects",
@@ -197,7 +206,8 @@ export const projectApp = defineApp({
   modules: ["Projects"],
   doctypes: [Project, Task, fileDocType],
   printFormats: [TaskPrint],
-  reports: [OpenTasks]
+  reports: [OpenTasks],
+  clientScripts: [TaskFormScript]
 });
 
 export const registry = createRegistryFromApps([projectApp]);
@@ -709,11 +719,11 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 314 tests across app manifests, schema, permissions, signed sessions, user permissions, events, registry, services, naming series, document lifecycle, document timelines and diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, saved user filters, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, print templates, print letterheads, reports, report summaries, report charts, report exports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, D1 schema planning/migration application, and CLI starter scaffolding.
+Current suite: 319 tests across app manifests, client scripts, schema, permissions, signed sessions, user permissions, events, registry, services, naming series, document lifecycle, document timelines and diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, saved user filters, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, print templates, print letterheads, reports, report summaries, report charts, report exports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, D1 schema planning/migration application, and CLI starter scaffolding.
 
 ## Status
 
-This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, permissioned document timelines with field diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, signed session actor resolution, event-sourced user permissions with admin API/Desk management, app manifest composition, saved user filters, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, report charts/exports, custom print templates, reusable letterheads, Durable Object realtime topics, and an initial starter CLI exist, but richer chart controls, durable job dashboards, richer realtime presence, full user/login management, advanced file workflows, CLI-managed app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
+This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, permissioned document timelines with field diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, signed session actor resolution, event-sourced user permissions with admin API/Desk management, app manifest composition, declarative client script injection, saved user filters, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, report charts/exports, custom print templates, reusable letterheads, Durable Object realtime topics, and an initial starter CLI exist, but richer chart controls, durable job dashboards, richer realtime presence, full user/login management, advanced file workflows, CLI-managed app installation, richer browser-side client APIs, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
 
 ## References
 

@@ -46,11 +46,12 @@ That model is powerful, but it is not event-sourcing first. cf-frappe keeps the 
 | Session auth | sessions | signed cookie actor resolver with env-backed Worker composition |
 | Cloudflare runtime | not native | Worker, D1, Durable Object command routing |
 | Apps | installed apps and hooks | `defineApp` manifests composed into one registry with dependency-ordered hooks |
+| Client scripts | form/list scripts | same-origin `defineClientScript` bundles injected into generated Desk list/form pages |
 | App starter | bench/new app setup | initial `cf-frappe init` scaffold with Worker, D1, Durable Object, and signed-session wiring |
 
 ## Current Gaps
 
-- Generated Desk UI now covers basic list/form/report/print pages, model-defined form sections and field order, list columns, default list filters, saved user filters, filter controls, link-field select controls, child table row grids, submit/cancel lifecycle actions, document timelines with field diffs/comments/assignments/tags/followers, user-permission administration, report summaries/charts/exports, custom print templates, reusable letterheads, and page size. Advanced filter builders, report builder, broader admin tools, richer chart controls, and client scripting are not implemented.
+- Generated Desk UI now covers basic list/form/report/print pages, model-defined form sections and field order, list columns, default list filters, saved user filters, filter controls, link-field select controls, child table row grids, submit/cancel lifecycle actions, document timelines with field diffs/comments/assignments/tags/followers, user-permission administration, report summaries/charts/exports, custom print templates, reusable letterheads, same-origin client script injection, and page size. Advanced filter builders, report builder, broader admin tools, richer chart controls, and richer browser-side client APIs are not implemented.
 - DocType metadata now plans and applies D1 projection-index migrations with a checksum journal, and app manifests compose DocTypes/hooks/reports/print formats, but destructive/renaming migrations, data backfills, and CLI-driven app installation are still future work.
 - Background jobs now have basic Queue/Cron support, but durable dashboards, job result storage, worker pools, retry administration, and scheduler admin views are not implemented.
 - Document history now exposes permissioned timeline entries with bounded event-sourced field-level old/new diffs, comment events, activity feed entries, assignment events, tag events, follower events, admin-only audit search, and deleted-document audit recovery from the event stream.

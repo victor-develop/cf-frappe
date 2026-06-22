@@ -13,6 +13,7 @@ import {
   type ResolvedListView
 } from "../../core/types";
 import type { ReportDefinition } from "../../core/reports";
+import type { ClientScriptDefinition, ClientScriptScope } from "../../core/client-script";
 import type {
   DocumentAssignments,
   DocumentFollowers,
@@ -365,6 +366,7 @@ export function renderListView(
   options: {
     readonly savedFilters?: readonly SavedListFilter[];
     readonly selectedSavedFilterId?: string;
+    readonly clientScripts?: readonly ClientScriptDefinition[];
   } = {}
 ): string {
   const fields = listView.columns;
@@ -397,7 +399,8 @@ export function renderListView(
         <tbody>${rows || `<tr><td colspan="${fields.length + 3}" class="empty">No documents yet.</td></tr>`}</tbody>
       </table>
     </div>
-  </section>`;
+  </section>
+  ${renderClientScripts(doctype.name, "list", options.clientScripts ?? [])}`;
 }
 
 function renderSavedFilters(
@@ -437,6 +440,7 @@ export function renderFormView(
     readonly tableDefinitions?: FormTableDefinitions;
     readonly lifecycleActions?: readonly FormLifecycleAction[];
     readonly printFormats?: readonly PrintFormatDefinition[];
+    readonly clientScripts?: readonly ClientScriptDefinition[];
   }
 ): string {
   const action =
@@ -501,7 +505,25 @@ export function renderFormView(
     ${commands}
     ${lifecycleActions}
     ${printLinks}
-  </form>`;
+  </form>
+  ${renderClientScripts(doctype.name, "form", options.clientScripts ?? [], options.document?.name)}`;
+}
+
+function renderClientScripts(
+  doctype: string,
+  scope: Exclude<ClientScriptScope, "both">,
+  scripts: readonly ClientScriptDefinition[],
+  documentName?: string
+): string {
+  return scripts
+    .map((script) => {
+      const type = (script.type ?? "module") === "module" ? ' type="module"' : "";
+      const documentAttribute = documentName === undefined
+        ? ""
+        : ` data-document-name="${escapeHtml(documentName)}"`;
+      return `<script${type} src="${escapeHtml(script.src)}" data-cf-frappe-script="${escapeHtml(script.name)}" data-doctype="${escapeHtml(doctype)}" data-scope="${scope}"${documentAttribute}></script>`;
+    })
+    .join("");
 }
 
 export function renderDocumentTimeline(

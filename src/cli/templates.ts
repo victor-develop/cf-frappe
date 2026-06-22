@@ -22,6 +22,7 @@ export function starterProjectFiles(input: StarterProjectTemplateInput): readonl
     { path: ".gitignore", contents: gitignore() },
     { path: ".dev.vars.example", contents: devVarsExample() },
     { path: "README.md", contents: readme(input) },
+    { path: "public/assets/task-form.js", contents: taskFormJs() },
     { path: "src/models.ts", contents: modelsTs() },
     { path: "src/worker.ts", contents: workerTs() },
     { path: "migrations/0001_cf_frappe_core.sql", contents: coreMigrationSql() },
@@ -66,6 +67,9 @@ function wranglerJsonc(input: StarterProjectTemplateInput): string {
   "main": "src/worker.ts",
   "compatibility_date": ${json(input.compatibilityDate)},
   "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./public"
+  },
   "d1_databases": [
     {
       "binding": "DB",
@@ -149,6 +153,7 @@ npm run dev
 \`\`\`
 
 Open \`/desk\` for the generated Desk UI or \`/api/meta/doctypes/Task\` for the metadata API. The starter falls back to a read-only guest actor when no signed session cookie is present.
+Client scripts live under \`public/assets\`; add them with \`defineClientScript(...)\` in \`src/models.ts\`.
 
 ## Deploy
 
@@ -169,7 +174,7 @@ Run \`npm run cf:types\` after changing bindings so \`worker-configuration.d.ts\
 }
 
 function modelsTs(): string {
-  return `import { createRegistryFromApps, defineApp, defineDocType, definePrintFormat, defineReport } from "cf-frappe";
+  return `import { createRegistryFromApps, defineApp, defineClientScript, defineDocType, definePrintFormat, defineReport } from "cf-frappe";
 
 export const Task = defineDocType({
   name: "Task",
@@ -280,6 +285,13 @@ export const TaskPrint = definePrintFormat({
   roles: ["Guest", "User", "Task Manager"]
 });
 
+export const TaskFormScript = defineClientScript({
+  name: "task-form",
+  doctype: "Task",
+  src: "/assets/task-form.js",
+  scope: "form"
+});
+
 export const taskApp = defineApp({
   name: "tasks",
   label: "Tasks",
@@ -288,6 +300,7 @@ export const taskApp = defineApp({
   doctypes: [Task],
   printFormats: [TaskPrint],
   reports: [OpenTasks],
+  clientScripts: [TaskFormScript],
   hooks: {
     Task: [
       {
@@ -313,9 +326,7 @@ function workerTs(): string {
 } from "cf-frappe";
 import { registry } from "./models";
 
-interface Env extends CloudFrappeEnv {
-  readonly SESSION_SECRET: string;
-}
+type Env = Cloudflare.Env & CloudFrappeEnv;
 
 const guestActor: Actor = {
   id: "guest",
@@ -335,6 +346,17 @@ export default createCloudFrappeWorker<Env>({
       fallback: () => guestActor
     })(request)
 });
+`;
+}
+
+function taskFormJs(): string {
+  return `const script = document.currentScript;
+if (script instanceof HTMLScriptElement) {
+  console.debug("cf-frappe client script", {
+    doctype: script.dataset.doctype,
+    documentName: script.dataset.documentName ?? null
+  });
+}
 `;
 }
 

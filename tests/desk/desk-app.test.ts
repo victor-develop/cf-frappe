@@ -2,6 +2,7 @@ import {
   CHILD_TABLE_ROW_INDEX_FIELD,
   createDeskApp,
   createRegistry,
+  defineClientScript,
   defineDocType,
   deterministicIds,
   DocumentService,
@@ -115,6 +116,57 @@ describe("Desk app", () => {
     expect(html).toContain('class="fields cols-1"');
     expect(html).toContain('class="fields cols-2"');
     expect(html).toContain("Create");
+  });
+
+  it("renders model-declared client scripts for list and form pages", async () => {
+    const { app, services } = makeDesk();
+    services.registry.registerClientScript(
+      defineClientScript({ name: "note-list", doctype: "Note", src: "/assets/note-list.js", scope: "list", type: "classic" })
+    );
+    services.registry.registerClientScript(
+      defineClientScript({ name: "note-form", doctype: "Note", src: "/assets/note-form.js", scope: "form" })
+    );
+    services.registry.registerClientScript(
+      defineClientScript({ name: "note-shared", doctype: "Note", src: "/assets/note-shared.js", scope: "both" })
+    );
+    services.registry.registerClientScript(
+      defineClientScript({
+        name: 'note-"<form>',
+        doctype: "Note",
+        src: '/assets/note-"<form>.js',
+        scope: "form"
+      })
+    );
+    const document = await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: 'Script " <Note>' })
+    });
+
+    const list = await app.request("/desk/Note");
+    expect(list.status).toBe(200);
+    const listHtml = await list.text();
+    expect(listHtml).toContain('src="/assets/note-list.js" data-cf-frappe-script="note-list"');
+    expect(listHtml).toContain('data-scope="list"');
+    expect(listHtml).toContain('src="/assets/note-shared.js"');
+    expect(listHtml).not.toContain('src="/assets/note-form.js"');
+    expect(listHtml).not.toContain('type="module" src="/assets/note-list.js"');
+
+    const create = await app.request("/desk/Note/new");
+    expect(create.status).toBe(200);
+    const createHtml = await create.text();
+    expect(createHtml).toContain('type="module" src="/assets/note-form.js"');
+    expect(createHtml).toContain('data-scope="form"');
+    expect(createHtml).toContain('src="/assets/note-shared.js"');
+    expect(createHtml).not.toContain('src="/assets/note-list.js"');
+    expect(createHtml).not.toContain("data-document-name=");
+
+    const update = await app.request(`/desk/Note/${encodeURIComponent(document.name)}`);
+    expect(update.status).toBe(200);
+    const updateHtml = await update.text();
+    expect(updateHtml).toContain('src="/assets/note-&quot;&lt;form&gt;.js"');
+    expect(updateHtml).toContain('data-cf-frappe-script="note-&quot;&lt;form&gt;"');
+    expect(updateHtml).toContain('data-document-name="Script &quot; &lt;Note&gt;"');
   });
 
   it("renders metadata-driven list filters", async () => {
