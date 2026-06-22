@@ -24,7 +24,7 @@ import { D1EventStore, D1ProjectionStore } from "../adapters/d1";
 import { createDeskApp } from "../adapters/desk";
 import { createResourceApi, userAccountSessionActorResolver } from "../adapters/http";
 import type { ActorResolver, AuthSessionOptions } from "../adapters/http";
-import type { Actor } from "../core/types";
+import { DEFAULT_TENANT_ID, type Actor } from "../core/types";
 import { FrameworkError } from "../core/errors";
 import type { JobRegistry, JobRetryPolicy } from "../core/jobs";
 import { canSubscribeToRealtimeTopic, parseRealtimeTopic, realtimeTopicFromScope } from "../core/realtime";
@@ -509,7 +509,7 @@ async function handleRealtimeRequest<TEnv extends CloudFrappeEnv, TJobResources>
   }
   const namespace = realtime.namespace(env);
   const stub = namespace.get(namespace.idFromName(topic));
-  return stub.fetch(requestWithRealtimeTopic(request, topic));
+  return stub.fetch(requestWithRealtimeTopic(request, topic, actor));
 }
 
 function isRealtimePath(pathname: string, route = "/api/realtime"): boolean {
@@ -536,9 +536,11 @@ function parseFirstRealtimeTopic(candidates: readonly string[]) {
   return null;
 }
 
-function requestWithRealtimeTopic(request: Request, topic: string): Request {
+function requestWithRealtimeTopic(request: Request, topic: string, actor: Actor): Request {
   const url = new URL(request.url);
   url.searchParams.set("topic", topic);
+  url.searchParams.set("tenantId", actor.tenantId ?? DEFAULT_TENANT_ID);
+  url.searchParams.set("userId", actor.id);
   return new Request(url.toString(), request);
 }
 

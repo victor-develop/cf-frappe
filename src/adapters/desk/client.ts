@@ -616,6 +616,10 @@ export function renderDeskClientScript(): string {
       if (payload && payload.kind === "DocumentUserNotification") {
         callRealtimeHandler(callbacks.notification, [payload, parsed.event, parsed, subscription]);
       }
+      return;
+    }
+    if (parsed.type === "cf-frappe.realtime.presence" && parsed.presence) {
+      callRealtimeHandler(callbacks.presence, [parsed.presence, parsed, subscription]);
     }
   }
 

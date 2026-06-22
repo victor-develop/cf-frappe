@@ -90,6 +90,11 @@ interface DeskRealtimeHandlers {
     message: unknown,
     subscription: DeskRealtimeSubscription
   ) => void;
+  readonly presence?: (
+    presence: Record<string, unknown>,
+    message: unknown,
+    subscription: DeskRealtimeSubscription
+  ) => void;
 }
 
 interface DeskRealtimeSubscription {
@@ -249,6 +254,10 @@ describe("Desk client runtime", () => {
       notification: (notification, event) => {
         seen.push(`notification:${String(notification.recipientId)}:${String(event.id)}`);
       },
+      presence: (presence, _message, sub) => {
+        const connections = presence.connections as Array<{ readonly userId?: string }>;
+        seen.push(`presence:${String(presence.action)}:${String(connections[0]?.userId)}:${sub.topic}`);
+      },
       message: (message) => {
         seen.push(`message:${String((message as { type?: string }).type)}`);
       },
@@ -275,6 +284,14 @@ describe("Desk client runtime", () => {
         }
       }
     }));
+    sockets[0]?.emitMessage(JSON.stringify({
+      type: "cf-frappe.realtime.presence",
+      presence: {
+        action: "join",
+        topic: subscription.topic,
+        connections: [{ userId: "owner@example.com" }]
+      }
+    }));
     sockets[0]?.emitMessage("{");
     subscription.close(1000, "done");
 
@@ -284,6 +301,8 @@ describe("Desk client runtime", () => {
       `message:cf-frappe.realtime.event`,
       `event:NoteAssigned:wss://app.example/api/realtime?topic=user%3Aacme%3Aowner%2540example.com`,
       `notification:owner@example.com:evt1:user:owner%40example.com`,
+      `message:cf-frappe.realtime.presence`,
+      `presence:join:owner@example.com:user:acme:owner%40example.com`,
       "malformed:SyntaxError:{"
     ]);
     expect(sockets[0]?.closed).toEqual({ code: 1000, reason: "done" });

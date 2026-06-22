@@ -29,6 +29,8 @@ describe("CloudFrappe Worker realtime", () => {
     expect(response.status).toBe(101);
     expect(topics).toEqual(["document:acme:Note:My%20Note"]);
     expect(fetches).toHaveLength(1);
+    expect(new URL(fetches[0]!.url).searchParams.get("tenantId")).toBe("acme");
+    expect(new URL(fetches[0]!.url).searchParams.get("userId")).toBe("owner@example.com");
   });
 
   it("routes authorized doctype websocket subscriptions to the topic hub", async () => {
@@ -312,6 +314,9 @@ function fakeRealtimeNamespace(topics: string[], fetches: Request[]): RealtimeHu
         async fetch(request: Request) {
           fetches.push(request);
           return { status: 101 } as Response;
+        },
+        async presence() {
+          return { topic: topics.at(-1) ?? "", connections: [] };
         },
         async publish() {
           return 0;

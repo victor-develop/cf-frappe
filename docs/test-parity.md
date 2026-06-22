@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk browser field-control slice:
+As of the realtime presence slice:
 
 - Vitest files: `59`
-- Vitest cases: `462`
+- Vitest cases: `468`
 
 ## Implication
 

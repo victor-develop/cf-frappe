@@ -686,6 +686,9 @@ function fakeRealtimeNamespace(fetches: Request[]): RealtimeHubNamespace {
     },
     get() {
       return {
+        presence() {
+          return Promise.resolve({ topic: "", connections: [] });
+        },
         publish() {
           return Promise.resolve(0);
         },
