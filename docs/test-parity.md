@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk browser API slice:
+As of the Desk form event hooks slice:
 
-- Test files: `50`
-- Vitest cases: `362`
+- Vitest files: `50`
+- Vitest cases: `363`
 
 ## Implication
 

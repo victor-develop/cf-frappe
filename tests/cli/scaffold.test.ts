@@ -73,7 +73,7 @@ describe("cf-frappe CLI scaffold", () => {
       "defineClientScript"
     );
     await expect(readFile(join(target, "public/assets/task-form.js"), "utf8")).resolves.toContain(
-      "document.currentScript"
+      "window.cfFrappe.form.on"
     );
     await expect(readFile(join(target, "public/assets/task-form.js"), "utf8")).resolves.toContain(
       "window.cfFrappe.resource.get"

@@ -294,6 +294,7 @@ describe("Desk app", () => {
     expect(list.status).toBe(200);
     const listHtml = await list.text();
     expect(listHtml).toContain('src="/desk/client.js" data-cf-frappe-runtime="desk"');
+    expect(listHtml).toContain('data-cf-frappe-runtime="desk" data-doctype="Note" data-scope="list"');
     expect(listHtml).toContain('src="/assets/note-list.js" data-cf-frappe-script="note-list"');
     expect(listHtml.indexOf('src="/desk/client.js"')).toBeLessThan(listHtml.indexOf('src="/assets/note-list.js"'));
     expect(listHtml).toContain('data-scope="list"');
@@ -305,6 +306,7 @@ describe("Desk app", () => {
     expect(create.status).toBe(200);
     const createHtml = await create.text();
     expect(createHtml).toContain('src="/desk/client.js" data-cf-frappe-runtime="desk"');
+    expect(createHtml).toContain('data-cf-frappe-runtime="desk" data-doctype="Note" data-scope="form"');
     expect(createHtml).toContain('type="module" src="/assets/note-form.js"');
     expect(createHtml).toContain('data-scope="form"');
     expect(createHtml).toContain('src="/assets/note-shared.js"');
@@ -329,6 +331,7 @@ describe("Desk app", () => {
     expect(response.headers.get("content-type")).toContain("application/javascript");
     const source = await response.text();
     expect(source).toContain("root.cfFrappe");
+    expect(source).toContain("form: Object.freeze");
     expect(source).toContain("documentTopic(tenantId, doctype, name)");
     expect(source).toContain("resourcePath(doctype, name) + \"/transition/\"");
     expect(source).toContain("new WebSocket(realtimeUrl(topic)");

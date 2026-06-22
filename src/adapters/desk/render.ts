@@ -733,16 +733,16 @@ function renderClientScripts(
   documentName?: string,
   documentTenantId?: string
 ): string {
-  const runtime = `<script src="${DESK_CLIENT_SCRIPT_PATH}" data-cf-frappe-runtime="desk"></script>`;
+  const documentAttribute = documentName === undefined
+    ? ""
+    : ` data-document-name="${escapeHtml(documentName)}"`;
+  const tenantAttribute = documentTenantId === undefined
+    ? ""
+    : ` data-tenant-id="${escapeHtml(documentTenantId)}"`;
+  const runtime = `<script src="${DESK_CLIENT_SCRIPT_PATH}" data-cf-frappe-runtime="desk" data-doctype="${escapeHtml(doctype)}" data-scope="${scope}"${documentAttribute}${tenantAttribute}></script>`;
   const declared = scripts
     .map((script) => {
       const type = (script.type ?? "module") === "module" ? ' type="module"' : "";
-      const documentAttribute = documentName === undefined
-        ? ""
-        : ` data-document-name="${escapeHtml(documentName)}"`;
-      const tenantAttribute = documentTenantId === undefined
-        ? ""
-        : ` data-tenant-id="${escapeHtml(documentTenantId)}"`;
       return `<script${type} src="${escapeHtml(script.src)}" data-cf-frappe-script="${escapeHtml(script.name)}" data-doctype="${escapeHtml(doctype)}" data-scope="${scope}"${documentAttribute}${tenantAttribute}></script>`;
     })
     .join("");
