@@ -1,4 +1,4 @@
-import { createResourceApi, unsafeHeaderActorResolver } from "../../src";
+import { createResourceApi, definePrintFormat, unsafeHeaderActorResolver } from "../../src";
 import { createServices, data, owner } from "../helpers";
 
 describe("print api", () => {
@@ -46,6 +46,36 @@ describe("print api", () => {
     expect(response.headers.get("content-type")).toContain("text/html");
     const html = await response.text();
     expect(html).toContain("Printable");
+    expect(html).not.toContain("<script>alert");
+    expect(html).toContain("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;");
+  });
+
+  it("renders custom print templates with escaped document values", async () => {
+    const { app, services } = makeApp();
+    services.registry.registerPrintFormat(
+      definePrintFormat({
+        name: "Note Template",
+        label: "Templated Note",
+        doctype: "Note",
+        template: [
+          "<article><h2>{{ doc.title }}</h2>",
+          "<p>{{ doc.body }}</p>",
+          "<small>{{ format.label }} / {{ doc.name }}</small></article>"
+        ].join("")
+      })
+    );
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Template Note", priority: "High", body: "<script>alert('x')</script>" })
+    });
+
+    const response = await app.request("/api/print/Note%20Template/Template%20Note", { headers: userHeaders });
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("<article><h2>Template Note</h2>");
+    expect(html).toContain("<small>Templated Note / Template Note</small>");
     expect(html).not.toContain("<script>alert");
     expect(html).toContain("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;");
   });

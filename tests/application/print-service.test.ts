@@ -1,4 +1,4 @@
-import { PrintService } from "../../src";
+import { PrintService, definePrintFormat } from "../../src";
 import { createServices, data, guest, owner } from "../helpers";
 
 describe("PrintService", () => {
@@ -32,6 +32,33 @@ describe("PrintService", () => {
           ]
         }
       ]
+    });
+  });
+
+  it("builds template-only print view models without field sections", async () => {
+    const { registry, documents, prints } = createServices(["e1"]);
+    registry.registerPrintFormat(
+      definePrintFormat({
+        name: "Note Template",
+        doctype: "Note",
+        template: "<h2>{{ doc.title }}</h2><p>{{ doc.body }}</p>"
+      })
+    );
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Templated", priority: "High", body: "Ready" })
+    });
+
+    const view = await prints.printDocument(owner, "Note Template", "Templated");
+
+    expect(view).toMatchObject({
+      format: {
+        name: "Note Template",
+        template: "<h2>{{ doc.title }}</h2><p>{{ doc.body }}</p>"
+      },
+      document: { name: "Templated" },
+      sections: []
     });
   });
 

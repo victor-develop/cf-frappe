@@ -1,4 +1,9 @@
 import type { PrintDocumentView, PrintFieldView } from "../../application/print-service";
+import {
+  parsePrintTemplatePath,
+  substitutePrintTemplate,
+  type PrintTemplateReference
+} from "../../core/print-format";
 import type { JsonValue } from "../../core/types";
 
 export function renderPrintDocument(view: PrintDocumentView): string {
@@ -11,6 +16,9 @@ export function renderPrintDocument(view: PrintDocumentView): string {
       </section>`
     )
     .join("");
+  const content = view.format.template && view.format.template.trim().length > 0
+    ? `<section class="print-template">${renderTemplate(view.format.template, view)}</section>`
+    : sections;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -26,7 +34,7 @@ export function renderPrintDocument(view: PrintDocumentView): string {
       <h1>${escapeHtml(view.document.name)}</h1>
       <span>${escapeHtml(view.format.label ?? view.format.name)}</span>
     </header>
-    ${sections}
+    ${content}
     <footer class="print-footer">Version ${String(view.document.version)} · ${escapeHtml(view.document.updatedAt)}</footer>
   </main>
 </body>
@@ -48,6 +56,64 @@ function formatValue(value: JsonValue): string {
     return JSON.stringify(value);
   }
   return String(value);
+}
+
+function renderTemplate(template: string, view: PrintDocumentView): string {
+  return substitutePrintTemplate(template, (path) => escapeHtml(formatValue(resolveTemplateValue(path, view))));
+}
+
+function resolveTemplateValue(path: string, view: PrintDocumentView): JsonValue {
+  const reference = parsePrintTemplatePath(path);
+  if (!reference) {
+    return "";
+  }
+  if (reference.scope === "format") {
+    return formatMetadata(reference.field, view);
+  }
+  if (reference.kind === "metadata") {
+    return documentMetadata(reference.field, view);
+  }
+  return view.document.data[reference.field] ?? null;
+}
+
+function documentMetadata(
+  field: Extract<PrintTemplateReference, { readonly scope: "doc"; readonly kind: "metadata" }>["field"],
+  view: PrintDocumentView
+): JsonValue {
+  switch (field) {
+    case "doctype":
+      return view.document.doctype;
+    case "name":
+      return view.document.name;
+    case "tenantId":
+      return view.document.tenantId;
+    case "version":
+      return view.document.version;
+    case "docstatus":
+      return view.document.docstatus;
+    case "createdAt":
+      return view.document.createdAt;
+    case "updatedAt":
+      return view.document.updatedAt;
+  }
+}
+
+function formatMetadata(
+  field: Extract<PrintTemplateReference, { readonly scope: "format" }>["field"],
+  view: PrintDocumentView
+): JsonValue {
+  switch (field) {
+    case "doctype":
+      return view.format.doctype;
+    case "name":
+      return view.format.name;
+    case "label":
+      return view.format.label ?? null;
+    case "module":
+      return view.format.module ?? null;
+    case "description":
+      return view.format.description ?? null;
+  }
 }
 
 function escapeHtml(value: string): string {

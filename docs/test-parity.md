@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the report CSV exports slice:
+As of the custom print templates slice:
 
 - Test files: `40`
-- Vitest cases: `236`
+- Vitest cases: `242`
 
 ## Implication
 

@@ -60,7 +60,7 @@ export class PrintService {
     return {
       format,
       document,
-      sections: format.sections.map((section) => printSectionView(section, document))
+      sections: (format.sections ?? []).map((section) => printSectionView(section, document))
     };
   }
 
