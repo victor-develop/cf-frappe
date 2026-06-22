@@ -12,6 +12,7 @@ export type ReportChartOrder = ReportOrder;
 const REPORT_FILTER_OPERATORS = ["eq", "contains", "gte", "lte"] as const;
 const REPORT_FILTER_TYPES = ["text", "longText", "integer", "number", "boolean", "date", "datetime", "select", "link"] as const;
 const REPORT_ORDERS = ["asc", "desc"] as const;
+const REPORT_SUMMARY_AGGREGATES = ["count", "sum", "avg", "min", "max"] as const;
 const REPORT_CHART_COLOR_PATTERN = /^#[0-9A-Fa-f]{3}(?:[0-9A-Fa-f]{3})?$/;
 
 export interface ReportColumnDefinition {
@@ -131,6 +132,7 @@ export function assertReportDefinition(definition: ReportDefinition): void {
     assertUnique(group.summaries.map((summary) => summary.name), `summary on group '${group.name}'`, definition.name);
   }
   assertFiltersValid(definition);
+  assertSummariesValid(definition);
   assertReportOrderValid(definition);
   assertChartsReferenceGroups(definition);
 }
@@ -256,6 +258,31 @@ function assertFiltersValid(report: ReportDefinition): void {
         { status: 400 }
       );
     }
+  }
+}
+
+function assertSummariesValid(report: ReportDefinition): void {
+  for (const summary of report.summaries ?? []) {
+    assertSummaryAggregateValid(report.name, summary);
+  }
+  for (const group of report.groups ?? []) {
+    for (const summary of group.summaries) {
+      assertSummaryAggregateValid(report.name, summary, ` on group '${group.name}'`);
+    }
+  }
+}
+
+function assertSummaryAggregateValid(
+  reportName: string,
+  summary: ReportSummaryDefinition,
+  context = ""
+): void {
+  if (!(REPORT_SUMMARY_AGGREGATES as readonly string[]).includes(summary.aggregate)) {
+    throw new FrameworkError(
+      "REPORT_INVALID",
+      `Report '${reportName}' summary '${summary.name}'${context} has invalid aggregate '${String(summary.aggregate)}'`,
+      { status: 400 }
+    );
   }
 }
 

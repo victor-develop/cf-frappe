@@ -254,6 +254,18 @@ export type DocumentEventPayload =
       readonly ownerId: string;
     }
   | {
+      readonly kind: "SavedReportSaved";
+      readonly reportId: string;
+      readonly label: string;
+      readonly ownerId: string;
+      readonly definition: JsonObject;
+    }
+  | {
+      readonly kind: "SavedReportDeleted";
+      readonly reportId: string;
+      readonly ownerId: string;
+    }
+  | {
       readonly kind: "WorkflowTransitioned";
       readonly action: string;
       readonly from: string;

@@ -67,6 +67,40 @@ describe("reports", () => {
         ]
       })
     ).toThrow("Report 'Broken Group' group 'by_meta' cannot group by json field 'meta'");
+
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        reports: [
+          {
+            name: "Broken Aggregate",
+            doctype: "Note",
+            columns: [{ name: "title" }],
+            summaries: [{ name: "median_count", aggregate: "median" as "sum", field: "count" }]
+          }
+        ]
+      })
+    ).toThrow("Report 'Broken Aggregate' summary 'median_count' has invalid aggregate 'median'");
+
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        reports: [
+          {
+            name: "Broken Group Aggregate",
+            doctype: "Note",
+            columns: [{ name: "title" }],
+            groups: [
+              {
+                name: "by_title",
+                field: "title",
+                summaries: [{ name: "median_count", aggregate: "median" as "sum", field: "count" }]
+              }
+            ]
+          }
+        ]
+      })
+    ).toThrow("Report 'Broken Group Aggregate' summary 'median_count' on group 'by_title' has invalid aggregate 'median'");
   });
 
   it("validates report filters against supported operators, types, and fields", () => {

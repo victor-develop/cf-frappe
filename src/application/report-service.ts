@@ -148,16 +148,21 @@ export class ReportService {
 
   getReport(actor: Actor, reportName: string): ReportDefinition {
     const report = this.registry.getReport(reportName);
-    if (!this.canAccess(actor, report)) {
-      throw permissionDenied(`Actor '${actor.id}' cannot read report '${report.name}'`);
-    }
-    assertReportMatchesDocType(report, this.registry.get(report.doctype));
+    this.readableReport(actor, report);
     return report;
   }
 
   async runReport(actor: Actor, reportName: string, options: ReportRunOptions = {}): Promise<ReportRunResult> {
     const report = this.getReport(actor, reportName);
-    const doctype = this.registry.get(report.doctype);
+    return this.runReportDefinition(actor, report, options);
+  }
+
+  async runReportDefinition(
+    actor: Actor,
+    report: ReportDefinition,
+    options: ReportRunOptions = {}
+  ): Promise<ReportRunResult> {
+    const doctype = this.readableReport(actor, report);
     const limit = clampLimit(options.limit);
     const offset = Math.max(0, options.offset ?? 0);
     const filters = this.materializeFilters(report, doctype, options.filters ?? {});
@@ -187,7 +192,15 @@ export class ReportService {
     options: ReportCsvExportOptions = {}
   ): Promise<ReportCsvExport> {
     const report = this.getReport(actor, reportName);
-    const doctype = this.registry.get(report.doctype);
+    return this.exportReportDefinitionCsv(actor, report, options);
+  }
+
+  async exportReportDefinitionCsv(
+    actor: Actor,
+    report: ReportDefinition,
+    options: ReportCsvExportOptions = {}
+  ): Promise<ReportCsvExport> {
+    const doctype = this.readableReport(actor, report);
     const limit = clampCsvExportLimit(options.limit);
     const filters = this.materializeFilters(report, doctype, options.filters ?? {});
     const order = resolveReportOrder(report, doctype, options);
@@ -253,6 +266,15 @@ export class ReportService {
   private canAccess(actor: Actor, report: ReportDefinition): boolean {
     const doctype = this.registry.get(report.doctype);
     return canReadReport(actor, report) && can(actor, doctype, report.permissionAction ?? "read");
+  }
+
+  private readableReport(actor: Actor, report: ReportDefinition): DocTypeDefinition {
+    const doctype = this.registry.get(report.doctype);
+    if (!canReadReport(actor, report) || !can(actor, doctype, report.permissionAction ?? "read")) {
+      throw permissionDenied(`Actor '${actor.id}' cannot read report '${report.name}'`);
+    }
+    assertReportMatchesDocType(report, doctype);
+    return doctype;
   }
 
   private async listAllReadableDocuments(actor: Actor, doctype: string): Promise<readonly DocumentSnapshot[]> {

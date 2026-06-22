@@ -17,6 +17,7 @@ export * from "./application/print-service";
 export * from "./application/query-service";
 export * from "./application/realtime";
 export * from "./application/report-service";
+export * from "./application/saved-report-service";
 export * from "./application/saved-list-filter-service";
 export * from "./application/user-permission-service";
 export * from "./application/user-permission-grant-validator";

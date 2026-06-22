@@ -13,6 +13,7 @@ import {
   QueryService,
   ReportService,
   SavedListFilterService,
+  SavedReportService,
   UserPermissionService,
   ModelBackedUserPermissionGrantValidator
 } from "../src";
@@ -280,6 +281,7 @@ export function createServices(
     readonly afterCommit?: (context: AfterCommitContext) => void | Promise<void>;
     readonly onHookError?: (error: unknown, event: DomainEvent) => void | Promise<void>;
     readonly savedFilterIds?: readonly string[];
+    readonly savedReportIds?: readonly string[];
   } = {}
 ) {
   const registry = createTestRegistry();
@@ -310,7 +312,14 @@ export function createServices(
   });
   const prints = new PrintService({ registry, queries });
   const reports = new ReportService({ registry, queries });
-  return { registry, store, events: store, projections: store, documents, history, audit, savedFilters, userPermissions, prints, queries, reports };
+  const savedReports = new SavedReportService({
+    registry,
+    events: store,
+    reports,
+    clock: fixedClock(now),
+    ids: deterministicIds(options.savedReportIds ?? ["saved-report-1", "saved-report-event-1", "saved-report-event-2"])
+  });
+  return { registry, store, events: store, projections: store, documents, history, audit, savedFilters, savedReports, userPermissions, prints, queries, reports };
 }
 
 export function createLinkedServices(ids: readonly string[] = ["evt1", "evt2", "evt3", "evt4"]) {

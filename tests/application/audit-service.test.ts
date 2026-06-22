@@ -160,6 +160,41 @@ describe("AuditService", () => {
     });
   });
 
+  it("searches saved report events by audit kind", async () => {
+    const { audit, savedReports } = createServices(["create-1"], {
+      savedReportIds: ["audit", "event-1", "event-2"]
+    });
+    const saved = await savedReports.save({
+      actor: owner,
+      doctype: "Note",
+      label: "Audit report",
+      definition: { columns: [{ name: "title" }] }
+    });
+    await savedReports.delete({ actor: owner, doctype: "Note", id: saved.id });
+
+    const savedEvents = await audit.search(admin, {
+      doctype: "Note",
+      name: saved.id,
+      kind: "SavedReportSaved"
+    });
+    const deletedEvents = await audit.search(admin, {
+      doctype: "Note",
+      name: saved.id,
+      kind: "SavedReportDeleted"
+    });
+
+    expect(savedEvents.events).toHaveLength(1);
+    expect(savedEvents.events[0]).toMatchObject({
+      id: "evt_event-1",
+      payload: { kind: "SavedReportSaved", reportId: saved.id, label: "Audit report" }
+    });
+    expect(deletedEvents.events).toHaveLength(1);
+    expect(deletedEvents.events[0]).toMatchObject({
+      id: "evt_event-2",
+      payload: { kind: "SavedReportDeleted", reportId: saved.id }
+    });
+  });
+
   it("rejects non-system managers before querying audit events", async () => {
     const { audit, documents } = createServices(["create-1"]);
     await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Private Audit" }) });

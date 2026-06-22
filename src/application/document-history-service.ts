@@ -281,6 +281,8 @@ function diffEvent(
     case "DocumentUnfollowed":
     case "SavedListFilterSaved":
     case "SavedListFilterDeleted":
+    case "SavedReportSaved":
+    case "SavedReportDeleted":
     case "UserPermissionAllowed":
     case "UserPermissionRevoked":
       return [];
@@ -350,6 +352,10 @@ function summarize(payload: DocumentEventPayload): string {
       return `Saved list filter ${payload.label}`;
     case "SavedListFilterDeleted":
       return "Deleted list filter";
+    case "SavedReportSaved":
+      return `Saved report ${payload.label}`;
+    case "SavedReportDeleted":
+      return "Deleted report";
     case "UserPermissionAllowed":
       return `Allowed ${payload.userId} to access ${payload.targetDoctype}/${payload.targetName}`;
     case "UserPermissionRevoked":
