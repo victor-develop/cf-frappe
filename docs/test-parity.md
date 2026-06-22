@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk file manager slice:
+As of the Desk workflow transition slice:
 
-- Test files: `48`
-- Vitest cases: `354`
+- Test files: `49`
+- Vitest cases: `357`
 
 ## Implication
 

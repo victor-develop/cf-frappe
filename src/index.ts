@@ -38,6 +38,7 @@ export * from "./core/schema";
 export * from "./core/streams";
 export * from "./core/types";
 export * from "./core/user-permissions";
+export * from "./core/workflow";
 export * from "./ports/audit-event-store";
 export * from "./ports/clock";
 export * from "./ports/document-store";

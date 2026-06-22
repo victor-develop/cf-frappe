@@ -7,6 +7,7 @@ import {
   linkTargetMatchesUserPermissions,
   type UserPermissionProvider
 } from "../core/user-permissions";
+import { allowedWorkflowTransitions, currentWorkflowState } from "../core/workflow";
 import type { ModelRegistry } from "../core/registry";
 import type { AfterCommitContext } from "../core/registry";
 import type { Clock } from "../ports/clock";
@@ -372,14 +373,13 @@ export class DocumentService implements DocumentCommandExecutor {
     ensureExpectedVersion(existing, command.expectedVersion);
     ensureDocumentStatus(existing, ["draft"], "transition");
 
-    const stateField = workflow.stateField ?? "workflow_state";
-    const currentState = String(existing.data[stateField] ?? workflow.initialState);
-    const transition = workflow.transitions.find(
-      (item) => item.action === command.action && item.from === currentState
-    );
-    const roleAllowed =
-      transition?.roles === undefined || transition.roles.some((role) => command.actor.roles.includes(role));
-    if (!transition || !roleAllowed) {
+    const currentState = currentWorkflowState(workflow, existing);
+    const transition = allowedWorkflowTransitions({
+      actor: command.actor,
+      workflow,
+      document: existing
+    }).find((item) => item.action === command.action);
+    if (!transition) {
       throw new FrameworkError(
         "WORKFLOW_TRANSITION_DENIED",
         `Transition '${command.action}' is not allowed from '${currentState}'`,
@@ -387,7 +387,7 @@ export class DocumentService implements DocumentCommandExecutor {
       );
     }
 
-    const patch: DocumentData = { [stateField]: transition.to };
+    const patch: DocumentData = { [workflow.stateField ?? "workflow_state"]: transition.to };
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,

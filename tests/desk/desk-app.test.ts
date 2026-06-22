@@ -1103,6 +1103,37 @@ describe("Desk app", () => {
     ]);
   });
 
+  it("renders and runs metadata-defined workflow transitions from generated forms", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    const edit = await app.request("/desk/Note/My%20Note");
+    expect(edit.status).toBe(200);
+    const editHtml = await edit.text();
+    expect(editHtml).toContain('aria-label="Workflow actions"');
+    expect(editHtml).toContain('formaction="/desk/Note/My%20Note/transition/close"');
+
+    const transitioned = await app.request("/desk/Note/My%20Note/transition/close", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(transitioned.status).toBe(303);
+    expect(transitioned.headers.get("location")).toBe("/desk/Note/My%20Note");
+    await expect(services.queries.getDocument(owner, "Note", "My Note")).resolves.toMatchObject({
+      version: 2,
+      data: { workflow_state: "Closed" }
+    });
+    await expect(services.events.readStream("acme:Note:My%20Note")).resolves.toMatchObject([
+      expect.anything(),
+      { metadata: { method: "POST", url: "http://localhost/desk/Note/My%20Note/transition/close" } }
+    ]);
+
+    const closed = await app.request("/desk/Note/My%20Note");
+    expect(closed.status).toBe(200);
+    await expect(closed.text()).resolves.not.toContain("/transition/close");
+  });
+
   it("rejects stale generated form posts instead of appending over newer events", async () => {
     const { app, services } = makeDesk();
     await services.documents.create({ actor: owner, doctype: "Note", data: data() });

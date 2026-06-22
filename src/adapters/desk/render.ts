@@ -31,6 +31,11 @@ import type { UserPermissionState } from "../../core/user-permissions";
 export type FormLinkOptions = Readonly<Record<string, readonly LinkOption[]>>;
 export type FormTableDefinitions = Readonly<Record<string, DocTypeDefinition>>;
 export type FormLifecycleAction = "submit" | "cancel";
+export interface FormWorkflowAction {
+  readonly action: string;
+  readonly label: string;
+  readonly to: string;
+}
 
 export interface DeskLayoutOptions {
   readonly title: string;
@@ -639,6 +644,7 @@ export function renderFormView(
     readonly linkOptions?: FormLinkOptions;
     readonly tableDefinitions?: FormTableDefinitions;
     readonly lifecycleActions?: readonly FormLifecycleAction[];
+    readonly workflowActions?: readonly FormWorkflowAction[];
     readonly printFormats?: readonly PrintFormatDefinition[];
     readonly clientScripts?: readonly ClientScriptDefinition[];
   }
@@ -678,6 +684,15 @@ export function renderFormView(
           })
           .join("")}</section>`
       : "";
+  const workflowActions =
+    options.mode === "update" && options.document && options.workflowActions?.length
+      ? `<section class="command-row" aria-label="Workflow actions">${options.workflowActions
+          .map(
+            (workflow) =>
+              `<button class="button" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(options.document!.name)}/transition/${encodeURIComponent(workflow.action)}">${escapeHtml(workflow.label)}</button>`
+          )
+          .join("")}</section>`
+      : "";
   const printLinks =
     options.mode === "update" && options.document && options.printFormats?.length
       ? `<section class="command-row" aria-label="Print formats">${options.printFormats
@@ -703,6 +718,7 @@ export function renderFormView(
       ${canSave ? `<button class="button primary" type="submit">${options.mode === "create" ? "Create" : "Save"}</button>` : ""}
     </div>
     ${commands}
+    ${workflowActions}
     ${lifecycleActions}
     ${printLinks}
   </form>

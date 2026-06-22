@@ -13,6 +13,7 @@ import type { UserPermissionService } from "../../application/user-permission-se
 import { FrameworkError } from "../../core/errors";
 import { can } from "../../core/permissions";
 import type { ModelRegistry } from "../../core/registry";
+import { allowedWorkflowTransitions } from "../../core/workflow";
 import {
   CHILD_TABLE_ROW_INDEX_FIELD,
   type Actor,
@@ -45,7 +46,8 @@ import {
   renderUserPermissionAdmin,
   type FormLifecycleAction,
   type FormLinkOptions,
-  type FormTableDefinitions
+  type FormTableDefinitions,
+  type FormWorkflowAction
 } from "./render";
 
 export interface DeskAppOptions {
@@ -464,6 +466,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const linkOptions = await linkOptionsForForm(options, actor, doctype, formView);
     const tableDefinitions = tableDefinitionsForForm(options, formView);
     const lifecycleActions = lifecycleActionsFor(actor, doctype, document);
+    const workflowActions = workflowActionsFor(actor, doctype, document);
     const timeline = await options.timeline?.getTimeline(actor, doctype.name, document.name, { limit: 25 });
     const assignments = await options.timeline?.getAssignments(actor, doctype.name, document.name);
     const tags = await options.timeline?.getTags(actor, doctype.name, document.name);
@@ -478,6 +481,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       linkOptions,
       tableDefinitions,
       lifecycleActions,
+      workflowActions,
       printFormats,
       clientScripts: options.registry.listClientScripts(doctype.name, "form")
     });
@@ -687,6 +691,26 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     }
   });
 
+  app.post("/desk/:doctype/:name/transition/:action", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const name = c.req.param("name");
+    try {
+      const expectedVersion = await parseDeskExpectedVersion(c.req.raw);
+      await options.documents.transition({
+        actor,
+        doctype: doctype.name,
+        name,
+        action: c.req.param("action"),
+        ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(`/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(name)}`, 303);
+    } catch (error) {
+      return renderDeskError(options, c.req.raw, actor, doctype, "update", error, name);
+    }
+  });
+
   app.post("/desk/:doctype/:name/submit", async (c) => {
     const actor = await options.actor(c.req.raw);
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
@@ -788,6 +812,7 @@ async function renderDeskError(
         linkOptions,
         tableDefinitions,
         ...(document ? { lifecycleActions: lifecycleActionsFor(actor, doctype, document) } : {}),
+        ...(document ? { workflowActions: workflowActionsFor(actor, doctype, document) } : {}),
         ...(document ? { printFormats: listPrintFormats(options, actor, doctype.name) } : {}),
         clientScripts: options.registry.listClientScripts(doctype.name, "form"),
         error: message
@@ -889,6 +914,23 @@ function lifecycleActionsFor(
     return ["cancel"];
   }
   return [];
+}
+
+function workflowActionsFor(
+  actor: Actor,
+  doctype: DocTypeDefinition,
+  document: DocumentSnapshot
+): readonly FormWorkflowAction[] {
+  const workflow = doctype.workflow;
+  if (!workflow || document.docstatus !== "draft" || !can(actor, doctype, "transition", document)) {
+    return [];
+  }
+  return allowedWorkflowTransitions({ actor, workflow, document })
+    .map((transition) => ({
+      action: transition.action,
+      label: transition.action,
+      to: transition.to
+    }));
 }
 
 async function linkOptionsForForm(
