@@ -352,11 +352,15 @@ export default createCloudFrappeWorker<Env>({
 }
 
 function taskFormJs(): string {
-  return `const script = document.currentScript;
-if (script instanceof HTMLScriptElement) {
-  console.debug("cf-frappe client script", {
-    doctype: script.dataset.doctype,
-    documentName: script.dataset.documentName ?? null
+  return `const ctx = window.cfFrappe.context(document.currentScript);
+
+if (ctx.doctype && ctx.documentName) {
+  window.cfFrappe.resource.get(ctx.doctype, ctx.documentName).then((doc) => {
+    console.debug("cf-frappe form context", {
+      name: doc.name,
+      version: doc.version,
+      state: doc.data.workflow_state
+    });
   });
 }
 `;

@@ -24,7 +24,7 @@ The current slice is a working kernel:
 - metadata-configured list columns, default filters, saved user filters, filter controls, and page size
 - metadata-defined print formats with reusable letterheads, field sections, or HTML templates with escaped substitutions
 - metadata-defined reports, summaries, and charts over current projections
-- metadata-defined same-origin client scripts injected into generated Desk list/form pages
+- metadata-defined same-origin client scripts with a built-in Desk browser API
 - Cloudflare Queue/Cron background job primitives
 - R2-backed file attachments with event-sourced `File` metadata and Desk file manager workflows
 - Durable Object WebSocket realtime topics for document events
@@ -211,6 +211,22 @@ export const projectApp = defineApp({
 });
 
 export const registry = createRegistryFromApps([projectApp]);
+```
+
+Generated Desk list and form pages load `/desk/client.js` before model-declared client scripts. That runtime exposes `window.cfFrappe` helpers for same-origin metadata, resource, report, link-option, command, workflow, lifecycle, and realtime calls, so browser scripts can stay small and use the same permissioned HTTP/event boundaries as the server-rendered UI:
+
+```js
+const ctx = window.cfFrappe.context(document.currentScript);
+
+if (ctx.doctype && ctx.documentName) {
+  const doc = await window.cfFrappe.resource.get(ctx.doctype, ctx.documentName);
+  await window.cfFrappe.resource.transition(ctx.doctype, doc.name, "start", {
+    expectedVersion: doc.version
+  });
+  const socket = window.cfFrappe.realtime.document(ctx.doctype, doc.name, {
+    tenantId: doc.tenantId
+  });
+}
 ```
 
 Apps can depend on other apps, and dependency order controls hook order while still letting cross-app DocType links resolve in one registry:
@@ -726,11 +742,11 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 357 tests across app manifests, client scripts, schema, permissions, signed sessions, user permissions, events, registry, services, naming series, workflow helpers, document lifecycle, generated workflow actions, document timelines and diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, saved user filters, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, print templates, print letterheads, reports, report summaries, report charts, report exports, jobs, durable job execution history, retry administration, scheduler administration, files, Desk file manager workflows, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, D1 schema planning/migration application, and CLI starter scaffolding.
+Current suite: 362 tests across app manifests, client scripts, Desk browser APIs, schema, permissions, signed sessions, user permissions, events, registry, services, naming series, workflow helpers, document lifecycle, generated workflow actions, document timelines and diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, saved user filters, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, print templates, print letterheads, reports, report summaries, report charts, report exports, jobs, durable job execution history, retry administration, scheduler administration, files, Desk file manager workflows, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, D1 schema planning/migration application, and CLI starter scaffolding.
 
 ## Status
 
-This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, generated workflow transition actions, permissioned document timelines with field diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, signed session actor resolution, event-sourced user permissions with admin API/Desk management, app manifest composition, declarative client script injection, saved user filters, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives with durable execution history, retry administration, and basic scheduler administration, R2-backed file attachments with a Desk file manager, report charts/exports, custom print templates, reusable letterheads, Durable Object realtime topics, and an initial starter CLI exist, but richer chart controls, worker pools, richer scheduler controls, richer realtime presence, full user/login management, advanced file workflows, CLI-managed app installation, richer browser-side client APIs, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
+This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, generated workflow transition actions, permissioned document timelines with field diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, signed session actor resolution, event-sourced user permissions with admin API/Desk management, app manifest composition, declarative client script injection with a built-in Desk browser API, saved user filters, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives with durable execution history, retry administration, and basic scheduler administration, R2-backed file attachments with a Desk file manager, report charts/exports, custom print templates, reusable letterheads, Durable Object realtime topics, and an initial starter CLI exist, but richer chart controls, worker pools, richer scheduler controls, richer realtime presence, full user/login management, advanced file workflows, CLI-managed app installation, form event hooks, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
 
 ## References
 

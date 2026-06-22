@@ -75,6 +75,9 @@ describe("cf-frappe CLI scaffold", () => {
     await expect(readFile(join(target, "public/assets/task-form.js"), "utf8")).resolves.toContain(
       "document.currentScript"
     );
+    await expect(readFile(join(target, "public/assets/task-form.js"), "utf8")).resolves.toContain(
+      "window.cfFrappe.resource.get"
+    );
     await expect(readFile(join(target, "migrations/0001_cf_frappe_core.sql"), "utf8")).resolves.toContain(
       "CREATE TABLE IF NOT EXISTS cf_frappe_events"
     );

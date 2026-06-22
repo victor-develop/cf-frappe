@@ -30,6 +30,7 @@ import type { ActorResolver } from "../http/actor";
 import { listFiltersFromUrl, parseOptionalInteger } from "../http/request";
 import { writeReportCsvHeaders } from "../http/report-export";
 import { renderPrintDocument } from "../print";
+import { DESK_CLIENT_SCRIPT_PATH, renderDeskClientScript } from "./client";
 import {
   renderDeskHome,
   renderDeskLayout,
@@ -71,6 +72,15 @@ export function createDeskApp(options: DeskAppOptions): Hono {
   const app = new Hono();
 
   app.onError((error, c) => renderDeskFailure(options, c.req.raw, error));
+
+  app.get(DESK_CLIENT_SCRIPT_PATH, () =>
+    new Response(renderDeskClientScript(), {
+      headers: {
+        "cache-control": "public, max-age=3600",
+        "content-type": "application/javascript; charset=utf-8"
+      }
+    })
+  );
 
   app.get("/desk", async (c) => {
     const actor = await options.actor(c.req.raw);

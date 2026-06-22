@@ -27,6 +27,7 @@ import type { ReportRunResult } from "../../application/report-service";
 import type { SavedListFilter } from "../../application/saved-list-filter-service";
 import type { PrintFormatDefinition } from "../../core/print-format";
 import type { UserPermissionState } from "../../core/user-permissions";
+import { DESK_CLIENT_SCRIPT_PATH } from "./client";
 
 export type FormLinkOptions = Readonly<Record<string, readonly LinkOption[]>>;
 export type FormTableDefinitions = Readonly<Record<string, DocTypeDefinition>>;
@@ -722,24 +723,30 @@ export function renderFormView(
     ${lifecycleActions}
     ${printLinks}
   </form>
-  ${renderClientScripts(doctype.name, "form", options.clientScripts ?? [], options.document?.name)}`;
+  ${renderClientScripts(doctype.name, "form", options.clientScripts ?? [], options.document?.name, options.document?.tenantId)}`;
 }
 
 function renderClientScripts(
   doctype: string,
   scope: Exclude<ClientScriptScope, "both">,
   scripts: readonly ClientScriptDefinition[],
-  documentName?: string
+  documentName?: string,
+  documentTenantId?: string
 ): string {
-  return scripts
+  const runtime = `<script src="${DESK_CLIENT_SCRIPT_PATH}" data-cf-frappe-runtime="desk"></script>`;
+  const declared = scripts
     .map((script) => {
       const type = (script.type ?? "module") === "module" ? ' type="module"' : "";
       const documentAttribute = documentName === undefined
         ? ""
         : ` data-document-name="${escapeHtml(documentName)}"`;
-      return `<script${type} src="${escapeHtml(script.src)}" data-cf-frappe-script="${escapeHtml(script.name)}" data-doctype="${escapeHtml(doctype)}" data-scope="${scope}"${documentAttribute}></script>`;
+      const tenantAttribute = documentTenantId === undefined
+        ? ""
+        : ` data-tenant-id="${escapeHtml(documentTenantId)}"`;
+      return `<script${type} src="${escapeHtml(script.src)}" data-cf-frappe-script="${escapeHtml(script.name)}" data-doctype="${escapeHtml(doctype)}" data-scope="${scope}"${documentAttribute}${tenantAttribute}></script>`;
     })
     .join("");
+  return `${runtime}${declared}`;
 }
 
 export function renderDocumentTimeline(

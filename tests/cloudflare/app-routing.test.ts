@@ -29,6 +29,23 @@ describe("CloudFrappe Worker routing", () => {
     expect(deskish.headers.get("content-type")).toContain("application/json");
   });
 
+  it("serves the built-in Desk client runtime through Worker routing", async () => {
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => owner
+    });
+    const env = {
+      DB: fakeD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const response = await worker.fetch!(cfRequest("http://localhost/desk/client.js"), env, fakeExecutionContext());
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("application/javascript");
+    await expect(response.text()).resolves.toContain("root.cfFrappe");
+  });
+
   it("mounts admin audit search on the Worker API", async () => {
     const worker = createCloudFrappeWorker({
       registry: createTestRegistry(),
