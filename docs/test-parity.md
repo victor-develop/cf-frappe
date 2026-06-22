@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the job retry administration slice:
+As of the scheduler administration slice:
 
 - Test files: `48`
-- Vitest cases: `336`
+- Vitest cases: `344`
 
 ## Implication
 

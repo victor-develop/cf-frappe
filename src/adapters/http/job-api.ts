@@ -1,12 +1,14 @@
 import { Hono } from "hono";
 import type { JobHistoryService } from "../../application/job-history-service";
 import type { JobRetryPort } from "../../application/job-retry-service";
+import type { JobScheduleService } from "../../application/job-schedule-service";
 import type { ActorResolver } from "./actor";
 import { parseOptionalInteger } from "./request";
 
 export interface JobApiOptions {
-  readonly jobs: JobHistoryService;
+  readonly jobs?: JobHistoryService;
   readonly retry?: JobRetryPort;
+  readonly schedules?: JobScheduleService;
   readonly actor: ActorResolver;
 }
 
@@ -14,6 +16,9 @@ export function createJobApi(options: JobApiOptions): Hono {
   const app = new Hono();
 
   app.get("/api/jobs", async (c) => {
+    if (!options.jobs) {
+      return c.json({ error: { code: "JOB_NOT_FOUND", message: "Job history is not enabled" } }, 404);
+    }
     const actor = await options.actor(c.req.raw);
     const limit = parseOptionalInteger(c.req.query("limit"));
     const jobName = c.req.query("job");
@@ -29,9 +34,35 @@ export function createJobApi(options: JobApiOptions): Hono {
   });
 
   app.get("/api/jobs/executions/:idempotencyKey", async (c) => {
+    if (!options.jobs) {
+      return c.json({ error: { code: "JOB_NOT_FOUND", message: "Job history is not enabled" } }, 404);
+    }
     const actor = await options.actor(c.req.raw);
     const data = await options.jobs.get(actor, c.req.param("idempotencyKey"));
     return c.json({ data });
+  });
+
+  app.get("/api/jobs/schedules", async (c) => {
+    if (!options.schedules) {
+      return c.json({ error: { code: "JOB_SCHEDULE_NOT_FOUND", message: "Job schedules are not enabled" } }, 404);
+    }
+    const actor = await options.actor(c.req.raw);
+    const cron = c.req.query("cron");
+    const jobName = c.req.query("job");
+    const data = await options.schedules.dashboard(actor, {
+      ...(cron === undefined ? {} : { cron }),
+      ...(jobName === undefined ? {} : { jobName })
+    });
+    return c.json({ data });
+  });
+
+  app.post("/api/jobs/schedules/:scheduleId/run", async (c) => {
+    if (!options.schedules) {
+      return c.json({ error: { code: "JOB_SCHEDULE_NOT_FOUND", message: "Job schedules are not enabled" } }, 404);
+    }
+    const actor = await options.actor(c.req.raw);
+    const data = await options.schedules.dispatch(actor, c.req.param("scheduleId"));
+    return c.json({ data }, 201);
   });
 
   app.post("/api/jobs/executions/:idempotencyKey/retry", async (c) => {

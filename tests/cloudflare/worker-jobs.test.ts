@@ -94,6 +94,63 @@ describe("CloudFrappe Worker jobs", () => {
     expect(noRetry).not.toHaveBeenCalled();
   });
 
+  it("exposes configured schedules for admin inspection and manual dispatch", async () => {
+    const queue = new InMemoryJobQueue();
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => ({ id: "admin@example.com", roles: ["System Manager"], tenantId: "acme" }),
+      jobs: {
+        registry: createJobRegistry<CloudFrappeRuntimeServices>({
+          jobs: [{ name: "reports.daily", description: "Build reports", handler: () => undefined }]
+        }),
+        queue: () => queue,
+        schedules: [{ cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" }],
+        clock: fixedClock(now),
+        ids: deterministicIds(["manual-001"])
+      }
+    });
+    const env = { DB: fakeD1(), AGGREGATES: fakeNamespace() };
+
+    const list = await worker.fetch!(
+      cfRequest("http://localhost/api/jobs/schedules?job=reports.daily"),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(list.status).toBe(200);
+    await expect(list.json()).resolves.toMatchObject({
+      data: {
+        schedules: [
+          {
+            id: "1",
+            cron: "0 2 * * *",
+            jobName: "reports.daily",
+            tenantId: "acme",
+            registered: true
+          }
+        ]
+      }
+    });
+
+    const run = await worker.fetch!(
+      cfRequest("http://localhost/api/jobs/schedules/1/run", { method: "POST" }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(run.status).toBe(201);
+    expect(queue.queued()[0]?.message).toMatchObject({
+      tenantId: "acme",
+      runId: "job_manual-001",
+      idempotencyKey: `manual:0 2 * * *:${Date.parse(now)}:reports.daily`,
+      metadata: {
+        dispatchSource: "manual",
+        dispatchedBy: "admin@example.com",
+        dispatchedAt: now
+      }
+    });
+  });
+
   it("shares configured job execution history with the Desk admin surface", async () => {
     const executionLog = new InMemoryJobExecutionLog();
     const queue = new InMemoryJobQueue();

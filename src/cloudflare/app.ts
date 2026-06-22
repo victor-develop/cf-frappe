@@ -4,6 +4,7 @@ import { JobDispatcher } from "../application/job-dispatcher";
 import { JobExecutor } from "../application/job-executor";
 import { JobHistoryService } from "../application/job-history-service";
 import { JobRetryService } from "../application/job-retry-service";
+import { JobScheduleService } from "../application/job-schedule-service";
 import { DocumentHistoryService } from "../application/document-history-service";
 import { PrintService } from "../application/print-service";
 import { QueryService } from "../application/query-service";
@@ -22,7 +23,7 @@ import { FrameworkError } from "../core/errors";
 import type { JobRegistry, JobRetryPolicy } from "../core/jobs";
 import { canSubscribeToRealtimeTopic, parseRealtimeTopic, realtimeTopicFromScope } from "../core/realtime";
 import type { ModelRegistry } from "../core/registry";
-import type { Clock } from "../ports/clock";
+import { systemClock, type Clock } from "../ports/clock";
 import type { FileStorage } from "../ports/file-storage";
 import type { IdGenerator } from "../ports/id-generator";
 import type { JobExecutionLog } from "../ports/job-execution-log";
@@ -35,7 +36,11 @@ import {
 } from "./durable-object-command-executor";
 import { processCloudflareJobBatch } from "./job-consumer";
 import { DurableObjectRealtimePublisher, type RealtimeHubNamespace } from "./realtime-hub";
-import { dispatchScheduledJobs, type ScheduledJobDefinition } from "./scheduled-jobs";
+import {
+  dispatchScheduledJob,
+  dispatchScheduledJobs,
+  type ScheduledJobDefinition
+} from "./scheduled-jobs";
 import { toErrorResponse } from "../adapters/http";
 
 export interface CloudFrappeEnv {
@@ -223,11 +228,12 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     ? { ...services, realtime }
     : services;
   const jobOptions = options.jobs;
+  const schedules = jobOptions?.schedules ?? [];
   const jobExecutionLog = jobOptions?.executionLog?.(env, servicesWithRealtime);
   const jobHistory = jobExecutionLog && jobOptions
     ? new JobHistoryService({ registry: jobOptions.registry, executionLog: jobExecutionLog })
     : undefined;
-  const jobRuntime = jobExecutionLog && jobOptions
+  const jobRuntime = jobOptions && (jobExecutionLog || schedules.length > 0)
     ? jobsForEnv(jobRuntimeCache, jobOptions, env, servicesWithRealtime, jobExecutionLog)
     : undefined;
   const jobRetry = jobExecutionLog && jobOptions && jobRuntime
@@ -235,6 +241,31 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
         executionLog: jobExecutionLog,
         dispatcher: jobRuntime.dispatcher,
         ...(jobOptions.clock === undefined ? {} : { clock: jobOptions.clock })
+      })
+    : undefined;
+  const jobSchedules = jobOptions && schedules.length > 0 && jobRuntime
+    ? new JobScheduleService({
+        registry: jobOptions.registry,
+        schedules,
+        runner: {
+          async run(schedule, actor) {
+            const clock = jobOptions.clock ?? systemClock;
+            const dispatchedAt = clock.now();
+            return await dispatchScheduledJob({
+              cron: schedule.cron,
+              scheduledTime: Date.parse(dispatchedAt),
+              env,
+              dispatcher: jobRuntime.dispatcher,
+              schedule,
+              idempotencyPrefix: "manual",
+              metadata: {
+                dispatchSource: "manual",
+                dispatchedBy: actor.id,
+                dispatchedAt
+              }
+            });
+          }
+        }
       })
     : undefined;
   const actor = (request: Request) => options.actor(request, env);
@@ -253,6 +284,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     ...(files === undefined ? {} : { files }),
     ...(jobHistory === undefined ? {} : { jobs: jobHistory }),
     ...(jobRetry === undefined ? {} : { jobRetry }),
+    ...(jobSchedules === undefined ? {} : { jobSchedules }),
     ...(options.files?.maxFileBytes === undefined ? {} : { maxFileBytes: options.files.maxFileBytes })
   });
   const desk = createDeskApp({
@@ -266,6 +298,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     reports,
     ...(jobHistory === undefined ? {} : { jobs: jobHistory }),
     ...(jobRetry === undefined ? {} : { jobRetry }),
+    ...(jobSchedules === undefined ? {} : { jobSchedules }),
     actor
   });
   const runtimeApps = {

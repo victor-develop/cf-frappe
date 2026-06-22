@@ -1,6 +1,7 @@
 import {
   createJobRegistry,
   deterministicIds,
+  dispatchScheduledJob,
   dispatchScheduledJobs,
   fixedClock,
   InMemoryJobQueue,
@@ -44,6 +45,7 @@ describe("dispatchScheduledJobs", () => {
         cron: "0 2 * * *",
         scheduledTime,
         scheduledAt: "2026-01-01T02:00:00.000Z",
+        dispatchSource: "scheduled",
         source: "cron"
       }
     });
@@ -67,6 +69,58 @@ describe("dispatchScheduledJobs", () => {
       })
     ).resolves.toEqual([]);
     expect(queue.queued()).toEqual([]);
+  });
+
+  it("dispatches a single schedule with manual idempotency and metadata", async () => {
+    const queue = new InMemoryJobQueue();
+    const dispatcher = new JobDispatcher({
+      registry: createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] }),
+      queue,
+      clock: fixedClock(now),
+      ids: deterministicIds(["manual-001"])
+    });
+    const scheduledTime = Date.parse(now);
+
+    const message = await dispatchScheduledJob({
+      cron: "0 2 * * *",
+      scheduledTime,
+      env: { region: "test" },
+      dispatcher,
+      schedule: {
+        cron: "0 2 * * *",
+        jobName: "reports.daily",
+        tenantId: "acme",
+        metadata: {
+          cron: "spoofed",
+          scheduledTime: 1,
+          scheduledAt: "spoofed",
+          dispatchSource: "spoofed",
+          source: "cron"
+        }
+      },
+      idempotencyPrefix: "manual",
+      metadata: {
+        cron: "still-spoofed",
+        dispatchSource: "manual",
+        dispatchedBy: "admin@example.com",
+        dispatchedAt: now
+      }
+    });
+
+    expect(message).toMatchObject({
+      tenantId: "acme",
+      runId: "job_manual-001",
+      idempotencyKey: `manual:0 2 * * *:${scheduledTime}:reports.daily`,
+      metadata: {
+        cron: "0 2 * * *",
+        scheduledTime,
+        scheduledAt: now,
+        dispatchSource: "manual",
+        source: "cron",
+        dispatchedBy: "admin@example.com",
+        dispatchedAt: now
+      }
+    });
   });
 });
 

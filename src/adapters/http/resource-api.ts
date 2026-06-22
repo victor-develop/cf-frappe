@@ -5,6 +5,7 @@ import type { DocumentHistoryService } from "../../application/document-history-
 import type { FileService } from "../../application/file-service";
 import type { JobHistoryService } from "../../application/job-history-service";
 import type { JobRetryPort } from "../../application/job-retry-service";
+import type { JobScheduleService } from "../../application/job-schedule-service";
 import type { PrintService } from "../../application/print-service";
 import { QueryService } from "../../application/query-service";
 import type { ReportService } from "../../application/report-service";
@@ -37,6 +38,7 @@ export interface ResourceApiOptions {
   readonly audit?: AuditService;
   readonly jobs?: JobHistoryService;
   readonly jobRetry?: JobRetryPort;
+  readonly jobSchedules?: JobScheduleService;
   readonly userPermissions?: UserPermissionService;
   readonly maxFileBytes?: number;
 }
@@ -123,12 +125,13 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     );
   }
 
-  if (options.jobs) {
+  if (options.jobs || options.jobSchedules) {
     app.route(
       "/",
       createJobApi({
-        jobs: options.jobs,
+        ...(options.jobs === undefined ? {} : { jobs: options.jobs }),
         ...(options.jobRetry === undefined ? {} : { retry: options.jobRetry }),
+        ...(options.jobSchedules === undefined ? {} : { schedules: options.jobSchedules }),
         actor: resolveActor
       })
     );

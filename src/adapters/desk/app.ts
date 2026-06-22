@@ -3,6 +3,7 @@ import type { DocumentCommandExecutor } from "../../application/document-service
 import type { DocumentHistoryService } from "../../application/document-history-service";
 import type { JobHistoryService } from "../../application/job-history-service";
 import type { JobRetryPort } from "../../application/job-retry-service";
+import type { JobScheduleService } from "../../application/job-schedule-service";
 import type { PrintService } from "../../application/print-service";
 import { QueryService } from "../../application/query-service";
 import type { ReportFilters, ReportService } from "../../application/report-service";
@@ -34,6 +35,7 @@ import {
   renderDocumentTimeline,
   renderFormView,
   renderJobAdmin,
+  renderJobScheduleAdmin,
   renderListView,
   renderNotFound,
   renderReportList,
@@ -55,6 +57,7 @@ export interface DeskAppOptions {
   readonly reports?: ReportService;
   readonly jobs?: JobHistoryService;
   readonly jobRetry?: JobRetryPort;
+  readonly jobSchedules?: JobScheduleService;
   readonly actor: ActorResolver;
 }
 
@@ -130,9 +133,44 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         title: "Jobs",
         doctypes,
         reports,
-        body: renderJobAdmin(dashboard, { allowRetry: options.jobRetry !== undefined })
+        body: renderJobAdmin(dashboard, {
+          allowRetry: options.jobRetry !== undefined,
+          showSchedulesLink: options.jobSchedules !== undefined
+        })
       })
     );
+  });
+
+  app.get("/desk/admin/jobs/schedules", async (c) => {
+    const schedules = requireJobSchedules(options);
+    const actor = await options.actor(c.req.raw);
+    const url = new URL(c.req.url);
+    const cron = url.searchParams.get("cron") ?? undefined;
+    const jobName = url.searchParams.get("job") ?? undefined;
+    const dashboard = await schedules.dashboard(actor, {
+      ...(cron === undefined ? {} : { cron }),
+      ...(jobName === undefined ? {} : { jobName })
+    });
+    const doctypes = options.queries.listDoctypes(actor);
+    const reports = listReports(options, actor);
+    return html(
+      renderDeskLayout({
+        title: "Job Schedules",
+        doctypes,
+        reports,
+        body: renderJobScheduleAdmin(dashboard, {
+          allowRun: schedules.canDispatch(),
+          showHistoryLink: options.jobs !== undefined
+        })
+      })
+    );
+  });
+
+  app.post("/desk/admin/jobs/schedules/:scheduleId/run", async (c) => {
+    const schedules = requireJobSchedules(options);
+    const actor = await options.actor(c.req.raw);
+    await schedules.dispatch(actor, c.req.param("scheduleId"));
+    return c.redirect("/desk/admin/jobs/schedules", 303);
   });
 
   app.post("/desk/admin/jobs/:idempotencyKey/retry", async (c) => {
@@ -704,6 +742,13 @@ function requireJobRetry(options: DeskAppOptions): JobRetryPort {
     throw new FrameworkError("JOB_NOT_FOUND", "Job retry is not enabled", { status: 404 });
   }
   return options.jobRetry;
+}
+
+function requireJobSchedules(options: DeskAppOptions): JobScheduleService {
+  if (!options.jobSchedules) {
+    throw new FrameworkError("JOB_SCHEDULE_NOT_FOUND", "Job schedules are not enabled", { status: 404 });
+  }
+  return options.jobSchedules;
 }
 
 function lifecycleActionsFor(

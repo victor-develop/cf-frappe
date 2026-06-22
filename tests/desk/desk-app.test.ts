@@ -14,6 +14,7 @@ import {
   JobDispatcher,
   JobHistoryService,
   JobRetryService,
+  JobScheduleService,
   QueryService,
   SYSTEM_MANAGER_ROLE
 } from "../../src";
@@ -383,6 +384,82 @@ describe("Desk app", () => {
       runId: "job_retry-001",
       idempotencyKey: "reports.daily:job_002"
     });
+  });
+
+  it("renders and dispatches job schedules from the Desk admin surface", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const services = createServices();
+    const jobs = createJobRegistry({
+      jobs: [{ name: "reports.daily", description: "Build reports", handler: () => undefined }]
+    });
+    const runner = vi.fn(async () => ({
+      tenantId: "acme",
+      jobName: "reports.daily",
+      payload: {},
+      runId: "job_manual-001",
+      idempotencyKey: "manual:0 2 * * *:1767225600000:reports.daily",
+      enqueuedAt: now,
+      metadata: { dispatchSource: "manual" }
+    }));
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      jobSchedules: new JobScheduleService({
+        registry: jobs,
+        schedules: [
+          {
+            cron: "0 2 * * *",
+            jobName: "reports.daily",
+            tenantId: "acme",
+            payload: () => ({ scope: "daily" })
+          }
+        ],
+        runner: { run: runner }
+      }),
+      actor: () => admin
+    });
+
+    const response = await app.request("/desk/admin/jobs/schedules?job=reports.daily");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Job Schedules");
+    expect(html).toContain("0 2 * * *");
+    expect(html).toContain("reports.daily");
+    expect(html).toContain("acme");
+    expect(html).toContain("payload");
+    expect(html).toContain('formaction="/desk/admin/jobs/schedules/1/run"');
+    expect(html).not.toContain('href="/desk/admin/jobs"');
+
+    const dispatched = await app.request("/desk/admin/jobs/schedules/1/run", { method: "POST" });
+    expect(dispatched.status).toBe(303);
+    expect(dispatched.headers.get("location")).toBe("/desk/admin/jobs/schedules");
+    expect(runner).toHaveBeenCalledOnce();
+  });
+
+  it("hides schedule run actions when dispatch is not configured", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const services = createServices();
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      jobSchedules: new JobScheduleService({
+        registry: createJobRegistry({
+          jobs: [{ name: "reports.daily", description: "Build reports", handler: () => undefined }]
+        }),
+        schedules: [{ cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" }]
+      }),
+      actor: () => admin
+    });
+
+    const response = await app.request("/desk/admin/jobs/schedules");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("reports.daily");
+    expect(html).not.toContain('formaction="/desk/admin/jobs/schedules/1/run"');
   });
 
   it("uses the Desk error boundary for non-admin user-permission access", async () => {

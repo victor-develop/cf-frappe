@@ -10,6 +10,8 @@ import {
   JobDispatcher,
   JobExecutor,
   JobRetryService,
+  JobScheduleService,
+  DEFAULT_TENANT_ID,
   permanentJobError,
   retryableJobError,
   SYSTEM_MANAGER_ROLE
@@ -271,6 +273,133 @@ describe("JobRetryService", () => {
     await expect(retry.retry(otherAdmin, "reports.daily:job_002")).rejects.toMatchObject({
       code: "JOB_EXECUTION_NOT_FOUND"
     });
+  });
+});
+
+describe("JobScheduleService", () => {
+  it("lists tenant-visible schedules with job metadata and dynamic flags", async () => {
+    const registry = createJobRegistry({
+      jobs: [
+        {
+          name: "reports.daily",
+          description: "Build daily reports",
+          retry: { maxAttempts: 2 },
+          handler: () => undefined
+        },
+        { name: "email.digest", handler: () => undefined }
+      ]
+    });
+    const service = new JobScheduleService({
+      registry,
+      schedules: [
+        {
+          cron: "0 2 * * *",
+          jobName: "reports.daily",
+          tenantId: "acme",
+          payload: () => ({ scope: "daily" }),
+          delaySeconds: 30
+        },
+        {
+          cron: "0 3 * * *",
+          jobName: "email.digest",
+          tenantId: "other"
+        },
+        {
+          cron: "0 4 * * *",
+          jobName: "missing.job",
+          tenantId: "acme"
+        },
+        {
+          cron: "0 5 * * *",
+          jobName: "email.digest",
+          tenantId: () => "acme"
+        }
+      ]
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+
+    await expect(service.dashboard(admin, { jobName: "reports.daily" })).resolves.toEqual({
+      filters: { jobName: "reports.daily" },
+      schedules: [
+        {
+          id: "1",
+          cron: "0 2 * * *",
+          jobName: "reports.daily",
+          registered: true,
+          dispatchable: false,
+          description: "Build daily reports",
+          retry: { maxAttempts: 2 },
+          delaySeconds: 30,
+          tenantId: "acme",
+          dynamic: {
+            tenantId: false,
+            payload: true,
+            metadata: false,
+            idempotencyKey: false
+          }
+        }
+      ]
+    });
+
+    await expect(service.dashboard(admin)).resolves.toMatchObject({
+      schedules: [
+        { id: "1", jobName: "reports.daily", tenantId: "acme" },
+        { id: "3", jobName: "missing.job", registered: false, tenantId: "acme" }
+      ]
+    });
+  });
+
+  it("dispatches registered schedules through the configured runner", async () => {
+    const registry = createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] });
+    const runner = vi.fn(async () => jobMessage("reports.daily", "job_manual", "acme"));
+    const service = new JobScheduleService({
+      registry,
+      schedules: [{ cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" }],
+      runner: { run: runner }
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+
+    await expect(service.dispatch(admin, "1")).resolves.toMatchObject({
+      schedule: { id: "1", cron: "0 2 * * *", jobName: "reports.daily" },
+      message: { tenantId: "acme", idempotencyKey: "reports.daily:job_manual" }
+    });
+    expect(runner).toHaveBeenCalledWith(
+      { cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" },
+      admin
+    );
+  });
+
+  it("rejects non-admin, cross-tenant, and invalid schedule dispatch", async () => {
+    const registry = createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] });
+    const runner = vi.fn(async () => jobMessage("reports.daily", "job_manual", "acme"));
+    const service = new JobScheduleService({
+      registry,
+      schedules: [
+        { cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" },
+        { cron: "0 3 * * *", jobName: "missing.job", tenantId: "acme" },
+        { cron: "0 4 * * *", jobName: "reports.daily", tenantId: () => "acme" }
+      ],
+      runner: { run: runner }
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const otherAdmin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "other" };
+    const defaultAdmin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: DEFAULT_TENANT_ID };
+
+    await expect(service.dashboard({ id: "owner@example.com", roles: ["User"], tenantId: "acme" })).rejects.toMatchObject({
+      code: "PERMISSION_DENIED"
+    });
+    await expect(service.dispatch(otherAdmin, "1")).rejects.toMatchObject({
+      code: "JOB_SCHEDULE_NOT_FOUND"
+    });
+    await expect(service.dispatch(admin, "2")).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Scheduled job 'missing.job' is not registered"
+    });
+    await expect(service.dispatch(defaultAdmin, "3")).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Dynamic tenant job schedules cannot be manually dispatched"
+    });
+    expect(runner).not.toHaveBeenCalled();
   });
 });
 

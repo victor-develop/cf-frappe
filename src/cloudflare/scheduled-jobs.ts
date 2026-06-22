@@ -29,6 +29,16 @@ export interface DispatchScheduledJobsOptions<TEnv = unknown, TResources = unkno
   readonly schedules: readonly ScheduledJobDefinition<TEnv>[];
 }
 
+export interface DispatchScheduledJobOptions<TEnv = unknown, TResources = unknown> {
+  readonly cron: string;
+  readonly scheduledTime: number;
+  readonly env: TEnv;
+  readonly dispatcher: JobDispatcher<TResources>;
+  readonly schedule: ScheduledJobDefinition<TEnv>;
+  readonly idempotencyPrefix?: string;
+  readonly metadata?: DocumentData;
+}
+
 export async function dispatchScheduledJobs<TEnv, TResources>(
   options: DispatchScheduledJobsOptions<TEnv, TResources>
 ): Promise<readonly JobMessage[]> {
@@ -42,25 +52,48 @@ export async function dispatchScheduledJobs<TEnv, TResources>(
 
   for (const schedule of options.schedules.filter((item) => item.cron === options.controller.cron)) {
     messages.push(
-      await options.dispatcher.dispatch(
-        await dispatchCommand(schedule, context)
-      )
+      await dispatchScheduledJob({
+        cron: context.cron,
+        scheduledTime: context.scheduledTime,
+        env: context.env,
+        dispatcher: options.dispatcher,
+        schedule
+      })
     );
   }
 
   return messages;
 }
 
+export async function dispatchScheduledJob<TEnv, TResources>(
+  options: DispatchScheduledJobOptions<TEnv, TResources>
+): Promise<JobMessage> {
+  const context: ScheduledJobContext<TEnv> = {
+    cron: options.cron,
+    scheduledTime: options.scheduledTime,
+    scheduledAt: new Date(options.scheduledTime).toISOString(),
+    env: options.env
+  };
+  return await options.dispatcher.dispatch(
+    await dispatchCommand(options.schedule, context, {
+      ...(options.idempotencyPrefix === undefined ? {} : { idempotencyPrefix: options.idempotencyPrefix }),
+      ...(options.metadata === undefined ? {} : { metadata: options.metadata })
+    })
+  );
+}
+
 async function dispatchCommand<TEnv>(
   schedule: ScheduledJobDefinition<TEnv>,
-  context: ScheduledJobContext<TEnv>
+  context: ScheduledJobContext<TEnv>,
+  options: { readonly idempotencyPrefix?: string; readonly metadata?: DocumentData } = {}
 ): Promise<DispatchJobCommand> {
   const payload = await resolveValue(schedule.payload, context, {});
   const tenantId = await resolveValue(schedule.tenantId, context, undefined);
   const metadata = await resolveValue(schedule.metadata, context, {});
+  const idempotencyPrefix = options.idempotencyPrefix ?? "scheduled";
   const idempotencyKey =
     schedule.idempotencyKey === undefined
-      ? `scheduled:${context.cron}:${context.scheduledTime}:${schedule.jobName}`
+      ? `${idempotencyPrefix}:${context.cron}:${context.scheduledTime}:${schedule.jobName}`
       : await resolveValue(schedule.idempotencyKey, context, "");
   return {
     jobName: schedule.jobName,
@@ -68,10 +101,12 @@ async function dispatchCommand<TEnv>(
     payload,
     idempotencyKey,
     metadata: {
+      ...metadata,
+      ...(options.metadata ?? {}),
       cron: context.cron,
       scheduledTime: context.scheduledTime,
       scheduledAt: context.scheduledAt,
-      ...metadata
+      dispatchSource: idempotencyPrefix
     },
     ...(schedule.delaySeconds === undefined ? {} : { delaySeconds: schedule.delaySeconds })
   };

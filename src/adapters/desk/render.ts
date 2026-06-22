@@ -21,6 +21,7 @@ import type {
   DocumentTimeline
 } from "../../application/document-history-service";
 import type { JobExecutionDashboard } from "../../application/job-history-service";
+import type { JobScheduleDashboard } from "../../application/job-schedule-service";
 import type { ReportRunResult } from "../../application/report-service";
 import type { SavedListFilter } from "../../application/saved-list-filter-service";
 import type { PrintFormatDefinition } from "../../core/print-format";
@@ -179,7 +180,7 @@ export function renderUserPermissionAdmin(state: UserPermissionState): string {
 
 export function renderJobAdmin(
   dashboard: JobExecutionDashboard,
-  options: { readonly allowRetry?: boolean } = {}
+  options: { readonly allowRetry?: boolean; readonly showSchedulesLink?: boolean } = {}
 ): string {
   const jobRows = dashboard.jobs
     .map((job) => {
@@ -214,6 +215,7 @@ export function renderJobAdmin(
     </div>
     <div class="actions"><button class="button primary" type="submit">Filter</button></div>
   </form>
+  ${options.showSchedulesLink ? `<section class="toolbar"><a class="button" href="/desk/admin/jobs/schedules">Schedules</a></section>` : ""}
   <section class="panel">
     <div class="table-wrap">
       <table>
@@ -239,6 +241,60 @@ function renderJobRetryAction(idempotencyKey: string, status: JobExecutionDashbo
   return `<form class="inline-action" method="post">
     <button class="button" type="submit" formaction="/desk/admin/jobs/${encodeURIComponent(idempotencyKey)}/retry">Retry</button>
   </form>`;
+}
+
+export function renderJobScheduleAdmin(
+  dashboard: JobScheduleDashboard,
+  options: { readonly allowRun?: boolean; readonly showHistoryLink?: boolean } = {}
+): string {
+  const rows = dashboard.schedules
+    .map((schedule) => `<tr>
+        <td>${escapeHtml(schedule.id)}</td>
+        <td>${escapeHtml(schedule.cron)}</td>
+        <td>${escapeHtml(schedule.jobName)}</td>
+        <td>${escapeHtml(schedule.tenantId ?? (schedule.dynamic.tenantId ? "dynamic" : ""))}</td>
+        <td>${schedule.registered ? "yes" : "no"}</td>
+        <td>${escapeHtml(schedule.delaySeconds === undefined ? "" : String(schedule.delaySeconds))}</td>
+        <td>${escapeHtml(dynamicScheduleFields(schedule))}</td>
+        <td>${options.allowRun ? renderScheduleRunAction(schedule.id, schedule.dispatchable) : ""}</td>
+      </tr>`)
+    .join("");
+  return `<form class="panel form list-filters" method="get" action="/desk/admin/jobs/schedules">
+    <div class="fields">
+      <label class="field"><span>Cron</span><input name="cron" value="${escapeHtml(dashboard.filters.cron ?? "")}"></label>
+      <label class="field"><span>Job</span><input name="job" value="${escapeHtml(dashboard.filters.jobName ?? "")}"></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Filter</button></div>
+  </form>
+  ${options.showHistoryLink ? `<section class="toolbar">
+    <a class="button" href="/desk/admin/jobs">Execution history</a>
+  </section>` : ""}
+  <section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>ID</th><th>Cron</th><th>Job</th><th>Tenant</th><th>Registered</th><th>Delay</th><th>Dynamic</th><th>Action</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="8" class="empty">No schedules configured.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+function renderScheduleRunAction(scheduleId: string, dispatchable: boolean): string {
+  if (!dispatchable) {
+    return "";
+  }
+  return `<form class="inline-action" method="post">
+    <button class="button" type="submit" formaction="/desk/admin/jobs/schedules/${encodeURIComponent(scheduleId)}/run">Run</button>
+  </form>`;
+}
+
+function dynamicScheduleFields(schedule: JobScheduleDashboard["schedules"][number]): string {
+  return [
+    schedule.dynamic.tenantId ? "tenant" : "",
+    schedule.dynamic.payload ? "payload" : "",
+    schedule.dynamic.metadata ? "metadata" : "",
+    schedule.dynamic.idempotencyKey ? "idempotency" : ""
+  ].filter((field) => field !== "").join(", ");
 }
 
 export function renderReportView(

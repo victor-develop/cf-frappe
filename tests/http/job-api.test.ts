@@ -8,6 +8,7 @@ import {
   JobDispatcher,
   JobHistoryService,
   JobRetryService,
+  JobScheduleService,
   SYSTEM_MANAGER_ROLE,
   unsafeHeaderActorResolver
 } from "../../src";
@@ -133,6 +134,68 @@ describe("job api", () => {
         error: "smtp timeout"
       }
     });
+  });
+
+  it("returns configured schedules and manually dispatches a schedule without execution history", async () => {
+    const services = createServices();
+    const registry = createJobRegistry({
+      jobs: [{ name: "reports.daily", description: "Build reports", handler: () => undefined }]
+    });
+    const runner = vi.fn(async () => ({
+      tenantId: "acme",
+      jobName: "reports.daily",
+      payload: {},
+      runId: "job_manual-001",
+      idempotencyKey: "manual:0 2 * * *:1767225600000:reports.daily",
+      enqueuedAt: now,
+      metadata: { dispatchSource: "manual" }
+    }));
+    const app = createResourceApi({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      jobSchedules: new JobScheduleService({
+        registry,
+        schedules: [{ cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" }],
+        runner: { run: runner }
+      }),
+      actor: unsafeHeaderActorResolver
+    });
+
+    const list = await app.request("/api/jobs/schedules?job=reports.daily", { headers: adminHeaders });
+
+    expect(list.status).toBe(200);
+    await expect(list.json()).resolves.toMatchObject({
+      data: {
+        filters: { jobName: "reports.daily" },
+        schedules: [
+          {
+            id: "1",
+            cron: "0 2 * * *",
+            jobName: "reports.daily",
+            tenantId: "acme",
+            registered: true
+          }
+        ]
+      }
+    });
+
+    const run = await app.request("/api/jobs/schedules/1/run", {
+      method: "POST",
+      headers: adminHeaders
+    });
+
+    expect(run.status).toBe(201);
+    await expect(run.json()).resolves.toMatchObject({
+      data: {
+        message: {
+          tenantId: "acme",
+          runId: "job_manual-001",
+          idempotencyKey: "manual:0 2 * * *:1767225600000:reports.daily"
+        }
+      }
+    });
+    expect(runner).toHaveBeenCalledOnce();
   });
 });
 
