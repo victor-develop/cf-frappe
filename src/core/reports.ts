@@ -47,6 +47,7 @@ export interface ReportGroupDefinition {
   readonly label?: string;
   readonly field: string;
   readonly summaries: readonly ReportSummaryDefinition[];
+  readonly maxRows?: number;
 }
 
 export interface ReportChartDefinition {
@@ -129,6 +130,13 @@ export function assertReportDefinition(definition: ReportDefinition): void {
       throw new FrameworkError("REPORT_INVALID", `Report '${definition.name}' group '${group.name}' must define at least one summary`, {
         status: 400
       });
+    }
+    if (group.maxRows !== undefined && (!Number.isInteger(group.maxRows) || group.maxRows < 1)) {
+      throw new FrameworkError(
+        "REPORT_INVALID",
+        `Report '${definition.name}' group '${group.name}' maxRows must be a positive integer`,
+        { status: 400 }
+      );
     }
     assertUnique(group.summaries.map((summary) => summary.name), `summary on group '${group.name}'`, definition.name);
   }

@@ -184,6 +184,58 @@ describe("ReportService", () => {
     ]);
   });
 
+  it("limits report group rows without hiding chart top values", async () => {
+    const { documents, registry, reports } = createServices(["e1", "e2", "e3"]);
+    registry.registerReport(
+      defineReport({
+        name: "Title Group Limit",
+        doctype: "Note",
+        columns: [{ name: "title" }],
+        groups: [
+          {
+            name: "by_title",
+            field: "title",
+            maxRows: 2,
+            summaries: [{ name: "total_count", aggregate: "sum", field: "count" }]
+          }
+        ],
+        charts: [
+          {
+            name: "largest_title_count",
+            type: "bar",
+            group: "by_title",
+            summary: "total_count",
+            maxPoints: 1,
+            orderBy: "value",
+            order: "desc"
+          }
+        ],
+        roles: ["User"]
+      })
+    );
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Alpha", count: 1 }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Beta", count: 2 }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Zeta", count: 10 }) });
+
+    const result = await reports.runReport(owner, "Title Group Limit");
+
+    expect(result.groups).toMatchObject([
+      {
+        name: "by_title",
+        rows: [
+          { key: "Alpha", summaries: [{ name: "total_count", value: 1 }] },
+          { key: "Beta", summaries: [{ name: "total_count", value: 2 }] }
+        ]
+      }
+    ]);
+    expect(result.charts).toMatchObject([
+      {
+        name: "largest_title_count",
+        points: [{ key: "Zeta", value: 10 }]
+      }
+    ]);
+  });
+
   it("sorts report rows by metadata and runtime controls before pagination and export", async () => {
     const { documents, registry, reports } = createServices(["e1", "e2", "e3"]);
     registry.registerReport(

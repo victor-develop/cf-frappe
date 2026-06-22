@@ -34,6 +34,13 @@ import { reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request";
 import { renderPrintDocument } from "../print";
 import { DESK_CLIENT_SCRIPT_PATH, renderDeskClientScript } from "./client";
 import {
+  deskReportFieldLabel,
+  deskReportSumSummaryLabel,
+  deskReportSumSummaryName,
+  isDeskGroupableReportField,
+  isDeskNumericReportField
+} from "./report-builder";
+import {
   renderDeskHome,
   renderDeskLayout,
   renderErrorPanel,
@@ -56,6 +63,27 @@ import {
 } from "./render";
 
 const MAX_DESK_FORM_BYTES = 1_048_576;
+const DEFAULT_DESK_REPORT_GROUP_MAX_ROWS = 50;
+const DEFAULT_DESK_REPORT_CHART_MAX_POINTS = 50;
+const MAX_DESK_REPORT_CHART_POINTS = 50;
+const REPORT_CHART_TYPES = ["bar", "line", "pie"] as const;
+const REPORT_CHART_ORDER_BY = ["key", "label", "value"] as const;
+const REPORT_CHART_ORDERS = ["asc", "desc"] as const;
+
+type DeskReportChartType = (typeof REPORT_CHART_TYPES)[number];
+type DeskReportChartOrderBy = (typeof REPORT_CHART_ORDER_BY)[number];
+type DeskReportChartOrder = (typeof REPORT_CHART_ORDERS)[number];
+type SavedReportSummaryDefinition = NonNullable<SavedReportDefinition["summaries"]>[number];
+type SavedReportGroupDefinition = NonNullable<SavedReportDefinition["groups"]>[number];
+type SavedReportChartDefinition = NonNullable<SavedReportDefinition["charts"]>[number];
+
+interface ParsedDeskReportChartControls {
+  readonly type: DeskReportChartType;
+  readonly summary: string;
+  readonly maxPoints: number;
+  readonly orderBy?: DeskReportChartOrderBy;
+  readonly order?: DeskReportChartOrder;
+}
 
 export interface DeskAppOptions {
   readonly registry: ModelRegistry;
@@ -1245,8 +1273,21 @@ async function parseDeskSavedReport(
   const fields = new Map(doctype.fields.map((field) => [field.name, field]));
   const columnNames = uniqueFormValues(form, "column");
   const filterNames = uniqueFormValues(form, "filter");
+  const summaryNames = uniqueFormValues(form, "summary");
   const columns = columnNames.map((name) => reportColumnFor(fields, name));
   const filters = filterNames.map((name) => reportFilterFor(fields, name));
+  const sumSummaries = summaryNames.map((name) => reportSumSummaryFor(fields, name));
+  const summaries = [
+    ...(form.get("summaryCount") === "1" ? [reportRecordCountSummary()] : []),
+    ...sumSummaries
+  ];
+  const chartControls = parseReportChartControls(form);
+  const groupBy = stringSearchParamValue(form, "groupBy") ?? stringSearchParamValue(form, "group");
+  const groupSummaries = reportGroupSummariesFor(fields, sumSummaries, chartControls?.summary);
+  const group = groupBy === undefined
+    ? undefined
+    : reportGroupFor(fields, groupBy, groupSummaries);
+  const chart = reportChartFor(chartControls, group);
   const orderBy = stringSearchParamValue(form, "orderBy");
   const order = stringSearchParamValue(form, "order");
   return {
@@ -1254,6 +1295,9 @@ async function parseDeskSavedReport(
     definition: {
       columns,
       ...(filters.length === 0 ? {} : { filters }),
+      ...(summaries.length === 0 ? {} : { summaries }),
+      ...(group === undefined ? {} : { groups: [group] }),
+      ...(chart === undefined ? {} : { charts: [chart] }),
       ...(orderBy && columnNames.includes(orderBy) ? { orderBy } : {}),
       ...(order === "asc" || order === "desc" ? { order } : {})
     }
@@ -1363,7 +1407,7 @@ function reportColumnFor(
   }
   return {
     name: field.name,
-    label: field.label ?? field.name,
+    label: deskReportFieldLabel(field),
     type: field.type
   };
 }
@@ -1378,11 +1422,166 @@ function reportFilterFor(
   }
   return {
     name: field.name,
-    label: field.label ?? field.name,
+    label: deskReportFieldLabel(field),
     field: field.name,
     type: field.type as Exclude<FieldType, "json" | "table">,
     ...(field.type === "text" || field.type === "longText" ? { operator: "contains" } : {})
   };
+}
+
+function reportRecordCountSummary(): SavedReportSummaryDefinition {
+  return {
+    name: "record_count",
+    label: "Records",
+    aggregate: "count",
+    type: "integer"
+  };
+}
+
+function reportSumSummaryFor(
+  fields: ReadonlyMap<string, FieldDefinition>,
+  name: string
+): SavedReportSummaryDefinition {
+  const field = fields.get(name);
+  if (!field || field.hidden || !isDeskNumericReportField(field)) {
+    throw new FrameworkError("BAD_REQUEST", `Unknown report summary '${name}'`, { status: 400 });
+  }
+  return {
+    name: deskReportSumSummaryName(field),
+    label: deskReportSumSummaryLabel(field),
+    aggregate: "sum",
+    field: field.name,
+    type: field.type
+  };
+}
+
+function reportGroupFor(
+  fields: ReadonlyMap<string, FieldDefinition>,
+  name: string,
+  summaries: readonly SavedReportSummaryDefinition[]
+): SavedReportGroupDefinition {
+  const field = fields.get(name);
+  if (!field || field.hidden || !isDeskGroupableReportField(field)) {
+    throw new FrameworkError("BAD_REQUEST", `Unknown report group '${name}'`, { status: 400 });
+  }
+  return {
+    name: `by_${field.name}`,
+    label: `By ${deskReportFieldLabel(field)}`,
+    field: field.name,
+    summaries,
+    maxRows: DEFAULT_DESK_REPORT_GROUP_MAX_ROWS
+  };
+}
+
+function reportGroupSummariesFor(
+  fields: ReadonlyMap<string, FieldDefinition>,
+  sumSummaries: readonly SavedReportSummaryDefinition[],
+  chartSummaryName: string | undefined
+): readonly SavedReportSummaryDefinition[] {
+  const summaries = [reportRecordCountSummary(), ...sumSummaries];
+  if (chartSummaryName === undefined || chartSummaryName === "record_count") {
+    return summaries;
+  }
+  const chartSummary = reportChartSumSummaryFor(fields, chartSummaryName);
+  return summaries.some((summary) => summary.name === chartSummary.name)
+    ? summaries
+    : [...summaries, chartSummary];
+}
+
+function reportChartSumSummaryFor(
+  fields: ReadonlyMap<string, FieldDefinition>,
+  summaryName: string
+): SavedReportSummaryDefinition {
+  for (const field of fields.values()) {
+    if (!field.hidden && isDeskNumericReportField(field) && deskReportSumSummaryName(field) === summaryName) {
+      return reportSumSummaryFor(fields, field.name);
+    }
+  }
+  throw new FrameworkError("BAD_REQUEST", `Unknown report chart summary '${summaryName}'`, { status: 400 });
+}
+
+function parseReportChartControls(form: URLSearchParams): ParsedDeskReportChartControls | undefined {
+  const chartType = optionalEnumSearchParamValue(form, "chartType", REPORT_CHART_TYPES, "Report chart type");
+  if (chartType === undefined) {
+    return undefined;
+  }
+  const orderBy = optionalEnumSearchParamValue(form, "chartOrderBy", REPORT_CHART_ORDER_BY, "Report chart orderBy");
+  const order = optionalEnumSearchParamValue(form, "chartOrder", REPORT_CHART_ORDERS, "Report chart order");
+  const maxPoints = boundedPositiveIntegerSearchParamValue(
+    form,
+    "chartMaxPoints",
+    "Report chart max points",
+    MAX_DESK_REPORT_CHART_POINTS
+  ) ?? DEFAULT_DESK_REPORT_CHART_MAX_POINTS;
+  return {
+    type: chartType,
+    summary: stringSearchParamValue(form, "chartSummary") ?? "record_count",
+    maxPoints,
+    ...(orderBy === undefined ? {} : { orderBy }),
+    ...(order === undefined ? {} : { order })
+  };
+}
+
+function reportChartFor(
+  controls: ParsedDeskReportChartControls | undefined,
+  group: SavedReportGroupDefinition | undefined
+): SavedReportChartDefinition | undefined {
+  if (controls === undefined) {
+    return undefined;
+  }
+  if (group === undefined) {
+    throw new FrameworkError("BAD_REQUEST", "Report chart requires a group", { status: 400 });
+  }
+  if (!group.summaries.some((summary) => summary.name === controls.summary)) {
+    throw new FrameworkError("BAD_REQUEST", `Unknown report chart summary '${controls.summary}'`, { status: 400 });
+  }
+  return {
+    name: "builder_chart",
+    label: "Chart",
+    type: controls.type,
+    group: group.name,
+    summary: controls.summary,
+    maxPoints: controls.maxPoints,
+    ...(controls.orderBy === undefined ? {} : { orderBy: controls.orderBy }),
+    ...(controls.order === undefined ? {} : { order: controls.order }),
+    showValues: true
+  };
+}
+
+function optionalEnumSearchParamValue<TValue extends DeskReportChartType | DeskReportChartOrderBy | DeskReportChartOrder>(
+  form: URLSearchParams,
+  key: string,
+  allowed: readonly TValue[],
+  label: string
+): TValue | undefined {
+  const value = stringSearchParamValue(form, key);
+  if (value === undefined) {
+    return undefined;
+  }
+  if ((allowed as readonly string[]).includes(value)) {
+    return value as TValue;
+  }
+  throw new FrameworkError("BAD_REQUEST", `${label} '${value}' is invalid`, { status: 400 });
+}
+
+function boundedPositiveIntegerSearchParamValue(
+  form: URLSearchParams,
+  key: string,
+  label: string,
+  max: number
+): number | undefined {
+  const value = stringSearchParamValue(form, key);
+  if (value === undefined) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new FrameworkError("BAD_REQUEST", `${label} must be a positive integer`, { status: 400 });
+  }
+  if (parsed > max) {
+    throw new FrameworkError("BAD_REQUEST", `${label} must be at most ${String(max)}`, { status: 400 });
+  }
+  return parsed;
 }
 
 function coerceTableFormValue(

@@ -106,6 +106,60 @@ describe("SavedReportService", () => {
     expect(csv.body).toBe("Title,Count\nHigh Count B,7");
   });
 
+  it("round-trips persisted group and chart bounds through saved report events", async () => {
+    const { documents, savedReports } = createServices(["doc-1", "doc-2", "doc-3"], {
+      savedReportIds: ["bounded", "event-1"]
+    });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Alpha", count: 1 }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Beta", count: 2 }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Zeta", count: 10 }) });
+    const saved = await savedReports.save({
+      actor: owner,
+      doctype: "Note",
+      label: "Bounded counts",
+      definition: {
+        columns: [{ name: "title" }, { name: "count" }],
+        groups: [
+          {
+            name: "by_title",
+            field: "title",
+            maxRows: 2,
+            summaries: [{ name: "total_count", aggregate: "sum", field: "count" }]
+          }
+        ],
+        charts: [
+          {
+            name: "largest_title_count",
+            type: "bar",
+            group: "by_title",
+            summary: "total_count",
+            maxPoints: 1,
+            orderBy: "value",
+            order: "desc"
+          }
+        ]
+      }
+    });
+
+    const result = await savedReports.run({ actor: owner, doctype: "Note", id: saved.id });
+
+    expect(result.groups).toMatchObject([
+      {
+        name: "by_title",
+        rows: [
+          { key: "Alpha", summaries: [{ name: "total_count", value: 1 }] },
+          { key: "Beta", summaries: [{ name: "total_count", value: 2 }] }
+        ]
+      }
+    ]);
+    expect(result.charts).toMatchObject([
+      {
+        name: "largest_title_count",
+        points: [{ key: "Zeta", value: 10 }]
+      }
+    ]);
+  });
+
   it("updates and deletes only reports owned by the actor", async () => {
     const { savedReports } = createServices(["create-1"], {
       savedReportIds: ["report-1", "event-1", "event-2", "event-3"]

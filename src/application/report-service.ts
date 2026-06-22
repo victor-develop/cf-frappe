@@ -177,7 +177,7 @@ export class ReportService {
       filters: buildReportFilterControls(report, doctype, filters),
       order,
       summary: buildReportSummary(filtered, report.summaries ?? []),
-      groups,
+      groups: limitReportGroups(groups, report.groups ?? []),
       charts: buildReportCharts(groups, report.charts ?? []),
       rows,
       limit,
@@ -610,6 +610,19 @@ function buildReportGroups(
       field: group.field,
       rows
     };
+  });
+}
+
+function limitReportGroups(
+  groups: readonly ReportGroupResult[],
+  definitions: readonly ReportGroupDefinition[]
+): readonly ReportGroupResult[] {
+  const maxRowsByName = new Map(definitions.map((definition) => [definition.name, definition.maxRows]));
+  return groups.map((group) => {
+    const maxRows = maxRowsByName.get(group.name);
+    return maxRows === undefined
+      ? group
+      : { ...group, rows: group.rows.slice(0, maxRows) };
   });
 }
 

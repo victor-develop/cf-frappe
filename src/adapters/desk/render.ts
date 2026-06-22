@@ -31,6 +31,13 @@ import type { SavedReport } from "../../application/saved-report-service";
 import type { PrintFormatDefinition } from "../../core/print-format";
 import type { UserPermissionState } from "../../core/user-permissions";
 import { DESK_CLIENT_SCRIPT_PATH } from "./client";
+import {
+  deskReportFieldLabel,
+  deskReportSumSummaryLabel,
+  deskReportSumSummaryName,
+  isDeskGroupableReportField,
+  isDeskNumericReportField
+} from "./report-builder";
 
 export type FormLinkOptions = Readonly<Record<string, readonly LinkOption[]>>;
 export type FormTableDefinitions = Readonly<Record<string, DocTypeDefinition>>;
@@ -258,12 +265,29 @@ export function renderSavedReportBuilder(
     .map((field) => renderReportBuilderCheckbox("column", field, defaultColumns.has(field.name)))
     .join("");
   const filterOptions = visibleFields
-    .filter((field) => field.type !== "json" && field.type !== "table")
+    .filter(isDeskGroupableReportField)
     .map((field) => renderReportBuilderCheckbox("filter", field, false))
     .join("");
+  const numericFields = visibleFields.filter(isDeskNumericReportField);
+  const summaryOptions = [
+    renderReportBuilderValueCheckbox("summaryCount", "1", "Records", false),
+    ...numericFields.map((field) => renderReportBuilderCheckbox("summary", field, false))
+  ].join("");
+  const groupOptions = renderReportBuilderFieldOptions(
+    visibleFields.filter(isDeskGroupableReportField)
+  );
+  const chartSummaryOptions = [
+    `<option value="record_count">Records</option>`,
+    ...numericFields.map(
+      (field) =>
+        `<option value="${escapeHtml(deskReportSumSummaryName(field))}">${escapeHtml(deskReportSumSummaryLabel(field))}</option>`
+    )
+  ].join("");
   const orderOptions = [
     `<option value=""></option>`,
-    ...visibleFields.map((field) => `<option value="${escapeHtml(field.name)}">${escapeHtml(field.label ?? field.name)}</option>`)
+    ...visibleFields
+      .filter(isDeskGroupableReportField)
+      .map((field) => `<option value="${escapeHtml(field.name)}">${escapeHtml(deskReportFieldLabel(field))}</option>`)
   ].join("");
   return `${options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : ""}
   <form class="panel form report-builder-form" method="post" action="/desk/report-builder/${encodeURIComponent(doctype.name)}">
@@ -278,6 +302,32 @@ export function renderSavedReportBuilder(
       <legend>Filters</legend>
       ${filterOptions}
     </fieldset>
+    <fieldset class="choice-grid">
+      <legend>Summaries</legend>
+      ${summaryOptions}
+    </fieldset>
+    <div class="fields">
+      <label class="field"><span>Group By</span><select name="groupBy">${groupOptions}</select></label>
+      <label class="field"><span>Chart Type</span><select name="chartType">
+        <option value=""></option>
+        <option value="bar">Bar</option>
+        <option value="line">Line</option>
+        <option value="pie">Pie</option>
+      </select></label>
+      <label class="field"><span>Chart Value</span><select name="chartSummary">${chartSummaryOptions}</select></label>
+    </div>
+    <div class="fields">
+      <label class="field"><span>Chart Sort</span><select name="chartOrderBy">
+        <option value="key">Group Key</option>
+        <option value="label">Group Label</option>
+        <option value="value">Value</option>
+      </select></label>
+      <label class="field"><span>Chart Order</span><select name="chartOrder">
+        <option value="asc">Ascending</option>
+        <option value="desc">Descending</option>
+      </select></label>
+      <label class="field"><span>Chart Points</span><input name="chartMaxPoints" type="number" min="1" max="50"></label>
+    </div>
     <div class="fields">
       <label class="field"><span>Order By</span><select name="orderBy">${orderOptions}</select></label>
       <label class="field"><span>Order</span><select name="order">
@@ -317,17 +367,42 @@ export function renderSavedReportView(
     <dl>
       <div><dt>DocType</dt><dd>${escapeHtml(saved.doctype)}</dd></div>
       <div><dt>Columns</dt><dd>${escapeHtml(saved.definition.columns.map((column) => column.label ?? column.name).join(", "))}</dd></div>
+      ${renderSavedReportDefinitionMeta(saved.definition)}
       <div><dt>Updated</dt><dd>${escapeHtml(saved.updatedAt)}</dd></div>
     </dl>
   </section>
   ${renderReportView(result, { exportHref: options.exportHref })}`;
 }
 
+function renderSavedReportDefinitionMeta(definition: SavedReport["definition"]): string {
+  return [
+    renderSavedReportMetaItem("Summaries", definition.summaries?.map((summary) => summary.label ?? summary.name)),
+    renderSavedReportMetaItem("Groups", definition.groups?.map((group) => group.label ?? group.name)),
+    renderSavedReportMetaItem("Charts", definition.charts?.map((chart) => chart.label ?? chart.name))
+  ].join("");
+}
+
+function renderSavedReportMetaItem(label: string, values: readonly string[] | undefined): string {
+  const text = values?.filter(Boolean).join(", ");
+  return text ? `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(text)}</dd></div>` : "";
+}
+
 function renderReportBuilderCheckbox(name: string, field: FieldDefinition, checked: boolean): string {
+  return renderReportBuilderValueCheckbox(name, field.name, deskReportFieldLabel(field), checked);
+}
+
+function renderReportBuilderValueCheckbox(name: string, value: string, label: string, checked: boolean): string {
   return `<label class="choice">
-    <input type="checkbox" name="${name}" value="${escapeHtml(field.name)}"${checked ? " checked" : ""}>
-    <span>${escapeHtml(field.label ?? field.name)}</span>
+    <input type="checkbox" name="${escapeHtml(name)}" value="${escapeHtml(value)}"${checked ? " checked" : ""}>
+    <span>${escapeHtml(label)}</span>
   </label>`;
+}
+
+function renderReportBuilderFieldOptions(fields: readonly FieldDefinition[]): string {
+  return [
+    `<option value=""></option>`,
+    ...fields.map((field) => `<option value="${escapeHtml(field.name)}">${escapeHtml(deskReportFieldLabel(field))}</option>`)
+  ].join("");
 }
 
 export function renderUserPermissionAdmin(state: UserPermissionState): string {

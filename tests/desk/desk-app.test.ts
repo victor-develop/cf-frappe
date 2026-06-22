@@ -182,12 +182,26 @@ describe("Desk app", () => {
     expect(builderHtml).toContain("Note Report Builder");
     expect(builderHtml).toContain('name="column" value="title"');
     expect(builderHtml).toContain('name="filter" value="priority"');
+    expect(builderHtml).toContain('name="summaryCount" value="1"');
+    expect(builderHtml).toContain('name="summary" value="count"');
+    expect(builderHtml).toContain('<select name="groupBy">');
+    expect(builderHtml).toContain('<option value="priority">priority</option>');
+    expect(builderHtml).toContain('<select name="chartType">');
+    expect(builderHtml).toContain('<option value="sum_count">Total count</option>');
 
     const body = new URLSearchParams();
     body.set("label", "High count desk report");
     body.append("column", "title");
     body.append("column", "count");
     body.append("filter", "priority");
+    body.set("summaryCount", "1");
+    body.append("summary", "count");
+    body.set("groupBy", "priority");
+    body.set("chartType", "bar");
+    body.set("chartSummary", "sum_count");
+    body.set("chartOrderBy", "value");
+    body.set("chartOrder", "desc");
+    body.set("chartMaxPoints", "3");
     body.set("orderBy", "count");
     body.set("order", "desc");
     const saved = await app.request("/desk/report-builder/Note", {
@@ -207,6 +221,13 @@ describe("Desk app", () => {
     expect(html).toContain("High count desk report");
     expect(html).toContain("High Count B");
     expect(html.indexOf("High Count B")).toBeLessThan(html.indexOf("High Count A"));
+    expect(html).toContain("<dt>Summaries</dt><dd>Records, Total count</dd>");
+    expect(html).toContain("<dt>Groups</dt><dd>By priority</dd>");
+    expect(html).toContain("<dt>Charts</dt><dd>Chart</dd>");
+    expect(html).toContain("<span>Records</span><strong>2</strong>");
+    expect(html).toContain("<span>Total count</span><strong>10</strong>");
+    expect(html).toContain("By priority");
+    expect(html).toContain("chart-svg chart-bar");
     expect(html).toContain('<select id="filter-priority" name="filter_priority">');
     expect(html).toContain("/desk/report-builder/Note/report_saved-report-1/export.csv?filter_priority=High&amp;order_by=count&amp;order=desc");
     expect(html).toContain('action="/desk/report-builder/Note/report_saved-report-1/delete"');
@@ -225,6 +246,44 @@ describe("Desk app", () => {
     expect(deleted.headers.get("location")).toBe("/desk/report-builder/Note");
     const afterDelete = await app.request("/desk/report-builder/Note");
     await expect(afterDelete.text()).resolves.toContain("No saved reports.");
+  });
+
+  it("builds saved report charts without requiring a matching top-level summary", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Low Chart Count", priority: "Low", count: 1 })
+    });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "High Chart Count", priority: "High", count: 5 })
+    });
+
+    const body = new URLSearchParams();
+    body.set("label", "Chart-only count report");
+    body.append("column", "title");
+    body.append("column", "count");
+    body.set("groupBy", "priority");
+    body.set("chartType", "bar");
+    body.set("chartSummary", "sum_count");
+    const saved = await app.request("/desk/report-builder/Note", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body
+    });
+
+    expect(saved.status).toBe(303);
+    expect(saved.headers.get("location")).toBe("/desk/report-builder/Note/report_saved-report-1");
+
+    const run = await app.request("/desk/report-builder/Note/report_saved-report-1");
+    expect(run.status).toBe(200);
+    const html = await run.text();
+    expect(html).toContain("<dt>Groups</dt><dd>By priority</dd>");
+    expect(html).toContain("<dt>Charts</dt><dd>Chart</dd>");
+    expect(html).toContain("<th>Total count</th>");
+    expect(html).toContain("chart-svg chart-bar");
   });
 
   it("escapes saved report builder labels and rejects invalid builder fields", async () => {
@@ -255,6 +314,55 @@ describe("Desk app", () => {
 
     expect(invalid.status).toBe(400);
     await expect(invalid.text()).resolves.toContain("Unknown report column &#39;missing&#39;");
+  });
+
+  it("rejects invalid saved report groups and chart summaries without persisting them", async () => {
+    const { app } = makeDesk();
+    const invalidGroupBody = new URLSearchParams();
+    invalidGroupBody.set("label", "Invalid group report");
+    invalidGroupBody.append("column", "title");
+    invalidGroupBody.set("groupBy", "missing");
+    const invalidGroup = await app.request("/desk/report-builder/Note", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: invalidGroupBody
+    });
+
+    expect(invalidGroup.status).toBe(400);
+    await expect(invalidGroup.text()).resolves.toContain("Unknown report group &#39;missing&#39;");
+
+    const invalidChartBody = new URLSearchParams();
+    invalidChartBody.set("label", "Invalid chart report");
+    invalidChartBody.append("column", "title");
+    invalidChartBody.set("groupBy", "priority");
+    invalidChartBody.set("chartType", "bar");
+    invalidChartBody.set("chartSummary", "missing");
+    const invalidChart = await app.request("/desk/report-builder/Note", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: invalidChartBody
+    });
+
+    expect(invalidChart.status).toBe(400);
+    await expect(invalidChart.text()).resolves.toContain("Unknown report chart summary &#39;missing&#39;");
+
+    const invalidChartLimitBody = new URLSearchParams();
+    invalidChartLimitBody.set("label", "Invalid chart limit report");
+    invalidChartLimitBody.append("column", "title");
+    invalidChartLimitBody.set("groupBy", "priority");
+    invalidChartLimitBody.set("chartType", "bar");
+    invalidChartLimitBody.set("chartMaxPoints", "51");
+    const invalidChartLimit = await app.request("/desk/report-builder/Note", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: invalidChartLimitBody
+    });
+
+    expect(invalidChartLimit.status).toBe(400);
+    await expect(invalidChartLimit.text()).resolves.toContain("Report chart max points must be at most 50");
+
+    const builder = await app.request("/desk/report-builder/Note");
+    await expect(builder.text()).resolves.toContain("No saved reports.");
   });
 
   it("renders a Desk file manager for upload, download, and delete workflows", async () => {

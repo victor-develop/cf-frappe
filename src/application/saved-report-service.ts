@@ -390,6 +390,7 @@ function groupToPayload(group: ReportGroupDefinition): JsonObject {
     name: group.name,
     label: group.label,
     field: group.field,
+    maxRows: group.maxRows,
     summaries: group.summaries.map(summaryToPayload)
   });
 }
@@ -450,7 +451,8 @@ function groupFromPayload(payload: JsonObject): ReportGroupDefinition {
     name: requiredString(payload.name, "group.name"),
     field: requiredString(payload.field, "group.field"),
     summaries: objectArray(payload.summaries, "group.summaries").map(summaryFromPayload),
-    ...(typeof payload.label === "string" ? { label: payload.label } : {})
+    ...(typeof payload.label === "string" ? { label: payload.label } : {}),
+    ...(typeof payload.maxRows === "number" ? { maxRows: payload.maxRows } : {})
   };
 }
 

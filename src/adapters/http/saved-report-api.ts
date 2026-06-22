@@ -180,7 +180,8 @@ function groupValue(value: Record<string, unknown>): ReportGroupDefinition {
     name: requiredString(value.name, "Saved report group name must be a string"),
     field: requiredString(value.field, "Saved report group field must be a string"),
     summaries: objectArray(value.summaries, "group.summaries").map(summaryValue),
-    ...optionalStringField(value, "label")
+    ...optionalStringField(value, "label"),
+    ...(value.maxRows === undefined ? {} : { maxRows: integerValue(value.maxRows, "Saved report group maxRows must be an integer") })
   };
 }
 
