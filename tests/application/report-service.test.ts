@@ -1,5 +1,5 @@
-import { defineReport } from "../../src";
-import { createServices, data, guest, owner } from "../helpers";
+import { QueryService, ReportService, defineReport } from "../../src";
+import { createChildTableServices, createServices, data, guest, owner } from "../helpers";
 
 describe("ReportService", () => {
   it("lists reports readable by actor roles and DocType permissions", () => {
@@ -11,8 +11,8 @@ describe("ReportService", () => {
 
   it("runs metadata-defined reports over permission-filtered documents", async () => {
     const { documents, reports } = createServices(["e1", "e2"]);
-    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Low Note", priority: "Low" }) });
-    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "High Note", priority: "High", body: "Needs care" }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Low Note", priority: "Low", count: 2 }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "High Note", priority: "High", body: "Needs care", count: 7 }) });
 
     const result = await reports.runReport(owner, "Open Notes", {
       filters: { priority: "High" }
@@ -21,8 +21,133 @@ describe("ReportService", () => {
     expect(result).toMatchObject({
       columns: [{ name: "title" }, { name: "priority" }, { name: "body" }],
       rows: [{ title: "High Note", priority: "High", body: "Needs care" }],
+      summary: [
+        { name: "note_count", label: "Notes", aggregate: "count", value: 1, type: "integer" },
+        { name: "total_count", label: "Total Count", aggregate: "sum", value: 7, field: "count", type: "integer" }
+      ],
+      groups: [
+        {
+          name: "by_priority",
+          label: "By Priority",
+          field: "priority",
+          rows: [
+            {
+              key: "High",
+              label: "High",
+              summaries: [
+                { name: "note_count", value: 1 },
+                { name: "total_count", value: 7 }
+              ]
+            }
+          ]
+        }
+      ],
       total: 1
     });
+  });
+
+  it("computes report summaries and groups before pagination", async () => {
+    const { documents, reports } = createServices(["e1", "e2", "e3"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Low Note", priority: "Low", count: 2 }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "High Note A", priority: "High", count: 7 }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "High Note B", priority: "High", count: 3 }) });
+
+    const result = await reports.runReport(owner, "Open Notes", {
+      limit: 1
+    });
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.total).toBe(3);
+    expect(result.summary).toMatchObject([
+      { name: "note_count", value: 3 },
+      { name: "total_count", value: 12 }
+    ]);
+    expect(result.groups).toMatchObject([
+      {
+        name: "by_priority",
+        rows: [
+          {
+            key: "High",
+            summaries: [
+              { name: "note_count", value: 2 },
+              { name: "total_count", value: 10 }
+            ]
+          },
+          {
+            key: "Low",
+            summaries: [
+              { name: "note_count", value: 1 },
+              { name: "total_count", value: 2 }
+            ]
+          }
+        ]
+      }
+    ]);
+  });
+
+  it("counts populated table fields in top-level and grouped summaries", async () => {
+    const { registry, store, projections } = createChildTableServices();
+    registry.registerReport(
+      defineReport({
+        name: "Invoice Item Coverage",
+        doctype: "Sales Invoice",
+        columns: [{ name: "title" }],
+        summaries: [{ name: "invoices_with_items", aggregate: "count", field: "items" }],
+        groups: [
+          {
+            name: "by_title",
+            field: "title",
+            summaries: [{ name: "invoices_with_items", aggregate: "count", field: "items" }]
+          }
+        ],
+        roles: ["User"]
+      })
+    );
+    const reports = new ReportService({ registry, queries: new QueryService({ registry, projections }) });
+    await store.save({
+      tenantId: "acme",
+      doctype: "Sales Invoice",
+      name: "INV-1",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "INV-1", items: [{ product: "SKU-1", quantity: 2, rate: 5 }] },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    });
+    await store.save({
+      tenantId: "acme",
+      doctype: "Sales Invoice",
+      name: "INV-2",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "INV-2", items: [] },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:01.000Z"
+    });
+    await store.save({
+      tenantId: "acme",
+      doctype: "Sales Invoice",
+      name: "INV-3",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "INV-3" },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:02.000Z"
+    });
+
+    const result = await reports.runReport(owner, "Invoice Item Coverage");
+
+    expect(result.summary).toMatchObject([{ name: "invoices_with_items", value: 2 }]);
+    expect(result.groups).toMatchObject([
+      {
+        name: "by_title",
+        rows: [
+          { key: "INV-1", summaries: [{ name: "invoices_with_items", value: 1 }] },
+          { key: "INV-2", summaries: [{ name: "invoices_with_items", value: 1 }] },
+          { key: "INV-3", summaries: [{ name: "invoices_with_items", value: 0 }] }
+        ]
+      }
+    ]);
   });
 
   it("supports contains filters and pagination after filtering", async () => {

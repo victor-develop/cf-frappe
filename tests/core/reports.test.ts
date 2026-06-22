@@ -29,4 +29,43 @@ describe("reports", () => {
 
     expect(() => createRegistry({ reports: [report] })).toThrow("DocType 'Missing' is not registered");
   });
+
+  it("validates report summary and group fields against the DocType", () => {
+    const Note = defineDocType({
+      name: "Note",
+      fields: [
+        { name: "title", type: "text" },
+        { name: "count", type: "integer" },
+        { name: "meta", type: "json" }
+      ]
+    });
+
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        reports: [
+          defineReport({
+            name: "Broken Summary",
+            doctype: "Note",
+            columns: [{ name: "title" }],
+            summaries: [{ name: "missing_total", aggregate: "sum", field: "missing" }]
+          })
+        ]
+      })
+    ).toThrow("Report 'Broken Summary' summary 'missing_total' references unknown field 'missing'");
+
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        reports: [
+          defineReport({
+            name: "Broken Group",
+            doctype: "Note",
+            columns: [{ name: "title" }],
+            groups: [{ name: "by_meta", field: "meta", summaries: [{ name: "rows", aggregate: "count" }] }]
+          })
+        ]
+      })
+    ).toThrow("Report 'Broken Group' group 'by_meta' cannot group by json field 'meta'");
+  });
 });

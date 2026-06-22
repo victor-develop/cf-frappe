@@ -33,14 +33,19 @@ describe("report api", () => {
 
   it("runs a report with query-string filters", async () => {
     const { app, services } = makeApp();
-    await services.documents.create({ actor: { id: "owner@example.com", roles: ["User"], tenantId: "acme" }, doctype: "Note", data: data({ title: "Low Note", priority: "Low" }) });
-    await services.documents.create({ actor: { id: "owner@example.com", roles: ["User"], tenantId: "acme" }, doctype: "Note", data: data({ title: "High Note", priority: "High", body: "Needs care" }) });
+    await services.documents.create({ actor: { id: "owner@example.com", roles: ["User"], tenantId: "acme" }, doctype: "Note", data: data({ title: "Low Note", priority: "Low", count: 2 }) });
+    await services.documents.create({ actor: { id: "owner@example.com", roles: ["User"], tenantId: "acme" }, doctype: "Note", data: data({ title: "High Note", priority: "High", body: "Needs care", count: 7 }) });
 
     const response = await app.request("/api/report/Open%20Notes/run?filter_priority=High", { headers: userHeaders });
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       rows: [{ title: "High Note", priority: "High", body: "Needs care" }],
+      summary: [
+        { name: "note_count", value: 1 },
+        { name: "total_count", value: 7 }
+      ],
+      groups: [{ name: "by_priority", rows: [{ key: "High" }] }],
       total: 1
     });
   });

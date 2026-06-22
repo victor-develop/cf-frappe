@@ -139,6 +139,8 @@ export function renderReportView(result: ReportRunResult): string {
     )
     .join("");
   return `${filterForm ? `<form class="panel form report-filters" method="get"><div class="fields">${filterForm}</div><div class="actions"><button class="button primary" type="submit">Run</button></div></form>` : ""}
+  ${renderReportSummary(result.summary)}
+  ${renderReportGroups(result.groups)}
   <section class="panel">
     <div class="table-wrap">
       <table>
@@ -147,6 +149,49 @@ export function renderReportView(result: ReportRunResult): string {
       </table>
     </div>
   </section>`;
+}
+
+function renderReportSummary(summary: ReportRunResult["summary"]): string {
+  if (summary.length === 0) {
+    return "";
+  }
+  const items = summary
+    .map(
+      (item) =>
+        `<li><span>${escapeHtml(item.label)}</span><strong>${escapeHtml(formatValue(item.value))}</strong></li>`
+    )
+    .join("");
+  return `<section class="panel report-summary" aria-label="Report summary"><ul>${items}</ul></section>`;
+}
+
+function renderReportGroups(groups: ReportRunResult["groups"]): string {
+  if (groups.length === 0) {
+    return "";
+  }
+  return groups
+    .map((group) => {
+      const summaryHeaders = (group.rows[0]?.summaries ?? [])
+        .map((summary) => `<th>${escapeHtml(summary.label)}</th>`)
+        .join("");
+      const rows = group.rows
+        .map(
+          (row) =>
+            `<tr><td>${escapeHtml(row.label)}</td>${row.summaries
+              .map((summary) => `<td>${escapeHtml(formatValue(summary.value))}</td>`)
+              .join("")}</tr>`
+        )
+        .join("");
+      return `<section class="panel report-group">
+        <h2>${escapeHtml(group.label)}</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>${escapeHtml(group.field)}</th>${summaryHeaders}</tr></thead>
+            <tbody>${rows || `<tr><td colspan="2" class="empty">No rows matched.</td></tr>`}</tbody>
+          </table>
+        </div>
+      </section>`;
+    })
+    .join("");
 }
 
 export function renderListView(
@@ -809,6 +854,30 @@ tr:last-child td { border-bottom: 0; }
 .timeline { margin-top: 16px; max-width: 860px; }
 .list-filters { max-width: none; margin-bottom: 16px; }
 .list-filters .actions { justify-content: flex-start; }
+.report-summary {
+  padding: 14px 18px;
+}
+.report-summary ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.report-summary li {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.report-summary span { color: var(--muted); font-size: 13px; }
+.report-summary strong { font-size: 20px; }
+.report-group {
+  padding: 14px 18px;
+}
+.report-group h2 { margin-bottom: 10px; font-size: 16px; }
 .saved-filters {
   max-width: none;
   margin-bottom: 16px;

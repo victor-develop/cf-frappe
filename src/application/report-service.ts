@@ -1,12 +1,43 @@
 import { badRequest, permissionDenied } from "../core/errors";
 import { can } from "../core/permissions";
-import { assertReportMatchesDocType, canReadReport, type ReportColumnDefinition, type ReportDefinition } from "../core/reports";
+import {
+  assertReportMatchesDocType,
+  canReadReport,
+  type ReportColumnDefinition,
+  type ReportDefinition,
+  type ReportGroupDefinition,
+  type ReportSummaryAggregate,
+  type ReportSummaryDefinition
+} from "../core/reports";
 import type { ModelRegistry } from "../core/registry";
 import type { Actor, DocumentSnapshot, FieldType, JsonPrimitive, JsonValue } from "../core/types";
 import { QueryService } from "./query-service";
 
 export type ReportFilters = Readonly<Record<string, JsonPrimitive | undefined>>;
 export type ReportRow = Readonly<Record<string, JsonValue>>;
+
+export interface ReportSummaryValue {
+  readonly name: string;
+  readonly label: string;
+  readonly aggregate: ReportSummaryAggregate;
+  readonly value: JsonPrimitive;
+  readonly field?: string;
+  readonly type?: FieldType;
+  readonly indicator?: string;
+}
+
+export interface ReportGroupRow {
+  readonly key: JsonPrimitive;
+  readonly label: string;
+  readonly summaries: readonly ReportSummaryValue[];
+}
+
+export interface ReportGroupResult {
+  readonly name: string;
+  readonly label: string;
+  readonly field: string;
+  readonly rows: readonly ReportGroupRow[];
+}
 
 export interface ReportRunOptions {
   readonly filters?: ReportFilters;
@@ -17,6 +48,8 @@ export interface ReportRunOptions {
 export interface ReportRunResult {
   readonly report: ReportDefinition;
   readonly columns: readonly ReportColumnDefinition[];
+  readonly summary: readonly ReportSummaryValue[];
+  readonly groups: readonly ReportGroupResult[];
   readonly rows: readonly ReportRow[];
   readonly limit: number;
   readonly offset: number;
@@ -61,6 +94,8 @@ export class ReportService {
     return {
       report,
       columns: report.columns,
+      summary: buildReportSummary(filtered, report.summaries ?? []),
+      groups: buildReportGroups(filtered, report.groups ?? []),
       rows,
       limit,
       offset,
@@ -126,6 +161,128 @@ function reportRow(document: DocumentSnapshot, columns: readonly ReportColumnDef
   return Object.fromEntries(
     columns.map((column) => [column.name, document.data[column.field ?? column.name] ?? null])
   ) as ReportRow;
+}
+
+function buildReportSummary(
+  documents: readonly DocumentSnapshot[],
+  summaries: readonly ReportSummaryDefinition[]
+): readonly ReportSummaryValue[] {
+  return summaries.map((summary) => summaryValue(summary, documents));
+}
+
+function buildReportGroups(
+  documents: readonly DocumentSnapshot[],
+  groups: readonly ReportGroupDefinition[]
+): readonly ReportGroupResult[] {
+  return groups.map((group) => {
+    const buckets = new Map<string, { readonly key: JsonPrimitive; readonly documents: DocumentSnapshot[] }>();
+    for (const document of documents) {
+      const key = primitiveValue(document, group.field) ?? null;
+      const bucketKey = JSON.stringify(key);
+      const existing = buckets.get(bucketKey);
+      if (existing) {
+        existing.documents.push(document);
+      } else {
+        buckets.set(bucketKey, { key, documents: [document] });
+      }
+    }
+    const rows = [...buckets.values()]
+      .sort((left, right) => compareValues(left.key, right.key))
+      .map((bucket) => ({
+        key: bucket.key,
+        label: groupLabel(bucket.key),
+        summaries: buildReportSummary(bucket.documents, group.summaries)
+      }));
+    return {
+      name: group.name,
+      label: group.label ?? group.name,
+      field: group.field,
+      rows
+    };
+  });
+}
+
+function summaryValue(
+  summary: ReportSummaryDefinition,
+  documents: readonly DocumentSnapshot[]
+): ReportSummaryValue {
+  return {
+    name: summary.name,
+    label: summary.label ?? summary.name,
+    aggregate: summary.aggregate,
+    value: aggregateValue(summary, documents),
+    ...(summary.field ? { field: summary.field } : {}),
+    ...(summary.type ? { type: summary.type } : summary.aggregate === "count" ? { type: "integer" } : {}),
+    ...(summary.indicator ? { indicator: summary.indicator } : {})
+  };
+}
+
+function aggregateValue(summary: ReportSummaryDefinition, documents: readonly DocumentSnapshot[]): JsonPrimitive {
+  const field = summary.field;
+  switch (summary.aggregate) {
+    case "count":
+      return field
+        ? documents.filter((document) => isPresentValue(document.data[field])).length
+        : documents.length;
+    case "sum":
+      return numericValues(documents, requiredSummaryField(summary)).reduce((total, value) => total + value, 0);
+    case "avg": {
+      const values = numericValues(documents, requiredSummaryField(summary));
+      return values.length === 0 ? null : values.reduce((total, value) => total + value, 0) / values.length;
+    }
+    case "min":
+      return minMaxValue(documents, requiredSummaryField(summary), "min");
+    case "max":
+      return minMaxValue(documents, requiredSummaryField(summary), "max");
+  }
+}
+
+function requiredSummaryField(summary: ReportSummaryDefinition): string {
+  if (!summary.field) {
+    throw badRequest(`Report summary '${summary.name}' requires a field for ${summary.aggregate}`);
+  }
+  return summary.field;
+}
+
+function numericValues(documents: readonly DocumentSnapshot[], field: string): readonly number[] {
+  return documents
+    .map((document) => primitiveValue(document, field))
+    .filter((value): value is number => typeof value === "number");
+}
+
+function minMaxValue(
+  documents: readonly DocumentSnapshot[],
+  field: string,
+  direction: "min" | "max"
+): JsonPrimitive {
+  const values = documents
+    .map((document) => primitiveValue(document, field))
+    .filter((value): value is Exclude<JsonPrimitive, null> => value !== undefined && value !== null);
+  if (values.length === 0) {
+    return null;
+  }
+  return values.slice(1).reduce((selected, value) => {
+    const comparison = compareValues(value, selected);
+    return direction === "min"
+      ? comparison < 0 ? value : selected
+      : comparison > 0 ? value : selected;
+  }, values[0]!);
+}
+
+function primitiveValue(document: DocumentSnapshot, field: string): JsonPrimitive | undefined {
+  const value = document.data[field];
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  return undefined;
+}
+
+function isPresentValue(value: JsonValue | undefined): boolean {
+  return value !== undefined && value !== null;
+}
+
+function groupLabel(value: JsonPrimitive): string {
+  return value === null ? "(empty)" : String(value);
 }
 
 function coerceFilterValue(value: JsonPrimitive | undefined, type?: FieldType): JsonPrimitive | undefined {

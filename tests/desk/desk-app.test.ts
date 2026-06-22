@@ -67,7 +67,7 @@ describe("Desk app", () => {
     await services.documents.create({
       actor: owner,
       doctype: "Note",
-      data: data({ title: "Report Note", priority: "High", body: "For reporting" })
+      data: data({ title: "Report Note", priority: "High", body: "For reporting", count: 7 })
     });
 
     const list = await app.request("/desk/reports");
@@ -79,6 +79,8 @@ describe("Desk app", () => {
     const html = await report.text();
     expect(html).toContain("Report Note");
     expect(html).toContain("For reporting");
+    expect(html).toContain("Total Count");
+    expect(html).toContain("By Priority");
   });
 
   it("renders list and create form pages", async () => {

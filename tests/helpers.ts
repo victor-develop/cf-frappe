@@ -99,6 +99,21 @@ export const openNotesReport = defineReport({
     { name: "priority", label: "Priority", type: "select" },
     { name: "body", label: "Body", type: "longText" }
   ],
+  summaries: [
+    { name: "note_count", label: "Notes", aggregate: "count" },
+    { name: "total_count", label: "Total Count", aggregate: "sum", field: "count", type: "integer" }
+  ],
+  groups: [
+    {
+      name: "by_priority",
+      label: "By Priority",
+      field: "priority",
+      summaries: [
+        { name: "note_count", label: "Notes", aggregate: "count" },
+        { name: "total_count", label: "Total Count", aggregate: "sum", field: "count", type: "integer" }
+      ]
+    }
+  ],
   filters: [
     { name: "priority", label: "Priority", field: "priority", type: "select" },
     { name: "title", label: "Title", field: "title", type: "text", operator: "contains" }
