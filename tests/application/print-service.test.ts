@@ -1,4 +1,4 @@
-import { PrintService, definePrintFormat } from "../../src";
+import { PrintService, definePrintFormat, definePrintLetterhead } from "../../src";
 import { createServices, data, guest, owner } from "../helpers";
 
 describe("PrintService", () => {
@@ -60,6 +60,73 @@ describe("PrintService", () => {
       document: { name: "Templated" },
       sections: []
     });
+  });
+
+  it("resolves readable print letterheads into print view models", async () => {
+    const { registry, documents, prints } = createServices(["e1"]);
+    registry.registerPrintLetterhead(
+      definePrintLetterhead({
+        name: "Company Letterhead",
+        label: "Company",
+        headerHtml: "<strong>ACME</strong>",
+        footerHtml: "<small>Registered office</small>"
+      })
+    );
+    registry.registerPrintFormat(
+      definePrintFormat({
+        name: "Note Letterhead Print",
+        doctype: "Note",
+        letterhead: "Company Letterhead",
+        sections: [{ fields: [{ field: "title" }] }]
+      })
+    );
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Letterheaded", priority: "High", body: "Ready" })
+    });
+
+    const view = await prints.printDocument(owner, "Note Letterhead Print", "Letterheaded");
+
+    expect(view).toMatchObject({
+      format: { name: "Note Letterhead Print", letterhead: "Company Letterhead" },
+      letterhead: {
+        name: "Company Letterhead",
+        headerHtml: "<strong>ACME</strong>",
+        footerHtml: "<small>Registered office</small>"
+      },
+      document: { name: "Letterheaded" }
+    });
+    expect(prints.listPrintLetterheads(owner).map((letterhead) => letterhead.name)).toContain("Company Letterhead");
+  });
+
+  it("denies print formats when the referenced letterhead roles do not match", async () => {
+    const { registry, documents, prints } = createServices(["e1"]);
+    registry.registerPrintLetterhead(
+      definePrintLetterhead({
+        name: "Managers Only",
+        headerHtml: "<strong>Management</strong>",
+        roles: ["Task Manager"]
+      })
+    );
+    registry.registerPrintFormat(
+      definePrintFormat({
+        name: "Restricted Letterhead Print",
+        doctype: "Note",
+        letterhead: "Managers Only",
+        sections: [{ fields: [{ field: "title" }] }]
+      })
+    );
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Restricted", priority: "High", body: "Ready" })
+    });
+
+    expect(prints.listPrintFormats(owner).map((format) => format.name)).not.toContain("Restricted Letterhead Print");
+    await expect(prints.printDocument(owner, "Restricted Letterhead Print", "Restricted")).rejects.toThrow(
+      "cannot read print format"
+    );
   });
 
   it("denies print access when report roles do not match", async () => {

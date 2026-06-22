@@ -20,7 +20,7 @@ The current slice is a working kernel:
 - generated Desk list/form UI from DocType metadata
 - metadata-configured form sections, field order, and form column layout
 - metadata-configured list columns, default filters, saved user filters, filter controls, and page size
-- metadata-defined print formats with field sections or HTML templates with escaped substitutions
+- metadata-defined print formats with reusable letterheads, field sections, or HTML templates with escaped substitutions
 - metadata-defined reports, summaries, and charts over current projections
 - Cloudflare Queue/Cron background job primitives
 - R2-backed file attachments with event-sourced `File` metadata
@@ -43,7 +43,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | Hooks/controllers | pure hook contracts registered in `ModelRegistry` |
 | REST resources | generated `/api/resource/:doctype` routes |
 | Desk list/forms | generated `/desk` pages, list/form layouts, columns, saved filters, and filters from DocType metadata |
-| Print formats | metadata-defined printable document pages and escaped templates |
+| Print formats | metadata-defined printable document pages, letterheads, and escaped templates |
 | Reports | metadata-defined report columns, filters, summaries, charts, API, and Desk pages |
 | Background jobs | `JobRegistry`, Queue producers/consumers, and Cron dispatch |
 | File attachments | `File` DocType metadata plus R2 object storage |
@@ -404,7 +404,7 @@ Print formats are metadata registered beside DocTypes. `PrintService` reads the 
 const printable = await services.prints.printDocument(actor, "Task Standard", "TASK-1");
 ```
 
-Print formats can either declare field sections or a trusted HTML template with escaped `{{ doc.field }}`, `{{ doc.name }}`, and `{{ format.label }}` substitutions. HTTP clients can call `/api/print/Task%20Standard/TASK-1`. Desk exposes the same printable page at `/desk/print/Task%20Standard/TASK-1` and links available print formats from generated edit forms. Letterheads, PDF generation, print settings, and report printouts are future layers over the same view-model boundary.
+Print formats can reference reusable trusted letterhead header/footer HTML, then either declare field sections or a trusted HTML template with escaped `{{ doc.field }}`, `{{ doc.name }}`, and `{{ format.label }}` substitutions. HTTP clients can call `/api/print/Task%20Standard/TASK-1`. Desk exposes the same printable page at `/desk/print/Task%20Standard/TASK-1` and links available print formats from generated edit forms. PDF generation, print settings, and report printouts are future layers over the same view-model boundary.
 
 ## Background Jobs
 
@@ -624,11 +624,11 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 242 tests across schema, permissions, events, registry, services, naming series, document lifecycle, document timelines, comments, assignments, saved user filters, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, print templates, reports, report summaries, report charts, report exports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
+Current suite: 248 tests across schema, permissions, events, registry, services, naming series, document lifecycle, document timelines, comments, assignments, saved user filters, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, print templates, print letterheads, reports, report summaries, report charts, report exports, jobs, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, and D1 schema planning/migration application.
 
 ## Status
 
-This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, permissioned document timelines, comments, assignments, saved user filters, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, report charts/exports, custom print templates, and Durable Object realtime topics exist, but letterheads, richer chart controls, durable job dashboards, richer realtime presence, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
+This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, permissioned document timelines, comments, assignments, saved user filters, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives, R2-backed file attachments, report charts/exports, custom print templates, reusable letterheads, and Durable Object realtime topics exist, but richer chart controls, durable job dashboards, richer realtime presence, auth integrations, advanced file workflows, app installation, client scripting, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
 
 ## References
 

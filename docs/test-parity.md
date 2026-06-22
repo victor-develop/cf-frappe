@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the custom print templates slice:
+As of the print letterheads slice:
 
 - Test files: `40`
-- Vitest cases: `242`
+- Vitest cases: `248`
 
 ## Implication
 

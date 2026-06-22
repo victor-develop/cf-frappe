@@ -19,6 +19,12 @@ export function renderPrintDocument(view: PrintDocumentView): string {
   const content = view.format.template && view.format.template.trim().length > 0
     ? `<section class="print-template">${renderTemplate(view.format.template, view)}</section>`
     : sections;
+  const letterheadHeader = view.letterhead?.headerHtml
+    ? `<section class="print-letterhead print-letterhead-header">${view.letterhead.headerHtml}</section>`
+    : "";
+  const letterheadFooter = view.letterhead?.footerHtml
+    ? `<section class="print-letterhead print-letterhead-footer">${view.letterhead.footerHtml}</section>`
+    : "";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -29,12 +35,14 @@ export function renderPrintDocument(view: PrintDocumentView): string {
 </head>
 <body>
   <main class="print-page">
+    ${letterheadHeader}
     <header class="print-header">
       <p>${escapeHtml(view.document.doctype)}</p>
       <h1>${escapeHtml(view.document.name)}</h1>
       <span>${escapeHtml(view.format.label ?? view.format.name)}</span>
     </header>
     ${content}
+    ${letterheadFooter}
     <footer class="print-footer">Version ${String(view.document.version)} · ${escapeHtml(view.document.updatedAt)}</footer>
   </main>
 </body>
@@ -164,6 +172,20 @@ body {
 h1, h2 { margin: 0; letter-spacing: 0; }
 h1 { font-size: 30px; line-height: 1.2; }
 h2 { font-size: 18px; line-height: 1.3; margin-bottom: 12px; }
+.print-letterhead {
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.print-letterhead-header {
+  padding-bottom: 18px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+.print-letterhead-footer {
+  padding-top: 18px;
+  margin-top: 18px;
+  border-top: 1px solid var(--border);
+}
 .print-section { padding: 22px 0; border-bottom: 1px solid var(--border); }
 dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 24px; margin: 0; }
 dt {

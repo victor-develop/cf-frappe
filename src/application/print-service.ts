@@ -1,8 +1,10 @@
 import { permissionDenied } from "../core/errors";
 import { can } from "../core/permissions";
 import {
+  canReadPrintLetterhead,
   canReadPrintFormat,
   type PrintFormatDefinition,
+  type PrintLetterheadDefinition,
   type PrintSectionDefinition
 } from "../core/print-format";
 import type { ModelRegistry } from "../core/registry";
@@ -22,6 +24,7 @@ export interface PrintSectionView {
 
 export interface PrintDocumentView {
   readonly format: PrintFormatDefinition;
+  readonly letterhead?: PrintLetterheadDefinition;
   readonly document: DocumentSnapshot;
   readonly sections: readonly PrintSectionView[];
 }
@@ -54,11 +57,19 @@ export class PrintService {
     return format;
   }
 
+  listPrintLetterheads(actor: Actor): readonly PrintLetterheadDefinition[] {
+    return this.registry
+      .listPrintLetterheads()
+      .filter((letterhead) => canReadPrintLetterhead(actor, letterhead));
+  }
+
   async printDocument(actor: Actor, formatName: string, name: string): Promise<PrintDocumentView> {
     const format = this.getPrintFormat(actor, formatName);
     const document = await this.queries.getDocument(actor, format.doctype, name);
+    const letterhead = format.letterhead ? this.getPrintLetterhead(actor, format.letterhead) : undefined;
     return {
       format,
+      ...(letterhead ? { letterhead } : {}),
       document,
       sections: (format.sections ?? []).map((section) => printSectionView(section, document))
     };
@@ -66,7 +77,26 @@ export class PrintService {
 
   private canAccess(actor: Actor, format: PrintFormatDefinition): boolean {
     const doctype = this.registry.get(format.doctype);
-    return canReadPrintFormat(actor, format) && can(actor, doctype, format.permissionAction ?? "read");
+    return (
+      canReadPrintFormat(actor, format) &&
+      can(actor, doctype, format.permissionAction ?? "read") &&
+      this.canAccessReferencedLetterhead(actor, format.letterhead)
+    );
+  }
+
+  private canAccessReferencedLetterhead(actor: Actor, letterheadName: string | undefined): boolean {
+    if (!letterheadName) {
+      return true;
+    }
+    return canReadPrintLetterhead(actor, this.registry.getPrintLetterhead(letterheadName));
+  }
+
+  private getPrintLetterhead(actor: Actor, letterheadName: string): PrintLetterheadDefinition {
+    const letterhead = this.registry.getPrintLetterhead(letterheadName);
+    if (!canReadPrintLetterhead(actor, letterhead)) {
+      throw permissionDenied(`Actor '${actor.id}' cannot read print letterhead '${letterhead.name}'`);
+    }
+    return letterhead;
   }
 }
 

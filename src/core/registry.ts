@@ -1,6 +1,6 @@
 import { FrameworkError } from "./errors";
-import type { PrintFormatDefinition } from "./print-format";
-import { assertPrintFormatMatchesDocType } from "./print-format";
+import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-format";
+import { assertPrintFormatMatchesDocType, assertPrintLetterheadValid } from "./print-format";
 import type { ReportDefinition } from "./reports";
 import { assertReportMatchesDocType } from "./reports";
 import type {
@@ -33,6 +33,7 @@ export interface DocumentHooks {
 
 export interface RegistryOptions {
   readonly doctypes?: readonly DocTypeDefinition[];
+  readonly letterheads?: readonly PrintLetterheadDefinition[];
   readonly printFormats?: readonly PrintFormatDefinition[];
   readonly reports?: readonly ReportDefinition[];
   readonly hooks?: Readonly<Record<string, readonly DocumentHooks[]>>;
@@ -40,6 +41,7 @@ export interface RegistryOptions {
 
 export class ModelRegistry {
   private readonly doctypes = new Map<string, DocTypeDefinition>();
+  private readonly letterheads = new Map<string, PrintLetterheadDefinition>();
   private readonly printFormats = new Map<string, PrintFormatDefinition>();
   private readonly reports = new Map<string, ReportDefinition>();
   private readonly hooks = new Map<string, DocumentHooks[]>();
@@ -49,6 +51,9 @@ export class ModelRegistry {
       this.putDocType(doctype);
     }
     this.assertDocTypeReferencesResolve();
+    for (const letterhead of options.letterheads ?? []) {
+      this.registerPrintLetterhead(letterhead);
+    }
     for (const report of options.reports ?? []) {
       this.registerReport(report);
     }
@@ -118,6 +123,18 @@ export class ModelRegistry {
     this.reports.set(report.name, report);
   }
 
+  registerPrintLetterhead(letterhead: PrintLetterheadDefinition): void {
+    if (this.letterheads.has(letterhead.name)) {
+      throw new FrameworkError(
+        "PRINT_FORMAT_DUPLICATE",
+        `Print letterhead '${letterhead.name}' is already registered`,
+        { status: 409 }
+      );
+    }
+    assertPrintLetterheadValid(letterhead);
+    this.letterheads.set(letterhead.name, letterhead);
+  }
+
   registerPrintFormat(format: PrintFormatDefinition): void {
     const doctype = this.doctypes.get(format.doctype);
     if (!doctype) {
@@ -129,6 +146,13 @@ export class ModelRegistry {
       throw new FrameworkError("PRINT_FORMAT_DUPLICATE", `Print format '${format.name}' is already registered`, {
         status: 409
       });
+    }
+    if (format.letterhead !== undefined && !this.letterheads.has(format.letterhead)) {
+      throw new FrameworkError(
+        "PRINT_FORMAT_INVALID",
+        `Print format '${format.name}' references unknown letterhead '${format.letterhead}'`,
+        { status: 400 }
+      );
     }
     assertPrintFormatMatchesDocType(format, doctype);
     this.printFormats.set(format.name, format);
@@ -182,6 +206,20 @@ export class ModelRegistry {
 
   listPrintFormats(): readonly PrintFormatDefinition[] {
     return [...this.printFormats.values()].sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  getPrintLetterhead(letterheadName: string): PrintLetterheadDefinition {
+    const definition = this.letterheads.get(letterheadName);
+    if (!definition) {
+      throw new FrameworkError("PRINT_FORMAT_NOT_FOUND", `Print letterhead '${letterheadName}' is not registered`, {
+        status: 404
+      });
+    }
+    return definition;
+  }
+
+  listPrintLetterheads(): readonly PrintLetterheadDefinition[] {
+    return [...this.letterheads.values()].sort((left, right) => left.name.localeCompare(right.name));
   }
 
   hooksFor(doctype: string): readonly DocumentHooks[] {

@@ -12,12 +12,21 @@ export interface PrintSectionDefinition {
   readonly fields: readonly PrintFieldDefinition[];
 }
 
+export interface PrintLetterheadDefinition {
+  readonly name: string;
+  readonly label?: string;
+  readonly headerHtml?: string;
+  readonly footerHtml?: string;
+  readonly roles?: readonly string[];
+}
+
 export interface PrintFormatDefinition {
   readonly name: string;
   readonly label?: string;
   readonly module?: string;
   readonly description?: string;
   readonly doctype: string;
+  readonly letterhead?: string;
   readonly sections?: readonly PrintSectionDefinition[];
   readonly template?: string;
   readonly roles?: readonly string[];
@@ -36,6 +45,12 @@ export type PrintTemplateReference =
 interface PrintTemplateToken {
   readonly path: string;
   readonly start: number;
+}
+
+export function definePrintLetterhead(definition: PrintLetterheadDefinition): PrintLetterheadDefinition {
+  assertIdentifier(definition.name, "print letterhead name");
+  assertHasLetterheadBody(definition);
+  return Object.freeze({ ...definition });
 }
 
 export function definePrintFormat(definition: PrintFormatDefinition): PrintFormatDefinition {
@@ -70,6 +85,13 @@ export function canReadPrintFormat(actor: Actor, format: PrintFormatDefinition):
     return true;
   }
   return format.roles === undefined || format.roles.some((role) => actor.roles.includes(role));
+}
+
+export function canReadPrintLetterhead(actor: Actor, letterhead: PrintLetterheadDefinition): boolean {
+  if (actor.roles.includes(SYSTEM_MANAGER_ROLE)) {
+    return true;
+  }
+  return letterhead.roles === undefined || letterhead.roles.some((role) => actor.roles.includes(role));
 }
 
 export function assertPrintFormatMatchesDocType(format: PrintFormatDefinition, doctype: DocTypeDefinition): void {
@@ -115,6 +137,11 @@ export function assertPrintFormatMatchesDocType(format: PrintFormatDefinition, d
       );
     }
   }
+}
+
+export function assertPrintLetterheadValid(letterhead: PrintLetterheadDefinition): void {
+  assertIdentifier(letterhead.name, "print letterhead name");
+  assertHasLetterheadBody(letterhead);
 }
 
 export function printTemplatePaths(template: string): readonly string[] {
@@ -171,6 +198,20 @@ function assertHasPrintableBody(
       { status: 400 }
     );
   }
+}
+
+function assertHasLetterheadBody(letterhead: PrintLetterheadDefinition): void {
+  if (!hasText(letterhead.headerHtml) && !hasText(letterhead.footerHtml)) {
+    throw new FrameworkError(
+      "PRINT_FORMAT_INVALID",
+      `Print letterhead '${letterhead.name}' must define headerHtml or footerHtml`,
+      { status: 400 }
+    );
+  }
+}
+
+function hasText(value: string | undefined): boolean {
+  return value !== undefined && value.trim().length > 0;
 }
 
 function assertTemplateTokenContext(formatName: string, template: string, token: PrintTemplateToken): void {

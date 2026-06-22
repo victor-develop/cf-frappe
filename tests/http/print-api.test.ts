@@ -1,4 +1,4 @@
-import { createResourceApi, definePrintFormat, unsafeHeaderActorResolver } from "../../src";
+import { createResourceApi, definePrintFormat, definePrintLetterhead, unsafeHeaderActorResolver } from "../../src";
 import { createServices, data, owner } from "../helpers";
 
 describe("print api", () => {
@@ -78,5 +78,37 @@ describe("print api", () => {
     expect(html).toContain("<small>Templated Note / Template Note</small>");
     expect(html).not.toContain("<script>alert");
     expect(html).toContain("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;");
+  });
+
+  it("renders print letterhead header and footer HTML", async () => {
+    const { app, services } = makeApp();
+    services.registry.registerPrintLetterhead(
+      definePrintLetterhead({
+        name: "Company Letterhead",
+        headerHtml: '<div class="brand">ACME Cloud</div>',
+        footerHtml: "<small>Confidential</small>"
+      })
+    );
+    services.registry.registerPrintFormat(
+      definePrintFormat({
+        name: "Note Letterhead",
+        doctype: "Note",
+        letterhead: "Company Letterhead",
+        sections: [{ fields: [{ field: "title", label: "Title" }] }]
+      })
+    );
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Letterheaded", priority: "High", body: "Ready" })
+    });
+
+    const response = await app.request("/api/print/Note%20Letterhead/Letterheaded", { headers: userHeaders });
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('<section class="print-letterhead print-letterhead-header"><div class="brand">ACME Cloud</div></section>');
+    expect(html).toContain("<dd>Letterheaded</dd>");
+    expect(html).toContain('<section class="print-letterhead print-letterhead-footer"><small>Confidential</small></section>');
   });
 });

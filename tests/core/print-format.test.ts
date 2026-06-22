@@ -1,4 +1,4 @@
-import { createRegistry, defineDocType, definePrintFormat, FrameworkError } from "../../src";
+import { createRegistry, defineDocType, definePrintFormat, definePrintLetterhead, FrameworkError } from "../../src";
 
 describe("print formats", () => {
   it("registers print formats after their DocType and lists them in stable order", () => {
@@ -22,6 +22,20 @@ describe("print formats", () => {
     expect(registry.listPrintFormats().map((format) => format.name)).toEqual(["Alpha Print", "Zulu Print"]);
   });
 
+  it("registers print letterheads in stable order", () => {
+    const registry = createRegistry({
+      letterheads: [
+        definePrintLetterhead({ name: "Zulu Letterhead", headerHtml: "<p>Zulu</p>" }),
+        definePrintLetterhead({ name: "Alpha Letterhead", headerHtml: "<p>Alpha</p>" })
+      ]
+    });
+
+    expect(registry.listPrintLetterheads().map((letterhead) => letterhead.name)).toEqual([
+      "Alpha Letterhead",
+      "Zulu Letterhead"
+    ]);
+  });
+
   it("rejects empty print formats", () => {
     expect(() =>
       definePrintFormat({
@@ -29,6 +43,14 @@ describe("print formats", () => {
         doctype: "Note"
       })
     ).toThrow(FrameworkError);
+  });
+
+  it("rejects empty print letterheads", () => {
+    expect(() =>
+      definePrintLetterhead({
+        name: "Broken Letterhead"
+      })
+    ).toThrow("Print letterhead 'Broken Letterhead' must define headerHtml or footerHtml");
   });
 
   it("rejects direct registry print formats without sections or template", () => {
@@ -60,6 +82,24 @@ describe("print formats", () => {
       sections: [],
       template: "<h2>{{ doc.title }}</h2><small>{{ format.name }} {{ doc.name }}</small>"
     });
+  });
+
+  it("rejects print formats that reference unknown letterheads", () => {
+    const Note = defineDocType({ name: "Note", fields: [{ name: "title", type: "text" }] });
+
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        printFormats: [
+          definePrintFormat({
+            name: "Missing Letterhead Print",
+            doctype: "Note",
+            letterhead: "Missing Letterhead",
+            sections: [{ fields: [{ field: "title" }] }]
+          })
+        ]
+      })
+    ).toThrow("Print format 'Missing Letterhead Print' references unknown letterhead 'Missing Letterhead'");
   });
 
   it("rejects print formats that reference unknown fields", () => {
