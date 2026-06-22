@@ -20,6 +20,7 @@ import type {
   DocumentTags,
   DocumentTimeline
 } from "../../application/document-history-service";
+import type { JobExecutionDashboard } from "../../application/job-history-service";
 import type { ReportRunResult } from "../../application/report-service";
 import type { SavedListFilter } from "../../application/saved-list-filter-service";
 import type { PrintFormatDefinition } from "../../core/print-format";
@@ -176,6 +177,57 @@ export function renderUserPermissionAdmin(state: UserPermissionState): string {
   </section>`;
 }
 
+export function renderJobAdmin(dashboard: JobExecutionDashboard): string {
+  const jobRows = dashboard.jobs
+    .map((job) => {
+      const retry = job.retry ? JSON.stringify(job.retry) : "";
+      return `<tr>
+        <td>${escapeHtml(job.name)}</td>
+        <td>${escapeHtml(job.description ?? "")}</td>
+        <td>${escapeHtml(retry)}</td>
+      </tr>`;
+    })
+    .join("");
+  const executionRows = dashboard.executions
+    .map(
+      (record) => `<tr>
+        <td>${escapeHtml(record.idempotencyKey)}</td>
+        <td>${escapeHtml(record.jobName)}</td>
+        <td>${escapeHtml(record.runId)}</td>
+        <td>${escapeHtml(record.status)}</td>
+        <td>${escapeHtml(record.startedAt)}</td>
+        <td>${escapeHtml(record.finishedAt ?? "")}</td>
+        <td>${escapeHtml(record.result === undefined ? record.error ?? "" : JSON.stringify(record.result))}</td>
+      </tr>`
+    )
+    .join("");
+  return `<form class="panel form list-filters" method="get" action="/desk/admin/jobs">
+    <div class="fields">
+      <label class="field"><span>Job</span><input name="job" value="${escapeHtml(dashboard.filters.jobName ?? "")}"></label>
+      <label class="field"><span>Status</span><select name="status">${renderJobStatusOptions(dashboard.filters.status)}</select></label>
+      <label class="field"><span>Run ID</span><input name="run_id" value="${escapeHtml(dashboard.filters.runId ?? "")}"></label>
+      <label class="field"><span>Limit</span><input name="limit" type="number" min="1" value="${String(dashboard.limit)}"></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Filter</button></div>
+  </form>
+  <section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Job</th><th>Description</th><th>Retry</th></tr></thead>
+        <tbody>${jobRows || `<tr><td colspan="3" class="empty">No jobs registered.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>
+  <section class="panel job-history">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Idempotency Key</th><th>Job</th><th>Run ID</th><th>Status</th><th>Started</th><th>Finished</th><th>Result / Error</th></tr></thead>
+        <tbody>${executionRows || `<tr><td colspan="7" class="empty">No executions recorded.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
 export function renderReportView(
   result: ReportRunResult,
   options: { readonly exportHref?: string } = {}
@@ -210,6 +262,17 @@ export function renderReportView(
       </table>
     </div>
   </section>`;
+}
+
+function renderJobStatusOptions(status: JobExecutionDashboard["filters"]["status"]): string {
+  const options = ["", "running", "succeeded", "failed"];
+  return options
+    .map((value) => {
+      const label = value === "" ? "Any status" : value;
+      const selected = value === (status ?? "") ? " selected" : "";
+      return `<option value="${escapeHtml(value)}"${selected}>${escapeHtml(label)}</option>`;
+    })
+    .join("");
 }
 
 function renderReportCharts(charts: ReportRunResult["charts"]): string {
@@ -1245,6 +1308,7 @@ tr:last-child td { border-bottom: 0; }
   margin-bottom: 16px;
   padding: 14px 18px;
 }
+.job-history { margin-top: 16px; }
 .saved-filters h2 { margin-bottom: 10px; font-size: 16px; }
 .saved-filters ul {
   display: flex;

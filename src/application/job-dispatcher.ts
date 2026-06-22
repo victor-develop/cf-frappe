@@ -1,5 +1,6 @@
 import type { JobRegistry } from "../core/jobs";
 import type { JobPayload } from "../core/jobs";
+import { DEFAULT_TENANT_ID } from "../core/types";
 import type { Clock } from "../ports/clock";
 import { systemClock } from "../ports/clock";
 import type { IdGenerator } from "../ports/id-generator";
@@ -29,7 +30,9 @@ export class JobDispatcher<TResources = unknown> {
   async dispatch<TPayload extends JobPayload>(command: DispatchJobCommand<TPayload>): Promise<JobMessage<TPayload>> {
     this.registry.get(command.jobName);
     const runId = this.ids.next("job_");
+    const tenantId = command.tenantId ?? DEFAULT_TENANT_ID;
     const message: JobMessage<TPayload> = {
+      tenantId,
       jobName: command.jobName,
       payload: command.payload,
       runId,

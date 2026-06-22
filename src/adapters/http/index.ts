@@ -2,6 +2,7 @@ export * from "./actor";
 export * from "./audit-api";
 export * from "./errors";
 export * from "./file-api";
+export * from "./job-api";
 export * from "./print-api";
 export * from "./report-api";
 export * from "./request";

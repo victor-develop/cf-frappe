@@ -7,7 +7,10 @@ import {
   deterministicIds,
   DocumentService,
   fixedClock,
+  createJobRegistry,
   InMemoryDocumentStore,
+  InMemoryJobExecutionLog,
+  JobHistoryService,
   QueryService,
   SYSTEM_MANAGER_ROLE
 } from "../../src";
@@ -306,6 +309,44 @@ describe("Desk app", () => {
       version: 2,
       grants: []
     });
+  });
+
+  it("renders job definitions and execution history from the Desk admin surface", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
+    const services = createServices();
+    const executionLog = new InMemoryJobExecutionLog();
+    const jobs = createJobRegistry({
+      jobs: [{ name: "reports.daily", description: "Build reports", handler: () => undefined }]
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      jobs: new JobHistoryService({ registry: jobs, executionLog }),
+      actor: () => admin
+    });
+    const message = {
+      tenantId: "acme",
+      jobName: "reports.daily",
+      payload: {},
+      runId: "job_001",
+      idempotencyKey: "reports.daily:job_001",
+      enqueuedAt: now,
+      metadata: {}
+    };
+    await executionLog.begin(message, now);
+    await executionLog.complete(message, "2026-01-01T00:01:00.000Z", { rows: 3 });
+
+    const response = await app.request("/desk/admin/jobs?status=succeeded");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Jobs");
+    expect(html).toContain("reports.daily");
+    expect(html).toContain("Build reports");
+    expect(html).toContain("reports.daily:job_001");
+    expect(html).toContain("succeeded");
+    expect(html).toContain("{&quot;rows&quot;:3}");
   });
 
   it("uses the Desk error boundary for non-admin user-permission access", async () => {

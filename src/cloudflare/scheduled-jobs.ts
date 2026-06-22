@@ -15,6 +15,7 @@ export interface ScheduledJobContext<TEnv = unknown> {
 export interface ScheduledJobDefinition<TEnv = unknown> {
   readonly cron: string;
   readonly jobName: string;
+  readonly tenantId?: string | ((context: ScheduledJobContext<TEnv>) => MaybePromise<string>);
   readonly payload?: JobPayload | ((context: ScheduledJobContext<TEnv>) => MaybePromise<JobPayload>);
   readonly metadata?: DocumentData | ((context: ScheduledJobContext<TEnv>) => MaybePromise<DocumentData>);
   readonly idempotencyKey?: string | ((context: ScheduledJobContext<TEnv>) => MaybePromise<string>);
@@ -55,6 +56,7 @@ async function dispatchCommand<TEnv>(
   context: ScheduledJobContext<TEnv>
 ): Promise<DispatchJobCommand> {
   const payload = await resolveValue(schedule.payload, context, {});
+  const tenantId = await resolveValue(schedule.tenantId, context, undefined);
   const metadata = await resolveValue(schedule.metadata, context, {});
   const idempotencyKey =
     schedule.idempotencyKey === undefined
@@ -62,6 +64,7 @@ async function dispatchCommand<TEnv>(
       : await resolveValue(schedule.idempotencyKey, context, "");
   return {
     jobName: schedule.jobName,
+    ...(tenantId === undefined ? {} : { tenantId }),
     payload,
     idempotencyKey,
     metadata: {

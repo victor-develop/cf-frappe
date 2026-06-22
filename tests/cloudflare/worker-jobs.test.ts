@@ -3,9 +3,11 @@ import {
   createJobRegistry,
   deterministicIds,
   fixedClock,
+  InMemoryJobExecutionLog,
   InMemoryJobQueue,
   type AggregateCoordinatorRpc,
   type CloudFrappeRuntimeServices,
+  type JobMessage,
   type JobQueue,
   type RpcDurableObjectNamespace
 } from "../../src";
@@ -91,6 +93,63 @@ describe("CloudFrappe Worker jobs", () => {
     ).rejects.toThrow("queue unavailable");
     expect(noRetry).not.toHaveBeenCalled();
   });
+
+  it("shares configured job execution history with the Desk admin surface", async () => {
+    const executionLog = new InMemoryJobExecutionLog();
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => ({ id: "admin@example.com", roles: ["System Manager"], tenantId: "acme" }),
+      jobs: {
+        registry: createJobRegistry<CloudFrappeRuntimeServices>({
+          jobs: [{ name: "reports.daily", handler: () => "done" }]
+        }),
+        queue: () => new InMemoryJobQueue(),
+        executionLog: () => executionLog,
+        clock: fixedClock(now)
+      }
+    });
+    const env = { DB: fakeD1(), AGGREGATES: fakeNamespace() };
+    const message = {
+      tenantId: "acme",
+      jobName: "reports.daily",
+      payload: {},
+      runId: "job_001",
+      idempotencyKey: "reports.daily:job_001",
+      enqueuedAt: now,
+      metadata: {}
+    };
+
+    await worker.queue?.(
+      {
+        queue: "jobs",
+        metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
+        messages: [
+          {
+            id: "msg_001",
+            timestamp: new Date(now),
+            body: message,
+            attempts: 1,
+            ack: vi.fn(),
+            retry: vi.fn()
+          } as unknown as Message<JobMessage>
+        ],
+        retryAll: vi.fn(),
+        ackAll: vi.fn()
+      },
+      env,
+      fakeExecutionContext()
+    );
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/desk/admin/jobs?status=succeeded"),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("reports.daily:job_001");
+    expect(html).toContain("succeeded");
+  });
 });
 
 function fakeNamespace(): RpcDurableObjectNamespace<AggregateCoordinatorRpc> {
@@ -139,6 +198,10 @@ function fakeD1(): D1Database {
       throw new Error("Not implemented");
     }
   } as unknown as D1Database;
+}
+
+function cfRequest(url: string, init?: RequestInit): Parameters<NonNullable<ReturnType<typeof createCloudFrappeWorker>["fetch"]>>[0] {
+  return new Request(url, init) as unknown as Parameters<NonNullable<ReturnType<typeof createCloudFrappeWorker>["fetch"]>>[0];
 }
 
 function fakeExecutionContext(): ExecutionContext {

@@ -2,6 +2,7 @@ import { AuditService } from "../application/audit-service";
 import { JobExecutionError } from "../application/job-errors";
 import { JobDispatcher } from "../application/job-dispatcher";
 import { JobExecutor } from "../application/job-executor";
+import { JobHistoryService } from "../application/job-history-service";
 import { DocumentHistoryService } from "../application/document-history-service";
 import { PrintService } from "../application/print-service";
 import { QueryService } from "../application/query-service";
@@ -120,14 +121,16 @@ export function createCloudFrappeWorker<
   const jobOptions = options.jobs;
   if (jobOptions) {
     handler.queue = (batch, env) => {
-      const runtime = jobsForEnv(jobRuntimes, jobOptions, env, appsForEnv(runtimeApps, options, env).services);
+      const apps = appsForEnv(runtimeApps, options, env);
+      const runtime = jobsForEnv(jobRuntimes, jobOptions, env, apps.services, apps.jobExecutionLog);
       return processCloudflareJobBatch(batch, {
         executor: runtime.executor,
         ...(jobOptions.retry === undefined ? {} : { retry: jobOptions.retry })
       });
     };
     handler.scheduled = async (controller, env) => {
-      const runtime = jobsForEnv(jobRuntimes, jobOptions, env, appsForEnv(runtimeApps, options, env).services);
+      const apps = appsForEnv(runtimeApps, options, env);
+      const runtime = jobsForEnv(jobRuntimes, jobOptions, env, apps.services, apps.jobExecutionLog);
       try {
         const messages = await dispatchScheduledJobs({
           controller,
@@ -154,6 +157,7 @@ interface RuntimeApps {
   readonly app: ReturnType<typeof createResourceApi>;
   readonly desk: ReturnType<typeof createDeskApp>;
   readonly services: CloudFrappeRuntimeServices;
+  readonly jobExecutionLog?: JobExecutionLog;
 }
 
 interface JobRuntime<TResources> {
@@ -216,6 +220,11 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
   const servicesWithRealtime: CloudFrappeRuntimeServices = realtime
     ? { ...services, realtime }
     : services;
+  const jobOptions = options.jobs;
+  const jobExecutionLog = jobOptions?.executionLog?.(env, servicesWithRealtime);
+  const jobHistory = jobExecutionLog && jobOptions
+    ? new JobHistoryService({ registry: jobOptions.registry, executionLog: jobExecutionLog })
+    : undefined;
   const actor = (request: Request) => options.actor(request, env);
   const app = createResourceApi({
     registry: options.registry,
@@ -230,6 +239,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     actor,
     ...(options.maxJsonBytes ? { maxJsonBytes: options.maxJsonBytes } : {}),
     ...(files === undefined ? {} : { files }),
+    ...(jobHistory === undefined ? {} : { jobs: jobHistory }),
     ...(options.files?.maxFileBytes === undefined ? {} : { maxFileBytes: options.files.maxFileBytes })
   });
   const desk = createDeskApp({
@@ -241,9 +251,15 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     savedFilters,
     userPermissions,
     reports,
+    ...(jobHistory === undefined ? {} : { jobs: jobHistory }),
     actor
   });
-  const runtimeApps = { app, desk, services: servicesWithRealtime };
+  const runtimeApps = {
+    app,
+    desk,
+    services: servicesWithRealtime,
+    ...(jobExecutionLog === undefined ? {} : { jobExecutionLog })
+  };
   cache.set(env, runtimeApps);
   return runtimeApps;
 }
@@ -252,7 +268,8 @@ function jobsForEnv<TEnv extends CloudFrappeEnv, TResources>(
   cache: WeakMap<object, JobRuntime<TResources>>,
   options: CloudFrappeJobOptions<TEnv, TResources>,
   env: TEnv,
-  services: CloudFrappeRuntimeServices
+  services: CloudFrappeRuntimeServices,
+  sharedExecutionLog?: JobExecutionLog
 ): JobRuntime<TResources> {
   const cached = cache.get(env);
   if (cached) {
@@ -261,7 +278,7 @@ function jobsForEnv<TEnv extends CloudFrappeEnv, TResources>(
 
   const queue = options.queue(env, services);
   const resources = options.resources?.(env, services) ?? (services as TResources);
-  const executionLog = options.executionLog?.(env, services);
+  const executionLog = sharedExecutionLog ?? options.executionLog?.(env, services);
   const dispatcher = new JobDispatcher({
     registry: options.registry,
     queue,

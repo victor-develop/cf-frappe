@@ -3,6 +3,7 @@ import type { AuditService } from "../../application/audit-service";
 import type { DocumentCommandExecutor } from "../../application/document-service";
 import type { DocumentHistoryService } from "../../application/document-history-service";
 import type { FileService } from "../../application/file-service";
+import type { JobHistoryService } from "../../application/job-history-service";
 import type { PrintService } from "../../application/print-service";
 import { QueryService } from "../../application/query-service";
 import type { ReportService } from "../../application/report-service";
@@ -15,6 +16,7 @@ import type { ActorResolver } from "./actor";
 import { createAuditApi } from "./audit-api";
 import { toErrorResponse } from "./errors";
 import { createFileApi } from "./file-api";
+import { createJobApi } from "./job-api";
 import { createPrintApi } from "./print-api";
 import { createReportApi } from "./report-api";
 import { listFiltersFromUrl, parseOptionalInteger, readJsonObject, requestMetadata } from "./request";
@@ -32,6 +34,7 @@ export interface ResourceApiOptions {
   readonly prints?: PrintService;
   readonly reports?: ReportService;
   readonly audit?: AuditService;
+  readonly jobs?: JobHistoryService;
   readonly userPermissions?: UserPermissionService;
   readonly maxFileBytes?: number;
 }
@@ -113,6 +116,16 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       "/",
       createAuditApi({
         audit: options.audit,
+        actor: resolveActor
+      })
+    );
+  }
+
+  if (options.jobs) {
+    app.route(
+      "/",
+      createJobApi({
+        jobs: options.jobs,
         actor: resolveActor
       })
     );

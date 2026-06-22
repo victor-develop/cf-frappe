@@ -24,6 +24,7 @@ export interface D1MigrationPlanOptions {
 }
 
 export const D1_CORE_MIGRATION_ID = "0001_cf_frappe_core";
+export const D1_JOB_EXECUTION_MIGRATION_ID = "0002_cf_frappe_job_executions";
 
 export const D1_CORE_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
   {
@@ -95,6 +96,37 @@ export const D1_CORE_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
   }
 ];
 
+export const D1_JOB_EXECUTION_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
+  {
+    name: "create_cf_frappe_job_executions",
+    sql:
+      "CREATE TABLE IF NOT EXISTS cf_frappe_job_executions (" +
+      "tenant_id TEXT NOT NULL, " +
+      "idempotency_key TEXT NOT NULL, " +
+      "job_name TEXT NOT NULL, " +
+      "run_id TEXT NOT NULL, " +
+      "status TEXT NOT NULL, " +
+      "started_at TEXT NOT NULL, " +
+      "finished_at TEXT, " +
+      "result_json TEXT, " +
+      "error TEXT, " +
+      "PRIMARY KEY (tenant_id, idempotency_key)" +
+      ");"
+  },
+  {
+    name: "index_cf_frappe_job_executions_history",
+    sql:
+      "CREATE INDEX IF NOT EXISTS idx_cf_frappe_job_executions_history " +
+      "ON cf_frappe_job_executions(tenant_id, job_name, status, started_at);"
+  },
+  {
+    name: "index_cf_frappe_job_executions_started_at",
+    sql:
+      "CREATE INDEX IF NOT EXISTS idx_cf_frappe_job_executions_started_at " +
+      "ON cf_frappe_job_executions(tenant_id, started_at);"
+  }
+];
+
 export function planD1ProjectionIndexes(
   doctypes: readonly DocTypeDefinition[]
 ): readonly PlannedSqlStatement[] {
@@ -134,6 +166,11 @@ export function planD1Migrations(
           id: D1_CORE_MIGRATION_ID,
           label: "cf-frappe event/projection tables",
           statements: D1_CORE_SCHEMA_STATEMENTS
+        }),
+        defineD1Migration({
+          id: D1_JOB_EXECUTION_MIGRATION_ID,
+          label: "cf-frappe job execution history",
+          statements: D1_JOB_EXECUTION_SCHEMA_STATEMENTS
         })
       ]
     : [];

@@ -1,4 +1,5 @@
 import type { JobHandlerResult, JobRegistry } from "../core/jobs";
+import { DEFAULT_TENANT_ID } from "../core/types";
 import type { Clock } from "../ports/clock";
 import { systemClock } from "../ports/clock";
 import type { JobExecutionLog } from "../ports/job-execution-log";
@@ -42,6 +43,7 @@ export class JobExecutor<TResources = unknown> {
 
     try {
       const result = await definition.handler({
+        tenantId: message.tenantId ?? DEFAULT_TENANT_ID,
         jobName: message.jobName,
         payload: message.payload,
         runId: message.runId,

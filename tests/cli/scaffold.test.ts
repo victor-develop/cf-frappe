@@ -40,7 +40,8 @@ describe("cf-frappe CLI scaffold", () => {
       "src/models.ts",
       "src/worker.ts",
       "migrations/0001_cf_frappe_core.sql",
-      "migrations/0002_task_indexes.sql"
+      "migrations/0002_cf_frappe_job_executions.sql",
+      "migrations/0003_task_indexes.sql"
     ]);
 
     const packageJson = JSON.parse(await readFile(join(target, "package.json"), "utf8")) as {
@@ -76,7 +77,10 @@ describe("cf-frappe CLI scaffold", () => {
     await expect(readFile(join(target, "migrations/0001_cf_frappe_core.sql"), "utf8")).resolves.toContain(
       "CREATE TABLE IF NOT EXISTS cf_frappe_events"
     );
-    await expect(readFile(join(target, "migrations/0002_task_indexes.sql"), "utf8")).resolves.toContain(
+    await expect(readFile(join(target, "migrations/0002_cf_frappe_job_executions.sql"), "utf8")).resolves.toContain(
+      "CREATE TABLE IF NOT EXISTS cf_frappe_job_executions"
+    );
+    await expect(readFile(join(target, "migrations/0003_task_indexes.sql"), "utf8")).resolves.toContain(
       "idx_cf_frappe_documents_task_workflow_state_priority_ea45bef5"
     );
   });

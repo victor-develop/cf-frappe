@@ -13,6 +13,7 @@ export interface JobRetryPolicy {
 }
 
 export interface JobHandlerContext<TPayload extends JobPayload = JobPayload, TResources = unknown> {
+  readonly tenantId?: string;
   readonly jobName: JobName;
   readonly payload: TPayload;
   readonly runId: string;

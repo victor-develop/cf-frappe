@@ -2,6 +2,7 @@ import type { JobName, JobPayload } from "../core/jobs";
 import type { DocumentData } from "../core/types";
 
 export interface JobMessage<TPayload extends JobPayload = JobPayload> {
+  readonly tenantId?: string;
   readonly jobName: JobName;
   readonly payload: TPayload;
   readonly runId: string;
@@ -11,6 +12,7 @@ export interface JobMessage<TPayload extends JobPayload = JobPayload> {
 }
 
 export interface DispatchJobCommand<TPayload extends JobPayload = JobPayload> {
+  readonly tenantId?: string;
   readonly jobName: JobName;
   readonly payload: TPayload;
   readonly idempotencyKey?: string;

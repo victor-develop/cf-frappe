@@ -59,6 +59,7 @@ function parseJobMessage(value: unknown): JobMessage | null {
     return null;
   }
   if (
+    (value.tenantId !== undefined && typeof value.tenantId !== "string") ||
     typeof value.jobName !== "string" ||
     typeof value.runId !== "string" ||
     typeof value.idempotencyKey !== "string" ||
@@ -69,6 +70,7 @@ function parseJobMessage(value: unknown): JobMessage | null {
     return null;
   }
   return {
+    ...(value.tenantId === undefined ? {} : { tenantId: value.tenantId }),
     jobName: value.jobName,
     payload: value.payload,
     runId: value.runId,

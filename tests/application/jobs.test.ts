@@ -6,10 +6,12 @@ import {
   fixedClock,
   InMemoryJobExecutionLog,
   InMemoryJobQueue,
+  JobHistoryService,
   JobDispatcher,
   JobExecutor,
   permanentJobError,
-  retryableJobError
+  retryableJobError,
+  SYSTEM_MANAGER_ROLE
 } from "../../src";
 import { now } from "../helpers";
 
@@ -33,6 +35,7 @@ describe("JobDispatcher", () => {
     });
 
     expect(message).toEqual({
+      tenantId: "default",
       jobName: "email.digest",
       payload: { account: "acme" },
       runId: "job_001",
@@ -78,14 +81,105 @@ describe("JobExecutor", () => {
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler).toHaveBeenCalledWith(
       expect.objectContaining({
+        tenantId: "default",
         payload: { week: "2026-W01" },
         resources: { service: "documents" },
         attempt: 1
       })
     );
-    expect(executionLog.get("reports.weekly:2026-W01")).toMatchObject({
+    await expect(executionLog.get("reports.weekly:2026-W01")).resolves.toMatchObject({
+      tenantId: "default",
       status: "succeeded",
       result: "done"
+    });
+  });
+});
+
+describe("JobHistoryService", () => {
+  it("lists job definitions and filtered execution history for admins", async () => {
+    const registry = createJobRegistry({
+      jobs: [
+        {
+          name: "reports.daily",
+          description: "Build the daily report",
+          retry: { maxAttempts: 3, baseDelaySeconds: 30 },
+          handler: () => undefined
+        },
+        { name: "email.digest", handler: () => undefined }
+      ]
+    });
+    const executionLog = new InMemoryJobExecutionLog();
+    const service = new JobHistoryService({ registry, executionLog });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const failedMessage = jobMessage("email.digest", "job_001", "acme");
+    const succeededMessage = jobMessage("reports.daily", "job_002", "acme");
+
+    await executionLog.begin(failedMessage, "2026-01-01T00:00:00.000Z");
+    await executionLog.fail(failedMessage, "2026-01-01T00:01:00.000Z", new Error("mail service down"));
+    await executionLog.begin(succeededMessage, "2026-01-01T00:02:00.000Z");
+    await executionLog.complete(succeededMessage, "2026-01-01T00:03:00.000Z", { count: 7 });
+
+    await expect(service.dashboard(admin, { status: "failed", limit: 10 })).resolves.toEqual({
+      jobs: [
+        { name: "email.digest" },
+        {
+          name: "reports.daily",
+          description: "Build the daily report",
+          retry: { maxAttempts: 3, baseDelaySeconds: 30 }
+        }
+      ],
+      filters: { status: "failed" },
+      limit: 10,
+      executions: [
+        expect.objectContaining({
+          tenantId: "acme",
+          idempotencyKey: "email.digest:job_001",
+          jobName: "email.digest",
+          status: "failed",
+          error: "mail service down"
+        })
+      ]
+    });
+  });
+
+  it("keeps job execution history scoped to the actor tenant", async () => {
+    const executionLog = new InMemoryJobExecutionLog();
+    const service = new JobHistoryService({
+      registry: createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] }),
+      executionLog
+    });
+    const acme = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const other = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "other" };
+    const acmeMessage = jobMessage("reports.daily", "job_001", "acme");
+    const otherMessage = jobMessage("reports.daily", "job_001", "other");
+
+    await executionLog.begin(acmeMessage, "2026-01-01T00:00:00.000Z");
+    await executionLog.complete(acmeMessage, "2026-01-01T00:01:00.000Z", "acme");
+    await executionLog.begin(otherMessage, "2026-01-01T00:02:00.000Z");
+    await executionLog.complete(otherMessage, "2026-01-01T00:03:00.000Z", "other");
+
+    await expect(service.dashboard(acme, { limit: 10 })).resolves.toMatchObject({
+      executions: [{ tenantId: "acme", result: "acme" }]
+    });
+    await expect(service.get(other, "reports.daily:job_001")).resolves.toMatchObject({
+      tenantId: "other",
+      result: "other"
+    });
+  });
+
+  it("rejects non-admin job history access and invalid filters", async () => {
+    const service = new JobHistoryService({
+      registry: createJobRegistry(),
+      executionLog: new InMemoryJobExecutionLog()
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+
+    await expect(service.dashboard({ id: "owner@example.com", roles: ["User"], tenantId: "acme" })).rejects.toMatchObject({
+      code: "PERMISSION_DENIED"
+    });
+    await expect(service.dashboard(admin, { status: "waiting" })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Unknown job execution status 'waiting'"
     });
   });
 });
@@ -112,3 +206,15 @@ describe("job retry classification", () => {
     expect(classifyJobError(badRequest("invalid"), {}, 1)).toEqual({ action: "fail" });
   });
 });
+
+function jobMessage(jobName: string, runId: string, tenantId?: string) {
+  return {
+    ...(tenantId === undefined ? {} : { tenantId }),
+    jobName,
+    payload: {},
+    runId,
+    idempotencyKey: `${jobName}:${runId}`,
+    enqueuedAt: now,
+    metadata: {}
+  };
+}

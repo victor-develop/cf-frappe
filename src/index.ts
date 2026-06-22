@@ -10,6 +10,7 @@ export * from "./application/file-service";
 export * from "./application/job-dispatcher";
 export * from "./application/job-errors";
 export * from "./application/job-executor";
+export * from "./application/job-history-service";
 export * from "./application/print-service";
 export * from "./application/query-service";
 export * from "./application/realtime";

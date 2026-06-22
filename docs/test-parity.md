@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the client script metadata slice:
+As of the durable job execution history slice:
 
-- Test files: `46`
-- Vitest cases: `319`
+- Test files: `48`
+- Vitest cases: `332`
 
 ## Implication
 

@@ -47,7 +47,10 @@ describe("D1MigrationRunner", () => {
     const result = await runner.apply(migrations);
 
     expect(result.applied).toEqual([]);
-    expect(result.skipped.map((migration) => migration.id)).toEqual(["0001_cf_frappe_core"]);
+    expect(result.skipped.map((migration) => migration.id)).toEqual([
+      "0001_cf_frappe_core",
+      "0002_cf_frappe_job_executions"
+    ]);
   });
 
   it("rejects duplicate migration ids when listing pending migrations", async () => {

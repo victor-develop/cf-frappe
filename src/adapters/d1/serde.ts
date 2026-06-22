@@ -1,4 +1,5 @@
-import type { DocumentData, DocumentSnapshot, DomainEvent } from "../../core/types";
+import type { DocumentData, DocumentSnapshot, DomainEvent, JsonValue } from "../../core/types";
+import type { JobExecutionRecord } from "../../ports/job-execution-log";
 
 export interface EventRow {
   readonly id: string;
@@ -23,6 +24,18 @@ export interface DocumentRow {
   readonly data_json: string;
   readonly created_at: string;
   readonly updated_at: string;
+}
+
+export interface JobExecutionRow {
+  readonly tenant_id: string;
+  readonly idempotency_key: string;
+  readonly job_name: string;
+  readonly run_id: string;
+  readonly status: JobExecutionRecord["status"];
+  readonly started_at: string;
+  readonly finished_at: string | null;
+  readonly result_json: string | null;
+  readonly error: string | null;
 }
 
 export function eventFromRow(row: EventRow): DomainEvent {
@@ -52,5 +65,20 @@ export function documentFromRow(row: DocumentRow): DocumentSnapshot {
     data: JSON.parse(row.data_json) as DocumentData,
     createdAt: row.created_at,
     updatedAt: row.updated_at
+  };
+}
+
+export function jobExecutionFromRow(row: JobExecutionRow): JobExecutionRecord {
+  const result = row.result_json === null ? undefined : JSON.parse(row.result_json) as JsonValue;
+  return {
+    idempotencyKey: row.idempotency_key,
+    tenantId: row.tenant_id,
+    jobName: row.job_name,
+    runId: row.run_id,
+    status: row.status,
+    startedAt: row.started_at,
+    ...(row.finished_at === null ? {} : { finishedAt: row.finished_at }),
+    ...(result === undefined ? {} : { result }),
+    ...(row.error === null ? {} : { error: row.error })
   };
 }

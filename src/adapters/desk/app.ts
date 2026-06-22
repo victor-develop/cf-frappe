@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { DocumentCommandExecutor } from "../../application/document-service";
 import type { DocumentHistoryService } from "../../application/document-history-service";
+import type { JobHistoryService } from "../../application/job-history-service";
 import type { PrintService } from "../../application/print-service";
 import { QueryService } from "../../application/query-service";
 import type { ReportFilters, ReportService } from "../../application/report-service";
@@ -31,6 +32,7 @@ import {
   renderErrorPanel,
   renderDocumentTimeline,
   renderFormView,
+  renderJobAdmin,
   renderListView,
   renderNotFound,
   renderReportList,
@@ -50,6 +52,7 @@ export interface DeskAppOptions {
   readonly savedFilters?: SavedListFilterService;
   readonly userPermissions?: UserPermissionService;
   readonly reports?: ReportService;
+  readonly jobs?: JobHistoryService;
   readonly actor: ActorResolver;
 }
 
@@ -100,6 +103,32 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         doctypes,
         reports,
         body: renderUserPermissionAdmin(state)
+      })
+    );
+  });
+
+  app.get("/desk/admin/jobs", async (c) => {
+    const jobs = requireJobs(options);
+    const actor = await options.actor(c.req.raw);
+    const url = new URL(c.req.url);
+    const jobName = url.searchParams.get("job") ?? undefined;
+    const runId = url.searchParams.get("run_id") ?? undefined;
+    const status = url.searchParams.get("status") ?? undefined;
+    const limit = parseOptionalInteger(url.searchParams.get("limit") ?? undefined);
+    const dashboard = await jobs.dashboard(actor, {
+      ...(jobName === undefined ? {} : { jobName }),
+      ...(runId === undefined ? {} : { runId }),
+      ...(status === undefined ? {} : { status }),
+      ...(limit === undefined ? {} : { limit })
+    });
+    const doctypes = options.queries.listDoctypes(actor);
+    const reports = listReports(options, actor);
+    return html(
+      renderDeskLayout({
+        title: "Jobs",
+        doctypes,
+        reports,
+        body: renderJobAdmin(dashboard)
       })
     );
   });
@@ -652,6 +681,13 @@ function requireUserPermissions(options: DeskAppOptions): UserPermissionService 
     throw new FrameworkError("DOCUMENT_NOT_FOUND", "User permissions are not enabled", { status: 404 });
   }
   return options.userPermissions;
+}
+
+function requireJobs(options: DeskAppOptions): JobHistoryService {
+  if (!options.jobs) {
+    throw new FrameworkError("JOB_NOT_FOUND", "Jobs are not enabled", { status: 404 });
+  }
+  return options.jobs;
 }
 
 function lifecycleActionsFor(
