@@ -7,7 +7,9 @@ import {
   fixedClock,
   InMemoryDocumentStore,
   InMemoryFileStorage,
-  QueryService
+  ModelBackedUserPermissionGrantValidator,
+  QueryService,
+  UserPermissionService
 } from "../../src";
 import type { FileStorage, PutFileObjectCommand } from "../../src";
 import { guest, now, owner } from "../helpers";
@@ -46,6 +48,118 @@ describe("FileService", () => {
     await expect(new Response((await services.storage.get("acme/files/file_object-invoice.pdf"))?.body).text()).resolves.toBe(
       "hello"
     );
+  });
+
+  it("lists readable file metadata with attachment filters", async () => {
+    const services = createFileServices(
+      ["create-1", "create-2", "create-3"],
+      ["object-1", "object-2", "object-3"]
+    );
+    const publicFile = await services.files.upload({
+      actor: otherUser,
+      filename: "public.txt",
+      body: "public",
+      isPrivate: false
+    });
+    await services.files.upload({
+      actor: otherUser,
+      filename: "private-other.txt",
+      body: "private"
+    });
+    const attached = await services.files.upload({
+      actor: owner,
+      filename: "attached.txt",
+      body: "attached",
+      attachedTo: { doctype: "File", name: publicFile.snapshot.name }
+    });
+
+    const dashboard = await services.files.dashboard(owner);
+    expect(dashboard).toMatchObject({ limit: 50, filters: {} });
+    expect(dashboard.files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: attached.snapshot.name,
+          filename: "attached.txt",
+          attachedTo: { doctype: "File", name: publicFile.snapshot.name },
+          deletable: true
+        }),
+        expect.objectContaining({
+          name: publicFile.snapshot.name,
+          filename: "public.txt",
+          deletable: false
+        })
+      ])
+    );
+    expect(dashboard.files).toHaveLength(2);
+    await expect(
+      services.files.dashboard(owner, {
+        attachedToDoctype: "File",
+        attachedToName: publicFile.snapshot.name,
+        limit: 10
+      })
+    ).resolves.toMatchObject({
+      files: [{ name: attached.snapshot.name, deletable: true }],
+      limit: 10,
+      filters: { attachedToDoctype: "File", attachedToName: publicFile.snapshot.name }
+    });
+  });
+
+  it("over-fetches permissioned file dashboard pages until the readable limit is filled", async () => {
+    const services = createFileServices(
+      ["create-1", "create-2", "create-3"],
+      ["object-1", "object-2", "object-3"]
+    );
+    await services.files.upload({
+      actor: otherUser,
+      filename: "private-first.txt",
+      body: "private"
+    });
+    const visibleOne = await services.files.upload({
+      actor: otherUser,
+      filename: "public-one.txt",
+      body: "one",
+      isPrivate: false
+    });
+    const visibleTwo = await services.files.upload({
+      actor: owner,
+      filename: "owned-two.txt",
+      body: "two"
+    });
+
+    await expect(services.files.dashboard(owner, { limit: 2 })).resolves.toMatchObject({
+      files: [
+        { name: visibleOne.snapshot.name, filename: "public-one.txt" },
+        { name: visibleTwo.snapshot.name, filename: "owned-two.txt" }
+      ],
+      limit: 2
+    });
+  });
+
+  it("applies event-sourced user permissions to file dashboard metadata", async () => {
+    const services = createFileServices(["create-1", "create-2"], ["object-1", "object-2"]);
+    const admin = { id: "admin@example.com", roles: ["System Manager"], tenantId: "acme" };
+    const allowed = await services.files.upload({
+      actor: otherUser,
+      filename: "allowed.txt",
+      body: "allowed",
+      isPrivate: false
+    });
+    await services.files.upload({
+      actor: otherUser,
+      filename: "denied.txt",
+      body: "denied",
+      isPrivate: false
+    });
+    await services.userPermissions.allow({
+      actor: admin,
+      userId: owner.id,
+      targetDoctype: "File",
+      targetName: allowed.snapshot.name
+    });
+
+    await expect(services.files.dashboard(owner)).resolves.toMatchObject({
+      files: [{ name: allowed.snapshot.name, filename: "allowed.txt" }]
+    });
   });
 
   it("enforces File permissions when downloading private files", async () => {
@@ -173,26 +287,33 @@ describe("FileService", () => {
   });
 });
 
-function createFileServices(ids: readonly string[] = ["create"]) {
+function createFileServices(ids: readonly string[] = ["create"], fileIds: readonly string[] = ["object"]) {
   const registry = createRegistry({ doctypes: [fileDocType] });
   const store = new InMemoryDocumentStore();
   const storage = new InMemoryFileStorage();
+  const userPermissions = new UserPermissionService({
+    events: store,
+    clock: fixedClock(now),
+    ids: deterministicIds(["user-permission-event-1", "user-permission-event-2", "user-permission-event-3"]),
+    validator: new ModelBackedUserPermissionGrantValidator({ registry, events: store })
+  });
   const documents = new DocumentService({
     registry,
     store,
+    userPermissions,
     clock: fixedClock(now),
     ids: deterministicIds(ids)
   });
-  const queries = new QueryService({ registry, projections: store });
+  const queries = new QueryService({ registry, projections: store, userPermissions });
   const files = new FileService({
     registry,
     documents,
     queries,
     storage,
     clock: fixedClock(now),
-    ids: deterministicIds(["object"])
+    ids: deterministicIds(fileIds)
   });
-  return { registry, store, storage, documents, queries, files };
+  return { registry, store, storage, documents, queries, userPermissions, files };
 }
 
 class FailingDeleteStorage implements FileStorage {

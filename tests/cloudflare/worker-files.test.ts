@@ -51,6 +51,66 @@ describe("CloudFrappe Worker files", () => {
       "hello"
     );
   });
+
+  it("exposes the Desk file manager when file support is configured", async () => {
+    const worker = createCloudFrappeWorker({
+      registry: createRegistry({ doctypes: [fileDocType] }),
+      actor: () => owner,
+      files: {
+        storage: () => new InMemoryFileStorage(),
+        clock: fixedClock(now),
+        ids: deterministicIds(["object"])
+      }
+    });
+    const env = { DB: fakeD1(), AGGREGATES: fakeNamespace([]) };
+
+    const home = await worker.fetch!(
+      cfRequest("http://localhost/desk"),
+      env,
+      fakeExecutionContext()
+    );
+    expect(home.status).toBe(200);
+    await expect(home.text()).resolves.toContain('href="/desk/files"');
+
+    const files = await worker.fetch!(
+      cfRequest("http://localhost/desk/files"),
+      env,
+      fakeExecutionContext()
+    );
+    expect(files.status).toBe(200);
+    await expect(files.text()).resolves.toContain("Upload File");
+  });
+
+  it("applies configured file upload limits to the Desk file manager", async () => {
+    const storage = new InMemoryFileStorage();
+    const worker = createCloudFrappeWorker({
+      registry: createRegistry({ doctypes: [fileDocType] }),
+      actor: () => owner,
+      files: {
+        storage: () => storage,
+        maxFileBytes: 4,
+        clock: fixedClock(now),
+        ids: deterministicIds(["object"])
+      }
+    });
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/desk/files", {
+        method: "POST",
+        headers: {
+          "content-type": "multipart/form-data; boundary=oversized",
+          "content-length": "99"
+        },
+        body: "--oversized--"
+      }),
+      { DB: fakeD1(), AGGREGATES: fakeNamespace([]) },
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toContain("File exceeds 4 bytes");
+    expect(storage.has("acme/files/file_object-hello.txt")).toBe(false);
+  });
 });
 
 function fakeNamespace(names: string[]): RpcDurableObjectNamespace<AggregateCoordinatorRpc> {

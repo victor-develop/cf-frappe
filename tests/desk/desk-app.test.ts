@@ -6,9 +6,12 @@ import {
   defineDocType,
   deterministicIds,
   DocumentService,
+  fileDocType,
+  FileService,
   fixedClock,
   createJobRegistry,
   InMemoryDocumentStore,
+  InMemoryFileStorage,
   InMemoryJobExecutionLog,
   InMemoryJobQueue,
   JobDispatcher,
@@ -59,6 +62,40 @@ describe("Desk app", () => {
     return { app, services };
   }
 
+  function makeFileDesk(
+    actor = owner,
+    options: { readonly maxFileBytes?: number; readonly ids?: readonly string[]; readonly fileIds?: readonly string[] } = {}
+  ) {
+    const registry = createRegistry({ doctypes: [fileDocType] });
+    const store = new InMemoryDocumentStore();
+    const storage = new InMemoryFileStorage();
+    const documents = new DocumentService({
+      registry,
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(options.ids ?? ["create", "request-delete", "delete"])
+    });
+    const queries = new QueryService({ registry, projections: store });
+    const files = new FileService({
+      registry,
+      documents,
+      queries,
+      storage,
+      clock: fixedClock(now),
+      ids: deterministicIds(options.fileIds ?? ["object"]),
+      ...(options.maxFileBytes === undefined ? {} : { maxFileBytes: options.maxFileBytes })
+    });
+    const app = createDeskApp({
+      registry,
+      documents,
+      queries,
+      files,
+      ...(options.maxFileBytes === undefined ? {} : { maxFileBytes: options.maxFileBytes }),
+      actor: () => actor
+    });
+    return { app, registry, store, storage, documents, queries, files };
+  }
+
   it("renders a metadata-driven home page", async () => {
     const { app } = makeDesk();
 
@@ -102,6 +139,109 @@ describe("Desk app", () => {
     expect(csv.headers.get("x-cf-frappe-exported")).toBe("1");
     expect(csv.headers.get("x-cf-frappe-export-truncated")).toBe("false");
     await expect(csv.text()).resolves.toBe("Title,Priority,Body\nReport Note,High,For reporting");
+  });
+
+  it("renders a Desk file manager for upload, download, and delete workflows", async () => {
+    const { app, storage } = makeFileDesk();
+
+    const home = await app.request("/desk");
+    expect(home.status).toBe(200);
+    await expect(home.text()).resolves.toContain('href="/desk/files"');
+
+    const uploadForm = new FormData();
+    uploadForm.append("file", new Blob(["hello"], { type: "text/plain" }), "hello.txt");
+    uploadForm.set("is_private", "1");
+    const uploaded = await app.request("/desk/files", {
+      method: "POST",
+      headers: { "content-length": "512" },
+      body: uploadForm
+    });
+    expect(uploaded.status).toBe(303);
+    expect(uploaded.headers.get("location")).toBe("/desk/files");
+
+    const list = await app.request("/desk/files");
+    expect(list.status).toBe(200);
+    const html = await list.text();
+    expect(html).toContain("hello.txt");
+    expect(html).toContain("/desk/files/file_object/content");
+    expect(html).toContain('formaction="/desk/files/file_object/delete"');
+
+    const downloaded = await app.request("/desk/files/file_object/content");
+    expect(downloaded.status).toBe(200);
+    expect(downloaded.headers.get("content-disposition")).toBe('attachment; filename="hello.txt"');
+    await expect(downloaded.text()).resolves.toBe("hello");
+
+    const deleted = await app.request("/desk/files/file_object/delete", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(deleted.status).toBe(303);
+    expect(storage.has("acme/files/file_object-hello.txt")).toBe(false);
+  });
+
+  it("rejects oversized Desk file uploads before parsing multipart content", async () => {
+    const { app, storage } = makeFileDesk(owner, { maxFileBytes: 4 });
+
+    const response = await app.request("/desk/files", {
+      method: "POST",
+      headers: {
+        "content-type": "multipart/form-data; boundary=oversized",
+        "content-length": "99"
+      },
+      body: "--oversized--"
+    });
+
+    expect(response.status).toBe(400);
+    const html = await response.text();
+    expect(html).toContain("File exceeds 4 bytes");
+    expect(storage.has("acme/files/file_object-hello.txt")).toBe(false);
+  });
+
+  it("requires Desk file uploads to declare content length before parsing multipart content", async () => {
+    const { app, storage } = makeFileDesk();
+
+    const response = await app.request("/desk/files", {
+      method: "POST",
+      headers: {
+        "content-type": "multipart/form-data; boundary=missing-length"
+      },
+      body: "--missing-length--"
+    });
+
+    expect(response.status).toBe(411);
+    const html = await response.text();
+    expect(html).toContain("content-length is required for file uploads");
+    expect(storage.has("acme/files/file_object-hello.txt")).toBe(false);
+  });
+
+  it("enforces File permissions for Desk content and delete routes", async () => {
+    const services = makeFileDesk(owner);
+    const uploaded = await services.files.upload({
+      actor: owner,
+      filename: "private.txt",
+      body: "secret",
+      contentType: "text/plain"
+    });
+    const guestApp = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      files: services.files,
+      actor: () => guest
+    });
+
+    const downloaded = await guestApp.request(`/desk/files/${uploaded.snapshot.name}/content`);
+    expect(downloaded.status).toBe(403);
+    await expect(downloaded.text()).resolves.toContain("cannot read File");
+
+    const deleted = await guestApp.request(`/desk/files/${uploaded.snapshot.name}/delete`, {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(deleted.status).toBe(403);
+    expect(services.storage.has("acme/files/file_object-private.txt")).toBe(true);
   });
 
   it("renders list and create form pages", async () => {

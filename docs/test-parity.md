@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the scheduler administration slice:
+As of the Desk file manager slice:
 
 - Test files: `48`
-- Vitest cases: `344`
+- Vitest cases: `354`
 
 ## Implication
 

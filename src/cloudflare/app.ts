@@ -291,6 +291,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     registry: options.registry,
     documents,
     prints,
+    ...(files === undefined ? {} : { files }),
     queries: restrictedQueries,
     timeline: restrictedHistory,
     savedFilters,
@@ -299,6 +300,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources>(
     ...(jobHistory === undefined ? {} : { jobs: jobHistory }),
     ...(jobRetry === undefined ? {} : { jobRetry }),
     ...(jobSchedules === undefined ? {} : { jobSchedules }),
+    ...(options.files?.maxFileBytes === undefined ? {} : { maxFileBytes: options.files.maxFileBytes }),
     actor
   });
   const runtimeApps = {

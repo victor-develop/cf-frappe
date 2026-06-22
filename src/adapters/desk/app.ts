@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { DocumentCommandExecutor } from "../../application/document-service";
 import type { DocumentHistoryService } from "../../application/document-history-service";
+import type { FileService } from "../../application/file-service";
 import type { JobHistoryService } from "../../application/job-history-service";
 import type { JobRetryPort } from "../../application/job-retry-service";
 import type { JobScheduleService } from "../../application/job-schedule-service";
@@ -32,6 +33,7 @@ import {
   renderDeskHome,
   renderDeskLayout,
   renderErrorPanel,
+  renderFileManager,
   renderDocumentTimeline,
   renderFormView,
   renderJobAdmin,
@@ -50,6 +52,7 @@ export interface DeskAppOptions {
   readonly registry: ModelRegistry;
   readonly documents: DocumentCommandExecutor;
   readonly prints?: PrintService;
+  readonly files?: FileService;
   readonly queries: QueryService;
   readonly timeline?: DocumentHistoryService;
   readonly savedFilters?: SavedListFilterService;
@@ -58,6 +61,7 @@ export interface DeskAppOptions {
   readonly jobs?: JobHistoryService;
   readonly jobRetry?: JobRetryPort;
   readonly jobSchedules?: JobScheduleService;
+  readonly maxFileBytes?: number;
   readonly actor: ActorResolver;
 }
 
@@ -75,6 +79,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         title: "Home",
         doctypes,
         reports,
+        showFiles: options.files !== undefined,
         body: renderDeskHome(doctypes, reports)
       })
     );
@@ -89,9 +94,86 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         title: "Reports",
         doctypes,
         reports,
+        showFiles: options.files !== undefined,
         body: renderReportList(reports)
       })
     );
+  });
+
+  app.get("/desk/files", async (c) => {
+    const files = requireFiles(options);
+    const actor = await options.actor(c.req.raw);
+    const url = new URL(c.req.url);
+    const limit = parseOptionalInteger(url.searchParams.get("limit") ?? undefined);
+    const attachedToDoctype = url.searchParams.get("attached_to_doctype") ?? undefined;
+    const attachedToName = url.searchParams.get("attached_to_name") ?? undefined;
+    const dashboard = await files.dashboard(actor, {
+      ...(attachedToDoctype === undefined ? {} : { attachedToDoctype }),
+      ...(attachedToName === undefined ? {} : { attachedToName }),
+      ...(limit === undefined ? {} : { limit })
+    });
+    const doctypes = options.queries.listDoctypes(actor);
+    const reports = listReports(options, actor);
+    return html(
+      renderDeskLayout({
+        title: "Files",
+        doctypes,
+        reports,
+        showFiles: true,
+        body: renderFileManager(dashboard)
+      })
+    );
+  });
+
+  app.post("/desk/files", async (c) => {
+    const files = requireFiles(options);
+    const actor = await options.actor(c.req.raw);
+    try {
+      preflightDeskFileUpload(c.req.raw, options.maxFileBytes ?? 25 * 1024 * 1024);
+      const form = await parseDeskFileUpload(c.req.raw);
+      await files.upload({
+        actor,
+        filename: form.filename,
+        body: form.body,
+        contentType: form.contentType,
+        isPrivate: form.isPrivate,
+        ...(form.attachedTo === undefined ? {} : { attachedTo: form.attachedTo }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect("/desk/files", 303);
+    } catch (error) {
+      return renderDeskFileFailure(options, c.req.raw, actor, error);
+    }
+  });
+
+  app.get("/desk/files/:name/content", async (c) => {
+    const files = requireFiles(options);
+    const actor = await options.actor(c.req.raw);
+    const downloaded = await files.download({ actor, name: c.req.param("name") });
+    const headers = new Headers();
+    headers.set("content-type", downloaded.object.metadata.contentType ?? "application/octet-stream");
+    headers.set("content-length", String(downloaded.object.metadata.size));
+    if (downloaded.object.metadata.httpEtag) {
+      headers.set("etag", downloaded.object.metadata.httpEtag);
+    }
+    const filename = typeof downloaded.snapshot.data.filename === "string"
+      ? downloaded.snapshot.data.filename
+      : downloaded.snapshot.name;
+    headers.set("content-disposition", `attachment; filename="${filename.replace(/["\\]/g, "_")}"`);
+    return new Response(downloaded.object.body, { headers });
+  });
+
+  app.post("/desk/files/:name/delete", async (c) => {
+    const files = requireFiles(options);
+    const actor = await options.actor(c.req.raw);
+    const expectedVersion = await parseDeskExpectedVersion(c.req.raw);
+    await files.delete({
+      actor,
+      name: c.req.param("name"),
+      ...(expectedVersion === undefined ? {} : { expectedVersion }),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.redirect("/desk/files", 303);
   });
 
   app.get("/desk/admin/user-permissions", async (c) => {
@@ -751,6 +833,50 @@ function requireJobSchedules(options: DeskAppOptions): JobScheduleService {
   return options.jobSchedules;
 }
 
+function requireFiles(options: DeskAppOptions): FileService {
+  if (!options.files) {
+    throw new FrameworkError("DOCUMENT_NOT_FOUND", "Files are not enabled", { status: 404 });
+  }
+  return options.files;
+}
+
+function preflightDeskFileUpload(request: Request, maxFileBytes: number): void {
+  const contentLength = request.headers.get("content-length");
+  if (contentLength === null) {
+    throw new FrameworkError("BAD_REQUEST", "content-length is required for file uploads", { status: 411 });
+  }
+  const parsed = Number(contentLength);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new FrameworkError("BAD_REQUEST", "content-length must be a non-negative number", { status: 400 });
+  }
+  if (parsed > maxFileBytes) {
+    throw new FrameworkError("BAD_REQUEST", `File exceeds ${maxFileBytes} bytes`, { status: 400 });
+  }
+}
+
+async function renderDeskFileFailure(
+  options: DeskAppOptions,
+  request: Request,
+  actor: Actor,
+  error: unknown
+): Promise<Response> {
+  const files = requireFiles(options);
+  const dashboard = await files.dashboard(actor).catch(() => ({ files: [], limit: 50, filters: {} }));
+  const doctypes = options.queries.listDoctypes(actor);
+  const reports = listReports(options, actor);
+  const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
+  return html(
+    renderDeskLayout({
+      title: "Files",
+      doctypes,
+      reports,
+      showFiles: true,
+      body: renderFileManager(dashboard, { error: message })
+    }),
+    error instanceof FrameworkError ? error.status : 500
+  );
+}
+
 function lifecycleActionsFor(
   actor: Actor,
   doctype: DocTypeDefinition,
@@ -844,6 +970,50 @@ interface ParsedDeskUserPermission {
   readonly targetName: string;
   readonly applicableDoctypes: readonly string[];
   readonly expectedVersion?: number;
+}
+
+interface ParsedDeskFileUpload {
+  readonly filename: string;
+  readonly body: Blob;
+  readonly contentType: string;
+  readonly isPrivate: boolean;
+  readonly attachedTo?: {
+    readonly doctype: string;
+    readonly name: string;
+  };
+}
+
+async function parseDeskFileUpload(request: Request): Promise<ParsedDeskFileUpload> {
+  const form = await request.formData();
+  const file = form.get("file");
+  if (!(file instanceof Blob) || file.size === 0) {
+    throw new FrameworkError("BAD_REQUEST", "file is required", { status: 400 });
+  }
+  const filename = fileNameFromFormValue(file);
+  const attachedToDoctype = stringFormValue(form, "attached_to_doctype").trim();
+  const attachedToName = stringFormValue(form, "attached_to_name").trim();
+  if ((attachedToDoctype && !attachedToName) || (!attachedToDoctype && attachedToName)) {
+    throw new FrameworkError("BAD_REQUEST", "attached_to_doctype and attached_to_name must be provided together", {
+      status: 400
+    });
+  }
+  return {
+    filename,
+    body: file,
+    contentType: file.type || "application/octet-stream",
+    isPrivate: form.get("is_private") !== null,
+    ...(attachedToDoctype && attachedToName
+      ? { attachedTo: { doctype: attachedToDoctype, name: attachedToName } }
+      : {})
+  };
+}
+
+function fileNameFromFormValue(file: Blob): string {
+  const value = (file as Blob & { readonly name?: string }).name;
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new FrameworkError("BAD_REQUEST", "filename is required", { status: 400 });
+  }
+  return value;
 }
 
 async function parseDeskComment(request: Request): Promise<ParsedDeskComment> {

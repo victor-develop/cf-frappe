@@ -5,7 +5,13 @@ import { FILE_DOCTYPE_NAME } from "../core/file-doctype";
 import { can } from "../core/permissions";
 import type { ModelRegistry } from "../core/registry";
 import { validateDocumentData } from "../core/schema";
-import { DEFAULT_TENANT_ID, type Actor, type DocumentData, type DocumentSnapshot } from "../core/types";
+import {
+  DEFAULT_TENANT_ID,
+  SYSTEM_MANAGER_ROLE,
+  type Actor,
+  type DocumentData,
+  type DocumentSnapshot
+} from "../core/types";
 import type { Clock } from "../ports/clock";
 import { systemClock } from "../ports/clock";
 import type { FileContent, FileStorage, StoredFileObject } from "../ports/file-storage";
@@ -56,6 +62,37 @@ export interface UploadedFile {
 export interface DownloadedFile {
   readonly snapshot: DocumentSnapshot;
   readonly object: StoredFileObject;
+}
+
+export interface FileDashboardQuery {
+  readonly attachedToDoctype?: string;
+  readonly attachedToName?: string;
+  readonly limit?: number;
+}
+
+export interface FileDashboardEntry {
+  readonly name: string;
+  readonly filename: string;
+  readonly contentType: string;
+  readonly size: number;
+  readonly isPrivate: boolean;
+  readonly uploadedBy: string;
+  readonly uploadedAt: string;
+  readonly expectedVersion: number;
+  readonly deletable: boolean;
+  readonly attachedTo?: {
+    readonly doctype: string;
+    readonly name: string;
+  };
+}
+
+export interface FileDashboard {
+  readonly files: readonly FileDashboardEntry[];
+  readonly limit: number;
+  readonly filters: {
+    readonly attachedToDoctype?: string;
+    readonly attachedToName?: string;
+  };
 }
 
 export class FileService {
@@ -137,6 +174,62 @@ export class FileService {
       await this.storage.delete(key).catch(() => undefined);
       throw error;
     }
+  }
+
+  async dashboard(actor: Actor, query: FileDashboardQuery = {}): Promise<FileDashboard> {
+    const limit = normalizeLimit(query.limit);
+    const filters = {
+      ...(query.attachedToDoctype === undefined || query.attachedToDoctype === ""
+        ? {}
+        : { attachedToDoctype: query.attachedToDoctype }),
+      ...(query.attachedToName === undefined || query.attachedToName === ""
+        ? {}
+        : { attachedToName: query.attachedToName })
+    };
+    const listFilters = [
+      ...(filters.attachedToDoctype === undefined
+        ? []
+        : [{ field: "attached_to_doctype", operator: "eq" as const, value: filters.attachedToDoctype }]),
+      ...(filters.attachedToName === undefined
+        ? []
+        : [{ field: "attached_to_name", operator: "eq" as const, value: filters.attachedToName }])
+    ];
+    const doctype = this.registry.get(this.fileDoctype);
+    const files: FileDashboardEntry[] = [];
+    const tenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
+    const systemActor: Actor = { id: "__file_dashboard__", roles: [SYSTEM_MANAGER_ROLE], tenantId };
+    const batchLimit = Math.max(limit, 50);
+    let offset = 0;
+    let total = 0;
+    do {
+      const result = await this.queries.listDocuments(systemActor, this.fileDoctype, {
+        tenantId,
+        filters: listFilters,
+        limit: batchLimit,
+        offset
+      });
+      total = result.total;
+      const readable = await Promise.all(
+        result.data.map(async (snapshot) => ({
+          snapshot,
+          readable: await this.queries.canReadDocument(actor, doctype, snapshot)
+        }))
+      );
+      files.push(
+        ...readable
+          .filter((entry) => entry.readable)
+          .map(({ snapshot }) => ({
+            ...fileDashboardEntry(snapshot),
+            deletable: can(actor, doctype, "delete", snapshot)
+          }))
+      );
+      offset += batchLimit;
+    } while (files.length < limit && offset < total);
+    return {
+      files: files.slice(0, limit),
+      limit,
+      filters
+    };
   }
 
   async download(command: DownloadFileCommand): Promise<DownloadedFile> {
@@ -227,6 +320,44 @@ export class FileService {
     }
     await this.queries.getDocument(actor, attachedTo.doctype, attachedTo.name, tenantId);
   }
+}
+
+function fileDashboardEntry(snapshot: DocumentSnapshot): Omit<FileDashboardEntry, "deletable"> {
+  const attachedToDoctype = stringData(snapshot, "attached_to_doctype");
+  const attachedToName = stringData(snapshot, "attached_to_name");
+  return {
+    name: snapshot.name,
+    filename: stringData(snapshot, "filename") || snapshot.name,
+    contentType: stringData(snapshot, "content_type"),
+    size: numberData(snapshot, "size"),
+    isPrivate: snapshot.data.is_private !== false,
+    uploadedBy: stringData(snapshot, "uploaded_by"),
+    uploadedAt: stringData(snapshot, "uploaded_at"),
+    expectedVersion: snapshot.version,
+    ...(attachedToDoctype && attachedToName
+      ? { attachedTo: { doctype: attachedToDoctype, name: attachedToName } }
+      : {})
+  };
+}
+
+function stringData(snapshot: DocumentSnapshot, field: string): string {
+  const value = snapshot.data[field];
+  return typeof value === "string" ? value : "";
+}
+
+function numberData(snapshot: DocumentSnapshot, field: string): number {
+  const value = snapshot.data[field];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function normalizeLimit(limit: number | undefined): number {
+  if (limit === undefined) {
+    return 50;
+  }
+  if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+    throw badRequest("File dashboard limit must be between 1 and 200");
+  }
+  return limit;
 }
 
 function byteLength(body: FileContent): number {

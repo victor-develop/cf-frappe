@@ -239,7 +239,10 @@ export class QueryService {
     return readable.filter((entry) => entry.readable).map((entry) => entry.document);
   }
 
-  private async canReadDocument(actor: Actor, doctype: DocTypeDefinition, document: DocumentSnapshot): Promise<boolean> {
+  async canReadDocument(actor: Actor, doctype: DocTypeDefinition, document: DocumentSnapshot): Promise<boolean> {
+    if (document.docstatus === "deleted") {
+      return false;
+    }
     if (!can(actor, doctype, "read", document)) {
       return false;
     }

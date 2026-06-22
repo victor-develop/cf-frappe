@@ -59,6 +59,28 @@ describe("file api", () => {
       error: { code: "BAD_REQUEST", message: "File exceeds 4 bytes" }
     });
   });
+
+  it("does not expose File counts through the generic resource list", async () => {
+    const app = makeApp();
+    const uploaded = await app.request("/api/files?filename=private.txt", {
+      method: "POST",
+      headers: userHeaders("owner@example.com", "User"),
+      body: "secret"
+    });
+    expect(uploaded.status).toBe(201);
+
+    const listed = await app.request("/api/resource/File", {
+      headers: userHeaders("owner@example.com", "User")
+    });
+
+    expect(listed.status).toBe(403);
+    await expect(listed.json()).resolves.toMatchObject({
+      error: {
+        code: "PERMISSION_DENIED",
+        message: "Actor 'owner@example.com' cannot read File"
+      }
+    });
+  });
 });
 
 function makeApp(maxFileBytes = 1024) {

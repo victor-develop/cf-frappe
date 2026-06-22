@@ -26,7 +26,7 @@ The current slice is a working kernel:
 - metadata-defined reports, summaries, and charts over current projections
 - metadata-defined same-origin client scripts injected into generated Desk list/form pages
 - Cloudflare Queue/Cron background job primitives
-- R2-backed file attachments with event-sourced `File` metadata
+- R2-backed file attachments with event-sourced `File` metadata and Desk file manager workflows
 - Durable Object WebSocket realtime topics for document events
 - composable app manifests for packaging DocTypes, reports, print formats, and hooks
 - installable `cf-frappe init` starter scaffold for new Cloudflare apps
@@ -52,7 +52,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | Reports | metadata-defined report columns, filters, summaries, charts, API, and Desk pages |
 | Client scripts | `defineClientScript(...)` browser bundles attached to Desk list/form pages |
 | Background jobs | `JobRegistry`, Queue producers/consumers, and Cron dispatch |
-| File attachments | `File` DocType metadata plus R2 object storage |
+| File attachments | `File` DocType metadata plus R2 object storage and generated Desk file manager |
 | Realtime events | document commit events over Durable Object WebSocket topics |
 | Database tables | D1 append-only events plus current projections |
 | Migrations | metadata-planned D1 migrations with applied checksum journal |
@@ -284,6 +284,10 @@ When file support is enabled, the generated API also includes:
 
 The generated Desk UI includes:
 
+- `GET /desk/files`
+- `POST /desk/files`
+- `GET /desk/files/:name/content`
+- `POST /desk/files/:name/delete`
 - `GET /desk`
 - `GET /desk/print/:format/:name`
 - `GET /desk/reports`
@@ -553,7 +557,7 @@ Queue consumers process each message independently: malformed messages and perma
 
 ## File Attachments
 
-File bytes live in a `FileStorage` port; file metadata is a regular event-sourced `File` document. On Cloudflare, `R2FileStorage` stores bytes in R2 while `DocumentService` records filename, object key, size, content type, attachment target, uploader, privacy, and ETag.
+File bytes live in a `FileStorage` port; file metadata is a regular event-sourced `File` document. On Cloudflare, `R2FileStorage` stores bytes in R2 while `DocumentService` records filename, object key, size, content type, attachment target, uploader, privacy, and ETag. When file support is enabled, Desk adds `/desk/files` for file upload, readable file listing, content download, attachment filtering, and delete actions through the same `FileService` boundary.
 
 ```ts
 import {
@@ -593,7 +597,7 @@ Register `fileDocType` with your app registry, then bind R2 in `wrangler.jsonc`:
 }
 ```
 
-Uploads are buffered in this first slice so the framework always knows the object length before writing to R2. Multipart uploads and presigned direct browser uploads are intentionally left as future adapters over the same `FileStorage` boundary.
+Uploads are buffered in this first slice so the framework always knows the object length before writing to R2. Multipart chunking, presigned direct browser uploads, virus scanning hooks, and image transforms are intentionally left as future adapters over the same `FileStorage` boundary.
 
 ## Realtime
 
@@ -666,6 +670,7 @@ flowchart LR
   DESK --> QUERY
   DESK --> PRINTS
   DESK --> REPORTS
+  DESK --> FSVC
   CRON["Cron trigger"] --> JOBS["JobDispatcher"]
   QUEUE["Queue consumer"] --> EXEC["JobExecutor"]
   FILES["File API"] --> FSVC["FileService"]
@@ -721,11 +726,11 @@ This runs:
 - Vitest unit/API tests
 - declaration build
 
-Current suite: 344 tests across app manifests, client scripts, schema, permissions, signed sessions, user permissions, events, registry, services, naming series, document lifecycle, document timelines and diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, saved user filters, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, print templates, print letterheads, reports, report summaries, report charts, report exports, jobs, durable job execution history, retry administration, scheduler administration, files, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, D1 schema planning/migration application, and CLI starter scaffolding.
+Current suite: 354 tests across app manifests, client scripts, schema, permissions, signed sessions, user permissions, events, registry, services, naming series, document lifecycle, document timelines and diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, saved user filters, metadata-configured form/list views, child table validation, metadata-validated list filters, print formats, print templates, print letterheads, reports, report summaries, report charts, report exports, jobs, durable job execution history, retry administration, scheduler administration, files, Desk file manager workflows, realtime, D1/in-memory adapters, HTTP API, generated Desk UI, Durable Object command routing, Worker routing, WebSocket topic routing, Queue/Cron/R2 integration, D1 schema planning/migration application, and CLI starter scaffolding.
 
 ## Status
 
-This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, permissioned document timelines with field diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, signed session actor resolution, event-sourced user permissions with admin API/Desk management, app manifest composition, declarative client script injection, saved user filters, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives with durable execution history, retry administration, and basic scheduler administration, R2-backed file attachments, report charts/exports, custom print templates, reusable letterheads, Durable Object realtime topics, and an initial starter CLI exist, but richer chart controls, worker pools, richer scheduler controls, richer realtime presence, full user/login management, advanced file workflows, CLI-managed app installation, richer browser-side client APIs, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
+This is not Frappe parity yet. Basic generated Desk list/form/report/print pages, permissioned document timelines with field diffs, activity feed entries, admin audit search and deleted recovery, comments, assignments, tags, followers, signed session actor resolution, event-sourced user permissions with admin API/Desk management, app manifest composition, declarative client script injection, saved user filters, metadata-configured form and list views, metadata-planned D1 migrations, Cloudflare-native background job primitives with durable execution history, retry administration, and basic scheduler administration, R2-backed file attachments with a Desk file manager, report charts/exports, custom print templates, reusable letterheads, Durable Object realtime topics, and an initial starter CLI exist, but richer chart controls, worker pools, richer scheduler controls, richer realtime presence, full user/login management, advanced file workflows, CLI-managed app installation, richer browser-side client APIs, and a compatibility-sized test suite remain open. The current implementation is the event-sourced Cloudflare kernel needed to grow those surfaces without rewiring the foundation.
 
 ## References
 

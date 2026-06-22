@@ -20,6 +20,7 @@ import type {
   DocumentTags,
   DocumentTimeline
 } from "../../application/document-history-service";
+import type { FileDashboard } from "../../application/file-service";
 import type { JobExecutionDashboard } from "../../application/job-history-service";
 import type { JobScheduleDashboard } from "../../application/job-schedule-service";
 import type { ReportRunResult } from "../../application/report-service";
@@ -36,6 +37,7 @@ export interface DeskLayoutOptions {
   readonly body: string;
   readonly active?: string;
   readonly activeReport?: string;
+  readonly showFiles?: boolean;
   readonly doctypes: readonly DocTypeDefinition[];
   readonly reports?: readonly ReportDefinition[];
   readonly message?: string;
@@ -69,6 +71,7 @@ export function renderDeskLayout(options: DeskLayoutOptions): string {
     <nav>
       ${nav ? `<p class="nav-heading">DocTypes</p>${nav}` : ""}
       ${reportNav ? `<p class="nav-heading">Reports</p>${reportNav}` : ""}
+      ${options.showFiles ? `<p class="nav-heading">Files</p><a class="nav-link" href="/desk/files">Files</a>` : ""}
     </nav>
   </aside>
   <main id="main" class="main">
@@ -108,6 +111,71 @@ export function renderDeskHome(
     </div>
   </section>
   ${renderReportList(reports)}`;
+}
+
+export function renderFileManager(
+  dashboard: FileDashboard,
+  options: { readonly error?: string } = {}
+): string {
+  const rows = dashboard.files
+    .map((file) => {
+      const attachedTo = attachmentLabel(file);
+      return `<tr>
+        <td><a href="/desk/files/${encodeURIComponent(file.name)}/content">${escapeHtml(file.filename)}</a></td>
+        <td>${escapeHtml(file.name)}</td>
+        <td>${escapeHtml(file.contentType)}</td>
+        <td>${escapeHtml(formatBytes(file.size))}</td>
+        <td>${file.isPrivate ? "yes" : "no"}</td>
+        <td>${escapeHtml(attachedTo)}</td>
+        <td>${escapeHtml(file.uploadedBy)}</td>
+        <td>${escapeHtml(file.uploadedAt)}</td>
+        <td>${file.deletable ? renderFileDeleteAction(file) : ""}</td>
+      </tr>`;
+    })
+    .join("");
+  return `<form class="panel form file-upload" method="post" action="/desk/files" enctype="multipart/form-data">
+    <div class="form-head">
+      <h2>Upload File</h2>
+    </div>
+    ${options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : ""}
+    <div class="fields">
+      <label class="field"><span>File</span><input name="file" type="file" required></label>
+      <label class="field"><span>Attached To DocType</span><input name="attached_to_doctype" value="${escapeHtml(dashboard.filters.attachedToDoctype ?? "")}"></label>
+      <label class="field"><span>Attached To Name</span><input name="attached_to_name" value="${escapeHtml(dashboard.filters.attachedToName ?? "")}"></label>
+      <label class="field checkbox-field"><span>Private</span><input name="is_private" type="checkbox" value="1" checked></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Upload</button></div>
+  </form>
+  <form class="panel form list-filters" method="get" action="/desk/files">
+    <div class="fields">
+      <label class="field"><span>Attached To DocType</span><input name="attached_to_doctype" value="${escapeHtml(dashboard.filters.attachedToDoctype ?? "")}"></label>
+      <label class="field"><span>Attached To Name</span><input name="attached_to_name" value="${escapeHtml(dashboard.filters.attachedToName ?? "")}"></label>
+      <label class="field"><span>Limit</span><input name="limit" type="number" min="1" max="200" value="${String(dashboard.limit)}"></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Filter</button><a class="button" href="/desk/files">Clear</a></div>
+  </form>
+  <section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Filename</th><th>ID</th><th>Content Type</th><th>Size</th><th>Private</th><th>Attached To</th><th>Uploaded By</th><th>Uploaded At</th><th>Action</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="9" class="empty">No files found.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+function renderFileDeleteAction(file: FileDashboard["files"][number]): string {
+  return `<form class="inline-action" method="post">
+    <input type="hidden" name="expectedVersion" value="${String(file.expectedVersion)}">
+    <button class="button danger" type="submit" formaction="/desk/files/${encodeURIComponent(file.name)}/delete">Delete</button>
+  </form>`;
+}
+
+function attachmentLabel(file: FileDashboard["files"][number]): string {
+  if (!file.attachedTo) {
+    return "";
+  }
+  return `${file.attachedTo.doctype}/${file.attachedTo.name}`;
 }
 
 export function renderReportList(reports: readonly ReportDefinition[]): string {
@@ -1125,6 +1193,17 @@ function formatValue(value: JsonValue | undefined): string {
     return JSON.stringify(value);
   }
   return String(value);
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) {
+    return `${String(value)} B`;
+  }
+  const kib = value / 1024;
+  if (kib < 1024) {
+    return `${kib.toFixed(1)} KiB`;
+  }
+  return `${(kib / 1024).toFixed(1)} MiB`;
 }
 
 function formatFormValue(value: JsonValue | undefined): string {
