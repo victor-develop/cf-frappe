@@ -425,8 +425,8 @@ describe("Desk app", () => {
     await expect(builder.text()).resolves.toContain("No saved reports.");
   });
 
-  it("renders a Desk file manager for upload, download, and delete workflows", async () => {
-    const { app, storage } = makeFileDesk();
+  it("renders a Desk file manager for upload, metadata, download, and delete workflows", async () => {
+    const { app, storage } = makeFileDesk(owner, { ids: ["create", "metadata", "request-delete", "delete"] });
 
     const home = await app.request("/desk");
     expect(home.status).toBe(200);
@@ -448,16 +448,36 @@ describe("Desk app", () => {
     const html = await list.text();
     expect(html).toContain("hello.txt");
     expect(html).toContain("/desk/files/file_object/content");
+    expect(html).toContain('action="/desk/files/file_object/metadata"');
     expect(html).toContain('formaction="/desk/files/file_object/delete"');
+
+    const genericCommand = await app.request("/desk/File/file_object/command/updateMetadata", {
+      method: "POST",
+      body: new URLSearchParams({ filename: "bypass.txt", expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(genericCommand.status).toBe(403);
+
+    const metadata = await app.request("/desk/files/file_object/metadata", {
+      method: "POST",
+      body: new URLSearchParams({ filename: "renamed.txt", expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(metadata.status).toBe(303);
+    expect(metadata.headers.get("location")).toBe("/desk/files");
+
+    const renamedList = await app.request("/desk/files");
+    const renamedHtml = await renamedList.text();
+    expect(renamedHtml).toContain("renamed.txt");
 
     const downloaded = await app.request("/desk/files/file_object/content");
     expect(downloaded.status).toBe(200);
-    expect(downloaded.headers.get("content-disposition")).toBe('attachment; filename="hello.txt"');
+    expect(downloaded.headers.get("content-disposition")).toBe('attachment; filename="renamed.txt"');
     await expect(downloaded.text()).resolves.toBe("hello");
 
     const deleted = await app.request("/desk/files/file_object/delete", {
       method: "POST",
-      body: new URLSearchParams({ expectedVersion: "1" }),
+      body: new URLSearchParams({ expectedVersion: "2" }),
       headers: { "content-type": "application/x-www-form-urlencoded" }
     });
     expect(deleted.status).toBe(303);

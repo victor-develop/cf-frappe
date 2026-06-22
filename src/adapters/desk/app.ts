@@ -212,6 +212,26 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     }
   });
 
+  app.post("/desk/files/:name/metadata", async (c) => {
+    const files = requireFiles(options);
+    const actor = await options.actor(c.req.raw);
+    try {
+      const form = await parseDeskFileMetadataUpdate(c.req.raw);
+      await files.updateMetadata({
+        actor,
+        name: c.req.param("name"),
+        filename: form.filename,
+        isPrivate: form.isPrivate,
+        attachedTo: form.attachedTo,
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect("/desk/files", 303);
+    } catch (error) {
+      return renderDeskFileFailure(options, c.req.raw, actor, error);
+    }
+  });
+
   app.get("/desk/files/:name/content", async (c) => {
     const files = requireFiles(options);
     const actor = await options.actor(c.req.raw);
@@ -1116,12 +1136,19 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const formView = options.queries.getFormView(actor, doctype.name);
     const name = c.req.param("name");
     try {
+      const commandName = c.req.param("command");
+      const commandDefinition = doctype.commands?.find((item) => item.name === commandName);
+      if (commandDefinition?.internal) {
+        throw new FrameworkError("BAD_REQUEST", `${doctype.name} command '${commandName}' is internal`, {
+          status: 400
+        });
+      }
       const form = await parseDeskForm(c.req.raw, doctype, formView, (doctypeName) => options.registry.get(doctypeName));
       await options.documents.execute({
         actor,
         doctype: doctype.name,
         name,
-        command: c.req.param("command"),
+        command: commandName,
         input: form.data,
         ...(form.expectedVersion !== undefined ? { expectedVersion: form.expectedVersion } : {}),
         metadata: requestMetadata(c.req.raw)
@@ -1722,6 +1749,18 @@ interface ParsedDeskFileUpload {
   };
 }
 
+interface ParsedDeskFileMetadataUpdate {
+  readonly filename: string;
+  readonly isPrivate: boolean;
+  readonly attachedTo:
+    | {
+        readonly doctype: string;
+        readonly name: string;
+      }
+    | null;
+  readonly expectedVersion?: number;
+}
+
 interface ParsedDeskDataPatchApply {
   readonly limit?: number;
 }
@@ -1761,6 +1800,25 @@ async function parseDeskFileUpload(request: Request): Promise<ParsedDeskFileUplo
     ...(attachedToDoctype && attachedToName
       ? { attachedTo: { doctype: attachedToDoctype, name: attachedToName } }
       : {})
+  };
+}
+
+async function parseDeskFileMetadataUpdate(request: Request): Promise<ParsedDeskFileMetadataUpdate> {
+  const form = await request.formData();
+  const filename = stringFormValue(form, "filename");
+  const attachedToDoctype = stringFormValue(form, "attached_to_doctype").trim();
+  const attachedToName = stringFormValue(form, "attached_to_name").trim();
+  if ((attachedToDoctype && !attachedToName) || (!attachedToDoctype && attachedToName)) {
+    throw new FrameworkError("BAD_REQUEST", "attached_to_doctype and attached_to_name must be provided together", {
+      status: 400
+    });
+  }
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  return {
+    filename,
+    isPrivate: form.get("is_private") !== null,
+    attachedTo: attachedToDoctype && attachedToName ? { doctype: attachedToDoctype, name: attachedToName } : null,
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
   };
 }
 

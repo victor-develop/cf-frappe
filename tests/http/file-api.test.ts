@@ -80,6 +80,38 @@ describe("file api", () => {
         message: "Actor 'owner@example.com' cannot read File"
       }
     });
+
+    const updated = await app.request("/api/resource/File/file_object", {
+      method: "PUT",
+      headers: {
+        ...userHeaders("owner@example.com", "User"),
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ filename: "bypass.txt", expectedVersion: 1 })
+    });
+    expect(updated.status).toBe(403);
+    await expect(updated.json()).resolves.toMatchObject({
+      error: {
+        code: "PERMISSION_DENIED",
+        message: "Actor 'owner@example.com' cannot update File/file_object"
+      }
+    });
+
+    const commanded = await app.request("/api/resource/File/file_object/command/updateMetadata", {
+      method: "POST",
+      headers: {
+        ...userHeaders("owner@example.com", "User"),
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ filename: "bypass.txt", expectedVersion: 1 })
+    });
+    expect(commanded.status).toBe(400);
+    await expect(commanded.json()).resolves.toMatchObject({
+      error: {
+        code: "BAD_REQUEST",
+        message: "File command 'updateMetadata' is internal"
+      }
+    });
   });
 
   it("lists readable file metadata through the file dashboard endpoint", async () => {
@@ -153,6 +185,73 @@ describe("file api", () => {
     expect(badLimit.status).toBe(400);
     await expect(badLimit.json()).resolves.toMatchObject({
       error: { message: "File dashboard limit must be between 1 and 200" }
+    });
+  });
+
+  it("updates file metadata through the file API", async () => {
+    const app = makeApp(1024, ["create-1", "create-2", "metadata-1"], ["object-1", "object-2"]);
+    await app.request("/api/files?filename=target.txt&is_private=false", {
+      method: "POST",
+      headers: userHeaders("owner@example.com", "User"),
+      body: "target"
+    });
+    await app.request("/api/files?filename=private.txt", {
+      method: "POST",
+      headers: userHeaders("owner@example.com", "User"),
+      body: "secret"
+    });
+
+    const updated = await app.request("/api/files/file_object-2", {
+      method: "PATCH",
+      headers: {
+        ...userHeaders("owner@example.com", "User"),
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        filename: "renamed.txt",
+        is_private: false,
+        attached_to_doctype: "File",
+        attached_to_name: "file_object-1",
+        expectedVersion: 1
+      })
+    });
+
+    expect(updated.status).toBe(200);
+    await expect(updated.json()).resolves.toMatchObject({
+      data: {
+        name: "file_object-2",
+        version: 2,
+        data: {
+          filename: "renamed.txt",
+          key: "acme/files/file_object-2-private.txt",
+          is_private: false,
+          attached_to_doctype: "File",
+          attached_to_name: "file_object-1"
+        }
+      }
+    });
+
+    const guestDownload = await app.request("/api/files/file_object-2/content", {
+      headers: userHeaders("guest", "Guest")
+    });
+    expect(guestDownload.status).toBe(200);
+    expect(guestDownload.headers.get("content-disposition")).toBe('attachment; filename="renamed.txt"');
+
+    const guestList = await app.request("/api/files?attached_to_doctype=File&attached_to_name=file_object-1", {
+      headers: userHeaders("guest", "Guest")
+    });
+    expect(guestList.status).toBe(200);
+    await expect(guestList.json()).resolves.toMatchObject({
+      data: {
+        files: [
+          {
+            name: "file_object-2",
+            filename: "renamed.txt",
+            editable: false,
+            deletable: false
+          }
+        ]
+      }
     });
   });
 });

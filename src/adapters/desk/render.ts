@@ -164,7 +164,7 @@ export function renderFileManager(
         <td>${escapeHtml(attachedTo)}</td>
         <td>${escapeHtml(file.uploadedBy)}</td>
         <td>${escapeHtml(file.uploadedAt)}</td>
-        <td>${file.deletable ? renderFileDeleteAction(file) : ""}</td>
+        <td>${file.editable ? renderFileMetadataAction(file) : ""}${file.deletable ? renderFileDeleteAction(file) : ""}</td>
       </tr>`;
     })
     .join("");
@@ -197,6 +197,17 @@ export function renderFileManager(
       </table>
     </div>
   </section>`;
+}
+
+function renderFileMetadataAction(file: FileDashboard["files"][number]): string {
+  return `<form class="inline-action file-metadata-action" method="post" action="/desk/files/${encodeURIComponent(file.name)}/metadata">
+    <input type="hidden" name="expectedVersion" value="${String(file.expectedVersion)}">
+    <input aria-label="Filename" name="filename" value="${escapeHtml(file.filename)}">
+    <input aria-label="Attached To DocType" name="attached_to_doctype" value="${escapeHtml(file.attachedTo?.doctype ?? "")}">
+    <input aria-label="Attached To Name" name="attached_to_name" value="${escapeHtml(file.attachedTo?.name ?? "")}">
+    <label class="inline-checkbox"><span>Private</span><input name="is_private" type="checkbox" value="1"${file.isPrivate ? " checked" : ""}></label>
+    <button class="button" type="submit">Save</button>
+  </form>`;
 }
 
 function renderFileDeleteAction(file: FileDashboard["files"][number]): string {
@@ -1176,6 +1187,7 @@ export function renderFormView(
       : `/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(options.document?.name ?? "")}`;
   const title = options.mode === "create" ? `New ${labelFor(doctype)}` : options.document?.name ?? doctype.name;
   const canSave = options.mode === "create" || options.document?.docstatus === "draft";
+  const publicCommands = doctype.commands?.filter((command) => !command.internal) ?? [];
   const sections = formView.sections
     .map((section) =>
       renderFormSection(
@@ -1188,8 +1200,8 @@ export function renderFormView(
     )
     .join("");
   const commands =
-    options.mode === "update" && options.document?.docstatus === "draft" && doctype.commands?.length
-      ? `<section class="command-row" aria-label="Commands">${doctype.commands
+    options.mode === "update" && options.document?.docstatus === "draft" && publicCommands.length
+      ? `<section class="command-row" aria-label="Commands">${publicCommands
           .map(
             (command) =>
               `<button class="button" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(options.document?.name ?? "")}/command/${encodeURIComponent(command.name)}">${escapeHtml(command.name)}</button>`

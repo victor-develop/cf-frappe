@@ -47,7 +47,7 @@ export const fileDocType: DocTypeDefinition<FileDocumentData> = defineDocType<Fi
   permissions: [
     {
       roles: [SYSTEM_MANAGER_ROLE],
-      actions: ["read", "create", "update", "delete"]
+      actions: ["read", "create", "metadata", "update", "delete"]
     },
     {
       roles: ["User"],
@@ -65,6 +65,11 @@ export const fileDocType: DocTypeDefinition<FileDocumentData> = defineDocType<Fi
       when: ({ actor, document }) => document?.data.uploaded_by === actor.id
     },
     {
+      roles: ["User"],
+      actions: ["metadata"],
+      when: ({ actor, document }) => document?.data.uploaded_by === actor.id
+    },
+    {
       roles: ["Guest"],
       actions: ["read"],
       when: ({ document }) => document?.data.is_private === false
@@ -79,6 +84,13 @@ export const fileDocType: DocTypeDefinition<FileDocumentData> = defineDocType<Fi
         storage_state: "delete_requested",
         deletion_requested_at: now
       })
+    },
+    {
+      name: "updateMetadata",
+      eventType: "FileMetadataUpdated",
+      fields: ["filename", "is_private", "attached_to_doctype", "attached_to_name"],
+      internal: true,
+      permissionAction: "metadata"
     }
   ],
   indexes: [["attached_to_doctype", "attached_to_name"], ["uploaded_by"], ["is_private"]]

@@ -54,6 +54,19 @@ export interface DeleteFileCommand extends DownloadFileCommand {
   readonly metadata?: DocumentData;
 }
 
+export interface UpdateFileMetadataCommand extends DownloadFileCommand {
+  readonly filename?: string;
+  readonly isPrivate?: boolean;
+  readonly attachedTo?:
+    | {
+        readonly doctype: string;
+        readonly name: string;
+      }
+    | null;
+  readonly expectedVersion?: number;
+  readonly metadata?: DocumentData;
+}
+
 export interface UploadedFile {
   readonly snapshot: DocumentSnapshot;
   readonly object: StoredFileObject["metadata"];
@@ -79,6 +92,7 @@ export interface FileDashboardEntry {
   readonly uploadedBy: string;
   readonly uploadedAt: string;
   readonly expectedVersion: number;
+  readonly editable: boolean;
   readonly deletable: boolean;
   readonly attachedTo?: {
     readonly doctype: string;
@@ -220,6 +234,7 @@ export class FileService {
           .filter((entry) => entry.readable)
           .map(({ snapshot }) => ({
             ...fileDashboardEntry(snapshot),
+            editable: can(actor, doctype, "metadata", snapshot),
             deletable: can(actor, doctype, "delete", snapshot)
           }))
       );
@@ -230,6 +245,49 @@ export class FileService {
       limit,
       filters
     };
+  }
+
+  async updateMetadata(command: UpdateFileMetadataCommand): Promise<DocumentSnapshot> {
+    const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
+    const current = await this.queries.getDocument(command.actor, this.fileDoctype, command.name, tenantId);
+    const doctype = this.registry.get(this.fileDoctype);
+    if (!can(command.actor, doctype, "metadata", current)) {
+      throw permissionDenied(
+        `Actor '${command.actor.id}' cannot execute updateMetadata on ${this.fileDoctype}/${command.name}`
+      );
+    }
+    if (current.data.storage_state === "delete_requested") {
+      throw new FrameworkError("DOCUMENT_DELETED", `${this.fileDoctype}/${command.name} is pending deletion`, {
+        status: 410
+      });
+    }
+    const patch: DocumentData = {
+      ...(command.filename === undefined ? {} : { filename: sanitizeFilename(command.filename) }),
+      ...(command.isPrivate === undefined ? {} : { is_private: command.isPrivate })
+    };
+    if (command.attachedTo !== undefined) {
+      if (command.attachedTo === null) {
+        patch.attached_to_doctype = "";
+        patch.attached_to_name = "";
+      } else {
+        await this.validateAttachmentTarget(command.actor, tenantId, command.attachedTo);
+        patch.attached_to_doctype = command.attachedTo.doctype;
+        patch.attached_to_name = command.attachedTo.name;
+      }
+    }
+    if (Object.keys(patch).length === 0) {
+      throw badRequest("At least one file metadata field must be provided");
+    }
+    return this.documents.execute({
+      actor: command.actor,
+      doctype: this.fileDoctype,
+      name: command.name,
+      command: "updateMetadata",
+      input: patch,
+      ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+      ...(command.expectedVersion === undefined ? {} : { expectedVersion: command.expectedVersion }),
+      metadata: command.metadata ?? {}
+    });
   }
 
   async download(command: DownloadFileCommand): Promise<DownloadedFile> {
@@ -322,7 +380,7 @@ export class FileService {
   }
 }
 
-function fileDashboardEntry(snapshot: DocumentSnapshot): Omit<FileDashboardEntry, "deletable"> {
+function fileDashboardEntry(snapshot: DocumentSnapshot): Omit<FileDashboardEntry, "editable" | "deletable"> {
   const attachedToDoctype = stringData(snapshot, "attached_to_doctype");
   const attachedToName = stringData(snapshot, "attached_to_name");
   return {

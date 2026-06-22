@@ -162,6 +162,111 @@ describe("FileService", () => {
     });
   });
 
+  it("updates file metadata through an event-sourced command", async () => {
+    const services = createFileServices(
+      ["create-1", "create-2", "metadata-1"],
+      ["object-1", "object-2"]
+    );
+    const target = await services.files.upload({
+      actor: owner,
+      filename: "target.txt",
+      body: "target",
+      isPrivate: false
+    });
+    const uploaded = await services.files.upload({
+      actor: owner,
+      filename: "original.txt",
+      body: "content"
+    });
+
+    const updated = await services.files.updateMetadata({
+      actor: owner,
+      name: uploaded.snapshot.name,
+      filename: "renamed/final.txt",
+      isPrivate: false,
+      attachedTo: { doctype: "File", name: target.snapshot.name },
+      expectedVersion: 1
+    });
+
+    expect(updated).toMatchObject({
+      name: uploaded.snapshot.name,
+      version: 2,
+      data: {
+        filename: "renamed-final.txt",
+        key: "acme/files/file_object-2-original.txt",
+        is_private: false,
+        attached_to_doctype: "File",
+        attached_to_name: target.snapshot.name
+      }
+    });
+    expect(services.storage.has("acme/files/file_object-2-original.txt")).toBe(true);
+    await expect(
+      services.files.dashboard(owner, {
+        attachedToDoctype: "File",
+        attachedToName: target.snapshot.name
+      })
+    ).resolves.toMatchObject({
+      files: [
+        {
+          name: uploaded.snapshot.name,
+          filename: "renamed-final.txt",
+          editable: true,
+          deletable: true,
+          attachedTo: { doctype: "File", name: target.snapshot.name }
+        }
+      ]
+    });
+    await expect(services.files.download({ actor: guest, name: uploaded.snapshot.name })).resolves.toMatchObject({
+      snapshot: { data: { filename: "renamed-final.txt", is_private: false } }
+    });
+  });
+
+  it("validates metadata attachment targets before appending file metadata events", async () => {
+    const services = createFileServices(["create-1", "metadata-1"], ["object-1"]);
+    const uploaded = await services.files.upload({
+      actor: owner,
+      filename: "original.txt",
+      body: "content"
+    });
+
+    await expect(
+      services.files.updateMetadata({
+        actor: owner,
+        name: uploaded.snapshot.name,
+        attachedTo: { doctype: "File", name: "missing" },
+        expectedVersion: 1
+      })
+    ).rejects.toMatchObject({ code: "DOCUMENT_NOT_FOUND" });
+    const current = await services.queries.getDocument(owner, "File", uploaded.snapshot.name);
+    expect(current).toMatchObject({
+      version: 1,
+      data: { filename: "original.txt" }
+    });
+    expect(current.data).not.toHaveProperty("attached_to_doctype");
+    expect(current.data).not.toHaveProperty("attached_to_name");
+  });
+
+  it("denies metadata updates before validating requested attachment targets", async () => {
+    const services = createFileServices(["create-1"], ["object-1"]);
+    const uploaded = await services.files.upload({
+      actor: otherUser,
+      filename: "public.txt",
+      body: "public",
+      isPrivate: false
+    });
+
+    await expect(
+      services.files.updateMetadata({
+        actor: owner,
+        name: uploaded.snapshot.name,
+        attachedTo: { doctype: "File", name: "missing" }
+      })
+    ).rejects.toMatchObject({
+      code: "PERMISSION_DENIED",
+      message: `Actor '${owner.id}' cannot execute updateMetadata on File/${uploaded.snapshot.name}`
+    });
+  });
+
   it("enforces File permissions when downloading private files", async () => {
     const services = createFileServices();
     const uploaded = await services.files.upload({

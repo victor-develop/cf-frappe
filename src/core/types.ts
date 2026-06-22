@@ -50,6 +50,7 @@ export interface FieldDefinition {
 export type PermissionAction =
   | "read"
   | "create"
+  | "metadata"
   | "update"
   | "delete"
   | "submit"
@@ -111,6 +112,7 @@ export interface DomainCommandDefinition {
   readonly name: string;
   readonly eventType: string;
   readonly fields?: readonly string[];
+  readonly internal?: boolean;
   readonly roles?: readonly string[];
   readonly permissionAction?: PermissionAction;
   readonly buildPatch?: (context: DomainCommandContext) => DocumentData;

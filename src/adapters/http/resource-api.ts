@@ -148,6 +148,7 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       createFileApi({
         files: options.files,
         actor: resolveActor,
+        maxJsonBytes,
         ...(options.maxFileBytes === undefined ? {} : { maxFileBytes: options.maxFileBytes })
       })
     );
@@ -534,14 +535,20 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
 
   app.post("/api/resource/:doctype/:name/command/:command", async (c) => {
     const actor = await resolveActor(c.req.raw);
+    const doctype = options.registry.get(c.req.param("doctype"));
+    const commandName = c.req.param("command");
+    const commandDefinition = doctype.commands?.find((item) => item.name === commandName);
+    if (commandDefinition?.internal) {
+      throw badRequest(`${doctype.name} command '${commandName}' is internal`);
+    }
     const body = await readJson(c.req.raw, { allowEmpty: true, maxJsonBytes });
     const input = withoutKeys(body, ["expectedVersion"]);
     const expectedVersion = numberValue(body.expectedVersion);
     const snapshot = await options.documents.execute({
       actor,
-      doctype: c.req.param("doctype"),
+      doctype: doctype.name,
       name: c.req.param("name"),
-      command: c.req.param("command"),
+      command: commandName,
       input,
       ...(expectedVersion !== undefined ? { expectedVersion } : {}),
       metadata: requestMetadata(c.req.raw)

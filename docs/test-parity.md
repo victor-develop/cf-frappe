@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file metadata dashboard API slice:
+As of the file metadata update workflow slice:
 
 - Vitest files: `64`
-- Vitest cases: `522`
+- Vitest cases: `526`
 
 ## Implication
 
