@@ -20,7 +20,7 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the CLI app install wiring slice:
+As of the CLI app dependency metadata slice:
 
 - Vitest files: `59`
 - Vitest cases: `461`

@@ -1,6 +1,7 @@
 /// <reference types="node" />
 import { relative } from "node:path";
 import { installAppModule, AppInstallError } from "./app-install.js";
+import { PackageJsonError } from "./package-json.js";
 import { scaffoldProject, ScaffoldError } from "./scaffold.js";
 
 export interface CliIo {
@@ -23,7 +24,9 @@ interface InstallCommand {
   readonly kind: "install";
   readonly moduleSpecifier: string;
   readonly exportName?: string;
+  readonly dependencyVersion?: string;
   readonly localName?: string;
+  readonly saveDependency: boolean;
   readonly registryFile?: string;
 }
 
@@ -54,13 +57,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       const result = await installAppModule({
         cwd: io.cwd(),
         moduleSpecifier: command.moduleSpecifier,
+        saveDependency: command.saveDependency,
+        ...(command.dependencyVersion === undefined ? {} : { dependencyVersion: command.dependencyVersion }),
         ...(command.exportName === undefined ? {} : { exportName: command.exportName }),
         ...(command.localName === undefined ? {} : { localName: command.localName }),
         ...(command.registryFile === undefined ? {} : { registryFile: command.registryFile })
       });
-      io.stdout.write(
-        `Wired ${result.moduleSpecifier} as ${result.localName} into ${result.registryFile}\n`
-      );
+      io.stdout.write(installSuccessText(result));
       return 0;
     }
     const result = await scaffoldProject({
@@ -85,7 +88,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     );
     return 0;
   } catch (error) {
-    if (error instanceof ScaffoldError || error instanceof AppInstallError) {
+    if (error instanceof ScaffoldError || error instanceof AppInstallError || error instanceof PackageJsonError) {
       io.stderr.write(`cf-frappe: ${error.message}\n`);
       return 1;
     }
@@ -136,8 +139,10 @@ function parseInitArgs(argv: readonly string[]): ParsedCommand {
 
 function parseInstallArgs(argv: readonly string[]): ParsedCommand {
   let moduleSpecifier: string | undefined;
+  let dependencyVersion: string | undefined;
   let exportName: string | undefined;
   let localName: string | undefined;
+  let saveDependency = true;
   let registryFile: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -157,6 +162,15 @@ function parseInstallArgs(argv: readonly string[]): ParsedCommand {
       index += 1;
       continue;
     }
+    if (arg === "--version") {
+      const value = argv[index + 1];
+      if (value === undefined) {
+        return { kind: "invalid", message: "Missing value for --version" };
+      }
+      dependencyVersion = value;
+      index += 1;
+      continue;
+    }
     if (arg === "--as") {
       const value = argv[index + 1];
       if (value === undefined) {
@@ -164,6 +178,10 @@ function parseInstallArgs(argv: readonly string[]): ParsedCommand {
       }
       localName = value;
       index += 1;
+      continue;
+    }
+    if (arg === "--no-save") {
+      saveDependency = false;
       continue;
     }
     if (arg === "--registry") {
@@ -187,9 +205,14 @@ function parseInstallArgs(argv: readonly string[]): ParsedCommand {
   if (moduleSpecifier === undefined) {
     return { kind: "invalid", message: "Missing app module" };
   }
+  if (!saveDependency && dependencyVersion !== undefined) {
+    return { kind: "invalid", message: "Cannot combine --version with --no-save" };
+  }
   return {
     kind: "install",
     moduleSpecifier,
+    saveDependency,
+    ...(dependencyVersion === undefined ? {} : { dependencyVersion }),
     ...(exportName === undefined ? {} : { exportName }),
     ...(localName === undefined ? {} : { localName }),
     ...(registryFile === undefined ? {} : { registryFile })
@@ -202,14 +225,26 @@ function helpText(): string {
     "",
     "Usage:",
     "  cf-frappe init <directory> [--force]",
-    "  cf-frappe install <module> [--export <name>] [--as <localName>] [--registry <path>]",
+    "  cf-frappe install <module> [--version <range>] [--export <name>] [--as <localName>] [--registry <path>] [--no-save]",
     "  cf-frappe --help",
     "",
     "Commands:",
     "  init   Create a Cloudflare-ready cf-frappe starter app",
-    "  install   Wire an app module into a generated app registry",
+    "  install   Save and wire an app module into a generated app registry",
     ""
   ].join("\n");
+}
+
+function installSuccessText(result: Awaited<ReturnType<typeof installAppModule>>): string {
+  const lines = [`Wired ${result.moduleSpecifier} as ${result.localName} into ${result.registryFile}`];
+  if (result.dependency !== undefined) {
+    const status = result.dependency.changed ? "Saved" : "Kept";
+    lines.push(
+      `${status} dependency ${result.dependency.packageName}@${result.dependency.version} in ${result.dependency.packageJsonFile}`,
+      "Run your package manager to update node_modules and lockfile."
+    );
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 function displayPath(cwd: string, projectDirectory: string): string {

@@ -160,13 +160,14 @@ Client scripts live under \`public/assets\`; add them with \`defineClientScript(
 
 ## Apps
 
-The starter keeps installed app manifests in \`src/apps/index.ts\`. After installing an app package with npm, wire it into the registry with:
+The starter keeps installed app manifests in \`src/apps/index.ts\`. Save an app dependency and wire it into the registry with:
 
 \`\`\`bash
 npx cf-frappe install @acme/cf-frappe-crm
+npm install
 \`\`\`
 
-Use \`--export <name>\` for named exports and \`--as <localName>\` when you want a specific local identifier.
+Use \`--version <range>\` to pin the package, \`--export <name>\` for named exports, \`--as <localName>\` when you want a specific local identifier, and \`--no-save\` for local or workspace modules that are already managed outside \`package.json\`.
 
 ## Deploy
 

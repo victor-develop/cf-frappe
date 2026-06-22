@@ -1,6 +1,7 @@
 /// <reference types="node" />
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { planPackageDependencyUpdate, type PackageDependencyPlan } from "./package-json.js";
 
 const DEFAULT_REGISTRY_FILE = "src/apps/index.ts";
 const IMPORTS_START = "/* cf-frappe app imports:start */";
@@ -14,6 +15,9 @@ export interface InstallAppModuleOptions {
   readonly moduleSpecifier: string;
   readonly exportName?: string;
   readonly localName?: string;
+  readonly packageJsonFile?: string;
+  readonly dependencyVersion?: string;
+  readonly saveDependency?: boolean;
   readonly registryFile?: string;
 }
 
@@ -22,6 +26,14 @@ export interface InstallAppModuleResult {
   readonly moduleSpecifier: string;
   readonly localName: string;
   readonly exportName?: string;
+  readonly dependency?: InstallDependencyResult;
+}
+
+export interface InstallDependencyResult {
+  readonly packageJsonFile: string;
+  readonly packageName: string;
+  readonly version: string;
+  readonly changed: boolean;
 }
 
 export class AppInstallError extends Error {
@@ -48,17 +60,29 @@ export async function installAppModule(options: InstallAppModuleOptions): Promis
   if (source.includes(`from ${JSON.stringify(moduleSpecifier)}`)) {
     throw new AppInstallError(`App module '${moduleSpecifier}' is already installed`, "app-duplicate");
   }
-  if (new RegExp(`\\b${escapeRegExp(localName)}\\b`).test(blockBetween(source, APPS_START, APPS_END))) {
+  if (blockContainsIdentifier(blockBetween(source, APPS_START, APPS_END), localName)) {
     throw new AppInstallError(`App local name '${localName}' is already installed`, "app-duplicate");
   }
+  const dependencyPlan = options.saveDependency === false
+    ? undefined
+    : await planPackageDependencyUpdate({
+        moduleSpecifier,
+        ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+        ...(options.packageJsonFile === undefined ? {} : { packageJsonFile: options.packageJsonFile }),
+        ...(options.dependencyVersion === undefined ? {} : { version: options.dependencyVersion })
+      });
   const withImport = insertBeforeMarker(source, IMPORTS_END, `${importLine}\n`);
   const withApp = insertBeforeMarker(withImport, APPS_END, `  ${localName},\n`);
+  if (dependencyPlan !== undefined && dependencyPlan.changed) {
+    await writeFile(resolve(options.cwd ?? ".", dependencyPlan.packageJsonFile), dependencyPlan.contents, "utf8");
+  }
   await writeFile(registryPath, withApp, "utf8");
   return {
     registryFile,
     moduleSpecifier,
     localName,
-    ...(exportName === undefined ? {} : { exportName })
+    ...(exportName === undefined ? {} : { exportName }),
+    ...(dependencyPlan === undefined ? {} : { dependency: dependencyResult(dependencyPlan) })
   };
 }
 
@@ -75,6 +99,15 @@ function appImportLine(options: {
     return `import { ${options.exportName} } from ${specifier};`;
   }
   return `import { ${options.exportName} as ${options.localName} } from ${specifier};`;
+}
+
+function dependencyResult(plan: PackageDependencyPlan): InstallDependencyResult {
+  return {
+    packageJsonFile: plan.packageJsonFile,
+    packageName: plan.packageName,
+    version: plan.version,
+    changed: plan.changed
+  };
 }
 
 async function readRegistryFile(path: string): Promise<string> {
@@ -131,6 +164,10 @@ function localNameForModule(moduleSpecifier: string): string {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function blockContainsIdentifier(source: string, identifier: string): boolean {
+  return new RegExp(`(^|[^A-Za-z0-9_$])${escapeRegExp(identifier)}([^A-Za-z0-9_$]|$)`).test(source);
 }
 
 function isNodeError(error: unknown, code: string): boolean {

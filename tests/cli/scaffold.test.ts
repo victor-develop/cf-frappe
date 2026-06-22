@@ -147,19 +147,28 @@ describe("cf-frappe CLI scaffold", () => {
 
     const stdout = textBuffer();
     const stderr = textBuffer();
-    const exitCode = await runCli(["install", "@acme/cf-frappe-crm", "--export", "crmApp", "--as", "crm"], {
-      cwd: () => target,
-      stdout,
-      stderr
-    });
+    const exitCode = await runCli(
+      ["install", "@acme/cf-frappe-crm", "--version", "^1.2.3", "--export", "crmApp", "--as", "crm"],
+      {
+        cwd: () => target,
+        stdout,
+        stderr
+      }
+    );
 
     expect(exitCode).toBe(0);
     expect(stderr.text()).toBe("");
     expect(stdout.text()).toContain("Wired @acme/cf-frappe-crm as crm into src/apps/index.ts");
+    expect(stdout.text()).toContain("Saved dependency @acme/cf-frappe-crm@^1.2.3 in package.json");
+    expect(stdout.text()).toContain("Run your package manager to update node_modules and lockfile.");
     await expect(readFile(join(target, "src/apps/index.ts"), "utf8")).resolves.toContain(
       'import { crmApp as crm } from "@acme/cf-frappe-crm";'
     );
     await expect(readFile(join(target, "src/apps/index.ts"), "utf8")).resolves.toContain("  crm,");
+    const packageJsonAfterCrm = JSON.parse(await readFile(join(target, "package.json"), "utf8")) as {
+      readonly dependencies: Record<string, string>;
+    };
+    expect(packageJsonAfterCrm.dependencies["@acme/cf-frappe-crm"]).toBe("^1.2.3");
 
     await writeFile(
       join(target, "src/custom-apps.ts"),
@@ -193,6 +202,69 @@ describe("cf-frappe CLI scaffold", () => {
     await expect(readFile(join(target, "src/custom-apps.ts"), "utf8")).resolves.toContain(
       "  cfFrappeHelpdeskApp,"
     );
+    const packageJsonAfterHelpdesk = JSON.parse(await readFile(join(target, "package.json"), "utf8")) as {
+      readonly dependencies: Record<string, string>;
+    };
+    expect(packageJsonAfterHelpdesk.dependencies["@acme/cf-frappe-helpdesk"]).toBe("latest");
+
+    const localStdout = textBuffer();
+    const local = await runCli(["install", "./apps/local", "--as", "localApp", "--no-save"], {
+      cwd: () => target,
+      stdout: localStdout,
+      stderr: textBuffer()
+    });
+    expect(local).toBe(0);
+    expect(localStdout.text()).toContain("Wired ./apps/local as localApp into src/apps/index.ts");
+    expect(localStdout.text()).not.toContain("dependency");
+    const packageJsonAfterLocal = JSON.parse(await readFile(join(target, "package.json"), "utf8")) as {
+      readonly dependencies: Record<string, string>;
+    };
+    expect(packageJsonAfterLocal.dependencies["./apps/local"]).toBeUndefined();
+
+    const registryBeforeMalformedPackage = await readFile(join(target, "src/apps/index.ts"), "utf8");
+    await writeFile(
+      join(target, "package.json"),
+      `${JSON.stringify({ ...packageJsonAfterLocal, dependencies: [] }, null, 2)}\n`
+    );
+    const malformedPackageErr = textBuffer();
+    const malformedPackage = await runCli(["install", "@acme/cf-frappe-billing"], {
+      cwd: () => target,
+      stdout: textBuffer(),
+      stderr: malformedPackageErr
+    });
+    expect(malformedPackage).toBe(1);
+    expect(malformedPackageErr.text()).toContain("has non-object dependencies");
+    await expect(readFile(join(target, "src/apps/index.ts"), "utf8")).resolves.toBe(registryBeforeMalformedPackage);
+    await writeFile(join(target, "package.json"), `${JSON.stringify(packageJsonAfterLocal, null, 2)}\n`);
+
+    await writeFile(
+      join(target, "src/dollar-apps.ts"),
+      [
+        'import { createRegistryFromApps } from "cf-frappe";',
+        "/* cf-frappe app imports:start */",
+        "/* cf-frappe app imports:end */",
+        "",
+        "export const installedApps = [",
+        "  /* cf-frappe apps:start */",
+        "  $crm,",
+        "  /* cf-frappe apps:end */",
+        "] as const;",
+        "",
+        "export const registry = createRegistryFromApps(installedApps);",
+        ""
+      ].join("\n")
+    );
+    const dollarDuplicateErr = textBuffer();
+    const dollarDuplicate = await runCli(
+      ["install", "@acme/cf-frappe-dollar", "--as", "$crm", "--registry", "src/dollar-apps.ts", "--no-save"],
+      {
+        cwd: () => target,
+        stdout: textBuffer(),
+        stderr: dollarDuplicateErr
+      }
+    );
+    expect(dollarDuplicate).toBe(1);
+    expect(dollarDuplicateErr.text()).toContain("App local name '$crm' is already installed");
 
     const duplicateErr = textBuffer();
     const duplicate = await runCli(["install", "@acme/cf-frappe-crm"], {
@@ -220,11 +292,18 @@ describe("cf-frappe CLI scaffold", () => {
       targetDirectory: "demo",
       force: true
     });
-    expect(parseCliArgs(["install", "@acme/cf-frappe-crm", "--export", "crmApp", "--as", "crm"])).toEqual({
+    expect(parseCliArgs(["install", "@acme/cf-frappe-crm", "--version", "^1.2.3", "--export", "crmApp", "--as", "crm"])).toEqual({
       kind: "install",
       moduleSpecifier: "@acme/cf-frappe-crm",
+      saveDependency: true,
+      dependencyVersion: "^1.2.3",
       exportName: "crmApp",
       localName: "crm"
+    });
+    expect(parseCliArgs(["install", "./apps/local", "--no-save"])).toEqual({
+      kind: "install",
+      moduleSpecifier: "./apps/local",
+      saveDependency: false
     });
 
     const stdout = textBuffer();
