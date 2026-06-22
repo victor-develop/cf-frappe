@@ -53,6 +53,19 @@ interface DeskClientRuntime {
     readonly listView: (doctype: string) => Promise<unknown>;
   };
   readonly resource: {
+    readonly activity: (
+      doctype: string,
+      name: string,
+      input: Record<string, unknown>,
+      options?: { readonly expectedVersion?: number }
+    ) => Promise<unknown>;
+    readonly assign: (
+      doctype: string,
+      name: string,
+      assignee: string,
+      options?: { readonly expectedVersion?: number }
+    ) => Promise<unknown>;
+    readonly assignments: (doctype: string, name: string) => Promise<unknown>;
     readonly command: (
       doctype: string,
       name: string,
@@ -60,11 +73,56 @@ interface DeskClientRuntime {
       input: Record<string, unknown>,
       options: { readonly expectedVersion: number }
     ) => Promise<unknown>;
+    readonly comment: (
+      doctype: string,
+      name: string,
+      input: string | Record<string, unknown>,
+      options?: { readonly expectedVersion?: number }
+    ) => Promise<unknown>;
+    readonly deleteSavedFilter: (doctype: string, filterId: string) => Promise<unknown>;
+    readonly follow: (
+      doctype: string,
+      name: string,
+      options?: { readonly follower?: string; readonly expectedVersion?: number }
+    ) => Promise<unknown>;
+    readonly followers: (doctype: string, name: string) => Promise<unknown>;
+    readonly listSavedFilters: (doctype: string) => Promise<unknown>;
+    readonly saveFilter: (doctype: string, input: Record<string, unknown>) => Promise<unknown>;
+    readonly tag: (
+      doctype: string,
+      name: string,
+      tag: string,
+      options?: { readonly expectedVersion?: number }
+    ) => Promise<unknown>;
+    readonly tags: (doctype: string, name: string) => Promise<unknown>;
+    readonly timeline: (
+      doctype: string,
+      name: string,
+      options?: { readonly limit?: number; readonly beforeSequence?: number; readonly before_sequence?: number }
+    ) => Promise<unknown>;
     readonly transition: (
       doctype: string,
       name: string,
       action: string,
       options: { readonly expectedVersion: number }
+    ) => Promise<unknown>;
+    readonly unassign: (
+      doctype: string,
+      name: string,
+      assignee: string,
+      options?: { readonly expectedVersion?: number }
+    ) => Promise<unknown>;
+    readonly unfollow: (
+      doctype: string,
+      name: string,
+      follower: string,
+      options?: { readonly expectedVersion?: number }
+    ) => Promise<unknown>;
+    readonly untag: (
+      doctype: string,
+      name: string,
+      tag: string,
+      options?: { readonly expectedVersion?: number }
     ) => Promise<unknown>;
     readonly list: (doctype: string, options: { readonly filters: Record<string, unknown> }) => Promise<unknown>;
     readonly update: (
@@ -198,6 +256,78 @@ describe("Desk client runtime", () => {
     expect(calls[0]?.url).toBe(
       "/api/resource/Task?filter_priority__ne=Low&filter_count__gt=2&filter_count__lt=9&filter_title=Launch"
     );
+  });
+
+  it("wraps document collaboration and saved-filter resource APIs", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      if ((init?.method ?? "GET") === "DELETE" && String(url).includes("/saved-filters/")) {
+        return new Response(null, { status: 204 });
+      }
+      return new Response(JSON.stringify({ data: { ok: true } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await runtime.resource.timeline("Task Type", "TASK/1", { limit: 10, beforeSequence: 42 });
+    await runtime.resource.comment("Task Type", "TASK/1", "Looks good", { expectedVersion: 7 });
+    await runtime.resource.activity("Task Type", "TASK/1", {
+      subject: "Email sent",
+      detail: "Sent to customer",
+      expectedVersion: 1
+    }, { expectedVersion: 8 });
+    await runtime.resource.assign("Task Type", "TASK/1", "support@example.com", { expectedVersion: 9 });
+    await runtime.resource.assignments("Task Type", "TASK/1");
+    await runtime.resource.unassign("Task Type", "TASK/1", "support@example.com", { expectedVersion: 10 });
+    await runtime.resource.tag("Task Type", "TASK/1", "Urgent", { expectedVersion: 11 });
+    await runtime.resource.tags("Task Type", "TASK/1");
+    await runtime.resource.untag("Task Type", "TASK/1", "Needs Review", { expectedVersion: 12 });
+    await runtime.resource.follow("Task Type", "TASK/1", { follower: "owner@example.com", expectedVersion: 13 });
+    await runtime.resource.followers("Task Type", "TASK/1");
+    await runtime.resource.unfollow("Task Type", "TASK/1", "owner@example.com", { expectedVersion: 14 });
+    await runtime.resource.listSavedFilters("Task Type");
+    await runtime.resource.saveFilter("Task Type", {
+      id: "client-ignored",
+      label: "High priority",
+      filters: [{ field: "priority", value: "High" }]
+    });
+    await runtime.resource.deleteSavedFilter("Task Type", "filter/1");
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/resource/Task%20Type/TASK%2F1/timeline?limit=10&before_sequence=42",
+      "POST /api/resource/Task%20Type/TASK%2F1/comments",
+      "POST /api/resource/Task%20Type/TASK%2F1/activities",
+      "POST /api/resource/Task%20Type/TASK%2F1/assignments",
+      "GET /api/resource/Task%20Type/TASK%2F1/assignments",
+      "DELETE /api/resource/Task%20Type/TASK%2F1/assignments/support%40example.com",
+      "POST /api/resource/Task%20Type/TASK%2F1/tags",
+      "GET /api/resource/Task%20Type/TASK%2F1/tags",
+      "DELETE /api/resource/Task%20Type/TASK%2F1/tags/Needs%20Review",
+      "POST /api/resource/Task%20Type/TASK%2F1/followers",
+      "GET /api/resource/Task%20Type/TASK%2F1/followers",
+      "DELETE /api/resource/Task%20Type/TASK%2F1/followers/owner%40example.com",
+      "GET /api/resource/Task%20Type/saved-filters",
+      "POST /api/resource/Task%20Type/saved-filters",
+      "DELETE /api/resource/Task%20Type/saved-filters/filter%2F1"
+    ]);
+    expect(calls.map((call) => call.init.body)).toEqual([
+      undefined,
+      JSON.stringify({ text: "Looks good", expectedVersion: 7 }),
+      JSON.stringify({ subject: "Email sent", detail: "Sent to customer", expectedVersion: 8 }),
+      JSON.stringify({ assignee: "support@example.com", expectedVersion: 9 }),
+      undefined,
+      JSON.stringify({ expectedVersion: 10 }),
+      JSON.stringify({ tag: "Urgent", expectedVersion: 11 }),
+      undefined,
+      JSON.stringify({ expectedVersion: 12 }),
+      JSON.stringify({ follower: "owner@example.com", expectedVersion: 13 }),
+      undefined,
+      JSON.stringify({ expectedVersion: 14 }),
+      undefined,
+      JSON.stringify({ label: "High priority", filters: [{ field: "priority", value: "High" }] }),
+      undefined
+    ]);
   });
 
   it("fetches resolved list-view metadata for browser filter builders", async () => {

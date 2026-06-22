@@ -104,18 +104,55 @@ export function renderDeskClientScript(): string {
     return "/api/resource/" + encodePart(doctype) + (name === undefined ? "" : "/" + encodePart(name));
   }
 
+  function resourceActionPath(doctype, name, action) {
+    return resourcePath(doctype, name) + "/" + action;
+  }
+
+  function resourceMemberPath(doctype, name, action, member) {
+    return resourceActionPath(doctype, name, action) + "/" + encodePart(member);
+  }
+
   function versionBody(options) {
     return options && options.expectedVersion !== undefined ? { expectedVersion: options.expectedVersion } : {};
   }
 
-  function commandBody(input, options) {
+  function withoutKeys(input, keys) {
+    var excluded = {};
+    keys.forEach(function (key) {
+      excluded[key] = true;
+    });
     var body = {};
     Object.entries(input || {}).forEach(function (entry) {
-      if (entry[0] !== "expectedVersion") {
+      if (!excluded[entry[0]]) {
         body[entry[0]] = entry[1];
       }
     });
-    return Object.assign(body, versionBody(options));
+    return body;
+  }
+
+  function commandBody(input, options) {
+    return Object.assign(withoutKeys(input, ["expectedVersion"]), versionBody(options));
+  }
+
+  function commentBody(input, options) {
+    return commandBody(typeof input === "string" ? { text: input } : input, options);
+  }
+
+  function savedFilterBody(input) {
+    return withoutKeys(input, ["id"]);
+  }
+
+  function timelineParams(options) {
+    var params = {};
+    if (options && options.limit !== undefined && options.limit !== null) {
+      params.limit = options.limit;
+    }
+    if (options && options.beforeSequence !== undefined && options.beforeSequence !== null) {
+      params.before_sequence = options.beforeSequence;
+    } else if (options && options.before_sequence !== undefined && options.before_sequence !== null) {
+      params.before_sequence = options.before_sequence;
+    }
+    return params;
   }
 
   function documentTopic(tenantId, doctype, name) {
@@ -772,11 +809,23 @@ export function renderDeskClientScript(): string {
       msgprint: msgprint
     }),
     resource: Object.freeze({
+      activity: function (doctype, name, input, options) {
+        return request(resourceActionPath(doctype, name, "activities"), { method: "POST", body: commandBody(input, options) }).then(unwrapData);
+      },
+      assign: function (doctype, name, assignee, options) {
+        return request(resourceActionPath(doctype, name, "assignments"), { method: "POST", body: Object.assign({ assignee: assignee }, versionBody(options)) }).then(unwrapData);
+      },
+      assignments: function (doctype, name) {
+        return request(resourceActionPath(doctype, name, "assignments")).then(unwrapData);
+      },
       cancel: function (doctype, name, options) {
         return request(resourcePath(doctype, name) + "/cancel", { method: "POST", body: versionBody(options) }).then(unwrapData);
       },
       command: function (doctype, name, command, input, options) {
         return request(resourcePath(doctype, name) + "/command/" + encodePart(command), { method: "POST", body: commandBody(input, options) }).then(unwrapData);
+      },
+      comment: function (doctype, name, input, options) {
+        return request(resourceActionPath(doctype, name, "comments"), { method: "POST", body: commentBody(input, options) }).then(unwrapData);
       },
       create: function (doctype, data) {
         return request(resourcePath(doctype), { method: "POST", body: data || {} }).then(unwrapData);
@@ -784,17 +833,50 @@ export function renderDeskClientScript(): string {
       delete: function (doctype, name, options) {
         return request(resourcePath(doctype, name), { method: "DELETE", body: versionBody(options) }).then(unwrapData);
       },
+      deleteSavedFilter: function (doctype, filterId) {
+        return request(resourcePath(doctype) + "/saved-filters/" + encodePart(filterId), { method: "DELETE" }).then(unwrapData);
+      },
+      follow: function (doctype, name, options) {
+        return request(resourceActionPath(doctype, name, "followers"), { method: "POST", body: commandBody(options || {}, options) }).then(unwrapData);
+      },
+      followers: function (doctype, name) {
+        return request(resourceActionPath(doctype, name, "followers")).then(unwrapData);
+      },
       get: function (doctype, name) {
         return request(resourcePath(doctype, name)).then(unwrapData);
       },
       list: function (doctype, options) {
         return request(withQuery(resourcePath(doctype), resourceListParams(options || {})));
       },
+      listSavedFilters: function (doctype) {
+        return request(resourcePath(doctype) + "/saved-filters").then(unwrapData);
+      },
+      saveFilter: function (doctype, input) {
+        return request(resourcePath(doctype) + "/saved-filters", { method: "POST", body: savedFilterBody(input || {}) }).then(unwrapData);
+      },
       submit: function (doctype, name, options) {
         return request(resourcePath(doctype, name) + "/submit", { method: "POST", body: versionBody(options) }).then(unwrapData);
       },
+      tag: function (doctype, name, tag, options) {
+        return request(resourceActionPath(doctype, name, "tags"), { method: "POST", body: Object.assign({ tag: tag }, versionBody(options)) }).then(unwrapData);
+      },
+      tags: function (doctype, name) {
+        return request(resourceActionPath(doctype, name, "tags")).then(unwrapData);
+      },
+      timeline: function (doctype, name, options) {
+        return request(withQuery(resourceActionPath(doctype, name, "timeline"), timelineParams(options || {}))).then(unwrapData);
+      },
       transition: function (doctype, name, action, options) {
         return request(resourcePath(doctype, name) + "/transition/" + encodePart(action), { method: "POST", body: versionBody(options) }).then(unwrapData);
+      },
+      unassign: function (doctype, name, assignee, options) {
+        return request(resourceMemberPath(doctype, name, "assignments", assignee), { method: "DELETE", body: versionBody(options) }).then(unwrapData);
+      },
+      unfollow: function (doctype, name, follower, options) {
+        return request(resourceMemberPath(doctype, name, "followers", follower), { method: "DELETE", body: versionBody(options) }).then(unwrapData);
+      },
+      untag: function (doctype, name, tag, options) {
+        return request(resourceMemberPath(doctype, name, "tags", tag), { method: "DELETE", body: versionBody(options) }).then(unwrapData);
       },
       update: function (doctype, name, data, options) {
         return request(resourcePath(doctype, name), { method: "PUT", body: commandBody(data, options) }).then(unwrapData);

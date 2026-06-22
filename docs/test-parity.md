@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk record attachment panel slice:
+As of the Desk document collaboration client helper slice:
 
 - Vitest files: `64`
-- Vitest cases: `531`
+- Vitest cases: `532`
 
 ## Implication
 
