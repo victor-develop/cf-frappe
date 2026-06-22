@@ -57,10 +57,18 @@ export interface DeskLayoutOptions {
   readonly body: string;
   readonly active?: string;
   readonly activeReport?: string;
+  readonly activeAdmin?: string;
   readonly showFiles?: boolean;
+  readonly adminLinks?: readonly DeskNavLink[];
   readonly doctypes: readonly DocTypeDefinition[];
   readonly reports?: readonly ReportDefinition[];
   readonly message?: string;
+}
+
+export interface DeskNavLink {
+  readonly href: string;
+  readonly label: string;
+  readonly id?: string;
 }
 
 export function renderDeskLayout(options: DeskLayoutOptions): string {
@@ -74,6 +82,12 @@ export function renderDeskLayout(options: DeskLayoutOptions): string {
     .map(
       (report) =>
         `<a class="nav-link${report.name === options.activeReport ? " is-active" : ""}" href="/desk/reports/${encodeURIComponent(report.name)}">${escapeHtml(report.label ?? report.name)}</a>`
+    )
+    .join("");
+  const adminNav = (options.adminLinks ?? [])
+    .map(
+      (link) =>
+        `<a class="nav-link${link.id !== undefined && link.id === options.activeAdmin ? " is-active" : ""}" href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a>`
     )
     .join("");
   return `<!doctype html>
@@ -92,6 +106,7 @@ export function renderDeskLayout(options: DeskLayoutOptions): string {
       ${nav ? `<p class="nav-heading">DocTypes</p>${nav}` : ""}
       ${reportNav ? `<p class="nav-heading">Reports</p>${reportNav}` : ""}
       ${options.showFiles ? `<p class="nav-heading">Files</p><a class="nav-link" href="/desk/files">Files</a>` : ""}
+      ${adminNav ? `<p class="nav-heading">Admin</p>${adminNav}` : ""}
     </nav>
   </aside>
   <main id="main" class="main">

@@ -1252,6 +1252,71 @@ describe("Desk app", () => {
     expect(appliedHtml).toContain("{&quot;touched&quot;:1}");
   });
 
+  it("renders enabled admin surfaces in the Desk navigation", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const services = createServices();
+    const dataPatches = new DataPatchService({
+      log: new InMemoryDataPatchLog(),
+      resources: {},
+      patches: [defineDataPatch({ id: "core.seed", checksum: "v1", run: () => undefined })]
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      userPermissions: services.userPermissions,
+      roles: new RoleService({ events: services.store }),
+      dataPatches,
+      jobSchedules: new JobScheduleService({
+        registry: createJobRegistry({
+          jobs: [{ name: "reports.daily", handler: () => undefined }]
+        }),
+        schedules: [{ cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" }]
+      }),
+      actor: () => admin
+    });
+
+    const home = await app.request("/desk");
+    expect(home.status).toBe(200);
+    const homeHtml = await home.text();
+    expect(homeHtml).toContain('<p class="nav-heading">Admin</p>');
+    expect(homeHtml).toContain('href="/desk/admin/user-permissions"');
+    expect(homeHtml).toContain('href="/desk/admin/roles"');
+    expect(homeHtml).toContain('href="/desk/admin/data-patches"');
+    expect(homeHtml).toContain('href="/desk/admin/jobs/schedules"');
+    expect(homeHtml).not.toContain('href="/desk/admin/users"');
+
+    const dataPatchPage = await app.request("/desk/admin/data-patches");
+    expect(dataPatchPage.status).toBe(200);
+    await expect(dataPatchPage.text()).resolves.toContain(
+      '<a class="nav-link is-active" href="/desk/admin/data-patches">Data Patches</a>'
+    );
+
+    const userApp = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      dataPatches,
+      actor: () => guest
+    });
+    const userHome = await userApp.request("/desk");
+    expect(userHome.status).toBe(200);
+    await expect(userHome.text()).resolves.not.toContain('<p class="nav-heading">Admin</p>');
+
+    const failingActorApp = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      dataPatches,
+      actor: () => {
+        throw new Error("missing actor");
+      }
+    });
+    const failed = await failingActorApp.request("/desk/admin/data-patches");
+    expect(failed.status).toBe(500);
+    await expect(failed.text()).resolves.not.toContain('<p class="nav-heading">Admin</p>');
+  });
+
   it("renders Desk data patch admin route errors", async () => {
     const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
     const services = createServices();

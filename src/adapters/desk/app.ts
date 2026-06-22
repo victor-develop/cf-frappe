@@ -22,6 +22,7 @@ import { USER_PROFILE_FIELDS, type UserProfileInput } from "../../core/user-prof
 import { allowedWorkflowTransitions } from "../../core/workflow.js";
 import {
   CHILD_TABLE_ROW_INDEX_FIELD,
+  SYSTEM_MANAGER_ROLE,
   type Actor,
   type DocTypeDefinition,
   type DocumentData,
@@ -64,6 +65,7 @@ import {
   renderSavedReportView,
   renderUserAccountAdmin,
   renderUserPermissionAdmin,
+  type DeskNavLink,
   type FormLifecycleAction,
   type FormLinkOptions,
   type FormTableDefinitions,
@@ -136,6 +138,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     return html(
       renderDeskLayout({
         title: "Home",
+        adminLinks: adminLinksFor(options, actor),
         doctypes,
         reports,
         showFiles: options.files !== undefined,
@@ -151,6 +154,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     return html(
       renderDeskLayout({
         title: "Reports",
+        adminLinks: adminLinksFor(options, actor),
         doctypes,
         reports,
         showFiles: options.files !== undefined,
@@ -178,6 +182,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     return html(
       renderDeskLayout({
         title: "Files",
+        adminLinks: adminLinksFor(options, actor),
         doctypes,
         reports,
         showFiles: true,
@@ -248,6 +253,8 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     return html(
       renderDeskLayout({
         title: "User Permissions",
+        activeAdmin: "user-permissions",
+        adminLinks: adminLinksFor(options, actor),
         doctypes,
         reports,
         body: renderUserPermissionAdmin(state)
@@ -304,6 +311,8 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     return html(
       renderDeskLayout({
         title: "Jobs",
+        activeAdmin: "jobs",
+        adminLinks: adminLinksFor(options, actor),
         doctypes,
         reports,
         body: renderJobAdmin(dashboard, {
@@ -359,6 +368,8 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     return html(
       renderDeskLayout({
         title: "Job Schedules",
+        activeAdmin: "job-schedules",
+        adminLinks: adminLinksFor(options, actor),
         doctypes,
         reports,
         body: renderJobScheduleAdmin(dashboard, {
@@ -622,6 +633,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     return html(
       renderDeskLayout({
         title: `${doctype.label ?? doctype.name} Report Builder`,
+        adminLinks: adminLinksFor(options, actor),
         active: doctype.name,
         doctypes,
         reports,
@@ -705,6 +717,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     return html(
       renderDeskLayout({
         title: saved.label,
+        adminLinks: adminLinksFor(options, actor),
         active: doctype.name,
         doctypes,
         reports,
@@ -735,6 +748,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     return html(
       renderDeskLayout({
         title: result.report.label ?? result.report.name,
+        adminLinks: adminLinksFor(options, actor),
         activeReport: result.report.name,
         doctypes,
         reports,
@@ -792,6 +806,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     return html(
       renderDeskLayout({
         title: doctype.label ?? doctype.name,
+        adminLinks: adminLinksFor(options, actor),
         active: doctype.name,
         doctypes,
         reports,
@@ -849,6 +864,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     return html(
       renderDeskLayout({
         title: `New ${doctype.label ?? doctype.name}`,
+        adminLinks: adminLinksFor(options, actor),
         active: doctype.name,
         doctypes,
         reports,
@@ -912,6 +928,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     return html(
       renderDeskLayout({
         title: document.name,
+        adminLinks: adminLinksFor(options, actor),
         active: doctype.name,
         doctypes,
         reports,
@@ -1191,15 +1208,13 @@ export function createDeskApp(options: DeskAppOptions): Hono {
 async function renderDeskFailure(options: DeskAppOptions, request: Request, error: unknown): Promise<Response> {
   const status = error instanceof FrameworkError ? error.status : 500;
   const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
-  const doctypes = await Promise.resolve(options.actor(request))
-    .then((actor) => options.queries.listDoctypes(actor))
-    .catch(() => []);
-  const reports = await Promise.resolve(options.actor(request))
-    .then((actor) => listReports(options, actor))
-    .catch(() => []);
+  const actor = await Promise.resolve().then(() => options.actor(request)).catch(() => undefined);
+  const doctypes = actor === undefined ? [] : options.queries.listDoctypes(actor);
+  const reports = actor === undefined ? [] : listReports(options, actor);
   return html(
     renderDeskLayout({
       title: status === 404 ? "Not found" : "Request failed",
+      ...(actor === undefined ? {} : { adminLinks: adminLinksFor(options, actor) }),
       doctypes,
       reports,
       body: status === 404 ? renderNotFound(message) : renderErrorPanel(message)
@@ -1227,6 +1242,7 @@ async function renderDeskError(
   return html(
     renderDeskLayout({
       title: mode === "create" ? `New ${doctype.label ?? doctype.name}` : name ?? doctype.name,
+      adminLinks: adminLinksFor(options, actor),
       active: doctype.name,
       doctypes,
       reports,
@@ -1248,6 +1264,26 @@ async function renderDeskError(
 
 function listReports(options: DeskAppOptions, actor: Actor) {
   return options.reports?.listReports(actor) ?? [];
+}
+
+function adminLinksFor(options: DeskAppOptions, actor: Actor): readonly DeskNavLink[] {
+  if (!actor.roles.includes(SYSTEM_MANAGER_ROLE)) {
+    return [];
+  }
+  return [
+    ...(options.userAccounts === undefined ? [] : [{ id: "users", label: "Users", href: "/desk/admin/users" }]),
+    ...(options.roles === undefined ? [] : [{ id: "roles", label: "Roles", href: "/desk/admin/roles" }]),
+    ...(options.userPermissions === undefined
+      ? []
+      : [{ id: "user-permissions", label: "User Permissions", href: "/desk/admin/user-permissions" }]),
+    ...(options.dataPatches === undefined
+      ? []
+      : [{ id: "data-patches", label: "Data Patches", href: "/desk/admin/data-patches" }]),
+    ...(options.jobs === undefined ? [] : [{ id: "jobs", label: "Jobs", href: "/desk/admin/jobs" }]),
+    ...(options.jobSchedules === undefined
+      ? []
+      : [{ id: "job-schedules", label: "Job Schedules", href: "/desk/admin/jobs/schedules" }])
+  ];
 }
 
 function listPrintFormats(options: DeskAppOptions, actor: Actor, doctype?: string) {
@@ -1352,6 +1388,7 @@ async function renderDeskFileFailure(
   return html(
     renderDeskLayout({
       title: "Files",
+      adminLinks: adminLinksFor(options, actor),
       doctypes,
       reports,
       showFiles: true,
@@ -1373,6 +1410,8 @@ async function renderDeskDataPatchPage(
   return html(
     renderDeskLayout({
       title: "Data Patches",
+      activeAdmin: "data-patches",
+      adminLinks: adminLinksFor(options, actor),
       doctypes,
       reports,
       showFiles: options.files !== undefined,
@@ -1417,6 +1456,7 @@ async function renderDeskSavedReportBuilderFailure(
   return html(
     renderDeskLayout({
       title: `${doctype.label ?? doctype.name} Report Builder`,
+      adminLinks: adminLinksFor(options, actor),
       active: doctype.name,
       doctypes,
       reports,
@@ -1441,6 +1481,8 @@ async function renderDeskUserAccountPage(
   return html(
     renderDeskLayout({
       title: "Users",
+      activeAdmin: "users",
+      adminLinks: adminLinksFor(options, actor),
       doctypes,
       reports,
       body: renderUserAccountAdmin({
@@ -1490,6 +1532,8 @@ async function renderDeskRolePage(
   return html(
     renderDeskLayout({
       title: "Roles",
+      activeAdmin: "roles",
+      adminLinks: adminLinksFor(options, actor),
       doctypes,
       reports,
       body: renderRoleAdmin(state, error === undefined ? {} : { error })
