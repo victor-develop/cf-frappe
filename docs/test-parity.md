@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the notification client helpers slice:
+As of the role catalog client helpers slice:
 
 - Vitest files: `73`
-- Vitest cases: `709`
+- Vitest cases: `710`
 
 ## Implication
 

@@ -124,6 +124,14 @@ export function renderDeskClientScript(): string {
     return withQuery("/api/notifications/" + encodePart(notificationId) + "/" + action, notificationCommandParams(options || {}));
   }
 
+  function rolePath(role, options) {
+    return withQuery("/api/roles/" + encodePart(role), tenantParams(options || {}));
+  }
+
+  function roleActionPath(role, action, options) {
+    return withQuery("/api/roles/" + encodePart(role) + "/" + action, tenantParams(options || {}));
+  }
+
   function versionBody(options) {
     return options && options.expectedVersion !== undefined ? { expectedVersion: options.expectedVersion } : {};
   }
@@ -148,6 +156,10 @@ export function renderDeskClientScript(): string {
 
   function commentBody(input, options) {
     return commandBody(typeof input === "string" ? { text: input } : input, options);
+  }
+
+  function descriptionBody(input, options) {
+    return commandBody(typeof input === "string" ? { description: input } : input, options);
   }
 
   function savedFilterBody(input) {
@@ -1072,6 +1084,26 @@ export function renderDeskClientScript(): string {
       },
       run: function (report, options) {
         return request(withQuery("/api/report/" + encodePart(report) + "/run", resourceListParams(options || {})));
+      }
+    }),
+    roles: Object.freeze({
+      changeDescription: function (role, input, options) {
+        return request(roleActionPath(role, "description", options || {}), { method: "PUT", body: descriptionBody(input, options) }).then(unwrapData);
+      },
+      create: function (role, input, options) {
+        return request(rolePath(role, options || {}), { method: "POST", body: commandBody(input || {}, options) }).then(unwrapData);
+      },
+      disable: function (role, options) {
+        return request(roleActionPath(role, "disable", options || {}), { method: "POST", body: versionBody(options) }).then(unwrapData);
+      },
+      enable: function (role, options) {
+        return request(roleActionPath(role, "enable", options || {}), { method: "POST", body: versionBody(options) }).then(unwrapData);
+      },
+      get: function (role, options) {
+        return request(rolePath(role, options || {})).then(unwrapData);
+      },
+      list: function (options) {
+        return request(withQuery("/api/roles", tenantParams(options || {}))).then(unwrapData);
       }
     }),
     request: request,

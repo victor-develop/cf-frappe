@@ -87,6 +87,22 @@ interface DeskClientRuntime {
     }) => Promise<unknown>;
     readonly markRead: (notificationId: string, options?: { readonly user?: string }) => Promise<unknown>;
   };
+  readonly roles: {
+    readonly changeDescription: (
+      role: string,
+      input: string | Record<string, unknown>,
+      options?: { readonly expectedVersion?: number; readonly tenant?: string }
+    ) => Promise<unknown>;
+    readonly create: (
+      role: string,
+      input?: Record<string, unknown>,
+      options?: { readonly expectedVersion?: number; readonly tenant?: string }
+    ) => Promise<unknown>;
+    readonly disable: (role: string, options?: { readonly expectedVersion?: number; readonly tenant?: string }) => Promise<unknown>;
+    readonly enable: (role: string, options?: { readonly expectedVersion?: number; readonly tenant?: string }) => Promise<unknown>;
+    readonly get: (role: string, options?: { readonly tenant?: string }) => Promise<unknown>;
+    readonly list: (options?: { readonly tenant?: string }) => Promise<unknown>;
+  };
   readonly files: {
     readonly bulkDelete: (files: readonly DeskBulkFileSelection[]) => Promise<unknown>;
     readonly bulkUpdateMetadata: (
@@ -636,6 +652,55 @@ describe("Desk client runtime", () => {
     ]);
     expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin"]);
     expect(calls.map((call) => call.init.body)).toEqual([undefined, undefined, undefined]);
+  });
+
+  it("wraps event-sourced role catalog APIs with tenant and version metadata", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { version: 4, roles: [{ name: "Support Lead" }] } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.roles.list({ tenant: "acme/east" })).resolves.toEqual({
+      version: 4,
+      roles: [{ name: "Support Lead" }]
+    });
+    await runtime.roles.get("Support Lead", { tenant: "acme/east" });
+    await runtime.roles.create(
+      "Support Lead",
+      { description: "Escalation owner", enabled: true, expectedVersion: 99 },
+      { expectedVersion: 0, tenant: "acme/east" }
+    );
+    await runtime.roles.changeDescription("Support Lead", "Owns escalations", { expectedVersion: 1, tenant: "acme/east" });
+    await runtime.roles.enable("Support Lead", { expectedVersion: 2, tenant: "acme/east" });
+    await runtime.roles.disable("Support Lead", { expectedVersion: 3, tenant: "acme/east" });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/roles?tenant=acme%2Feast",
+      "GET /api/roles/Support%20Lead?tenant=acme%2Feast",
+      "POST /api/roles/Support%20Lead?tenant=acme%2Feast",
+      "PUT /api/roles/Support%20Lead/description?tenant=acme%2Feast",
+      "POST /api/roles/Support%20Lead/enable?tenant=acme%2Feast",
+      "POST /api/roles/Support%20Lead/disable?tenant=acme%2Feast"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual([
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin"
+    ]);
+    expect(calls.map((call) => call.init.body)).toEqual([
+      undefined,
+      undefined,
+      JSON.stringify({ description: "Escalation owner", enabled: true, expectedVersion: 0 }),
+      JSON.stringify({ description: "Owns escalations", expectedVersion: 1 }),
+      JSON.stringify({ expectedVersion: 2 }),
+      JSON.stringify({ expectedVersion: 3 })
+    ]);
   });
 
   it("wraps document collaboration and saved-filter resource APIs", async () => {

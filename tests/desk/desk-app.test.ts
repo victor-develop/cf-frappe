@@ -1258,6 +1258,7 @@ describe("Desk app", () => {
     expect(source).toContain("files: Object.freeze");
     expect(source).toContain("notifications: Object.freeze");
     expect(source).toContain("profiles: Object.freeze");
+    expect(source).toContain("roles: Object.freeze");
     expect(source).toContain("documentTopic(tenantId, doctype, name)");
     expect(source).toContain("userTopic(tenantId, userId)");
     expect(source).toContain("resourcePath(doctype, name) + \"/transition/\"");
