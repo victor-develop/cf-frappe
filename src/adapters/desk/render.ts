@@ -311,7 +311,7 @@ export function renderFileManager(
       const attachedTo = attachmentLabel(file);
       return `<tr>
         <td>${file.deletable || file.editable ? renderFileBulkSelection(file, bulkFileActionFormId) : ""}</td>
-        <td><a href="/desk/files/${encodeURIComponent(file.name)}/content">${escapeHtml(file.filename)}</a></td>
+        <td>${renderFileContentLinks(file)}</td>
         <td>${escapeHtml(file.name)}</td>
         <td>${escapeHtml(file.contentType)}</td>
         <td>${escapeHtml(formatBytes(file.size))}</td>
@@ -375,7 +375,7 @@ export function renderFileAttachmentPanel(
   const rows = dashboard.files
     .map(
       (file) => `<tr>
-        <td><a href="/desk/files/${encodeURIComponent(file.name)}/content">${escapeHtml(file.filename)}</a></td>
+        <td>${renderFileContentLinks(file)}</td>
         <td>${escapeHtml(file.contentType)}</td>
         <td>${escapeHtml(formatBytes(file.size))}</td>
         <td>${file.isPrivate ? "yes" : "no"}</td>
@@ -407,6 +407,13 @@ export function renderFileAttachmentPanel(
       </table>
     </div>
   </section>`;
+}
+
+function renderFileContentLinks(file: FileDashboard["files"][number]): string {
+  const downloadHref = `/desk/files/${encodeURIComponent(file.name)}/content`;
+  const previewHref = `/desk/files/${encodeURIComponent(file.name)}/preview`;
+  const preview = file.previewable ? ` <a href="${previewHref}">Preview</a>` : "";
+  return `<a href="${downloadHref}">${escapeHtml(file.filename)}</a>${preview}`;
 }
 
 export function renderDocumentPresencePanel(

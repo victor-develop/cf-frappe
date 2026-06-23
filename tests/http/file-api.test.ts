@@ -45,6 +45,51 @@ describe("file api", () => {
     await expect(downloaded.text()).resolves.toBe("hello");
   });
 
+  it("previews browser-safe files inline through the file API", async () => {
+    const app = makeApp(1024, ["create-1", "create-2"], ["object-1", "object-2"]);
+    const textUpload = await app.request("/api/files?filename=preview.txt&is_private=false", {
+      method: "POST",
+      headers: userHeaders("owner@example.com", "User"),
+      body: "preview me"
+    });
+    expect(textUpload.status).toBe(201);
+    const htmlUpload = await app.request("/api/files?filename=inline.html&is_private=false", {
+      method: "POST",
+      headers: { ...userHeaders("owner@example.com", "User"), "content-type": "text/html" },
+      body: "<script>alert(1)</script>"
+    });
+    expect(htmlUpload.status).toBe(201);
+
+    const listed = await app.request("/api/files?limit=10", {
+      headers: userHeaders("guest", "Guest")
+    });
+    expect(listed.status).toBe(200);
+    await expect(listed.json()).resolves.toMatchObject({
+      data: {
+        files: expect.arrayContaining([
+          expect.objectContaining({ filename: "preview.txt", previewable: true }),
+          expect.objectContaining({ filename: "inline.html", previewable: false })
+        ])
+      }
+    });
+
+    const preview = await app.request("/api/files/file_object-1/preview", {
+      headers: userHeaders("guest", "Guest")
+    });
+    expect(preview.status).toBe(200);
+    expect(preview.headers.get("content-disposition")).toBe('inline; filename="preview.txt"');
+    expect(preview.headers.get("x-content-type-options")).toBe("nosniff");
+    await expect(preview.text()).resolves.toBe("preview me");
+
+    const unsupported = await app.request("/api/files/file_object-2/preview", {
+      headers: userHeaders("guest", "Guest")
+    });
+    expect(unsupported.status).toBe(400);
+    await expect(unsupported.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "File 'file_object-2' cannot be previewed" }
+    });
+  });
+
   it("rejects oversized uploads before storing content", async () => {
     const app = makeApp(4);
 

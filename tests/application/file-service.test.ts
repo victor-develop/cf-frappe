@@ -225,6 +225,52 @@ describe("FileService", () => {
     });
   });
 
+  it("marks only available browser-safe file content as previewable", async () => {
+    const services = createFileServices(
+      ["create-1", "create-2", "create-3", "create-4"],
+      ["object-1", "object-2", "object-3", "object-4"]
+    );
+    await services.files.upload({
+      actor: owner,
+      filename: "readme.txt",
+      body: "hello",
+      contentType: "text/plain",
+      isPrivate: false
+    });
+    await services.files.upload({
+      actor: owner,
+      filename: "inline.html",
+      body: "<script>alert(1)</script>",
+      contentType: "text/html",
+      isPrivate: false
+    });
+    await services.files.upload({
+      actor: owner,
+      filename: "logo.png",
+      body: "png",
+      contentType: "image/png",
+      isPrivate: false
+    });
+    await services.files.upload({
+      actor: owner,
+      filename: "vector.svg",
+      body: "<svg><script>alert(1)</script></svg>",
+      contentType: "image/svg+xml",
+      isPrivate: false
+    });
+
+    const dashboard = await services.files.dashboard(owner);
+
+    expect(dashboard.files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ filename: "readme.txt", previewable: true }),
+        expect.objectContaining({ filename: "inline.html", previewable: false }),
+        expect.objectContaining({ filename: "logo.png", previewable: true }),
+        expect.objectContaining({ filename: "vector.svg", previewable: false })
+      ])
+    );
+  });
+
   it("filters readable file metadata by file manager fields", async () => {
     const scanner = new StaticScanner("clean", { engine: "unit-av" });
     const services = createFileServices(

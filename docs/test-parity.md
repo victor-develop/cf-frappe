@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk report-builder chart controls slice:
+As of the permissioned file previews slice:
 
 - Vitest files: `73`
-- Vitest cases: `698`
+- Vitest cases: `700`
 
 ## Implication
 

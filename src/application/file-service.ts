@@ -187,6 +187,7 @@ export interface FileDashboardEntry {
   readonly contentType: string;
   readonly size: number;
   readonly isPrivate: boolean;
+  readonly previewable: boolean;
   readonly storageState: string;
   readonly directUploadExpiresAt?: string;
   readonly scanStatus?: string;
@@ -820,13 +821,16 @@ function bulkFileFailure(name: string, error: unknown, fallback: string): BulkDe
 function fileDashboardEntry(snapshot: DocumentSnapshot): Omit<FileDashboardEntry, "editable" | "deletable"> {
   const attachedToDoctype = stringData(snapshot, "attached_to_doctype");
   const attachedToName = stringData(snapshot, "attached_to_name");
+  const contentType = stringData(snapshot, "content_type");
+  const storageState = stringData(snapshot, "storage_state") || "available";
   return {
     name: snapshot.name,
     filename: stringData(snapshot, "filename") || snapshot.name,
-    contentType: stringData(snapshot, "content_type"),
+    contentType,
     size: numberData(snapshot, "size"),
     isPrivate: snapshot.data.is_private !== false,
-    storageState: stringData(snapshot, "storage_state") || "available",
+    previewable: storageState === "available" && isPreviewableFileContentType(contentType),
+    storageState,
     ...(stringData(snapshot, "direct_upload_expires_at")
       ? { directUploadExpiresAt: stringData(snapshot, "direct_upload_expires_at") }
       : {}),
@@ -841,6 +845,19 @@ function fileDashboardEntry(snapshot: DocumentSnapshot): Omit<FileDashboardEntry
       ? { attachedTo: { doctype: attachedToDoctype, name: attachedToName } }
       : {})
   };
+}
+
+const PREVIEWABLE_FILE_CONTENT_TYPES = new Set([
+  "application/json",
+  "application/pdf",
+  "text/csv",
+  "text/markdown",
+  "text/plain"
+]);
+
+export function isPreviewableFileContentType(contentType: string): boolean {
+  const normalized = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+  return PREVIEWABLE_FILE_CONTENT_TYPES.has(normalized) || (normalized.startsWith("image/") && normalized !== "image/svg+xml");
 }
 
 function stringData(snapshot: DocumentSnapshot, field: string): string {

@@ -718,6 +718,7 @@ describe("Desk app", () => {
       ids: [
         "create",
         "create-other",
+        "create-html",
         "bulk-metadata",
         "bulk-request-delete",
         "bulk-delete",
@@ -725,7 +726,7 @@ describe("Desk app", () => {
         "request-delete",
         "delete"
       ],
-      fileIds: ["object", "other"]
+      fileIds: ["object", "other", "html"]
     });
 
     const home = await app.request("/desk");
@@ -751,13 +752,25 @@ describe("Desk app", () => {
       body: otherUploadForm
     });
     expect(otherUploaded.status).toBe(303);
+    const htmlUploadForm = new FormData();
+    htmlUploadForm.append("file", new Blob(["<script>alert(1)</script>"], { type: "text/html" }), "inline.html");
+    const htmlUploaded = await app.request("/desk/files", {
+      method: "POST",
+      headers: { "content-length": "512" },
+      body: htmlUploadForm
+    });
+    expect(htmlUploaded.status).toBe(303);
 
     const list = await app.request("/desk/files");
     expect(list.status).toBe(200);
     const html = await list.text();
     expect(html).toContain("hello.txt");
     expect(html).toContain("public.json");
+    expect(html).toContain("inline.html");
     expect(html).toContain("/desk/files/file_object/content");
+    expect(html).toContain("/desk/files/file_object/preview");
+    expect(html).toContain("/desk/files/file_html/content");
+    expect(html).not.toContain("/desk/files/file_html/preview");
     expect(html).toContain('action="/desk/files/file_object/metadata"');
     expect(html).toContain('formaction="/desk/files/file_object/delete"');
     expect(html).toContain('name="filename"');
@@ -848,6 +861,14 @@ describe("Desk app", () => {
     expect(downloaded.status).toBe(200);
     expect(downloaded.headers.get("content-disposition")).toBe('attachment; filename="renamed.txt"');
     await expect(downloaded.text()).resolves.toBe("hello");
+    const preview = await app.request("/desk/files/file_object/preview");
+    expect(preview.status).toBe(200);
+    expect(preview.headers.get("content-disposition")).toBe('inline; filename="renamed.txt"');
+    expect(preview.headers.get("x-content-type-options")).toBe("nosniff");
+    await expect(preview.text()).resolves.toBe("hello");
+    const unsupportedPreview = await app.request("/desk/files/file_html/preview");
+    expect(unsupportedPreview.status).toBe(400);
+    await expect(unsupportedPreview.text()).resolves.toContain("File &#39;file_html&#39; cannot be previewed");
 
     const deleted = await app.request("/desk/files/file_object/delete", {
       method: "POST",
@@ -973,6 +994,7 @@ describe("Desk app", () => {
     const html = await form.text();
     expect(html).toContain("proposal.txt");
     expect(html).toContain("/desk/files/file_attachment/content");
+    expect(html).toContain("/desk/files/file_attachment/preview");
     expect(html).toContain("/desk/files?attached_to_doctype=Note&amp;attached_to_name=My%20Note");
     expect(html).toContain('formaction="/desk/Note/My%20Note/files/file_attachment/delete"');
 
@@ -1005,6 +1027,10 @@ describe("Desk app", () => {
     const downloaded = await app.request("/desk/files/file_attachment/content");
     expect(downloaded.status).toBe(200);
     await expect(downloaded.text()).resolves.toBe("proposal");
+    const preview = await app.request("/desk/files/file_attachment/preview");
+    expect(preview.status).toBe(200);
+    expect(preview.headers.get("content-disposition")).toBe('inline; filename="proposal.txt"');
+    await expect(preview.text()).resolves.toBe("proposal");
 
     const deleted = await app.request("/desk/Note/My%20Note/files/file_attachment/delete", {
       method: "POST",
@@ -1073,6 +1099,9 @@ describe("Desk app", () => {
     const downloaded = await guestApp.request(`/desk/files/${uploaded.snapshot.name}/content`);
     expect(downloaded.status).toBe(403);
     await expect(downloaded.text()).resolves.toContain("cannot read File");
+    const preview = await guestApp.request(`/desk/files/${uploaded.snapshot.name}/preview`);
+    expect(preview.status).toBe(403);
+    await expect(preview.text()).resolves.toContain("cannot read File");
 
     const deleted = await guestApp.request(`/desk/files/${uploaded.snapshot.name}/delete`, {
       method: "POST",

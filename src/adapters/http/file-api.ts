@@ -1,6 +1,7 @@
 import { Hono } from "hono";
-import type { FileService, UpdateFileMetadataCommand } from "../../application/file-service.js";
+import { isPreviewableFileContentType, type FileService, type UpdateFileMetadataCommand } from "../../application/file-service.js";
 import { badRequest } from "../../core/errors.js";
+import { fileContentHeaders } from "../file-content.js";
 import type { ActorResolver } from "./actor.js";
 import { parseOptionalInteger, readBoundedBytes, readJsonObject, requestMetadata } from "./request.js";
 
@@ -99,16 +100,20 @@ export function createFileApi(options: FileApiOptions): Hono {
       actor,
       name: c.req.param("name")
     });
-    const headers = new Headers();
-    headers.set("content-type", downloaded.object.metadata.contentType ?? "application/octet-stream");
-    headers.set("content-length", String(downloaded.object.metadata.size));
-    if (downloaded.object.metadata.httpEtag) {
-      headers.set("etag", downloaded.object.metadata.httpEtag);
+    return new Response(downloaded.object.body, { headers: fileContentHeaders(downloaded, "attachment") });
+  });
+
+  app.get("/api/files/:name/preview", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const downloaded = await options.files.download({
+      actor,
+      name: c.req.param("name")
+    });
+    const contentType = downloaded.object.metadata.contentType ?? "application/octet-stream";
+    if (!isPreviewableFileContentType(contentType)) {
+      throw badRequest(`File '${downloaded.snapshot.name}' cannot be previewed`);
     }
-    const filenameValue = downloaded.snapshot.data.filename;
-    const filename = typeof filenameValue === "string" ? filenameValue : downloaded.snapshot.name;
-    headers.set("content-disposition", `attachment; filename="${filename.replace(/["\\]/g, "_")}"`);
-    return new Response(downloaded.object.body, { headers });
+    return new Response(downloaded.object.body, { headers: fileContentHeaders(downloaded, "inline") });
   });
 
   app.post("/api/files/delete", async (c) => {

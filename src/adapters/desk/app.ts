@@ -10,6 +10,7 @@ import type {
   FileService,
   UpdateFileMetadataCommand
 } from "../../application/file-service.js";
+import { isPreviewableFileContentType } from "../../application/file-service.js";
 import type { JobHistoryService } from "../../application/job-history-service.js";
 import type { JobRetryPort } from "../../application/job-retry-service.js";
 import type { JobScheduleService } from "../../application/job-schedule-service.js";
@@ -51,6 +52,7 @@ import {
   type MutableDocumentData,
   type ResolvedFormView
 } from "../../core/types.js";
+import { fileContentHeaders } from "../file-content.js";
 import type { ActorResolver } from "../http/actor.js";
 import { listFiltersFromUrl, parseOptionalInteger, readBoundedText } from "../http/request.js";
 import { writeReportCsvHeaders } from "../http/report-export.js";
@@ -382,17 +384,18 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const files = requireFiles(options);
     const actor = await options.actor(c.req.raw);
     const downloaded = await files.download({ actor, name: c.req.param("name") });
-    const headers = new Headers();
-    headers.set("content-type", downloaded.object.metadata.contentType ?? "application/octet-stream");
-    headers.set("content-length", String(downloaded.object.metadata.size));
-    if (downloaded.object.metadata.httpEtag) {
-      headers.set("etag", downloaded.object.metadata.httpEtag);
+    return new Response(downloaded.object.body, { headers: fileContentHeaders(downloaded, "attachment") });
+  });
+
+  app.get("/desk/files/:name/preview", async (c) => {
+    const files = requireFiles(options);
+    const actor = await options.actor(c.req.raw);
+    const downloaded = await files.download({ actor, name: c.req.param("name") });
+    const contentType = downloaded.object.metadata.contentType ?? "application/octet-stream";
+    if (!isPreviewableFileContentType(contentType)) {
+      throw new FrameworkError("BAD_REQUEST", `File '${downloaded.snapshot.name}' cannot be previewed`, { status: 400 });
     }
-    const filename = typeof downloaded.snapshot.data.filename === "string"
-      ? downloaded.snapshot.data.filename
-      : downloaded.snapshot.name;
-    headers.set("content-disposition", `attachment; filename="${filename.replace(/["\\]/g, "_")}"`);
-    return new Response(downloaded.object.body, { headers });
+    return new Response(downloaded.object.body, { headers: fileContentHeaders(downloaded, "inline") });
   });
 
   app.post("/desk/files/:name/delete", async (c) => {
