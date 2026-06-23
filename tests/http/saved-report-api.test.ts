@@ -43,7 +43,10 @@ describe("saved report api", () => {
         doctype: "Note",
         label: "High counts",
         ownerId: "owner@example.com",
-        definition: { columns: [{ name: "title" }, { name: "count" }] }
+        definition: {
+          columns: [{ name: "title" }, { name: "count" }],
+          charts: [expect.objectContaining({ xAxisLabel: "Priority", yAxisLabel: "Total Count" })]
+        }
       }
     });
 
@@ -104,6 +107,7 @@ describe("saved report api", () => {
       report: { label: "Counts", doctype: "Note" },
       rows: [{ title: "High Count A", count: 3 }],
       summary: [{ name: "total_count", value: 10 }],
+      charts: [expect.objectContaining({ xAxisLabel: "Priority", yAxisLabel: "Total Count" })],
       order: { orderBy: "count", order: "asc" },
       total: 2
     });
@@ -232,6 +236,24 @@ function highCountsDefinition() {
     ],
     filters: [{ name: "priority", field: "priority", type: "select", defaultValue: "High" }],
     summaries: [{ name: "total_count", label: "Total Count", aggregate: "sum", field: "count", type: "integer" }],
+    groups: [
+      {
+        name: "by_priority",
+        label: "By Priority",
+        field: "priority",
+        summaries: [{ name: "total_count", label: "Total Count", aggregate: "sum", field: "count", type: "integer" }]
+      }
+    ],
+    charts: [
+      {
+        name: "priority_totals",
+        type: "bar",
+        group: "by_priority",
+        summary: "total_count",
+        xAxisLabel: "Priority",
+        yAxisLabel: "Total Count"
+      }
+    ],
     orderBy: "count",
     order: "desc"
   };

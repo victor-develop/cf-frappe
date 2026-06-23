@@ -326,7 +326,9 @@ describe("reports", () => {
           orderBy: "value",
           order: "desc",
           colors: ["#1f6feb", "#2e7d32"],
-          showValues: false
+          showValues: false,
+          xAxisLabel: "Priority",
+          yAxisLabel: "Records"
         }
       ]
     }).charts?.[0];
@@ -335,7 +337,9 @@ describe("reports", () => {
       orderBy: "value",
       order: "desc",
       colors: ["#1f6feb", "#2e7d32"],
-      showValues: false
+      showValues: false,
+      xAxisLabel: "Priority",
+      yAxisLabel: "Records"
     });
     expect(Object.isFrozen(controlledChart?.colors)).toBe(true);
 

@@ -667,6 +667,10 @@ export function renderSavedReportBuilder(
       </select></label>
     </div>
     <div class="fields">
+      <label class="field"><span>X Axis Label</span><input name="chartXAxisLabel"></label>
+      <label class="field"><span>Y Axis Label</span><input name="chartYAxisLabel"></label>
+    </div>
+    <div class="fields">
       <label class="field"><span>Order By</span><select name="orderBy">${orderOptions}</select></label>
       <label class="field"><span>Order</span><select name="order">
         <option value="asc">Ascending</option>
@@ -1468,7 +1472,7 @@ function renderBarChart(
       </g>`;
     })
     .join("");
-  return `<svg class="chart-svg chart-bar" role="img" aria-label="${escapeHtml(chart.label)}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet">${bars}</svg>`;
+  return `<svg class="chart-svg chart-bar" role="img" aria-label="${escapeHtml(chartAriaLabel(chart))}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet">${bars}${renderChartAxisLabels(chart, width, height)}</svg>`;
 }
 
 function renderLineChart(
@@ -1494,7 +1498,7 @@ function renderLineChart(
       </g>`
     )
     .join("");
-  return `<svg class="chart-svg chart-line" role="img" aria-label="${escapeHtml(chart.label)}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet"><path d="${path}" style="stroke: ${chartColor(chart, 0)}"></path>${markers}</svg>`;
+  return `<svg class="chart-svg chart-line" role="img" aria-label="${escapeHtml(chartAriaLabel(chart))}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet"><path d="${path}" style="stroke: ${chartColor(chart, 0)}"></path>${markers}${renderChartAxisLabels(chart, width, height)}</svg>`;
 }
 
 function renderPieChart(
@@ -1526,6 +1530,21 @@ function renderPieChart(
 }
 
 const chartPalette = ["#1f6feb", "#2e7d32", "#ad1457", "#ef6c00", "#00695c", "#6a1b9a"];
+
+function renderChartAxisLabels(chart: ReportRunResult["charts"][number], width: number, height: number): string {
+  const xAxis = chart.xAxisLabel
+    ? `<text class="chart-axis-label chart-axis-x" x="${width / 2}" y="${height - 4}" text-anchor="middle">${escapeHtml(chart.xAxisLabel)}</text>`
+    : "";
+  const yAxis = chart.yAxisLabel
+    ? `<text class="chart-axis-label chart-axis-y" x="14" y="${height / 2}" text-anchor="middle" transform="rotate(-90 14 ${height / 2})">${escapeHtml(chart.yAxisLabel)}</text>`
+    : "";
+  return `${xAxis}${yAxis}`;
+}
+
+function chartAriaLabel(chart: ReportRunResult["charts"][number]): string {
+  const labels = [chart.label, chart.xAxisLabel, chart.yAxisLabel].filter(Boolean);
+  return labels.join(", ");
+}
 
 function chartColor(chart: ReportRunResult["charts"][number], index: number): string {
   const fallback = chartPalette[index % chartPalette.length]!;
@@ -2598,6 +2617,11 @@ tr:last-child td { border-bottom: 0; }
 .chart-line text {
   fill: var(--muted);
   font-size: 12px;
+}
+.chart-axis-label {
+  fill: var(--text);
+  font-size: 10px;
+  font-weight: 600;
 }
 .chart-line path {
   fill: none;

@@ -406,7 +406,9 @@ function chartToPayload(chart: ReportChartDefinition): JsonObject {
     orderBy: chart.orderBy,
     order: chart.order,
     colors: chart.colors ? [...chart.colors] : undefined,
-    showValues: chart.showValues
+    showValues: chart.showValues,
+    xAxisLabel: chart.xAxisLabel,
+    yAxisLabel: chart.yAxisLabel
   });
 }
 
@@ -469,7 +471,9 @@ function chartFromPayload(payload: JsonObject): ReportChartDefinition {
     ...(orderBy === undefined ? {} : { orderBy }),
     ...(payload.order === "asc" || payload.order === "desc" ? { order: payload.order } : {}),
     ...(colors ? { colors } : {}),
-    ...(typeof payload.showValues === "boolean" ? { showValues: payload.showValues } : {})
+    ...(typeof payload.showValues === "boolean" ? { showValues: payload.showValues } : {}),
+    ...(typeof payload.xAxisLabel === "string" ? { xAxisLabel: payload.xAxisLabel } : {}),
+    ...(typeof payload.yAxisLabel === "string" ? { yAxisLabel: payload.yAxisLabel } : {})
   };
 }
 

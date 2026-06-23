@@ -124,6 +124,8 @@ interface ParsedDeskReportChartControls {
   readonly order?: DeskReportChartOrder;
   readonly colors?: readonly string[];
   readonly showValues: boolean;
+  readonly xAxisLabel?: string;
+  readonly yAxisLabel?: string;
 }
 
 export interface DeskAppOptions {
@@ -3406,12 +3408,16 @@ function parseReportChartControls(form: URLSearchParams): ParsedDeskReportChartC
     MAX_DESK_REPORT_CHART_POINTS
   ) ?? DEFAULT_DESK_REPORT_CHART_MAX_POINTS;
   const colors = reportChartPalette(form.get("chartPalette"));
+  const xAxisLabel = stringSearchParamValue(form, "chartXAxisLabel");
+  const yAxisLabel = stringSearchParamValue(form, "chartYAxisLabel");
   return {
     type: chartType,
     summary: stringSearchParamValue(form, "chartSummary") ?? "record_count",
     maxPoints,
     ...(colors.length === 0 ? {} : { colors }),
     showValues: optionalBooleanSearchParamValue(form, "chartShowValues", "Report chart show values") ?? true,
+    ...(xAxisLabel === undefined ? {} : { xAxisLabel }),
+    ...(yAxisLabel === undefined ? {} : { yAxisLabel }),
     ...(orderBy === undefined ? {} : { orderBy }),
     ...(order === undefined ? {} : { order })
   };
@@ -3440,7 +3446,9 @@ function reportChartFor(
     ...(controls.orderBy === undefined ? {} : { orderBy: controls.orderBy }),
     ...(controls.order === undefined ? {} : { order: controls.order }),
     ...(controls.colors === undefined ? {} : { colors: controls.colors }),
-    showValues: controls.showValues
+    showValues: controls.showValues,
+    ...(controls.xAxisLabel === undefined ? {} : { xAxisLabel: controls.xAxisLabel }),
+    ...(controls.yAxisLabel === undefined ? {} : { yAxisLabel: controls.yAxisLabel })
   };
 }
 

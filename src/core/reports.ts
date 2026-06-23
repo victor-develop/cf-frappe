@@ -61,6 +61,8 @@ export interface ReportChartDefinition {
   readonly order?: ReportChartOrder;
   readonly colors?: readonly string[];
   readonly showValues?: boolean;
+  readonly xAxisLabel?: string;
+  readonly yAxisLabel?: string;
 }
 
 export interface ReportDefinition {

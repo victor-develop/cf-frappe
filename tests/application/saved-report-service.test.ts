@@ -135,7 +135,9 @@ describe("SavedReportService", () => {
             summary: "total_count",
             maxPoints: 1,
             orderBy: "value",
-            order: "desc"
+            order: "desc",
+            xAxisLabel: "Title",
+            yAxisLabel: "Total Count"
           }
         ]
       }
@@ -155,6 +157,8 @@ describe("SavedReportService", () => {
     expect(result.charts).toMatchObject([
       {
         name: "largest_title_count",
+        xAxisLabel: "Title",
+        yAxisLabel: "Total Count",
         points: [{ key: "Zeta", value: 10 }]
       }
     ]);

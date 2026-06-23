@@ -486,6 +486,8 @@ describe("Desk app", () => {
     expect(builderHtml).toContain('<option value="sum_count">Total count</option>');
     expect(builderHtml).toContain('name="chartPalette"');
     expect(builderHtml).toContain('<select name="chartShowValues">');
+    expect(builderHtml).toContain('name="chartXAxisLabel"');
+    expect(builderHtml).toContain('name="chartYAxisLabel"');
 
     const body = new URLSearchParams();
     body.set("label", "High count desk report");
@@ -502,6 +504,8 @@ describe("Desk app", () => {
     body.set("chartMaxPoints", "3");
     body.set("chartPalette", "#123456, #abcdef");
     body.set("chartShowValues", "false");
+    body.set("chartXAxisLabel", "Priority");
+    body.set("chartYAxisLabel", "Total Count");
     body.set("orderBy", "count");
     body.set("order", "desc");
     const saved = await app.request("/desk/report-builder/Note", {
@@ -528,6 +532,8 @@ describe("Desk app", () => {
     expect(html).toContain("<span>Total count</span><strong>10</strong>");
     expect(html).toContain("By priority");
     expect(html).toContain("chart-svg chart-bar");
+    expect(html).toContain("Priority");
+    expect(html).toContain("Total Count");
     expect(html).toContain("fill: #123456");
     expect(html).not.toContain('text-anchor="middle">10</text>');
     expect(html).toContain('<select id="filter-priority" name="filter_priority">');
@@ -538,7 +544,9 @@ describe("Desk app", () => {
         charts: [
           expect.objectContaining({
             colors: ["#123456", "#abcdef"],
-            showValues: false
+            showValues: false,
+            xAxisLabel: "Priority",
+            yAxisLabel: "Total Count"
           })
         ]
       }

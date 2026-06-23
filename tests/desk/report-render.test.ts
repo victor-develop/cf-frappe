@@ -103,6 +103,8 @@ describe("Desk report rendering", () => {
         order: "desc",
         colors: ["#123456", "#abcdef"],
         showValues: false,
+        xAxisLabel: "Priority",
+        yAxisLabel: "Notes",
         points: [
           { key: "High", label: "High", value: 5 },
           { key: "Low", label: "Low", value: 2 }
@@ -143,6 +145,10 @@ describe("Desk report rendering", () => {
     expect(html).toContain('style="fill: #123456"');
     expect(html).toContain('style="stroke: #654321"');
     expect(html).toContain('style="background: #abcdef"');
+    expect(html).toContain('aria-label="Priority Bar, Priority, Notes"');
+    expect(html).toContain('class="chart-axis-label chart-axis-x"');
+    expect(html).toContain(">Priority</text>");
+    expect(html).toContain(">Notes</text>");
     expect(html).not.toContain(">5</text>");
     expect(html).not.toContain(">7</text>");
     expect(html).not.toContain("High (3)");

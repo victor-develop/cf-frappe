@@ -196,7 +196,9 @@ function chartValue(value: Record<string, unknown>): ReportChartDefinition {
     ...(value.orderBy === undefined ? {} : { orderBy: requiredString(value.orderBy, "Saved report chart orderBy must be a string") as ReportChartOrderBy }),
     ...(value.order === undefined ? {} : { order: reportOrderValue(value.order) }),
     ...(value.colors === undefined ? {} : { colors: stringArray(value.colors, "Saved report chart colors must be strings") }),
-    ...(value.showValues === undefined ? {} : { showValues: booleanValue(value.showValues, "Saved report chart showValues must be a boolean") })
+    ...(value.showValues === undefined ? {} : { showValues: booleanValue(value.showValues, "Saved report chart showValues must be a boolean") }),
+    ...optionalStringField(value, "xAxisLabel"),
+    ...optionalStringField(value, "yAxisLabel")
   };
 }
 

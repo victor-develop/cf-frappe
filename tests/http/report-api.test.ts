@@ -79,7 +79,9 @@ describe("report api", () => {
             orderBy: "value",
             order: "desc",
             colors: ["#123456"],
-            showValues: false
+            showValues: false,
+            xAxisLabel: "Priority",
+            yAxisLabel: "Notes"
           }
         ],
         roles: ["User"]
@@ -100,6 +102,8 @@ describe("report api", () => {
           order: "desc",
           colors: ["#123456"],
           showValues: false,
+          xAxisLabel: "Priority",
+          yAxisLabel: "Notes",
           points: [{ key: "High", value: 2 }]
         }
       ]

@@ -154,7 +154,9 @@ describe("ReportService", () => {
             orderBy: "value",
             order: "desc",
             colors: ["#123", "#abcdef"],
-            showValues: false
+            showValues: false,
+            xAxisLabel: "Priority",
+            yAxisLabel: "Notes"
           }
         ],
         roles: ["User"]
@@ -176,6 +178,8 @@ describe("ReportService", () => {
         order: "desc",
         colors: ["#123", "#abcdef"],
         showValues: false,
+        xAxisLabel: "Priority",
+        yAxisLabel: "Notes",
         points: [
           { key: "Medium", label: "Medium", value: 3 },
           { key: "Low", label: "Low", value: 2 }

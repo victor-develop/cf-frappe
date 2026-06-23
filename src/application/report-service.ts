@@ -65,6 +65,8 @@ export interface ReportChartResult {
   readonly order: ReportChartOrder;
   readonly colors: readonly string[];
   readonly showValues: boolean;
+  readonly xAxisLabel?: string;
+  readonly yAxisLabel?: string;
   readonly points: readonly ReportChartPoint[];
 }
 
@@ -657,6 +659,8 @@ function buildReportCharts(
       order,
       colors: chart.colors ?? EMPTY_CHART_COLORS,
       showValues: chart.showValues ?? true,
+      ...(chart.xAxisLabel === undefined ? {} : { xAxisLabel: chart.xAxisLabel }),
+      ...(chart.yAxisLabel === undefined ? {} : { yAxisLabel: chart.yAxisLabel }),
       points
     };
   });
