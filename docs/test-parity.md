@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk report formula columns slice:
+As of the selected-document bulk client helpers slice:
 
 - Vitest files: `73`
-- Vitest cases: `703`
+- Vitest cases: `704`
 
 ## Implication
 

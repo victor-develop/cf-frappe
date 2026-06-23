@@ -1257,6 +1257,7 @@ describe("Desk app", () => {
     expect(source).toContain("documentTopic(tenantId, doctype, name)");
     expect(source).toContain("userTopic(tenantId, userId)");
     expect(source).toContain("resourcePath(doctype, name) + \"/transition/\"");
+    expect(source).toContain("resourcePath(doctype) + \"/bulk-transition/\"");
     expect(source).toContain("new WebSocket(realtimeUrl(topic, options)");
     expect(source).toContain("subscribeDocument");
     expect(source).toContain("DocumentUserNotification");

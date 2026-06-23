@@ -142,6 +142,10 @@ export function renderDeskClientScript(): string {
     return withoutKeys(input, ["id"]);
   }
 
+  function bulkDocumentsBody(documents) {
+    return { documents: documents };
+  }
+
   function timelineParams(options) {
     var params = {};
     if (options && options.limit !== undefined && options.limit !== null) {
@@ -921,6 +925,18 @@ export function renderDeskClientScript(): string {
       },
       assignments: function (doctype, name) {
         return request(resourceActionPath(doctype, name, "assignments")).then(unwrapData);
+      },
+      bulkCancel: function (doctype, documents) {
+        return request(resourcePath(doctype) + "/bulk-cancel", { method: "POST", body: bulkDocumentsBody(documents) }).then(unwrapData);
+      },
+      bulkDelete: function (doctype, documents) {
+        return request(resourcePath(doctype) + "/delete", { method: "POST", body: bulkDocumentsBody(documents) }).then(unwrapData);
+      },
+      bulkSubmit: function (doctype, documents) {
+        return request(resourcePath(doctype) + "/bulk-submit", { method: "POST", body: bulkDocumentsBody(documents) }).then(unwrapData);
+      },
+      bulkTransition: function (doctype, action, documents) {
+        return request(resourcePath(doctype) + "/bulk-transition/" + encodePart(action), { method: "POST", body: bulkDocumentsBody(documents) }).then(unwrapData);
       },
       amend: function (doctype, name, input, options) {
         return request(resourcePath(doctype, name) + "/amend", { method: "POST", body: commandBody(input || {}, options) }).then(unwrapData);

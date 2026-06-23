@@ -73,6 +73,14 @@ interface DeskClientRuntime {
       options?: { readonly expectedVersion?: number }
     ) => Promise<unknown>;
     readonly assignments: (doctype: string, name: string) => Promise<unknown>;
+    readonly bulkCancel: (doctype: string, documents: readonly DeskBulkDocumentSelection[]) => Promise<unknown>;
+    readonly bulkDelete: (doctype: string, documents: readonly DeskBulkDocumentSelection[]) => Promise<unknown>;
+    readonly bulkSubmit: (doctype: string, documents: readonly DeskBulkDocumentSelection[]) => Promise<unknown>;
+    readonly bulkTransition: (
+      doctype: string,
+      action: string,
+      documents: readonly DeskBulkDocumentSelection[]
+    ) => Promise<unknown>;
     readonly amend: (
       doctype: string,
       name: string,
@@ -165,6 +173,11 @@ interface DeskClientRuntime {
       options: { readonly expectedVersion: number }
     ) => Promise<unknown>;
   };
+}
+
+interface DeskBulkDocumentSelection {
+  readonly name: string;
+  readonly expectedVersion?: number;
 }
 
 interface DeskRealtimeHandlers {
@@ -306,6 +319,50 @@ describe("Desk client runtime", () => {
     expect(calls[0]?.url).toBe(
       "/api/resource/Task?filter_priority__ne=Low&filter_count__gt=2&filter_count__lt=9&filter_title=Launch"
     );
+  });
+
+  it("wraps selected-document bulk resource APIs with encoded JSON requests", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { ok: true } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+    const documents = [
+      { name: "TASK/1", expectedVersion: 2 },
+      { name: "TASK-2" }
+    ];
+
+    await runtime.resource.bulkDelete("Task Type", documents);
+    await runtime.resource.bulkSubmit("Task Type", documents);
+    await runtime.resource.bulkCancel("Task Type", documents);
+    await runtime.resource.bulkTransition("Task Type", "close now", documents);
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "POST /api/resource/Task%20Type/delete",
+      "POST /api/resource/Task%20Type/bulk-submit",
+      "POST /api/resource/Task%20Type/bulk-cancel",
+      "POST /api/resource/Task%20Type/bulk-transition/close%20now"
+    ]);
+    expect(calls.map((call) => (call.init.headers as Headers).get("content-type"))).toEqual([
+      "application/json",
+      "application/json",
+      "application/json",
+      "application/json"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual([
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin"
+    ]);
+    expect(calls.map((call) => call.init.body)).toEqual([
+      JSON.stringify({ documents }),
+      JSON.stringify({ documents }),
+      JSON.stringify({ documents }),
+      JSON.stringify({ documents })
+    ]);
   });
 
   it("wraps document collaboration and saved-filter resource APIs", async () => {
