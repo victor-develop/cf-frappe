@@ -76,6 +76,17 @@ interface DeskClientRuntime {
       options?: { readonly expectedVersion?: number; readonly tenant?: string }
     ) => Promise<unknown>;
   };
+  readonly notifications: {
+    readonly dismiss: (notificationId: string, options?: { readonly user?: string }) => Promise<unknown>;
+    readonly inbox: (options?: {
+      readonly include_dismissed?: boolean;
+      readonly includeDismissed?: boolean;
+      readonly limit?: number;
+      readonly unread?: boolean;
+      readonly user?: string;
+    }) => Promise<unknown>;
+    readonly markRead: (notificationId: string, options?: { readonly user?: string }) => Promise<unknown>;
+  };
   readonly files: {
     readonly bulkDelete: (files: readonly DeskBulkFileSelection[]) => Promise<unknown>;
     readonly bulkUpdateMetadata: (
@@ -595,6 +606,36 @@ describe("Desk client runtime", () => {
       "PUT /api/users/owner%40example.com/profile?tenant=acme%2Feast"
     ]);
     expect(calls[1]?.init.body).toBe(JSON.stringify({ fullName: "Ada Lovelace", expectedVersion: 7 }));
+  });
+
+  it("wraps same-origin notification inbox and read-state APIs", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const notificationId = "evt_assign:user:support%40example.com";
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { notification: { id: notificationId } } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(
+      runtime.notifications.inbox({
+        includeDismissed: true,
+        limit: 10,
+        unread: true,
+        user: "support@example.com"
+      })
+    ).resolves.toEqual({ notification: { id: notificationId } });
+    await runtime.notifications.markRead(notificationId, { user: "support@example.com" });
+    await runtime.notifications.dismiss(notificationId, { user: "support@example.com" });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/notifications?user=support%40example.com&limit=10&unread=true&include_dismissed=true",
+      "POST /api/notifications/evt_assign%3Auser%3Asupport%2540example.com/read?user=support%40example.com",
+      "POST /api/notifications/evt_assign%3Auser%3Asupport%2540example.com/dismiss?user=support%40example.com"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin"]);
+    expect(calls.map((call) => call.init.body)).toEqual([undefined, undefined, undefined]);
   });
 
   it("wraps document collaboration and saved-filter resource APIs", async () => {

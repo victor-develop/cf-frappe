@@ -120,6 +120,10 @@ export function renderDeskClientScript(): string {
     return withQuery("/api/users/" + encodePart(userId) + "/profile", tenantParams(options || {}));
   }
 
+  function notificationActionPath(notificationId, action, options) {
+    return withQuery("/api/notifications/" + encodePart(notificationId) + "/" + action, notificationCommandParams(options || {}));
+  }
+
   function versionBody(options) {
     return options && options.expectedVersion !== undefined ? { expectedVersion: options.expectedVersion } : {};
   }
@@ -167,6 +171,21 @@ export function renderDeskClientScript(): string {
   function tenantParams(options) {
     var params = {};
     setParam(params, "tenant", options && options.tenant);
+    return params;
+  }
+
+  function notificationInboxParams(options) {
+    var params = {};
+    setParam(params, "user", options && options.user);
+    setParam(params, "limit", options && options.limit);
+    setParam(params, "unread", options && options.unread);
+    setParam(params, "include_dismissed", options && (options.includeDismissed !== undefined ? options.includeDismissed : options.include_dismissed));
+    return params;
+  }
+
+  function notificationCommandParams(options) {
+    var params = {};
+    setParam(params, "user", options && options.user);
     return params;
   }
 
@@ -959,6 +978,17 @@ export function renderDeskClientScript(): string {
       },
       reports: function () {
         return request("/api/meta/reports").then(unwrapData);
+      }
+    }),
+    notifications: Object.freeze({
+      dismiss: function (notificationId, options) {
+        return request(notificationActionPath(notificationId, "dismiss", options || {}), { method: "POST" }).then(unwrapData);
+      },
+      inbox: function (options) {
+        return request(withQuery("/api/notifications", notificationInboxParams(options || {}))).then(unwrapData);
+      },
+      markRead: function (notificationId, options) {
+        return request(notificationActionPath(notificationId, "read", options || {}), { method: "POST" }).then(unwrapData);
       }
     }),
     profiles: Object.freeze({
