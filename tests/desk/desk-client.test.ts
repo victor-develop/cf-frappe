@@ -103,6 +103,19 @@ interface DeskClientRuntime {
     readonly get: (role: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly list: (options?: { readonly tenant?: string }) => Promise<unknown>;
   };
+  readonly userPermissions: {
+    readonly allow: (
+      userId: string,
+      grant: Record<string, unknown>,
+      options?: { readonly expectedVersion?: number; readonly tenant?: string }
+    ) => Promise<unknown>;
+    readonly get: (userId: string, options?: { readonly tenant?: string }) => Promise<unknown>;
+    readonly revoke: (
+      userId: string,
+      grant: Record<string, unknown>,
+      options?: { readonly expectedVersion?: number; readonly tenant?: string }
+    ) => Promise<unknown>;
+  };
   readonly customFields: {
     readonly disable: (
       doctype: string,
@@ -755,6 +768,46 @@ describe("Desk client runtime", () => {
       undefined,
       JSON.stringify({ field: expectedField, expectedVersion: 1 }),
       JSON.stringify({ expectedVersion: 2 })
+    ]);
+  });
+
+  it("wraps event-sourced user permission APIs with tenant and version metadata", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { userId: "owner@example.com", version: 2, grants: [] } }), {
+        headers: { "content-type": "application/json" },
+        status: (init?.method ?? "GET") === "POST" ? 201 : 200
+      });
+    });
+    const expectedGrant = {
+      targetDoctype: "Customer",
+      targetName: "CUST/1",
+      applicableDoctypes: ["Sales Order"]
+    };
+    const grant = {
+      ...expectedGrant,
+      expectedVersion: 99
+    };
+
+    await expect(runtime.userPermissions.get("owner@example.com", { tenant: "acme/east" })).resolves.toEqual({
+      userId: "owner@example.com",
+      version: 2,
+      grants: []
+    });
+    await runtime.userPermissions.allow("owner@example.com", grant, { expectedVersion: 1, tenant: "acme/east" });
+    await runtime.userPermissions.revoke("owner@example.com", grant, { expectedVersion: 2, tenant: "acme/east" });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/user-permissions/owner%40example.com?tenant=acme%2Feast",
+      "POST /api/user-permissions/owner%40example.com?tenant=acme%2Feast",
+      "DELETE /api/user-permissions/owner%40example.com?tenant=acme%2Feast"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin"]);
+    expect(calls.map((call) => call.init.body)).toEqual([
+      undefined,
+      JSON.stringify({ ...expectedGrant, expectedVersion: 1 }),
+      JSON.stringify({ ...expectedGrant, expectedVersion: 2 })
     ]);
   });
 

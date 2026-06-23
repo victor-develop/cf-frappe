@@ -136,6 +136,10 @@ export function renderDeskClientScript(): string {
     return withQuery("/api/custom-fields/" + encodePart(doctype) + (field === undefined ? "" : "/" + encodePart(field)), tenantParams(options || {}));
   }
 
+  function userPermissionPath(userId, options) {
+    return withQuery("/api/user-permissions/" + encodePart(userId), tenantParams(options || {}));
+  }
+
   function versionBody(options) {
     return options && options.expectedVersion !== undefined ? { expectedVersion: options.expectedVersion } : {};
   }
@@ -169,6 +173,10 @@ export function renderDeskClientScript(): string {
   function customFieldBody(field, options) {
     var bodyField = isPlainObject(field) ? withoutKeys(field, ["expectedVersion"]) : field;
     return Object.assign({ field: bodyField }, versionBody(options));
+  }
+
+  function userPermissionBody(grant, options) {
+    return commandBody(grant || {}, options);
   }
 
   function savedFilterBody(input) {
@@ -949,6 +957,17 @@ export function renderDeskClientScript(): string {
       },
       save: function (doctype, field, options) {
         return request(customFieldPath(doctype, undefined, options || {}), { method: "POST", body: customFieldBody(field, options) }).then(unwrapData);
+      }
+    }),
+    userPermissions: Object.freeze({
+      allow: function (userId, grant, options) {
+        return request(userPermissionPath(userId, options || {}), { method: "POST", body: userPermissionBody(grant, options) }).then(unwrapData);
+      },
+      get: function (userId, options) {
+        return request(userPermissionPath(userId, options || {})).then(unwrapData);
+      },
+      revoke: function (userId, grant, options) {
+        return request(userPermissionPath(userId, options || {}), { method: "DELETE", body: userPermissionBody(grant, options) }).then(unwrapData);
       }
     }),
     form: Object.freeze({
