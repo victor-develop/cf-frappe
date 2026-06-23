@@ -144,6 +144,14 @@ export function renderDeskClientScript(): string {
     return "/api/data-patches" + (patchId === undefined ? "" : "/" + encodePart(patchId)) + (action === undefined ? "" : "/" + action);
   }
 
+  function jobExecutionPath(idempotencyKey, action) {
+    return "/api/jobs/executions/" + encodePart(idempotencyKey) + (action === undefined ? "" : "/" + action);
+  }
+
+  function jobSchedulePath(scheduleId, action) {
+    return "/api/jobs/schedules" + (scheduleId === undefined ? "" : "/" + encodePart(scheduleId)) + (action === undefined ? "" : "/" + action);
+  }
+
   function versionBody(options) {
     return options && options.expectedVersion !== undefined ? { expectedVersion: options.expectedVersion } : {};
   }
@@ -267,6 +275,22 @@ export function renderDeskClientScript(): string {
       headers["content-type"] = contentType;
     }
     return headers;
+  }
+
+  function jobDashboardParams(options) {
+    var params = {};
+    setParam(params, "job", options && (options.jobName !== undefined ? options.jobName : options.job));
+    setParam(params, "run_id", options && (options.runId !== undefined ? options.runId : options.run_id));
+    setParam(params, "status", options && options.status);
+    setParam(params, "limit", options && options.limit);
+    return params;
+  }
+
+  function jobScheduleParams(options) {
+    var params = {};
+    setParam(params, "cron", options && options.cron);
+    setParam(params, "job", options && (options.jobName !== undefined ? options.jobName : options.job));
+    return params;
   }
 
   function timelineParams(options) {
@@ -1002,6 +1026,41 @@ export function renderDeskClientScript(): string {
       },
       status: function () {
         return request(dataPatchPath()).then(unwrapData);
+      }
+    }),
+    jobs: Object.freeze({
+      createSchedule: function (input) {
+        return request(jobSchedulePath(), { method: "POST", body: input || {} }).then(unwrapData);
+      },
+      dashboard: function (options) {
+        return request(withQuery("/api/jobs", jobDashboardParams(options || {}))).then(unwrapData);
+      },
+      deleteSchedule: function (scheduleId) {
+        return request(jobSchedulePath(scheduleId), { method: "DELETE" }).then(unwrapData);
+      },
+      disableSchedule: function (scheduleId) {
+        return request(jobSchedulePath(scheduleId, "disable"), { method: "POST" }).then(unwrapData);
+      },
+      enableSchedule: function (scheduleId) {
+        return request(jobSchedulePath(scheduleId, "enable"), { method: "POST" }).then(unwrapData);
+      },
+      execution: function (idempotencyKey) {
+        return request(jobExecutionPath(idempotencyKey)).then(unwrapData);
+      },
+      resetSchedule: function (scheduleId) {
+        return request(jobSchedulePath(scheduleId, "reset"), { method: "POST" }).then(unwrapData);
+      },
+      retry: function (idempotencyKey) {
+        return request(jobExecutionPath(idempotencyKey, "retry"), { method: "POST" }).then(unwrapData);
+      },
+      runSchedule: function (scheduleId) {
+        return request(jobSchedulePath(scheduleId, "run"), { method: "POST" }).then(unwrapData);
+      },
+      schedules: function (options) {
+        return request(withQuery(jobSchedulePath(), jobScheduleParams(options || {}))).then(unwrapData);
+      },
+      updateSchedule: function (scheduleId, input) {
+        return request(jobSchedulePath(scheduleId), { method: "PUT", body: input || {} }).then(unwrapData);
       }
     }),
     form: Object.freeze({

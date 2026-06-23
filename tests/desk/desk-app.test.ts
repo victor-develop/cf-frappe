@@ -1258,6 +1258,7 @@ describe("Desk app", () => {
     expect(source).toContain("dataPatches: Object.freeze");
     expect(source).toContain("form: Object.freeze");
     expect(source).toContain("files: Object.freeze");
+    expect(source).toContain("jobs: Object.freeze");
     expect(source).toContain("notifications: Object.freeze");
     expect(source).toContain("profiles: Object.freeze");
     expect(source).toContain("roles: Object.freeze");

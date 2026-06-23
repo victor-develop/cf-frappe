@@ -126,6 +126,19 @@ interface DeskClientRuntime {
     readonly retry: (patchId: string) => Promise<unknown>;
     readonly status: () => Promise<unknown>;
   };
+  readonly jobs: {
+    readonly createSchedule: (input: Record<string, unknown>) => Promise<unknown>;
+    readonly dashboard: (options?: Record<string, unknown>) => Promise<unknown>;
+    readonly deleteSchedule: (scheduleId: string) => Promise<unknown>;
+    readonly disableSchedule: (scheduleId: string) => Promise<unknown>;
+    readonly enableSchedule: (scheduleId: string) => Promise<unknown>;
+    readonly execution: (idempotencyKey: string) => Promise<unknown>;
+    readonly resetSchedule: (scheduleId: string) => Promise<unknown>;
+    readonly retry: (idempotencyKey: string) => Promise<unknown>;
+    readonly runSchedule: (scheduleId: string) => Promise<unknown>;
+    readonly schedules: (options?: Record<string, unknown>) => Promise<unknown>;
+    readonly updateSchedule: (scheduleId: string, input: Record<string, unknown>) => Promise<unknown>;
+  };
   readonly customFields: {
     readonly disable: (
       doctype: string,
@@ -874,6 +887,86 @@ describe("Desk client runtime", () => {
       undefined,
       JSON.stringify({ patchIds: ["crm.second"], limit: 1, idempotencyKey: "patches:batch", delaySeconds: 5 }),
       JSON.stringify({ limit: 1, idempotencyKey: "patches:single", delaySeconds: 10 })
+    ]);
+  });
+
+  it("wraps job history and schedule APIs without browser-side validation", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { ok: true } }), {
+        headers: { "content-type": "application/json" },
+        status: (init?.method ?? "GET") === "POST" ? 201 : 200
+      });
+    });
+    const schedule = {
+      id: "runtime/daily",
+      cron: "0 2 * * *",
+      jobName: "reports.daily",
+      enabled: true,
+      payload: { scope: "all" },
+      metadata: { source: "client" },
+      delaySeconds: 30
+    };
+    const update = {
+      id: "ignored-body-id",
+      cron: "0 3 * * *",
+      jobName: "reports.daily",
+      enabled: false
+    };
+
+    await expect(runtime.jobs.dashboard({ jobName: "reports.daily", runId: "job/42", status: "failed", limit: 5 })).resolves.toEqual({
+      ok: true
+    });
+    await runtime.jobs.execution("reports.daily:job/42");
+    await runtime.jobs.retry("reports.daily:job/42");
+    await runtime.jobs.schedules({ cron: "0 2 * * *", jobName: "reports.daily" });
+    await runtime.jobs.createSchedule(schedule);
+    await runtime.jobs.updateSchedule("runtime/daily", update);
+    await runtime.jobs.deleteSchedule("runtime/daily");
+    await runtime.jobs.runSchedule("runtime/daily");
+    await runtime.jobs.enableSchedule("runtime/daily");
+    await runtime.jobs.disableSchedule("runtime/daily");
+    await runtime.jobs.resetSchedule("runtime/daily");
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/jobs?job=reports.daily&run_id=job%2F42&status=failed&limit=5",
+      "GET /api/jobs/executions/reports.daily%3Ajob%2F42",
+      "POST /api/jobs/executions/reports.daily%3Ajob%2F42/retry",
+      "GET /api/jobs/schedules?cron=0+2+*+*+*&job=reports.daily",
+      "POST /api/jobs/schedules",
+      "PUT /api/jobs/schedules/runtime%2Fdaily",
+      "DELETE /api/jobs/schedules/runtime%2Fdaily",
+      "POST /api/jobs/schedules/runtime%2Fdaily/run",
+      "POST /api/jobs/schedules/runtime%2Fdaily/enable",
+      "POST /api/jobs/schedules/runtime%2Fdaily/disable",
+      "POST /api/jobs/schedules/runtime%2Fdaily/reset"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual([
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin"
+    ]);
+    expect(calls.map((call) => call.init.body)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      JSON.stringify(schedule),
+      JSON.stringify(update),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined
     ]);
   });
 
