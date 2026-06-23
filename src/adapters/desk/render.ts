@@ -117,6 +117,12 @@ export interface WorkspacePageView {
   readonly sections: readonly WorkspaceSectionView[];
 }
 
+type DataPatchQueueControls = {
+  readonly apply: boolean;
+  readonly rollback: boolean;
+  readonly rollbackRetry: boolean;
+};
+
 export function renderDeskLayout(options: DeskLayoutOptions): string {
   const workspaceNav = (options.workspaces ?? [])
     .map(
@@ -1170,9 +1176,11 @@ export function renderDataPatchAdmin(
     readonly error?: string;
     readonly plan?: DataPatchApplyPlan | DataPatchRollbackPlan;
     readonly planKind?: "apply" | "rollback";
+    readonly queue?: DataPatchQueueControls;
   } = {}
 ): string {
   const canPlanRollback = dashboard.patches.some((patch) => patch.rollbackable === true);
+  const queue = options.queue ?? { apply: false, rollback: false, rollbackRetry: false };
   const rows = dashboard.patches
     .map((patch) => `<tr>
       <td>${escapeHtml(patch.id)}</td>
@@ -1181,7 +1189,7 @@ export function renderDataPatchAdmin(
       <td>${escapeHtml(patch.status)}</td>
       <td>${escapeHtml(dataPatchTimestamp(patch))}</td>
       <td>${escapeHtml(dataPatchDetail(patch))}</td>
-      <td>${renderDataPatchAction(patch)}</td>
+      <td>${renderDataPatchAction(patch, queue)}</td>
     </tr>`)
     .join("");
   return `<form class="panel form" method="post" action="/desk/admin/data-patches/apply">
@@ -1193,7 +1201,9 @@ export function renderDataPatchAdmin(
     </div>
     <div class="actions">
       <button class="button" type="submit" formaction="/desk/admin/data-patches/plan">Plan Batch</button>
+      ${queue.apply ? `<button class="button" type="submit" formaction="/desk/admin/data-patches/enqueue">Enqueue Batch</button>` : ""}
       ${canPlanRollback ? `<button class="button" type="submit" formaction="/desk/admin/data-patches/rollback-plan">Plan Rollback Batch</button>` : ""}
+      ${canPlanRollback && queue.rollback ? `<button class="button" type="submit" formaction="/desk/admin/data-patches/rollback-enqueue">Enqueue Rollback Batch</button>` : ""}
       ${canPlanRollback ? `<button class="button" type="submit" formaction="/desk/admin/data-patches/rollback">Rollback Batch</button>` : ""}
       <button class="button primary" type="submit">Apply Batch</button>
     </div>
@@ -1208,10 +1218,14 @@ export function renderDataPatchAdmin(
   </section>`;
 }
 
-function renderDataPatchAction(patch: DataPatchDashboardEntry): string {
+function renderDataPatchAction(
+  patch: DataPatchDashboardEntry,
+  queue: DataPatchQueueControls
+): string {
   if (patch.status === "not_applied") {
     return `<form class="inline-action" method="post">
       <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/plan">Plan</button>
+      ${queue.apply ? `<button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/enqueue">Enqueue</button>` : ""}
       <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/apply">Apply</button>
     </form>`;
   }
@@ -1223,12 +1237,14 @@ function renderDataPatchAction(patch: DataPatchDashboardEntry): string {
   if (patch.status === "rollback_failed") {
     return `<form class="inline-action" method="post">
       <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/rollback-retry">Retry Rollback</button>
+      ${queue.rollbackRetry ? `<button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/rollback-retry-enqueue">Enqueue Retry</button>` : ""}
     </form>`;
   }
   if (patch.status === "applied" && patch.rollbackable === true) {
     const label = patch.rollbackLabel ?? "Plan Rollback";
     return `<form class="inline-action" method="post">
       <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/rollback-plan">${escapeHtml(label)}</button>
+      ${queue.rollback ? `<button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/rollback-enqueue">Enqueue Rollback</button>` : ""}
       <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/rollback">Rollback</button>
     </form>`;
   }

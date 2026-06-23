@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the data-patch rollback retry queue orchestration slice:
+As of the Desk data-patch queue controls slice:
 
 - Vitest files: `73`
-- Vitest cases: `761`
+- Vitest cases: `764`
 
 ## Implication
 

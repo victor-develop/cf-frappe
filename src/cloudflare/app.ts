@@ -484,6 +484,11 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     reports,
     roles,
     ...(dataPatches === undefined ? {} : { dataPatches }),
+    ...(dataPatchQueue === undefined || !dataPatchApplyQueueEnabled ? {} : { dataPatchQueue }),
+    ...(dataPatchQueue === undefined || !dataPatchRollbackQueueEnabled ? {} : { dataPatchRollbackQueue: dataPatchQueue }),
+    ...(dataPatchQueue === undefined || !dataPatchRollbackRetryQueueEnabled
+      ? {}
+      : { dataPatchRollbackRetryQueue: dataPatchQueue }),
     ...(jobHistory === undefined ? {} : { jobs: jobHistory }),
     ...(jobRetry === undefined ? {} : { jobRetry }),
     ...(jobSchedules === undefined ? {} : { jobSchedules }),

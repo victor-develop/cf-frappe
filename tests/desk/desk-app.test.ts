@@ -2,8 +2,12 @@ import {
   CHILD_TABLE_ROW_INDEX_FIELD,
   CustomFieldService,
   createDeskApp,
+  createDataPatchApplyJob,
+  createDataPatchRollbackJob,
+  createDataPatchRollbackRetryJob,
   createRegistry,
   DataPatchService,
+  DataPatchQueueService,
   defineClientScript,
   defineDataPatch,
   defineDocType,
@@ -2452,6 +2456,253 @@ describe("Desk app", () => {
     expect(resources.rolledBack).toEqual(["second", "first"]);
   });
 
+  it("enqueues data patch apply jobs from the Desk admin surface", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
+    const services = createServices();
+    const resources = { touched: [] as string[] };
+    const dataPatches = new DataPatchService({
+      log: new InMemoryDataPatchLog(),
+      resources,
+      patches: [
+        defineDataPatch<typeof resources>({
+          id: "core.first",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.touched.push("first");
+            return { touched: resources.touched.length };
+          }
+        }),
+        defineDataPatch<typeof resources>({
+          id: "crm.second",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.touched.push("second");
+          }
+        })
+      ],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-first", "claim-second"])
+    });
+    const queue = new InMemoryJobQueue();
+    const dataPatchQueue = new DataPatchQueueService({
+      dataPatches,
+      dispatcher: new JobDispatcher({
+        registry: createJobRegistry({ jobs: [createDataPatchApplyJob()] }),
+        queue,
+        clock: fixedClock(now),
+        ids: deterministicIds(["patch-001", "patch-002"])
+      })
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      dataPatches,
+      dataPatchQueue,
+      actor: () => admin
+    });
+
+    const page = await app.request("/desk/admin/data-patches");
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain('formaction="/desk/admin/data-patches/enqueue"');
+    expect(html).toContain('formaction="/desk/admin/data-patches/core.first/enqueue"');
+    expect(html).not.toContain('formaction="/desk/admin/data-patches/rollback-enqueue"');
+
+    const batch = await app.request("/desk/admin/data-patches/enqueue", {
+      method: "POST",
+      body: new URLSearchParams({ limit: "1" })
+    });
+    expect(batch.status).toBe(303);
+    const batchLocation = batch.headers.get("location");
+    expect(batchLocation).toContain("/desk/admin/data-patches?");
+    expect(queue.queued()[0]?.message).toMatchObject({
+      tenantId: "acme",
+      jobName: "cf-frappe.data-patches.apply",
+      runId: "job_patch-001",
+      payload: { patchIds: ["core.first"] },
+      metadata: { dispatchSource: "data-patches", requestedBy: "admin@example.com" }
+    });
+    expect(resources.touched).toEqual([]);
+    const batchHtml = await (await app.request(batchLocation!)).text();
+    expect(batchHtml).toContain("Enqueued data patch job cf-frappe.data-patches.apply / job_patch-001");
+
+    const single = await app.request("/desk/admin/data-patches/core.first/enqueue", { method: "POST" });
+    expect(single.status).toBe(303);
+    expect(queue.queued()[1]?.message).toMatchObject({
+      tenantId: "acme",
+      jobName: "cf-frappe.data-patches.apply",
+      runId: "job_patch-002",
+      payload: { patchIds: ["core.first"] }
+    });
+    expect(resources.touched).toEqual([]);
+  });
+
+  it("enqueues data patch rollback jobs from the Desk admin surface", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
+    const services = createServices();
+    const resources = { applied: [] as string[], rolledBack: [] as string[] };
+    const dataPatches = new DataPatchService({
+      log: new InMemoryDataPatchLog(),
+      resources,
+      patches: [
+        defineDataPatch<typeof resources>({
+          id: "core.first",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.applied.push("first");
+          },
+          rollback: {
+            run: ({ resources }) => {
+              resources.rolledBack.push("first");
+            }
+          }
+        }),
+        defineDataPatch<typeof resources>({
+          id: "crm.second",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.applied.push("second");
+          },
+          rollback: {
+            run: ({ resources }) => {
+              resources.rolledBack.push("second");
+            }
+          }
+        })
+      ],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-first", "claim-second"])
+    });
+    const queue = new InMemoryJobQueue();
+    const dataPatchRollbackQueue = new DataPatchQueueService({
+      dataPatches,
+      dispatcher: new JobDispatcher({
+        registry: createJobRegistry({ jobs: [createDataPatchRollbackJob()] }),
+        queue,
+        clock: fixedClock(now),
+        ids: deterministicIds(["patch-rollback-001", "patch-rollback-002"])
+      })
+    });
+    await dataPatches.apply(admin);
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      dataPatches,
+      dataPatchRollbackQueue,
+      actor: () => admin
+    });
+
+    const page = await app.request("/desk/admin/data-patches");
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain('formaction="/desk/admin/data-patches/rollback-enqueue"');
+    expect(html).toContain('formaction="/desk/admin/data-patches/crm.second/rollback-enqueue"');
+    expect(html).not.toContain('formaction="/desk/admin/data-patches/enqueue"');
+
+    const batch = await app.request("/desk/admin/data-patches/rollback-enqueue", {
+      method: "POST",
+      body: new URLSearchParams({ limit: "1" })
+    });
+    expect(batch.status).toBe(303);
+    const batchLocation = batch.headers.get("location");
+    expect(batchLocation).toContain("/desk/admin/data-patches?");
+    expect(queue.queued()[0]?.message).toMatchObject({
+      tenantId: "acme",
+      jobName: "cf-frappe.data-patches.rollback",
+      runId: "job_patch-rollback-001",
+      payload: { patchIds: ["crm.second"] },
+      metadata: { dispatchSource: "data-patches", requestedBy: "admin@example.com" }
+    });
+    expect(resources.rolledBack).toEqual([]);
+    const batchHtml = await (await app.request(batchLocation!)).text();
+    expect(batchHtml).toContain("Enqueued data patch rollback job cf-frappe.data-patches.rollback / job_patch-rollback-001");
+
+    const single = await app.request("/desk/admin/data-patches/crm.second/rollback-enqueue", { method: "POST" });
+    expect(single.status).toBe(303);
+    expect(queue.queued()[1]?.message).toMatchObject({
+      tenantId: "acme",
+      jobName: "cf-frappe.data-patches.rollback",
+      runId: "job_patch-rollback-002",
+      payload: { patchIds: ["crm.second"] }
+    });
+    expect(resources.rolledBack).toEqual([]);
+  });
+
+  it("enqueues failed rollback retry jobs from the Desk admin surface", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
+    const services = createServices();
+    const resources = { attempts: 0, rolledBack: [] as string[] };
+    const dataPatches = new DataPatchService({
+      log: new InMemoryDataPatchLog(),
+      resources,
+      patches: [
+        defineDataPatch<typeof resources>({
+          id: "core.rollback",
+          checksum: "v1",
+          run: () => undefined,
+          rollback: {
+            run: ({ resources }) => {
+              resources.attempts += 1;
+              if (resources.attempts === 1) {
+                throw new Error("rollback boom");
+              }
+              resources.rolledBack.push("core");
+              return { attempts: resources.attempts };
+            }
+          }
+        })
+      ],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-apply", "rollback-failed"])
+    });
+    const queue = new InMemoryJobQueue();
+    const dataPatchRollbackRetryQueue = new DataPatchQueueService({
+      dataPatches,
+      dispatcher: new JobDispatcher({
+        registry: createJobRegistry({ jobs: [createDataPatchRollbackRetryJob()] }),
+        queue,
+        clock: fixedClock(now),
+        ids: deterministicIds(["patch-rollback-retry-001"])
+      })
+    });
+    await dataPatches.apply(admin);
+    await expect(dataPatches.rollback(admin, { patchIds: ["core.rollback"] })).rejects.toThrow("rollback boom");
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      dataPatches,
+      dataPatchRollbackRetryQueue,
+      actor: () => admin
+    });
+
+    const page = await app.request("/desk/admin/data-patches");
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain('formaction="/desk/admin/data-patches/core.rollback/rollback-retry-enqueue"');
+
+    const enqueued = await app.request("/desk/admin/data-patches/core.rollback/rollback-retry-enqueue", {
+      method: "POST"
+    });
+    expect(enqueued.status).toBe(303);
+    const enqueuedLocation = enqueued.headers.get("location");
+    expect(enqueuedLocation).toContain("/desk/admin/data-patches?");
+    expect(queue.queued()[0]?.message).toMatchObject({
+      tenantId: "acme",
+      jobName: "cf-frappe.data-patches.rollback-retry",
+      runId: "job_patch-rollback-retry-001",
+      payload: { patchId: "core.rollback" },
+      metadata: { dispatchSource: "data-patches", requestedBy: "admin@example.com" }
+    });
+    expect(resources).toEqual({ attempts: 1, rolledBack: [] });
+    const enqueuedHtml = await (await app.request(enqueuedLocation!)).text();
+    expect(enqueuedHtml).toContain(
+      "Enqueued data patch rollback retry job cf-frappe.data-patches.rollback-retry / job_patch-rollback-retry-001"
+    );
+  });
+
   it("renders failed data patch retry actions in the Desk admin surface", async () => {
     const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
     const services = createServices();
@@ -2646,6 +2897,22 @@ describe("Desk app", () => {
     });
     expect(invalidLimit.status).toBe(400);
     await expect(invalidLimit.text()).resolves.toContain("Data patch apply limit must be a positive integer");
+
+    const queueDisabled = await app.request("/desk/admin/data-patches/enqueue", { method: "POST" });
+    expect(queueDisabled.status).toBe(404);
+    await expect(queueDisabled.text()).resolves.toContain("Data patch queue is not enabled");
+
+    const rollbackQueueDisabled = await app.request("/desk/admin/data-patches/rollback-enqueue", { method: "POST" });
+    expect(rollbackQueueDisabled.status).toBe(404);
+    await expect(rollbackQueueDisabled.text()).resolves.toContain("Data patch rollback queue is not enabled");
+
+    const rollbackRetryQueueDisabled = await app.request("/desk/admin/data-patches/core.seed/rollback-retry-enqueue", {
+      method: "POST"
+    });
+    expect(rollbackRetryQueueDisabled.status).toBe(404);
+    await expect(rollbackRetryQueueDisabled.text()).resolves.toContain(
+      "Data patch rollback retry queue is not enabled"
+    );
 
     const disabled = createDeskApp({
       registry: services.registry,

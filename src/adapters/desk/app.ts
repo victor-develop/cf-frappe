@@ -1,6 +1,11 @@
 import { Hono } from "hono";
 import type { CustomFieldService } from "../../application/custom-field-service.js";
 import type {
+  DataPatchQueuePort,
+  DataPatchRollbackQueuePort,
+  DataPatchRollbackRetryQueuePort
+} from "../../application/data-patch-jobs.js";
+import type {
   DataPatchAdminPort,
   DataPatchApplyPlan,
   DataPatchRollbackPlan
@@ -154,6 +159,9 @@ export interface DeskAppOptions {
   readonly userPermissions?: UserPermissionService;
   readonly reports?: ReportService;
   readonly dataPatches?: DataPatchAdminPort;
+  readonly dataPatchQueue?: DataPatchQueuePort;
+  readonly dataPatchRollbackQueue?: DataPatchRollbackQueuePort;
+  readonly dataPatchRollbackRetryQueue?: DataPatchRollbackRetryQueuePort;
   readonly jobs?: JobHistoryService;
   readonly jobRetry?: JobRetryPort;
   readonly jobSchedules?: JobScheduleService;
@@ -517,7 +525,15 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const dataPatches = requireDataPatches(options);
     const actor = await options.actor(c.req.raw);
     const dashboard = await dataPatches.dashboard(actor);
-    return renderDeskDataPatchPage(options, actor, dashboard);
+    return renderDeskDataPatchPage(
+      options,
+      actor,
+      dashboard,
+      200,
+      undefined,
+      undefined,
+      dataPatchQueuedMessageFromUrl(c.req.url)
+    );
   });
 
   app.post("/desk/admin/data-patches/apply", async (c) => {
@@ -527,6 +543,19 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       const form = await parseDeskDataPatchApply(c.req.raw);
       await dataPatches.apply(actor, form.limit === undefined ? {} : { limit: form.limit });
       return c.redirect("/desk/admin/data-patches", 303);
+    } catch (error) {
+      return renderDeskDataPatchFailure(options, actor, dataPatches, error);
+    }
+  });
+
+  app.post("/desk/admin/data-patches/enqueue", async (c) => {
+    const dataPatches = requireDataPatches(options);
+    const dataPatchQueue = requireDataPatchQueue(options);
+    const actor = await options.actor(c.req.raw);
+    try {
+      const form = await parseDeskDataPatchApply(c.req.raw);
+      const result = await dataPatchQueue.enqueue(actor, form.limit === undefined ? {} : { limit: form.limit });
+      return c.redirect(dataPatchQueuedLocation("data patch", result.message), 303);
     } catch (error) {
       return renderDeskDataPatchFailure(options, actor, dataPatches, error);
     }
@@ -570,12 +599,40 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     }
   });
 
+  app.post("/desk/admin/data-patches/rollback-enqueue", async (c) => {
+    const dataPatches = requireDataPatches(options);
+    const dataPatchRollbackQueue = requireDataPatchRollbackQueue(options);
+    const actor = await options.actor(c.req.raw);
+    try {
+      const form = await parseDeskDataPatchApply(c.req.raw);
+      const result = await dataPatchRollbackQueue.enqueueRollback(
+        actor,
+        form.limit === undefined ? {} : { limit: form.limit }
+      );
+      return c.redirect(dataPatchQueuedLocation("data patch rollback", result.message), 303);
+    } catch (error) {
+      return renderDeskDataPatchFailure(options, actor, dataPatches, error);
+    }
+  });
+
   app.post("/desk/admin/data-patches/:id/apply", async (c) => {
     const dataPatches = requireDataPatches(options);
     const actor = await options.actor(c.req.raw);
     try {
       await dataPatches.apply(actor, { patchIds: [c.req.param("id")] });
       return c.redirect("/desk/admin/data-patches", 303);
+    } catch (error) {
+      return renderDeskDataPatchFailure(options, actor, dataPatches, error);
+    }
+  });
+
+  app.post("/desk/admin/data-patches/:id/enqueue", async (c) => {
+    const dataPatches = requireDataPatches(options);
+    const dataPatchQueue = requireDataPatchQueue(options);
+    const actor = await options.actor(c.req.raw);
+    try {
+      const result = await dataPatchQueue.enqueue(actor, { patchIds: [c.req.param("id")] });
+      return c.redirect(dataPatchQueuedLocation("data patch", result.message), 303);
     } catch (error) {
       return renderDeskDataPatchFailure(options, actor, dataPatches, error);
     }
@@ -598,6 +655,18 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     try {
       await dataPatches.retryRollbackFailed(actor, c.req.param("id"));
       return c.redirect("/desk/admin/data-patches", 303);
+    } catch (error) {
+      return renderDeskDataPatchFailure(options, actor, dataPatches, error);
+    }
+  });
+
+  app.post("/desk/admin/data-patches/:id/rollback-retry-enqueue", async (c) => {
+    const dataPatches = requireDataPatches(options);
+    const dataPatchRollbackRetryQueue = requireDataPatchRollbackRetryQueue(options);
+    const actor = await options.actor(c.req.raw);
+    try {
+      const result = await dataPatchRollbackRetryQueue.enqueueRollbackRetry(actor, c.req.param("id"));
+      return c.redirect(dataPatchQueuedLocation("data patch rollback retry", result.message), 303);
     } catch (error) {
       return renderDeskDataPatchFailure(options, actor, dataPatches, error);
     }
@@ -633,6 +702,18 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     try {
       await dataPatches.rollback(actor, { patchIds: [c.req.param("id")] });
       return c.redirect("/desk/admin/data-patches", 303);
+    } catch (error) {
+      return renderDeskDataPatchFailure(options, actor, dataPatches, error);
+    }
+  });
+
+  app.post("/desk/admin/data-patches/:id/rollback-enqueue", async (c) => {
+    const dataPatches = requireDataPatches(options);
+    const dataPatchRollbackQueue = requireDataPatchRollbackQueue(options);
+    const actor = await options.actor(c.req.raw);
+    try {
+      const result = await dataPatchRollbackQueue.enqueueRollback(actor, { patchIds: [c.req.param("id")] });
+      return c.redirect(dataPatchQueuedLocation("data patch rollback", result.message), 303);
     } catch (error) {
       return renderDeskDataPatchFailure(options, actor, dataPatches, error);
     }
@@ -2015,6 +2096,29 @@ function requireDataPatches(options: DeskAppOptions): DataPatchAdminPort {
   return options.dataPatches;
 }
 
+function requireDataPatchQueue(options: DeskAppOptions): DataPatchQueuePort {
+  if (!options.dataPatchQueue) {
+    throw new FrameworkError("DATA_PATCH_NOT_FOUND", "Data patch queue is not enabled", { status: 404 });
+  }
+  return options.dataPatchQueue;
+}
+
+function requireDataPatchRollbackQueue(options: DeskAppOptions): DataPatchRollbackQueuePort {
+  if (!options.dataPatchRollbackQueue) {
+    throw new FrameworkError("DATA_PATCH_NOT_FOUND", "Data patch rollback queue is not enabled", { status: 404 });
+  }
+  return options.dataPatchRollbackQueue;
+}
+
+function requireDataPatchRollbackRetryQueue(options: DeskAppOptions): DataPatchRollbackRetryQueuePort {
+  if (!options.dataPatchRollbackRetryQueue) {
+    throw new FrameworkError("DATA_PATCH_NOT_FOUND", "Data patch rollback retry queue is not enabled", {
+      status: 404
+    });
+  }
+  return options.dataPatchRollbackRetryQueue;
+}
+
 function requireJobRetry(options: DeskAppOptions): JobRetryPort {
   if (!options.jobRetry) {
     throw new FrameworkError("JOB_NOT_FOUND", "Job retry is not enabled", { status: 404 });
@@ -2176,7 +2280,10 @@ async function renderDeskDataPatchPage(
   dashboard: Parameters<typeof renderDataPatchAdmin>[0],
   status = 200,
   error?: string,
-  planned?: { readonly kind: "apply"; readonly plan: DataPatchApplyPlan } | { readonly kind: "rollback"; readonly plan: DataPatchRollbackPlan }
+  planned?:
+    | { readonly kind: "apply"; readonly plan: DataPatchApplyPlan }
+    | { readonly kind: "rollback"; readonly plan: DataPatchRollbackPlan },
+  message?: string
 ): Promise<Response> {
   const doctypes = options.queries.listDoctypes(actor);
   const reports = listReports(options, actor);
@@ -2188,13 +2295,73 @@ async function renderDeskDataPatchPage(
       doctypes,
       reports,
       showFiles: options.files !== undefined,
+      ...(message === undefined ? {} : { message }),
       body: renderDataPatchAdmin(dashboard, {
         ...(error === undefined ? {} : { error }),
-        ...(planned === undefined ? {} : { plan: planned.plan, planKind: planned.kind })
+        ...(planned === undefined ? {} : { plan: planned.plan, planKind: planned.kind }),
+        queue: {
+          apply: options.dataPatchQueue !== undefined,
+          rollback: options.dataPatchRollbackQueue !== undefined,
+          rollbackRetry: options.dataPatchRollbackRetryQueue !== undefined
+        }
       })
     }),
     status
   );
+}
+
+type DataPatchQueueMessageSummary = {
+  readonly jobName: string;
+  readonly runId: string;
+  readonly idempotencyKey: string;
+};
+
+type DataPatchQueueLabel = "data patch" | "data patch rollback" | "data patch rollback retry";
+
+const DATA_PATCH_NOTICE_PARAM_LIMIT = 256;
+
+function dataPatchQueuedMessage(
+  label: DataPatchQueueLabel,
+  message: DataPatchQueueMessageSummary
+): string {
+  return `Enqueued ${label} job ${message.jobName} / ${message.runId} (${message.idempotencyKey})`;
+}
+
+function dataPatchQueuedLocation(label: DataPatchQueueLabel, message: DataPatchQueueMessageSummary): string {
+  const params = new URLSearchParams({
+    queued: label,
+    job: message.jobName,
+    run: message.runId,
+    key: message.idempotencyKey
+  });
+  return `/desk/admin/data-patches?${params.toString()}`;
+}
+
+function dataPatchQueuedMessageFromUrl(url: string): string | undefined {
+  const params = new URL(url).searchParams;
+  const label = parseDataPatchQueueLabel(params.get("queued"));
+  const jobName = boundedDataPatchNoticeParam(params.get("job"));
+  const runId = boundedDataPatchNoticeParam(params.get("run"));
+  const idempotencyKey = boundedDataPatchNoticeParam(params.get("key"));
+  if (label === undefined || jobName === undefined || runId === undefined || idempotencyKey === undefined) {
+    return undefined;
+  }
+  return dataPatchQueuedMessage(label, { jobName, runId, idempotencyKey });
+}
+
+function parseDataPatchQueueLabel(value: string | null): DataPatchQueueLabel | undefined {
+  if (value === "data patch" || value === "data patch rollback" || value === "data patch rollback retry") {
+    return value;
+  }
+  return undefined;
+}
+
+function boundedDataPatchNoticeParam(value: string | null): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed || trimmed.length > DATA_PATCH_NOTICE_PARAM_LIMIT) {
+    return undefined;
+  }
+  return trimmed;
 }
 
 async function renderDeskDataPatchFailure(

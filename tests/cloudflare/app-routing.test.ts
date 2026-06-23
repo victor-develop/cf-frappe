@@ -801,8 +801,9 @@ describe("CloudFrappe Worker routing", () => {
   });
 
   it("mounts app-declared data patch Desk routes on the Worker", async () => {
-    const resources = { touched: [] as string[] };
+    const resources = { touched: [] as string[], rollbackAttempts: 0 };
     const log = new InMemoryDataPatchLog();
+    const queue = new InMemoryJobQueue();
     const registry = createRegistry({
       dataPatches: [
         defineDataPatch<any>({
@@ -810,6 +811,12 @@ describe("CloudFrappe Worker routing", () => {
           checksum: "v1",
           run: ({ resources }) => {
             resources.touched.push("crm");
+          },
+          rollback: {
+            run: ({ resources }) => {
+              resources.rollbackAttempts += 1;
+              throw new Error("rollback boom");
+            }
           }
         })
       ]
@@ -821,7 +828,19 @@ describe("CloudFrappe Worker routing", () => {
         log: () => log,
         resources: () => resources,
         clock: fixedClock(now),
-        ids: deterministicIds(["claim-1"])
+        ids: deterministicIds(["claim-1", "rollback-failed"])
+      },
+      jobs: {
+        registry: createJobRegistry<any>({
+          jobs: [
+            createDataPatchApplyJob<any>(),
+            createDataPatchRollbackJob<any>(),
+            createDataPatchRollbackRetryJob<any>()
+          ]
+        }),
+        queue: () => queue,
+        clock: fixedClock(now),
+        ids: deterministicIds(["desk-patch-001"])
       }
     });
     const env = {
@@ -839,8 +858,37 @@ describe("CloudFrappe Worker routing", () => {
     expect(html).toContain("Data Patches");
     expect(html).toContain("crm.backfill");
     expect(html).toContain('formaction="/desk/admin/data-patches/plan"');
+    expect(html).toContain('formaction="/desk/admin/data-patches/enqueue"');
     expect(html).toContain('formaction="/desk/admin/data-patches/crm.backfill/plan"');
+    expect(html).toContain('formaction="/desk/admin/data-patches/crm.backfill/enqueue"');
     expect(html).toContain('formaction="/desk/admin/data-patches/crm.backfill/apply"');
+
+    const enqueued = await worker.fetch!(
+      cfRequest("http://localhost/desk/admin/data-patches/enqueue", {
+        body: new URLSearchParams({ limit: "1" }),
+        method: "POST"
+      }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(enqueued.status).toBe(303);
+    const enqueuedLocation = enqueued.headers.get("location");
+    expect(enqueuedLocation).toContain("/desk/admin/data-patches?");
+    const enqueuedNotice = await worker.fetch!(
+      cfRequest(`http://localhost${enqueuedLocation!}`),
+      env,
+      fakeExecutionContext()
+    );
+    expect(enqueuedNotice.status).toBe(200);
+    const enqueuedHtml = await enqueuedNotice.text();
+    expect(enqueuedHtml).toContain("Enqueued data patch job cf-frappe.data-patches.apply / job_desk-patch-001");
+    expect(queue.queued()[0]?.message).toMatchObject({
+      tenantId: "acme",
+      jobName: "cf-frappe.data-patches.apply",
+      runId: "job_desk-patch-001",
+      payload: { patchIds: ["crm.backfill"] }
+    });
+    expect(resources.touched).toEqual([]);
 
     const planned = await worker.fetch!(
       cfRequest("http://localhost/desk/admin/data-patches/crm.backfill/plan", { method: "POST" }),
@@ -861,6 +909,27 @@ describe("CloudFrappe Worker routing", () => {
     expect(applied.status).toBe(303);
     expect(applied.headers.get("location")).toBe("/desk/admin/data-patches");
     expect(resources.touched).toEqual(["crm"]);
+
+    const appliedDashboard = await worker.fetch!(
+      cfRequest("http://localhost/desk/admin/data-patches"),
+      env,
+      fakeExecutionContext()
+    );
+    expect(appliedDashboard.status).toBe(200);
+    const appliedHtml = await appliedDashboard.text();
+    expect(appliedHtml).toContain('formaction="/desk/admin/data-patches/crm.backfill/rollback-enqueue"');
+
+    const failedRollback = await worker.fetch!(
+      cfRequest("http://localhost/desk/admin/data-patches/crm.backfill/rollback", { method: "POST" }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(failedRollback.status).toBe(500);
+    const failedRollbackHtml = await failedRollback.text();
+    expect(failedRollbackHtml).toContain(
+      'formaction="/desk/admin/data-patches/crm.backfill/rollback-retry-enqueue"'
+    );
+    expect(resources.rollbackAttempts).toBe(1);
   });
 
   it("mounts user-permission admin API and Desk routes on the Worker", async () => {
