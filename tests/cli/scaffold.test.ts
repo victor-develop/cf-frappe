@@ -91,6 +91,9 @@ describe("cf-frappe CLI scaffold", () => {
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "npx cf-frappe install @acme/cf-frappe-crm"
     );
+    await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
+      "npx cf-frappe data-patches status --url https://your-worker.example"
+    );
     await expect(readFile(join(target, "public/assets/task-form.js"), "utf8")).resolves.toContain(
       "window.cfFrappe.form.on"
     );

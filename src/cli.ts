@@ -4,8 +4,11 @@ import process from "node:process";
 import { runCli } from "./cli/command.js";
 
 try {
+  const fetchImpl = typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : undefined;
   process.exitCode = await runCli(process.argv.slice(2), {
     cwd: () => process.cwd(),
+    env: (name) => process.env[name],
+    ...(fetchImpl === undefined ? {} : { fetch: fetchImpl }),
     stderr: process.stderr,
     stdout: process.stdout
   });

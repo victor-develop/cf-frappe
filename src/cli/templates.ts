@@ -200,6 +200,13 @@ The install command saves package metadata, runs the detected package manager (\
 
 After adding app DocType indexes, or changing them with a DocType version bump, generate reviewable D1 migration files with \`npm run d1:generate\`, then apply them locally or remotely with the existing migration scripts.
 
+Registered data patches can be inspected and run against a deployed Worker through the admin API. Keep secret auth material in environment variables and pass it with \`--header-env\`. Assuming \`CF_FRAPPE_AUTH\` is already exported by your shell secret manager or CI secret store:
+
+\`\`\`bash
+npx cf-frappe data-patches status --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe data-patches apply --url https://your-worker.example --id crm.customer_status_v1 --header-env Authorization=CF_FRAPPE_AUTH
+\`\`\`
+
 ## Deploy
 
 \`\`\`bash

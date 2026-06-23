@@ -21,10 +21,19 @@ import {
   type PackageManagerName,
   type PackageManagerRunner
 } from "./package-manager.js";
+import {
+  DataPatchRemoteError,
+  runRemoteDataPatchCommand,
+  type DataPatchHeaderOption,
+  type DataPatchRemoteAction,
+  type DataPatchRemoteCommand
+} from "./data-patches.js";
 import { scaffoldProject, ScaffoldError } from "./scaffold.js";
 
 export interface CliIo {
   readonly cwd: () => string;
+  readonly env?: (name: string) => string | undefined;
+  readonly fetch?: typeof fetch;
   readonly migrationRegistryLoader?: MigrationRegistryLoader;
   readonly packageManager?: PackageManagerRunner;
   readonly stderr: WritableText;
@@ -69,7 +78,13 @@ interface InvalidCommand {
   readonly message: string;
 }
 
-type ParsedCommand = InitCommand | InstallCommand | MigrateGenerateCommand | HelpCommand | InvalidCommand;
+type ParsedCommand =
+  | InitCommand
+  | InstallCommand
+  | MigrateGenerateCommand
+  | DataPatchRemoteCommand
+  | HelpCommand
+  | InvalidCommand;
 
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
   const command = parseCliArgs(argv);
@@ -83,6 +98,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   }
 
   try {
+    if (command.kind === "data-patches") {
+      io.stdout.write(await runRemoteDataPatchCommand(command, {
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
     if (command.kind === "install") {
       const installOptions = {
         cwd: io.cwd(),
@@ -149,7 +171,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof AppInstallError ||
       error instanceof MigrationGenerateError ||
       error instanceof PackageJsonError ||
-      error instanceof PackageManagerError
+      error instanceof PackageManagerError ||
+      error instanceof DataPatchRemoteError
     ) {
       io.stderr.write(`cf-frappe: ${error.message}\n`);
       return 1;
@@ -169,10 +192,200 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   if (command === "migrate") {
     return parseMigrateArgs(rest);
   }
+  if (command === "data-patches") {
+    return parseDataPatchesArgs(rest);
+  }
   if (command !== "init") {
     return { kind: "invalid", message: `Unknown command '${command}'` };
   }
   return parseInitArgs(rest);
+}
+
+function parseDataPatchesArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = dataPatchAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown data-patches command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: DataPatchHeaderOption[] = [];
+  const patchIds: string[] = [];
+  let limit: number | undefined;
+  let idempotencyKey: string | undefined;
+  let delaySeconds: number | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = rest[index + 1];
+      if (value === undefined) {
+        return { kind: "invalid", message: "Missing value for --url" };
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = rest[index + 1];
+      if (value === undefined) {
+        return { kind: "invalid", message: "Missing value for --header" };
+      }
+      const parsed = parseLiteralHeader(value);
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = rest[index + 1];
+      if (value === undefined) {
+        return { kind: "invalid", message: "Missing value for --header-env" };
+      }
+      const parsed = parseEnvHeader(value);
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--id") {
+      if (action === "status") {
+        return { kind: "invalid", message: "Cannot use --id with data-patches status" };
+      }
+      const value = rest[index + 1];
+      if (value === undefined) {
+        return { kind: "invalid", message: "Missing value for --id" };
+      }
+      patchIds.push(value);
+      index += 1;
+      continue;
+    }
+    if (arg === "--limit") {
+      if (action === "status") {
+        return { kind: "invalid", message: "Cannot use --limit with data-patches status" };
+      }
+      const value = rest[index + 1];
+      if (value === undefined) {
+        return { kind: "invalid", message: "Missing value for --limit" };
+      }
+      const parsed = parsePositiveInteger(value, "Data patch apply limit");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      limit = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--idempotency-key") {
+      if (action !== "enqueue") {
+        return { kind: "invalid", message: "Can only use --idempotency-key with data-patches enqueue" };
+      }
+      const value = rest[index + 1];
+      if (value === undefined) {
+        return { kind: "invalid", message: "Missing value for --idempotency-key" };
+      }
+      if (value.trim().length === 0) {
+        return { kind: "invalid", message: "Data patch idempotency key must be non-empty" };
+      }
+      idempotencyKey = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--delay-seconds") {
+      if (action !== "enqueue") {
+        return { kind: "invalid", message: "Can only use --delay-seconds with data-patches enqueue" };
+      }
+      const value = rest[index + 1];
+      if (value === undefined) {
+        return { kind: "invalid", message: "Missing value for --delay-seconds" };
+      }
+      const parsed = parseNonNegativeInteger(value, "Data patch enqueue delay");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      delaySeconds = parsed;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown data-patches ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  return {
+    kind: "data-patches",
+    action,
+    url,
+    headers,
+    ...(patchIds.length === 0 ? {} : { patchIds }),
+    ...(limit === undefined ? {} : { limit }),
+    ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+    ...(delaySeconds === undefined ? {} : { delaySeconds })
+  };
+}
+
+function dataPatchAction(value: string): DataPatchRemoteAction | undefined {
+  return value === "status" || value === "apply" || value === "enqueue" ? value : undefined;
+}
+
+function parseLiteralHeader(value: string): DataPatchHeaderOption | string {
+  const separator = value.indexOf(":");
+  if (separator < 1) {
+    return "Data patch header must use 'Name: value' syntax";
+  }
+  const name = value.slice(0, separator).trim();
+  const headerValue = value.slice(separator + 1).trim();
+  if (!isHttpHeaderName(name)) {
+    return `Data patch header name '${name}' is invalid`;
+  }
+  if (headerValue.length === 0) {
+    return `Data patch header '${name}' must have a non-empty value`;
+  }
+  return { kind: "literal", name, value: headerValue };
+}
+
+function parseEnvHeader(value: string): DataPatchHeaderOption | string {
+  const separator = value.indexOf("=");
+  if (separator < 1) {
+    return "Data patch environment header must use 'Name=ENV_VAR' syntax";
+  }
+  const name = value.slice(0, separator).trim();
+  const envName = value.slice(separator + 1).trim();
+  if (!isHttpHeaderName(name)) {
+    return `Data patch header name '${name}' is invalid`;
+  }
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(envName)) {
+    return `Data patch header env var '${envName}' is invalid`;
+  }
+  return { kind: "env", name, envName };
+}
+
+function parsePositiveInteger(value: string, label: string): number | string {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : `${label} must be a positive integer`;
+}
+
+function parseNonNegativeInteger(value: string, label: string): number | string {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : `${label} must be a non-negative integer`;
+}
+
+function isHttpHeaderName(value: string): boolean {
+  return /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(value);
 }
 
 function parseMigrateArgs(argv: readonly string[]): ParsedCommand {
@@ -367,12 +580,18 @@ function helpText(): string {
     "  cf-frappe init <directory> [--force]",
     "  cf-frappe install <module> [--version <range>] [--export <name>] [--as <localName>] [--registry <path>] [--package-manager <npm|pnpm|yarn|bun>] [--no-install] [--no-save]",
     "  cf-frappe migrate generate [--registry <path>] [--migrations <dir>] [--no-core]",
+    "  cf-frappe data-patches status --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe data-patches apply --url <origin> [--id <patchId>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe data-patches enqueue --url <origin> [--id <patchId>] [--limit <n>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe --help",
     "",
     "Commands:",
     "  init   Create a Cloudflare-ready cf-frappe starter app",
     "  install   Save, install, and wire an app module into a generated app registry",
     "  migrate generate   Write reviewable D1 migration files from app metadata",
+    "  data-patches   Inspect, apply, or enqueue remote app-declared data patches through the admin API",
+    "",
+    "Use --header-env for secret-bearing auth headers so tokens stay out of shell history.",
     ""
   ].join("\n");
 }

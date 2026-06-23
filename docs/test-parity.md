@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the generated Desk realtime presence panel slice:
+As of the remote data-patch CLI slice:
 
-- Vitest files: `65`
-- Vitest cases: `540`
+- Vitest files: `66`
+- Vitest cases: `546`
 
 ## Implication
 
