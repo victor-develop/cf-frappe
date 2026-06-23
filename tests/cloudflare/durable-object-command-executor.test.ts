@@ -40,6 +40,53 @@ describe("DurableObjectCommandExecutor", () => {
     ]);
   });
 
+  it("routes duplicate commands by destination name or naming-series aggregate", async () => {
+    const calls: unknown[] = [];
+    const names: string[] = [];
+    const namespace = fakeNamespace(names, calls);
+    const executor = new DurableObjectCommandExecutor({
+      registry: createTestRegistry(),
+      namespace
+    });
+
+    await executor.duplicate({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      data: { title: "My Note Copy" },
+      expectedVersion: 1
+    });
+    await executor.duplicate({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      newName: "Manual Copy",
+      expectedVersion: 1
+    });
+
+    const seriesCalls: unknown[] = [];
+    const seriesNames: string[] = [];
+    const seriesExecutor = new DurableObjectCommandExecutor({
+      registry: createRegistry({ doctypes: [supportTicketDocType] }),
+      namespace: fakeNamespace(seriesNames, seriesCalls)
+    });
+    await seriesExecutor.duplicate({
+      actor: owner,
+      doctype: "Support Ticket",
+      name: "TICK-.0001",
+      data: { subject: "Copied ticket" },
+      expectedVersion: 1
+    });
+
+    expect(names).toEqual(["acme:Note:My Note Copy", "acme:Note:Manual Copy"]);
+    expect(calls).toMatchObject([
+      { kind: "duplicate", name: "My Note", data: { title: "My Note Copy" }, expectedVersion: 1 },
+      { kind: "duplicate", name: "My Note", newName: "Manual Copy", expectedVersion: 1 }
+    ]);
+    expect(seriesNames).toEqual(["acme:Support Ticket:_series:TICK-.####"]);
+    expect(seriesCalls).toMatchObject([{ kind: "duplicate", doctype: "Support Ticket" }]);
+  });
+
   it("routes named mutations to the same aggregate identity", async () => {
     const calls: unknown[] = [];
     const names: string[] = [];

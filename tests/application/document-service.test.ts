@@ -1607,6 +1607,63 @@ describe("DocumentService", () => {
     ]);
   });
 
+  it("duplicates readable documents through the create event path without copying read-only ownership", async () => {
+    const { documents, events, projections } = createServices(["e1", "e2"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data({ body: "Original" }) });
+
+    const duplicated = await documents.duplicate({
+      actor: manager,
+      doctype: "Note",
+      name: "My Note",
+      data: { title: "My Note Copy", body: "Copied" },
+      expectedVersion: 1,
+      metadata: { source: "copy-button" }
+    });
+
+    expect(duplicated).toMatchObject({
+      name: "My Note Copy",
+      version: 1,
+      docstatus: "draft",
+      data: {
+        title: "My Note Copy",
+        body: "Copied",
+        created_by: manager.id
+      }
+    });
+    await expect(projections.get("acme", "Note", "My Note Copy")).resolves.toEqual(duplicated);
+    await expect(events.readStream("acme:Note:My%20Note%20Copy")).resolves.toMatchObject([
+      {
+        type: "NoteCreated",
+        payload: { kind: "DocumentCreated", data: { title: "My Note Copy", created_by: manager.id } },
+        metadata: { source: "copy-button", duplicatedFrom: "My Note", duplicatedFromVersion: 1 }
+      }
+    ]);
+  });
+
+  it("enforces source read access and expected versions when duplicating documents", async () => {
+    const { documents } = createServices(["e1", "e2"]);
+    await documents.create({ actor: manager, doctype: "Note", data: data({ title: "Manager Note" }) });
+
+    await expect(
+      documents.duplicate({
+        actor: owner,
+        doctype: "Note",
+        name: "Manager Note",
+        data: { title: "Owner Copy" }
+      })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+
+    await expect(
+      documents.duplicate({
+        actor: manager,
+        doctype: "Note",
+        name: "Manager Note",
+        data: { title: "Stale Copy" },
+        expectedVersion: 2
+      })
+    ).rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
+  });
+
   it("enforces lifecycle permissions and status transitions at the command boundary", async () => {
     const { documents } = createServices(["e1", "e2", "e3", "e4"]);
     await documents.create({ actor: owner, doctype: "Note", data: data() });

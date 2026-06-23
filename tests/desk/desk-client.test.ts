@@ -86,6 +86,12 @@ interface DeskClientRuntime {
       input: string | Record<string, unknown>,
       options?: { readonly expectedVersion?: number }
     ) => Promise<unknown>;
+    readonly duplicate: (
+      doctype: string,
+      name: string,
+      input?: Record<string, unknown>,
+      options?: { readonly expectedVersion?: number }
+    ) => Promise<unknown>;
     readonly deleteSavedFilter: (doctype: string, filterId: string) => Promise<unknown>;
     readonly follow: (
       doctype: string,
@@ -251,11 +257,19 @@ describe("Desk client runtime", () => {
 
     await runtime.resource.update("Task", "TASK-1", { title: "Queued", expectedVersion: 1 }, { expectedVersion: 8 });
     await runtime.resource.command("Task", "TASK-1", "assign", { assignee: "ops", expectedVersion: 2 }, { expectedVersion: 9 });
+    await runtime.resource.duplicate(
+      "Task",
+      "TASK-1",
+      { data: { title: "Queued Copy" }, newName: "TASK-2", expectedVersion: 3 },
+      { expectedVersion: 10 }
+    );
 
     expect(calls.map((call) => call.init.body)).toEqual([
       JSON.stringify({ title: "Queued", expectedVersion: 8 }),
-      JSON.stringify({ assignee: "ops", expectedVersion: 9 })
+      JSON.stringify({ assignee: "ops", expectedVersion: 9 }),
+      JSON.stringify({ data: { title: "Queued Copy" }, newName: "TASK-2", expectedVersion: 10 })
     ]);
+    expect(calls[2]?.url).toBe("/api/resource/Task/TASK-1/duplicate");
   });
 
   it("maps resource list filter operators to query parameters", async () => {

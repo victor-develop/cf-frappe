@@ -22,7 +22,7 @@ import {
 
 describe("resource api", () => {
   function makeApp() {
-    const services = createServices(["e1", "e2", "e3", "e4", "e5", "e6", "e7"]);
+    const services = createServices(["e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8"]);
     return createResourceApi({
       registry: services.registry,
       documents: services.documents,
@@ -310,6 +310,19 @@ describe("resource api", () => {
     const list = await app.request("/api/resource/Note?limit=5", { headers: userHeaders });
     expect(list.status).toBe(200);
     await expect(list.json()).resolves.toMatchObject({ data: [{ name: "HTTP Note" }] });
+
+    const duplicated = await app.request("/api/resource/Note/HTTP%20Note/duplicate", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({
+        data: { title: "HTTP Note Copy", body: "Copied" },
+        expectedVersion: 1
+      })
+    });
+    expect(duplicated.status).toBe(201);
+    await expect(duplicated.json()).resolves.toMatchObject({
+      data: { name: "HTTP Note Copy", version: 1, docstatus: "draft", data: { body: "Copied" } }
+    });
 
     const updated = await app.request("/api/resource/Note/HTTP%20Note", {
       method: "PUT",

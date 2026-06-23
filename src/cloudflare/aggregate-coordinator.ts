@@ -14,6 +14,7 @@ import type {
   AddDocumentCommentCommand,
   CreateDocumentCommand,
   DeleteDocumentCommand,
+  DuplicateDocumentCommand,
   FollowDocumentCommand,
   ShareDocumentCommand,
   RecordDocumentActivityCommand,
@@ -35,6 +36,7 @@ import type { RealtimePublisher } from "../ports/realtime.js";
 
 export type AggregateCoordinatorCommand =
   | ({ readonly kind: "create" } & CreateDocumentCommand)
+  | ({ readonly kind: "duplicate" } & DuplicateDocumentCommand)
   | ({ readonly kind: "update" } & UpdateDocumentCommand)
   | ({ readonly kind: "submit" } & SubmitDocumentCommand)
   | ({ readonly kind: "cancel" } & CancelDocumentCommand)
@@ -126,6 +128,8 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
       switch (command.kind) {
         case "create":
           return this.service.create(command);
+        case "duplicate":
+          return this.service.duplicate(command);
         case "update":
           return this.service.update(command);
         case "submit":

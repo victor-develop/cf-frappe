@@ -13,6 +13,7 @@ import type {
   BulkTransitionDocumentsCommand,
   CreateDocumentCommand,
   DeleteDocumentCommand,
+  DuplicateDocumentCommand,
   DocumentCommandExecutor,
   ExecuteDomainCommand,
   FollowDocumentCommand,
@@ -61,6 +62,10 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
 
   create(command: CreateDocumentCommand): Promise<DocumentSnapshot> {
     return this.stubForCreate(command).transact({ ...command, kind: "create" });
+  }
+
+  duplicate(command: DuplicateDocumentCommand): Promise<DocumentSnapshot> {
+    return this.stubForDuplicate(command).transact({ ...command, kind: "duplicate" });
   }
 
   update(command: UpdateDocumentCommand): Promise<DocumentSnapshot> {
@@ -179,6 +184,16 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
   private stubForCreate(command: CreateDocumentCommand): AggregateCoordinatorRpc {
     const doctype = this.registry.get(command.doctype);
     const name = previewSeriesAggregateName(doctype) ?? command.name ?? previewName(doctype, command.data) ?? "_new";
+    return this.stub(resolveTenant(command), doctype.name, name);
+  }
+
+  private stubForDuplicate(command: DuplicateDocumentCommand): AggregateCoordinatorRpc {
+    const doctype = this.registry.get(command.doctype);
+    const name =
+      previewSeriesAggregateName(doctype) ??
+      command.newName ??
+      previewName(doctype, command.data ?? {}) ??
+      "_new";
     return this.stub(resolveTenant(command), doctype.name, name);
   }
 

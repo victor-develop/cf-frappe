@@ -23,7 +23,7 @@ Observed counts:
 As of the custom-field runtime application slice:
 
 - Vitest files: `73`
-- Vitest cases: `673`
+- Vitest cases: `677`
 
 ## Implication
 

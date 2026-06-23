@@ -940,6 +940,9 @@ export function renderDeskClientScript(): string {
       deleteSavedFilter: function (doctype, filterId) {
         return request(resourcePath(doctype) + "/saved-filters/" + encodePart(filterId), { method: "DELETE" }).then(unwrapData);
       },
+      duplicate: function (doctype, name, input, options) {
+        return request(resourcePath(doctype, name) + "/duplicate", { method: "POST", body: commandBody(input || {}, options) }).then(unwrapData);
+      },
       follow: function (doctype, name, options) {
         return request(resourceActionPath(doctype, name, "followers"), { method: "POST", body: commandBody(options || {}, options) }).then(unwrapData);
       },

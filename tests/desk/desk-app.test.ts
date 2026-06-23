@@ -2850,6 +2850,28 @@ describe("Desk app", () => {
     });
   });
 
+  it("duplicates documents from generated edit forms", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ body: "Original" }) });
+
+    const edit = await app.request("/desk/Note/My%20Note");
+    expect(edit.status).toBe(200);
+    await expect(edit.text()).resolves.toContain('formaction="/desk/Note/My%20Note/duplicate"');
+
+    const duplicated = await app.request("/desk/Note/My%20Note/duplicate", {
+      method: "POST",
+      body: new URLSearchParams({ title: "My Note Copy", body: "Copied", expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(duplicated.status).toBe(303);
+    expect(duplicated.headers.get("location")).toBe("/desk/Note/My%20Note%20Copy");
+    await expect(services.queries.getDocument(owner, "Note", "My Note Copy")).resolves.toMatchObject({
+      docstatus: "draft",
+      data: { title: "My Note Copy", body: "Copied", created_by: owner.id }
+    });
+  });
+
   it("renders printable documents from Desk", async () => {
     const { app, services } = makeDesk();
     await services.documents.create({

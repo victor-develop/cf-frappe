@@ -1686,6 +1686,7 @@ export function renderFormView(
     readonly printFormats?: readonly PrintFormatDefinition[];
     readonly clientScripts?: readonly ClientScriptDefinition[];
     readonly realtimeRoute?: string;
+    readonly canDuplicate?: boolean;
   }
 ): string {
   const action =
@@ -1742,6 +1743,10 @@ export function renderFormView(
           )
           .join("")}</section>`
       : "";
+  const duplicateAction =
+    options.mode === "update" && options.document && options.canDuplicate
+      ? `<button class="button" type="submit" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(options.document.name)}/duplicate">Duplicate</button>`
+      : "";
   const versionField = options.document
     ? `<input type="hidden" name="expectedVersion" value="${String(options.document.version)}">`
     : "";
@@ -1756,6 +1761,7 @@ export function renderFormView(
     <div class="actions">
       <a class="button" href="/desk/${encodeURIComponent(doctype.name)}">Cancel</a>
       ${canSave ? `<button class="button primary" type="submit">${options.mode === "create" ? "Create" : "Save"}</button>` : ""}
+      ${duplicateAction}
     </div>
     ${commands}
     ${workflowActions}

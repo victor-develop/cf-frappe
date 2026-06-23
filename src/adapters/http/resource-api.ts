@@ -511,6 +511,24 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     return c.json({ data: snapshot });
   });
 
+  app.post("/api/resource/:doctype/:name/duplicate", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    const body = await readJson(c.req.raw, { allowEmpty: true, maxJsonBytes });
+    const expectedVersion = numberValue(body.expectedVersion);
+    const data = objectValue(body.data, "Duplicate data");
+    const newName = stringValue(body.newName);
+    const snapshot = await options.documents.duplicate({
+      actor,
+      doctype: c.req.param("doctype"),
+      name: c.req.param("name"),
+      ...(data === undefined ? {} : { data }),
+      ...(newName === undefined ? {} : { newName }),
+      ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: snapshot }, 201);
+  });
+
   app.post("/api/resource/:doctype/:name/comments", async (c) => {
     const actor = await resolveActor(c.req.raw);
     const body = await readJson(c.req.raw, { maxJsonBytes });
@@ -817,6 +835,16 @@ function numberValue(value: unknown): number | undefined {
     throw badRequest("expectedVersion must be an integer");
   }
   return value;
+}
+
+function objectValue(value: unknown, label: string): MutableDocumentData | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    throw badRequest(`${label} must be an object`);
+  }
+  return value as MutableDocumentData;
 }
 
 function documentSelectionsValue(value: unknown): readonly BulkDocumentSelection[] {
