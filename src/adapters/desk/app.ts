@@ -48,6 +48,7 @@ import {
   type FieldDefinition,
   type FieldType,
   type JsonValue,
+  type LinkOption,
   type ListDocumentsFilter,
   type MutableDocumentData,
   type ResolvedFormView
@@ -1266,7 +1267,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
     const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
-    const tableDefinitions = await tableDefinitionsForForm(options, actor, formView);
+    const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView);
     const linkOptions = await linkOptionsForForm(options, actor, doctype, formView, tableDefinitions);
     const doctypes = await listDeskDoctypes(options, actor);
     const reports = listReports(options, actor);
@@ -1292,7 +1293,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
     const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
-    const tableDefinitions = await tableDefinitionsForForm(options, actor, formView);
+    const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView);
     try {
       const snapshot = await options.documents.create({
         actor,
@@ -1547,7 +1548,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
     const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
     const name = c.req.param("name");
-    const tableDefinitions = await tableDefinitionsForForm(options, actor, formView);
+    const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView);
     try {
       const form = await parseDeskForm(c.req.raw, doctype, formView, tableDefinitions);
       const snapshot = await options.documents.duplicate({
@@ -1569,7 +1570,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
     const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
     const name = c.req.param("name");
-    const tableDefinitions = await tableDefinitionsForForm(options, actor, formView);
+    const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView);
     try {
       const form = await parseDeskForm(c.req.raw, doctype, formView, tableDefinitions);
       const snapshot = await options.documents.amend({
@@ -1591,7 +1592,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
     const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
     const name = c.req.param("name");
-    const tableDefinitions = await tableDefinitionsForForm(options, actor, formView);
+    const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView);
     try {
       const form = await parseDeskForm(c.req.raw, doctype, formView, tableDefinitions);
       await options.documents.update({
@@ -1613,7 +1614,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
     const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
     const name = c.req.param("name");
-    const tableDefinitions = await tableDefinitionsForForm(options, actor, formView);
+    const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView);
     try {
       const commandName = c.req.param("command");
       const commandDefinition = doctype.commands?.find((item) => item.name === commandName);
@@ -1741,7 +1742,7 @@ async function renderDeskError(
   const doctypes = await listDeskDoctypes(options, actor);
   const reports = listReports(options, actor);
   const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
-  const tableDefinitions = await tableDefinitionsForForm(options, actor, formView);
+  const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView);
   const linkOptions = await linkOptionsForForm(options, actor, doctype, formView, tableDefinitions);
   const document = name ? await options.queries.getDocument(actor, doctype.name, name).catch(() => undefined) : undefined;
   const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
@@ -2342,7 +2343,7 @@ async function renderDeskDocumentPage(
   const printFormats = listPrintFormats(options, actor, doctype.name);
   const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
   const document = await options.queries.getDocument(actor, doctype.name, name);
-  const tableDefinitions = await tableDefinitionsForForm(options, actor, formView);
+  const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView);
   const linkOptions = await linkOptionsForForm(options, actor, doctype, formView, tableDefinitions);
   const lifecycleActions = lifecycleActionsFor(actor, doctype, document);
   const workflowActions = workflowActionsFor(actor, doctype, document);
@@ -2558,45 +2559,73 @@ async function linkOptionsForForm(
   tableDefinitions: FormTableDefinitions
 ): Promise<FormLinkOptions> {
   const entries = await Promise.all(
-    formView.fields.flatMap((field) => {
-      if (field.type === "link") {
-        return [
-          async () => {
-            const result = await options.queries.listLinkOptions(actor, doctype.name, field.name);
-            return [field.name, result.options] as const;
-          }
-        ];
-      }
-      if (field.type === "table" && field.tableOf) {
-        const child = tableDefinitions[field.name];
-        if (!child) {
-          return [];
-        }
-        return child.fields
-          .filter((childField) => childField.type === "link")
-          .map((childField) => async () => {
-            const result = await options.queries.listLinkOptionsForField(actor, child, childField.name);
-            return [`${field.name}.${childField.name}`, result.options] as const;
-          });
-      }
-      return [];
-    }).map((load) => load())
+    linkOptionLoadersForFields(options, actor, doctype, formView.fields, tableDefinitions).map((load) => load())
   );
   return Object.fromEntries(entries) as FormLinkOptions;
+}
+
+function linkOptionLoadersForFields(
+  options: DeskAppOptions,
+  actor: Actor,
+  doctype: DocTypeDefinition,
+  fields: readonly FieldDefinition[],
+  tableDefinitions: FormTableDefinitions,
+  pathPrefix = ""
+): readonly (() => Promise<readonly [string, readonly LinkOption[]]>)[] {
+  return fields.flatMap((field) => {
+    const path = pathPrefix ? `${pathPrefix}.${field.name}` : field.name;
+    if (field.type === "link") {
+      return [
+        async () => {
+          const result = await options.queries.listLinkOptionsForField(actor, doctype, field.name);
+          return [path, result.options] as const;
+        }
+      ];
+    }
+    if (field.type === "table" && field.tableOf) {
+      const child = tableDefinitions[path];
+      return child ? linkOptionLoadersForFields(options, actor, child, child.fields, tableDefinitions, path) : [];
+    }
+    return [];
+  });
 }
 
 async function tableDefinitionsForForm(
   options: DeskAppOptions,
   actor: Actor,
+  doctype: DocTypeDefinition,
   formView: ResolvedFormView
 ): Promise<FormTableDefinitions> {
-  const entries = await Promise.all(formView.fields
-    .filter((field) => field.type === "table" && field.tableOf)
-    .map(async (field) => [
-      field.name,
-      await options.queries.resolveEffectiveDocType(actor, field.tableOf!)
-    ] as const));
+  const nestedEntries = await Promise.all(
+    formView.fields.map((field) => tableDefinitionEntriesForField(options, actor, field, field.name, [doctype.name]))
+  );
+  const entries = nestedEntries.flat();
   return Object.fromEntries(entries) as FormTableDefinitions;
+}
+
+async function tableDefinitionEntriesForField(
+  options: DeskAppOptions,
+  actor: Actor,
+  field: FieldDefinition,
+  path: string,
+  visitedDoctypes: readonly string[]
+): Promise<readonly (readonly [string, DocTypeDefinition])[]> {
+  if (field.type !== "table" || !field.tableOf) {
+    return [];
+  }
+  const child = await options.queries.resolveEffectiveDocType(actor, field.tableOf);
+  if (visitedDoctypes.includes(child.name)) {
+    return [[path, child] as const];
+  }
+  const nested = await Promise.all(
+    child.fields.map((childField) =>
+      tableDefinitionEntriesForField(options, actor, childField, `${path}.${childField.name}`, [
+        ...visitedDoctypes,
+        child.name
+      ])
+    )
+  );
+  return [[path, child] as const, ...nested.flat()];
 }
 
 interface ParsedDeskForm {
@@ -3195,7 +3224,9 @@ async function parseDeskForm(
       const child = field.type === "table" && field.tableOf ? tableDefinitions[field.name] : undefined;
       return [
         field.name,
-        child ? coerceTableFormValue(field, child, form) : coerceFormValue(field, form.get(field.name))
+        child
+          ? coerceTableFormValue(field, child, form, tableDefinitions, field.name, field.name)
+          : coerceFormValue(field, form.get(field.name))
       ] as const;
     })
     .filter(([, value]) => value !== undefined);
@@ -3601,25 +3632,16 @@ function boundedPositiveIntegerSearchParamValue(
 function coerceTableFormValue(
   field: FieldDefinition,
   child: DocTypeDefinition,
-  form: FormData
+  form: FormData,
+  tableDefinitions: FormTableDefinitions,
+  definitionPath: string,
+  inputPath: string
 ): DocumentData[string] | undefined {
   const childFields = child.fields.filter((childField) => !childField.hidden && !childField.readOnly);
-  const rows = tableRowIndexes(form, field.name)
-    .filter((rowIndex) => !isEmptyTableRow(form, field.name, rowIndex, childFields))
+  const rows = tableRowIndexes(form, inputPath)
+    .filter((rowIndex) => !isEmptyTableRow(form, tableDefinitions, definitionPath, inputPath, rowIndex, childFields))
     .map((rowIndex) => {
-      const row = Object.fromEntries(
-        childFields
-          .map((childField) => [
-            childField.name,
-            coerceFormValue(childField, form.get(tableInputName(field.name, rowIndex, childField.name)))
-          ] as const)
-          .filter(([, value]) => value !== undefined)
-      ) as MutableDocumentData;
-      const origin = coerceChildRowOrigin(form.get(tableInputName(field.name, rowIndex, CHILD_TABLE_ROW_INDEX_FIELD)));
-      if (origin !== undefined) {
-        row[CHILD_TABLE_ROW_INDEX_FIELD] = origin;
-      }
-      return row;
+      return coerceTableRowValue(form, tableDefinitions, definitionPath, inputPath, rowIndex, childFields);
     });
   const nonEmptyRows = rows.filter((row) => Object.keys(row).length > 0);
   if (nonEmptyRows.length === 0) {
@@ -3628,14 +3650,59 @@ function coerceTableFormValue(
   return nonEmptyRows as DocumentData[string];
 }
 
+function coerceTableRowValue(
+  form: FormData,
+  tableDefinitions: FormTableDefinitions,
+  definitionPath: string,
+  inputPath: string,
+  rowIndex: number,
+  childFields: readonly FieldDefinition[]
+): MutableDocumentData {
+  const row = Object.fromEntries(
+    childFields
+      .map((childField) => {
+        const childDefinitionPath = `${definitionPath}.${childField.name}`;
+        const childInputPath = tableInputName(inputPath, rowIndex, childField.name);
+        const nestedChild = childField.type === "table" && childField.tableOf
+          ? tableDefinitions[childDefinitionPath]
+          : undefined;
+        return [
+          childField.name,
+          nestedChild
+            ? coerceTableFormValue(childField, nestedChild, form, tableDefinitions, childDefinitionPath, childInputPath)
+            : coerceFormValue(childField, form.get(childInputPath))
+        ] as const;
+      })
+      .filter(([, value]) => value !== undefined)
+  ) as MutableDocumentData;
+  const origin = coerceChildRowOrigin(form.get(tableInputName(inputPath, rowIndex, CHILD_TABLE_ROW_INDEX_FIELD)));
+  if (origin !== undefined) {
+    row[CHILD_TABLE_ROW_INDEX_FIELD] = origin;
+  }
+  return row;
+}
+
 function isEmptyTableRow(
   form: FormData,
-  tableField: string,
+  tableDefinitions: FormTableDefinitions,
+  definitionPath: string,
+  inputPath: string,
   rowIndex: number,
   childFields: readonly FieldDefinition[]
 ): boolean {
   return childFields.every((childField) => {
-    const value = form.get(tableInputName(tableField, rowIndex, childField.name));
+    const childDefinitionPath = `${definitionPath}.${childField.name}`;
+    const childInputPath = tableInputName(inputPath, rowIndex, childField.name);
+    const nestedChild = childField.type === "table" && childField.tableOf
+      ? tableDefinitions[childDefinitionPath]
+      : undefined;
+    if (nestedChild) {
+      const nestedFields = nestedChild.fields.filter((nestedField) => !nestedField.hidden && !nestedField.readOnly);
+      return tableRowIndexes(form, childInputPath).every((nestedIndex) =>
+        isEmptyTableRow(form, tableDefinitions, childDefinitionPath, childInputPath, nestedIndex, nestedFields)
+      );
+    }
+    const value = form.get(childInputPath);
     return value === null || value === "";
   });
 }

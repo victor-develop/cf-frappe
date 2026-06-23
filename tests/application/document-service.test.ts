@@ -612,7 +612,81 @@ describe("DocumentService", () => {
     });
   });
 
-  it("does not resolve unrelated invalid custom-field overlays during document commands", async () => {
+  it("applies nested child table custom fields to command validation and event payloads", async () => {
+    const salesInvoiceChargeDocType = defineDocType({
+      name: "Sales Invoice Charge",
+      fields: [
+        { name: "project", type: "link", linkTo: "Project", required: true },
+        { name: "amount", type: "number", required: true, min: 0 }
+      ]
+    });
+    const registry = createRegistry({
+      doctypes: [projectDocType, productDocType, salesInvoiceChargeDocType, salesInvoiceItemDocType, salesInvoiceDocType]
+    });
+    const store = new InMemoryDocumentStore();
+    const customFields = new CustomFieldService({
+      registry,
+      events: store,
+      ids: deterministicIds(["custom-field-1"]),
+      clock: fixedClock(now)
+    });
+    const documents = new DocumentService({
+      registry,
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["project-1", "product-1", "invoice-1", "invoice-2"]),
+      doctypeResolver: (base, { tenantId }) => customFields.effectiveDocType(base.name, tenantId)
+    });
+    const admin = { id: "admin@example.com", roles: ["System Manager"], tenantId: "acme" };
+    await customFields.saveField({
+      actor: admin,
+      doctype: "Sales Invoice Item",
+      field: { name: "charges", type: "table", tableOf: "Sales Invoice Charge" }
+    });
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Apollo" } });
+    await documents.create({ actor: owner, doctype: "Product", data: { sku: "SKU-1", title: "Widget" } });
+
+    const invoice = await documents.create({
+      actor: owner,
+      doctype: "Sales Invoice",
+      data: {
+        title: "INV-NESTED-CUSTOM",
+        items: [{ product: "SKU-1", quantity: 1, charges: [{ project: "Apollo", amount: 5 }] }]
+      }
+    });
+
+    expect(invoice).toMatchObject({
+      data: {
+        items: [{ product: "SKU-1", quantity: 1, charges: [{ project: "Apollo", amount: 5 }] }]
+      }
+    });
+    await expect(store.readStream(documentStream("acme", "Sales Invoice", "INV-NESTED-CUSTOM"))).resolves.toMatchObject([
+      {
+        payload: {
+          kind: "DocumentCreated",
+          data: { items: [{ charges: [{ project: "Apollo", amount: 5 }] }] }
+        }
+      }
+    ]);
+    await expect(
+      documents.create({
+        actor: owner,
+        doctype: "Sales Invoice",
+        data: {
+          title: "INV-BROKEN-NESTED-CUSTOM",
+          items: [{ product: "SKU-1", quantity: 1, charges: [{ project: "Missing", amount: -1 }] }]
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: expect.arrayContaining([
+        expect.objectContaining({ field: "items[0].charges[0].project", code: "link_not_found" }),
+        expect.objectContaining({ field: "items[0].charges[0].amount", code: "min" })
+      ])
+    });
+  });
+
+  it("does not resolve unrelated custom-field overlays during document commands", async () => {
     const unrelatedChild = defineDocType({
       name: "Unrelated Child",
       fields: [{ name: "title", type: "text" }]
@@ -657,8 +731,8 @@ describe("DocumentService", () => {
       doctypeResolver: (base, { tenantId }) => customFields.effectiveDocType(base.name, tenantId)
     });
 
-    await expect(customFields.effectiveDocType("Unrelated Child", "acme")).rejects.toMatchObject({
-      code: "CUSTOM_FIELD_INVALID"
+    await expect(customFields.effectiveDocType("Unrelated Child", "acme")).resolves.toMatchObject({
+      fields: expect.arrayContaining([expect.objectContaining({ name: "subitems", type: "table", tableOf: "Project" })])
     });
     await expect(
       documents.create({

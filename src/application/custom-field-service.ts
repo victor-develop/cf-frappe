@@ -54,6 +54,13 @@ interface TenantCustomFieldEvents {
   readonly catalogVersion: number;
 }
 
+interface TableGraphEdge {
+  readonly source: string;
+  readonly target: string;
+  readonly fieldName: string;
+  readonly custom: boolean;
+}
+
 export class CustomFieldService {
   private readonly registry: ModelRegistry;
   private readonly events: EventStore;
@@ -85,9 +92,9 @@ export class CustomFieldService {
         this.assertCustomFieldRuntimeSupported(entry.field);
         this.assertReferencesResolve(entry.field);
         this.assertTableFieldDoesNotSelfTarget(doctype, entry.field);
-        this.assertNestedTableCustomFieldSupported(doctype, entry.field, states);
       }
     }
+    this.assertTableGraphAcyclicFrom(doctype.name, states);
     return applyCustomFieldsToDocType(doctype, state);
   }
 
@@ -103,7 +110,11 @@ export class CustomFieldService {
     assertCustomFieldCanExtend(doctype, field);
     this.assertReferencesResolve(field);
     this.assertTableFieldDoesNotSelfTarget(doctype, field);
-    this.assertNestedTableCustomFieldSupported(doctype, field, states);
+    this.assertTableGraphAcyclicFrom(
+      doctype.name,
+      statesWithPendingField(tenantId, states, doctype.name, field, this.clock.now()),
+      { doctype: doctype.name, field }
+    );
     ensureExpectedVersion(state, command.expectedVersion);
     const existing = state.fields.find((entry) => entry.field.name === field.name);
     if (existing?.enabled && fieldsEqual(existing.field, field)) {
@@ -221,34 +232,6 @@ export class CustomFieldService {
     }
   }
 
-  private assertNestedTableCustomFieldSupported(
-    doctype: { readonly name: string },
-    field: FieldDefinition,
-    states: readonly CustomFieldState[]
-  ): void {
-    if (field.type !== "table") {
-      return;
-    }
-    if (this.isChildTableDocType(doctype.name, states)) {
-      throw new FrameworkError(
-        "CUSTOM_FIELD_INVALID",
-        `Custom table field '${field.name}' on child table DocType '${doctype.name}' is not supported until nested table controls are supported`,
-        { status: 400 }
-      );
-    }
-    if (field.tableOf !== undefined) {
-      const targetState = states.find((state) => state.doctype === field.tableOf);
-      const nestedTableField = targetState?.fields.find((entry) => entry.enabled && entry.field.type === "table");
-      if (nestedTableField) {
-        throw new FrameworkError(
-          "CUSTOM_FIELD_INVALID",
-          `Custom table field '${field.name}' targets child DocType '${field.tableOf}' with custom table field '${nestedTableField.field.name}', which is not supported until nested table controls are supported`,
-          { status: 400 }
-        );
-      }
-    }
-  }
-
   private assertTableFieldDoesNotSelfTarget(
     doctype: { readonly name: string },
     field: FieldDefinition
@@ -263,21 +246,68 @@ export class CustomFieldService {
     );
   }
 
-  private isChildTableDocType(doctypeName: string, states: readonly CustomFieldState[]): boolean {
-    const parent = this.registry
-      .list()
-      .find((candidate) =>
-        candidate.fields.some((field) => field.type === "table" && field.tableOf === doctypeName)
-      );
-    if (parent) {
-      return true;
+  private assertTableGraphAcyclicFrom(
+    root: string,
+    states: readonly CustomFieldState[],
+    blame?: { readonly doctype: string; readonly field: FieldDefinition }
+  ): void {
+    const graph = this.tableGraph(states);
+    const visited = new Set<string>();
+    const visit = (doctype: string, path: readonly string[]): void => {
+      visited.add(doctype);
+      for (const edge of graph.get(doctype) ?? []) {
+        const cycleStart = path.indexOf(edge.target);
+        if (cycleStart >= 0) {
+          this.throwRecursiveTableField(edge, [...path.slice(cycleStart), edge.target], blame);
+        }
+        if (!visited.has(edge.target)) {
+          visit(edge.target, [...path, edge.target]);
+        }
+      }
+    };
+    visit(root, [root]);
+  }
+
+  private tableGraph(states: readonly CustomFieldState[]): ReadonlyMap<string, readonly TableGraphEdge[]> {
+    const graph = new Map<string, TableGraphEdge[]>();
+    const add = (edge: TableGraphEdge) => {
+      graph.set(edge.source, [...(graph.get(edge.source) ?? []), edge]);
+    };
+    for (const doctype of this.registry.list()) {
+      for (const field of doctype.fields) {
+        if (field.type === "table" && field.tableOf) {
+          add({ source: doctype.name, target: field.tableOf, fieldName: field.name, custom: false });
+        }
+      }
     }
-    return states.some((state) =>
-      state.fields.some((entry) =>
-        entry.enabled &&
-        entry.field.type === "table" &&
-        entry.field.tableOf === doctypeName
-      )
+    for (const state of states) {
+      for (const entry of state.fields) {
+        if (entry.enabled && entry.field.type === "table" && entry.field.tableOf) {
+          add({
+            source: state.doctype,
+            target: entry.field.tableOf,
+            fieldName: entry.field.name,
+            custom: true
+          });
+        }
+      }
+    }
+    return graph;
+  }
+
+  private throwRecursiveTableField(
+    edge: TableGraphEdge,
+    path: readonly string[],
+    blame: { readonly doctype: string; readonly field: FieldDefinition } | undefined
+  ): never {
+    const field = blame?.field ?? { name: edge.fieldName };
+    const prefix = blame || edge.custom
+      ? `Custom table field '${field.name}'`
+      : `Table field '${edge.fieldName}' on DocType '${edge.source}'`;
+    throw new FrameworkError(
+      "CUSTOM_FIELD_INVALID",
+      `${prefix} creates recursive table path ${path.join(" -> ")}, which is not supported until recursive table controls are supported`,
+      { status: 400 }
     );
   }
 
@@ -369,6 +399,35 @@ function ensureExpectedVersion(state: CustomFieldState, expectedVersion: number 
 
 function fieldsEqual(left: FieldDefinition, right: FieldDefinition): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function statesWithPendingField(
+  tenantId: TenantId,
+  states: readonly CustomFieldState[],
+  doctype: string,
+  field: PersistedFieldDefinition,
+  now: string
+): readonly CustomFieldState[] {
+  return states.map((state) => {
+    if (state.doctype !== doctype) {
+      return state;
+    }
+    const existing = state.fields.find((entry) => entry.field.name === field.name);
+    return Object.freeze({
+      ...state,
+      fields: Object.freeze([
+        ...state.fields.filter((entry) => entry.field.name !== field.name),
+        {
+          tenantId,
+          doctype,
+          field,
+          enabled: true,
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now
+        }
+      ])
+    });
+  });
 }
 
 function withSavedCatalogEvents(

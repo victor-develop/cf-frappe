@@ -1967,6 +1967,56 @@ describe("Desk app", () => {
     });
   });
 
+  it("applies nested child table custom fields to generated Desk child-table forms", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"] };
+    const { app, services } = makeChildTableCustomFieldDesk(admin);
+    await services.customFields.saveField({
+      actor: admin,
+      doctype: "Sales Invoice Item",
+      field: {
+        name: "bonus_products",
+        label: "Bonus Products",
+        type: "table",
+        tableOf: "Product"
+      }
+    });
+    await services.documents.create({ actor: admin, doctype: "Product", data: { sku: "SKU-1", title: "Widget" } });
+
+    const form = await app.request("/desk/Sales%20Invoice/new");
+    expect(form.status).toBe(200);
+    const html = await form.text();
+    expect(html).toContain("<th>Bonus Products</th>");
+    expect(html).toContain("<legend>Bonus Products</legend>");
+    expect(html).toContain('name="items[0].bonus_products[0].sku"');
+    expect(html).toContain('name="items[0].bonus_products[0].title"');
+
+    const created = await app.request("/desk/Sales%20Invoice", {
+      method: "POST",
+      body: new URLSearchParams({
+        title: "INV-NESTED-CHILD-CUSTOM-DESK",
+        "items[0].product": "SKU-1",
+        "items[0].quantity": "1",
+        "items[0].bonus_products[0].sku": "BONUS-1",
+        "items[0].bonus_products[0].title": "Bonus Widget"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(created.status).toBe(303);
+    expect(created.headers.get("location")).toBe("/desk/Sales%20Invoice/INV-NESTED-CHILD-CUSTOM-DESK");
+    await expect(services.queries.getDocument(admin, "Sales Invoice", "INV-NESTED-CHILD-CUSTOM-DESK")).resolves.toMatchObject({
+      data: {
+        items: [
+          {
+            product: "SKU-1",
+            quantity: 1,
+            bonus_products: [{ sku: "BONUS-1", title: "Bonus Widget" }]
+          }
+        ]
+      }
+    });
+  });
+
   it("requires custom-field administrators before rendering an empty Desk admin surface", async () => {
     const { app } = makeCustomFieldDesk({ id: "reader@example.com", roles: ["Reader"], tenantId: "acme" });
 

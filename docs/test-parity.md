@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk report formula literal operand controls slice:
+As of the nested child-table custom field slice:
 
 - Vitest files: `73`
-- Vitest cases: `724`
+- Vitest cases: `729`
 
 ## Implication
 

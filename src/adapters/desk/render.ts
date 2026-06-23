@@ -2187,7 +2187,8 @@ function renderFormSection(
         mode,
         linkOptions[field.name] ?? [],
         tableDefinitions[field.name],
-        linkOptions
+        linkOptions,
+        tableDefinitions
       )
     )
     .join("");
@@ -2203,7 +2204,8 @@ function renderField(
   mode: "create" | "update",
   linkOptions: readonly LinkOption[],
   tableDefinition: DocTypeDefinition | undefined,
-  allLinkOptions: FormLinkOptions
+  allLinkOptions: FormLinkOptions,
+  tableDefinitions: FormTableDefinitions
 ): string {
   const id = `field-${slug(field.name)}`;
   const label = escapeHtml(field.label ?? field.name);
@@ -2213,7 +2215,7 @@ function renderField(
   const formatted = formatFormValue(value);
   const help = field.readOnly ? `<small>Read only</small>` : "";
   if (field.type === "table") {
-    return renderTableField(field, value, tableDefinition, allLinkOptions);
+    return renderTableField(field, value, tableDefinition, allLinkOptions, tableDefinitions, field.name, field.name);
   }
   if (field.type === "link") {
     const options = renderLinkOptions(linkOptions, formatted);
@@ -2237,7 +2239,10 @@ function renderTableField(
   field: FieldDefinition,
   value: JsonValue | undefined,
   child: DocTypeDefinition | undefined,
-  linkOptions: FormLinkOptions
+  linkOptions: FormLinkOptions,
+  tableDefinitions: FormTableDefinitions,
+  definitionPath: string,
+  inputPath: string
 ): string {
   const label = escapeHtml(field.label ?? field.name);
   if (!child) {
@@ -2252,16 +2257,20 @@ function renderTableField(
   const body = renderRows
     .map((row, rowIndex) =>
       renderTableRow({
-        tableField: field.name,
+        definitionPath,
+        inputPath,
         rowIndex,
         ...(rows.length > 0 ? { originIndex: rowIndex } : {}),
         row,
         childFields,
-        linkOptions
+        linkOptions,
+        tableDefinitions
       })
     )
     .join("");
-  const nextRow = rows.length > 0 ? renderBlankTableRow(field.name, rows.length, childFields, linkOptions) : "";
+  const nextRow = rows.length > 0
+    ? renderBlankTableRow(definitionPath, inputPath, rows.length, childFields, linkOptions, tableDefinitions)
+    : "";
   return `<fieldset class="field table-field">
     <legend>${label}${field.required ? " *" : ""}</legend>
     <div class="table-wrap">
@@ -2274,26 +2283,31 @@ function renderTableField(
 }
 
 function renderTableRow(options: {
-  readonly tableField: string;
+  readonly definitionPath: string;
+  readonly inputPath: string;
   readonly rowIndex: number;
   readonly originIndex?: number;
   readonly row: Record<string, JsonValue>;
   readonly childFields: readonly FieldDefinition[];
   readonly linkOptions: FormLinkOptions;
+  readonly tableDefinitions: FormTableDefinitions;
 }): string {
   const marker =
-    options.originIndex === undefined ? "" : renderTableRowOrigin(options.tableField, options.rowIndex, options.originIndex);
+    options.originIndex === undefined ? "" : renderTableRowOrigin(options.inputPath, options.rowIndex, options.originIndex);
   if (options.childFields.length === 0) {
     return `<tr><td>${marker}</td></tr>`;
   }
   return `<tr>${options.childFields
     .map((childField, cellIndex) => {
       const input = renderTableCellInput(
-        options.tableField,
+        options.definitionPath,
+        options.inputPath,
         options.rowIndex,
         childField,
         options.row[childField.name],
-        options.linkOptions[`${options.tableField}.${childField.name}`] ?? []
+        options.linkOptions[`${options.definitionPath}.${childField.name}`] ?? [],
+        options.linkOptions,
+        options.tableDefinitions
       );
       return `<td>${cellIndex === 0 ? marker : ""}${input}</td>`;
     })
@@ -2306,26 +2320,36 @@ function renderTableRowOrigin(tableField: string, rowIndex: number, originIndex:
 }
 
 function renderBlankTableRow(
-  tableField: string,
+  definitionPath: string,
+  inputPath: string,
   rowIndex: number,
   childFields: readonly FieldDefinition[],
-  linkOptions: FormLinkOptions
+  linkOptions: FormLinkOptions,
+  tableDefinitions: FormTableDefinitions
 ): string {
   return `<tr>${childFields
     .map((childField) =>
-      `<td>${renderTableCellInput(tableField, rowIndex, childField, undefined, linkOptions[`${tableField}.${childField.name}`] ?? [])}</td>`
+      `<td>${renderTableCellInput(definitionPath, inputPath, rowIndex, childField, undefined, linkOptions[`${definitionPath}.${childField.name}`] ?? [], linkOptions, tableDefinitions)}</td>`
     )
     .join("")}</tr>`;
 }
 
 function renderTableCellInput(
-  tableField: string,
+  definitionPath: string,
+  inputPath: string,
   rowIndex: number,
   field: FieldDefinition,
   value: JsonValue | undefined,
-  linkOptions: readonly LinkOption[]
+  linkOptions: readonly LinkOption[],
+  allLinkOptions: FormLinkOptions,
+  tableDefinitions: FormTableDefinitions
 ): string {
-  const name = `${tableField}[${rowIndex}].${field.name}`;
+  const fieldDefinitionPath = `${definitionPath}.${field.name}`;
+  const name = `${inputPath}[${rowIndex}].${field.name}`;
+  if (field.type === "table") {
+    const child = tableDefinitions[fieldDefinitionPath];
+    return renderTableField(field, value, child, allLinkOptions, tableDefinitions, fieldDefinitionPath, name);
+  }
   const id = `field-${slug(name)}`;
   const common = `id="${id}" name="${escapeHtml(name)}"`;
   const formatted = formatFormValue(value);
