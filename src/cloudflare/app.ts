@@ -48,6 +48,7 @@ import { systemClock, type Clock } from "../ports/clock.js";
 import type { DataPatchLog } from "../ports/data-patch-log.js";
 import type { FileScanner } from "../ports/file-scanner.js";
 import type { FileStorage } from "../ports/file-storage.js";
+import type { FileTransformer } from "../ports/file-transformer.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 import type { JobExecutionLog } from "../ports/job-execution-log.js";
 import type { JobMessage, JobQueue } from "../ports/job-queue.js";
@@ -97,6 +98,7 @@ export interface CloudFrappeRuntimeServices {
 export interface CloudFrappeFileOptions<TEnv extends CloudFrappeEnv = CloudFrappeEnv> {
   readonly storage: (env: TEnv, services: Omit<CloudFrappeRuntimeServices, "files">) => FileStorage;
   readonly scanner?: (env: TEnv, services: Omit<CloudFrappeRuntimeServices, "files">) => FileScanner;
+  readonly transformer?: (env: TEnv, services: Omit<CloudFrappeRuntimeServices, "files">) => FileTransformer;
   readonly maxFileBytes?: number;
   readonly fileDoctype?: string;
   readonly clock?: Clock;
@@ -349,6 +351,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
         queries: restrictedQueries,
         storage: options.files.storage(env, baseServices),
         ...(options.files.scanner === undefined ? {} : { scanner: options.files.scanner(env, baseServices) }),
+        ...(options.files.transformer === undefined ? {} : { transformer: options.files.transformer(env, baseServices) }),
         ...(options.files.clock === undefined ? {} : { clock: options.files.clock }),
         ...(options.files.ids === undefined ? {} : { ids: options.files.ids }),
         ...(options.files.maxFileBytes === undefined ? {} : { maxFileBytes: options.files.maxFileBytes }),

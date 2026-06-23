@@ -13,7 +13,14 @@ import {
   documentStream
 } from "../../src";
 import { MIN_MULTIPART_FILE_PART_BYTES } from "../../src";
-import type { FileScanner, FileScanTarget, FileStorage, PutFileObjectCommand } from "../../src";
+import type {
+  FileScanner,
+  FileScanTarget,
+  FileStorage,
+  FileTransformer,
+  PutFileObjectCommand,
+  TransformFileObjectCommand
+} from "../../src";
 import { guest, now, owner } from "../helpers";
 
 const otherUser = {
@@ -1420,6 +1427,77 @@ describe("FileService", () => {
     });
   });
 
+  it("transforms image files through an injected transformer after read permission checks", async () => {
+    const transformer = new RecordingTransformer();
+    const services = createFileServices(["create"], ["object"], { transformer });
+    const uploaded = await services.files.upload({
+      actor: owner,
+      filename: "avatar.png",
+      body: "image-bytes",
+      contentType: "image/png",
+      isPrivate: false
+    });
+
+    const transformed = await services.files.transform({
+      actor: guest,
+      name: uploaded.snapshot.name,
+      options: { width: 128, height: 128, fit: "cover", format: "webp", quality: 80 }
+    });
+
+    expect(transformed.snapshot.name).toBe(uploaded.snapshot.name);
+    expect(transformed.transform.contentType).toBe("image/webp");
+    await expect(new Response(transformed.transform.body).text()).resolves.toBe("transformed:image-bytes");
+    expect(transformer.commands).toEqual([
+      expect.objectContaining({
+        actorId: guest.id,
+        tenantId: "acme",
+        options: { width: 128, height: 128, fit: "cover", format: "webp", quality: 80 },
+        source: expect.objectContaining({
+          key: "acme/files/file_object-avatar.png",
+          filename: "avatar.png",
+          contentType: "image/png",
+          size: 11
+        })
+      })
+    ]);
+  });
+
+  it("inherits download permissions before transforming private files", async () => {
+    const transformer = new RecordingTransformer();
+    const services = createFileServices(["create"], ["object"], { transformer });
+    const uploaded = await services.files.upload({
+      actor: owner,
+      filename: "private.png",
+      body: "secret",
+      contentType: "image/png"
+    });
+
+    await expect(
+      services.files.transform({ actor: guest, name: uploaded.snapshot.name, options: { width: 64 } })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+    expect(transformer.commands).toEqual([]);
+  });
+
+  it("rejects non-transformable file content before invoking the transformer", async () => {
+    const transformer = new RecordingTransformer();
+    const services = createFileServices(["create"], ["object"], { transformer });
+    const uploaded = await services.files.upload({
+      actor: owner,
+      filename: "vector.svg",
+      body: "<svg></svg>",
+      contentType: "image/svg+xml",
+      isPrivate: false
+    });
+
+    await expect(
+      services.files.transform({ actor: guest, name: uploaded.snapshot.name, options: { width: 64 } })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: `File '${uploaded.snapshot.name}' cannot be transformed`
+    });
+    expect(transformer.commands).toEqual([]);
+  });
+
   it("deletes metadata and object content together", async () => {
     const services = createFileServices(["create", "request-delete", "delete"]);
     const uploaded = await services.files.upload({
@@ -1622,7 +1700,11 @@ describe("FileService", () => {
 function createFileServices(
   ids: readonly string[] = ["create"],
   fileIds: readonly string[] = ["object"],
-  options: { readonly scanner?: FileScanner; readonly storage?: InMemoryFileStorage } = {}
+  options: {
+    readonly scanner?: FileScanner;
+    readonly storage?: InMemoryFileStorage;
+    readonly transformer?: FileTransformer;
+  } = {}
 ) {
   const registry = createRegistry({ doctypes: [fileDocType] });
   const store = new InMemoryDocumentStore();
@@ -1648,7 +1730,8 @@ function createFileServices(
     storage,
     clock: fixedClock(now),
     ids: deterministicIds(fileIds),
-    ...(options.scanner === undefined ? {} : { scanner: options.scanner })
+    ...(options.scanner === undefined ? {} : { scanner: options.scanner }),
+    ...(options.transformer === undefined ? {} : { transformer: options.transformer })
   });
   return { registry, store, storage, documents, queries, userPermissions, files };
 }
@@ -1703,6 +1786,21 @@ class CountingMultipartStorage extends InMemoryFileStorage {
   override uploadMultipartPart(command: Parameters<InMemoryFileStorage["uploadMultipartPart"]>[0]) {
     this.uploadedParts += 1;
     return super.uploadMultipartPart(command);
+  }
+}
+
+class RecordingTransformer implements FileTransformer {
+  readonly commands: TransformFileObjectCommand[] = [];
+
+  async transform(command: TransformFileObjectCommand) {
+    this.commands.push(command);
+    const sourceText = await new Response(command.source.body).text();
+    return {
+      body: new Response(`transformed:${sourceText}`).body as ReadableStream<Uint8Array>,
+      contentType: command.options.format ? `image/${command.options.format}` : command.source.contentType,
+      contentLength: `transformed:${sourceText}`.length,
+      etag: '"transform"'
+    };
   }
 }
 

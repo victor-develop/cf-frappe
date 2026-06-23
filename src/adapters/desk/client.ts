@@ -294,6 +294,16 @@ export function renderDeskClientScript(): string {
     return headers;
   }
 
+  function fileTransformParams(options) {
+    var params = {};
+    setParam(params, "width", options && options.width);
+    setParam(params, "height", options && options.height);
+    setParam(params, "fit", options && options.fit);
+    setParam(params, "format", options && options.format);
+    setParam(params, "quality", options && options.quality);
+    return params;
+  }
+
   var minMultipartChunkBytes = ${JSON.stringify(MIN_MULTIPART_FILE_PART_BYTES)};
   var maxMultipartFileParts = ${JSON.stringify(MAX_MULTIPART_FILE_PARTS)};
   var defaultMultipartChunkBytes = minMultipartChunkBytes;
@@ -1348,6 +1358,9 @@ export function renderDeskClientScript(): string {
       prepareMultipartUpload: prepareMultipartUpload,
       previewUrl: function (name) {
         return filePath(name, "preview");
+      },
+      transformUrl: function (name, options) {
+        return withQuery(filePath(name, "transform"), fileTransformParams(options || {}));
       },
       updateMetadata: function (name, input, options) {
         return request(filePath(name), { method: "PATCH", body: commandBody(input, options) }).then(unwrapData);

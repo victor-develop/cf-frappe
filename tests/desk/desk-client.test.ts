@@ -204,6 +204,7 @@ interface DeskClientRuntime {
     readonly prepareDirectUpload: (input: Record<string, unknown>) => Promise<unknown>;
     readonly prepareMultipartUpload: (input: Record<string, unknown>) => Promise<unknown>;
     readonly previewUrl: (name: string) => string;
+    readonly transformUrl: (name: string, options?: Record<string, unknown>) => string;
     readonly updateMetadata: (
       name: string,
       input: Record<string, unknown>,
@@ -612,6 +613,8 @@ describe("Desk client runtime", () => {
 
     expect(runtime.files.contentUrl("file/1")).toBe("/api/files/file%2F1/content");
     expect(runtime.files.previewUrl("file/1")).toBe("/api/files/file%2F1/preview");
+    expect(runtime.files.transformUrl("file/1", { width: 320, height: 240, fit: "cover", format: "webp", quality: 82 }))
+      .toBe("/api/files/file%2F1/transform?width=320&height=240&fit=cover&format=webp&quality=82");
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
       "POST /api/files?attached_to_doctype=Task+Type&attached_to_name=TASK%2F1&filename=hello.txt&is_private=true",
       "POST /api/files/direct-upload",

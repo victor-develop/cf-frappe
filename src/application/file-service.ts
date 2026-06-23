@@ -28,6 +28,13 @@ import {
 import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
 import type { FileScanner, FileScanResult, FileScanSource, FileScanTarget } from "../ports/file-scanner.js";
+import {
+  isTransformableFileContentType,
+  normalizeFileTransformOptions,
+  type FileTransformer,
+  type FileTransformOptions,
+  type TransformedFileObject
+} from "../ports/file-transformer.js";
 import type {
   DirectFileUpload,
   FileContent,
@@ -51,6 +58,7 @@ export interface FileServiceOptions {
   readonly maxFileBytes?: number;
   readonly fileDoctype?: string;
   readonly scanner?: FileScanner;
+  readonly transformer?: FileTransformer;
 }
 
 export interface UploadFileCommand {
@@ -71,6 +79,10 @@ export interface DownloadFileCommand {
   readonly actor: Actor;
   readonly name: string;
   readonly tenantId?: string;
+}
+
+export interface TransformFileCommand extends DownloadFileCommand {
+  readonly options: FileTransformOptions;
 }
 
 export interface PrepareDirectUploadCommand {
@@ -213,6 +225,12 @@ export interface DownloadedFile {
   readonly object: StoredFileObject;
 }
 
+export interface TransformedFile {
+  readonly snapshot: DocumentSnapshot;
+  readonly object: StoredFileObject["metadata"];
+  readonly transform: TransformedFileObject;
+}
+
 export interface FileDashboardQuery {
   readonly attachedToDoctype?: string;
   readonly attachedToName?: string;
@@ -274,6 +292,7 @@ export class FileService {
   private readonly maxFileBytes: number;
   private readonly fileDoctype: string;
   private readonly scanner: FileScanner | undefined;
+  private readonly transformer: FileTransformer | undefined;
 
   constructor(options: FileServiceOptions) {
     this.registry = options.registry;
@@ -285,6 +304,7 @@ export class FileService {
     this.maxFileBytes = options.maxFileBytes ?? 25 * 1024 * 1024;
     this.fileDoctype = options.fileDoctype ?? FILE_DOCTYPE_NAME;
     this.scanner = options.scanner;
+    this.transformer = options.transformer;
   }
 
   async upload(command: UploadFileCommand): Promise<UploadedFile> {
@@ -836,6 +856,41 @@ export class FileService {
       throw notFound(`${this.fileDoctype}/${command.name} content was not found`);
     }
     return { snapshot, object };
+  }
+
+  async transform(command: TransformFileCommand): Promise<TransformedFile> {
+    if (!this.transformer) {
+      throw badRequest("File transforms are not configured");
+    }
+    const downloaded = await this.download(command);
+    const options = normalizeFileTransformOptions(command.options);
+    const contentType = downloaded.object.metadata.contentType ?? stringField(downloaded.snapshot, "content_type");
+    if (!isTransformableFileContentType(contentType)) {
+      throw badRequest(`File '${downloaded.snapshot.name}' cannot be transformed`);
+    }
+    const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
+    const filename = stringField(downloaded.snapshot, "filename") || downloaded.snapshot.name;
+    const transform = await this.transformer.transform({
+      actorId: command.actor.id,
+      tenantId,
+      source: {
+        key: downloaded.object.metadata.key,
+        filename,
+        contentType,
+        size: downloaded.object.metadata.size,
+        body: downloaded.object.body,
+        etag: downloaded.object.metadata.etag,
+        ...(downloaded.object.metadata.httpEtag === undefined
+          ? {}
+          : { httpEtag: downloaded.object.metadata.httpEtag })
+      },
+      options
+    });
+    return {
+      snapshot: downloaded.snapshot,
+      object: downloaded.object.metadata,
+      transform
+    };
   }
 
   async delete(command: DeleteFileCommand): Promise<DocumentSnapshot> {

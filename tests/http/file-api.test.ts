@@ -12,6 +12,7 @@ import {
   unsafeHeaderActorResolver
 } from "../../src";
 import { MIN_MULTIPART_FILE_PART_BYTES } from "../../src";
+import type { FileTransformer, TransformFileObjectCommand } from "../../src";
 import { now } from "../helpers";
 
 describe("file api", () => {
@@ -89,6 +90,170 @@ describe("file api", () => {
     await expect(unsupported.json()).resolves.toMatchObject({
       error: { code: "BAD_REQUEST", message: "File 'file_object-2' cannot be previewed" }
     });
+  });
+
+  it("transforms readable images through the file API", async () => {
+    const transformer = new RecordingTransformer();
+    const { app } = makeAppFixture(1024, ["create"], ["object"], { transformer });
+    const uploaded = await app.request("/api/files?filename=avatar.png&is_private=false", {
+      method: "POST",
+      headers: { ...userHeaders("owner@example.com", "User"), "content-type": "image/png" },
+      body: "image-bytes"
+    });
+    expect(uploaded.status).toBe(201);
+
+    const transformed = await app.request(
+      "/api/files/file_object/transform?width=320&height=240&fit=cover&format=webp&quality=82",
+      {
+        headers: userHeaders("guest", "Guest")
+      }
+    );
+
+    expect(transformed.status).toBe(200);
+    expect(transformed.headers.get("content-type")).toBe("image/webp");
+    expect(transformed.headers.get("content-length")).toBe("23");
+    expect(transformed.headers.get("content-disposition")).toBe('inline; filename="avatar.png"');
+    expect(transformed.headers.get("etag")).toBe('"transform"');
+    await expect(transformed.text()).resolves.toBe("transformed:image-bytes");
+    expect(transformer.commands).toEqual([
+      expect.objectContaining({
+        actorId: "guest",
+        tenantId: "acme",
+        options: { width: 320, height: 240, fit: "cover", format: "webp", quality: 82 },
+        source: expect.objectContaining({
+          key: "acme/files/file_object-avatar.png",
+          contentType: "image/png",
+          size: 11
+        })
+      })
+    ]);
+  });
+
+  it("validates file transform query options", async () => {
+    const transformer = new RecordingTransformer();
+    const { app } = makeAppFixture(1024, ["create"], ["object"], { transformer });
+    await app.request("/api/files?filename=avatar.png&is_private=false", {
+      method: "POST",
+      headers: { ...userHeaders("owner@example.com", "User"), "content-type": "image/png" },
+      body: "image-bytes"
+    });
+
+    const invalidWidth = await app.request("/api/files/file_object/transform?width=0", {
+      headers: userHeaders("guest", "Guest")
+    });
+    expect(invalidWidth.status).toBe(400);
+    await expect(invalidWidth.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "width must be an integer from 1 to 4096" }
+    });
+
+    const cases = [
+      {
+        path: "/api/files/file_object/transform",
+        message: "At least one file transform option must be provided"
+      },
+      {
+        path: "/api/files/file_object/transform?fit=squeeze",
+        message: "fit must be one of scale-down, contain, cover, crop, pad"
+      },
+      {
+        path: "/api/files/file_object/transform?format=gif",
+        message: "format must be one of jpeg, png, webp, avif"
+      },
+      {
+        path: "/api/files/file_object/transform?quality=0",
+        message: "quality must be an integer from 1 to 100"
+      },
+      {
+        path: "/api/files/file_object/transform?width=64&fit=crop",
+        message: "File transform fit 'crop' requires width and height"
+      }
+    ];
+    for (const entry of cases) {
+      const response = await app.request(entry.path, {
+        headers: userHeaders("guest", "Guest")
+      });
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "BAD_REQUEST", message: entry.message }
+      });
+    }
+
+    const unknown = await app.request("/api/files/file_object/transform?resize=small", {
+      headers: userHeaders("guest", "Guest")
+    });
+    expect(unknown.status).toBe(400);
+    await expect(unknown.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Unknown file transform query parameter 'resize'" }
+    });
+    expect(transformer.commands).toEqual([]);
+  });
+
+  it("rejects file transforms without a configured transformer", async () => {
+    const app = makeApp();
+    await app.request("/api/files?filename=avatar.png&is_private=false", {
+      method: "POST",
+      headers: { ...userHeaders("owner@example.com", "User"), "content-type": "image/png" },
+      body: "image-bytes"
+    });
+
+    const transformed = await app.request("/api/files/file_object/transform?width=64", {
+      headers: userHeaders("guest", "Guest")
+    });
+
+    expect(transformed.status).toBe(400);
+    await expect(transformed.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "File transforms are not configured" }
+    });
+  });
+
+  it("rejects non-image and SVG file transforms before invoking the adapter", async () => {
+    const transformer = new RecordingTransformer();
+    const { app } = makeAppFixture(1024, ["create-1", "create-2"], ["object-1", "object-2"], { transformer });
+    await app.request("/api/files?filename=notes.txt&is_private=false", {
+      method: "POST",
+      headers: userHeaders("owner@example.com", "User"),
+      body: "notes"
+    });
+    await app.request("/api/files?filename=vector.svg&is_private=false", {
+      method: "POST",
+      headers: { ...userHeaders("owner@example.com", "User"), "content-type": "image/svg+xml" },
+      body: "<svg></svg>"
+    });
+
+    const text = await app.request("/api/files/file_object-1/transform?width=64", {
+      headers: userHeaders("guest", "Guest")
+    });
+    const svg = await app.request("/api/files/file_object-2/transform?width=64", {
+      headers: userHeaders("guest", "Guest")
+    });
+
+    expect(text.status).toBe(400);
+    expect(svg.status).toBe(400);
+    await expect(text.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "File 'file_object-1' cannot be transformed" }
+    });
+    await expect(svg.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "File 'file_object-2' cannot be transformed" }
+    });
+    expect(transformer.commands).toEqual([]);
+  });
+
+  it("inherits file read permissions for image transform requests", async () => {
+    const transformer = new RecordingTransformer();
+    const { app } = makeAppFixture(1024, ["create"], ["object"], { transformer });
+    await app.request("/api/files?filename=private.png", {
+      method: "POST",
+      headers: { ...userHeaders("owner@example.com", "User"), "content-type": "image/png" },
+      body: "secret"
+    });
+
+    const transformed = await app.request("/api/files/file_object/transform?width=64", {
+      headers: userHeaders("guest", "Guest")
+    });
+
+    expect(transformed.status).toBe(403);
+    await expect(transformed.json()).resolves.toMatchObject({ error: { code: "PERMISSION_DENIED" } });
+    expect(transformer.commands).toEqual([]);
   });
 
   it("rejects oversized uploads before storing content", async () => {
@@ -751,15 +916,17 @@ describe("file api", () => {
 function makeApp(
   maxFileBytes = 1024,
   documentIds: readonly string[] = ["create"],
-  fileIds: readonly string[] = ["object"]
+  fileIds: readonly string[] = ["object"],
+  options: { readonly transformer?: FileTransformer } = {}
 ) {
-  return makeAppFixture(maxFileBytes, documentIds, fileIds).app;
+  return makeAppFixture(maxFileBytes, documentIds, fileIds, options).app;
 }
 
 function makeAppFixture(
   maxFileBytes = 1024,
   documentIds: readonly string[] = ["create"],
-  fileIds: readonly string[] = ["object"]
+  fileIds: readonly string[] = ["object"],
+  options: { readonly transformer?: FileTransformer } = {}
 ) {
   const registry = createRegistry({ doctypes: [fileDocType] });
   const store = new InMemoryDocumentStore();
@@ -778,7 +945,8 @@ function makeAppFixture(
     storage,
     clock: fixedClock(now),
     ids: deterministicIds(fileIds),
-    maxFileBytes
+    maxFileBytes,
+    ...(options.transformer === undefined ? {} : { transformer: options.transformer })
   });
   const app = createResourceApi({
     registry,
@@ -809,4 +977,19 @@ function jsonHeaders(user: string, roles: string): HeadersInit {
 
 function repeatedBytes(value: string, size: number): Uint8Array<ArrayBuffer> {
   return new Uint8Array(size).fill(new TextEncoder().encode(value)[0] ?? 0);
+}
+
+class RecordingTransformer implements FileTransformer {
+  readonly commands: TransformFileObjectCommand[] = [];
+
+  async transform(command: TransformFileObjectCommand) {
+    this.commands.push(command);
+    const sourceText = await new Response(command.source.body).text();
+    return {
+      body: new Response(`transformed:${sourceText}`).body as ReadableStream<Uint8Array>,
+      contentType: command.options.format ? `image/${command.options.format}` : command.source.contentType,
+      contentLength: `transformed:${sourceText}`.length,
+      etag: '"transform"'
+    };
+  }
 }

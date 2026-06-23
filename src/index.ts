@@ -66,6 +66,7 @@ export * from "./ports/document-store.js";
 export * from "./ports/event-store.js";
 export * from "./ports/file-scanner.js";
 export * from "./ports/file-storage.js";
+export * from "./ports/file-transformer.js";
 export * from "./ports/id-generator.js";
 export * from "./ports/job-execution-log.js";
 export * from "./ports/job-queue.js";

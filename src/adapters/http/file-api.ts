@@ -4,8 +4,9 @@ import {
   type FileService,
   type UpdateFileMetadataCommand
 } from "../../application/file-service.js";
+import type { FileTransformFit, FileTransformFormat, FileTransformOptions } from "../../ports/file-transformer.js";
 import { badRequest } from "../../core/errors.js";
-import { fileContentHeaders } from "../file-content.js";
+import { fileContentHeaders, transformedFileContentHeaders } from "../file-content.js";
 import type { ActorResolver } from "./actor.js";
 import { parseOptionalInteger, readBoundedBytes, readJsonObject, requestMetadata } from "./request.js";
 
@@ -135,6 +136,16 @@ export function createFileApi(options: FileApiOptions): Hono {
       throw badRequest(`File '${downloaded.snapshot.name}' cannot be previewed`);
     }
     return new Response(downloaded.object.body, { headers: fileContentHeaders(downloaded, "inline") });
+  });
+
+  app.get("/api/files/:name/transform", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const transformed = await options.files.transform({
+      actor,
+      name: c.req.param("name"),
+      options: fileTransformQuery(c.req.raw)
+    });
+    return new Response(transformed.transform.body, { headers: transformedFileContentHeaders(transformed) });
   });
 
   app.post("/api/files/delete", async (c) => {
@@ -515,6 +526,53 @@ function multipartPartSizeHeader(headers: Headers): number | undefined {
     throw badRequest("multipart part size must be a non-negative integer");
   }
   return size;
+}
+
+function fileTransformQuery(request: Request): FileTransformOptions {
+  const params = new URL(request.url).searchParams;
+  const allowed = new Set(["width", "height", "fit", "format", "quality"]);
+  const unknown = [...new Set([...params.keys()].filter((key) => !allowed.has(key)))];
+  if (unknown.length > 0) {
+    throw badRequest(`Unknown file transform query parameter '${unknown[0]}'`);
+  }
+  return {
+    ...optionalTransformInteger(params, "width"),
+    ...optionalTransformInteger(params, "height"),
+    ...optionalTransformFit(params),
+    ...optionalTransformFormat(params),
+    ...optionalTransformInteger(params, "quality")
+  };
+}
+
+function optionalTransformInteger<TKey extends "width" | "height" | "quality">(
+  params: URLSearchParams,
+  key: TKey
+): { readonly [K in TKey]?: number } {
+  const value = params.get(key);
+  if (value === null || value === "") {
+    return {};
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) {
+    throw badRequest(`${key} must be an integer`);
+  }
+  return { [key]: parsed } as { readonly [K in TKey]: number };
+}
+
+function optionalTransformFit(params: URLSearchParams): Pick<FileTransformOptions, "fit"> {
+  const value = params.get("fit");
+  if (value === null || value === "") {
+    return {};
+  }
+  return { fit: value as FileTransformFit };
+}
+
+function optionalTransformFormat(params: URLSearchParams): Pick<FileTransformOptions, "format"> {
+  const value = params.get("format");
+  if (value === null || value === "") {
+    return {};
+  }
+  return { format: value as FileTransformFormat };
 }
 
 function fileMetadataPatch(body: Record<string, unknown>): MutableFileMetadataPatch {
