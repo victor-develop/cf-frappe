@@ -28,6 +28,7 @@ import {
   JobHistoryService,
   JobRetryService,
   JobScheduleService,
+  jobScheduleDefinitionsStream,
   QueryService,
   ReportService,
   RoleService,
@@ -2506,7 +2507,7 @@ describe("Desk app", () => {
     expect(page.status).toBe(200);
     const html = await page.text();
     expect(html).toContain('formaction="/desk/admin/data-patches/enqueue"');
-    expect(html).toContain('formaction="/desk/admin/data-patches/core.first/enqueue"');
+    expect(html).toContain('action="/desk/admin/data-patches/core.first/enqueue"');
     expect(html).toContain('name="idempotencyKey"');
     expect(html).toContain('maxlength="256"');
     expect(html).toContain('name="delaySeconds"');
@@ -2565,13 +2566,20 @@ describe("Desk app", () => {
     const batchHtml = await (await app.request(batchLocation!)).text();
     expect(batchHtml).toContain("Enqueued data patch job cf-frappe.data-patches.apply / job_patch-001");
 
-    const single = await app.request("/desk/admin/data-patches/core.first/enqueue", { method: "POST" });
+    const single = await app.request("/desk/admin/data-patches/core.first/enqueue", {
+      method: "POST",
+      body: new URLSearchParams({ idempotencyKey: "patches:single-first", delaySeconds: "5" })
+    });
     expect(single.status).toBe(303);
-    expect(queue.queued()[1]?.message).toMatchObject({
-      tenantId: "acme",
-      jobName: "cf-frappe.data-patches.apply",
-      runId: "job_patch-002",
-      payload: { patchIds: ["core.first"] }
+    expect(queue.queued()[1]).toMatchObject({
+      delaySeconds: 5,
+      message: {
+        tenantId: "acme",
+        jobName: "cf-frappe.data-patches.apply",
+        runId: "job_patch-002",
+        idempotencyKey: "patches:single-first",
+        payload: { patchIds: ["core.first"] }
+      }
     });
     expect(resources.touched).toEqual([]);
   });
@@ -2636,7 +2644,7 @@ describe("Desk app", () => {
     expect(page.status).toBe(200);
     const html = await page.text();
     expect(html).toContain('formaction="/desk/admin/data-patches/rollback-enqueue"');
-    expect(html).toContain('formaction="/desk/admin/data-patches/crm.second/rollback-enqueue"');
+    expect(html).toContain('action="/desk/admin/data-patches/crm.second/rollback-enqueue"');
     expect(html).toContain('name="idempotencyKey"');
     expect(html).toContain('name="delaySeconds"');
     expect(html).not.toContain('formaction="/desk/admin/data-patches/enqueue"');
@@ -2663,13 +2671,20 @@ describe("Desk app", () => {
     const batchHtml = await (await app.request(batchLocation!)).text();
     expect(batchHtml).toContain("Enqueued data patch rollback job cf-frappe.data-patches.rollback / job_patch-rollback-001");
 
-    const single = await app.request("/desk/admin/data-patches/crm.second/rollback-enqueue", { method: "POST" });
+    const single = await app.request("/desk/admin/data-patches/crm.second/rollback-enqueue", {
+      method: "POST",
+      body: new URLSearchParams({ idempotencyKey: "patches:rollback-single", delaySeconds: "15" })
+    });
     expect(single.status).toBe(303);
-    expect(queue.queued()[1]?.message).toMatchObject({
-      tenantId: "acme",
-      jobName: "cf-frappe.data-patches.rollback",
-      runId: "job_patch-rollback-002",
-      payload: { patchIds: ["crm.second"] }
+    expect(queue.queued()[1]).toMatchObject({
+      delaySeconds: 15,
+      message: {
+        tenantId: "acme",
+        jobName: "cf-frappe.data-patches.rollback",
+        runId: "job_patch-rollback-002",
+        idempotencyKey: "patches:rollback-single",
+        payload: { patchIds: ["crm.second"] }
+      }
     });
     expect(resources.rolledBack).toEqual([]);
   });
@@ -2725,20 +2740,27 @@ describe("Desk app", () => {
     const page = await app.request("/desk/admin/data-patches");
     expect(page.status).toBe(200);
     const html = await page.text();
-    expect(html).toContain('formaction="/desk/admin/data-patches/core.rollback/rollback-retry-enqueue"');
+    expect(html).toContain('action="/desk/admin/data-patches/core.rollback/rollback-retry-enqueue"');
+    expect(html).toContain('name="idempotencyKey"');
+    expect(html).toContain('name="delaySeconds"');
 
     const enqueued = await app.request("/desk/admin/data-patches/core.rollback/rollback-retry-enqueue", {
-      method: "POST"
+      method: "POST",
+      body: new URLSearchParams({ idempotencyKey: "patches:rollback-retry-single", delaySeconds: "25" })
     });
     expect(enqueued.status).toBe(303);
     const enqueuedLocation = enqueued.headers.get("location");
     expect(enqueuedLocation).toContain("/desk/admin/data-patches?");
-    expect(queue.queued()[0]?.message).toMatchObject({
-      tenantId: "acme",
-      jobName: "cf-frappe.data-patches.rollback-retry",
-      runId: "job_patch-rollback-retry-001",
-      payload: { patchId: "core.rollback" },
-      metadata: { dispatchSource: "data-patches", requestedBy: "admin@example.com" }
+    expect(queue.queued()[0]).toMatchObject({
+      delaySeconds: 25,
+      message: {
+        tenantId: "acme",
+        jobName: "cf-frappe.data-patches.rollback-retry",
+        runId: "job_patch-rollback-retry-001",
+        idempotencyKey: "patches:rollback-retry-single",
+        payload: { patchId: "core.rollback" },
+        metadata: { dispatchSource: "data-patches", requestedBy: "admin@example.com" }
+      }
     });
     expect(resources).toEqual({ attempts: 1, rolledBack: [] });
     const enqueuedHtml = await (await app.request(enqueuedLocation!)).text();
@@ -3106,17 +3128,19 @@ describe("Desk app", () => {
     const jobs = createJobRegistry({
       jobs: [{ name: "reports.daily", description: "Build reports", handler: () => undefined }]
     });
+    const scheduleEvents = new InMemoryEventStore();
+    const jobSchedules = new JobScheduleService({
+      registry: jobs,
+      schedules: [],
+      events: scheduleEvents,
+      clock: fixedClock(now),
+      ids: deterministicIds(["save-runtime", "update-runtime", "delete-runtime"])
+    });
     const app = createDeskApp({
       registry: services.registry,
       documents: services.documents,
       queries: services.queries,
-      jobSchedules: new JobScheduleService({
-        registry: jobs,
-        schedules: [],
-        events: new InMemoryEventStore(),
-        clock: fixedClock(now),
-        ids: deterministicIds(["save-runtime", "update-runtime", "delete-runtime"])
-      }),
+      jobSchedules,
       actor: () => admin
     });
 
@@ -3124,6 +3148,22 @@ describe("Desk app", () => {
     const emptyHtml = await empty.text();
     expect(emptyHtml).toContain('action="/desk/admin/jobs/schedules"');
     expect(emptyHtml).toContain("Save runtime schedule");
+    expect(emptyHtml).toContain('name="delaySeconds" type="number" min="0" max="86400"');
+
+    const invalidDelay = await app.request("/desk/admin/jobs/schedules", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        id: "runtime-too-late",
+        cron: "15 4 * * *",
+        jobName: "reports.daily",
+        delaySeconds: "86401",
+        enabled: "true"
+      }).toString()
+    });
+    expect(invalidDelay.status).toBe(400);
+    await expect(invalidDelay.text()).resolves.toContain("delaySeconds must be an integer between 0 and 86400");
+    await expect(scheduleEvents.readStream(jobScheduleDefinitionsStream())).resolves.toEqual([]);
 
     const created = await app.request("/desk/admin/jobs/schedules", {
       method: "POST",

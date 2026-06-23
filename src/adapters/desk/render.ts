@@ -44,6 +44,7 @@ import type { UserAccount } from "../../core/user-accounts.js";
 import type { UserNotificationInbox } from "../../application/user-notification-service.js";
 import { USER_PROFILE_FIELDS, type UserProfileState } from "../../core/user-profiles.js";
 import type { UserPermissionState } from "../../core/user-permissions.js";
+import { MAX_JOB_QUEUE_DELAY_SECONDS, MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH } from "../../ports/job-queue.js";
 import { DESK_CLIENT_SCRIPT_PATH } from "./client.js";
 import {
   deskReportFieldLabel,
@@ -1221,41 +1222,56 @@ export function renderDataPatchAdmin(
 }
 
 function renderDataPatchQueueFields(): string {
-  return `<label class="field"><span>Idempotency Key</span><input name="idempotencyKey" maxlength="256"></label>
-      <label class="field"><span>Delay Seconds</span><input name="delaySeconds" type="number" min="0" max="86400"></label>`;
+  return `<label class="field"><span>Idempotency Key</span><input name="idempotencyKey" maxlength="${MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH}"></label>
+      <label class="field"><span>Delay Seconds</span><input name="delaySeconds" type="number" min="0" max="${MAX_JOB_QUEUE_DELAY_SECONDS}"></label>`;
 }
 
 function renderDataPatchAction(
   patch: DataPatchDashboardEntry,
   queue: DataPatchQueueControls
 ): string {
+  const patchId = encodeURIComponent(patch.id);
   if (patch.status === "not_applied") {
-    return `<form class="inline-action" method="post">
-      <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/plan">Plan</button>
-      ${queue.apply ? `<button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/enqueue">Enqueue</button>` : ""}
-      <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/apply">Apply</button>
-    </form>`;
+    return `<div class="data-patch-actions">
+      <form class="inline-action data-patch-command-action" method="post">
+        <button class="button" type="submit" formaction="/desk/admin/data-patches/${patchId}/plan">Plan</button>
+        <button class="button" type="submit" formaction="/desk/admin/data-patches/${patchId}/apply">Apply</button>
+      </form>
+      ${queue.apply ? renderDataPatchQueueAction(`/desk/admin/data-patches/${patchId}/enqueue`, "Enqueue") : ""}
+    </div>`;
   }
   if (patch.status === "failed") {
     return `<form class="inline-action" method="post">
-      <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/retry">Retry</button>
+      <button class="button" type="submit" formaction="/desk/admin/data-patches/${patchId}/retry">Retry</button>
     </form>`;
   }
   if (patch.status === "rollback_failed") {
-    return `<form class="inline-action" method="post">
-      <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/rollback-retry">Retry Rollback</button>
-      ${queue.rollbackRetry ? `<button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/rollback-retry-enqueue">Enqueue Retry</button>` : ""}
-    </form>`;
+    return `<div class="data-patch-actions">
+      <form class="inline-action data-patch-command-action" method="post">
+        <button class="button" type="submit" formaction="/desk/admin/data-patches/${patchId}/rollback-retry">Retry Rollback</button>
+      </form>
+      ${queue.rollbackRetry ? renderDataPatchQueueAction(`/desk/admin/data-patches/${patchId}/rollback-retry-enqueue`, "Enqueue Retry") : ""}
+    </div>`;
   }
   if (patch.status === "applied" && patch.rollbackable === true) {
     const label = patch.rollbackLabel ?? "Plan Rollback";
-    return `<form class="inline-action" method="post">
-      <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/rollback-plan">${escapeHtml(label)}</button>
-      ${queue.rollback ? `<button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/rollback-enqueue">Enqueue Rollback</button>` : ""}
-      <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/rollback">Rollback</button>
-    </form>`;
+    return `<div class="data-patch-actions">
+      <form class="inline-action data-patch-command-action" method="post">
+        <button class="button" type="submit" formaction="/desk/admin/data-patches/${patchId}/rollback-plan">${escapeHtml(label)}</button>
+        <button class="button" type="submit" formaction="/desk/admin/data-patches/${patchId}/rollback">Rollback</button>
+      </form>
+      ${queue.rollback ? renderDataPatchQueueAction(`/desk/admin/data-patches/${patchId}/rollback-enqueue`, "Enqueue Rollback") : ""}
+    </div>`;
   }
   return "";
+}
+
+function renderDataPatchQueueAction(action: string, label: string): string {
+  return `<form class="inline-action data-patch-queue-action" method="post" action="${escapeHtml(action)}">
+    <input name="idempotencyKey" maxlength="${MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH}" placeholder="Idempotency Key" aria-label="Idempotency Key">
+    <input name="delaySeconds" type="number" min="0" max="${MAX_JOB_QUEUE_DELAY_SECONDS}" placeholder="Delay Seconds" aria-label="Delay Seconds">
+    <button class="button" type="submit">${escapeHtml(label)}</button>
+  </form>`;
 }
 
 function renderDataPatchPlan(plan: DataPatchApplyPlan | DataPatchRollbackPlan, kind: "apply" | "rollback"): string {
@@ -1356,7 +1372,7 @@ function renderJobScheduleEditor(): string {
       <label class="field"><span>ID</span><input name="id"></label>
       <label class="field"><span>Cron</span><input name="cron" required></label>
       <label class="field"><span>Job</span><input name="jobName" required></label>
-      <label class="field"><span>Delay</span><input name="delaySeconds" type="number" min="0"></label>
+      <label class="field"><span>Delay</span><input name="delaySeconds" type="number" min="0" max="${MAX_JOB_QUEUE_DELAY_SECONDS}"></label>
       <label class="field checkbox"><input name="enabled" value="true" type="checkbox" checked><span>Enabled</span></label>
     </div>
     <div class="actions"><button class="button primary" type="submit">Save runtime schedule</button></div>
@@ -2912,6 +2928,26 @@ tr:last-child td { border-bottom: 0; }
   min-height: 44px;
 }
 .inline-action { margin: 0; }
+.data-patch-actions,
+.data-patch-command-action {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.data-patch-actions {
+  align-items: flex-start;
+  min-width: min(100%, 440px);
+}
+.data-patch-queue-action {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(92px, 120px) auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+}
+.data-patch-queue-action input {
+  min-height: 38px;
+}
 .timeline-tag-form,
 .timeline-follower-form,
 .timeline-share-form,

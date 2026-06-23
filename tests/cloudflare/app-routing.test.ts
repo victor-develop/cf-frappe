@@ -860,7 +860,7 @@ describe("CloudFrappe Worker routing", () => {
     expect(html).toContain('formaction="/desk/admin/data-patches/plan"');
     expect(html).toContain('formaction="/desk/admin/data-patches/enqueue"');
     expect(html).toContain('formaction="/desk/admin/data-patches/crm.backfill/plan"');
-    expect(html).toContain('formaction="/desk/admin/data-patches/crm.backfill/enqueue"');
+    expect(html).toContain('action="/desk/admin/data-patches/crm.backfill/enqueue"');
     expect(html).toContain('formaction="/desk/admin/data-patches/crm.backfill/apply"');
 
     const enqueued = await worker.fetch!(
@@ -917,7 +917,7 @@ describe("CloudFrappe Worker routing", () => {
     );
     expect(appliedDashboard.status).toBe(200);
     const appliedHtml = await appliedDashboard.text();
-    expect(appliedHtml).toContain('formaction="/desk/admin/data-patches/crm.backfill/rollback-enqueue"');
+    expect(appliedHtml).toContain('action="/desk/admin/data-patches/crm.backfill/rollback-enqueue"');
 
     const failedRollback = await worker.fetch!(
       cfRequest("http://localhost/desk/admin/data-patches/crm.backfill/rollback", { method: "POST" }),
@@ -927,7 +927,7 @@ describe("CloudFrappe Worker routing", () => {
     expect(failedRollback.status).toBe(500);
     const failedRollbackHtml = await failedRollback.text();
     expect(failedRollbackHtml).toContain(
-      'formaction="/desk/admin/data-patches/crm.backfill/rollback-retry-enqueue"'
+      'action="/desk/admin/data-patches/crm.backfill/rollback-retry-enqueue"'
     );
     expect(resources.rollbackAttempts).toBe(1);
   });

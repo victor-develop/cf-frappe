@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk data-patch queue controls slice:
+As of the Desk data-patch single queue delivery controls slice:
 
 - Vitest files: `73`
-- Vitest cases: `764`
+- Vitest cases: `768`
 
 ## Implication
 

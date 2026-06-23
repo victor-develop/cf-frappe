@@ -5,6 +5,7 @@ import type {
   DataPatchQueuePort,
   DataPatchRollbackQueueOptions,
   DataPatchRollbackQueuePort,
+  DataPatchRollbackRetryQueueOptions,
   DataPatchRollbackRetryQueuePort
 } from "../../application/data-patch-jobs.js";
 import type {
@@ -48,6 +49,7 @@ import {
   type WorkspaceShortcutDefinition
 } from "../../core/workspace.js";
 import { allowedWorkflowTransitions } from "../../core/workflow.js";
+import { MAX_JOB_QUEUE_DELAY_SECONDS, MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH } from "../../ports/job-queue.js";
 import {
   CHILD_TABLE_ROW_INDEX_FIELD,
   FIELD_TYPES,
@@ -630,7 +632,11 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const dataPatchQueue = requireDataPatchQueue(options);
     const actor = await options.actor(c.req.raw);
     try {
-      const result = await dataPatchQueue.enqueue(actor, { patchIds: [c.req.param("id")] });
+      const delivery = await parseDeskDataPatchQueueDelivery(c.req.raw);
+      const result = await dataPatchQueue.enqueue(actor, {
+        patchIds: [c.req.param("id")],
+        ...delivery
+      });
       return c.redirect(dataPatchQueuedLocation("data patch", result.message), 303);
     } catch (error) {
       return renderDeskDataPatchFailure(options, actor, dataPatches, error);
@@ -664,7 +670,12 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const dataPatchRollbackRetryQueue = requireDataPatchRollbackRetryQueue(options);
     const actor = await options.actor(c.req.raw);
     try {
-      const result = await dataPatchRollbackRetryQueue.enqueueRollbackRetry(actor, c.req.param("id"));
+      const delivery = await parseDeskDataPatchQueueDelivery(c.req.raw);
+      const result = await dataPatchRollbackRetryQueue.enqueueRollbackRetry(
+        actor,
+        c.req.param("id"),
+        delivery
+      );
       return c.redirect(dataPatchQueuedLocation("data patch rollback retry", result.message), 303);
     } catch (error) {
       return renderDeskDataPatchFailure(options, actor, dataPatches, error);
@@ -711,7 +722,11 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const dataPatchRollbackQueue = requireDataPatchRollbackQueue(options);
     const actor = await options.actor(c.req.raw);
     try {
-      const result = await dataPatchRollbackQueue.enqueueRollback(actor, { patchIds: [c.req.param("id")] });
+      const delivery = await parseDeskDataPatchQueueDelivery(c.req.raw);
+      const result = await dataPatchRollbackQueue.enqueueRollback(actor, {
+        patchIds: [c.req.param("id")],
+        ...delivery
+      });
       return c.redirect(dataPatchQueuedLocation("data patch rollback", result.message), 303);
     } catch (error) {
       return renderDeskDataPatchFailure(options, actor, dataPatches, error);
@@ -2317,9 +2332,6 @@ type DataPatchQueueMessageSummary = {
 
 type DataPatchQueueLabel = "data patch" | "data patch rollback" | "data patch rollback retry";
 
-const DATA_PATCH_NOTICE_PARAM_LIMIT = 256;
-const DATA_PATCH_QUEUE_DELAY_SECONDS_LIMIT = 86_400;
-
 function dataPatchQueuedMessage(
   label: DataPatchQueueLabel,
   message: DataPatchQueueMessageSummary
@@ -2358,7 +2370,7 @@ function parseDataPatchQueueLabel(value: string | null): DataPatchQueueLabel | u
 
 function boundedDataPatchNoticeParam(value: string | null): string | undefined {
   const trimmed = value?.trim();
-  if (!trimmed || trimmed.length > DATA_PATCH_NOTICE_PARAM_LIMIT) {
+  if (!trimmed || trimmed.length > MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH) {
     return undefined;
   }
   return trimmed;
@@ -3007,6 +3019,7 @@ interface ParsedDeskDataPatchApply {
 }
 
 type ParsedDeskDataPatchQueue = DataPatchQueueOptions & DataPatchRollbackQueueOptions;
+type ParsedDeskDataPatchQueueDelivery = DataPatchRollbackRetryQueueOptions;
 
 interface ParsedDeskJobScheduleDefinition {
   readonly id?: string;
@@ -3029,8 +3042,17 @@ async function parseDeskJobScheduleDefinition(request: Request): Promise<ParsedD
     throw new FrameworkError("BAD_REQUEST", "jobName is required", { status: 400 });
   }
   const parsedDelay = delay === undefined ? undefined : Number(delay);
-  if (parsedDelay !== undefined && (!Number.isInteger(parsedDelay) || parsedDelay < 0)) {
-    throw new FrameworkError("BAD_REQUEST", "delaySeconds must be a non-negative integer", { status: 400 });
+  if (
+    parsedDelay !== undefined &&
+    (!Number.isInteger(parsedDelay) || parsedDelay < 0 || parsedDelay > MAX_JOB_QUEUE_DELAY_SECONDS)
+  ) {
+    throw new FrameworkError(
+      "BAD_REQUEST",
+      `delaySeconds must be an integer between 0 and ${MAX_JOB_QUEUE_DELAY_SECONDS}`,
+      {
+        status: 400
+      }
+    );
   }
   return {
     ...(id === undefined ? {} : { id }),
@@ -3049,28 +3071,43 @@ async function parseDeskDataPatchApply(request: Request): Promise<ParsedDeskData
 async function parseDeskDataPatchQueue(request: Request): Promise<ParsedDeskDataPatchQueue> {
   const form = await readUrlEncodedDeskForm(request);
   const apply = parseDeskDataPatchApplyForm(form);
+  const delivery = parseDeskDataPatchQueueDeliveryForm(form);
+  return {
+    ...apply,
+    ...delivery
+  };
+}
+
+async function parseDeskDataPatchQueueDelivery(request: Request): Promise<ParsedDeskDataPatchQueueDelivery> {
+  return parseDeskDataPatchQueueDeliveryForm(await readUrlEncodedDeskForm(request));
+}
+
+function parseDeskDataPatchQueueDeliveryForm(form: URLSearchParams): ParsedDeskDataPatchQueueDelivery {
   const idempotencyKey = stringSearchParamValue(form, "idempotencyKey");
   const delay = stringSearchParamValue(form, "delaySeconds");
   const delaySeconds = delay === undefined ? undefined : Number(delay);
   if (
     delaySeconds !== undefined &&
-    (!Number.isInteger(delaySeconds) || delaySeconds < 0 || delaySeconds > DATA_PATCH_QUEUE_DELAY_SECONDS_LIMIT)
+    (!Number.isInteger(delaySeconds) || delaySeconds < 0 || delaySeconds > MAX_JOB_QUEUE_DELAY_SECONDS)
   ) {
     throw new FrameworkError(
       "BAD_REQUEST",
-      `Data patch enqueue delaySeconds must be an integer between 0 and ${DATA_PATCH_QUEUE_DELAY_SECONDS_LIMIT}`,
+      `Data patch enqueue delaySeconds must be an integer between 0 and ${MAX_JOB_QUEUE_DELAY_SECONDS}`,
       {
         status: 400
       }
     );
   }
-  if (idempotencyKey !== undefined && idempotencyKey.length > DATA_PATCH_NOTICE_PARAM_LIMIT) {
-    throw new FrameworkError("BAD_REQUEST", "Data patch enqueue idempotencyKey must be at most 256 characters", {
-      status: 400
-    });
+  if (idempotencyKey !== undefined && idempotencyKey.length > MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH) {
+    throw new FrameworkError(
+      "BAD_REQUEST",
+      `Data patch enqueue idempotencyKey must be at most ${MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH} characters`,
+      {
+        status: 400
+      }
+    );
   }
   return {
-    ...apply,
     ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
     ...(delaySeconds === undefined ? {} : { delaySeconds })
   };

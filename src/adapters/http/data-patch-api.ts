@@ -9,6 +9,7 @@ import type {
   DataPatchRollbackRetryQueuePort
 } from "../../application/data-patch-jobs.js";
 import { badRequest } from "../../core/errors.js";
+import { MAX_JOB_QUEUE_DELAY_SECONDS, MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH } from "../../ports/job-queue.js";
 import type { ActorResolver } from "./actor.js";
 import { readJsonObject } from "./request.js";
 
@@ -248,10 +249,10 @@ function parseDelaySeconds(value: unknown): number | undefined {
     return undefined;
   }
   if (typeof value !== "number") {
-    throw badRequest("Data patch enqueue delaySeconds must be a non-negative integer");
+    throw badRequest(`Data patch enqueue delaySeconds must be an integer between 0 and ${MAX_JOB_QUEUE_DELAY_SECONDS}`);
   }
-  if (!Number.isInteger(value) || value < 0) {
-    throw badRequest("Data patch enqueue delaySeconds must be a non-negative integer");
+  if (!Number.isInteger(value) || value < 0 || value > MAX_JOB_QUEUE_DELAY_SECONDS) {
+    throw badRequest(`Data patch enqueue delaySeconds must be an integer between 0 and ${MAX_JOB_QUEUE_DELAY_SECONDS}`);
   }
   return value;
 }
@@ -263,5 +264,9 @@ function parseOptionalNonEmptyString(value: unknown, field: string): string | un
   if (typeof value !== "string" || value.trim().length === 0) {
     throw badRequest(`${field} must be a non-empty string`);
   }
-  return value;
+  const trimmed = value.trim();
+  if (trimmed.length > MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH) {
+    throw badRequest(`${field} must be at most ${MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH} characters`);
+  }
+  return trimmed;
 }

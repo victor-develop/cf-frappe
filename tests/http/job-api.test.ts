@@ -10,6 +10,7 @@ import {
   JobHistoryService,
   JobRetryService,
   JobScheduleService,
+  jobScheduleDefinitionsStream,
   SYSTEM_MANAGER_ROLE,
   unsafeHeaderActorResolver
 } from "../../src";
@@ -354,6 +355,38 @@ describe("job api", () => {
         }
       }
     });
+
+    const invalidDelay = await app.request("/api/jobs/schedules", {
+      method: "POST",
+      headers: { ...adminHeaders, "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "runtime-too-late",
+        cron: "15 4 * * *",
+        jobName: "reports.daily",
+        delaySeconds: 86_401
+      })
+    });
+    expect(invalidDelay.status).toBe(400);
+    await expect(invalidDelay.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "delaySeconds must be an integer between 0 and 86400" }
+    });
+    await expect(scheduleEvents.readStream(jobScheduleDefinitionsStream())).resolves.toHaveLength(1);
+
+    const invalidKey = await app.request("/api/jobs/schedules", {
+      method: "POST",
+      headers: { ...adminHeaders, "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "runtime-key-too-long",
+        cron: "15 4 * * *",
+        jobName: "reports.daily",
+        idempotencyKey: "x".repeat(257)
+      })
+    });
+    expect(invalidKey.status).toBe(400);
+    await expect(invalidKey.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Job schedule idempotencyKey must be at most 256 characters" }
+    });
+    await expect(scheduleEvents.readStream(jobScheduleDefinitionsStream())).resolves.toHaveLength(1);
 
     const list = await app.request("/api/jobs/schedules", { headers: adminHeaders });
     await expect(list.json()).resolves.toMatchObject({

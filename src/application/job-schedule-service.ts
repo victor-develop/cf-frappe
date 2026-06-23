@@ -13,7 +13,11 @@ import {
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
-import type { JobMessage } from "../ports/job-queue.js";
+import {
+  MAX_JOB_QUEUE_DELAY_SECONDS,
+  MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH,
+  type JobMessage
+} from "../ports/job-queue.js";
 
 export type DynamicJobScheduleValue = (...args: never[]) => unknown;
 
@@ -741,7 +745,9 @@ function normalizeRuntimeSchedule(
     enabled: command.enabled ?? true,
     ...(command.payload === undefined ? {} : { payload: normalizeDocumentData(command.payload, "payload") }),
     ...(command.metadata === undefined ? {} : { metadata: normalizeDocumentData(command.metadata, "metadata") }),
-    ...(command.idempotencyKey === undefined ? {} : { idempotencyKey: normalizeScheduleText(command.idempotencyKey, "idempotencyKey") }),
+    ...(command.idempotencyKey === undefined
+      ? {}
+      : { idempotencyKey: normalizeScheduleIdempotencyKey(command.idempotencyKey) }),
     ...(command.delaySeconds === undefined ? {} : { delaySeconds: normalizeDelaySeconds(command.delaySeconds) }),
     updatedAt: "",
     updatedBy: ""
@@ -782,9 +788,17 @@ function normalizeScheduleText(value: string, field: string): string {
   return normalized;
 }
 
+function normalizeScheduleIdempotencyKey(value: string): string {
+  const normalized = normalizeScheduleText(value, "idempotencyKey");
+  if (normalized.length > MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH) {
+    throw badRequest(`Job schedule idempotencyKey must be at most ${MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH} characters`);
+  }
+  return normalized;
+}
+
 function normalizeDelaySeconds(value: number): number {
-  if (!Number.isInteger(value) || value < 0) {
-    throw badRequest("delaySeconds must be a non-negative integer");
+  if (!Number.isInteger(value) || value < 0 || value > MAX_JOB_QUEUE_DELAY_SECONDS) {
+    throw badRequest(`delaySeconds must be an integer between 0 and ${MAX_JOB_QUEUE_DELAY_SECONDS}`);
   }
   return value;
 }

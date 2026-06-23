@@ -751,7 +751,17 @@ describe("data patch api", () => {
     });
     expect(invalidDelay.status).toBe(400);
     await expect(invalidDelay.json()).resolves.toMatchObject({
-      error: { code: "BAD_REQUEST", message: "Data patch enqueue delaySeconds must be a non-negative integer" }
+      error: { code: "BAD_REQUEST", message: "Data patch enqueue delaySeconds must be an integer between 0 and 86400" }
+    });
+
+    const tooLongDelay = await app.request("/api/data-patches/enqueue", {
+      method: "POST",
+      headers: { ...adminHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ delaySeconds: 86_401 })
+    });
+    expect(tooLongDelay.status).toBe(400);
+    await expect(tooLongDelay.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Data patch enqueue delaySeconds must be an integer between 0 and 86400" }
     });
 
     const invalidKey = await app.request("/api/data-patches/enqueue", {
@@ -762,6 +772,16 @@ describe("data patch api", () => {
     expect(invalidKey.status).toBe(400);
     await expect(invalidKey.json()).resolves.toMatchObject({
       error: { code: "BAD_REQUEST", message: "idempotencyKey must be a non-empty string" }
+    });
+
+    const tooLongKey = await app.request("/api/data-patches/enqueue", {
+      method: "POST",
+      headers: { ...adminHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ idempotencyKey: "x".repeat(257) })
+    });
+    expect(tooLongKey.status).toBe(400);
+    await expect(tooLongKey.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "idempotencyKey must be at most 256 characters" }
     });
   });
 

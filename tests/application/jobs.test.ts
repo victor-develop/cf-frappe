@@ -51,6 +51,54 @@ describe("JobDispatcher", () => {
     });
     expect(queue.queued()).toEqual([{ message, delaySeconds: 90 }]);
   });
+
+  it("rejects queue delays outside the Cloudflare delivery window", async () => {
+    const queue = new InMemoryJobQueue();
+    const dispatcher = new JobDispatcher({
+      registry: createJobRegistry({
+        jobs: [{ name: "email.digest", handler: () => undefined }]
+      }),
+      queue,
+      clock: fixedClock(now),
+      ids: deterministicIds(["001"])
+    });
+
+    await expect(
+      dispatcher.dispatch({
+        jobName: "email.digest",
+        payload: {},
+        delaySeconds: 86_401
+      })
+    ).rejects.toThrow("Job queue delaySeconds must be an integer between 0 and 86400");
+    await expect(dispatcher.dispatch({ jobName: "email.digest", payload: {} })).resolves.toMatchObject({
+      runId: "job_001"
+    });
+    expect(queue.queued()).toHaveLength(1);
+  });
+
+  it("rejects oversized queue idempotency keys before allocating ids", async () => {
+    const queue = new InMemoryJobQueue();
+    const dispatcher = new JobDispatcher({
+      registry: createJobRegistry({
+        jobs: [{ name: "email.digest", handler: () => undefined }]
+      }),
+      queue,
+      clock: fixedClock(now),
+      ids: deterministicIds(["001"])
+    });
+
+    await expect(
+      dispatcher.dispatch({
+        jobName: "email.digest",
+        payload: {},
+        idempotencyKey: "x".repeat(257)
+      })
+    ).rejects.toThrow("Job queue idempotencyKey must be at most 256 characters");
+    await expect(dispatcher.dispatch({ jobName: "email.digest", payload: {} })).resolves.toMatchObject({
+      runId: "job_001"
+    });
+    expect(queue.queued()).toHaveLength(1);
+  });
 });
 
 describe("JobExecutor", () => {
@@ -617,6 +665,58 @@ describe("JobScheduleService", () => {
       { type: "JobScheduleSaved", payload: { kind: "JobScheduleSaved", scheduleId: "runtime-daily" } },
       { type: "JobScheduleDeleted", payload: { kind: "JobScheduleDeleted", scheduleId: "runtime-daily" } }
     ]);
+  });
+
+  it("rejects runtime schedules with queue delays outside the delivery window before appending events", async () => {
+    const registry = createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] });
+    const events = new InMemoryEventStore();
+    const service = new JobScheduleService({
+      registry,
+      schedules: [],
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["save-runtime"])
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+
+    await expect(
+      service.save(admin, {
+        id: "runtime-daily",
+        cron: "15 4 * * *",
+        jobName: "reports.daily",
+        delaySeconds: 86_401
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "delaySeconds must be an integer between 0 and 86400"
+    });
+    await expect(events.readStream(jobScheduleDefinitionsStream())).resolves.toEqual([]);
+  });
+
+  it("rejects runtime schedules with oversized idempotency keys before appending events", async () => {
+    const registry = createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] });
+    const events = new InMemoryEventStore();
+    const service = new JobScheduleService({
+      registry,
+      schedules: [],
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["save-runtime"])
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+
+    await expect(
+      service.save(admin, {
+        id: "runtime-daily",
+        cron: "15 4 * * *",
+        jobName: "reports.daily",
+        idempotencyKey: "x".repeat(257)
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Job schedule idempotencyKey must be at most 256 characters"
+    });
+    await expect(events.readStream(jobScheduleDefinitionsStream())).resolves.toEqual([]);
   });
 
   it("keeps runtime schedule ids tenant-scoped in the global definition stream", async () => {
