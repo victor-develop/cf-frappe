@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the R2 multipart storage slice:
+As of the browser multipart upload orchestration slice:
 
 - Vitest files: `74`
-- Vitest cases: `790`
+- Vitest cases: `793`
 
 ## Implication
 

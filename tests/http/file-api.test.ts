@@ -646,7 +646,7 @@ describe("file api", () => {
       method: "PUT",
       headers: {
         ...userHeaders("owner@example.com", "User"),
-        "content-length": "4"
+        "x-cf-frappe-part-size": "4"
       },
       body: "tail"
     });

@@ -178,13 +178,13 @@ export function createFileApi(options: FileApiOptions): Hono {
 
   app.put("/api/files/:name/multipart-parts/:partNumber", async (c) => {
     const actor = await options.actor(c.req.raw);
-    const contentLength = contentLengthHeader(c.req.raw.headers);
+    const partSize = multipartPartSizeHeader(c.req.raw.headers);
     const uploaded = await options.files.uploadMultipartPart({
       actor,
       name: c.req.param("name"),
       partNumber: pathInteger(c.req.param("partNumber"), "partNumber"),
       body: c.req.raw.body ?? new Uint8Array(),
-      ...(contentLength === undefined ? {} : { size: contentLength }),
+      ...(partSize === undefined ? {} : { size: partSize }),
       metadata: requestMetadata(c.req.raw)
     });
     return c.json({ part: uploaded.part, data: uploaded.snapshot });
@@ -505,14 +505,14 @@ function pathInteger(value: string, label: string): number {
   return parsed;
 }
 
-function contentLengthHeader(headers: Headers): number | undefined {
-  const value = headers.get("content-length");
+function multipartPartSizeHeader(headers: Headers): number | undefined {
+  const value = headers.get("x-cf-frappe-part-size") ?? headers.get("content-length");
   if (value === null) {
     return undefined;
   }
   const size = Number(value);
   if (!Number.isInteger(size) || size < 0) {
-    throw badRequest("content-length must be a non-negative integer");
+    throw badRequest("multipart part size must be a non-negative integer");
   }
   return size;
 }

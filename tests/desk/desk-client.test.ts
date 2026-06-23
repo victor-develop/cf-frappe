@@ -1,4 +1,5 @@
 import { renderDeskClientScript } from "../../src/adapters/desk/client";
+import { MAX_MULTIPART_FILE_PARTS, MIN_MULTIPART_FILE_PART_BYTES } from "../../src";
 
 interface DeskClientRuntime {
   readonly context: (script?: { readonly dataset?: Record<string, string> }) => {
@@ -190,11 +191,18 @@ interface DeskClientRuntime {
       files: readonly DeskBulkFileSelection[],
       input?: Record<string, unknown>
     ) => Promise<unknown>;
+    readonly abortMultipartUpload: (name: string, options?: { readonly expectedVersion?: number }) => Promise<unknown>;
     readonly completeDirectUpload: (name: string, options?: { readonly expectedVersion?: number }) => Promise<unknown>;
+    readonly completeMultipartUpload: (
+      name: string,
+      parts: readonly { readonly partNumber: number; readonly etag: string }[],
+      options?: { readonly expectedVersion?: number }
+    ) => Promise<unknown>;
     readonly contentUrl: (name: string) => string;
     readonly delete: (name: string, options?: { readonly expectedVersion?: number }) => Promise<unknown>;
     readonly list: (options?: Record<string, unknown>) => Promise<unknown>;
     readonly prepareDirectUpload: (input: Record<string, unknown>) => Promise<unknown>;
+    readonly prepareMultipartUpload: (input: Record<string, unknown>) => Promise<unknown>;
     readonly previewUrl: (name: string) => string;
     readonly updateMetadata: (
       name: string,
@@ -202,6 +210,13 @@ interface DeskClientRuntime {
       options?: { readonly expectedVersion?: number }
     ) => Promise<unknown>;
     readonly upload: (body: Blob, options: Record<string, unknown>) => Promise<unknown>;
+    readonly uploadMultipart: (body: Blob, options: Record<string, unknown>) => Promise<unknown>;
+    readonly uploadMultipartPart: (
+      name: string,
+      partNumber: number,
+      body: Blob,
+      options?: { readonly size?: number }
+    ) => Promise<unknown>;
   };
   readonly resource: {
     readonly activity: (
@@ -615,6 +630,146 @@ describe("Desk client runtime", () => {
       })
     );
     expect(calls[2]?.init.body).toBe(JSON.stringify({ expectedVersion: 3 }));
+  });
+
+  it("orchestrates multipart file uploads with chunk progress", async () => {
+    const chunkSize = 5 * 1024 * 1024;
+    const calls: Array<{
+      readonly url: string;
+      readonly init: RequestInit;
+      readonly bodySize?: number;
+      readonly bodyText?: string;
+    }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      const bodyText = init?.body instanceof Blob ? undefined : init?.body?.toString();
+      const bodySize = init?.body instanceof Blob ? init.body.size : undefined;
+      calls.push({
+        url: String(url),
+        init: init ?? {},
+        ...(bodySize === undefined ? {} : { bodySize }),
+        ...(bodyText === undefined ? {} : { bodyText })
+      });
+      if (String(url) === "/api/files/multipart-upload") {
+        return jsonResponse({ data: { name: "file_multipart", version: 1 }, upload: { uploadId: "upload-1" } }, 201);
+      }
+      if (String(url).endsWith("/multipart-parts/1")) {
+        return jsonResponse({ part: { partNumber: 1, etag: "etag-1" }, data: { version: 2 } });
+      }
+      if (String(url).endsWith("/multipart-parts/2")) {
+        return jsonResponse({ part: { partNumber: 2, etag: "etag-2" }, data: { version: 3 } });
+      }
+      return jsonResponse({ data: { name: "file_multipart", version: 4, data: { storage_state: "available" } } });
+    });
+    const progress: unknown[] = [];
+
+    await expect(
+      runtime.files.uploadMultipart(new Blob([new Uint8Array(chunkSize), new Uint8Array([1])], { type: "text/plain" }), {
+        attachedTo: { doctype: "Task Type", name: "TASK/1" },
+        chunkSize,
+        filename: "large.txt",
+        isPrivate: false,
+        onProgress: (event: unknown) => progress.push(event)
+      })
+    ).resolves.toEqual({
+      data: { name: "file_multipart", version: 4, data: { storage_state: "available" } },
+      upload: { uploadId: "upload-1" },
+      parts: [
+        { partNumber: 1, etag: "etag-1" },
+        { partNumber: 2, etag: "etag-2" }
+      ]
+    });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "POST /api/files/multipart-upload",
+      "PUT /api/files/file_multipart/multipart-parts/1",
+      "PUT /api/files/file_multipart/multipart-parts/2",
+      "POST /api/files/file_multipart/complete-multipart-upload"
+    ]);
+    expect(calls.map((call) => call.bodyText)).toEqual([
+      JSON.stringify({
+        filename: "large.txt",
+        size: chunkSize + 1,
+        contentType: "text/plain",
+        attached_to_doctype: "Task Type",
+        attached_to_name: "TASK/1",
+        isPrivate: false
+      }),
+      undefined,
+      undefined,
+      JSON.stringify({
+        parts: [
+          { partNumber: 1, etag: "etag-1" },
+          { partNumber: 2, etag: "etag-2" }
+        ],
+        expectedVersion: 3
+      })
+    ]);
+    expect(calls.map((call) => call.bodySize)).toEqual([undefined, chunkSize, 1, undefined]);
+    expect((calls[1]?.init.headers as Headers).get("x-cf-frappe-part-size")).toBe(String(chunkSize));
+    expect((calls[2]?.init.headers as Headers).get("x-cf-frappe-part-size")).toBe("1");
+    expect(progress).toEqual([
+      expect.objectContaining({ partNumber: 1, totalParts: 2, uploadedBytes: chunkSize, totalBytes: chunkSize + 1 }),
+      expect.objectContaining({ partNumber: 2, totalParts: 2, uploadedBytes: chunkSize + 1, totalBytes: chunkSize + 1 })
+    ]);
+  });
+
+  it("aborts multipart file uploads when part upload fails before completion", async () => {
+    const chunkSize = 5 * 1024 * 1024;
+    const calls: Array<{ readonly url: string; readonly init: RequestInit; readonly bodyText?: string }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      const bodyText = init?.body instanceof Blob ? await init.body.text() : init?.body?.toString();
+      calls.push({ url: String(url), init: init ?? {}, ...(bodyText === undefined ? {} : { bodyText }) });
+      if (String(url) === "/api/files/multipart-upload") {
+        return jsonResponse({ data: { name: "file_multipart", version: 1 }, upload: { uploadId: "upload-1" } }, 201);
+      }
+      if (String(url).endsWith("/abort-multipart-upload")) {
+        return jsonResponse({ data: { name: "file_multipart", docstatus: "deleted", version: 2 } });
+      }
+      return jsonResponse({ error: { message: "part failed" } }, 500);
+    });
+
+    await expect(
+      runtime.files.uploadMultipart(new Blob([new Uint8Array(chunkSize), new Uint8Array([1])], { type: "text/plain" }), {
+        chunkSize,
+        filename: "large.txt"
+      })
+    ).rejects.toThrow("part failed");
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "POST /api/files/multipart-upload",
+      "PUT /api/files/file_multipart/multipart-parts/1",
+      "POST /api/files/file_multipart/abort-multipart-upload"
+    ]);
+    expect(calls[2]?.bodyText).toBe(JSON.stringify({ expectedVersion: 1 }));
+  });
+
+  it("rejects invalid multipart upload plans before reserving metadata", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return jsonResponse({ data: { name: "should-not-exist" } });
+    });
+
+    await expect(
+      runtime.files.uploadMultipart(new Blob([new Uint8Array(MIN_MULTIPART_FILE_PART_BYTES), new Uint8Array([1])]), {
+        chunkSize: MIN_MULTIPART_FILE_PART_BYTES - 1,
+        filename: "too-small.bin"
+      })
+    ).rejects.toThrow(
+      `chunkSize must be at least ${String(MIN_MULTIPART_FILE_PART_BYTES)} bytes for multi-part R2 uploads`
+    );
+    await expect(
+      runtime.files.uploadMultipart(
+        {
+          name: "too-many.bin",
+          size: MIN_MULTIPART_FILE_PART_BYTES * MAX_MULTIPART_FILE_PARTS + 1,
+          type: "application/octet-stream",
+          slice: () => new Blob()
+        } as unknown as Blob,
+        { chunkSize: MIN_MULTIPART_FILE_PART_BYTES }
+      )
+    ).rejects.toThrow(`Multipart upload cannot exceed ${String(MAX_MULTIPART_FILE_PARTS)} parts`);
+    expect(calls).toEqual([]);
   });
 
   it("wraps same-origin auth APIs with encoded JSON requests", async () => {
@@ -1719,6 +1874,13 @@ function evaluateDeskClient(
     throw new Error("Desk client runtime was not installed");
   }
   return fakeWindow.cfFrappe;
+}
+
+function jsonResponse(payload: unknown, status = 200): Response {
+  return new Response(JSON.stringify(payload), {
+    headers: { "content-type": "application/json" },
+    status
+  });
 }
 
 async function flushPromises(): Promise<void> {

@@ -1,4 +1,5 @@
 import { CHILD_TABLE_ROW_INDEX_FIELD } from "../../core/types.js";
+import { MAX_MULTIPART_FILE_PARTS, MIN_MULTIPART_FILE_PART_BYTES } from "../../ports/file-storage.js";
 
 export const DESK_CLIENT_SCRIPT_PATH = "/desk/client.js";
 
@@ -291,6 +292,164 @@ export function renderDeskClientScript(): string {
       headers["content-type"] = contentType;
     }
     return headers;
+  }
+
+  var minMultipartChunkBytes = ${JSON.stringify(MIN_MULTIPART_FILE_PART_BYTES)};
+  var maxMultipartFileParts = ${JSON.stringify(MAX_MULTIPART_FILE_PARTS)};
+  var defaultMultipartChunkBytes = minMultipartChunkBytes;
+
+  function fileBodySize(body) {
+    if (body && typeof body.size === "number" && Number.isFinite(body.size)) {
+      return body.size;
+    }
+    throw new Error("Multipart file body must expose a numeric size");
+  }
+
+  function multipartFilename(body, options) {
+    var filename = options && options.filename;
+    if (filename !== undefined && filename !== null && String(filename) !== "") {
+      return filename;
+    }
+    if (body && typeof body.name === "string" && body.name !== "") {
+      return body.name;
+    }
+    throw new Error("filename is required for multipart uploads");
+  }
+
+  function multipartContentType(body, options) {
+    var contentType = options && (options.contentType !== undefined ? options.contentType : options.content_type);
+    if (contentType !== undefined && contentType !== null && String(contentType) !== "") {
+      return contentType;
+    }
+    return body && typeof body.type === "string" && body.type !== "" ? body.type : "application/octet-stream";
+  }
+
+  function multipartChunkSize(options) {
+    var chunkSize = options && options.chunkSize !== undefined ? Number(options.chunkSize) : defaultMultipartChunkBytes;
+    if (!Number.isInteger(chunkSize) || chunkSize < 1) {
+      throw new Error("chunkSize must be a positive integer");
+    }
+    return chunkSize;
+  }
+
+  function assertMultipartUploadPlan(size, chunkSize) {
+    var totalParts = Math.max(1, Math.ceil(size / chunkSize));
+    if (totalParts > 1 && chunkSize < minMultipartChunkBytes) {
+      throw new Error("chunkSize must be at least " + String(minMultipartChunkBytes) + " bytes for multi-part R2 uploads");
+    }
+    if (totalParts > maxMultipartFileParts) {
+      throw new Error("Multipart upload cannot exceed " + String(maxMultipartFileParts) + " parts");
+    }
+    return totalParts;
+  }
+
+  function multipartReservationBody(body, options) {
+    var input = {
+      filename: multipartFilename(body, options || {}),
+      size: fileBodySize(body),
+      contentType: multipartContentType(body, options || {})
+    };
+    fileAttachmentParams(input, options || {});
+    if (options && (options.isPrivate !== undefined || options.is_private !== undefined)) {
+      input.isPrivate = options.isPrivate !== undefined ? options.isPrivate : options.is_private;
+    }
+    if (options && options.expiresInSeconds !== undefined) {
+      input.expiresInSeconds = options.expiresInSeconds;
+    }
+    return input;
+  }
+
+  function multipartPartBody(body, start, end) {
+    if (body && typeof body.slice === "function") {
+      return body.slice(start, end);
+    }
+    throw new Error("Multipart file body must support slice(start, end)");
+  }
+
+  function snapshotVersion(payload, fallback) {
+    return payload && payload.data && payload.data.version !== undefined ? payload.data.version : fallback;
+  }
+
+  function multipartProgress(callback, event) {
+    if (typeof callback === "function") {
+      callback(event);
+    }
+  }
+
+  function prepareMultipartUpload(input) {
+    return request("/api/files/multipart-upload", { method: "POST", body: input || {} });
+  }
+
+  function uploadMultipartPart(name, partNumber, body, options) {
+    var headers = {};
+    if (options && options.size !== undefined) {
+      headers["x-cf-frappe-part-size"] = String(options.size);
+    }
+    return request(filePath(name, "multipart-parts/" + encodePart(partNumber)), {
+      method: "PUT",
+      body: body,
+      headers: headers
+    });
+  }
+
+  function completeMultipartUpload(name, parts, options) {
+    return request(filePath(name, "complete-multipart-upload"), {
+      method: "POST",
+      body: Object.assign({ parts: parts }, versionBody(options))
+    }).then(unwrapData);
+  }
+
+  function abortMultipartUpload(name, options) {
+    return request(filePath(name, "abort-multipart-upload"), {
+      method: "POST",
+      body: versionBody(options)
+    }).then(unwrapData);
+  }
+
+  async function uploadMultipartFile(body, options) {
+    var input = multipartReservationBody(body, options || {});
+    var chunkSize = multipartChunkSize(options || {});
+    var size = input.size;
+    var totalParts = assertMultipartUploadPlan(size, chunkSize);
+    var prepared = await prepareMultipartUpload(input);
+    var fileName = prepared && prepared.data && prepared.data.name;
+    if (!fileName) {
+      throw new Error("Multipart upload reservation did not return a file name");
+    }
+    var expectedVersion = snapshotVersion(prepared, undefined);
+    var parts = [];
+    var uploadedBytes = 0;
+    var canAbort = true;
+    try {
+      for (var partNumber = 1, start = 0; partNumber <= totalParts; partNumber += 1, start += chunkSize) {
+        var end = Math.min(start + chunkSize, size);
+        var chunk = multipartPartBody(body, start, end);
+        var uploaded = await uploadMultipartPart(fileName, partNumber, chunk, { size: end - start });
+        parts.push(uploaded.part);
+        expectedVersion = snapshotVersion(uploaded, expectedVersion);
+        uploadedBytes += end - start;
+        multipartProgress(options && options.onProgress, {
+          file: prepared.data,
+          part: uploaded.part,
+          partNumber: partNumber,
+          totalParts: totalParts,
+          uploadedBytes: uploadedBytes,
+          totalBytes: size
+        });
+      }
+      canAbort = false;
+      var completed = await completeMultipartUpload(fileName, parts, { expectedVersion: expectedVersion });
+      return {
+        data: completed,
+        upload: prepared.upload,
+        parts: parts
+      };
+    } catch (error) {
+      if (canAbort && (!options || options.abortOnError !== false)) {
+        await abortMultipartUpload(fileName, { expectedVersion: expectedVersion }).catch(function () {});
+      }
+      throw error;
+    }
   }
 
   function auditEventParams(options) {
@@ -1169,9 +1328,11 @@ export function renderDeskClientScript(): string {
       bulkUpdateMetadata: function (files, input) {
         return request("/api/files/bulk-metadata", { method: "POST", body: bulkFilesBody(files, input) }).then(unwrapData);
       },
+      abortMultipartUpload: abortMultipartUpload,
       completeDirectUpload: function (name, options) {
         return request(filePath(name, "complete-upload"), { method: "POST", body: versionBody(options) }).then(unwrapData);
       },
+      completeMultipartUpload: completeMultipartUpload,
       contentUrl: function (name) {
         return filePath(name, "content");
       },
@@ -1184,6 +1345,7 @@ export function renderDeskClientScript(): string {
       prepareDirectUpload: function (input) {
         return request("/api/files/direct-upload", { method: "POST", body: input || {} });
       },
+      prepareMultipartUpload: prepareMultipartUpload,
       previewUrl: function (name) {
         return filePath(name, "preview");
       },
@@ -1196,7 +1358,9 @@ export function renderDeskClientScript(): string {
           body: body,
           headers: fileUploadHeaders(options || {})
         });
-      }
+      },
+      uploadMultipart: uploadMultipartFile,
+      uploadMultipartPart: uploadMultipartPart
     }),
     meta: Object.freeze({
       doctype: function (doctype) {
