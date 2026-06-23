@@ -256,7 +256,6 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     namespace: env.AGGREGATES
   });
   const audit = new AuditService({ events });
-  const savedFilters = new SavedListFilterService({ registry: options.registry, events });
   const userPermissions = new UserPermissionService({
     events,
     validator: new ModelBackedUserPermissionGrantValidator({ registry: options.registry, events })
@@ -265,6 +264,11 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     registry: options.registry,
     events,
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
+  });
+  const savedFilters = new SavedListFilterService({
+    registry: options.registry,
+    events,
+    doctypeResolver: (base, { tenantId }) => customFields.effectiveDocType(base.name, tenantId)
   });
   const documentShares = new DocumentShareService({ events });
   const roleValidator = options.auth?.validateRolesWithCatalog
@@ -297,7 +301,13 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
         ...(options.auth.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
       })
     : undefined;
-  const restrictedQueries = new QueryService({ registry: options.registry, projections, userPermissions, documentShares });
+  const restrictedQueries = new QueryService({
+    registry: options.registry,
+    projections,
+    doctypeResolver: (base, { tenantId }) => customFields.effectiveDocType(base.name, tenantId),
+    userPermissions,
+    documentShares
+  });
   const restrictedHistory = new DocumentHistoryService({ events, queries: restrictedQueries });
   const prints = new PrintService({ registry: options.registry, queries: restrictedQueries });
   const reports = new ReportService({ registry: options.registry, queries: restrictedQueries });

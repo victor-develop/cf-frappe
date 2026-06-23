@@ -1,8 +1,11 @@
 import {
   CHILD_TABLE_ROW_INDEX_FIELD,
+  DocumentShareService,
   DocumentService,
   FrameworkError,
   InMemoryDocumentStore,
+  ModelBackedUserPermissionGrantValidator,
+  UserPermissionService,
   createRegistry,
   defineDocType,
   deterministicIds,
@@ -10,6 +13,7 @@ import {
   fixedClock,
   namingSeriesStream
 } from "../../src";
+import type { DocTypeDefinition } from "../../src";
 import {
   createChildTableServices,
   createLinkedServices,
@@ -19,7 +23,9 @@ import {
   guest,
   manager,
   now,
-  owner
+  noteDocType,
+  owner,
+  projectDocType
 } from "../helpers";
 
 describe("DocumentService", () => {
@@ -49,6 +55,126 @@ describe("DocumentService", () => {
     });
     await expect(projections.get("acme", "Note", "My Note")).resolves.toEqual(created);
     await expect(events.currentVersion("acme:Note:My%20Note")).resolves.toBe(1);
+  });
+
+  it("can resolve tenant-extended DocTypes for document command validation", async () => {
+    const { registry, store } = createServices(["base"]);
+    const documents = new DocumentService({
+      registry,
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["create-1", "update-1"]),
+      doctypeResolver: (base, { tenantId }) =>
+        tenantId === "acme"
+          ? defineDocType({
+              ...base,
+              fields: [
+                ...base.fields,
+                { name: "reviewed", type: "boolean", defaultValue: false },
+                { name: "approval", type: "select", options: ["Pending", "Approved"], inListView: true }
+              ]
+            })
+          : base
+    });
+
+    const created = await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: { title: "Custom Runtime", approval: "Pending" }
+    });
+
+    expect(created).toMatchObject({
+      data: {
+        title: "Custom Runtime",
+        approval: "Pending",
+        reviewed: false
+      }
+    });
+    await expect(
+      documents.update({
+        actor: owner,
+        doctype: "Note",
+        name: "Custom Runtime",
+        patch: { reviewed: true, approval: "Approved" },
+        expectedVersion: 1
+      })
+    ).resolves.toMatchObject({
+      version: 2,
+      data: { reviewed: true, approval: "Approved" }
+    });
+    await expect(
+      documents.update({
+        actor: owner,
+        doctype: "Note",
+        name: "Custom Runtime",
+        patch: { approval: "Rejected" },
+        expectedVersion: 2
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "approval", code: "option" })]
+    });
+  });
+
+  it("uses tenant-extended DocTypes for non-update command user-permission checks", async () => {
+    const registry = createRegistry({ doctypes: [projectDocType, noteDocType] });
+    const store = new InMemoryDocumentStore();
+    const documentShares = new DocumentShareService({ events: store });
+    const userPermissions = new UserPermissionService({
+      events: store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["grant-1", "grant-2"]),
+      validator: new ModelBackedUserPermissionGrantValidator({ registry, events: store })
+    });
+    const doctypeResolver = (base: DocTypeDefinition, { tenantId }: { readonly tenantId: string }) =>
+      tenantId === "acme" && base.name === "Note"
+        ? defineDocType({
+            ...base,
+            fields: [
+              ...base.fields,
+              { name: "project", type: "link", linkTo: "Project", required: true }
+            ]
+          })
+        : base;
+    const documents = new DocumentService({
+      registry,
+      store,
+      documentShares,
+      userPermissions,
+      clock: fixedClock(now),
+      ids: deterministicIds(["project-1", "project-2", "note-1"]),
+      doctypeResolver
+    });
+    const admin = { id: "admin@example.com", roles: ["System Manager"], tenantId: "acme" };
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Apollo" } });
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Zeus" } });
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: { title: "Secret", body: "Body", project: "Zeus" }
+    });
+    await userPermissions.allow({
+      actor: admin,
+      userId: owner.id,
+      targetDoctype: "Project",
+      targetName: "Apollo"
+    });
+
+    await expect(
+      documents.comment({
+        actor: owner,
+        doctype: "Note",
+        name: "Secret",
+        text: "Should not pass"
+      })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+    await expect(
+      documents.submit({
+        actor: owner,
+        doctype: "Note",
+        name: "Secret"
+      })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
   });
 
   it("uses the event stream, not stale projection state, as the write authority", async () => {

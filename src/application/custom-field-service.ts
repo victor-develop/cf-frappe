@@ -71,8 +71,12 @@ export class CustomFieldService {
   async effectiveDocType(doctypeName: string, tenantId: TenantId = DEFAULT_TENANT_ID) {
     const doctype = this.registry.get(doctypeName);
     const state = await this.stateFor(tenantId, doctype.name);
+    if (state.fields.some((entry) => entry.enabled)) {
+      this.assertCustomFieldsSupportedOn(doctype);
+    }
     for (const entry of state.fields) {
       if (entry.enabled) {
+        this.assertCustomFieldRuntimeSupported(entry.field);
         this.assertReferencesResolve(entry.field);
       }
     }
@@ -84,6 +88,8 @@ export class CustomFieldService {
     const doctype = this.registry.get(command.doctype);
     const tenantId = resolveActorTenant(command.actor, command.tenantId);
     const field = normalizeField(command.field);
+    this.assertCustomFieldRuntimeSupported(field);
+    this.assertCustomFieldsSupportedOn(doctype);
     assertCustomFieldCanExtend(doctype, field);
     this.assertReferencesResolve(field);
     const state = await this.stateFor(tenantId, doctype.name);
@@ -153,6 +159,33 @@ export class CustomFieldService {
     if (field.type === "table" && field.tableOf !== undefined && !this.registry.has(field.tableOf)) {
       throw badRequest(`Custom field '${field.name}' targets unknown child DocType '${field.tableOf}'`);
     }
+  }
+
+  private assertCustomFieldRuntimeSupported(field: FieldDefinition): void {
+    if (field.type !== "table") {
+      return;
+    }
+    throw new FrameworkError(
+      "CUSTOM_FIELD_INVALID",
+      `Custom field '${field.name}' cannot be a table field until recursive table overlays are supported`,
+      { status: 400 }
+    );
+  }
+
+  private assertCustomFieldsSupportedOn(doctype: { readonly name: string }): void {
+    const parent = this.registry
+      .list()
+      .find((candidate) =>
+        candidate.fields.some((field) => field.type === "table" && field.tableOf === doctype.name)
+      );
+    if (!parent) {
+      return;
+    }
+    throw new FrameworkError(
+      "CUSTOM_FIELD_INVALID",
+      `Custom fields on child table DocType '${doctype.name}' are not supported yet`,
+      { status: 400 }
+    );
   }
 
   authorizeAdministration(actor: Actor, tenantId?: TenantId): void {

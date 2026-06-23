@@ -145,17 +145,17 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
 
   app.get("/api/meta/doctypes", async (c) => {
     const actor = await resolveActor(c.req.raw);
-    return c.json({ data: options.queries.listDoctypes(actor) });
+    return c.json({ data: await options.queries.listEffectiveDoctypes(actor) });
   });
 
   app.get("/api/meta/doctypes/:doctype", async (c) => {
     const actor = await resolveActor(c.req.raw);
-    return c.json({ data: options.queries.getMeta(actor, c.req.param("doctype")) });
+    return c.json({ data: await options.queries.getEffectiveMeta(actor, c.req.param("doctype")) });
   });
 
   app.get("/api/meta/doctypes/:doctype/list-view", async (c) => {
     const actor = await resolveActor(c.req.raw);
-    return c.json({ data: options.queries.getListView(actor, c.req.param("doctype")) });
+    return c.json({ data: await options.queries.getEffectiveListView(actor, c.req.param("doctype")) });
   });
 
   app.get("/api/meta/workspaces", async (c) => {

@@ -203,6 +203,103 @@ describe("CustomFieldService", () => {
     ).resolves.toMatchObject({ fields: [{ field: { name: "project", linkTo: "Project" } }] });
   });
 
+  it("rejects child table DocType custom fields until runtime table overlays are supported", async () => {
+    const InvoiceItem = defineDocType({
+      name: "Invoice Item",
+      fields: [{ name: "description", type: "text" }]
+    });
+    const Invoice = defineDocType({
+      name: "Invoice",
+      fields: [{ name: "items", type: "table", tableOf: "Invoice Item" }]
+    });
+    const service = new CustomFieldService({
+      registry: createRegistry({ doctypes: [Invoice, InvoiceItem] }),
+      events: new InMemoryEventStore(),
+      ids: deterministicIds(["field-1"]),
+      clock: fixedClock(now)
+    });
+
+    await expect(
+      service.saveField({
+        actor: admin,
+        doctype: "Invoice Item",
+        field: { name: "reviewed", type: "boolean" }
+      })
+    ).rejects.toMatchObject({
+      code: "CUSTOM_FIELD_INVALID",
+      message: "Custom fields on child table DocType 'Invoice Item' are not supported yet"
+    });
+  });
+
+  it("rejects replayed child table DocType custom fields when composing effective metadata", async () => {
+    const InvoiceItem = defineDocType({
+      name: "Invoice Item",
+      fields: [{ name: "description", type: "text" }]
+    });
+    const Invoice = defineDocType({
+      name: "Invoice",
+      fields: [{ name: "items", type: "table", tableOf: "Invoice Item" }]
+    });
+    const events = new InMemoryEventStore();
+    const stream = customFieldsStream("acme", "Invoice Item");
+    await events.append(stream, 0, [
+      {
+        id: "evt_legacy-field",
+        tenantId: "acme",
+        stream,
+        type: "CustomFieldSaved",
+        doctype: "__CustomFields",
+        documentName: "reviewed",
+        actorId: admin.id,
+        occurredAt: now,
+        payload: {
+          kind: "CustomFieldSaved",
+          doctypeName: "Invoice Item",
+          field: { name: "reviewed", type: "boolean" }
+        },
+        metadata: {}
+      }
+    ]);
+    const service = new CustomFieldService({
+      registry: createRegistry({ doctypes: [Invoice, InvoiceItem] }),
+      events,
+      clock: fixedClock(now)
+    });
+
+    await expect(service.effectiveDocType("Invoice Item", "acme")).rejects.toMatchObject({
+      code: "CUSTOM_FIELD_INVALID",
+      message: "Custom fields on child table DocType 'Invoice Item' are not supported yet"
+    });
+  });
+
+  it("rejects table custom fields until recursive table overlays are supported", async () => {
+    const InvoiceItem = defineDocType({
+      name: "Invoice Item",
+      fields: [{ name: "description", type: "text" }]
+    });
+    const Invoice = defineDocType({
+      name: "Invoice",
+      fields: [{ name: "total", type: "number" }]
+    });
+    const service = new CustomFieldService({
+      registry: createRegistry({ doctypes: [Invoice, InvoiceItem] }),
+      events: new InMemoryEventStore(),
+      ids: deterministicIds(["field-1"]),
+      clock: fixedClock(now)
+    });
+
+    await expect(
+      service.saveField({
+        actor: admin,
+        doctype: "Invoice",
+        field: { name: "extra_items", type: "table", tableOf: "Invoice Item" }
+      })
+    ).rejects.toMatchObject({
+      code: "CUSTOM_FIELD_INVALID",
+      message: "Custom field 'extra_items' cannot be a table field until recursive table overlays are supported"
+    });
+  });
+
   it("keeps custom field metadata events searchable through the audit boundary", async () => {
     const events = new InMemoryEventStore();
     const service = new CustomFieldService({

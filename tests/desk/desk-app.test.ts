@@ -27,6 +27,7 @@ import {
   QueryService,
   ReportService,
   RoleService,
+  SavedListFilterService,
   SYSTEM_MANAGER_ROLE,
   UserAccountService,
   UserNotificationService,
@@ -127,28 +128,53 @@ describe("Desk app", () => {
   }
 
   function makeCustomFieldDesk(actor = owner) {
-    const services = createServices(["e1", "e2", "e3", "e4"]);
+    const services = createServices(["base-1", "base-2"]);
     const customFields = new CustomFieldService({
       registry: services.registry,
       events: services.store,
       ids: deterministicIds(["custom-field-1", "custom-field-2", "custom-field-3"]),
       clock: fixedClock(now)
     });
+    const doctypeResolver = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
+      customFields.effectiveDocType(base.name, context.tenantId);
+    const documents = new DocumentService({
+      registry: services.registry,
+      store: services.store,
+      doctypeResolver,
+      documentShares: services.documentShares,
+      userPermissions: services.userPermissions,
+      ids: deterministicIds(["custom-doc-1", "custom-doc-2"]),
+      clock: fixedClock(now)
+    });
+    const queries = new QueryService({
+      registry: services.registry,
+      projections: services.store,
+      doctypeResolver,
+      documentShares: services.documentShares,
+      userPermissions: services.userPermissions
+    });
+    const savedFilters = new SavedListFilterService({
+      registry: services.registry,
+      events: services.store,
+      doctypeResolver,
+      ids: deterministicIds(["custom-saved-filter-1", "custom-saved-filter-event-1"]),
+      clock: fixedClock(now)
+    });
     const app = createDeskApp({
       registry: services.registry,
-      documents: services.documents,
+      documents,
       prints: services.prints,
-      queries: services.queries,
+      queries,
       documentShares: services.documentShares,
       reports: services.reports,
       timeline: services.history,
-      savedFilters: services.savedFilters,
+      savedFilters,
       savedReports: services.savedReports,
       customFields,
       userPermissions: services.userPermissions,
       actor: () => actor
     });
-    return { app, services: { ...services, customFields } };
+    return { app, services: { ...services, documents, queries, savedFilters, customFields } };
   }
 
   function makeLinkedDesk() {
@@ -1591,6 +1617,73 @@ describe("Desk app", () => {
       version: 2,
       fields: [{ field: { name: "reviewed" }, enabled: false }]
     });
+  });
+
+  it("applies custom fields to generated Desk forms and lists", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"] };
+    const { app, services } = makeCustomFieldDesk(admin);
+    await services.customFields.saveField({
+      actor: admin,
+      doctype: "Note",
+      field: {
+        name: "reviewed",
+        label: "Reviewed",
+        type: "boolean",
+        inFormView: true,
+        inListView: true,
+        inListFilter: true,
+        defaultValue: false
+      }
+    });
+
+    const form = await app.request("/desk/Note/new");
+    expect(form.status).toBe(200);
+    const formHtml = await form.text();
+    expect(formHtml).toContain("Reviewed");
+    expect(formHtml).toContain('name="reviewed"');
+
+    const created = await app.request("/desk/Note", {
+      method: "POST",
+      body: new URLSearchParams({
+        title: "Runtime Desk",
+        body: "Body",
+        reviewed: "on"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(created.status).toBe(303);
+    expect(created.headers.get("location")).toBe("/desk/Note/Runtime%20Desk");
+    await expect(services.queries.getDocument(admin, "Note", "Runtime Desk")).resolves.toMatchObject({
+      data: { reviewed: true }
+    });
+
+    const list = await app.request("/desk/Note?filter_reviewed=true");
+    expect(list.status).toBe(200);
+    const listHtml = await list.text();
+    expect(listHtml).toContain("Reviewed");
+    expect(listHtml).toContain("Runtime Desk");
+    expect(listHtml).toContain("filter_reviewed");
+
+    const saved = await app.request("/desk/Note/saved-filters", {
+      method: "POST",
+      body: new URLSearchParams({
+        saved_filter_label: "Reviewed notes",
+        filter_reviewed: "true"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(saved.status).toBe(303);
+    const savedLocation = saved.headers.get("location") ?? "";
+    expect(savedLocation).toContain("/desk/Note?saved_filter=");
+    await expect(services.savedFilters.list(admin, "Note")).resolves.toMatchObject([
+      { label: "Reviewed notes", filters: [{ field: "reviewed", value: true }] }
+    ]);
+
+    const savedList = await app.request(savedLocation);
+    expect(savedList.status).toBe(200);
+    const savedListHtml = await savedList.text();
+    expect(savedListHtml).toContain("Reviewed notes");
+    expect(savedListHtml).toContain("Runtime Desk");
   });
 
   it("requires custom-field administrators before rendering an empty Desk admin surface", async () => {

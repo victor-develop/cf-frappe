@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { CustomFieldService } from "../application/custom-field-service.js";
 import { DocumentShareService } from "../application/document-share-service.js";
 import { DocumentService, bulkDocumentFailure } from "../application/document-service.js";
 import type { BulkDocumentCommandFailure } from "../application/document-service.js";
@@ -96,7 +97,11 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
         : new UserNotificationService({
             events,
             ...(options.clock ? { clock: options.clock } : {})
-          });
+      });
+      const customFields = new CustomFieldService({
+        registry: options.registry,
+        events
+      });
       const deliveryHooks = createDocumentDeliveryHooks({
         ...(options.realtime ? { realtime: options.realtime(env) } : {}),
         ...(notifications ? { notifications } : {})
@@ -104,6 +109,7 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
       this.service = new DocumentService({
         registry: options.registry,
         store: new D1DocumentStore(env.DB),
+        doctypeResolver: (base, { tenantId }) => customFields.effectiveDocType(base.name, tenantId),
         documentShares: new DocumentShareService({ events }),
         userPermissions: new UserPermissionService({
           events,

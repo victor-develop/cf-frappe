@@ -63,6 +63,49 @@ describe("custom fields", () => {
     ).toThrow(FrameworkError);
   });
 
+  it("extends configured form and list views with view-enabled custom fields", () => {
+    const configured = defineDocType({
+      name: "Note",
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "body", type: "longText" }
+      ],
+      formView: {
+        sections: [{ heading: "Details", fields: ["title"], columns: 1 }]
+      },
+      listView: {
+        columns: ["title"],
+        filterFields: ["title"],
+        pageSize: 25
+      }
+    });
+    const state = foldCustomFields("acme", "Note", [
+      customFieldEvent(1, "CustomFieldSaved", {
+        kind: "CustomFieldSaved",
+        doctypeName: "Note",
+        field: {
+          name: "reviewed",
+          label: "Reviewed",
+          type: "boolean",
+          inFormView: true,
+          inListView: true,
+          inListFilter: true
+        }
+      })
+    ]);
+
+    const effective = applyCustomFieldsToDocType(configured, state);
+
+    expect(effective.formView?.sections).toEqual([
+      { heading: "Details", fields: ["title", "reviewed"], columns: 1 }
+    ]);
+    expect(effective.listView).toMatchObject({
+      columns: ["title", "reviewed"],
+      filterFields: ["title", "reviewed"],
+      pageSize: 25
+    });
+  });
+
   it("rejects custom fields that collide with base fields during composition", () => {
     const state = foldCustomFields("acme", "Note", [
       customFieldEvent(1, "CustomFieldSaved", {

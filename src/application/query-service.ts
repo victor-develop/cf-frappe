@@ -28,19 +28,27 @@ import type { ProjectionStore } from "../ports/projection-store.js";
 export interface QueryServiceOptions {
   readonly registry: ModelRegistry;
   readonly projections: ProjectionStore;
+  readonly doctypeResolver?: QueryServiceDocTypeResolver;
   readonly userPermissions?: UserPermissionProvider;
   readonly documentShares?: DocumentShareProvider;
 }
 
+export type QueryServiceDocTypeResolver = (
+  base: DocTypeDefinition,
+  context: { readonly actor: Actor; readonly tenantId: string }
+) => DocTypeDefinition | Promise<DocTypeDefinition>;
+
 export class QueryService {
   private readonly registry: ModelRegistry;
   private readonly projections: ProjectionStore;
+  private readonly doctypeResolver: QueryServiceDocTypeResolver | undefined;
   private readonly userPermissions: UserPermissionProvider | undefined;
   private readonly documentShares: DocumentShareProvider | undefined;
 
   constructor(options: QueryServiceOptions) {
     this.registry = options.registry;
     this.projections = options.projections;
+    this.doctypeResolver = options.doctypeResolver;
     this.userPermissions = options.userPermissions;
     this.documentShares = options.documentShares;
   }
@@ -63,7 +71,7 @@ export class QueryService {
     name: string,
     tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
   ): Promise<DocumentSnapshot> {
-    const doctype = this.registry.get(doctypeName);
+    const doctype = await this.doctypeFor(actor, doctypeName, tenantId);
     const document = await this.projections.get(tenantId, doctype.name, name);
     if (!document || document.docstatus === "deleted") {
       throw notFound(`${doctype.name}/${name} was not found`);
@@ -84,14 +92,15 @@ export class QueryService {
       readonly offset?: number;
     } = {}
   ): Promise<ListDocumentsResult> {
-    const doctype = this.registry.get(doctypeName);
+    const tenantId = options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
+    const doctype = await this.doctypeFor(actor, doctypeName, tenantId);
     if (!can(actor, doctype, "read")) {
       throw permissionDenied(`Actor '${actor.id}' cannot read ${doctype.name}`);
     }
     const limit = clampLimit(options.limit);
     const offset = Math.max(0, options.offset ?? 0);
     const result = await this.projections.list({
-      tenantId: options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID,
+      tenantId,
       doctype: doctype.name,
       filters: normalizeListFilters(doctype, options.filters ?? []),
       limit,
@@ -112,6 +121,37 @@ export class QueryService {
     return resolveFormView(this.getMeta(actor, doctypeName));
   }
 
+  async listEffectiveDoctypes(
+    actor: Actor,
+    tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
+  ): Promise<readonly DocTypeDefinition[]> {
+    return Promise.all(this.listDoctypes(actor).map((doctype) => this.resolveDocType(doctype, actor, tenantId)));
+  }
+
+  async getEffectiveMeta(
+    actor: Actor,
+    doctypeName: string,
+    tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
+  ): Promise<DocTypeDefinition> {
+    return this.resolveDocType(this.getMeta(actor, doctypeName), actor, tenantId);
+  }
+
+  async getEffectiveListView(
+    actor: Actor,
+    doctypeName: string,
+    tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
+  ): Promise<ResolvedListView> {
+    return resolveListView(await this.getEffectiveMeta(actor, doctypeName, tenantId));
+  }
+
+  async getEffectiveFormView(
+    actor: Actor,
+    doctypeName: string,
+    tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
+  ): Promise<ResolvedFormView> {
+    return resolveFormView(await this.getEffectiveMeta(actor, doctypeName, tenantId));
+  }
+
   async listLinkOptions(
     actor: Actor,
     doctypeName: string,
@@ -122,7 +162,8 @@ export class QueryService {
       readonly limit?: number;
     } = {}
   ): Promise<LinkOptionsResult> {
-    const doctype = this.getMeta(actor, doctypeName);
+    const tenantId = options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
+    const doctype = await this.doctypeFor(actor, doctypeName, tenantId);
     return this.listLinkOptionsForField(actor, doctype, fieldName, options);
   }
 
@@ -173,7 +214,8 @@ export class QueryService {
     readonly filters: readonly ListDocumentsFilter[];
     readonly result: ListDocumentsResult;
   }> {
-    const doctype = this.registry.get(doctypeName);
+    const tenantId = options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
+    const doctype = await this.doctypeFor(actor, doctypeName, tenantId);
     if (!can(actor, doctype, "read")) {
       throw permissionDenied(`Actor '${actor.id}' cannot read ${doctype.name}`);
     }
@@ -183,12 +225,24 @@ export class QueryService {
       options.filters ?? []
     );
     const result = await this.listDocuments(actor, doctype.name, {
-      ...(options.tenantId !== undefined ? { tenantId: options.tenantId } : {}),
+      tenantId,
       filters,
       limit: options.limit ?? listView.pageSize,
       ...(options.offset !== undefined ? { offset: options.offset } : {})
     });
     return { listView, filters, result };
+  }
+
+  private async doctypeFor(actor: Actor, doctypeName: string, tenantId: string): Promise<DocTypeDefinition> {
+    return this.resolveDocType(this.registry.get(doctypeName), actor, tenantId);
+  }
+
+  private async resolveDocType(
+    base: DocTypeDefinition,
+    actor: Actor,
+    tenantId: string
+  ): Promise<DocTypeDefinition> {
+    return (await this.doctypeResolver?.(base, { actor, tenantId })) ?? base;
   }
 
   private async collectLinkOptions(

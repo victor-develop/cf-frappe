@@ -59,6 +59,7 @@ import {
 export interface DocumentServiceOptions {
   readonly registry: ModelRegistry;
   readonly store: DocumentStore;
+  readonly doctypeResolver?: DocumentServiceDocTypeResolver;
   readonly userPermissions?: UserPermissionProvider;
   readonly documentShares?: DocumentShareProvider;
   readonly clock?: Clock;
@@ -66,6 +67,11 @@ export interface DocumentServiceOptions {
   readonly onHookError?: (error: unknown, event: DomainEvent) => void | Promise<void>;
   readonly afterCommit?: (context: AfterCommitContext) => void | Promise<void>;
 }
+
+export type DocumentServiceDocTypeResolver = (
+  base: DocTypeDefinition,
+  context: { readonly actor: Actor; readonly tenantId: string }
+) => DocTypeDefinition | Promise<DocTypeDefinition>;
 
 export interface CreateDocumentCommand {
   readonly actor: Actor;
@@ -344,6 +350,7 @@ export class DocumentService implements DocumentCommandExecutor {
   private readonly store: DocumentStore;
   private readonly clock: Clock;
   private readonly ids: IdGenerator;
+  private readonly doctypeResolver: DocumentServiceDocTypeResolver | undefined;
   private readonly userPermissions: UserPermissionProvider | undefined;
   private readonly documentShares: DocumentShareProvider | undefined;
   private readonly onHookError: ((error: unknown, event: DomainEvent) => void | Promise<void>) | undefined;
@@ -354,6 +361,7 @@ export class DocumentService implements DocumentCommandExecutor {
     this.store = options.store;
     this.clock = options.clock ?? systemClock;
     this.ids = options.ids ?? cryptoIdGenerator;
+    this.doctypeResolver = options.doctypeResolver;
     this.userPermissions = options.userPermissions;
     this.documentShares = options.documentShares;
     this.onHookError = options.onHookError;
@@ -361,8 +369,8 @@ export class DocumentService implements DocumentCommandExecutor {
   }
 
   async create(command: CreateDocumentCommand): Promise<DocumentSnapshot> {
-    const doctype = this.registry.get(command.doctype);
     const tenantId = resolveTenant(command.actor, command.tenantId);
+    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
     if (!can(command.actor, doctype, "create")) {
       throw permissionDenied(`Actor '${command.actor.id}' cannot create ${doctype.name}`);
     }
@@ -422,8 +430,8 @@ export class DocumentService implements DocumentCommandExecutor {
   }
 
   async update(command: UpdateDocumentCommand): Promise<DocumentSnapshot> {
-    const doctype = this.registry.get(command.doctype);
     const tenantId = resolveTenant(command.actor, command.tenantId);
+    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
     if (!(await this.canActOnDocument(command.actor, doctype, "update", existing))) {
@@ -484,12 +492,12 @@ export class DocumentService implements DocumentCommandExecutor {
   }
 
   async transition(command: TransitionDocumentCommand): Promise<DocumentSnapshot> {
-    const doctype = this.registry.get(command.doctype);
+    const tenantId = resolveTenant(command.actor, command.tenantId);
+    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
     const workflow = doctype.workflow;
     if (!workflow) {
       throw new FrameworkError("BAD_REQUEST", `${doctype.name} has no workflow`, { status: 400 });
     }
-    const tenantId = resolveTenant(command.actor, command.tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
     if (!can(command.actor, doctype, "transition", existing)) {
@@ -553,14 +561,14 @@ export class DocumentService implements DocumentCommandExecutor {
   }
 
   async execute(command: ExecuteDomainCommand): Promise<DocumentSnapshot> {
-    const doctype = this.registry.get(command.doctype);
+    const tenantId = resolveTenant(command.actor, command.tenantId);
+    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
     const commandDefinition = doctype.commands?.find((item) => item.name === command.command);
     if (!commandDefinition) {
       throw new FrameworkError("BAD_REQUEST", `${doctype.name} has no command '${command.command}'`, {
         status: 400
       });
     }
-    const tenantId = resolveTenant(command.actor, command.tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
     const permissionAction = commandDefinition.permissionAction ?? "update";
@@ -637,8 +645,8 @@ export class DocumentService implements DocumentCommandExecutor {
   }
 
   async comment(command: AddDocumentCommentCommand): Promise<DocumentSnapshot> {
-    const doctype = this.registry.get(command.doctype);
     const tenantId = resolveTenant(command.actor, command.tenantId);
+    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
     if (!can(command.actor, doctype, "comment", existing)) {
@@ -677,8 +685,8 @@ export class DocumentService implements DocumentCommandExecutor {
   }
 
   async recordActivity(command: RecordDocumentActivityCommand): Promise<DocumentSnapshot> {
-    const doctype = this.registry.get(command.doctype);
     const tenantId = resolveTenant(command.actor, command.tenantId);
+    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
     if (!can(command.actor, doctype, "activity", existing)) {
@@ -778,8 +786,8 @@ export class DocumentService implements DocumentCommandExecutor {
   }
 
   async share(command: ShareDocumentCommand): Promise<DocumentSnapshot> {
-    const doctype = this.registry.get(command.doctype);
     const tenantId = resolveTenant(command.actor, command.tenantId);
+    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, command.name);
     const staticShareAllowed = can(command.actor, doctype, "share", existing);
@@ -820,8 +828,8 @@ export class DocumentService implements DocumentCommandExecutor {
   }
 
   async revokeShare(command: RevokeDocumentShareCommand): Promise<DocumentSnapshot> {
-    const doctype = this.registry.get(command.doctype);
     const tenantId = resolveTenant(command.actor, command.tenantId);
+    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, command.name);
     if (!(await this.canActOnDocument(command.actor, doctype, "share", existing))) {
@@ -853,8 +861,8 @@ export class DocumentService implements DocumentCommandExecutor {
   }
 
   async delete(command: DeleteDocumentCommand): Promise<DocumentSnapshot> {
-    const doctype = this.registry.get(command.doctype);
     const tenantId = resolveTenant(command.actor, command.tenantId);
+    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
     if (!can(command.actor, doctype, "delete", existing)) {
@@ -917,8 +925,8 @@ export class DocumentService implements DocumentCommandExecutor {
   }
 
   async submit(command: SubmitDocumentCommand): Promise<DocumentSnapshot> {
-    const doctype = this.registry.get(command.doctype);
     const tenantId = resolveTenant(command.actor, command.tenantId);
+    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
     if (!can(command.actor, doctype, "submit", existing)) {
@@ -940,8 +948,8 @@ export class DocumentService implements DocumentCommandExecutor {
   }
 
   async cancel(command: CancelDocumentCommand): Promise<DocumentSnapshot> {
-    const doctype = this.registry.get(command.doctype);
     const tenantId = resolveTenant(command.actor, command.tenantId);
+    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
     if (!can(command.actor, doctype, "cancel", existing)) {
@@ -1010,8 +1018,8 @@ export class DocumentService implements DocumentCommandExecutor {
     readonly eventType: (doctype: DocTypeDefinition) => string;
     readonly alreadyDone: (assignees: readonly string[], assigneeId: string) => boolean;
   }): Promise<DocumentSnapshot> {
-    const doctype = this.registry.get(options.command.doctype);
     const tenantId = resolveTenant(options.command.actor, options.command.tenantId);
+    const doctype = await this.doctypeFor(options.command.actor, options.command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, options.command.name);
     const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, options.command.name);
     if (!can(options.command.actor, doctype, "assign", existing)) {
@@ -1058,8 +1066,8 @@ export class DocumentService implements DocumentCommandExecutor {
     readonly eventType: (doctype: DocTypeDefinition) => string;
     readonly alreadyDone: (tags: readonly string[], tag: string) => boolean;
   }): Promise<DocumentSnapshot> {
-    const doctype = this.registry.get(options.command.doctype);
     const tenantId = resolveTenant(options.command.actor, options.command.tenantId);
+    const doctype = await this.doctypeFor(options.command.actor, options.command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, options.command.name);
     const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, options.command.name);
     if (!can(options.command.actor, doctype, "tag", existing)) {
@@ -1106,8 +1114,8 @@ export class DocumentService implements DocumentCommandExecutor {
     readonly eventType: (doctype: DocTypeDefinition) => string;
     readonly alreadyDone: (followers: readonly string[], followerId: string) => boolean;
   }): Promise<DocumentSnapshot> {
-    const doctype = this.registry.get(options.command.doctype);
     const tenantId = resolveTenant(options.command.actor, options.command.tenantId);
+    const doctype = await this.doctypeFor(options.command.actor, options.command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, options.command.name);
     const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, options.command.name);
     if (!can(options.command.actor, doctype, "follow", existing)) {
@@ -1380,6 +1388,11 @@ export class DocumentService implements DocumentCommandExecutor {
 
   private relatedDocType(name: string): DocTypeDefinition | undefined {
     return this.registry.has(name) ? this.registry.get(name) : undefined;
+  }
+
+  private async doctypeFor(actor: Actor, doctypeName: string, tenantId: string): Promise<DocTypeDefinition> {
+    const base = this.registry.get(doctypeName);
+    return await this.doctypeResolver?.(base, { actor, tenantId }) ?? base;
   }
 
   private async readDocumentFromEvents(

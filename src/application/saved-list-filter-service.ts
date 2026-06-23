@@ -23,9 +23,15 @@ const MAX_FILTER_LABEL_LENGTH = 140;
 export interface SavedListFilterServiceOptions {
   readonly registry: ModelRegistry;
   readonly events: EventStore;
+  readonly doctypeResolver?: SavedListFilterDocTypeResolver;
   readonly clock?: Clock;
   readonly ids?: IdGenerator;
 }
+
+export type SavedListFilterDocTypeResolver = (
+  base: DocTypeDefinition,
+  context: { readonly actor: Actor; readonly tenantId: string }
+) => DocTypeDefinition | Promise<DocTypeDefinition>;
 
 export interface SavedListFilter {
   readonly tenantId: TenantId;
@@ -57,18 +63,20 @@ export interface DeleteListFilterCommand {
 export class SavedListFilterService {
   private readonly registry: ModelRegistry;
   private readonly events: EventStore;
+  private readonly doctypeResolver: SavedListFilterDocTypeResolver | undefined;
   private readonly clock: Clock;
   private readonly ids: IdGenerator;
 
   constructor(options: SavedListFilterServiceOptions) {
     this.registry = options.registry;
     this.events = options.events;
+    this.doctypeResolver = options.doctypeResolver;
     this.clock = options.clock ?? systemClock;
     this.ids = options.ids ?? cryptoIdGenerator;
   }
 
   async list(actor: Actor, doctypeName: string, tenantId = resolveTenant(actor)): Promise<readonly SavedListFilter[]> {
-    const doctype = this.readableDoctype(actor, doctypeName);
+    const doctype = await this.readableDoctype(actor, doctypeName, tenantId);
     const filters = await this.readAll(tenantId, doctype, actor.id);
     return [...filters].sort((left, right) => left.label.localeCompare(right.label) || left.id.localeCompare(right.id));
   }
@@ -79,7 +87,7 @@ export class SavedListFilterService {
     id: string,
     tenantId = resolveTenant(actor)
   ): Promise<SavedListFilter> {
-    const doctype = this.readableDoctype(actor, doctypeName);
+    const doctype = await this.readableDoctype(actor, doctypeName, tenantId);
     const filter = (await this.readAll(tenantId, doctype, actor.id)).find((item) => item.id === id);
     if (!filter) {
       throw notFound(`Saved filter '${id}' was not found`);
@@ -88,8 +96,8 @@ export class SavedListFilterService {
   }
 
   async save(command: SaveListFilterCommand): Promise<SavedListFilter> {
-    const doctype = this.readableDoctype(command.actor, command.doctype);
     const tenantId = resolveTenant(command.actor, command.tenantId);
+    const doctype = await this.readableDoctype(command.actor, command.doctype, tenantId);
     const stream = savedListFiltersStream(tenantId, doctype.name, command.actor.id);
     const events = await this.events.readStream(stream, {
       payloadKinds: ["SavedListFilterSaved", "SavedListFilterDeleted"]
@@ -137,8 +145,8 @@ export class SavedListFilterService {
   }
 
   async delete(command: DeleteListFilterCommand): Promise<void> {
-    const doctype = this.readableDoctype(command.actor, command.doctype);
     const tenantId = resolveTenant(command.actor, command.tenantId);
+    const doctype = await this.readableDoctype(command.actor, command.doctype, tenantId);
     const stream = savedListFiltersStream(tenantId, doctype.name, command.actor.id);
     const events = await this.events.readStream(stream, {
       payloadKinds: ["SavedListFilterSaved", "SavedListFilterDeleted"]
@@ -177,8 +185,9 @@ export class SavedListFilterService {
     return savedFilter ? mergeListFilters(savedFilter.filters, explicitFilters) : explicitFilters;
   }
 
-  private readableDoctype(actor: Actor, doctypeName: string): DocTypeDefinition {
-    const doctype = this.registry.get(doctypeName);
+  private async readableDoctype(actor: Actor, doctypeName: string, tenantId: TenantId): Promise<DocTypeDefinition> {
+    const base = this.registry.get(doctypeName);
+    const doctype = (await this.doctypeResolver?.(base, { actor, tenantId })) ?? base;
     if (!can(actor, doctype, "read")) {
       throw permissionDenied(`Actor '${actor.id}' cannot read ${doctype.name}`);
     }

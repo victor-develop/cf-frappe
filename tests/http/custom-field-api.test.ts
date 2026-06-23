@@ -2,8 +2,12 @@ import {
   createResourceApi,
   CustomFieldService,
   deterministicIds,
+  DocumentService,
   fixedClock,
+  QueryService,
+  SavedListFilterService,
   SYSTEM_MANAGER_ROLE,
+  type DocTypeDefinition,
   unsafeHeaderActorResolver
 } from "../../src";
 import { createServices, now } from "../helpers";
@@ -127,23 +131,141 @@ describe("custom field api", () => {
     expect(oversized.status).toBe(400);
     await expect(oversized.json()).resolves.toMatchObject({ error: { code: "BAD_REQUEST" } });
   });
+
+  it("applies custom fields to metadata, list filters, and resource writes", async () => {
+    const { app } = makeCustomFieldApp();
+    const createdField = await app.request("/api/custom-fields/Note", {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        field: {
+          name: "reviewed",
+          label: "Reviewed",
+          type: "boolean",
+          inFormView: true,
+          inListView: true,
+          inListFilter: true,
+          defaultValue: false
+        },
+        expectedVersion: 0
+      })
+    });
+    expect(createdField.status).toBe(201);
+
+    const meta = await app.request("/api/meta/doctypes/Note", { headers: adminHeaders });
+    expect(meta.status).toBe(200);
+    await expect(meta.json()).resolves.toMatchObject({
+      data: {
+        fields: expect.arrayContaining([expect.objectContaining({ name: "reviewed", type: "boolean" })])
+      }
+    });
+
+    const listView = await app.request("/api/meta/doctypes/Note/list-view", { headers: adminHeaders });
+    expect(listView.status).toBe(200);
+    await expect(listView.json()).resolves.toMatchObject({
+      data: {
+        columns: expect.arrayContaining([expect.objectContaining({ name: "reviewed" })]),
+        filterBuilderFields: expect.arrayContaining([
+          expect.objectContaining({ field: "reviewed", inputType: "boolean" })
+        ])
+      }
+    });
+
+    const createdDocument = await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({ title: "Runtime Reviewed", body: "Body", reviewed: true })
+    });
+    expect(createdDocument.status).toBe(201);
+    await expect(createdDocument.json()).resolves.toMatchObject({
+      data: { data: { reviewed: true } }
+    });
+
+    const filtered = await app.request("/api/resource/Note?filter_reviewed=true", { headers: adminHeaders });
+    expect(filtered.status).toBe(200);
+    await expect(filtered.json()).resolves.toMatchObject({
+      data: [{ name: "Runtime Reviewed", data: { reviewed: true } }],
+      total: 1
+    });
+
+    const saved = await app.request("/api/resource/Note/saved-filters", {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        label: "Reviewed notes",
+        filters: [{ field: "reviewed", value: true }]
+      })
+    });
+    expect(saved.status).toBe(201);
+    const savedJson = await saved.json() as { readonly data: { readonly id: string } };
+    expect(savedJson).toMatchObject({
+      data: {
+        label: "Reviewed notes",
+        filters: [{ field: "reviewed", value: true }]
+      }
+    });
+    const savedFiltered = await app.request(`/api/resource/Note?saved_filter=${savedJson.data.id}`, {
+      headers: adminHeaders
+    });
+    expect(savedFiltered.status).toBe(200);
+    await expect(savedFiltered.json()).resolves.toMatchObject({
+      data: [{ name: "Runtime Reviewed" }],
+      total: 1
+    });
+
+    const invalid = await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({ title: "Invalid Reviewed", reviewed: "yes" })
+    });
+    expect(invalid.status).toBe(422);
+    await expect(invalid.json()).resolves.toMatchObject({
+      error: { code: "VALIDATION_FAILED" }
+    });
+  });
 });
 
 function makeCustomFieldApp(maxJsonBytes = 1_048_576) {
-  const services = createServices(["e1"]);
+  const services = createServices(["note-1", "note-2"]);
   const customFields = new CustomFieldService({
     registry: services.registry,
     events: services.store,
     ids: deterministicIds(["field-1", "disable-1", "field-2"]),
     clock: fixedClock(now)
   });
+  const doctypeResolver = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
+    customFields.effectiveDocType(base.name, context.tenantId);
+  const documents = new DocumentService({
+    registry: services.registry,
+    store: services.store,
+    doctypeResolver,
+    documentShares: services.documentShares,
+    userPermissions: services.userPermissions,
+    ids: deterministicIds(["doc-1", "doc-2"]),
+    clock: fixedClock(now)
+  });
+  const queries = new QueryService({
+    registry: services.registry,
+    projections: services.store,
+    doctypeResolver,
+    documentShares: services.documentShares,
+    userPermissions: services.userPermissions
+  });
+  const savedFilters = new SavedListFilterService({
+    registry: services.registry,
+    events: services.store,
+    doctypeResolver,
+    ids: deterministicIds(["saved-filter-1", "saved-filter-event-1"]),
+    clock: fixedClock(now)
+  });
   return {
-    services,
+    services: { ...services, documents, queries, savedFilters },
     customFields,
     app: createResourceApi({
       registry: services.registry,
-      documents: services.documents,
-      queries: services.queries,
+      documents,
+      queries,
+      savedFilters,
       actor: unsafeHeaderActorResolver,
       customFields,
       maxJsonBytes

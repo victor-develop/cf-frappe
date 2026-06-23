@@ -1075,8 +1075,8 @@ export function createDeskApp(options: DeskAppOptions): Hono {
   app.get("/desk/:doctype", async (c) => {
     const actor = await options.actor(c.req.raw);
     const url = new URL(c.req.url);
-    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
-    const doctypes = options.queries.listDoctypes(actor);
+    const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
+    const doctypes = await listDeskDoctypes(options, actor);
     const reports = listReports(options, actor);
     const filters = listFiltersFromUrl(url);
     const savedFilterId = url.searchParams.get("saved_filter") ?? undefined;
@@ -1117,7 +1117,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       throw new FrameworkError("DOCUMENT_NOT_FOUND", "Saved filters are not enabled", { status: 404 });
     }
     const actor = await options.actor(c.req.raw);
-    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
     try {
       const form = await parseDeskSavedFilter(c.req.raw);
       const saved = await options.savedFilters.save({
@@ -1137,7 +1137,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       throw new FrameworkError("DOCUMENT_NOT_FOUND", "Saved filters are not enabled", { status: 404 });
     }
     const actor = await options.actor(c.req.raw);
-    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
     await options.savedFilters.delete({
       actor,
       doctype: doctype.name,
@@ -1251,11 +1251,11 @@ export function createDeskApp(options: DeskAppOptions): Hono {
 
   app.get("/desk/:doctype/new", async (c) => {
     const actor = await options.actor(c.req.raw);
-    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
-    const formView = options.queries.getFormView(actor, doctype.name);
+    const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
+    const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
     const linkOptions = await linkOptionsForForm(options, actor, doctype, formView);
     const tableDefinitions = tableDefinitionsForForm(options, formView);
-    const doctypes = options.queries.listDoctypes(actor);
+    const doctypes = await listDeskDoctypes(options, actor);
     const reports = listReports(options, actor);
     return html(
       renderDeskLayoutFor(options, {
@@ -1277,8 +1277,8 @@ export function createDeskApp(options: DeskAppOptions): Hono {
 
   app.post("/desk/:doctype", async (c) => {
     const actor = await options.actor(c.req.raw);
-    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
-    const formView = options.queries.getFormView(actor, doctype.name);
+    const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
+    const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
     try {
       const snapshot = await options.documents.create({
         actor,
@@ -1294,7 +1294,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
 
   app.get("/desk/:doctype/:name", async (c) => {
     const actor = await options.actor(c.req.raw);
-    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
     return renderDeskDocumentPage(options, actor, doctype, c.req.param("name"));
   });
 
@@ -1530,8 +1530,8 @@ export function createDeskApp(options: DeskAppOptions): Hono {
 
   app.post("/desk/:doctype/:name", async (c) => {
     const actor = await options.actor(c.req.raw);
-    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
-    const formView = options.queries.getFormView(actor, doctype.name);
+    const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
+    const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
     const name = c.req.param("name");
     try {
       const form = await parseDeskForm(c.req.raw, doctype, formView, (doctypeName) => options.registry.get(doctypeName));
@@ -1551,8 +1551,8 @@ export function createDeskApp(options: DeskAppOptions): Hono {
 
   app.post("/desk/:doctype/:name/command/:command", async (c) => {
     const actor = await options.actor(c.req.raw);
-    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
-    const formView = options.queries.getFormView(actor, doctype.name);
+    const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
+    const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
     const name = c.req.param("name");
     try {
       const commandName = c.req.param("command");
@@ -1655,7 +1655,7 @@ async function renderDeskFailure(options: DeskAppOptions, request: Request, erro
   const status = error instanceof FrameworkError ? error.status : 500;
   const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
   const actor = await Promise.resolve().then(() => options.actor(request)).catch(() => undefined);
-  const doctypes = actor === undefined ? [] : options.queries.listDoctypes(actor);
+  const doctypes = actor === undefined ? [] : await listDeskDoctypes(options, actor);
   const reports = actor === undefined ? [] : listReports(options, actor);
   return html(
     renderDeskLayoutFor(options, {
@@ -1678,9 +1678,9 @@ async function renderDeskError(
   error: unknown,
   name?: string
 ): Promise<Response> {
-  const doctypes = options.queries.listDoctypes(actor);
+  const doctypes = await listDeskDoctypes(options, actor);
   const reports = listReports(options, actor);
-  const formView = options.queries.getFormView(actor, doctype.name);
+  const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
   const linkOptions = await linkOptionsForForm(options, actor, doctype, formView);
   const tableDefinitions = tableDefinitionsForForm(options, formView);
   const document = name ? await options.queries.getDocument(actor, doctype.name, name).catch(() => undefined) : undefined;
@@ -1711,6 +1711,10 @@ async function renderDeskError(
 
 function listReports(options: DeskAppOptions, actor: Actor) {
   return options.reports?.listReports(actor) ?? [];
+}
+
+function listDeskDoctypes(options: DeskAppOptions, actor: Actor): Promise<readonly DocTypeDefinition[]> {
+  return options.queries.listEffectiveDoctypes(actor);
 }
 
 function deskRealtimeRoute(options: DeskAppOptions): string | undefined {
@@ -2273,10 +2277,10 @@ async function renderDeskDocumentPage(
   name: string,
   result: { readonly attachmentError?: string; readonly status?: number } = {}
 ): Promise<Response> {
-  const doctypes = options.queries.listDoctypes(actor);
+  const doctypes = await listDeskDoctypes(options, actor);
   const reports = listReports(options, actor);
   const printFormats = listPrintFormats(options, actor, doctype.name);
-  const formView = options.queries.getFormView(actor, doctype.name);
+  const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
   const document = await options.queries.getDocument(actor, doctype.name, name);
   const linkOptions = await linkOptionsForForm(options, actor, doctype, formView);
   const tableDefinitions = tableDefinitionsForForm(options, formView);

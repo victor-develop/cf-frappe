@@ -1,4 +1,5 @@
 import { createLinkedServices, createServices, data, guest, owner } from "../helpers";
+import { applyCustomFieldsToDocType, QueryService } from "../../src";
 import type { ProjectionStore } from "../../src";
 
 describe("QueryService", () => {
@@ -358,6 +359,78 @@ describe("QueryService", () => {
 
     const allView = await queries.listDocumentsForView(owner, "Note", { useDefaultFilters: false });
     expect(allView.result.total).toBe(2);
+  });
+
+  it("resolves tenant-extended DocTypes for metadata and list filtering", async () => {
+    const { registry, projections } = createServices();
+    const queries = new QueryService({
+      registry,
+      projections,
+      doctypeResolver: (base, { tenantId }) =>
+        tenantId === "acme"
+          ? applyCustomFieldsToDocType(base, {
+              tenantId,
+              doctype: base.name,
+              version: 1,
+              fields: [
+                {
+                  tenantId,
+                  doctype: base.name,
+                  enabled: true,
+                  createdAt: "2026-01-01T00:00:00.000Z",
+                  updatedAt: "2026-01-01T00:00:00.000Z",
+                  field: {
+                    name: "reviewed",
+                    label: "Reviewed",
+                    type: "boolean",
+                    inFormView: true,
+                    inListView: true,
+                    inListFilter: true
+                  }
+                }
+              ]
+            })
+          : base
+    });
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "Reviewed Note",
+      version: 1,
+      docstatus: "draft",
+      data: data({ title: "Reviewed Note", workflow_state: "Open", created_by: owner.id, reviewed: true }),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    });
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "Queued Note",
+      version: 1,
+      docstatus: "draft",
+      data: data({ title: "Queued Note", workflow_state: "Open", created_by: owner.id, reviewed: false }),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      updatedAt: "2026-01-01T00:00:01.000Z"
+    });
+
+    await expect(queries.getEffectiveMeta(owner, "Note")).resolves.toMatchObject({
+      fields: expect.arrayContaining([expect.objectContaining({ name: "reviewed", type: "boolean" })])
+    });
+    await expect(queries.getEffectiveFormView(owner, "Note")).resolves.toMatchObject({
+      fields: expect.arrayContaining([expect.objectContaining({ name: "reviewed" })])
+    });
+    const view = await queries.listDocumentsForView(owner, "Note", {
+      filters: [{ field: "reviewed", value: true }]
+    });
+
+    expect(view.listView.columns.map((field) => field.name)).toContain("reviewed");
+    expect(view.listView.filterBuilderFields).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: "reviewed", inputType: "boolean" })])
+    );
+    expect(view.result).toMatchObject({
+      data: [{ name: "Reviewed Note" }],
+      total: 1
+    });
   });
 });
 

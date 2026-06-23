@@ -1,6 +1,14 @@
 import { FrameworkError } from "./errors.js";
 import { defineDocType } from "./schema.js";
-import type { DocTypeDefinition, DomainEvent, FieldDefinition, PersistedFieldDefinition, TenantId } from "./types.js";
+import type {
+  DocTypeDefinition,
+  DomainEvent,
+  FieldDefinition,
+  FormViewDefinition,
+  ListViewDefinition,
+  PersistedFieldDefinition,
+  TenantId
+} from "./types.js";
 
 export interface CustomFieldEntry {
   readonly tenantId: TenantId;
@@ -77,7 +85,9 @@ export function applyCustomFieldsToDocType(
   assertNoBaseFieldCollisions(base, customFields);
   return defineDocType({
     ...base,
-    fields: Object.freeze([...base.fields, ...customFields])
+    fields: Object.freeze([...base.fields, ...customFields]),
+    ...formViewWithCustomFields(base, customFields),
+    ...listViewWithCustomFields(base, customFields)
   });
 }
 
@@ -114,6 +124,67 @@ function assertNoBaseFieldCollisions(base: DocTypeDefinition, fields: readonly F
       );
     }
   }
+}
+
+function formViewWithCustomFields(
+  base: DocTypeDefinition,
+  customFields: readonly FieldDefinition[]
+): { readonly formView?: FormViewDefinition } {
+  const sectionFields = customFields.filter((field) => field.inFormView).map((field) => field.name);
+  const sections = base.formView?.sections;
+  if (sectionFields.length === 0 || sections === undefined || sections.length === 0) {
+    return {};
+  }
+  return {
+    formView: {
+      ...base.formView,
+      sections: sections.map((section, index) =>
+        index === sections.length - 1
+          ? { ...section, fields: appendUnique(section.fields, sectionFields) }
+          : section
+      )
+    }
+  };
+}
+
+function listViewWithCustomFields(
+  base: DocTypeDefinition,
+  customFields: readonly FieldDefinition[]
+): { readonly listView?: ListViewDefinition } {
+  const listView = base.listView;
+  if (!listView) {
+    return {};
+  }
+  const columns = listView.columns === undefined
+    ? undefined
+    : appendUnique(listView.columns, customFields.filter((field) => field.inListView).map((field) => field.name));
+  const filterFields = listView.filterFields === undefined
+    ? undefined
+    : appendUnique(listView.filterFields, customFields.filter((field) => field.inListFilter).map((field) => field.name));
+  if (columns === undefined && filterFields === undefined) {
+    return {};
+  }
+  return {
+    listView: {
+      ...listView,
+      ...(columns === undefined ? {} : { columns }),
+      ...(filterFields === undefined ? {} : { filterFields })
+    }
+  };
+}
+
+function appendUnique(base: readonly string[], additions: readonly string[]): readonly string[] {
+  const seen = new Set(base);
+  return Object.freeze([
+    ...base,
+    ...additions.filter((name) => {
+      if (seen.has(name)) {
+        return false;
+      }
+      seen.add(name);
+      return true;
+    })
+  ]);
 }
 
 function assertCustomFieldName(name: string): void {
