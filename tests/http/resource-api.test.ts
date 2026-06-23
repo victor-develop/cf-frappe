@@ -298,6 +298,91 @@ describe("resource api", () => {
     });
   });
 
+  it("bulk submits and cancels resources with per-document outcomes", async () => {
+    const app = makeApp();
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Bulk Submit Selected", body: "Selected" })
+    });
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Bulk Submit Stale", body: "Stale" })
+    });
+
+    const submitted = await app.request("/api/resource/Note/bulk-submit", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({
+        documents: [
+          { name: "HTTP Bulk Submit Selected", expectedVersion: 1 },
+          { name: "HTTP Bulk Submit Stale", expectedVersion: 99 }
+        ]
+      })
+    });
+
+    expect(submitted.status).toBe(200);
+    await expect(submitted.json()).resolves.toMatchObject({
+      data: {
+        succeeded: [{ name: "HTTP Bulk Submit Selected", snapshot: { docstatus: "submitted", version: 2 } }],
+        failed: [{ name: "HTTP Bulk Submit Stale", code: "DOCUMENT_CONFLICT", status: 409 }]
+      }
+    });
+
+    const cancelled = await app.request("/api/resource/Note/bulk-cancel", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({
+        documents: [
+          { name: "HTTP Bulk Submit Selected", expectedVersion: 2 },
+          { name: "HTTP Bulk Submit Stale" }
+        ]
+      })
+    });
+
+    expect(cancelled.status).toBe(200);
+    await expect(cancelled.json()).resolves.toMatchObject({
+      data: {
+        succeeded: [{ name: "HTTP Bulk Submit Selected", snapshot: { docstatus: "cancelled", version: 3 } }],
+        failed: [{ name: "HTTP Bulk Submit Stale", code: "DOCUMENT_STATUS_CONFLICT", status: 409 }]
+      }
+    });
+  });
+
+  it("bulk transitions resources with per-document outcomes", async () => {
+    const app = makeApp();
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Bulk Transition Selected", body: "Selected" })
+    });
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Bulk Transition Stale", body: "Stale" })
+    });
+
+    const response = await app.request("/api/resource/Note/bulk-transition/close", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({
+        documents: [
+          { name: "HTTP Bulk Transition Selected", expectedVersion: 1 },
+          { name: "HTTP Bulk Transition Stale", expectedVersion: 99 }
+        ]
+      })
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        succeeded: [{ name: "HTTP Bulk Transition Selected", snapshot: { data: { workflow_state: "Closed" } } }],
+        failed: [{ name: "HTTP Bulk Transition Stale", code: "DOCUMENT_CONFLICT", status: 409 }]
+      }
+    });
+  });
+
   it("returns a permissioned resource timeline from the document event stream", async () => {
     const app = makeApp();
     await app.request("/api/resource/Note", {

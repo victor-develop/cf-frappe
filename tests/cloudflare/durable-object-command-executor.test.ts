@@ -110,7 +110,7 @@ describe("DurableObjectCommandExecutor", () => {
     ]);
   });
 
-  it("routes bulk deletes per aggregate and preserves serializable failure envelopes", async () => {
+  it("routes bulk document commands per aggregate and preserves serializable failure envelopes", async () => {
     const calls: unknown[] = [];
     const names: string[] = [];
     const namespace: RpcDurableObjectNamespace<any> = {
@@ -121,7 +121,7 @@ describe("DurableObjectCommandExecutor", () => {
       get() {
         return {
           transact() {
-            throw new Error("Bulk delete should use tryTransact");
+            throw new Error("Bulk commands should use tryTransact");
           },
           tryTransact(command: { readonly kind: string; readonly name: string; readonly expectedVersion?: number }) {
             calls.push(command);
@@ -166,11 +166,36 @@ describe("DurableObjectCommandExecutor", () => {
         { name: "Stale Note", expectedVersion: 99 }
       ]
     });
+    const submitted = await executor.bulkSubmit({
+      actor: owner,
+      doctype: "Note",
+      documents: [{ name: "Submit Note", expectedVersion: 1 }]
+    });
+    const cancelled = await executor.bulkCancel({
+      actor: owner,
+      doctype: "Note",
+      documents: [{ name: "Cancel Note", expectedVersion: 2 }]
+    });
+    const transitioned = await executor.bulkTransition({
+      actor: owner,
+      doctype: "Note",
+      action: "close",
+      documents: [{ name: "Transition Note", expectedVersion: 1 }]
+    });
 
-    expect(names).toEqual(["acme:Note:Selected Note", "acme:Note:Stale Note"]);
+    expect(names).toEqual([
+      "acme:Note:Selected Note",
+      "acme:Note:Stale Note",
+      "acme:Note:Submit Note",
+      "acme:Note:Cancel Note",
+      "acme:Note:Transition Note"
+    ]);
     expect(calls).toMatchObject([
       { kind: "delete", name: "Selected Note", expectedVersion: 1 },
-      { kind: "delete", name: "Stale Note", expectedVersion: 99 }
+      { kind: "delete", name: "Stale Note", expectedVersion: 99 },
+      { kind: "submit", name: "Submit Note", expectedVersion: 1 },
+      { kind: "cancel", name: "Cancel Note", expectedVersion: 2 },
+      { kind: "transition", name: "Transition Note", expectedVersion: 1, action: "close" }
     ]);
     expect(result).toMatchObject({
       deleted: [{ name: "Selected Note", snapshot: { docstatus: "deleted", version: 2 } }],
@@ -182,6 +207,12 @@ describe("DurableObjectCommandExecutor", () => {
           status: 409
         }
       ]
+    });
+    expect(submitted).toMatchObject({ succeeded: [{ name: "Submit Note", snapshot: { version: 2 } }], failed: [] });
+    expect(cancelled).toMatchObject({ succeeded: [{ name: "Cancel Note", snapshot: { version: 2 } }], failed: [] });
+    expect(transitioned).toMatchObject({
+      succeeded: [{ name: "Transition Note", snapshot: { version: 2 } }],
+      failed: []
     });
   });
 });

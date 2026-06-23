@@ -3,7 +3,7 @@ import type { AuditService } from "../../application/audit-service.js";
 import type { DataPatchQueuePort } from "../../application/data-patch-jobs.js";
 import type { DataPatchAdminPort } from "../../application/data-patch-service.js";
 import type { DocumentShareService } from "../../application/document-share-service.js";
-import type { BulkDeleteDocumentSelection, DocumentCommandExecutor } from "../../application/document-service.js";
+import type { BulkDocumentSelection, DocumentCommandExecutor } from "../../application/document-service.js";
 import type { DocumentHistoryService } from "../../application/document-history-service.js";
 import type { FileService } from "../../application/file-service.js";
 import type { JobHistoryService } from "../../application/job-history-service.js";
@@ -295,6 +295,43 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     const result = await options.documents.bulkDelete({
       actor,
       doctype: c.req.param("doctype"),
+      documents: documentSelectionsValue(body.documents),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: result });
+  });
+
+  app.post("/api/resource/:doctype/bulk-submit", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    const body = await readJson(c.req.raw, { maxJsonBytes });
+    const result = await options.documents.bulkSubmit({
+      actor,
+      doctype: c.req.param("doctype"),
+      documents: documentSelectionsValue(body.documents),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: result });
+  });
+
+  app.post("/api/resource/:doctype/bulk-cancel", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    const body = await readJson(c.req.raw, { maxJsonBytes });
+    const result = await options.documents.bulkCancel({
+      actor,
+      doctype: c.req.param("doctype"),
+      documents: documentSelectionsValue(body.documents),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: result });
+  });
+
+  app.post("/api/resource/:doctype/bulk-transition/:action", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    const body = await readJson(c.req.raw, { maxJsonBytes });
+    const result = await options.documents.bulkTransition({
+      actor,
+      doctype: c.req.param("doctype"),
+      action: c.req.param("action"),
       documents: documentSelectionsValue(body.documents),
       metadata: requestMetadata(c.req.raw)
     });
@@ -664,7 +701,7 @@ function numberValue(value: unknown): number | undefined {
   return value;
 }
 
-function documentSelectionsValue(value: unknown): readonly BulkDeleteDocumentSelection[] {
+function documentSelectionsValue(value: unknown): readonly BulkDocumentSelection[] {
   if (!Array.isArray(value)) {
     throw badRequest("documents must be an array");
   }

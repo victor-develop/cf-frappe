@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { DocumentShareService } from "../application/document-share-service.js";
-import { DocumentService, bulkDeleteDocumentFailure } from "../application/document-service.js";
-import type { BulkDeleteDocumentFailure } from "../application/document-service.js";
+import { DocumentService, bulkDocumentFailure } from "../application/document-service.js";
+import type { BulkDocumentCommandFailure } from "../application/document-service.js";
 import { UserPermissionService } from "../application/user-permission-service.js";
 import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator.js";
 import type { DomainEvent, DocumentSnapshot } from "../core/types.js";
@@ -58,7 +58,7 @@ export type AggregateCoordinatorTransactResult =
     }
   | {
       readonly ok: false;
-      readonly failure: BulkDeleteDocumentFailure;
+      readonly failure: BulkDocumentCommandFailure;
     };
 
 export interface AggregateCoordinatorEnv {
@@ -159,7 +159,7 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
       try {
         return { ok: true, snapshot: await this.transact(command) };
       } catch (error) {
-        return { ok: false, failure: bulkDeleteDocumentFailure(documentNameForFailure(command), error) };
+        return { ok: false, failure: bulkDocumentFailure(documentNameForFailure(command), error) };
       }
     }
   };

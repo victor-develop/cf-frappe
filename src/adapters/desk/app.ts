@@ -76,7 +76,8 @@ import {
   type FormLifecycleAction,
   type FormLinkOptions,
   type FormTableDefinitions,
-  type FormWorkflowAction
+  type FormWorkflowAction,
+  type ListBulkAction
 } from "./render.js";
 
 const MAX_DESK_FORM_BYTES = 1_048_576;
@@ -967,11 +968,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       ...(offset !== undefined ? { offset } : {})
     });
     const savedFilters = await options.savedFilters?.list(actor, doctype.name);
-    const bulkDeleteNames = result.data
-      .filter((document) =>
-        can(actor, doctype, "delete", document) && (document.docstatus === "draft" || document.docstatus === "cancelled")
-      )
-      .map((document) => document.name);
+    const bulkActions = listBulkActionsFor(actor, doctype, result.data);
     return html(
       renderDeskLayoutFor(options, {
         title: doctype.label ?? doctype.name,
@@ -983,7 +980,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
           ...(savedFilters ? { savedFilters } : {}),
           ...(savedFilter ? { selectedSavedFilterId: savedFilter.id } : {}),
           clientScripts: options.registry.listClientScripts(doctype.name, "list"),
-          bulkDeleteNames,
+          bulkActions,
           ...deskRealtimeRouteOption(options)
         })
       })
@@ -1028,7 +1025,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
     try {
-      const form = await parseDeskBulkDocumentDelete(c.req.raw);
+      const form = await parseDeskBulkDocumentAction(c.req.raw);
       const result = await options.documents.bulkDelete({
         actor,
         doctype: doctype.name,
@@ -1040,6 +1037,85 @@ export function createDeskApp(options: DeskAppOptions): Hono {
           options,
           c.req.raw,
           new FrameworkError("BAD_REQUEST", bulkDocumentDeleteFailureMessage(result.failed.length), { status: 400 })
+        );
+      }
+      return c.redirect(`/desk/${encodeURIComponent(doctype.name)}`, 303);
+    } catch (error) {
+      return renderDeskFailure(options, c.req.raw, error);
+    }
+  });
+
+  app.post("/desk/:doctype/bulk-submit", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    try {
+      const form = await parseDeskBulkDocumentAction(c.req.raw);
+      const result = await options.documents.bulkSubmit({
+        actor,
+        doctype: doctype.name,
+        documents: form.documents,
+        metadata: requestMetadata(c.req.raw)
+      });
+      if (result.failed.length > 0) {
+        return renderDeskFailure(
+          options,
+          c.req.raw,
+          new FrameworkError("BAD_REQUEST", bulkDocumentActionFailureMessage(result.failed.length, "submitted"), {
+            status: 400
+          })
+        );
+      }
+      return c.redirect(`/desk/${encodeURIComponent(doctype.name)}`, 303);
+    } catch (error) {
+      return renderDeskFailure(options, c.req.raw, error);
+    }
+  });
+
+  app.post("/desk/:doctype/bulk-cancel", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    try {
+      const form = await parseDeskBulkDocumentAction(c.req.raw);
+      const result = await options.documents.bulkCancel({
+        actor,
+        doctype: doctype.name,
+        documents: form.documents,
+        metadata: requestMetadata(c.req.raw)
+      });
+      if (result.failed.length > 0) {
+        return renderDeskFailure(
+          options,
+          c.req.raw,
+          new FrameworkError("BAD_REQUEST", bulkDocumentActionFailureMessage(result.failed.length, "cancelled"), {
+            status: 400
+          })
+        );
+      }
+      return c.redirect(`/desk/${encodeURIComponent(doctype.name)}`, 303);
+    } catch (error) {
+      return renderDeskFailure(options, c.req.raw, error);
+    }
+  });
+
+  app.post("/desk/:doctype/bulk-transition/:action", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    try {
+      const form = await parseDeskBulkDocumentAction(c.req.raw);
+      const result = await options.documents.bulkTransition({
+        actor,
+        doctype: doctype.name,
+        action: c.req.param("action"),
+        documents: form.documents,
+        metadata: requestMetadata(c.req.raw)
+      });
+      if (result.failed.length > 0) {
+        return renderDeskFailure(
+          options,
+          c.req.raw,
+          new FrameworkError("BAD_REQUEST", bulkDocumentActionFailureMessage(result.failed.length, "transitioned"), {
+            status: 400
+          })
         );
       }
       return c.redirect(`/desk/${encodeURIComponent(doctype.name)}`, 303);
@@ -1999,6 +2075,90 @@ function lifecycleActionsFor(
   return [];
 }
 
+function listBulkActionsFor(
+  actor: Actor,
+  doctype: DocTypeDefinition,
+  documents: readonly DocumentSnapshot[]
+): readonly ListBulkAction[] {
+  const base = `/desk/${encodeURIComponent(doctype.name)}`;
+  const actions: ListBulkAction[] = [];
+  const deleteNames = documents
+    .filter((document) =>
+      can(actor, doctype, "delete", document) && (document.docstatus === "draft" || document.docstatus === "cancelled")
+    )
+    .map((document) => document.name);
+  if (deleteNames.length > 0) {
+    actions.push({
+      id: "delete",
+      label: "Delete selected",
+      action: `${base}/bulk-delete`,
+      variant: "danger",
+      names: deleteNames
+    });
+  }
+  if (!doctype.workflow) {
+    const submitNames = documents
+      .filter((document) => document.docstatus === "draft" && can(actor, doctype, "submit", document))
+      .map((document) => document.name);
+    if (submitNames.length > 0) {
+      actions.push({
+        id: "submit",
+        label: "Submit selected",
+        action: `${base}/bulk-submit`,
+        names: submitNames
+      });
+    }
+    const cancelNames = documents
+      .filter((document) => document.docstatus === "submitted" && can(actor, doctype, "cancel", document))
+      .map((document) => document.name);
+    if (cancelNames.length > 0) {
+      actions.push({
+        id: "cancel",
+        label: "Cancel selected",
+        action: `${base}/bulk-cancel`,
+        names: cancelNames
+      });
+    }
+  }
+  for (const action of listBulkWorkflowActions(actor, doctype, documents, base)) {
+    actions.push(action);
+  }
+  return actions;
+}
+
+function listBulkWorkflowActions(
+  actor: Actor,
+  doctype: DocTypeDefinition,
+  documents: readonly DocumentSnapshot[],
+  base: string
+): readonly ListBulkAction[] {
+  const workflow = doctype.workflow;
+  if (!workflow) {
+    return [];
+  }
+  const actions = new Map<string, string[]>();
+  for (const document of documents) {
+    if (document.docstatus !== "draft" || !can(actor, doctype, "transition", document)) {
+      continue;
+    }
+    for (const transition of allowedWorkflowTransitions({ actor, workflow, document })) {
+      const names = actions.get(transition.action) ?? [];
+      names.push(document.name);
+      actions.set(transition.action, names);
+    }
+  }
+  return [...actions.entries()].map(([action, names]) => ({
+    id: `transition:${action}`,
+    label: `${capitalizeAction(action)} selected`,
+    action: `${base}/bulk-transition/${encodeURIComponent(action)}`,
+    names
+  }));
+}
+
+function capitalizeAction(action: string): string {
+  return action.length === 0 ? action : `${action.charAt(0).toUpperCase()}${action.slice(1)}`;
+}
+
 async function documentSharesForDesk(
   options: DeskAppOptions,
   actor: Actor,
@@ -2201,7 +2361,7 @@ interface ParsedDeskBulkFileDelete {
   }[];
 }
 
-interface ParsedDeskBulkDocumentDelete {
+interface ParsedDeskBulkDocumentAction {
   readonly documents: readonly {
     readonly name: string;
     readonly expectedVersion?: number;
@@ -2312,7 +2472,7 @@ async function parseDeskBulkFileDelete(request: Request): Promise<ParsedDeskBulk
   };
 }
 
-async function parseDeskBulkDocumentDelete(request: Request): Promise<ParsedDeskBulkDocumentDelete> {
+async function parseDeskBulkDocumentAction(request: Request): Promise<ParsedDeskBulkDocumentAction> {
   const form = await readUrlEncodedDeskForm(request);
   return {
     documents: form.getAll("document").map((name) => ({
@@ -2340,6 +2500,12 @@ function bulkFileDeleteFailureMessage(count: number): string {
 
 function bulkDocumentDeleteFailureMessage(count: number): string {
   return count === 1 ? "1 document could not be deleted" : `${String(count)} documents could not be deleted`;
+}
+
+function bulkDocumentActionFailureMessage(count: number, action: string): string {
+  return count === 1
+    ? `1 document could not be ${action}`
+    : `${String(count)} documents could not be ${action}`;
 }
 
 function fileNameFromFormValue(file: Blob): string {

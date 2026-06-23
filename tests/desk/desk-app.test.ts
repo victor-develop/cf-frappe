@@ -31,7 +31,18 @@ import {
   type DocTypeDefinition,
   type PasswordHasher
 } from "../../src";
-import { createChildTableServices, createLinkedServices, createServices, data, guest, manager, noteDocType, now, owner } from "../helpers";
+import {
+  createChildTableServices,
+  createLinkedServices,
+  createSeriesServices,
+  createServices,
+  data,
+  guest,
+  manager,
+  noteDocType,
+  now,
+  owner
+} from "../helpers";
 
 describe("Desk app", () => {
   function makeDesk(
@@ -129,6 +140,17 @@ describe("Desk app", () => {
       documents: services.documents,
       queries: services.queries,
       actor: () => owner
+    });
+    return { app, services };
+  }
+
+  function makeSeriesDesk(actor = owner, ids: readonly string[] = ["series-1", "ticket-1", "series-2", "ticket-2"]) {
+    const services = createSeriesServices(ids);
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: () => actor
     });
     return { app, services };
   }
@@ -999,6 +1021,89 @@ describe("Desk app", () => {
     const afterHtml = await after.text();
     expect(afterHtml).not.toContain("Desk Bulk Selected");
     expect(afterHtml).toContain("Desk Bulk Keep");
+  });
+
+  it("renders and submits generated list bulk workflow transitions", async () => {
+    const { app, services } = makeDesk(owner);
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Desk Bulk Transition" })
+    });
+
+    const list = await app.request("/desk/Note");
+
+    expect(list.status).toBe(200);
+    const html = await list.text();
+    expect(html).toContain('formaction="/desk/Note/bulk-transition/close"');
+    expect(html).toContain("Close selected");
+
+    const transitioned = await app.request("/desk/Note/bulk-transition/close", {
+      method: "POST",
+      body: new URLSearchParams({
+        document: "Desk Bulk Transition",
+        "expectedVersion:Desk Bulk Transition": "1"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(transitioned.status).toBe(303);
+    await expect(services.queries.getDocument(owner, "Note", "Desk Bulk Transition")).resolves.toMatchObject({
+      data: { workflow_state: "Closed" }
+    });
+  });
+
+  it("renders and submits generated list bulk lifecycle actions for DocTypes without workflow", async () => {
+    const { app, services } = makeSeriesDesk(owner, ["series-1", "ticket-1", "series-2", "ticket-2", "submit-1", "cancel-1"]);
+    await services.documents.create({
+      actor: owner,
+      doctype: "Support Ticket",
+      data: { subject: "Lifecycle selected" }
+    });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Support Ticket",
+      data: { subject: "Lifecycle keep" }
+    });
+
+    const list = await app.request("/desk/Support%20Ticket");
+
+    expect(list.status).toBe(200);
+    const html = await list.text();
+    expect(html).toContain('formaction="/desk/Support%20Ticket/bulk-submit"');
+    expect(html).toContain("Submit selected");
+    expect(html).not.toContain('formaction="/desk/Support%20Ticket/bulk-cancel"');
+
+    const submitted = await app.request("/desk/Support%20Ticket/bulk-submit", {
+      method: "POST",
+      body: new URLSearchParams({
+        document: "TICK-.0001",
+        "expectedVersion:TICK-.0001": "1"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(submitted.status).toBe(303);
+    await expect(services.queries.getDocument(owner, "Support Ticket", "TICK-.0001")).resolves.toMatchObject({
+      docstatus: "submitted"
+    });
+
+    const submittedList = await app.request("/desk/Support%20Ticket");
+    expect(await submittedList.text()).toContain('formaction="/desk/Support%20Ticket/bulk-cancel"');
+
+    const cancelled = await app.request("/desk/Support%20Ticket/bulk-cancel", {
+      method: "POST",
+      body: new URLSearchParams({
+        document: "TICK-.0001",
+        "expectedVersion:TICK-.0001": "2"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(cancelled.status).toBe(303);
+    await expect(services.queries.getDocument(owner, "Support Ticket", "TICK-.0001")).resolves.toMatchObject({
+      docstatus: "cancelled"
+    });
   });
 
   it("hides generated list bulk delete actions from actors without delete permission", async () => {

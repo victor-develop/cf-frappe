@@ -2,10 +2,15 @@ import type {
   AssignDocumentCommand,
   CancelDocumentCommand,
   AddDocumentCommentCommand,
-  BulkDeleteDocumentFailure,
+  BulkDocumentCommandEntry,
+  BulkDocumentCommandFailure,
+  BulkDocumentCommandResult,
+  BulkDocumentsCommand,
+  BulkCancelDocumentsCommand,
   BulkDeleteDocumentsCommand,
   BulkDeleteDocumentsResult,
-  BulkDeletedDocument,
+  BulkSubmitDocumentsCommand,
+  BulkTransitionDocumentsCommand,
   CreateDocumentCommand,
   DeleteDocumentCommand,
   DocumentCommandExecutor,
@@ -22,9 +27,9 @@ import type {
   UnfollowDocumentCommand,
   UpdateDocumentCommand
 } from "../application/document-service.js";
-import { normalizeBulkDeleteDocumentSelections } from "../application/document-service.js";
+import { normalizeBulkDocumentSelections } from "../application/document-service.js";
 import type { ModelRegistry } from "../core/registry.js";
-import type { DocumentSnapshot } from "../core/types.js";
+import type { Actor, DocumentData, DocumentSnapshot } from "../core/types.js";
 import { DEFAULT_TENANT_ID, type DocTypeDefinition } from "../core/types.js";
 import type { AggregateCoordinatorCommand, AggregateCoordinatorTransactResult } from "./aggregate-coordinator.js";
 
@@ -37,6 +42,8 @@ export interface RpcDurableObjectNamespace<T> {
   idFromName(name: string): DurableObjectId;
   get(id: DurableObjectId): T;
 }
+
+type NamedAggregateCoordinatorCommand = Exclude<AggregateCoordinatorCommand, { readonly kind: "create" }>;
 
 export interface DurableObjectCommandExecutorOptions {
   readonly registry: ModelRegistry;
@@ -64,8 +71,22 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
     return this.stubForNamed(command).transact({ ...command, kind: "submit" });
   }
 
+  bulkSubmit(command: BulkSubmitDocumentsCommand): Promise<BulkDocumentCommandResult> {
+    return this.runBulkDocumentCommand(command, (selection) => ({
+      ...bulkNamedCommand(command, selection),
+      kind: "submit" as const
+    }));
+  }
+
   cancel(command: CancelDocumentCommand): Promise<DocumentSnapshot> {
     return this.stubForNamed(command).transact({ ...command, kind: "cancel" });
+  }
+
+  bulkCancel(command: BulkCancelDocumentsCommand): Promise<BulkDocumentCommandResult> {
+    return this.runBulkDocumentCommand(command, (selection) => ({
+      ...bulkNamedCommand(command, selection),
+      kind: "cancel" as const
+    }));
   }
 
   delete(command: DeleteDocumentCommand): Promise<DocumentSnapshot> {
@@ -73,31 +94,42 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
   }
 
   async bulkDelete(command: BulkDeleteDocumentsCommand): Promise<BulkDeleteDocumentsResult> {
-    const selections = normalizeBulkDeleteDocumentSelections(command.documents);
-    const deleted: BulkDeletedDocument[] = [];
-    const failed: BulkDeleteDocumentFailure[] = [];
-    for (const selection of selections) {
-      const deleteCommand = {
-        actor: command.actor,
-        doctype: command.doctype,
-        name: selection.name,
-        ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
-        ...(selection.expectedVersion === undefined ? {} : { expectedVersion: selection.expectedVersion }),
-        metadata: command.metadata ?? {},
-        kind: "delete" as const
-      };
-      const result = await this.stubForNamed(deleteCommand).tryTransact(deleteCommand);
-      if (result.ok) {
-        deleted.push({ name: selection.name, snapshot: result.snapshot });
-      } else {
-        failed.push(result.failure);
-      }
-    }
-    return { deleted, failed };
+    const result = await this.runBulkDocumentCommand(command, (selection) => ({
+      ...bulkNamedCommand(command, selection),
+      kind: "delete" as const
+    }));
+    return { deleted: result.succeeded, failed: result.failed };
   }
 
   transition(command: TransitionDocumentCommand): Promise<DocumentSnapshot> {
     return this.stubForNamed(command).transact({ ...command, kind: "transition" });
+  }
+
+  bulkTransition(command: BulkTransitionDocumentsCommand): Promise<BulkDocumentCommandResult> {
+    return this.runBulkDocumentCommand(command, (selection) => ({
+      ...bulkNamedCommand(command, selection),
+      action: command.action,
+      kind: "transition" as const
+    }));
+  }
+
+  private async runBulkDocumentCommand(
+    command: BulkDocumentsCommand,
+    buildCommand: (selection: { readonly name: string; readonly expectedVersion?: number }) => NamedAggregateCoordinatorCommand
+  ): Promise<BulkDocumentCommandResult> {
+    const selections = normalizeBulkDocumentSelections(command.documents);
+    const succeeded: BulkDocumentCommandEntry[] = [];
+    const failed: BulkDocumentCommandFailure[] = [];
+    for (const selection of selections) {
+      const aggregateCommand = buildCommand(selection);
+      const result = await this.stubForNamed(aggregateCommand).tryTransact(aggregateCommand);
+      if (result.ok) {
+        succeeded.push({ name: selection.name, snapshot: result.snapshot });
+      } else {
+        failed.push(result.failure);
+      }
+    }
+    return { succeeded, failed };
   }
 
   execute(command: ExecuteDomainCommand): Promise<DocumentSnapshot> {
@@ -163,6 +195,27 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
 
 function resolveTenant(command: { readonly actor: { readonly tenantId?: string }; readonly tenantId?: string }): string {
   return command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
+}
+
+function bulkNamedCommand(
+  command: BulkDocumentsCommand,
+  selection: { readonly name: string; readonly expectedVersion?: number }
+): {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly tenantId?: string;
+  readonly expectedVersion?: number;
+  readonly metadata: DocumentData;
+} {
+  return {
+    actor: command.actor,
+    doctype: command.doctype,
+    name: selection.name,
+    ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+    ...(selection.expectedVersion === undefined ? {} : { expectedVersion: selection.expectedVersion }),
+    metadata: command.metadata ?? {}
+  };
 }
 
 function previewName(doctype: DocTypeDefinition, data: Record<string, unknown>): string | null {

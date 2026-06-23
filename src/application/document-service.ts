@@ -98,34 +98,64 @@ export interface DeleteDocumentCommand {
   readonly metadata?: DocumentData;
 }
 
-export interface BulkDeleteDocumentSelection {
+export interface BulkDocumentSelection {
   readonly name: string;
   readonly expectedVersion?: number;
 }
 
-export interface BulkDeleteDocumentsCommand {
+export interface BulkDocumentsCommand {
   readonly actor: Actor;
   readonly doctype: string;
-  readonly documents: readonly BulkDeleteDocumentSelection[];
+  readonly documents: readonly BulkDocumentSelection[];
   readonly tenantId?: string;
   readonly metadata?: DocumentData;
 }
 
-export interface BulkDeletedDocument {
+export interface BulkDocumentCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly tenantId?: string;
+  readonly expectedVersion?: number;
+  readonly metadata?: DocumentData;
+}
+
+export interface BulkDocumentCommandEntry {
   readonly name: string;
   readonly snapshot: DocumentSnapshot;
 }
 
-export interface BulkDeleteDocumentFailure {
+export interface BulkDocumentCommandFailure {
   readonly name: string;
   readonly code: FrameworkErrorCode | "UNKNOWN";
   readonly message: string;
   readonly status: number;
 }
 
+export interface BulkDocumentCommandResult {
+  readonly succeeded: readonly BulkDocumentCommandEntry[];
+  readonly failed: readonly BulkDocumentCommandFailure[];
+}
+
+export interface BulkDeleteDocumentSelection extends BulkDocumentSelection {}
+
+export interface BulkDeleteDocumentsCommand extends BulkDocumentsCommand {}
+
+export interface BulkDeletedDocument extends BulkDocumentCommandEntry {}
+
+export interface BulkDeleteDocumentFailure extends BulkDocumentCommandFailure {}
+
 export interface BulkDeleteDocumentsResult {
   readonly deleted: readonly BulkDeletedDocument[];
   readonly failed: readonly BulkDeleteDocumentFailure[];
+}
+
+export interface BulkSubmitDocumentsCommand extends BulkDocumentsCommand {}
+
+export interface BulkCancelDocumentsCommand extends BulkDocumentsCommand {}
+
+export interface BulkTransitionDocumentsCommand extends BulkDocumentsCommand {
+  readonly action: string;
 }
 
 export interface SubmitDocumentCommand {
@@ -276,10 +306,13 @@ export interface DocumentCommandExecutor {
   create(command: CreateDocumentCommand): Promise<DocumentSnapshot>;
   update(command: UpdateDocumentCommand): Promise<DocumentSnapshot>;
   submit(command: SubmitDocumentCommand): Promise<DocumentSnapshot>;
+  bulkSubmit(command: BulkSubmitDocumentsCommand): Promise<BulkDocumentCommandResult>;
   cancel(command: CancelDocumentCommand): Promise<DocumentSnapshot>;
+  bulkCancel(command: BulkCancelDocumentsCommand): Promise<BulkDocumentCommandResult>;
   delete(command: DeleteDocumentCommand): Promise<DocumentSnapshot>;
   bulkDelete(command: BulkDeleteDocumentsCommand): Promise<BulkDeleteDocumentsResult>;
   transition(command: TransitionDocumentCommand): Promise<DocumentSnapshot>;
+  bulkTransition(command: BulkTransitionDocumentsCommand): Promise<BulkDocumentCommandResult>;
   execute(command: ExecuteDomainCommand): Promise<DocumentSnapshot>;
   comment(command: AddDocumentCommentCommand): Promise<DocumentSnapshot>;
   recordActivity(command: RecordDocumentActivityCommand): Promise<DocumentSnapshot>;
@@ -862,25 +895,25 @@ export class DocumentService implements DocumentCommandExecutor {
   }
 
   async bulkDelete(command: BulkDeleteDocumentsCommand): Promise<BulkDeleteDocumentsResult> {
-    const selections = normalizeBulkDeleteDocumentSelections(command.documents);
-    const deleted: BulkDeletedDocument[] = [];
-    const failed: BulkDeleteDocumentFailure[] = [];
-    for (const selection of selections) {
-      try {
-        const snapshot = await this.delete({
-          actor: command.actor,
-          doctype: command.doctype,
-          name: selection.name,
-          ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
-          ...(selection.expectedVersion === undefined ? {} : { expectedVersion: selection.expectedVersion }),
-          metadata: command.metadata ?? {}
-        });
-        deleted.push({ name: selection.name, snapshot });
-      } catch (error) {
-        failed.push(bulkDeleteDocumentFailure(selection.name, error));
-      }
-    }
-    return { deleted, failed };
+    const result = await this.runBulkDocumentCommand(command, (selection) => this.delete(bulkNamedCommand(command, selection)));
+    return { deleted: result.succeeded, failed: result.failed };
+  }
+
+  async bulkSubmit(command: BulkSubmitDocumentsCommand): Promise<BulkDocumentCommandResult> {
+    return this.runBulkDocumentCommand(command, (selection) => this.submit(bulkNamedCommand(command, selection)));
+  }
+
+  async bulkCancel(command: BulkCancelDocumentsCommand): Promise<BulkDocumentCommandResult> {
+    return this.runBulkDocumentCommand(command, (selection) => this.cancel(bulkNamedCommand(command, selection)));
+  }
+
+  async bulkTransition(command: BulkTransitionDocumentsCommand): Promise<BulkDocumentCommandResult> {
+    return this.runBulkDocumentCommand(command, (selection) =>
+      this.transition({
+        ...bulkNamedCommand(command, selection),
+        action: command.action
+      })
+    );
   }
 
   async submit(command: SubmitDocumentCommand): Promise<DocumentSnapshot> {
@@ -927,6 +960,24 @@ export class DocumentService implements DocumentCommandExecutor {
       eventType: doctype.events?.cancel ?? `${doctype.name}Cancelled`,
       payloadKind: "DocumentCancelled"
     });
+  }
+
+  private async runBulkDocumentCommand(
+    command: BulkDocumentsCommand,
+    run: (selection: BulkDocumentSelection) => Promise<DocumentSnapshot>
+  ): Promise<BulkDocumentCommandResult> {
+    const selections = normalizeBulkDocumentSelections(command.documents);
+    const succeeded: BulkDocumentCommandEntry[] = [];
+    const failed: BulkDocumentCommandFailure[] = [];
+    for (const selection of selections) {
+      try {
+        const snapshot = await run(selection);
+        succeeded.push({ name: selection.name, snapshot });
+      } catch (error) {
+        failed.push(bulkDocumentFailure(selection.name, error));
+      }
+    }
+    return { succeeded, failed };
   }
 
   private async requireExistingFromEvents(
@@ -1538,6 +1589,12 @@ const MAX_BULK_DELETE_DOCUMENTS = 100;
 export function normalizeBulkDeleteDocumentSelections(
   documents: readonly BulkDeleteDocumentSelection[]
 ): readonly BulkDeleteDocumentSelection[] {
+  return normalizeBulkDocumentSelections(documents);
+}
+
+export function normalizeBulkDocumentSelections(
+  documents: readonly BulkDocumentSelection[]
+): readonly BulkDocumentSelection[] {
   if (documents.length === 0) {
     throw badRequest("At least one document must be selected");
   }
@@ -1565,6 +1622,10 @@ export function normalizeBulkDeleteDocumentSelections(
 }
 
 export function bulkDeleteDocumentFailure(name: string, error: unknown): BulkDeleteDocumentFailure {
+  return bulkDocumentFailure(name, error);
+}
+
+export function bulkDocumentFailure(name: string, error: unknown): BulkDocumentCommandFailure {
   if (error instanceof FrameworkError) {
     return {
       name,
@@ -1578,6 +1639,17 @@ export function bulkDeleteDocumentFailure(name: string, error: unknown): BulkDel
     code: "UNKNOWN",
     message: error instanceof Error ? error.message : "Bulk delete failed",
     status: 500
+  };
+}
+
+function bulkNamedCommand(command: BulkDocumentsCommand, selection: BulkDocumentSelection): BulkDocumentCommand {
+  return {
+    actor: command.actor,
+    doctype: command.doctype,
+    name: selection.name,
+    ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+    ...(selection.expectedVersion === undefined ? {} : { expectedVersion: selection.expectedVersion }),
+    metadata: command.metadata ?? {}
   };
 }
 

@@ -1575,6 +1575,89 @@ describe("DocumentService", () => {
     await expect(projections.get("acme", "Note", stale.name)).resolves.toMatchObject({ docstatus: "draft" });
   });
 
+  it("bulk submits and cancels selected documents through lifecycle events", async () => {
+    const { documents, projections } = createServices(["e1", "e2", "e3", "e4", "e5"]);
+    const selected = await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Submit Selected" })
+    });
+    const stale = await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Submit Stale" })
+    });
+
+    const submitted = await documents.bulkSubmit({
+      actor: owner,
+      doctype: "Note",
+      documents: [
+        { name: selected.name, expectedVersion: selected.version },
+        { name: stale.name, expectedVersion: 99 }
+      ]
+    });
+
+    expect(submitted).toMatchObject({
+      succeeded: [{ name: selected.name, snapshot: { docstatus: "submitted", version: 2 } }],
+      failed: [{ name: stale.name, code: "DOCUMENT_CONFLICT", status: 409 }]
+    });
+
+    const cancelled = await documents.bulkCancel({
+      actor: owner,
+      doctype: "Note",
+      documents: [
+        { name: selected.name, expectedVersion: 2 },
+        { name: stale.name }
+      ]
+    });
+
+    expect(cancelled).toMatchObject({
+      succeeded: [{ name: selected.name, snapshot: { docstatus: "cancelled", version: 3 } }],
+      failed: [{ name: stale.name, code: "DOCUMENT_STATUS_CONFLICT", status: 409 }]
+    });
+    await expect(projections.get("acme", "Note", selected.name)).resolves.toMatchObject({ docstatus: "cancelled" });
+    await expect(projections.get("acme", "Note", stale.name)).resolves.toMatchObject({ docstatus: "draft" });
+  });
+
+  it("bulk transitions selected documents through workflow events", async () => {
+    const { documents, projections } = createServices(["e1", "e2", "e3"]);
+    const selected = await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Transition Selected" })
+    });
+    const stale = await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Transition Stale" })
+    });
+
+    const result = await documents.bulkTransition({
+      actor: owner,
+      doctype: "Note",
+      action: "close",
+      documents: [
+        { name: selected.name, expectedVersion: selected.version },
+        { name: stale.name, expectedVersion: 99 },
+        { name: "Transition Missing" }
+      ]
+    });
+
+    expect(result).toMatchObject({
+      succeeded: [{ name: selected.name, snapshot: { version: 2, data: { workflow_state: "Closed" } } }],
+      failed: [
+        { name: stale.name, code: "DOCUMENT_CONFLICT", status: 409 },
+        { name: "Transition Missing", code: "DOCUMENT_NOT_FOUND", status: 404 }
+      ]
+    });
+    await expect(projections.get("acme", "Note", selected.name)).resolves.toMatchObject({
+      data: { workflow_state: "Closed" }
+    });
+    await expect(projections.get("acme", "Note", stale.name)).resolves.toMatchObject({
+      data: { workflow_state: "Open" }
+    });
+  });
+
   it("rejects invalid bulk document delete selections before writing events", async () => {
     const { documents, events } = createServices(["e1"]);
     const kept = await documents.create({
