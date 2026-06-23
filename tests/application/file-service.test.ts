@@ -12,6 +12,7 @@ import {
   UserPermissionService,
   documentStream
 } from "../../src";
+import { MIN_MULTIPART_FILE_PART_BYTES } from "../../src";
 import type { FileScanner, FileScanTarget, FileStorage, PutFileObjectCommand } from "../../src";
 import { guest, now, owner } from "../helpers";
 
@@ -898,6 +899,464 @@ describe("FileService", () => {
     });
   });
 
+  it("reserves, uploads, and completes multipart files through event-sourced metadata", async () => {
+    const services = createFileServices(["reserve", "part-1", "part-2", "begin", "complete"], ["multipart"]);
+    const firstPart = repeatedBytes("a", MIN_MULTIPART_FILE_PART_BYTES);
+
+    const prepared = await services.files.prepareMultipartUpload({
+      actor: owner,
+      filename: "large.bin",
+      size: MIN_MULTIPART_FILE_PART_BYTES + 3,
+      contentType: "application/octet-stream",
+      isPrivate: false
+    });
+
+    expect(prepared).toMatchObject({
+      snapshot: {
+        doctype: "File",
+        name: "file_multipart",
+        version: 1,
+        data: {
+          filename: "large.bin",
+          key: "acme/files/file_multipart-large.bin",
+          content_type: "application/octet-stream",
+          size: MIN_MULTIPART_FILE_PART_BYTES + 3,
+          storage_state: "upload_pending",
+          multipart_upload_id: "memory-multipart-1",
+          direct_upload_expires_at: "2026-01-01T00:15:00.000Z"
+        }
+      },
+      upload: {
+        key: "acme/files/file_multipart-large.bin",
+        uploadId: "memory-multipart-1"
+      }
+    });
+
+    const first = await services.files.uploadMultipartPart({
+      actor: owner,
+      name: prepared.snapshot.name,
+      partNumber: 1,
+      body: firstPart
+    });
+    expect(first).toMatchObject({
+      part: { partNumber: 1 },
+      snapshot: {
+        version: 2,
+        data: {
+          multipart_parts: [{ partNumber: 1, etag: first.part.etag, size: MIN_MULTIPART_FILE_PART_BYTES }]
+        }
+      }
+    });
+    const second = await services.files.uploadMultipartPart({
+      actor: owner,
+      name: prepared.snapshot.name,
+      partNumber: 2,
+      body: "end"
+    });
+    expect(second).toMatchObject({
+      part: { partNumber: 2 },
+      snapshot: {
+        version: 3,
+        data: {
+          multipart_parts: [
+            { partNumber: 1, etag: first.part.etag, size: MIN_MULTIPART_FILE_PART_BYTES },
+            { partNumber: 2, etag: second.part.etag, size: 3 }
+          ]
+        }
+      }
+    });
+    await expect(services.files.download({ actor: owner, name: prepared.snapshot.name })).rejects.toMatchObject({
+      code: "FILE_UPLOAD_PENDING",
+      status: 409
+    });
+
+    const completed = await services.files.completeMultipartUpload({
+      actor: owner,
+      name: prepared.snapshot.name,
+      parts: [second.part, first.part],
+      expectedVersion: second.snapshot.version
+    });
+
+    expect(completed).toMatchObject({
+      version: 5,
+      data: {
+        storage_state: "available",
+        etag: `"memory-acme/files/file_multipart-large.bin-multipart-${String(MIN_MULTIPART_FILE_PART_BYTES + 3)}"`
+      }
+    });
+    const downloaded = await services.files.download({ actor: guest, name: prepared.snapshot.name });
+    const bytes = new Uint8Array(await new Response(downloaded.object.body).arrayBuffer());
+    expect(bytes.byteLength).toBe(MIN_MULTIPART_FILE_PART_BYTES + 3);
+    expect(new TextDecoder().decode(bytes.slice(MIN_MULTIPART_FILE_PART_BYTES))).toBe("end");
+    await expect(services.store.readStream(documentStream("acme", "File", "file_multipart"))).resolves.toMatchObject([
+      {
+        type: "FileMultipartUploadReserved",
+        payload: {
+          kind: "DocumentCreated",
+          data: {
+            storage_state: "upload_pending",
+            multipart_upload_id: "memory-multipart-1"
+          }
+        }
+      },
+      {
+        type: "FileMultipartPartUploaded",
+        payload: {
+          kind: "DomainCommandApplied",
+          command: "recordMultipartPart",
+          patch: {
+            multipart_parts: [{ partNumber: 1, etag: first.part.etag, size: MIN_MULTIPART_FILE_PART_BYTES }]
+          }
+        }
+      },
+      {
+        type: "FileMultipartPartUploaded",
+        payload: {
+          kind: "DomainCommandApplied",
+          command: "recordMultipartPart",
+          patch: {
+            multipart_parts: [
+              { partNumber: 1, etag: first.part.etag, size: MIN_MULTIPART_FILE_PART_BYTES },
+              { partNumber: 2, etag: second.part.etag, size: 3 }
+            ]
+          }
+        }
+      },
+      {
+        type: "FileMultipartUploadCompletionStarted",
+        payload: {
+          kind: "DomainCommandApplied",
+          command: "beginMultipartUploadCompletion",
+          patch: {
+            storage_state: "upload_completing"
+          }
+        }
+      },
+      {
+        type: "FileMultipartUploadCompleted",
+        payload: {
+          kind: "DomainCommandApplied",
+          command: "completeMultipartUpload",
+          patch: {
+            storage_state: "available"
+          }
+        }
+      }
+    ]);
+  });
+
+  it("rejects incomplete multipart completion metadata before consuming storage", async () => {
+    const services = createFileServices(["reserve", "part-1", "part-2", "begin", "complete"], ["multipart"]);
+    const firstPart = repeatedBytes("a", MIN_MULTIPART_FILE_PART_BYTES);
+    const prepared = await services.files.prepareMultipartUpload({
+      actor: owner,
+      filename: "large.bin",
+      size: MIN_MULTIPART_FILE_PART_BYTES + 3
+    });
+    const first = await services.files.uploadMultipartPart({
+      actor: owner,
+      name: prepared.snapshot.name,
+      partNumber: 1,
+      body: firstPart
+    });
+
+    await expect(
+      services.files.completeMultipartUpload({
+        actor: owner,
+        name: prepared.snapshot.name,
+        parts: [first.part],
+        expectedVersion: first.snapshot.version
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Multipart upload object size mismatch"
+    });
+
+    const second = await services.files.uploadMultipartPart({
+      actor: owner,
+      name: prepared.snapshot.name,
+      partNumber: 2,
+      body: "end"
+    });
+    await expect(
+      services.files.completeMultipartUpload({
+        actor: owner,
+        name: prepared.snapshot.name,
+        parts: [first.part, second.part],
+        expectedVersion: second.snapshot.version
+      })
+    ).resolves.toMatchObject({
+      version: 5,
+      data: { storage_state: "available" }
+    });
+  });
+
+  it("rejects unrecorded multipart completion parts before consuming storage", async () => {
+    const services = createFileServices(["reserve", "part-1", "part-2", "begin", "complete"], ["multipart"]);
+    const firstPart = repeatedBytes("a", MIN_MULTIPART_FILE_PART_BYTES);
+    const prepared = await services.files.prepareMultipartUpload({
+      actor: owner,
+      filename: "large.bin",
+      size: MIN_MULTIPART_FILE_PART_BYTES + 3
+    });
+    const first = await services.files.uploadMultipartPart({
+      actor: owner,
+      name: prepared.snapshot.name,
+      partNumber: 1,
+      body: firstPart
+    });
+    const unrecorded = await services.storage.multipartUploads!.uploadMultipartPart({
+      key: "acme/files/file_multipart-large.bin",
+      uploadId: "memory-multipart-1",
+      partNumber: 2,
+      body: "end"
+    });
+
+    await expect(
+      services.files.completeMultipartUpload({
+        actor: owner,
+        name: prepared.snapshot.name,
+        parts: [first.part, unrecorded],
+        expectedVersion: first.snapshot.version
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Multipart upload part 2 was not uploaded"
+    });
+
+    const second = await services.files.uploadMultipartPart({
+      actor: owner,
+      name: prepared.snapshot.name,
+      partNumber: 2,
+      body: "end"
+    });
+    await expect(
+      services.files.completeMultipartUpload({
+        actor: owner,
+        name: prepared.snapshot.name,
+        parts: [first.part, second.part],
+        expectedVersion: second.snapshot.version
+      })
+    ).resolves.toMatchObject({
+      version: 5,
+      data: { storage_state: "available" }
+    });
+  });
+
+  it("rejects oversized multipart parts before streaming to storage", async () => {
+    const storage = new CountingMultipartStorage();
+    const services = createFileServices(["reserve"], ["multipart"], { storage });
+    const prepared = await services.files.prepareMultipartUpload({
+      actor: owner,
+      filename: "large.bin",
+      size: 4
+    });
+
+    await expect(
+      services.files.uploadMultipartPart({
+        actor: owner,
+        name: prepared.snapshot.name,
+        partNumber: 1,
+        body: new Response("12345").body as ReadableStream<Uint8Array>,
+        size: 5
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Multipart upload part exceeds reserved file size"
+    });
+    expect(storage.uploadedParts).toBe(0);
+  });
+
+  it("rejects R2-incompatible multipart manifests before beginning completion", async () => {
+    const services = createFileServices(["reserve", "part-1", "part-2"], ["multipart"]);
+    const prepared = await services.files.prepareMultipartUpload({
+      actor: owner,
+      filename: "tiny-parts.bin",
+      size: 6
+    });
+    const first = await services.files.uploadMultipartPart({
+      actor: owner,
+      name: prepared.snapshot.name,
+      partNumber: 1,
+      body: "abc"
+    });
+    const second = await services.files.uploadMultipartPart({
+      actor: owner,
+      name: prepared.snapshot.name,
+      partNumber: 2,
+      body: "def"
+    });
+
+    await expect(
+      services.files.completeMultipartUpload({
+        actor: owner,
+        name: prepared.snapshot.name,
+        parts: [first.part, second.part],
+        expectedVersion: second.snapshot.version
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: `Multipart upload parts before the final part must be at least ${String(MIN_MULTIPART_FILE_PART_BYTES)} bytes`
+    });
+    await expect(services.queries.getDocument(owner, "File", prepared.snapshot.name)).resolves.toMatchObject({
+      version: 3,
+      data: { storage_state: "upload_pending" }
+    });
+  });
+
+  it("scans multipart upload objects before making them available", async () => {
+    const scanner = new StaticScanner("clean", { engine: "unit-av", message: "multipart-ok" });
+    const services = createFileServices(["reserve", "part", "begin", "complete"], ["multipart"], { scanner });
+    const prepared = await services.files.prepareMultipartUpload({
+      actor: owner,
+      filename: "multipart-clean.txt",
+      size: 5,
+      contentType: "text/plain",
+      isPrivate: false
+    });
+    const part = await services.files.uploadMultipartPart({
+      actor: owner,
+      name: prepared.snapshot.name,
+      partNumber: 1,
+      body: "hello"
+    });
+
+    await expect(
+      services.files.completeMultipartUpload({
+        actor: owner,
+        name: prepared.snapshot.name,
+        parts: [part.part],
+        expectedVersion: part.snapshot.version
+      })
+    ).resolves.toMatchObject({
+      version: 4,
+      data: {
+        storage_state: "available",
+        scan_status: "clean",
+        scan_checked_at: now,
+        scan_engine: "unit-av",
+        scan_message: "multipart-ok"
+      }
+    });
+    expect(scanner.targets).toEqual([
+      expect.objectContaining({
+        key: "acme/files/file_multipart-multipart-clean.txt",
+        filename: "multipart-clean.txt",
+        source: "multipart_upload",
+        size: 5,
+        contentType: "text/plain"
+      })
+    ]);
+  });
+
+  it("keeps multipart completion retryable when scanner adapters fail after storage completion", async () => {
+    const services = createFileServices(["reserve", "part", "begin", "complete"], ["multipart"], {
+      scanner: {
+        async scan() {
+          throw new Error("scanner unavailable");
+        }
+      }
+    });
+    const prepared = await services.files.prepareMultipartUpload({
+      actor: owner,
+      filename: "multipart-retry.txt",
+      size: 5,
+      contentType: "text/plain",
+      isPrivate: false
+    });
+    const part = await services.files.uploadMultipartPart({
+      actor: owner,
+      name: prepared.snapshot.name,
+      partNumber: 1,
+      body: "hello"
+    });
+
+    await expect(
+      services.files.completeMultipartUpload({
+        actor: owner,
+        name: prepared.snapshot.name,
+        parts: [part.part],
+        expectedVersion: part.snapshot.version
+      })
+    ).rejects.toThrow("scanner unavailable");
+
+    expect(services.storage.has("acme/files/file_multipart-multipart-retry.txt")).toBe(true);
+    await expect(services.queries.getDocument(owner, "File", prepared.snapshot.name)).resolves.toMatchObject({
+      version: 3,
+      data: {
+        storage_state: "upload_completing",
+        scan_status: "pending"
+      }
+    });
+    await expect(services.files.download({ actor: owner, name: prepared.snapshot.name })).rejects.toMatchObject({
+      code: "FILE_UPLOAD_PENDING",
+      status: 409
+    });
+
+    const retryScanner = new StaticScanner("clean", { engine: "unit-av", message: "retried" });
+    const retryFiles = new FileService({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      storage: services.storage,
+      clock: fixedClock(now),
+      ids: deterministicIds(["unused"]),
+      scanner: retryScanner
+    });
+    await expect(
+      retryFiles.completeMultipartUpload({
+        actor: owner,
+        name: prepared.snapshot.name,
+        parts: [part.part],
+        expectedVersion: part.snapshot.version
+      })
+    ).resolves.toMatchObject({
+      version: 4,
+      data: {
+        storage_state: "available",
+        scan_status: "clean",
+        scan_message: "retried"
+      }
+    });
+  });
+
+  it("aborts multipart uploads and removes pending metadata", async () => {
+    const services = createFileServices(["reserve", "part", "delete"], ["multipart"]);
+    const prepared = await services.files.prepareMultipartUpload({
+      actor: owner,
+      filename: "cancel.bin",
+      size: 4,
+      contentType: "application/octet-stream"
+    });
+    const part = await services.files.uploadMultipartPart({
+      actor: owner,
+      name: prepared.snapshot.name,
+      partNumber: 1,
+      body: "data"
+    });
+
+    await expect(
+      services.files.abortMultipartUpload({
+        actor: owner,
+        name: prepared.snapshot.name,
+        expectedVersion: part.snapshot.version
+      })
+    ).resolves.toMatchObject({
+      docstatus: "deleted",
+      version: 3
+    });
+    await expect(services.queries.getDocument(owner, "File", prepared.snapshot.name)).rejects.toMatchObject({
+      code: "DOCUMENT_NOT_FOUND"
+    });
+    await expect(
+      services.storage.multipartUploads?.completeMultipartUpload({
+        key: "acme/files/file_multipart-cancel.bin",
+        uploadId: "memory-multipart-1",
+        parts: [part.part]
+      })
+    ).rejects.toMatchObject({ code: "DOCUMENT_NOT_FOUND" });
+  });
+
   it("validates metadata attachment targets before appending file metadata events", async () => {
     const services = createFileServices(["create-1", "metadata-1"], ["object-1"]);
     const uploaded = await services.files.upload({
@@ -1163,11 +1622,11 @@ describe("FileService", () => {
 function createFileServices(
   ids: readonly string[] = ["create"],
   fileIds: readonly string[] = ["object"],
-  options: { readonly scanner?: FileScanner } = {}
+  options: { readonly scanner?: FileScanner; readonly storage?: InMemoryFileStorage } = {}
 ) {
   const registry = createRegistry({ doctypes: [fileDocType] });
   const store = new InMemoryDocumentStore();
-  const storage = new InMemoryFileStorage();
+  const storage = options.storage ?? new InMemoryFileStorage();
   const userPermissions = new UserPermissionService({
     events: store,
     clock: fixedClock(now),
@@ -1236,4 +1695,17 @@ class FailingDeleteStorage implements FileStorage {
   async delete(): Promise<void> {
     throw new Error("delete failed");
   }
+}
+
+class CountingMultipartStorage extends InMemoryFileStorage {
+  uploadedParts = 0;
+
+  override uploadMultipartPart(command: Parameters<InMemoryFileStorage["uploadMultipartPart"]>[0]) {
+    this.uploadedParts += 1;
+    return super.uploadMultipartPart(command);
+  }
+}
+
+function repeatedBytes(value: string, size: number): Uint8Array<ArrayBuffer> {
+  return new Uint8Array(size).fill(new TextEncoder().encode(value)[0] ?? 0);
 }

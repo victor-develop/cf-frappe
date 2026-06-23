@@ -3,7 +3,7 @@ import {
   isValidMultipartFilePartNumber,
   MIN_MULTIPART_FILE_PART_BYTES,
   type UploadedMultipartFilePart
-} from "../ports/file-storage.js";
+} from "./file-storage.js";
 
 export function ensureMultipartPartNumber(partNumber: number): void {
   if (!isValidMultipartFilePartNumber(partNumber)) {

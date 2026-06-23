@@ -13,9 +13,9 @@ import {
   type UploadedMultipartFilePart,
   type UploadMultipartFilePartCommand
 } from "../ports/file-storage.js";
-import { badRequest } from "../core/errors.js";
+import { ensureMultipartPartNumber, sortedUploadedMultipartParts } from "../ports/multipart-file-storage.js";
+import { badRequest, FrameworkError, notFound } from "../core/errors.js";
 import type { DocumentData, JsonValue } from "../core/types.js";
-import { ensureMultipartPartNumber, sortedUploadedMultipartParts } from "../adapters/multipart-file-storage.js";
 
 export interface R2DirectUploadSigner {
   createUpload(command: CreateDirectFileUploadCommand): Promise<DirectFileUpload>;
@@ -83,7 +83,9 @@ export class R2FileStorage implements FileStorage {
   async uploadMultipartPart(command: UploadMultipartFilePartCommand): Promise<UploadedMultipartFilePart> {
     ensureMultipartPartNumber(command.partNumber);
     const upload = this.bucket.resumeMultipartUpload(command.key, command.uploadId);
-    const part = await upload.uploadPart(command.partNumber, command.body);
+    const part = await r2MultipartOperation(command, "upload part", () =>
+      upload.uploadPart(command.partNumber, command.body)
+    );
     return { partNumber: part.partNumber, etag: part.etag };
   }
 
@@ -93,16 +95,61 @@ export class R2FileStorage implements FileStorage {
       etag: part.etag
     }));
     const upload = this.bucket.resumeMultipartUpload(command.key, command.uploadId);
-    return metadataFromR2Object(await upload.complete(parts));
+    return metadataFromR2Object(await r2MultipartOperation(command, "complete", () => upload.complete(parts)));
   }
 
   async abortMultipartUpload(command: AbortMultipartFileUploadCommand): Promise<void> {
-    await this.bucket.resumeMultipartUpload(command.key, command.uploadId).abort();
+    await r2MultipartOperation(command, "abort", () =>
+      this.bucket.resumeMultipartUpload(command.key, command.uploadId).abort()
+    );
   }
 
   async delete(key: string): Promise<void> {
     await this.bucket.delete(key);
   }
+}
+
+async function r2MultipartOperation<T>(
+  command: { readonly key: string; readonly uploadId: string },
+  action: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof FrameworkError) {
+      throw error;
+    }
+    if (isMissingMultipartUploadError(error)) {
+      throw notFound(`Multipart upload '${command.uploadId}' was not found`);
+    }
+    throw new FrameworkError(
+      "FILE_STORAGE_ERROR",
+      `R2 multipart upload ${action} failed for '${command.key}': ${errorMessage(error)}`,
+      { status: 502 }
+    );
+  }
+}
+
+function isMissingMultipartUploadError(error: unknown): boolean {
+  const text = `${errorName(error)} ${errorMessage(error)}`.toLowerCase();
+  return (
+    text.includes("not found") ||
+    text.includes("does not exist") ||
+    text.includes("no such upload") ||
+    text.includes("expired") ||
+    text.includes("aborted")
+  );
+}
+
+function errorName(error: unknown): string {
+  return typeof error === "object" && error !== null && "name" in error && typeof error.name === "string"
+    ? error.name
+    : "";
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function metadataFromR2Object(object: R2Object): FileObjectMetadata {

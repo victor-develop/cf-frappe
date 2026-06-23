@@ -23,7 +23,7 @@ Observed counts:
 As of the R2 multipart storage slice:
 
 - Vitest files: `74`
-- Vitest cases: `777`
+- Vitest cases: `790`
 
 ## Implication
 

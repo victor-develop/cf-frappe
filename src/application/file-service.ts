@@ -18,12 +18,26 @@ import {
   SYSTEM_MANAGER_ROLE,
   type Actor,
   type DocumentData,
-  type DocumentSnapshot
+  type DocumentSnapshot,
+  type JsonValue
 } from "../core/types.js";
+import {
+  ensureR2CompatibleMultipartPartSizes,
+  sortedUploadedMultipartParts
+} from "../ports/multipart-file-storage.js";
 import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
 import type { FileScanner, FileScanResult, FileScanSource, FileScanTarget } from "../ports/file-scanner.js";
-import type { DirectFileUpload, FileContent, FileObjectMetadata, FileStorage, StoredFileObject } from "../ports/file-storage.js";
+import type {
+  DirectFileUpload,
+  FileContent,
+  FileObjectMetadata,
+  FileStorage,
+  MultipartFilePartContent,
+  MultipartFileUpload,
+  StoredFileObject,
+  UploadedMultipartFilePart
+} from "../ports/file-storage.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 import { cryptoIdGenerator } from "../ports/id-generator.js";
 
@@ -75,6 +89,26 @@ export interface PrepareDirectUploadCommand {
 }
 
 export interface CompleteDirectUploadCommand extends DownloadFileCommand {
+  readonly expectedVersion?: number;
+  readonly metadata?: DocumentData;
+}
+
+export interface PrepareMultipartUploadCommand extends PrepareDirectUploadCommand {}
+
+export interface UploadMultipartPartCommand extends DownloadFileCommand {
+  readonly partNumber: number;
+  readonly body: MultipartFilePartContent;
+  readonly size?: number;
+  readonly metadata?: DocumentData;
+}
+
+export interface CompleteMultipartUploadCommand extends DownloadFileCommand {
+  readonly parts: readonly UploadedMultipartFilePart[];
+  readonly expectedVersion?: number;
+  readonly metadata?: DocumentData;
+}
+
+export interface AbortMultipartUploadCommand extends DownloadFileCommand {
   readonly expectedVersion?: number;
   readonly metadata?: DocumentData;
 }
@@ -162,6 +196,16 @@ export interface UploadedFile {
 export interface PreparedDirectUpload {
   readonly snapshot: DocumentSnapshot;
   readonly upload: DirectFileUpload;
+}
+
+export interface PreparedMultipartUpload {
+  readonly snapshot: DocumentSnapshot;
+  readonly upload: MultipartFileUpload;
+}
+
+export interface UploadedMultipartPartResult {
+  readonly part: UploadedMultipartFilePart;
+  readonly snapshot: DocumentSnapshot;
 }
 
 export interface DownloadedFile {
@@ -451,6 +495,184 @@ export class FileService {
     });
   }
 
+  async prepareMultipartUpload(command: PrepareMultipartUploadCommand): Promise<PreparedMultipartUpload> {
+    if (!this.storage.multipartUploads) {
+      throw badRequest("Multipart uploads are not supported by this file storage");
+    }
+    const filename = sanitizeFilename(command.filename);
+    const size = normalizeFileSize(command.size);
+    if (size > this.maxFileBytes) {
+      throw badRequest(`File exceeds ${this.maxFileBytes} bytes`);
+    }
+
+    const contentType = command.contentType ?? "application/octet-stream";
+    const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
+    await this.validateAttachmentTarget(command.actor, tenantId, command.attachedTo);
+    const fileName = this.ids.next("file_");
+    const key = objectKey(tenantId, fileName, filename);
+    const expiresAt = addSeconds(this.clock.now(), normalizeDirectUploadExpiry(command.expiresInSeconds));
+    const baseData: DocumentData = {
+      filename,
+      key,
+      content_type: contentType,
+      size,
+      is_private: command.isPrivate ?? true,
+      uploaded_by: command.actor.id,
+      uploaded_at: this.clock.now(),
+      storage_state: "upload_pending",
+      direct_upload_expires_at: expiresAt,
+      ...(this.scanner === undefined ? {} : { scan_status: "pending" }),
+      ...(command.attachedTo
+        ? {
+            attached_to_doctype: command.attachedTo.doctype,
+            attached_to_name: command.attachedTo.name
+          }
+        : {})
+    };
+    this.preflightCreate(command.actor, baseData);
+    const upload = await this.storage.multipartUploads.createMultipartUpload({
+      key,
+      contentType,
+      filename,
+      customMetadata: {
+        tenantId,
+        uploadedBy: command.actor.id
+      }
+    });
+    try {
+      const snapshot = await this.documents.create({
+        actor: command.actor,
+        doctype: this.fileDoctype,
+        name: fileName,
+        tenantId,
+        data: {
+          ...baseData,
+          multipart_upload_id: upload.uploadId
+        },
+        eventType: "FileMultipartUploadReserved",
+        metadata: command.metadata ?? {}
+      });
+      return { snapshot, upload };
+    } catch (error) {
+      await this.storage.multipartUploads.abortMultipartUpload({ key, uploadId: upload.uploadId }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async uploadMultipartPart(command: UploadMultipartPartCommand): Promise<UploadedMultipartPartResult> {
+    const multipartUploads = this.requireMultipartUploads();
+    const current = await this.multipartUploadSnapshot(command, ["upload_pending"]);
+    const uploadId = this.multipartUploadId(current);
+    const size = multipartPartSize(command.body, command.size);
+    ensureMultipartPartFitsReservation(current, command.partNumber, size);
+    const part = await multipartUploads.uploadMultipartPart({
+      key: stringField(current, "key"),
+      uploadId,
+      partNumber: command.partNumber,
+      body: command.body
+    });
+    const snapshot = await this.documents.execute({
+      actor: command.actor,
+      doctype: this.fileDoctype,
+      name: command.name,
+      command: "recordMultipartPart",
+      input: {
+        multipart_parts: upsertMultipartPartManifest(multipartPartManifest(current), {
+          partNumber: part.partNumber,
+          etag: part.etag,
+          size
+        })
+      },
+      ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+      expectedVersion: current.version,
+      metadata: command.metadata ?? {}
+    });
+    return { part, snapshot };
+  }
+
+  async completeMultipartUpload(command: CompleteMultipartUploadCommand): Promise<DocumentSnapshot> {
+    const multipartUploads = this.requireMultipartUploads();
+    const current = await this.multipartUploadSnapshot(command, ["upload_pending", "upload_completing"]);
+    const key = stringField(current, "key");
+    ensureMultipartCompletionMatchesManifest(current, command.parts);
+    const completing = current.data.storage_state === "upload_completing"
+      ? current
+      : await this.documents.execute({
+          actor: command.actor,
+          doctype: this.fileDoctype,
+          name: command.name,
+          command: "beginMultipartUploadCompletion",
+          input: { storage_state: "upload_completing" },
+          ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+          ...(command.expectedVersion === undefined ? {} : { expectedVersion: command.expectedVersion }),
+          metadata: command.metadata ?? {}
+        });
+    const object = await this.completedMultipartObject({
+      multipartUploads,
+      snapshot: completing,
+      parts: command.parts
+    });
+    ensureDirectUploadMatches(completing, object, "Multipart upload");
+    const scan = await this.scanObject({
+      actor: command.actor,
+      tenantId: command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID,
+      filename: stringField(completing, "filename"),
+      source: "multipart_upload",
+      object
+    });
+    const scanPatch = scan ? fileScanPatch(scan, this.clock.now()) : {};
+    if (scan?.status === "infected") {
+      const snapshot = await this.documents.execute({
+        actor: command.actor,
+        doctype: this.fileDoctype,
+        name: command.name,
+        command: "failScan",
+        input: {
+          storage_state: "scan_failed",
+          etag: object.httpEtag ?? object.etag,
+          ...scanPatch
+        },
+        ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+        expectedVersion: completing.version,
+        metadata: command.metadata ?? {}
+      });
+      await this.storage.delete(key).catch(() => undefined);
+      throw fileScanFailed(scan, snapshot);
+    }
+    return this.documents.execute({
+      actor: command.actor,
+      doctype: this.fileDoctype,
+      name: command.name,
+      command: "completeMultipartUpload",
+      input: {
+        storage_state: "available",
+        etag: object.httpEtag ?? object.etag,
+        ...scanPatch
+      },
+      ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+      expectedVersion: completing.version,
+      metadata: command.metadata ?? {}
+    });
+  }
+
+  async abortMultipartUpload(command: AbortMultipartUploadCommand): Promise<DocumentSnapshot> {
+    const multipartUploads = this.requireMultipartUploads();
+    const current = await this.multipartUploadSnapshot(command, ["upload_pending"]);
+    ensureExpectedVersion(current, command.expectedVersion);
+    await multipartUploads.abortMultipartUpload({
+      key: stringField(current, "key"),
+      uploadId: this.multipartUploadId(current)
+    });
+    return this.documents.delete({
+      actor: command.actor,
+      doctype: this.fileDoctype,
+      name: command.name,
+      ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+      expectedVersion: current.version,
+      metadata: command.metadata ?? {}
+    });
+  }
+
   async dashboard(actor: Actor, query: FileDashboardQuery = {}): Promise<FileDashboard> {
     const limit = normalizeLimit(query.limit);
     const filters = {
@@ -594,7 +816,7 @@ export class FileService {
       command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID
     );
     const key = stringField(snapshot, "key");
-    if (snapshot.data.storage_state === "upload_pending") {
+    if (snapshot.data.storage_state === "upload_pending" || snapshot.data.storage_state === "upload_completing") {
       throw new FrameworkError("FILE_UPLOAD_PENDING", `${this.fileDoctype}/${command.name} upload has not been finalized`, {
         status: 409
       });
@@ -730,6 +952,65 @@ export class FileService {
       return;
     }
     await this.queries.getDocument(actor, attachedTo.doctype, attachedTo.name, tenantId);
+  }
+
+  private requireMultipartUploads(): NonNullable<FileStorage["multipartUploads"]> {
+    if (!this.storage.multipartUploads) {
+      throw badRequest("Multipart uploads are not supported by this file storage");
+    }
+    return this.storage.multipartUploads;
+  }
+
+  private async multipartUploadSnapshot(
+    command: DownloadFileCommand,
+    allowedStates: readonly string[]
+  ): Promise<DocumentSnapshot> {
+    const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
+    const current = await this.queries.getDocument(command.actor, this.fileDoctype, command.name, tenantId);
+    if (current.data.storage_state === "delete_requested") {
+      throw new FrameworkError("DOCUMENT_DELETED", `${this.fileDoctype}/${command.name} is pending deletion`, {
+        status: 410
+      });
+    }
+    if (
+      typeof current.data.storage_state !== "string" ||
+      !allowedStates.includes(current.data.storage_state) ||
+      !stringData(current, "multipart_upload_id")
+    ) {
+      throw badRequest(`${this.fileDoctype}/${command.name} is not pending multipart upload`);
+    }
+    const doctype = this.registry.get(this.fileDoctype);
+    if (!can(command.actor, doctype, "metadata", current)) {
+      throw permissionDenied(
+        `Actor '${command.actor.id}' cannot execute multipart upload on ${this.fileDoctype}/${command.name}`
+      );
+    }
+    return current;
+  }
+
+  private multipartUploadId(snapshot: DocumentSnapshot): string {
+    const uploadId = stringData(snapshot, "multipart_upload_id");
+    if (!uploadId) {
+      throw badRequest(`${snapshot.doctype}/${snapshot.name} has no multipart upload`);
+    }
+    return uploadId;
+  }
+
+  private async completedMultipartObject(command: {
+    readonly multipartUploads: NonNullable<FileStorage["multipartUploads"]>;
+    readonly snapshot: DocumentSnapshot;
+    readonly parts: readonly UploadedMultipartFilePart[];
+  }): Promise<FileObjectMetadata> {
+    const key = stringField(command.snapshot, "key");
+    const existing = await this.storage.head(key);
+    if (existing) {
+      return existing;
+    }
+    return command.multipartUploads.completeMultipartUpload({
+      key,
+      uploadId: this.multipartUploadId(command.snapshot),
+      parts: command.parts
+    });
   }
 
   private async scanObject(command: {
@@ -918,13 +1199,17 @@ function addSeconds(isoTimestamp: string, seconds: number): string {
   return new Date(timestamp + seconds * 1000).toISOString();
 }
 
-function ensureDirectUploadMatches(snapshot: DocumentSnapshot, object: FileObjectMetadata): void {
+function ensureDirectUploadMatches(
+  snapshot: DocumentSnapshot,
+  object: FileObjectMetadata,
+  label = "Direct upload"
+): void {
   const expectedSize = numberData(snapshot, "size");
   if (object.size !== expectedSize) {
-    throw badRequest("Direct upload object size mismatch");
+    throw badRequest(`${label} object size mismatch`);
   }
   if (normalizeContentType(object.contentType) !== normalizeContentType(stringData(snapshot, "content_type"))) {
-    throw badRequest("Direct upload object content type mismatch");
+    throw badRequest(`${label} object content type mismatch`);
   }
 }
 
@@ -982,4 +1267,100 @@ function stringField(snapshot: DocumentSnapshot, field: string): string {
     throw badRequest(`${snapshot.doctype}/${snapshot.name} has no ${field}`);
   }
   return value;
+}
+
+function ensureExpectedVersion(snapshot: DocumentSnapshot, expectedVersion: number | undefined): void {
+  if (expectedVersion !== undefined && snapshot.version !== expectedVersion) {
+    throw conflict(`Expected version ${expectedVersion}, found ${snapshot.version}`);
+  }
+}
+
+interface MultipartPartManifestEntry {
+  readonly [key: string]: JsonValue;
+  readonly partNumber: number;
+  readonly etag: string;
+  readonly size: number;
+}
+
+function multipartPartSize(body: MultipartFilePartContent, size: number | undefined): number {
+  if (size !== undefined) {
+    return normalizeFileSize(size);
+  }
+  if (typeof body === "string") {
+    return new TextEncoder().encode(body).byteLength;
+  }
+  if (body instanceof Blob) {
+    return body.size;
+  }
+  if (ArrayBuffer.isView(body)) {
+    return body.byteLength;
+  }
+  if (body instanceof ReadableStream) {
+    throw badRequest("Multipart upload part size is required for streamed bodies");
+  }
+  return body.byteLength;
+}
+
+function multipartPartManifest(snapshot: DocumentSnapshot): readonly MultipartPartManifestEntry[] {
+  const value = snapshot.data.multipart_parts;
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((entry): MultipartPartManifestEntry[] => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      return [];
+    }
+    const part = entry as Record<string, unknown>;
+    return typeof part.partNumber === "number" &&
+      Number.isInteger(part.partNumber) &&
+      typeof part.etag === "string" &&
+      typeof part.size === "number" &&
+      Number.isInteger(part.size)
+      ? [{ partNumber: part.partNumber, etag: part.etag, size: part.size }]
+      : [];
+  });
+}
+
+function upsertMultipartPartManifest(
+  manifest: readonly MultipartPartManifestEntry[],
+  part: MultipartPartManifestEntry
+): readonly MultipartPartManifestEntry[] {
+  return [
+    ...manifest.filter((entry) => entry.partNumber !== part.partNumber),
+    part
+  ].sort((left, right) => left.partNumber - right.partNumber);
+}
+
+function ensureMultipartPartFitsReservation(
+  snapshot: DocumentSnapshot,
+  partNumber: number,
+  size: number
+): void {
+  const previousTotal = multipartPartManifest(snapshot)
+    .filter((part) => part.partNumber !== partNumber)
+    .reduce((total, part) => total + part.size, 0);
+  if (previousTotal + size > numberData(snapshot, "size")) {
+    throw badRequest("Multipart upload part exceeds reserved file size");
+  }
+}
+
+function ensureMultipartCompletionMatchesManifest(
+  snapshot: DocumentSnapshot,
+  completedParts: readonly UploadedMultipartFilePart[]
+): void {
+  const orderedParts = sortedUploadedMultipartParts(completedParts);
+  const manifest = multipartPartManifest(snapshot);
+  const manifestByPart = new Map(manifest.map((part) => [part.partNumber, part]));
+  let totalSize = 0;
+  for (const completed of orderedParts) {
+    const recorded = manifestByPart.get(completed.partNumber);
+    if (!recorded || recorded.etag !== completed.etag) {
+      throw badRequest(`Multipart upload part ${String(completed.partNumber)} was not uploaded`);
+    }
+    totalSize += recorded.size;
+  }
+  ensureR2CompatibleMultipartPartSizes(orderedParts.map((part) => manifestByPart.get(part.partNumber)?.size ?? 0));
+  if (totalSize !== numberData(snapshot, "size")) {
+    throw badRequest("Multipart upload object size mismatch");
+  }
 }

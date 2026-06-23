@@ -15,12 +15,12 @@ import {
   type UploadMultipartFilePartCommand,
   type UploadedMultipartFilePart
 } from "../../ports/file-storage.js";
-import { notFound } from "../../core/errors.js";
 import {
   ensureMultipartPartNumber,
   ensureR2CompatibleMultipartPartSizes,
   sortedUploadedMultipartParts
-} from "../multipart-file-storage.js";
+} from "../../ports/multipart-file-storage.js";
+import { notFound } from "../../core/errors.js";
 
 interface StoredEntry {
   readonly bytes: Uint8Array;

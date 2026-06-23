@@ -12,8 +12,14 @@ export interface FileDocumentData extends DocumentData {
   readonly uploaded_by: string;
   readonly uploaded_at: string;
   readonly etag?: string;
-  readonly storage_state: "upload_pending" | "available" | "scan_failed" | "delete_requested";
+  readonly storage_state: "upload_pending" | "upload_completing" | "available" | "scan_failed" | "delete_requested";
   readonly direct_upload_expires_at?: string;
+  readonly multipart_upload_id?: string;
+  readonly multipart_parts?: readonly {
+    readonly partNumber: number;
+    readonly etag: string;
+    readonly size: number;
+  }[];
   readonly scan_status?: "pending" | "clean" | "infected";
   readonly scan_checked_at?: string;
   readonly scan_engine?: string;
@@ -42,10 +48,12 @@ export const fileDocType: DocTypeDefinition<FileDocumentData> = defineDocType<Fi
       name: "storage_state",
       label: "Storage State",
       type: "select",
-      options: ["upload_pending", "available", "scan_failed", "delete_requested"],
+      options: ["upload_pending", "upload_completing", "available", "scan_failed", "delete_requested"],
       defaultValue: "available"
     },
     { name: "direct_upload_expires_at", label: "Direct Upload Expires At", type: "datetime", readOnly: true },
+    { name: "multipart_upload_id", label: "Multipart Upload ID", type: "text", readOnly: true },
+    { name: "multipart_parts", label: "Multipart Parts", type: "json", readOnly: true },
     { name: "scan_status", label: "Scan Status", type: "select", options: ["pending", "clean", "infected"], readOnly: true },
     { name: "scan_checked_at", label: "Scan Checked At", type: "datetime", readOnly: true },
     { name: "scan_engine", label: "Scan Engine", type: "text", readOnly: true },
@@ -110,6 +118,29 @@ export const fileDocType: DocTypeDefinition<FileDocumentData> = defineDocType<Fi
       name: "completeDirectUpload",
       eventType: "FileDirectUploadCompleted",
       fields: ["storage_state", "etag", "scan_status", "scan_checked_at", "scan_engine", "scan_message"],
+      internal: true,
+      allowReadOnlyFields: true,
+      permissionAction: "metadata"
+    },
+    {
+      name: "beginMultipartUploadCompletion",
+      eventType: "FileMultipartUploadCompletionStarted",
+      fields: ["storage_state"],
+      internal: true,
+      permissionAction: "metadata"
+    },
+    {
+      name: "completeMultipartUpload",
+      eventType: "FileMultipartUploadCompleted",
+      fields: ["storage_state", "etag", "scan_status", "scan_checked_at", "scan_engine", "scan_message"],
+      internal: true,
+      allowReadOnlyFields: true,
+      permissionAction: "metadata"
+    },
+    {
+      name: "recordMultipartPart",
+      eventType: "FileMultipartPartUploaded",
+      fields: ["multipart_parts"],
       internal: true,
       allowReadOnlyFields: true,
       permissionAction: "metadata"

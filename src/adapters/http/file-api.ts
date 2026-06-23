@@ -1,5 +1,9 @@
 import { Hono } from "hono";
-import { isPreviewableFileContentType, type FileService, type UpdateFileMetadataCommand } from "../../application/file-service.js";
+import {
+  isPreviewableFileContentType,
+  type FileService,
+  type UpdateFileMetadataCommand
+} from "../../application/file-service.js";
 import { badRequest } from "../../core/errors.js";
 import { fileContentHeaders } from "../file-content.js";
 import type { ActorResolver } from "./actor.js";
@@ -64,8 +68,25 @@ export function createFileApi(options: FileApiOptions): Hono {
   app.post("/api/files/direct-upload", async (c) => {
     const actor = await options.actor(c.req.raw);
     const body = await readJsonObject(c.req.raw, { maxJsonBytes });
-    const input = directUploadInput(body);
+    const input = uploadReservationInput(body, "direct upload");
     const prepared = await options.files.prepareDirectUpload({
+      actor,
+      filename: input.filename,
+      size: input.size,
+      ...(input.contentType === undefined ? {} : { contentType: input.contentType }),
+      ...(input.isPrivate === undefined ? {} : { isPrivate: input.isPrivate }),
+      ...(input.attachedTo === undefined ? {} : { attachedTo: input.attachedTo }),
+      ...(input.expiresInSeconds === undefined ? {} : { expiresInSeconds: input.expiresInSeconds }),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: prepared.snapshot, upload: prepared.upload }, 201);
+  });
+
+  app.post("/api/files/multipart-upload", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const body = await readJsonObject(c.req.raw, { maxJsonBytes });
+    const input = uploadReservationInput(body, "multipart upload");
+    const prepared = await options.files.prepareMultipartUpload({
       actor,
       filename: input.filename,
       size: input.size,
@@ -155,6 +176,47 @@ export function createFileApi(options: FileApiOptions): Hono {
     return c.json({ data: snapshot });
   });
 
+  app.put("/api/files/:name/multipart-parts/:partNumber", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const contentLength = contentLengthHeader(c.req.raw.headers);
+    const uploaded = await options.files.uploadMultipartPart({
+      actor,
+      name: c.req.param("name"),
+      partNumber: pathInteger(c.req.param("partNumber"), "partNumber"),
+      body: c.req.raw.body ?? new Uint8Array(),
+      ...(contentLength === undefined ? {} : { size: contentLength }),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ part: uploaded.part, data: uploaded.snapshot });
+  });
+
+  app.post("/api/files/:name/complete-multipart-upload", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const body = await readJsonObject(c.req.raw, { maxJsonBytes });
+    const input = multipartCompletionInput(body);
+    const snapshot = await options.files.completeMultipartUpload({
+      actor,
+      name: c.req.param("name"),
+      parts: input.parts,
+      ...(input.expectedVersion === undefined ? {} : { expectedVersion: input.expectedVersion }),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: snapshot });
+  });
+
+  app.post("/api/files/:name/abort-multipart-upload", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const body = await readJsonObject(c.req.raw, { allowEmpty: true, maxJsonBytes });
+    const expectedVersion = expectedVersionBody(body);
+    const snapshot = await options.files.abortMultipartUpload({
+      actor,
+      name: c.req.param("name"),
+      ...(expectedVersion === undefined ? {} : { expectedVersion }),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: snapshot });
+  });
+
   app.delete("/api/files/:name", async (c) => {
     const actor = await options.actor(c.req.raw);
     const expectedVersion = parseOptionalInteger(c.req.query("expectedVersion"));
@@ -218,6 +280,11 @@ type DirectUploadInput = {
   readonly isPrivate?: boolean;
   readonly attachedTo?: Exclude<UpdateFileMetadataCommand["attachedTo"], null>;
   readonly expiresInSeconds?: number;
+};
+
+type MultipartCompletionInput = {
+  readonly parts: readonly { readonly partNumber: number; readonly etag: string }[];
+  readonly expectedVersion?: number;
 };
 
 type BulkDeleteInput = {
@@ -311,7 +378,7 @@ function bulkFileSelectionInput(
   return { name: item.name };
 }
 
-function directUploadInput(body: Record<string, unknown>): DirectUploadInput {
+function uploadReservationInput(body: Record<string, unknown>, operation: "direct upload" | "multipart upload"): DirectUploadInput {
   const unknown = Object.keys(body).filter(
     (key) =>
       ![
@@ -328,7 +395,7 @@ function directUploadInput(body: Record<string, unknown>): DirectUploadInput {
       ].includes(key)
   );
   if (unknown.length > 0) {
-    throw badRequest(`Unknown direct upload field '${unknown[0]}'`);
+    throw badRequest(`Unknown ${operation} field '${unknown[0]}'`);
   }
   if (typeof body.filename !== "string") {
     throw badRequest("filename must be a string");
@@ -383,6 +450,39 @@ function directUploadInput(body: Record<string, unknown>): DirectUploadInput {
   };
 }
 
+function multipartCompletionInput(body: Record<string, unknown>): MultipartCompletionInput {
+  const unknown = Object.keys(body).filter((key) => !["parts", "expectedVersion"].includes(key));
+  if (unknown.length > 0) {
+    throw badRequest(`Unknown multipart upload completion field '${unknown[0]}'`);
+  }
+  if (!Array.isArray(body.parts)) {
+    throw badRequest("parts must be an array");
+  }
+  const expectedVersion = expectedVersionBody({ expectedVersion: body.expectedVersion });
+  return {
+    parts: body.parts.map((part, index) => multipartPartInput(part, index)),
+    ...(expectedVersion === undefined ? {} : { expectedVersion })
+  };
+}
+
+function multipartPartInput(value: unknown, index: number): { readonly partNumber: number; readonly etag: string } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw badRequest(`parts[${String(index)}] must be an object`);
+  }
+  const part = value as Record<string, unknown>;
+  const unknown = Object.keys(part).filter((key) => !["partNumber", "etag"].includes(key));
+  if (unknown.length > 0) {
+    throw badRequest(`Unknown multipart upload completion field 'parts[${String(index)}].${unknown[0]}'`);
+  }
+  if (typeof part.partNumber !== "number" || !Number.isInteger(part.partNumber)) {
+    throw badRequest(`parts[${String(index)}].partNumber must be an integer`);
+  }
+  if (typeof part.etag !== "string") {
+    throw badRequest(`parts[${String(index)}].etag must be a string`);
+  }
+  return { partNumber: part.partNumber, etag: part.etag };
+}
+
 function expectedVersionBody(body: Record<string, unknown>): number | undefined {
   const unknown = Object.keys(body).filter((key) => key !== "expectedVersion");
   if (unknown.length > 0) {
@@ -395,6 +495,26 @@ function expectedVersionBody(body: Record<string, unknown>): number | undefined 
     throw badRequest("expectedVersion must be an integer");
   }
   return body.expectedVersion;
+}
+
+function pathInteger(value: string, label: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) {
+    throw badRequest(`${label} must be an integer`);
+  }
+  return parsed;
+}
+
+function contentLengthHeader(headers: Headers): number | undefined {
+  const value = headers.get("content-length");
+  if (value === null) {
+    return undefined;
+  }
+  const size = Number(value);
+  if (!Number.isInteger(size) || size < 0) {
+    throw badRequest("content-length must be a non-negative integer");
+  }
+  return size;
 }
 
 function fileMetadataPatch(body: Record<string, unknown>): MutableFileMetadataPatch {

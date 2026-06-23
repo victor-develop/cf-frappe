@@ -11,6 +11,7 @@ import {
   QueryService,
   unsafeHeaderActorResolver
 } from "../../src";
+import { MIN_MULTIPART_FILE_PART_BYTES } from "../../src";
 import { now } from "../helpers";
 
 describe("file api", () => {
@@ -583,6 +584,154 @@ describe("file api", () => {
     await expect(downloaded.text()).resolves.toBe("hello");
   });
 
+  it("reserves, uploads parts, and completes multipart uploads through the file API", async () => {
+    const { app } = makeAppFixture(
+      MIN_MULTIPART_FILE_PART_BYTES + 16,
+      ["reserve", "part-1", "part-2", "begin", "complete"],
+      ["multipart"]
+    );
+    const firstPart = repeatedBytes("a", MIN_MULTIPART_FILE_PART_BYTES);
+
+    const prepared = await app.request("/api/files/multipart-upload", {
+      method: "POST",
+      headers: jsonHeaders("owner@example.com", "User"),
+      body: JSON.stringify({
+        filename: "large.txt",
+        size: MIN_MULTIPART_FILE_PART_BYTES + 4,
+        content_type: "text/plain",
+        is_private: false
+      })
+    });
+
+    expect(prepared.status).toBe(201);
+    const preparedBody = await prepared.json() as {
+      data: { readonly name: string; readonly version: number };
+      upload: { readonly uploadId: string };
+    };
+    expect(preparedBody).toMatchObject({
+      data: {
+        name: "file_multipart",
+        version: 1,
+        data: {
+          storage_state: "upload_pending",
+          multipart_upload_id: "memory-multipart-1"
+        }
+      },
+      upload: { uploadId: "memory-multipart-1" }
+    });
+
+    const first = await app.request("/api/files/file_multipart/multipart-parts/1", {
+      method: "PUT",
+      headers: {
+        ...userHeaders("owner@example.com", "User"),
+        "content-length": String(firstPart.byteLength)
+      },
+      body: new Blob([firstPart])
+    });
+    expect(first.status).toBe(200);
+    const firstBody = await first.json() as {
+      part: { readonly partNumber: number; readonly etag: string };
+      data: { readonly version: number };
+    };
+    expect(firstBody).toMatchObject({
+      part: { partNumber: 1 },
+      data: {
+        version: 2,
+        data: {
+          multipart_parts: [{ partNumber: 1, size: MIN_MULTIPART_FILE_PART_BYTES }]
+        }
+      }
+    });
+    const second = await app.request("/api/files/file_multipart/multipart-parts/2", {
+      method: "PUT",
+      headers: {
+        ...userHeaders("owner@example.com", "User"),
+        "content-length": "4"
+      },
+      body: "tail"
+    });
+    expect(second.status).toBe(200);
+    const secondBody = await second.json() as {
+      part: { readonly partNumber: number; readonly etag: string };
+      data: { readonly version: number };
+    };
+
+    const completed = await app.request("/api/files/file_multipart/complete-multipart-upload", {
+      method: "POST",
+      headers: jsonHeaders("owner@example.com", "User"),
+      body: JSON.stringify({
+        expectedVersion: secondBody.data.version,
+        parts: [secondBody.part, firstBody.part]
+      })
+    });
+
+    expect(completed.status).toBe(200);
+    await expect(completed.json()).resolves.toMatchObject({
+      data: {
+        name: "file_multipart",
+        version: 5,
+        data: {
+          storage_state: "available"
+        }
+      }
+    });
+    const downloaded = await app.request("/api/files/file_multipart/content", {
+      headers: userHeaders("guest", "Guest")
+    });
+    expect(downloaded.status).toBe(200);
+    const bytes = new Uint8Array(await downloaded.arrayBuffer());
+    expect(bytes.byteLength).toBe(MIN_MULTIPART_FILE_PART_BYTES + 4);
+    expect(new TextDecoder().decode(bytes.slice(MIN_MULTIPART_FILE_PART_BYTES))).toBe("tail");
+  });
+
+  it("requires content-length for streamed multipart part uploads", async () => {
+    const app = makeApp(MIN_MULTIPART_FILE_PART_BYTES + 16, ["reserve"], ["multipart"]);
+    const prepared = await app.request("/api/files/multipart-upload", {
+      method: "POST",
+      headers: jsonHeaders("owner@example.com", "User"),
+      body: JSON.stringify({
+        filename: "large.txt",
+        size: MIN_MULTIPART_FILE_PART_BYTES + 4
+      })
+    });
+    expect(prepared.status).toBe(201);
+
+    const uploaded = await app.request("/api/files/file_multipart/multipart-parts/1", {
+      method: "PUT",
+      headers: userHeaders("owner@example.com", "User"),
+      body: "tail"
+    });
+
+    expect(uploaded.status).toBe(400);
+    await expect(uploaded.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Multipart upload part size is required for streamed bodies" }
+    });
+  });
+
+  it("validates multipart upload completion bodies", async () => {
+    const app = makeApp(MIN_MULTIPART_FILE_PART_BYTES + 16, ["reserve"], ["multipart"]);
+    const prepared = await app.request("/api/files/multipart-upload", {
+      method: "POST",
+      headers: jsonHeaders("owner@example.com", "User"),
+      body: JSON.stringify({
+        filename: "large.txt",
+        size: MIN_MULTIPART_FILE_PART_BYTES + 4
+      })
+    });
+    expect(prepared.status).toBe(201);
+
+    const completed = await app.request("/api/files/file_multipart/complete-multipart-upload", {
+      method: "POST",
+      headers: jsonHeaders("owner@example.com", "User"),
+      body: JSON.stringify({ parts: [{ partNumber: 1 }] })
+    });
+
+    expect(completed.status).toBe(400);
+    await expect(completed.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "parts[0].etag must be a string" }
+    });
+  });
+
   it("validates direct upload reservation bodies", async () => {
     const app = makeApp();
 
@@ -656,4 +805,8 @@ function jsonHeaders(user: string, roles: string): HeadersInit {
     ...userHeaders(user, roles),
     "content-type": "application/json"
   };
+}
+
+function repeatedBytes(value: string, size: number): Uint8Array<ArrayBuffer> {
+  return new Uint8Array(size).fill(new TextEncoder().encode(value)[0] ?? 0);
 }

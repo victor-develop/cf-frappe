@@ -265,6 +265,55 @@ describe("R2FileStorage", () => {
       { aborted: true }
     ]);
   });
+
+  it("maps missing R2 multipart uploads to framework not-found errors", async () => {
+    const bucket = fakeBucket({
+      resumeMultipartUpload(key, uploadId) {
+        return fakeMultipartUpload(key, uploadId, {
+          async uploadPart() {
+            throw Object.assign(new Error("No such upload"), { name: "NoSuchUpload", code: 10021, action: "uploadPart" });
+          }
+        });
+      }
+    });
+
+    await expect(
+      new R2FileStorage(bucket).multipartUploads.uploadMultipartPart({
+        key: "acme/files/file_1-video.mp4",
+        uploadId: "missing-upload",
+        partNumber: 1,
+        body: "chunk"
+      })
+    ).rejects.toMatchObject({
+      code: "DOCUMENT_NOT_FOUND",
+      status: 404,
+      message: "Multipart upload 'missing-upload' was not found"
+    });
+  });
+
+  it("maps other R2 multipart lifecycle failures to storage errors", async () => {
+    const bucket = fakeBucket({
+      resumeMultipartUpload(key, uploadId) {
+        return fakeMultipartUpload(key, uploadId, {
+          async complete() {
+            throw new Error("R2 temporarily unavailable");
+          }
+        });
+      }
+    });
+
+    await expect(
+      new R2FileStorage(bucket).multipartUploads.completeMultipartUpload({
+        key: "acme/files/file_1-video.mp4",
+        uploadId: "upload-1",
+        parts: [{ partNumber: 1, etag: "one" }]
+      })
+    ).rejects.toMatchObject({
+      code: "FILE_STORAGE_ERROR",
+      status: 502,
+      message: "R2 multipart upload complete failed for 'acme/files/file_1-video.mp4': R2 temporarily unavailable"
+    });
+  });
 });
 
 function fakeBucket(overrides: Partial<R2Bucket>): R2Bucket {

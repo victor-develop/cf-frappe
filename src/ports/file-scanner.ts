@@ -1,4 +1,4 @@
-export type FileScanSource = "buffered_upload" | "direct_upload";
+export type FileScanSource = "buffered_upload" | "direct_upload" | "multipart_upload";
 export type FileScanStatus = "clean" | "infected";
 
 export interface FileScanTarget {
