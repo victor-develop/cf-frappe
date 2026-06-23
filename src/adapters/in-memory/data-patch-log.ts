@@ -16,7 +16,8 @@ import type {
   RollbackFailedDataPatch,
   RollbackPendingDataPatch,
   RolledBackDataPatch,
-  RetryFailedDataPatch
+  RetryFailedDataPatch,
+  RetryFailedDataPatchRollback
 } from "../../ports/data-patch-log.js";
 
 type InMemoryDataPatchEntry =
@@ -86,6 +87,22 @@ export class InMemoryDataPatchLog implements DataPatchLog {
     const existing = this.patches.get(patch.id);
     assertRetryableFailedPatch(existing, patch.id, patch.checksum);
     this.patches.delete(patch.id);
+  }
+
+  async retryFailedDataPatchRollback(patch: RetryFailedDataPatchRollback) {
+    const existing = this.patches.get(patch.id);
+    assertRetryableFailedRollbackPatch(existing, patch.id, patch.checksum);
+    const claimed = Object.freeze({
+      id: patch.id,
+      checksum: patch.checksum,
+      appliedAt: existing.appliedAt,
+      ...(existing.result === undefined ? {} : { result: existing.result }),
+      claimId: patch.claimId,
+      rollbackClaimedAt: patch.claimedAt,
+      status: "rollback_pending" as const
+    });
+    this.patches.set(patch.id, claimed);
+    return { id: patch.id, checksum: patch.checksum, claimId: patch.claimId, claimedAt: patch.claimedAt };
   }
 
   async claimDataPatchRollback(patch: ClaimRollbackDataPatch): Promise<DataPatchRollbackClaimResult> {
@@ -252,6 +269,38 @@ function assertRetryableFailedPatch(
   throw dataPatchRetryUnavailable(id, `journal status is '${entry.status}'`);
 }
 
+function assertRetryableFailedRollbackPatch(
+  entry: InMemoryDataPatchEntry | undefined,
+  id: string,
+  checksum: string
+): asserts entry is RollbackFailedDataPatch & { readonly status: "rollback_failed"; readonly claimId: string } {
+  if (entry === undefined) {
+    throw dataPatchRollbackRetryUnavailable(id, "no failed rollback journal entry exists");
+  }
+  assertChecksumValueMatches(id, checksum, entry.checksum);
+  if (entry.status === "rollback_failed") {
+    return;
+  }
+  if (entry.status === "pending") {
+    throw new FrameworkError(
+      "DATA_PATCH_PENDING",
+      `Data patch '${id}' is already claimed and has not completed`,
+      { status: 409 }
+    );
+  }
+  if (entry.status === "failed") {
+    throw new FrameworkError("DATA_PATCH_FAILED", `Data patch '${id}' failed and must be retried first`, {
+      status: 409
+    });
+  }
+  if (entry.status === "rollback_pending") {
+    throw new FrameworkError("DATA_PATCH_ROLLBACK_PENDING", `Data patch '${id}' rollback is pending`, {
+      status: 409
+    });
+  }
+  throw dataPatchRollbackRetryUnavailable(id, `journal status is '${entry.status}'`);
+}
+
 function assertRollbackClaimable(
   entry: InMemoryDataPatchEntry | undefined,
   id: string,
@@ -299,6 +348,14 @@ function dataPatchRetryUnavailable(id: string, reason: string): FrameworkError {
   return new FrameworkError(
     "DATA_PATCH_RETRY_UNAVAILABLE",
     `Data patch '${id}' cannot be retried because ${reason}`,
+    { status: 409 }
+  );
+}
+
+function dataPatchRollbackRetryUnavailable(id: string, reason: string): FrameworkError {
+  return new FrameworkError(
+    "DATA_PATCH_ROLLBACK_RETRY_UNAVAILABLE",
+    `Data patch '${id}' rollback cannot be retried because ${reason}`,
     { status: 409 }
   );
 }

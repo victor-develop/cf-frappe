@@ -55,6 +55,7 @@ export interface DataPatchAdminPort {
   apply(actor: Actor, options?: DataPatchApplyOptions): Promise<DataPatchRunResult>;
   rollback(actor: Actor, options?: DataPatchRollbackOptions): Promise<DataPatchRollbackRunResult>;
   retryFailed(actor: Actor, patchId: string): Promise<DataPatchRunResult>;
+  retryRollbackFailed(actor: Actor, patchId: string): Promise<DataPatchRollbackRunResult>;
 }
 
 export interface DataPatchApplyOptions {
@@ -128,6 +129,15 @@ export class DataPatchService<TResources = unknown> {
     await this.assertPredecessorsApplied([patch]);
     await this.log.retryFailedDataPatch({ id: patch.id, checksum: patch.checksum });
     return this.runner().apply([patch]);
+  }
+
+  async retryRollbackFailed(actor: Actor, patchId: string): Promise<DataPatchRollbackRunResult> {
+    this.authorize(actor);
+    const patch = selectPatches(this.patches, [patchId])[0]!;
+    const recordedById = new Map((await this.log.recordedDataPatches()).map((recorded) => [recorded.id, recorded]));
+    this.assertSelectedPatchRollbackRetryable(patch, recordedById);
+    this.assertNoUnsafeSuccessorsOutsideSelection([patch], new Set([patch.id]), recordedById);
+    return this.runner().retryRollbackFailed(patch);
   }
 
   async planApply(actor: Actor, options: DataPatchApplyOptions = {}): Promise<DataPatchApplyPlan> {
@@ -325,6 +335,51 @@ export class DataPatchService<TResources = unknown> {
         );
       }
     }
+  }
+
+  private assertSelectedPatchRollbackRetryable(
+    patch: DataPatchDefinition<TResources>,
+    recordedById: ReadonlyMap<string, RecordedDataPatch>
+  ): void {
+    const recorded = recordedById.get(patch.id);
+    if (recorded === undefined) {
+      throw new FrameworkError(
+        "DATA_PATCH_ROLLBACK_RETRY_UNAVAILABLE",
+        `Data patch '${patch.id}' rollback cannot be retried because no failed rollback journal entry exists`,
+        { status: 409 }
+      );
+    }
+    assertChecksumMatches(patch, recorded);
+    if (recorded.status === "rollback_failed") {
+      if (patch.rollback !== undefined) {
+        return;
+      }
+      throw new FrameworkError(
+        "DATA_PATCH_ROLLBACK_UNAVAILABLE",
+        `Data patch '${patch.id}' does not declare a rollback`,
+        { status: 409 }
+      );
+    }
+    if (recorded.status === "pending") {
+      throw new FrameworkError("DATA_PATCH_PENDING", `Data patch '${patch.id}' is pending`, { status: 409 });
+    }
+    if (recorded.status === "failed") {
+      throw new FrameworkError("DATA_PATCH_FAILED", `Data patch '${patch.id}' failed and must be retried first`, {
+        status: 409
+      });
+    }
+    if (recorded.status === "rollback_pending") {
+      throw new FrameworkError(
+        "DATA_PATCH_ROLLBACK_PENDING",
+        `Data patch '${patch.id}' rollback is pending`,
+        { status: 409 }
+      );
+    }
+    throw new FrameworkError(
+      "DATA_PATCH_ROLLBACK_RETRY_UNAVAILABLE",
+      `Data patch '${patch.id}' rollback cannot be retried because journal status is '${recorded.status}'`,
+      { status: 409 }
+    );
   }
 
   private assertNoUnsafeSuccessorsOutsideSelection(

@@ -106,6 +106,14 @@ describe("cf-frappe CLI remote data patches", () => {
       patchIds: ["core.seed"]
     });
 
+    expect(parseCliArgs(["data-patches", "rollback-retry", "--url", "https://app.example", "--id", "core.seed"])).toEqual({
+      kind: "data-patches",
+      action: "rollback-retry",
+      url: "https://app.example",
+      headers: [],
+      patchIds: ["core.seed"]
+    });
+
     expect(parseCliArgs(["data-patches", "retry", "--url", "https://app.example"])).toEqual({
       kind: "invalid",
       message: "Data patch retry requires exactly one --id"
@@ -135,6 +143,23 @@ describe("cf-frappe CLI remote data patches", () => {
     ])).toEqual({
       kind: "invalid",
       message: "Cannot use --limit with data-patches retry"
+    });
+    expect(parseCliArgs(["data-patches", "rollback-retry", "--url", "https://app.example"])).toEqual({
+      kind: "invalid",
+      message: "Data patch rollback retry requires exactly one --id"
+    });
+    expect(parseCliArgs([
+      "data-patches",
+      "rollback-retry",
+      "--url",
+      "https://app.example",
+      "--id",
+      "core.seed",
+      "--limit",
+      "1"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Cannot use --limit with data-patches rollback-retry"
     });
 
     expect(parseCliArgs(["data-patches", "enqueue", "--url", "https://app.example", "--delay-seconds", "-1"])).toEqual({
@@ -326,6 +351,36 @@ describe("cf-frappe CLI remote data patches", () => {
     expect(stdout.text()).toContain("Retried data patch at https://app.example/cf");
     expect(stdout.text()).toContain("Applied:");
     expect(stdout.text()).toContain("- core.seed (v1)");
+  });
+
+  it("retries one failed remote data patch rollback through the admin API", async () => {
+    const calls: RemoteCall[] = [];
+    const stdout = textBuffer();
+    const exitCode = await runCli(
+      ["data-patches", "rollback-retry", "--url", "https://app.example/cf", "--id", "core.seed"],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(calls, {
+          data: {
+            rolledBack: [{ id: "core.seed", checksum: "v1", rolledBackAt: "2026-01-01T00:00:00Z" }],
+            skipped: []
+          }
+        }, 201),
+        stdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("https://app.example/cf/api/data-patches/core.seed/rollback-retry");
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.body).toBeUndefined();
+    expect(stdout.text()).toContain("Retried data patch rollback at https://app.example/cf");
+    expect(stdout.text()).toContain("Rolled back:");
+    expect(stdout.text()).toContain("- core.seed (v1)");
+    expect(stdout.text()).toContain("Skipped:");
+    expect(stdout.text()).toContain("- (none)");
   });
 
   it("applies selected remote data patches with bounded JSON options", async () => {

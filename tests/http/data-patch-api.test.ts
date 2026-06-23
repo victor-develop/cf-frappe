@@ -341,6 +341,70 @@ describe("data patch api", () => {
     });
   });
 
+  it("retries a failed data patch rollback through the admin JSON route", async () => {
+    const services = createServices();
+    const resources = { attempts: 0 };
+    const app = createResourceApi({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: unsafeHeaderActorResolver,
+      dataPatches: new DataPatchService({
+        log: new InMemoryDataPatchLog(),
+        resources,
+        patches: [
+          defineDataPatch<typeof resources>({
+            id: "core.rollback_retry",
+            checksum: "v1",
+            run: () => undefined,
+            rollback: {
+              run: ({ resources }) => {
+                resources.attempts += 1;
+                if (resources.attempts === 1) {
+                  throw new Error("rollback boom");
+                }
+                return { attempts: resources.attempts };
+              }
+            }
+          })
+        ],
+        clock: fixedClock(now),
+        ids: deterministicIds(["claim-apply", "rollback-failed", "rollback-retry"])
+      })
+    });
+
+    const applied = await app.request("/api/data-patches/apply", { method: "POST", headers: adminHeaders });
+    expect(applied.status).toBe(201);
+    const failed = await app.request("/api/data-patches/core.rollback_retry/rollback", {
+      method: "POST",
+      headers: adminHeaders
+    });
+    expect(failed.status).toBe(500);
+    expect(resources.attempts).toBe(1);
+
+    const retried = await app.request("/api/data-patches/core.rollback_retry/rollback-retry", {
+      method: "POST",
+      headers: adminHeaders
+    });
+    expect(retried.status).toBe(201);
+    await expect(retried.json()).resolves.toEqual({
+      data: {
+        rolledBack: [{ id: "core.rollback_retry", checksum: "v1", rolledBackAt: now, result: { attempts: 2 } }],
+        skipped: []
+      }
+    });
+    expect(resources.attempts).toBe(2);
+
+    const retriedAgain = await app.request("/api/data-patches/core.rollback_retry/rollback-retry", {
+      method: "POST",
+      headers: adminHeaders
+    });
+    expect(retriedAgain.status).toBe(409);
+    await expect(retriedAgain.json()).resolves.toMatchObject({
+      error: { code: "DATA_PATCH_ROLLBACK_RETRY_UNAVAILABLE" }
+    });
+  });
+
   it("enqueues data patch apply jobs through admin JSON routes", async () => {
     const services = createServices();
     const resources = { touched: [] as string[] };

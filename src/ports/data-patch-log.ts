@@ -113,6 +113,13 @@ export interface RetryFailedDataPatch {
   readonly checksum: string;
 }
 
+export interface RetryFailedDataPatchRollback {
+  readonly id: string;
+  readonly checksum: string;
+  readonly claimId: string;
+  readonly claimedAt: string;
+}
+
 export interface CompleteRollbackDataPatch {
   readonly id: string;
   readonly checksum: string;
@@ -136,6 +143,7 @@ export interface DataPatchLog {
   completeDataPatch(patch: CompleteDataPatch): Promise<void>;
   failDataPatch(patch: FailDataPatch): Promise<void>;
   retryFailedDataPatch(patch: RetryFailedDataPatch): Promise<void>;
+  retryFailedDataPatchRollback(patch: RetryFailedDataPatchRollback): Promise<ClaimedRollbackDataPatch>;
   claimDataPatchRollback(patch: ClaimRollbackDataPatch): Promise<DataPatchRollbackClaimResult>;
   completeDataPatchRollback(patch: CompleteRollbackDataPatch): Promise<void>;
   failDataPatchRollback(patch: FailRollbackDataPatch): Promise<void>;

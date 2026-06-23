@@ -274,7 +274,7 @@ function parseDataPatchesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--limit") {
-      if (action === "status" || action === "retry") {
+      if (action === "status" || isSingleDataPatchAction(action)) {
         return { kind: "invalid", message: `Cannot use --limit with data-patches ${action}` };
       }
       const value = rest[index + 1];
@@ -326,8 +326,8 @@ function parseDataPatchesArgs(argv: readonly string[]): ParsedCommand {
   if (url === undefined) {
     return { kind: "invalid", message: "Missing value for --url" };
   }
-  if (action === "retry" && patchIds.length !== 1) {
-    return { kind: "invalid", message: "Data patch retry requires exactly one --id" };
+  if (isSingleDataPatchAction(action) && patchIds.length !== 1) {
+    return { kind: "invalid", message: `Data patch ${dataPatchActionLabel(action)} requires exactly one --id` };
   }
   return {
     kind: "data-patches",
@@ -349,9 +349,18 @@ function dataPatchAction(value: string): DataPatchRemoteAction | undefined {
     value === "rollback" ||
     value === "enqueue" ||
     value === "rollback-enqueue" ||
-    value === "retry"
+    value === "retry" ||
+    value === "rollback-retry"
     ? value
     : undefined;
+}
+
+function isSingleDataPatchAction(action: DataPatchRemoteAction): boolean {
+  return action === "retry" || action === "rollback-retry";
+}
+
+function dataPatchActionLabel(action: DataPatchRemoteAction): string {
+  return action === "rollback-retry" ? "rollback retry" : action;
 }
 
 function isDataPatchQueueAction(action: DataPatchRemoteAction): boolean {
@@ -602,6 +611,7 @@ function helpText(): string {
     "  cf-frappe data-patches apply --url <origin> [--id <patchId>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches rollback --url <origin> [--id <patchId>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches retry --url <origin> --id <patchId> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe data-patches rollback-retry --url <origin> --id <patchId> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches enqueue --url <origin> [--id <patchId>] [--limit <n>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches rollback-enqueue --url <origin> [--id <patchId>] [--limit <n>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe --help",

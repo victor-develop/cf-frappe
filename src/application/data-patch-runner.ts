@@ -7,6 +7,7 @@ import type { IdGenerator } from "../ports/id-generator.js";
 import { cryptoIdGenerator } from "../ports/id-generator.js";
 import type {
   AppliedDataPatch,
+  ClaimedRollbackDataPatch,
   DataPatchLog,
   RecordedDataPatch,
   RolledBackDataPatch
@@ -203,34 +204,66 @@ export class DataPatchRunner<TResources = unknown> {
         );
       }
 
-      let result: JsonValue | undefined;
-      try {
-        result = normalizeResult(await patch.rollback.run({ resources: this.resources }));
-      } catch (error) {
-        await this.log.failDataPatchRollback({
-          id: patch.id,
-          checksum: patch.checksum,
-          claimId: claim.claim.claimId,
-          failedAt: this.clock.now(),
-          error: errorMessage(error)
-        });
-        throw error;
-      }
-
-      const record = {
-        id: patch.id,
-        checksum: patch.checksum,
-        rolledBackAt: this.clock.now(),
-        ...(result === undefined ? {} : { result })
-      };
-      await this.log.completeDataPatchRollback({
-        ...record,
-        claimId: claim.claim.claimId
-      });
-      rolledBack.push(record);
+      rolledBack.push(await this.rollbackClaimedPatch(patch, claim.claim));
     }
 
     return { rolledBack, skipped };
+  }
+
+  async retryRollbackFailed(patch: DataPatchDefinition<TResources>): Promise<DataPatchRollbackRunResult> {
+    const planned = normalizePatches([patch])[0]!;
+    if (planned.rollback === undefined) {
+      throw new FrameworkError(
+        "DATA_PATCH_ROLLBACK_UNAVAILABLE",
+        `Data patch '${planned.id}' does not declare a rollback`,
+        { status: 409 }
+      );
+    }
+    const claim = await this.log.retryFailedDataPatchRollback({
+      id: planned.id,
+      checksum: planned.checksum,
+      claimId: this.ids.next(),
+      claimedAt: this.clock.now()
+    });
+    return { rolledBack: [await this.rollbackClaimedPatch(planned, claim)], skipped: [] };
+  }
+
+  private async rollbackClaimedPatch(
+    patch: DataPatchDefinition<TResources>,
+    claim: ClaimedRollbackDataPatch
+  ): Promise<DataPatchRollbackRecord> {
+    if (patch.rollback === undefined) {
+      throw new FrameworkError(
+        "DATA_PATCH_ROLLBACK_UNAVAILABLE",
+        `Data patch '${patch.id}' does not declare a rollback`,
+        { status: 409 }
+      );
+    }
+    let result: JsonValue | undefined;
+    try {
+      result = normalizeResult(await patch.rollback.run({ resources: this.resources }));
+    } catch (error) {
+      await this.log.failDataPatchRollback({
+        id: patch.id,
+        checksum: patch.checksum,
+        claimId: claim.claimId,
+        failedAt: this.clock.now(),
+        error: errorMessage(error)
+      });
+      throw error;
+    }
+
+    const record = {
+      id: patch.id,
+      checksum: patch.checksum,
+      rolledBackAt: this.clock.now(),
+      ...(result === undefined ? {} : { result })
+    };
+    await this.log.completeDataPatchRollback({
+      ...record,
+      claimId: claim.claimId
+    });
+    return record;
   }
 }
 

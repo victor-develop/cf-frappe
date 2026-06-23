@@ -2502,27 +2502,32 @@ describe("Desk app", () => {
   it("renders failed rollback details in the Desk data patch admin surface", async () => {
     const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
     const services = createServices();
+    const resources = { attempts: 0 };
     const app = createDeskApp({
       registry: services.registry,
       documents: services.documents,
       queries: services.queries,
       dataPatches: new DataPatchService({
         log: new InMemoryDataPatchLog(),
-        resources: {},
+        resources,
         patches: [
-          defineDataPatch({
+          defineDataPatch<typeof resources>({
             id: "core.rollback",
             checksum: "v1",
             run: () => ({ applied: true }),
             rollback: {
-              run: () => {
-                throw new Error("rollback boom");
+              run: ({ resources }) => {
+                resources.attempts += 1;
+                if (resources.attempts === 1) {
+                  throw new Error("rollback boom");
+                }
+                return { attempts: resources.attempts };
               }
             }
           })
         ],
         clock: fixedClock(now),
-        ids: deterministicIds(["claim-apply", "claim-rollback"])
+        ids: deterministicIds(["claim-apply", "claim-rollback", "rollback-retry"])
       }),
       actor: () => admin
     });
@@ -2537,6 +2542,18 @@ describe("Desk app", () => {
     expect(html).toContain("rollback_failed");
     expect(html).toContain(now);
     expect(html).toContain("rollback boom");
+    expect(html).toContain('formaction="/desk/admin/data-patches/core.rollback/rollback-retry"');
+
+    const retried = await app.request("/desk/admin/data-patches/core.rollback/rollback-retry", { method: "POST" });
+    expect(retried.status).toBe(303);
+    expect(retried.headers.get("location")).toBe("/desk/admin/data-patches");
+    expect(resources.attempts).toBe(2);
+
+    const recovered = await app.request("/desk/admin/data-patches");
+    const recoveredHtml = await recovered.text();
+    expect(recoveredHtml).toContain("rolled_back");
+    expect(recoveredHtml).toContain("{&quot;attempts&quot;:2}");
+    expect(recoveredHtml).not.toContain('formaction="/desk/admin/data-patches/core.rollback/rollback-retry"');
   });
 
   it("renders enabled admin surfaces in the Desk navigation", async () => {

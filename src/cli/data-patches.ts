@@ -6,7 +6,8 @@ export type DataPatchRemoteAction =
   | "rollback"
   | "enqueue"
   | "rollback-enqueue"
-  | "retry";
+  | "retry"
+  | "rollback-retry";
 
 export interface DataPatchHeaderLiteral {
   readonly kind: "literal";
@@ -150,6 +151,13 @@ export async function runRemoteDataPatchCommand(
       path: `/api/data-patches/${encodeURIComponent(singlePatchId(command))}/retry`
     });
     return formatRetry(command.url, data);
+  }
+  if (command.action === "rollback-retry") {
+    const data = await requestRemoteDataPatch<DataPatchRollbackResponse>(command, io, {
+      method: "POST",
+      path: `/api/data-patches/${encodeURIComponent(singlePatchId(command, "rollback retry"))}/rollback-retry`
+    });
+    return formatRollbackRetry(command.url, data);
   }
   if (command.action === "rollback") {
     const data = await requestRemoteDataPatch<DataPatchRollbackResponse>(command, io, {
@@ -323,6 +331,17 @@ function formatRollback(baseUrl: string, result: DataPatchRollbackResponse): str
   ].join("\n");
 }
 
+function formatRollbackRetry(baseUrl: string, result: DataPatchRollbackResponse): string {
+  return [
+    `Retried data patch rollback at ${baseUrl}`,
+    "Rolled back:",
+    ...recordLines(result.rolledBack),
+    "Skipped:",
+    ...recordLines(result.skipped),
+    ""
+  ].join("\n");
+}
+
 function formatPlan(baseUrl: string, plan: DataPatchPlanResponse): string {
   const lines = [
     `Planned data patches at ${baseUrl}`,
@@ -387,10 +406,10 @@ function recordLines(records: readonly DataPatchRecordResponse[]): readonly stri
   return records.length === 0 ? ["- (none)"] : records.map((record) => `- ${record.id} (${record.checksum})`);
 }
 
-function singlePatchId(command: DataPatchRemoteCommand): string {
+function singlePatchId(command: DataPatchRemoteCommand, label = "retry"): string {
   const patchIds = command.patchIds ?? [];
   if (patchIds.length !== 1) {
-    throw new DataPatchRemoteError("Data patch retry requires exactly one --id");
+    throw new DataPatchRemoteError(`Data patch ${label} requires exactly one --id`);
   }
   return patchIds[0]!;
 }

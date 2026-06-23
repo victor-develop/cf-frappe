@@ -15,7 +15,8 @@ import type {
   RollbackFailedDataPatch,
   RollbackPendingDataPatch,
   RolledBackDataPatch,
-  RetryFailedDataPatch
+  RetryFailedDataPatch,
+  RetryFailedDataPatchRollback
 } from "../../ports/data-patch-log.js";
 
 interface DataPatchRow {
@@ -159,6 +160,44 @@ export class D1DataPatchLog implements DataPatchLog {
       .bind(patch.id, patch.checksum, row.claim_id, row.failed_at, row.error)
       .run();
     assertRetryCleared(result, patch.id);
+  }
+
+  async retryFailedDataPatchRollback(patch: RetryFailedDataPatchRollback) {
+    await this.ensureDataPatchTable();
+    const row = await this.row(patch.id);
+    assertRetryableFailedRollbackRow(row, patch.id, patch.checksum);
+    const result = await this.db
+      .prepare(
+        `UPDATE cf_frappe_data_patches
+         SET status = 'rollback_pending',
+             rollback_claim_id = ?,
+             rollback_claimed_at = ?,
+             rolled_back_at = NULL,
+             rollback_failed_at = NULL,
+             rollback_error = NULL,
+             rollback_result_json = NULL,
+             rollback_result_present = 0
+         WHERE id = ?
+           AND checksum = ?
+           AND status = 'rollback_failed'
+           AND rollback_claim_id IS ?
+           AND rollback_claimed_at IS ?
+           AND rollback_failed_at IS ?
+           AND rollback_error IS ?`
+      )
+      .bind(
+        patch.claimId,
+        patch.claimedAt,
+        patch.id,
+        patch.checksum,
+        row.rollback_claim_id,
+        row.rollback_claimed_at,
+        row.rollback_failed_at,
+        row.rollback_error
+      )
+      .run();
+    assertRollbackRetryClaimed(result, patch.id);
+    return { id: patch.id, checksum: patch.checksum, claimId: patch.claimId, claimedAt: patch.claimedAt };
   }
 
   async claimDataPatchRollback(patch: ClaimRollbackDataPatch): Promise<DataPatchRollbackClaimResult> {
@@ -487,6 +526,47 @@ function assertRetryableFailedRow(
   throw invalidStatus(row);
 }
 
+function assertRetryableFailedRollbackRow(
+  row: DataPatchRow | undefined,
+  id: string,
+  checksum: string
+): asserts row is DataPatchRow & { readonly status: "rollback_failed" } {
+  if (row === undefined) {
+    throw dataPatchRollbackRetryUnavailable(id, "no failed rollback journal entry exists");
+  }
+  if (row.checksum !== checksum) {
+    throw new FrameworkError(
+      "DATA_PATCH_CHECKSUM_MISMATCH",
+      `Recorded data patch '${id}' has checksum '${row.checksum}' but planned '${checksum}'`,
+      { status: 409 }
+    );
+  }
+  if (row.status === "rollback_failed") {
+    return;
+  }
+  if (row.status === "pending") {
+    throw new FrameworkError(
+      "DATA_PATCH_PENDING",
+      `Data patch '${id}' is already claimed and has not completed`,
+      { status: 409 }
+    );
+  }
+  if (row.status === "failed") {
+    throw new FrameworkError("DATA_PATCH_FAILED", `Data patch '${id}' failed and must be retried first`, {
+      status: 409
+    });
+  }
+  if (row.status === "rollback_pending") {
+    throw new FrameworkError("DATA_PATCH_ROLLBACK_PENDING", `Data patch '${id}' rollback is pending`, {
+      status: 409
+    });
+  }
+  if (row.status === "applied" || row.status === "rolled_back") {
+    throw dataPatchRollbackRetryUnavailable(id, `journal status is '${row.status}'`);
+  }
+  throw invalidStatus(row);
+}
+
 function assertRollbackClaimableRow(
   row: DataPatchRow | undefined,
   id: string,
@@ -521,6 +601,12 @@ function assertRetryCleared(result: unknown, id: string): void {
   }
 }
 
+function assertRollbackRetryClaimed(result: unknown, id: string): void {
+  if (changedRows(result) === 0) {
+    throw dataPatchRollbackRetryUnavailable(id, "the failed rollback journal entry changed before retry claim");
+  }
+}
+
 function assertRollbackChanged(result: unknown, id: string): void {
   if (changedRows(result) === 0) {
     throw new FrameworkError("DATA_PATCH_ROLLBACK_PENDING", `Data patch '${id}' rollback is not claimed by this runner`, {
@@ -542,6 +628,14 @@ function dataPatchRetryUnavailable(id: string, reason: string): FrameworkError {
   return new FrameworkError(
     "DATA_PATCH_RETRY_UNAVAILABLE",
     `Data patch '${id}' cannot be retried because ${reason}`,
+    { status: 409 }
+  );
+}
+
+function dataPatchRollbackRetryUnavailable(id: string, reason: string): FrameworkError {
+  return new FrameworkError(
+    "DATA_PATCH_ROLLBACK_RETRY_UNAVAILABLE",
+    `Data patch '${id}' rollback cannot be retried because ${reason}`,
     { status: 409 }
   );
 }

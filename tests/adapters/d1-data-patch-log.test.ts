@@ -259,6 +259,72 @@ describe("D1DataPatchLog", () => {
     });
   });
 
+  it("claims only failed D1 rollback records with matching checksums for retry", async () => {
+    const db = new FakeD1Database();
+    const log = new D1DataPatchLog(db as unknown as D1Database);
+
+    await log.claimDataPatch({ id: "accounts.seed", checksum: "v1", claimId: "claim-apply", claimedAt: now });
+    await log.completeDataPatch({
+      id: "accounts.seed",
+      checksum: "v1",
+      claimId: "claim-apply",
+      appliedAt: now,
+      result: { touched: 1 }
+    });
+    await log.claimDataPatchRollback({
+      id: "accounts.seed",
+      checksum: "v1",
+      claimId: "claim-rollback",
+      claimedAt: now
+    });
+    await log.failDataPatchRollback({
+      id: "accounts.seed",
+      checksum: "v1",
+      claimId: "claim-rollback",
+      failedAt: now,
+      error: "rollback boom"
+    });
+
+    await expect(log.retryFailedDataPatchRollback({
+      id: "accounts.seed",
+      checksum: "v2",
+      claimId: "claim-retry",
+      claimedAt: now
+    })).rejects.toMatchObject({
+      code: "DATA_PATCH_CHECKSUM_MISMATCH",
+      status: 409
+    });
+    await expect(log.retryFailedDataPatchRollback({
+      id: "accounts.seed",
+      checksum: "v1",
+      claimId: "claim-retry",
+      claimedAt: now
+    })).resolves.toEqual({ id: "accounts.seed", checksum: "v1", claimId: "claim-retry", claimedAt: now });
+    await expect(log.recordedDataPatches()).resolves.toEqual([
+      {
+        id: "accounts.seed",
+        checksum: "v1",
+        appliedAt: now,
+        result: { touched: 1 },
+        rollbackClaimedAt: now,
+        status: "rollback_pending"
+      }
+    ]);
+    await log.completeDataPatchRollback({
+      id: "accounts.seed",
+      checksum: "v1",
+      claimId: "claim-retry",
+      rolledBackAt: now
+    });
+    await expect(log.claimDataPatchRollback({
+      id: "accounts.seed",
+      checksum: "v1",
+      claimId: "claim-again",
+      claimedAt: now
+    })).resolves.toMatchObject({ kind: "rolled_back" });
+    expect(db.executedSql.some((sql) => sql.includes("rollback_result_present = 0"))).toBe(true);
+  });
+
   it("rejects retry clearing for non-failed D1 journal records", async () => {
     const db = new FakeD1Database();
     const log = new D1DataPatchLog(db as unknown as D1Database);
@@ -285,6 +351,67 @@ describe("D1DataPatchLog", () => {
       code: "DATA_PATCH_RETRY_UNAVAILABLE",
       status: 409
     });
+  });
+
+  it("does not claim a newer failed D1 rollback attempt after reading an older one", async () => {
+    const db = new FakeD1Database();
+    const log = new D1DataPatchLog(db as unknown as D1Database);
+    await log.claimDataPatch({ id: "accounts.seed", checksum: "v1", claimId: "claim-apply", claimedAt: now });
+    await log.completeDataPatch({ id: "accounts.seed", checksum: "v1", claimId: "claim-apply", appliedAt: now });
+    await log.claimDataPatchRollback({
+      id: "accounts.seed",
+      checksum: "v1",
+      claimId: "claim-old",
+      claimedAt: now
+    });
+    await log.failDataPatchRollback({
+      id: "accounts.seed",
+      checksum: "v1",
+      claimId: "claim-old",
+      failedAt: now,
+      error: "old failure"
+    });
+    db.beforeRollbackRetry = () => {
+      db.beforeRollbackRetry = undefined;
+      db.patches.set("accounts.seed", {
+        checksum: "v1",
+        status: "rollback_failed",
+        claim_id: "claim-apply",
+        claimed_at: now,
+        applied_at: now,
+        failed_at: null,
+        error: null,
+        result_json: null,
+        result_present: 0,
+        rollback_claim_id: "claim-new",
+        rollback_claimed_at: "2026-01-01T00:01:00.000Z",
+        rolled_back_at: null,
+        rollback_failed_at: "2026-01-01T00:02:00.000Z",
+        rollback_error: "new failure",
+        rollback_result_json: null,
+        rollback_result_present: 0
+      });
+    };
+
+    await expect(log.retryFailedDataPatchRollback({
+      id: "accounts.seed",
+      checksum: "v1",
+      claimId: "claim-retry",
+      claimedAt: now
+    })).rejects.toMatchObject({
+      code: "DATA_PATCH_ROLLBACK_RETRY_UNAVAILABLE",
+      status: 409
+    });
+    await expect(log.recordedDataPatches()).resolves.toEqual([
+      {
+        id: "accounts.seed",
+        checksum: "v1",
+        appliedAt: now,
+        rollbackFailedAt: "2026-01-01T00:02:00.000Z",
+        rollbackError: "new failure",
+        status: "rollback_failed"
+      }
+    ]);
   });
 
   it("does not clear a newer failed D1 retry attempt after reading an older one", async () => {
@@ -371,6 +498,7 @@ class FakeD1Database {
   }>();
   readonly executedSql: string[] = [];
   beforeDelete: (() => void) | undefined;
+  beforeRollbackRetry: (() => void) | undefined;
 
   prepare(sql: string) {
     this.executedSql.push(sql);
@@ -473,6 +601,42 @@ class FakeD1PreparedStatement {
           rollback_result_present: 0
         });
       }
+    }
+    if (this.sql.includes("rollback_result_present = 0")) {
+      this.db.beforeRollbackRetry?.();
+      const [
+        next_rollback_claim_id,
+        next_rollback_claimed_at,
+        id,
+        checksum,
+        rollback_claim_id,
+        rollback_claimed_at,
+        rollback_failed_at,
+        rollback_error
+      ] = this.params;
+      const patch = this.db.patches.get(String(id));
+      if (
+        patch?.status === "rollback_failed" &&
+        patch.checksum === checksum &&
+        patch.rollback_claim_id === rollback_claim_id &&
+        patch.rollback_claimed_at === rollback_claimed_at &&
+        patch.rollback_failed_at === rollback_failed_at &&
+        patch.rollback_error === rollback_error
+      ) {
+        this.db.patches.set(String(id), {
+          ...patch,
+          status: "rollback_pending",
+          rollback_claim_id: String(next_rollback_claim_id),
+          rollback_claimed_at: String(next_rollback_claimed_at),
+          rolled_back_at: null,
+          rollback_failed_at: null,
+          rollback_error: null,
+          rollback_result_json: null,
+          rollback_result_present: 0
+        });
+        return { success: true, meta: { changes: 1 } };
+      }
+      return { success: true, meta: { changes: 0 } };
     }
     if (this.sql.includes("SET status = 'applied'")) {
       const [applied_at, result_json, result_present, id, checksum, claim_id] = this.params;

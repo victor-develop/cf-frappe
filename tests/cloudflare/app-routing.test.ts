@@ -334,6 +334,71 @@ describe("CloudFrappe Worker routing", () => {
     expect(resources.attempts).toBe(2);
   });
 
+  it("mounts failed data patch rollback retry routes on the Worker", async () => {
+    const resources = { attempts: 0 };
+    const log = new InMemoryDataPatchLog();
+    const registry = createRegistry({
+      dataPatches: [
+        defineDataPatch<any>({
+          id: "core.rollback_retry",
+          checksum: "v1",
+          run: () => undefined,
+          rollback: {
+            run: ({ resources }) => {
+              resources.attempts += 1;
+              if (resources.attempts === 1) {
+                throw new Error("rollback boom");
+              }
+              return { attempts: resources.attempts };
+            }
+          }
+        })
+      ]
+    });
+    const worker = createCloudFrappeWorker({
+      registry,
+      actor: () => ({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" }),
+      dataPatches: {
+        log: () => log,
+        resources: () => resources,
+        clock: fixedClock(now),
+        ids: deterministicIds(["claim-apply", "rollback-failed", "rollback-retry"])
+      }
+    });
+    const env = {
+      DB: fakeD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const applied = await worker.fetch!(
+      cfRequest("http://localhost/api/data-patches/apply", { method: "POST" }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(applied.status).toBe(201);
+
+    const failed = await worker.fetch!(
+      cfRequest("http://localhost/api/data-patches/core.rollback_retry/rollback", { method: "POST" }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(failed.status).toBe(500);
+
+    const retried = await worker.fetch!(
+      cfRequest("http://localhost/api/data-patches/core.rollback_retry/rollback-retry", { method: "POST" }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(retried.status).toBe(201);
+    await expect(retried.json()).resolves.toMatchObject({
+      data: {
+        rolledBack: [{ id: "core.rollback_retry", checksum: "v1", rolledBackAt: now, result: { attempts: 2 } }],
+        skipped: []
+      }
+    });
+    expect(resources.attempts).toBe(2);
+  });
+
   it("uses the default D1 data patch journal for app-declared Worker patches", async () => {
     const registry = createRegistry({
       dataPatches: [

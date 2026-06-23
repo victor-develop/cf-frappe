@@ -1220,6 +1220,11 @@ function renderDataPatchAction(patch: DataPatchDashboardEntry): string {
       <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/retry">Retry</button>
     </form>`;
   }
+  if (patch.status === "rollback_failed") {
+    return `<form class="inline-action" method="post">
+      <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/rollback-retry">Retry Rollback</button>
+    </form>`;
+  }
   if (patch.status === "applied" && patch.rollbackable === true) {
     const label = patch.rollbackLabel ?? "Plan Rollback";
     return `<form class="inline-action" method="post">
