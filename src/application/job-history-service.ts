@@ -1,5 +1,5 @@
 import { badRequest, notFound, permissionDenied } from "../core/errors.js";
-import type { JobRetryPolicy } from "../core/jobs.js";
+import { DEFAULT_JOB_WORKER_POOL, type JobRetryPolicy } from "../core/jobs.js";
 import { DEFAULT_TENANT_ID, SYSTEM_MANAGER_ROLE, type Actor, type TenantId } from "../core/types.js";
 import type {
   JobExecutionLogReader,
@@ -19,6 +19,7 @@ export interface JobHistoryRegistry {
 export interface JobDefinitionForHistory {
   readonly name: string;
   readonly description?: string;
+  readonly pool?: string;
   readonly retry?: JobRetryPolicy;
 }
 
@@ -38,6 +39,7 @@ export interface JobExecutionHistoryQuery {
 export interface JobDefinitionSummary {
   readonly name: string;
   readonly description?: string;
+  readonly pool: string;
   readonly retry?: JobRetryPolicy;
 }
 
@@ -140,6 +142,7 @@ function jobSummary(job: JobDefinitionForHistory): JobDefinitionSummary {
   return {
     name: job.name,
     ...(job.description === undefined ? {} : { description: job.description }),
+    pool: job.pool ?? DEFAULT_JOB_WORKER_POOL,
     ...(job.retry === undefined ? {} : { retry: job.retry })
   };
 }

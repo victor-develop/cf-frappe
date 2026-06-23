@@ -64,4 +64,8 @@ export class JobExecutor<TResources = unknown> {
   retryPolicyFor(jobName: string) {
     return this.registry.get(jobName).retry;
   }
+
+  workerPoolFor(jobName: string) {
+    return this.registry.workerPoolFor(jobName);
+  }
 }

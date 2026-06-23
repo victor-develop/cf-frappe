@@ -49,6 +49,88 @@ describe("processCloudflareJobBatch", () => {
     expect(flaky.actions).toEqual([{ kind: "retry", delaySeconds: 45 }]);
   });
 
+  it("processes queue messages through worker-pool concurrency lanes", async () => {
+    let serialRunning = 0;
+    let fastRunning = 0;
+    let maxSerialRunning = 0;
+    let maxFastRunning = 0;
+    const registry = createJobRegistry({
+      workerPools: [
+        { name: "serial", concurrency: 1 },
+        { name: "fast", concurrency: 2 }
+      ],
+      jobs: [
+        {
+          name: "serial.job",
+          pool: "serial",
+          handler: async () => {
+            serialRunning += 1;
+            maxSerialRunning = Math.max(maxSerialRunning, serialRunning);
+            await Promise.resolve();
+            serialRunning -= 1;
+          }
+        },
+        {
+          name: "fast.job",
+          pool: "fast",
+          handler: async () => {
+            fastRunning += 1;
+            maxFastRunning = Math.max(maxFastRunning, fastRunning);
+            await Promise.resolve();
+            fastRunning -= 1;
+          }
+        }
+      ]
+    });
+    const messages = [
+      queueMessage(jobMessage("serial.job"), { id: "serial-1" }),
+      queueMessage(jobMessage("serial.job"), { id: "serial-2" }),
+      queueMessage(jobMessage("fast.job"), { id: "fast-1" }),
+      queueMessage(jobMessage("fast.job"), { id: "fast-2" })
+    ];
+
+    await processCloudflareJobBatch(batch(messages), {
+      executor: new JobExecutor({ registry, resources: {} })
+    });
+
+    expect(maxSerialRunning).toBe(1);
+    expect(maxFastRunning).toBe(2);
+    expect(messages.flatMap((message) => message.actions)).toEqual([
+      { kind: "ack" },
+      { kind: "ack" },
+      { kind: "ack" },
+      { kind: "ack" }
+    ]);
+  });
+
+  it("applies worker-pool retry defaults below job retry overrides", async () => {
+    const poolDefault = queueMessage(jobMessage("pool.flaky"), { id: "pool-flaky", attempts: 1 });
+    const jobOverride = queueMessage(jobMessage("job.flaky"), { id: "job-flaky", attempts: 1 });
+    const registry = createJobRegistry({
+      workerPools: [{ name: "slow", concurrency: 1, retry: { maxAttempts: 3, baseDelaySeconds: 20 } }],
+      jobs: [
+        {
+          name: "pool.flaky",
+          pool: "slow",
+          handler: () => { throw retryableJobError("pool retry"); }
+        },
+        {
+          name: "job.flaky",
+          pool: "slow",
+          retry: { baseDelaySeconds: 5 },
+          handler: () => { throw retryableJobError("job retry"); }
+        }
+      ]
+    });
+
+    await processCloudflareJobBatch(batch([poolDefault, jobOverride]), {
+      executor: new JobExecutor({ registry, resources: {} })
+    });
+
+    expect(poolDefault.actions).toEqual([{ kind: "retry", delaySeconds: 20 }]);
+    expect(jobOverride.actions).toEqual([{ kind: "retry", delaySeconds: 5 }]);
+  });
+
   it("acks permanent handler failures", async () => {
     const message = queueMessage(jobMessage("bad"));
     const registry = createJobRegistry({

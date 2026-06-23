@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the generated Desk document sharing controls slice:
+As of the Cloudflare job worker pools slice:
 
 - Vitest files: `69`
-- Vitest cases: `597`
+- Vitest cases: `603`
 
 ## Implication
 

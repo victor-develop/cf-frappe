@@ -104,9 +104,11 @@ describe("JobExecutor", () => {
 describe("JobHistoryService", () => {
   it("lists job definitions and filtered execution history for admins", async () => {
     const registry = createJobRegistry({
+      workerPools: [{ name: "reports", concurrency: 2 }],
       jobs: [
         {
           name: "reports.daily",
+          pool: "reports",
           description: "Build the daily report",
           retry: { maxAttempts: 3, baseDelaySeconds: 30 },
           handler: () => undefined
@@ -127,9 +129,10 @@ describe("JobHistoryService", () => {
 
     await expect(service.dashboard(admin, { status: "failed", limit: 10 })).resolves.toEqual({
       jobs: [
-        { name: "email.digest" },
+        { name: "email.digest", pool: "default" },
         {
           name: "reports.daily",
+          pool: "reports",
           description: "Build the daily report",
           retry: { maxAttempts: 3, baseDelaySeconds: 30 }
         }
@@ -876,6 +879,15 @@ describe("job retry classification", () => {
       action: "retry",
       delaySeconds: 120
     });
+  });
+
+  it("rejects retry delays outside Cloudflare Queue retry bounds", () => {
+    expect(() => retryableJobError("rate limited", 0)).toThrow(
+      "Job retry delaySeconds must be an integer between 1 and 86400"
+    );
+    expect(() => classifyJobError(retryableJobError("busy"), { baseDelaySeconds: 86_401 }, 1)).toThrow(
+      "Job retry policy baseDelaySeconds must be an integer between 1 and 86400"
+    );
   });
 
   it("fails permanent and exhausted errors", () => {

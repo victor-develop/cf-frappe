@@ -789,6 +789,7 @@ export function renderJobAdmin(
       const retry = job.retry ? JSON.stringify(job.retry) : "";
       return `<tr>
         <td>${escapeHtml(job.name)}</td>
+        <td>${escapeHtml(job.pool ?? "default")}</td>
         <td>${escapeHtml(job.description ?? "")}</td>
         <td>${escapeHtml(retry)}</td>
       </tr>`;
@@ -821,8 +822,8 @@ export function renderJobAdmin(
   <section class="panel">
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Job</th><th>Description</th><th>Retry</th></tr></thead>
-        <tbody>${jobRows || `<tr><td colspan="3" class="empty">No jobs registered.</td></tr>`}</tbody>
+        <thead><tr><th>Job</th><th>Pool</th><th>Description</th><th>Retry</th></tr></thead>
+        <tbody>${jobRows || `<tr><td colspan="4" class="empty">No jobs registered.</td></tr>`}</tbody>
       </table>
     </div>
   </section>

@@ -93,6 +93,76 @@ describe("CloudFrappe Worker jobs", () => {
     expect(queue.queued()).toEqual([]);
   });
 
+  it("processes queue batches through configured worker pools", async () => {
+    let serialRunning = 0;
+    let fastRunning = 0;
+    let maxSerialRunning = 0;
+    let maxFastRunning = 0;
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => owner,
+      jobs: {
+        registry: createJobRegistry<CloudFrappeRuntimeServices>({
+          workerPools: [
+            { name: "serial", concurrency: 1 },
+            { name: "fast", concurrency: 2 }
+          ],
+          jobs: [
+            {
+              name: "serial.job",
+              pool: "serial",
+              handler: async () => {
+                serialRunning += 1;
+                maxSerialRunning = Math.max(maxSerialRunning, serialRunning);
+                await Promise.resolve();
+                serialRunning -= 1;
+              }
+            },
+            {
+              name: "fast.job",
+              pool: "fast",
+              handler: async () => {
+                fastRunning += 1;
+                maxFastRunning = Math.max(maxFastRunning, fastRunning);
+                await Promise.resolve();
+                fastRunning -= 1;
+              }
+            }
+          ]
+        }),
+        queue: () => new InMemoryJobQueue()
+      }
+    });
+    const messages = [
+      queueMessage("serial.job", "serial-1"),
+      queueMessage("serial.job", "serial-2"),
+      queueMessage("fast.job", "fast-1"),
+      queueMessage("fast.job", "fast-2")
+    ];
+
+    await worker.queue?.(
+      {
+        queue: "jobs",
+        metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
+        messages,
+        retryAll: vi.fn(),
+        ackAll: vi.fn()
+      },
+      { DB: fakeD1(), AGGREGATES: fakeNamespace() },
+      fakeExecutionContext()
+    );
+
+    expect(maxSerialRunning).toBe(1);
+    expect(maxFastRunning).toBe(2);
+    expect(messages.map((message) => message.ack)).toEqual([
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(Function)
+    ]);
+    expect(messages.every((message) => vi.mocked(message.ack).mock.calls.length === 1)).toBe(true);
+  });
+
   it("allows transient scheduled dispatch failures to retry", async () => {
     const noRetry = vi.fn();
     const worker = createCloudFrappeWorker({
@@ -356,6 +426,25 @@ describe("CloudFrappe Worker jobs", () => {
     });
   });
 });
+
+function queueMessage(jobName: string, id: string): Message<JobMessage> {
+  return {
+    id,
+    timestamp: new Date(now),
+    body: {
+      tenantId: "acme",
+      jobName,
+      payload: {},
+      runId: `job_${id}`,
+      idempotencyKey: `${jobName}:${id}`,
+      enqueuedAt: now,
+      metadata: {}
+    },
+    attempts: 1,
+    ack: vi.fn(),
+    retry: vi.fn()
+  } as unknown as Message<JobMessage>;
+}
 
 function fakeNamespace(): RpcDurableObjectNamespace<AggregateCoordinatorRpc> {
   return {
