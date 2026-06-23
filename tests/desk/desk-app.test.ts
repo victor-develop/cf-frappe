@@ -1,5 +1,6 @@
 import {
   CHILD_TABLE_ROW_INDEX_FIELD,
+  CustomFieldService,
   createDeskApp,
   createRegistry,
   DataPatchService,
@@ -123,6 +124,31 @@ describe("Desk app", () => {
       actor: () => actor
     });
     return { app, services: { ...services, roles } };
+  }
+
+  function makeCustomFieldDesk(actor = owner) {
+    const services = createServices(["e1", "e2", "e3", "e4"]);
+    const customFields = new CustomFieldService({
+      registry: services.registry,
+      events: services.store,
+      ids: deterministicIds(["custom-field-1", "custom-field-2", "custom-field-3"]),
+      clock: fixedClock(now)
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      prints: services.prints,
+      queries: services.queries,
+      documentShares: services.documentShares,
+      reports: services.reports,
+      timeline: services.history,
+      savedFilters: services.savedFilters,
+      savedReports: services.savedReports,
+      customFields,
+      userPermissions: services.userPermissions,
+      actor: () => actor
+    });
+    return { app, services: { ...services, customFields } };
   }
 
   function makeLinkedDesk() {
@@ -1499,6 +1525,85 @@ describe("Desk app", () => {
     expect(html).not.toContain("Create Role");
   });
 
+  it("renders and mutates custom fields from the Desk admin surface", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
+    const { app, services } = makeCustomFieldDesk(admin);
+
+    const empty = await app.request("/desk/admin/custom-fields?doctype=Note");
+    expect(empty.status).toBe(200);
+    const emptyHtml = await empty.text();
+    expect(emptyHtml).toContain("Custom Fields");
+    expect(emptyHtml).toContain('name="doctype"');
+    expect(emptyHtml).toContain('name="defaultValue"');
+    expect(emptyHtml).toContain("No custom fields configured.");
+
+    const created = await app.request("/desk/admin/custom-fields", {
+      method: "POST",
+      body: new URLSearchParams({
+        doctype: "Note",
+        name: "reviewed",
+        label: "Reviewed",
+        type: "boolean",
+        inListView: "1",
+        defaultValue: "false",
+        expectedVersion: "0"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(created.status).toBe(303);
+    expect(created.headers.get("location")).toBe("/desk/admin/custom-fields?doctype=Note");
+    await expect(services.customFields.list(admin, "Note")).resolves.toMatchObject({
+      version: 1,
+      fields: [{ field: { name: "reviewed", label: "Reviewed", type: "boolean", defaultValue: false }, enabled: true }]
+    });
+
+    const current = await app.request("/desk/admin/custom-fields?doctype=Note");
+    expect(current.status).toBe(200);
+    const currentHtml = await current.text();
+    expect(currentHtml).toContain("reviewed");
+    expect(currentHtml).toContain("Reviewed");
+    expect(currentHtml).toContain("default: false");
+    expect(currentHtml).toContain('action="/desk/admin/custom-fields/Note/reviewed/disable"');
+    expect(currentHtml).toContain('name="expectedVersion" value="1"');
+
+    const stale = await app.request("/desk/admin/custom-fields", {
+      method: "POST",
+      body: new URLSearchParams({
+        doctype: "Note",
+        name: "reviewed_by",
+        type: "text",
+        expectedVersion: "0"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(stale.status).toBe(409);
+    const staleHtml = await stale.text();
+    expect(staleHtml).toContain("Expected custom fields for &#39;Note&#39; at version 0, found 1");
+    expect(staleHtml).toContain("reviewed");
+
+    const disabled = await app.request("/desk/admin/custom-fields/Note/reviewed/disable", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(disabled.status).toBe(303);
+    await expect(services.customFields.list(admin, "Note")).resolves.toMatchObject({
+      version: 2,
+      fields: [{ field: { name: "reviewed" }, enabled: false }]
+    });
+  });
+
+  it("requires custom-field administrators before rendering an empty Desk admin surface", async () => {
+    const { app } = makeCustomFieldDesk({ id: "reader@example.com", roles: ["Reader"], tenantId: "acme" });
+
+    const response = await app.request("/desk/admin/custom-fields");
+
+    expect(response.status).toBe(403);
+    const html = await response.text();
+    expect(html).toContain("cannot manage custom fields");
+    expect(html).not.toContain('name="defaultValue"');
+  });
+
   it("renders and mutates user accounts from the Desk admin surface", async () => {
     const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
     const { app, services } = makeAccountDesk(admin);
@@ -1930,12 +2035,14 @@ describe("Desk app", () => {
       resources: {},
       patches: [defineDataPatch({ id: "core.seed", checksum: "v1", run: () => undefined })]
     });
+    const customFields = new CustomFieldService({ registry: services.registry, events: services.store });
     const app = createDeskApp({
       registry: services.registry,
       documents: services.documents,
       queries: services.queries,
       userPermissions: services.userPermissions,
       roles: new RoleService({ events: services.store }),
+      customFields,
       dataPatches,
       jobSchedules: new JobScheduleService({
         registry: createJobRegistry({
@@ -1952,6 +2059,7 @@ describe("Desk app", () => {
     expect(homeHtml).toContain('<p class="nav-heading">Admin</p>');
     expect(homeHtml).toContain('href="/desk/admin/user-permissions"');
     expect(homeHtml).toContain('href="/desk/admin/roles"');
+    expect(homeHtml).toContain('href="/desk/admin/custom-fields"');
     expect(homeHtml).toContain('href="/desk/admin/data-patches"');
     expect(homeHtml).toContain('href="/desk/admin/jobs/schedules"');
     expect(homeHtml).not.toContain('href="/desk/admin/users"');

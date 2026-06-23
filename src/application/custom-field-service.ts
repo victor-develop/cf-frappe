@@ -63,7 +63,7 @@ export class CustomFieldService {
   }
 
   async list(actor: Actor, doctypeName: string, tenantId?: TenantId): Promise<CustomFieldState> {
-    this.ensureAdmin(actor);
+    this.authorizeAdministration(actor, tenantId);
     const doctype = this.registry.get(doctypeName);
     return this.stateFor(resolveActorTenant(actor, tenantId), doctype.name);
   }
@@ -80,7 +80,7 @@ export class CustomFieldService {
   }
 
   async saveField(command: SaveCustomFieldCommand): Promise<CustomFieldState> {
-    this.ensureAdmin(command.actor);
+    this.authorizeAdministration(command.actor, command.tenantId);
     const doctype = this.registry.get(command.doctype);
     const tenantId = resolveActorTenant(command.actor, command.tenantId);
     const field = normalizeField(command.field);
@@ -110,7 +110,7 @@ export class CustomFieldService {
   }
 
   async disableField(command: DisableCustomFieldCommand): Promise<CustomFieldState> {
-    this.ensureAdmin(command.actor);
+    this.authorizeAdministration(command.actor, command.tenantId);
     const doctype = this.registry.get(command.doctype);
     const tenantId = resolveActorTenant(command.actor, command.tenantId);
     const fieldName = normalizeRequired(command.fieldName, "Custom field name");
@@ -153,6 +153,11 @@ export class CustomFieldService {
     if (field.type === "table" && field.tableOf !== undefined && !this.registry.has(field.tableOf)) {
       throw badRequest(`Custom field '${field.name}' targets unknown child DocType '${field.tableOf}'`);
     }
+  }
+
+  authorizeAdministration(actor: Actor, tenantId?: TenantId): void {
+    this.ensureAdmin(actor);
+    resolveActorTenant(actor, tenantId);
   }
 
   private event(options: {

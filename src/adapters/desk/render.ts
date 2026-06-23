@@ -1,5 +1,6 @@
 import {
   CHILD_TABLE_ROW_INDEX_FIELD,
+  FIELD_TYPES,
   type DocTypeDefinition,
   type DocumentData,
   type DocumentSnapshot,
@@ -23,6 +24,7 @@ import type {
   DocumentTags,
   DocumentTimeline
 } from "../../application/document-history-service.js";
+import type { CustomFieldState } from "../../core/custom-fields.js";
 import type { DocumentSharePermission, DocumentShareState } from "../../core/document-shares.js";
 import type { FileDashboard } from "../../application/file-service.js";
 import type {
@@ -945,6 +947,116 @@ export function renderRoleAdmin(
       </table>
     </div>
   </section>`;
+}
+
+export interface CustomFieldAdminState {
+  readonly doctypes: readonly DocTypeDefinition[];
+  readonly selectedDoctype: string;
+  readonly state?: CustomFieldState;
+  readonly error?: string;
+}
+
+export function renderCustomFieldAdmin(state: CustomFieldAdminState): string {
+  const version = state.state?.version ?? 0;
+  const rows = state.state?.fields
+    .map((entry) => {
+      const field = entry.field;
+      const action = entry.enabled
+        ? `<form class="inline-action" method="post" action="/desk/admin/custom-fields/${encodeURIComponent(state.selectedDoctype)}/${encodeURIComponent(field.name)}/disable">
+            <input type="hidden" name="expectedVersion" value="${String(version)}">
+            <button class="button danger" type="submit">Disable</button>
+          </form>`
+        : "";
+      return `<tr>
+        <td>${escapeHtml(field.name)}</td>
+        <td>${escapeHtml(field.label ?? "")}</td>
+        <td>${escapeHtml(field.type)}</td>
+        <td>${renderCustomFieldDetails(field)}</td>
+        <td>${escapeHtml(renderCustomFieldFlags(field))}</td>
+        <td>${entry.enabled ? "enabled" : "disabled"}</td>
+        <td>${escapeHtml(entry.updatedAt)}</td>
+        <td>${action}</td>
+      </tr>`;
+    })
+    .join("");
+  return `<form class="panel form" method="get" action="/desk/admin/custom-fields">
+    <div class="fields cols-1">
+      <label class="field"><span>DocType</span><select name="doctype">${renderCustomFieldDoctypeOptions(state.doctypes, state.selectedDoctype)}</select></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Load</button></div>
+  </form>
+  ${state.error ? `<p class="error" role="alert">${escapeHtml(state.error)}</p>` : ""}
+  <form class="panel form" method="post" action="/desk/admin/custom-fields">
+    <input type="hidden" name="doctype" value="${escapeHtml(state.selectedDoctype)}">
+    <input type="hidden" name="expectedVersion" value="${String(version)}">
+    <div class="form-head"><h2>Add Custom Field</h2><p>v${String(version)}</p></div>
+    <div class="fields">
+      <label class="field"><span>Field Name</span><input name="name"></label>
+      <label class="field"><span>Label</span><input name="label"></label>
+      <label class="field"><span>Type</span><select name="type">${renderCustomFieldTypeOptions()}</select></label>
+      <label class="field"><span>Options</span><input name="options"></label>
+      <label class="field"><span>Link To</span><input name="linkTo"></label>
+      <label class="field"><span>Table Of</span><input name="tableOf"></label>
+      <label class="field"><span>Minimum</span><input name="min" type="number" step="any"></label>
+      <label class="field"><span>Maximum</span><input name="max" type="number" step="any"></label>
+      <label class="field"><span>Default JSON</span><textarea name="defaultValue"></textarea></label>
+    </div>
+    <div class="choices">
+      ${renderCustomFieldCheckbox("required", "Required")}
+      ${renderCustomFieldCheckbox("readOnly", "Read Only")}
+      ${renderCustomFieldCheckbox("hidden", "Hidden")}
+      ${renderCustomFieldCheckbox("inFormView", "Form View")}
+      ${renderCustomFieldCheckbox("inListView", "List View")}
+      ${renderCustomFieldCheckbox("inListFilter", "List Filter")}
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Save Field</button></div>
+  </form>
+  <section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Field</th><th>Label</th><th>Type</th><th>Details</th><th>Flags</th><th>Status</th><th>Updated</th><th>Actions</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="8" class="empty">No custom fields configured.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+function renderCustomFieldDoctypeOptions(doctypes: readonly DocTypeDefinition[], selectedDoctype: string): string {
+  return doctypes
+    .map((doctype) => `<option value="${escapeHtml(doctype.name)}"${doctype.name === selectedDoctype ? " selected" : ""}>${escapeHtml(doctype.label ?? doctype.name)}</option>`)
+    .join("");
+}
+
+function renderCustomFieldTypeOptions(): string {
+  return FIELD_TYPES
+    .map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`)
+    .join("");
+}
+
+function renderCustomFieldCheckbox(name: string, label: string): string {
+  return `<label class="choice"><input type="checkbox" name="${escapeHtml(name)}" value="1"><span>${escapeHtml(label)}</span></label>`;
+}
+
+function renderCustomFieldDetails(field: FieldDefinition): string {
+  return [
+    field.options && field.options.length > 0 ? `options: ${field.options.join(", ")}` : "",
+    field.linkTo ? `link: ${field.linkTo}` : "",
+    field.tableOf ? `table: ${field.tableOf}` : "",
+    field.min !== undefined ? `min: ${String(field.min)}` : "",
+    field.max !== undefined ? `max: ${String(field.max)}` : "",
+    field.defaultValue !== undefined ? `default: ${JSON.stringify(field.defaultValue)}` : ""
+  ].filter(Boolean).map(escapeHtml).join("<br>");
+}
+
+function renderCustomFieldFlags(field: FieldDefinition): string {
+  return [
+    field.required ? "required" : "",
+    field.readOnly ? "read only" : "",
+    field.hidden ? "hidden" : "",
+    field.inFormView ? "form" : "",
+    field.inListView ? "list" : "",
+    field.inListFilter ? "filter" : ""
+  ].filter(Boolean).join(", ");
 }
 
 export function renderJobAdmin(

@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the event-sourced custom field overlay slice:
+As of the generated custom-field administration slice:
 
-- Vitest files: `72`
-- Vitest cases: `659`
+- Vitest files: `73`
+- Vitest cases: `664`
 
 ## Implication
 

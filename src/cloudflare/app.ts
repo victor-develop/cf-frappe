@@ -1,4 +1,5 @@
 import { AuditService } from "../application/audit-service.js";
+import { CustomFieldService } from "../application/custom-field-service.js";
 import {
   DATA_PATCH_APPLY_JOB_NAME,
   DataPatchQueueService,
@@ -78,6 +79,7 @@ export interface CloudFrappeRuntimeServices {
   readonly notifications: UserNotificationService;
   readonly userProfiles?: UserProfileService;
   readonly userPermissions: UserPermissionService;
+  readonly customFields: CustomFieldService;
   readonly prints: PrintService;
   readonly queries: QueryService;
   readonly reports: ReportService;
@@ -259,6 +261,11 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     events,
     validator: new ModelBackedUserPermissionGrantValidator({ registry: options.registry, events })
   });
+  const customFields = new CustomFieldService({
+    registry: options.registry,
+    events,
+    ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
+  });
   const documentShares = new DocumentShareService({ events });
   const roleValidator = options.auth?.validateRolesWithCatalog
     ? new RoleCatalogUserRoleValidator({ events })
@@ -314,6 +321,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     notifications,
     ...(userProfiles === undefined ? {} : { userProfiles }),
     userPermissions,
+    customFields,
     prints,
     queries: restrictedQueries,
     reports,
@@ -417,6 +425,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(userProfiles === undefined ? {} : { userProfiles }),
     ...(userAccounts === undefined || options.auth === undefined ? {} : { auth: authSessionOptions(options.auth, env) }),
     userPermissions,
+    customFields,
     reports,
     roles,
     actor,
@@ -443,6 +452,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(userAccounts === undefined ? {} : { userAccounts }),
     ...(userProfiles === undefined ? {} : { userProfiles }),
     userPermissions,
+    customFields,
     reports,
     roles,
     ...(dataPatches === undefined ? {} : { dataPatches }),

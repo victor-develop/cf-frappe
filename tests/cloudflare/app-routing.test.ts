@@ -616,6 +616,49 @@ describe("CloudFrappe Worker routing", () => {
     expect(html).toContain("No grants configured.");
   });
 
+  it("mounts custom-field admin API and Desk routes on the Worker", async () => {
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => ({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" })
+    });
+    const env = {
+      DB: fakeEventD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const empty = await worker.fetch!(
+      cfRequest("http://localhost/api/custom-fields/Note"),
+      env,
+      fakeExecutionContext()
+    );
+    expect(empty.status).toBe(200);
+    await expect(empty.json()).resolves.toMatchObject({
+      data: { tenantId: "acme", doctype: "Note", version: 0, fields: [] }
+    });
+
+    const created = await worker.fetch!(
+      cfRequest("http://localhost/api/custom-fields/Note", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ field: { name: "reviewed", type: "boolean" }, expectedVersion: 0 })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(created.status).toBe(201);
+
+    const desk = await worker.fetch!(
+      cfRequest("http://localhost/desk/admin/custom-fields?doctype=Note"),
+      env,
+      fakeExecutionContext()
+    );
+    expect(desk.status).toBe(200);
+    const html = await desk.text();
+    expect(html).toContain("Custom Fields");
+    expect(html).toContain("reviewed");
+    expect(html).toContain('action="/desk/admin/custom-fields/Note/reviewed/disable"');
+  });
+
   it("mounts role catalog API and Desk routes on the Worker", async () => {
     const worker = createCloudFrappeWorker({
       registry: createTestRegistry(),

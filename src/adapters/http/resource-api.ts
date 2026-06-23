@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AuditService } from "../../application/audit-service.js";
+import type { CustomFieldService } from "../../application/custom-field-service.js";
 import type { DataPatchQueuePort } from "../../application/data-patch-jobs.js";
 import type { DataPatchAdminPort } from "../../application/data-patch-service.js";
 import type { DocumentShareService } from "../../application/document-share-service.js";
@@ -35,6 +36,7 @@ import {
 import type { ActorResolver } from "./actor.js";
 import { createAuthApi, type AuthSessionOptions } from "./auth-api.js";
 import { createAuditApi } from "./audit-api.js";
+import { createCustomFieldApi } from "./custom-field-api.js";
 import { createDataPatchApi } from "./data-patch-api.js";
 import { toErrorResponse } from "./errors.js";
 import { createFileApi } from "./file-api.js";
@@ -74,6 +76,7 @@ export interface ResourceApiOptions {
   readonly userProfiles?: UserProfileService;
   readonly auth?: AuthSessionOptions;
   readonly userPermissions?: UserPermissionService;
+  readonly customFields?: CustomFieldService;
   readonly maxFileBytes?: number;
 }
 
@@ -280,6 +283,17 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       "/",
       createUserPermissionApi({
         userPermissions: options.userPermissions,
+        actor: resolveActor,
+        maxJsonBytes
+      })
+    );
+  }
+
+  if (options.customFields) {
+    app.route(
+      "/",
+      createCustomFieldApi({
+        customFields: options.customFields,
         actor: resolveActor,
         maxJsonBytes
       })

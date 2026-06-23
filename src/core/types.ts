@@ -24,6 +24,8 @@ export type FieldType =
   | "link"
   | "table";
 
+export const FIELD_TYPES = ["text", "longText", "integer", "number", "boolean", "date", "datetime", "json", "select", "link", "table"] as const satisfies readonly FieldType[];
+
 export interface FieldDefaultContext {
   readonly actor: Actor;
   readonly now: string;

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { CustomFieldService } from "../../application/custom-field-service.js";
 import type { DataPatchAdminPort, DataPatchApplyPlan } from "../../application/data-patch-service.js";
 import type { DocumentShareService } from "../../application/document-share-service.js";
 import type { DocumentCommandExecutor } from "../../application/document-service.js";
@@ -36,6 +37,7 @@ import {
 import { allowedWorkflowTransitions } from "../../core/workflow.js";
 import {
   CHILD_TABLE_ROW_INDEX_FIELD,
+  FIELD_TYPES,
   SYSTEM_MANAGER_ROLE,
   type Actor,
   type DocTypeDefinition,
@@ -43,6 +45,7 @@ import {
   type DocumentSnapshot,
   type FieldDefinition,
   type FieldType,
+  type JsonValue,
   type ListDocumentsFilter,
   type MutableDocumentData,
   type ResolvedFormView
@@ -67,6 +70,7 @@ import {
   renderFileAttachmentPanel,
   renderFileManager,
   renderDataPatchAdmin,
+  renderCustomFieldAdmin,
   renderDocumentPresencePanel,
   renderDocumentTimeline,
   renderFormView,
@@ -128,6 +132,7 @@ export interface DeskAppOptions {
   readonly savedFilters?: SavedListFilterService;
   readonly savedReports?: SavedReportService;
   readonly roles?: RoleService;
+  readonly customFields?: CustomFieldService;
   readonly userAccounts?: UserAccountService;
   readonly notifications?: UserNotificationService;
   readonly userProfiles?: UserProfileService;
@@ -448,6 +453,17 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const state = await roles.list(actor);
     return renderDeskRolePage(options, actor, state);
+  });
+
+  app.get("/desk/admin/custom-fields", async (c) => {
+    const customFields = requireCustomFields(options);
+    const actor = await options.actor(c.req.raw);
+    customFields.authorizeAdministration(actor);
+    const url = new URL(c.req.url);
+    const doctypes = options.queries.listDoctypes(actor);
+    const selectedDoctype = url.searchParams.get("doctype")?.trim() || doctypes[0]?.name || "";
+    const state = selectedDoctype ? await customFields.list(actor, selectedDoctype) : undefined;
+    return renderDeskCustomFieldPage(options, actor, selectedDoctype, state);
   });
 
   app.get("/desk/admin/jobs", async (c) => {
@@ -855,6 +871,45 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       return c.redirect("/desk/admin/roles", 303);
     } catch (error) {
       return renderDeskRoleFailure(options, actor, roles, error);
+    }
+  });
+
+  app.post("/desk/admin/custom-fields", async (c) => {
+    const customFields = requireCustomFields(options);
+    const actor = await options.actor(c.req.raw);
+    customFields.authorizeAdministration(actor);
+    let form: ParsedDeskCustomField | undefined;
+    try {
+      form = await parseDeskCustomField(c.req.raw);
+      await customFields.saveField({
+        actor,
+        doctype: form.doctype,
+        field: form.field,
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(customFieldAdminHref(form.doctype), 303);
+    } catch (error) {
+      return renderDeskCustomFieldFailure(options, actor, customFields, form?.doctype ?? "", error);
+    }
+  });
+
+  app.post("/desk/admin/custom-fields/:doctype/:field/disable", async (c) => {
+    const customFields = requireCustomFields(options);
+    const actor = await options.actor(c.req.raw);
+    customFields.authorizeAdministration(actor);
+    try {
+      const form = await parseDeskCustomFieldDisable(c.req.raw);
+      await customFields.disableField({
+        actor,
+        doctype: c.req.param("doctype"),
+        fieldName: c.req.param("field"),
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(customFieldAdminHref(c.req.param("doctype")), 303);
+    } catch (error) {
+      return renderDeskCustomFieldFailure(options, actor, customFields, c.req.param("doctype"), error);
     }
   });
 
@@ -1677,6 +1732,9 @@ function adminLinksFor(options: DeskAppOptions, actor: Actor): readonly DeskNavL
   return [
     ...(options.userAccounts === undefined ? [] : [{ id: "users", label: "Users", href: "/desk/admin/users" }]),
     ...(options.roles === undefined ? [] : [{ id: "roles", label: "Roles", href: "/desk/admin/roles" }]),
+    ...(options.customFields === undefined
+      ? []
+      : [{ id: "custom-fields", label: "Custom Fields", href: "/desk/admin/custom-fields" }]),
     ...(options.userPermissions === undefined
       ? []
       : [{ id: "user-permissions", label: "User Permissions", href: "/desk/admin/user-permissions" }]),
@@ -1806,6 +1864,13 @@ function requireRoles(options: DeskAppOptions): RoleService {
     throw new FrameworkError("DOCUMENT_NOT_FOUND", "Roles are not enabled", { status: 404 });
   }
   return options.roles;
+}
+
+function requireCustomFields(options: DeskAppOptions): CustomFieldService {
+  if (!options.customFields) {
+    throw new FrameworkError("DOCUMENT_NOT_FOUND", "Custom fields are not enabled", { status: 404 });
+  }
+  return options.customFields;
 }
 
 function requireJobs(options: DeskAppOptions): JobHistoryService {
@@ -2137,6 +2202,68 @@ async function renderDeskRoleFailure(
   const state = await roles.list(actor);
   const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
   return renderDeskRolePage(options, actor, state, error instanceof FrameworkError ? error.status : 500, message);
+}
+
+async function renderDeskCustomFieldPage(
+  options: DeskAppOptions,
+  actor: Actor,
+  selectedDoctype: string,
+  state: Awaited<ReturnType<CustomFieldService["list"]>> | undefined,
+  status = 200,
+  error?: string
+): Promise<Response> {
+  const doctypes = options.queries.listDoctypes(actor);
+  const reports = listReports(options, actor);
+  return html(
+    renderDeskLayoutFor(options, {
+      title: "Custom Fields",
+      activeAdmin: "custom-fields",
+      adminLinks: adminLinksFor(options, actor),
+      doctypes,
+      reports,
+      body: renderCustomFieldAdmin({
+        doctypes,
+        selectedDoctype,
+        ...(state === undefined ? {} : { state }),
+        ...(error === undefined ? {} : { error })
+      })
+    }),
+    status
+  );
+}
+
+async function renderDeskCustomFieldFailure(
+  options: DeskAppOptions,
+  actor: Actor,
+  customFields: CustomFieldService,
+  selectedDoctype: string,
+  error: unknown
+): Promise<Response> {
+  if (error instanceof FrameworkError && error.status === 403) {
+    throw error;
+  }
+  const fallbackDoctype = selectedDoctype || options.queries.listDoctypes(actor)[0]?.name || "";
+  let state: Awaited<ReturnType<CustomFieldService["list"]>> | undefined;
+  try {
+    state = fallbackDoctype ? await customFields.list(actor, fallbackDoctype) : undefined;
+  } catch (listError) {
+    if (!(listError instanceof FrameworkError && listError.status === 404)) {
+      throw listError;
+    }
+  }
+  const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
+  return renderDeskCustomFieldPage(
+    options,
+    actor,
+    fallbackDoctype,
+    state,
+    error instanceof FrameworkError ? error.status : 500,
+    message
+  );
+}
+
+function customFieldAdminHref(doctype: string): string {
+  return `/desk/admin/custom-fields?doctype=${encodeURIComponent(doctype)}`;
 }
 
 async function renderDeskDocumentPage(
@@ -2484,6 +2611,16 @@ interface ParsedDeskRoleDescription {
 }
 
 interface ParsedDeskRoleStatus {
+  readonly expectedVersion?: number;
+}
+
+interface ParsedDeskCustomField {
+  readonly doctype: string;
+  readonly field: FieldDefinition;
+  readonly expectedVersion?: number;
+}
+
+interface ParsedDeskCustomFieldDisable {
   readonly expectedVersion?: number;
 }
 
@@ -2919,6 +3056,49 @@ async function parseDeskRoleStatus(request: Request): Promise<ParsedDeskRoleStat
   };
 }
 
+async function parseDeskCustomField(request: Request): Promise<ParsedDeskCustomField> {
+  const form = await readUrlEncodedDeskForm(request);
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  const doctype = requiredSearchParamValue(form, "doctype", "DocType");
+  const type = fieldTypeSearchParamValue(form, "type", "Field type");
+  const options = commaListFormValue(form.get("options"));
+  const label = stringSearchParamValue(form, "label");
+  const linkTo = stringSearchParamValue(form, "linkTo");
+  const tableOf = stringSearchParamValue(form, "tableOf");
+  const min = optionalNumberSearchParamValue(form, "min", "Minimum");
+  const max = optionalNumberSearchParamValue(form, "max", "Maximum");
+  const defaultValue = optionalJsonSearchParamValue(form, "defaultValue", "Default value");
+  return {
+    doctype,
+    field: {
+      name: requiredSearchParamValue(form, "name", "Field name"),
+      type,
+      ...(label === undefined ? {} : { label }),
+      ...(form.has("required") ? { required: true } : {}),
+      ...(form.has("readOnly") ? { readOnly: true } : {}),
+      ...(form.has("hidden") ? { hidden: true } : {}),
+      ...(form.has("inFormView") ? { inFormView: true } : {}),
+      ...(form.has("inListView") ? { inListView: true } : {}),
+      ...(form.has("inListFilter") ? { inListFilter: true } : {}),
+      ...(options.length === 0 ? {} : { options }),
+      ...(linkTo === undefined ? {} : { linkTo }),
+      ...(tableOf === undefined ? {} : { tableOf }),
+      ...(min === undefined ? {} : { min }),
+      ...(max === undefined ? {} : { max }),
+      ...(defaultValue === undefined ? {} : { defaultValue })
+    },
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
+async function parseDeskCustomFieldDisable(request: Request): Promise<ParsedDeskCustomFieldDisable> {
+  const form = await readUrlEncodedDeskForm(request);
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  return {
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
 async function parseDeskForm(
   request: Request,
   doctype: DocTypeDefinition,
@@ -2978,6 +3158,46 @@ function uniqueFormValues(form: URLSearchParams, key: string): readonly string[]
 function stringSearchParamValue(form: URLSearchParams, key: string): string | undefined {
   const value = form.get(key)?.trim();
   return value ? value : undefined;
+}
+
+function requiredSearchParamValue(form: URLSearchParams, key: string, label: string): string {
+  const value = stringSearchParamValue(form, key);
+  if (value === undefined) {
+    throw new FrameworkError("BAD_REQUEST", `${label} is required`, { status: 400 });
+  }
+  return value;
+}
+
+function fieldTypeSearchParamValue(form: URLSearchParams, key: string, label: string): FieldType {
+  const value = stringSearchParamValue(form, key);
+  if (value !== undefined && (FIELD_TYPES as readonly string[]).includes(value)) {
+    return value as FieldType;
+  }
+  throw new FrameworkError("BAD_REQUEST", `${label} is invalid`, { status: 400 });
+}
+
+function optionalNumberSearchParamValue(form: URLSearchParams, key: string, label: string): number | undefined {
+  const value = stringSearchParamValue(form, key);
+  if (value === undefined) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new FrameworkError("BAD_REQUEST", `${label} must be a number`, { status: 400 });
+  }
+  return parsed;
+}
+
+function optionalJsonSearchParamValue(form: URLSearchParams, key: string, label: string): JsonValue | undefined {
+  const value = stringSearchParamValue(form, key);
+  if (value === undefined) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(value) as JsonValue;
+  } catch {
+    throw new FrameworkError("BAD_REQUEST", `${label} must be valid JSON`, { status: 400 });
+  }
 }
 
 function optionalBooleanSearchParamValue(form: URLSearchParams, key: string, label: string): boolean | undefined {
