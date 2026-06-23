@@ -11,6 +11,7 @@ import type {
   ReportOrder,
   ReportSummaryDefinition
 } from "../../core/reports.js";
+import { REPORT_FORMULA_MAX_DEPTH } from "../../core/reports.js";
 import type { FieldType, JsonPrimitive } from "../../core/types.js";
 import { reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request.js";
 import type { ActorResolver } from "./actor.js";
@@ -205,21 +206,35 @@ function chartValue(value: Record<string, unknown>): ReportChartDefinition {
 }
 
 function formulaValue(value: Record<string, unknown>): NonNullable<ReportColumnDefinition["formula"]> {
-  return {
-    operator: requiredString(value.operator, "Saved report formula operator must be a string") as NonNullable<ReportColumnDefinition["formula"]>["operator"],
-    left: formulaOperandValue(value.left, "Saved report formula left must be a string or finite number"),
-    right: formulaOperandValue(value.right, "Saved report formula right must be a string or finite number")
-  };
+  return formulaValueWithLabel(value, "Saved report formula", 1);
 }
 
-function formulaOperandValue(value: unknown, message: string): ReportFormulaOperand {
+function formulaOperandValue(value: unknown, label: string, depth: number): ReportFormulaOperand {
   if (typeof value === "string") {
     return value;
   }
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
   }
-  throw badRequest(message);
+  if (isRecord(value)) {
+    return formulaValueWithLabel(value, label, depth);
+  }
+  throw badRequest(`${label} must be a string, finite number, or nested formula`);
+}
+
+function formulaValueWithLabel(
+  value: Record<string, unknown>,
+  label: string,
+  depth: number
+): NonNullable<ReportColumnDefinition["formula"]> {
+  if (depth > REPORT_FORMULA_MAX_DEPTH) {
+    throw badRequest(`${label} exceeds maximum formula depth of ${REPORT_FORMULA_MAX_DEPTH}`);
+  }
+  return {
+    operator: requiredString(value.operator, `${label} operator must be a string`) as NonNullable<ReportColumnDefinition["formula"]>["operator"],
+    left: formulaOperandValue(value.left, `${label} left`, depth + 1),
+    right: formulaOperandValue(value.right, `${label} right`, depth + 1)
+  };
 }
 
 function optionalStringField(value: Record<string, unknown>, key: string): Record<string, string> {

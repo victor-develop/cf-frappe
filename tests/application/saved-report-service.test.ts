@@ -1,4 +1,5 @@
-import { createServices, data, manager, owner } from "../helpers";
+import { REPORT_FORMULA_MAX_DEPTH, savedReportsStream, type JsonObject } from "../../src";
+import { createServices, data, manager, now, owner } from "../helpers";
 
 describe("SavedReportService", () => {
   it("saves normalized user report definitions as events and lists only the actor's reports", async () => {
@@ -79,10 +80,14 @@ describe("SavedReportService", () => {
           { name: "title", label: "Title" },
           { name: "count", label: "Count" },
           {
-            name: "double_count",
-            label: "Double Count",
+            name: "adjusted_count",
+            label: "Adjusted Count",
             type: "number",
-            formula: { operator: "multiply", left: "count", right: 2 }
+            formula: {
+              operator: "add",
+              left: { operator: "multiply", left: "count", right: 2 },
+              right: 1
+            }
           }
         ],
         filters: [{ name: "priority", field: "priority", type: "select", defaultValue: "High" }],
@@ -96,7 +101,7 @@ describe("SavedReportService", () => {
 
     expect(result).toMatchObject({
       report: { label: "High counts", doctype: "Note" },
-      rows: [{ title: "High Count B", count: 7, double_count: 14 }],
+      rows: [{ title: "High Count B", count: 7, adjusted_count: 15 }],
       summary: [{ name: "total_count", value: 10 }],
       total: 2
     });
@@ -109,7 +114,7 @@ describe("SavedReportService", () => {
     });
 
     expect(csv).toMatchObject({ exported: 1, total: 2, truncated: true });
-    expect(csv.body).toBe("Title,Count,Double Count\nHigh Count B,7,14");
+    expect(csv.body).toBe("Title,Count,Adjusted Count\nHigh Count B,7,15");
   });
 
   it("round-trips persisted group and chart bounds through saved report events", async () => {
@@ -300,4 +305,50 @@ describe("SavedReportService", () => {
       message: "Report 'Saved Report Draft' summary 'median_count' on group 'by_priority' has invalid aggregate 'median'"
     });
   });
+
+  it("rejects overly deep nested formulas while replaying saved report events", async () => {
+    const { events, savedReports } = createServices();
+    const stream = savedReportsStream("acme", "Note", owner.id);
+    await events.append(stream, 0, [
+      {
+        id: "event-deep-report",
+        tenantId: "acme",
+        stream,
+        type: "NoteSavedReportSaved",
+        doctype: "Note",
+        documentName: "report_deep",
+        actorId: owner.id,
+        occurredAt: now,
+        payload: {
+          kind: "SavedReportSaved",
+          reportId: "report_deep",
+          label: "Deep formula",
+          ownerId: owner.id,
+          definition: {
+            columns: [
+              {
+                name: "too_deep",
+                type: "number",
+                formula: nestedFormulaPayload(REPORT_FORMULA_MAX_DEPTH + 1)
+              }
+            ]
+          }
+        },
+        metadata: {}
+      }
+    ]);
+
+    await expect(savedReports.list(owner, "Note")).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: expect.stringContaining(`exceeds maximum formula depth of ${REPORT_FORMULA_MAX_DEPTH}`)
+    });
+  });
 });
+
+function nestedFormulaPayload(depth: number): JsonObject {
+  let formula: JsonObject = { operator: "add", left: "count", right: 1 };
+  for (let index = 1; index < depth; index += 1) {
+    formula = { operator: "add", left: formula, right: 1 };
+  }
+  return formula;
+}

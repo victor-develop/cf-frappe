@@ -1,6 +1,7 @@
 import { badRequest, permissionDenied } from "../core/errors.js";
 import { can } from "../core/permissions.js";
 import {
+  assertReportDefinition,
   assertReportMatchesDocType,
   canReadReport,
   type ReportColumnDefinition,
@@ -283,6 +284,7 @@ export class ReportService {
     if (!canReadReport(actor, report) || !can(actor, doctype, report.permissionAction ?? "read")) {
       throw permissionDenied(`Actor '${actor.id}' cannot read report '${report.name}'`);
     }
+    assertReportDefinition(report);
     assertReportMatchesDocType(report, doctype);
     return doctype;
   }
@@ -587,6 +589,9 @@ function reportFormulaValue(
 function numericFormulaOperand(document: DocumentSnapshot, operand: ReportFormulaOperand): number | null {
   if (typeof operand === "number") {
     return operand;
+  }
+  if (typeof operand === "object") {
+    return reportFormulaValue(document, operand);
   }
   const value = document.data[operand];
   return typeof value === "number" ? value : null;

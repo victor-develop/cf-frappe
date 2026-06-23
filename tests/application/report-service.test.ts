@@ -155,6 +155,16 @@ describe("ReportService", () => {
             formula: { operator: "multiply", left: "count", right: 2 }
           },
           {
+            name: "nested_score",
+            label: "Nested Score",
+            type: "number",
+            formula: {
+              operator: "add",
+              left: { operator: "multiply", left: "count", right: 2 },
+              right: 1
+            }
+          },
+          {
             name: "count_ratio",
             label: "Count Ratio",
             type: "number",
@@ -167,7 +177,7 @@ describe("ReportService", () => {
             formula: { operator: "divide", left: "count", right: 0 }
           }
         ],
-        orderBy: "double_count",
+        orderBy: "nested_score",
         order: "desc",
         roles: ["User"]
       })
@@ -179,16 +189,16 @@ describe("ReportService", () => {
 
     const result = await reports.runReport(owner, "Count Scores", { limit: 4 });
 
-    expect(result.order).toMatchObject({ orderBy: "double_count", order: "desc" });
+    expect(result.order).toMatchObject({ orderBy: "nested_score", order: "desc" });
     expect(result.rows).toEqual([
-      { title: "High", double_count: 10, count_ratio: 2.5, divide_by_zero: null },
-      { title: "Medium", double_count: 6, count_ratio: 1.5, divide_by_zero: null },
-      { title: "Low", double_count: 2, count_ratio: 0.5, divide_by_zero: null },
-      { title: "Zero", double_count: 0, count_ratio: 0, divide_by_zero: null }
+      { title: "High", double_count: 10, nested_score: 11, count_ratio: 2.5, divide_by_zero: null },
+      { title: "Medium", double_count: 6, nested_score: 7, count_ratio: 1.5, divide_by_zero: null },
+      { title: "Low", double_count: 2, nested_score: 3, count_ratio: 0.5, divide_by_zero: null },
+      { title: "Zero", double_count: 0, nested_score: 1, count_ratio: 0, divide_by_zero: null }
     ]);
 
     const csv = await reports.exportReportCsv(owner, "Count Scores", { limit: 2 });
-    expect(csv.body).toBe("Title,Double Count,Count Ratio,Divide By Zero\nHigh,10,2.5,\nMedium,6,1.5,");
+    expect(csv.body).toBe("Title,Double Count,Nested Score,Count Ratio,Divide By Zero\nHigh,10,11,2.5,\nMedium,6,7,1.5,");
   });
 
   it("sorts chart points by metadata before applying maxPoints", async () => {

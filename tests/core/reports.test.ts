@@ -1,4 +1,11 @@
-import { createRegistry, defineDocType, defineReport, FrameworkError } from "../../src";
+import {
+  createRegistry,
+  defineDocType,
+  defineReport,
+  FrameworkError,
+  REPORT_FORMULA_MAX_DEPTH,
+  type ReportFormulaDefinition
+} from "../../src";
 
 describe("reports", () => {
   it("registers reports after their DocType and lists them in stable order", () => {
@@ -256,7 +263,7 @@ describe("reports", () => {
     ).toThrow("Report 'Broken Json Order' cannot order by json column 'meta_value'");
   });
 
-  it("validates report formula operands as numeric fields or finite literals", () => {
+  it("validates report formula operands as numeric fields, finite literals, or nested formulas", () => {
     const Note = defineDocType({
       name: "Note",
       fields: [
@@ -266,19 +273,26 @@ describe("reports", () => {
     });
 
     const report = defineReport({
-      name: "Literal Formula",
+      name: "Nested Formula",
       doctype: "Note",
       columns: [
         {
           name: "count_percent",
           type: "number",
-          formula: { operator: "multiply", left: "count", right: 100 }
+          formula: {
+            operator: "add",
+            left: { operator: "multiply", left: "count", right: 100 },
+            right: { operator: "divide", left: "count", right: 2 }
+          }
         }
       ]
     });
 
-    expect(createRegistry({ doctypes: [Note], reports: [report] }).getReport("Literal Formula").columns[0]).toMatchObject({
-      formula: { left: "count", right: 100 }
+    expect(createRegistry({ doctypes: [Note], reports: [report] }).getReport("Nested Formula").columns[0]).toMatchObject({
+      formula: {
+        left: { operator: "multiply", left: "count", right: 100 },
+        right: { operator: "divide", left: "count", right: 2 }
+      }
     });
 
     expect(() =>
@@ -287,7 +301,7 @@ describe("reports", () => {
         doctype: "Note",
         columns: [{ name: "broken", formula: { operator: "add", left: "", right: 1 } }]
       })
-    ).toThrow("Report 'Broken Empty Formula' formula column 'broken' left operand must be a field name or finite numeric literal");
+    ).toThrow("Report 'Broken Empty Formula' formula column 'broken' left operand must be a field name, finite numeric literal, or nested formula");
 
     expect(() =>
       defineReport({
@@ -295,7 +309,7 @@ describe("reports", () => {
         doctype: "Note",
         columns: [{ name: "broken", formula: { operator: "add", left: "count", right: Number.POSITIVE_INFINITY } }]
       })
-    ).toThrow("Report 'Broken Infinite Formula' formula column 'broken' right operand must be a field name or finite numeric literal");
+    ).toThrow("Report 'Broken Infinite Formula' formula column 'broken' right operand must be a field name, finite numeric literal, or nested formula");
 
     expect(() =>
       createRegistry({
@@ -322,6 +336,53 @@ describe("reports", () => {
         ]
       })
     ).toThrow("Report 'Broken Missing Formula' formula column 'broken' references unknown right field 'missing'");
+
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        reports: [
+          defineReport({
+            name: "Broken Nested Formula",
+            doctype: "Note",
+            columns: [
+              {
+                name: "broken",
+                formula: {
+                  operator: "add",
+                  left: { operator: "multiply", left: "count", right: "missing" },
+                  right: 1
+                }
+              }
+            ]
+          })
+        ]
+      })
+    ).toThrow("Report 'Broken Nested Formula' formula column 'broken' references unknown left formula right field 'missing'");
+  });
+
+  it("rejects cyclic and overly deep report formula metadata", () => {
+    const cyclic = { operator: "add", left: "count", right: 1 } as {
+      operator: "add";
+      left: string;
+      right: unknown;
+    };
+    cyclic.right = cyclic;
+
+    expect(() =>
+      defineReport({
+        name: "Cyclic Formula",
+        doctype: "Note",
+        columns: [{ name: "cycle", type: "number", formula: cyclic as ReportFormulaDefinition }]
+      })
+    ).toThrow("contains a cyclic formula reference");
+
+    expect(() =>
+      defineReport({
+        name: "Too Deep Formula",
+        doctype: "Note",
+        columns: [{ name: "too_deep", type: "number", formula: nestedFormula(REPORT_FORMULA_MAX_DEPTH + 1) }]
+      })
+    ).toThrow(`exceeds maximum formula depth of ${REPORT_FORMULA_MAX_DEPTH}`);
   });
 
   it("validates report charts against grouped numeric summaries", () => {
@@ -513,3 +574,11 @@ describe("reports", () => {
     ).toThrow("Report 'Broken Color Chart' chart 'priority_chart' has invalid color 'blue'");
   });
 });
+
+function nestedFormula(depth: number): ReportFormulaDefinition {
+  let formula: ReportFormulaDefinition = { operator: "add", left: "count", right: 1 };
+  for (let index = 1; index < depth; index += 1) {
+    formula = { operator: "add", left: formula, right: 1 };
+  }
+  return formula;
+}

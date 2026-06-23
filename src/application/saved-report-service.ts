@@ -3,6 +3,7 @@ import { can } from "../core/permissions.js";
 import {
   assertReportMatchesDocType,
   defineReport,
+  REPORT_FORMULA_MAX_DEPTH,
   type ReportChartDefinition,
   type ReportChartOrderBy,
   type ReportColumnDefinition,
@@ -422,9 +423,13 @@ function chartToPayload(chart: ReportChartDefinition): JsonObject {
 function formulaToPayload(formula: NonNullable<ReportColumnDefinition["formula"]>): JsonObject {
   return {
     operator: formula.operator,
-    left: formula.left,
-    right: formula.right
+    left: formulaOperandToPayload(formula.left),
+    right: formulaOperandToPayload(formula.right)
   };
+}
+
+function formulaOperandToPayload(operand: ReportFormulaOperand): JsonValue {
+  return typeof operand === "object" ? formulaToPayload(operand) : operand;
 }
 
 function columnFromPayload(payload: JsonObject): ReportColumnDefinition {
@@ -496,20 +501,30 @@ function chartFromPayload(payload: JsonObject): ReportChartDefinition {
   };
 }
 
-function formulaFromPayload(payload: JsonObject): NonNullable<ReportColumnDefinition["formula"]> {
+function formulaFromPayload(
+  payload: JsonObject,
+  field = "formula",
+  depth = 1
+): NonNullable<ReportColumnDefinition["formula"]> {
+  if (depth > REPORT_FORMULA_MAX_DEPTH) {
+    throw badRequest(`Saved report definition '${field}' exceeds maximum formula depth of ${REPORT_FORMULA_MAX_DEPTH}`);
+  }
   return {
-    operator: requiredString(payload.operator, "formula.operator") as NonNullable<ReportColumnDefinition["formula"]>["operator"],
-    left: formulaOperandFromPayload(payload.left, "formula.left"),
-    right: formulaOperandFromPayload(payload.right, "formula.right")
+    operator: requiredString(payload.operator, `${field}.operator`) as NonNullable<ReportColumnDefinition["formula"]>["operator"],
+    left: formulaOperandFromPayload(payload.left, `${field}.left`, depth + 1),
+    right: formulaOperandFromPayload(payload.right, `${field}.right`, depth + 1)
   };
 }
 
-function formulaOperandFromPayload(value: JsonValue | undefined, field: string): ReportFormulaOperand {
+function formulaOperandFromPayload(value: JsonValue | undefined, field: string, depth: number): ReportFormulaOperand {
   if (typeof value === "string") {
     return value;
   }
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
+  }
+  if (value !== undefined && isJsonObject(value)) {
+    return formulaFromPayload(value, field, depth);
   }
   throw badRequest(`Saved report definition '${field}' is invalid`);
 }

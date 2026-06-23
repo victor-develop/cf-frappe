@@ -1,4 +1,4 @@
-import { createResourceApi, unsafeHeaderActorResolver } from "../../src";
+import { createResourceApi, REPORT_FORMULA_MAX_DEPTH, unsafeHeaderActorResolver, type JsonObject } from "../../src";
 import { createServices, data, owner } from "../helpers";
 
 describe("saved report api", () => {
@@ -142,7 +142,11 @@ describe("saved report api", () => {
               name: "double_count",
               label: "Double Count",
               type: "number",
-              formula: { operator: "multiply", left: "count", right: 2 }
+              formula: {
+                operator: "add",
+                left: { operator: "multiply", left: "count", right: 2 },
+                right: 1
+              }
             }
           ],
           orderBy: "double_count",
@@ -160,7 +164,11 @@ describe("saved report api", () => {
             {
               name: "double_count",
               label: "Double Count",
-              formula: { operator: "multiply", left: "count", right: 2 }
+              formula: {
+                operator: "add",
+                left: { operator: "multiply", left: "count", right: 2 },
+                right: 1
+              }
             }
           ],
           orderBy: "double_count"
@@ -172,7 +180,7 @@ describe("saved report api", () => {
 
     expect(run.status).toBe(200);
     await expect(run.json()).resolves.toMatchObject({
-      rows: [{ title: "High Count", double_count: 8 }],
+      rows: [{ title: "High Count", double_count: 9 }],
       order: { orderBy: "double_count", order: "desc" }
     });
   });
@@ -210,7 +218,66 @@ describe("saved report api", () => {
 
     expect(badFormula.status).toBe(400);
     await expect(badFormula.json()).resolves.toMatchObject({
-      error: { code: "BAD_REQUEST", message: "Saved report formula left must be a string or finite number" }
+      error: { code: "BAD_REQUEST", message: "Saved report formula left must be a string, finite number, or nested formula" }
+    });
+  });
+
+  it("maps malformed nested saved report formulas to bounded JSON errors", async () => {
+    const { app } = makeApp();
+
+    const badNestedFormula = await app.request("/api/report-builder/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({
+        label: "Bad nested formula",
+        definition: {
+          columns: [
+            {
+              name: "broken",
+              type: "number",
+              formula: {
+                operator: "add",
+                left: { operator: "multiply", left: "count", right: false },
+                right: 2
+              }
+            }
+          ]
+        }
+      })
+    });
+
+    expect(badNestedFormula.status).toBe(400);
+    await expect(badNestedFormula.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Saved report formula left right must be a string, finite number, or nested formula" }
+    });
+  });
+
+  it("maps overly deep nested saved report formulas to bounded JSON errors", async () => {
+    const { app } = makeApp();
+
+    const response = await app.request("/api/report-builder/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({
+        label: "Too deep",
+        definition: {
+          columns: [
+            {
+              name: "too_deep",
+              type: "number",
+              formula: nestedFormulaPayload(REPORT_FORMULA_MAX_DEPTH + 1)
+            }
+          ]
+        }
+      })
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "BAD_REQUEST",
+        message: expect.stringContaining(`exceeds maximum formula depth of ${REPORT_FORMULA_MAX_DEPTH}`)
+      }
     });
   });
 
@@ -331,4 +398,12 @@ function highCountsDefinition() {
     orderBy: "count",
     order: "desc"
   };
+}
+
+function nestedFormulaPayload(depth: number): JsonObject {
+  let formula: JsonObject = { operator: "add", left: "count", right: 1 };
+  for (let index = 1; index < depth; index += 1) {
+    formula = { operator: "add", left: formula, right: 1 };
+  }
+  return formula;
 }

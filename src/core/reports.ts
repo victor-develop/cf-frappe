@@ -9,7 +9,7 @@ export type ReportChartOrderBy = "key" | "label" | "value";
 export type ReportOrder = "asc" | "desc";
 export type ReportChartOrder = ReportOrder;
 export type ReportFormulaOperator = "add" | "subtract" | "multiply" | "divide";
-export type ReportFormulaOperand = string | number;
+export type ReportFormulaOperand = string | number | ReportFormulaDefinition;
 
 const REPORT_FILTER_OPERATORS = ["eq", "contains", "gte", "lte"] as const;
 const REPORT_FILTER_TYPES = ["text", "longText", "integer", "number", "boolean", "date", "datetime", "select", "link"] as const;
@@ -18,6 +18,7 @@ const REPORT_ORDERS = ["asc", "desc"] as const;
 const REPORT_SUMMARY_AGGREGATES = ["count", "sum", "avg", "min", "max"] as const;
 const REPORT_FORMULA_OPERATORS = ["add", "subtract", "multiply", "divide"] as const;
 const REPORT_CHART_COLOR_PATTERN = /^#[0-9A-Fa-f]{3}(?:[0-9A-Fa-f]{3})?$/;
+export const REPORT_FORMULA_MAX_DEPTH = 16;
 
 export interface ReportFormulaDefinition {
   readonly operator: ReportFormulaOperator;
@@ -98,7 +99,7 @@ export function defineReport(definition: ReportDefinition): ReportDefinition {
     definition.columns.map((column) =>
       Object.freeze({
         ...column,
-        ...(column.formula === undefined ? {} : { formula: Object.freeze({ ...column.formula }) })
+        ...(column.formula === undefined ? {} : { formula: freezeReportFormula(column.formula) })
       })
     )
   );
@@ -294,13 +295,6 @@ function assertFormulaColumnsValid(report: ReportDefinition): void {
         { status: 400 }
       );
     }
-    if (!REPORT_FORMULA_OPERATORS.includes(formula.operator)) {
-      throw new FrameworkError(
-        "REPORT_INVALID",
-        `Report '${report.name}' formula column '${column.name}' has invalid operator '${String(formula.operator)}'`,
-        { status: 400 }
-      );
-    }
     if (column.type !== undefined && column.type !== "integer" && column.type !== "number") {
       throw new FrameworkError(
         "REPORT_INVALID",
@@ -308,8 +302,32 @@ function assertFormulaColumnsValid(report: ReportDefinition): void {
         { status: 400 }
       );
     }
-    assertFormulaOperandSyntax(report.name, column.name, formula.left, "left");
-    assertFormulaOperandSyntax(report.name, column.name, formula.right, "right");
+    assertFormulaSyntax(report.name, column.name, formula, "");
+  }
+}
+
+function assertFormulaSyntax(
+  reportName: string,
+  columnName: string,
+  formula: ReportFormulaDefinition,
+  path: string,
+  depth = 1,
+  seen: WeakSet<ReportFormulaDefinition> = new WeakSet()
+): void {
+  assertFormulaTraversalSafe(reportName, columnName, formula, path, depth, seen);
+  seen.add(formula);
+  try {
+    if (!REPORT_FORMULA_OPERATORS.includes(formula.operator)) {
+      throw new FrameworkError(
+        "REPORT_INVALID",
+        `Report '${reportName}' formula column '${columnName}'${formulaPath(path)} has invalid operator '${String(formula.operator)}'`,
+        { status: 400 }
+      );
+    }
+    assertFormulaOperandSyntax(reportName, columnName, formula.left, formulaOperandPath(path, "left"), depth + 1, seen);
+    assertFormulaOperandSyntax(reportName, columnName, formula.right, formulaOperandPath(path, "right"), depth + 1, seen);
+  } finally {
+    seen.delete(formula);
   }
 }
 
@@ -317,7 +335,9 @@ function assertFormulaOperandSyntax(
   reportName: string,
   columnName: string,
   operand: ReportFormulaOperand,
-  side: "left" | "right"
+  path: string,
+  depth: number,
+  seen: WeakSet<ReportFormulaDefinition>
 ): void {
   if (typeof operand === "string") {
     if (operand.length > 0) {
@@ -325,10 +345,13 @@ function assertFormulaOperandSyntax(
     }
   } else if (typeof operand === "number" && Number.isFinite(operand)) {
     return;
+  } else if (isReportFormulaDefinition(operand)) {
+    assertFormulaSyntax(reportName, columnName, operand, `${path} formula`, depth, seen);
+    return;
   }
   throw new FrameworkError(
     "REPORT_INVALID",
-    `Report '${reportName}' formula column '${columnName}' ${side} operand must be a field name or finite numeric literal`,
+    `Report '${reportName}' formula column '${columnName}' ${path} operand must be a field name, finite numeric literal, or nested formula`,
     { status: 400 }
   );
 }
@@ -482,16 +505,39 @@ function assertFormulaMatchesDocType(
   column: ReportColumnDefinition & { readonly formula: ReportFormulaDefinition },
   fields: ReadonlyMap<string, { readonly type: FieldType }>
 ): void {
-  assertFormulaOperandMatchesDocType(reportName, column, column.formula.left, "left");
-  assertFormulaOperandMatchesDocType(reportName, column, column.formula.right, "right");
+  assertFormulaMatchesDocTypeFields(reportName, column, column.formula, "", 1, new WeakSet());
+
+  function assertFormulaMatchesDocTypeFields(
+    name: string,
+    reportColumn: ReportColumnDefinition,
+    formula: ReportFormulaDefinition,
+    path: string,
+    depth: number,
+    seen: WeakSet<ReportFormulaDefinition>
+  ): void {
+    assertFormulaTraversalSafe(name, reportColumn.name, formula, path, depth, seen);
+    seen.add(formula);
+    try {
+      assertFormulaOperandMatchesDocType(name, reportColumn, formula.left, formulaOperandPath(path, "left"), depth + 1, seen);
+      assertFormulaOperandMatchesDocType(name, reportColumn, formula.right, formulaOperandPath(path, "right"), depth + 1, seen);
+    } finally {
+      seen.delete(formula);
+    }
+  }
 
   function assertFormulaOperandMatchesDocType(
     name: string,
     reportColumn: ReportColumnDefinition,
     operand: ReportFormulaOperand,
-    side: "left" | "right"
+    path: string,
+    depth: number,
+    seen: WeakSet<ReportFormulaDefinition>
   ): void {
     if (typeof operand === "number") {
+      return;
+    }
+    if (isReportFormulaDefinition(operand)) {
+      assertFormulaMatchesDocTypeFields(name, reportColumn, operand, `${path} formula`, depth, seen);
       return;
     }
     const fieldName = operand;
@@ -499,17 +545,79 @@ function assertFormulaMatchesDocType(
     if (!field) {
       throw new FrameworkError(
         "REPORT_INVALID",
-        `Report '${name}' formula column '${reportColumn.name}' references unknown ${side} field '${fieldName}'`,
+        `Report '${name}' formula column '${reportColumn.name}' references unknown ${path} field '${fieldName}'`,
         { status: 400 }
       );
     }
     if (field.type !== "integer" && field.type !== "number") {
       throw new FrameworkError(
         "REPORT_INVALID",
-        `Report '${name}' formula column '${reportColumn.name}' requires a numeric ${side} field '${fieldName}'`,
+        `Report '${name}' formula column '${reportColumn.name}' requires a numeric ${path} field '${fieldName}'`,
         { status: 400 }
       );
     }
+  }
+}
+
+function freezeReportFormula(
+  formula: ReportFormulaDefinition,
+  depth = 1,
+  seen: WeakSet<ReportFormulaDefinition> = new WeakSet()
+): ReportFormulaDefinition {
+  assertFormulaTraversalSafe("Report", "formula", formula, "", depth, seen);
+  seen.add(formula);
+  try {
+    return Object.freeze({
+      operator: formula.operator,
+      left: freezeReportFormulaOperand(formula.left, depth + 1, seen),
+      right: freezeReportFormulaOperand(formula.right, depth + 1, seen)
+    });
+  } finally {
+    seen.delete(formula);
+  }
+}
+
+function freezeReportFormulaOperand(
+  operand: ReportFormulaOperand,
+  depth: number,
+  seen: WeakSet<ReportFormulaDefinition>
+): ReportFormulaOperand {
+  return isReportFormulaDefinition(operand) ? freezeReportFormula(operand, depth, seen) : operand;
+}
+
+function isReportFormulaDefinition(operand: ReportFormulaOperand): operand is ReportFormulaDefinition {
+  return typeof operand === "object" && operand !== null && !Array.isArray(operand);
+}
+
+function formulaPath(path: string): string {
+  return path.length === 0 ? "" : ` ${path}`;
+}
+
+function formulaOperandPath(path: string, side: "left" | "right"): string {
+  return path.length === 0 ? side : `${path} ${side}`;
+}
+
+function assertFormulaTraversalSafe(
+  reportName: string,
+  columnName: string,
+  formula: ReportFormulaDefinition,
+  path: string,
+  depth: number,
+  seen: WeakSet<ReportFormulaDefinition>
+): void {
+  if (depth > REPORT_FORMULA_MAX_DEPTH) {
+    throw new FrameworkError(
+      "REPORT_INVALID",
+      `Report '${reportName}' formula column '${columnName}'${formulaPath(path)} exceeds maximum formula depth of ${REPORT_FORMULA_MAX_DEPTH}`,
+      { status: 400 }
+    );
+  }
+  if (seen.has(formula)) {
+    throw new FrameworkError(
+      "REPORT_INVALID",
+      `Report '${reportName}' formula column '${columnName}'${formulaPath(path)} contains a cyclic formula reference`,
+      { status: 400 }
+    );
   }
 }
 
