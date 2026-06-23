@@ -1,13 +1,21 @@
-import type {
-  CreateDirectFileUploadCommand,
-  DirectFileUpload,
-  FileObjectMetadata,
-  FileStorage,
-  PutFileObjectCommand,
-  StoredFileObject
+import {
+  type AbortMultipartFileUploadCommand,
+  type CompleteMultipartFileUploadCommand,
+  type CreateDirectFileUploadCommand,
+  type CreateMultipartFileUploadCommand,
+  type DirectFileUpload,
+  type FileObjectMetadata,
+  type FileStorage,
+  type MultipartFileStorage,
+  type MultipartFileUpload,
+  type PutFileObjectCommand,
+  type StoredFileObject,
+  type UploadedMultipartFilePart,
+  type UploadMultipartFilePartCommand
 } from "../ports/file-storage.js";
 import { badRequest } from "../core/errors.js";
 import type { DocumentData, JsonValue } from "../core/types.js";
+import { ensureMultipartPartNumber, sortedUploadedMultipartParts } from "../adapters/multipart-file-storage.js";
 
 export interface R2DirectUploadSigner {
   createUpload(command: CreateDirectFileUploadCommand): Promise<DirectFileUpload>;
@@ -20,6 +28,7 @@ export interface R2FileStorageOptions {
 export class R2FileStorage implements FileStorage {
   private readonly bucket: R2Bucket;
   private readonly directUploads: R2DirectUploadSigner | undefined;
+  readonly multipartUploads: MultipartFileStorage = this;
 
   constructor(bucket: R2Bucket, options: R2FileStorageOptions = {}) {
     this.bucket = bucket;
@@ -58,6 +67,37 @@ export class R2FileStorage implements FileStorage {
       throw badRequest("R2 direct uploads require a direct upload signer");
     }
     return await this.directUploads.createUpload(command);
+  }
+
+  async createMultipartUpload(command: CreateMultipartFileUploadCommand): Promise<MultipartFileUpload> {
+    const upload = await this.bucket.createMultipartUpload(command.key, {
+      httpMetadata: {
+        contentType: command.contentType,
+        contentDisposition: contentDisposition(command.filename)
+      },
+      customMetadata: command.customMetadata ?? {}
+    });
+    return { key: upload.key, uploadId: upload.uploadId };
+  }
+
+  async uploadMultipartPart(command: UploadMultipartFilePartCommand): Promise<UploadedMultipartFilePart> {
+    ensureMultipartPartNumber(command.partNumber);
+    const upload = this.bucket.resumeMultipartUpload(command.key, command.uploadId);
+    const part = await upload.uploadPart(command.partNumber, command.body);
+    return { partNumber: part.partNumber, etag: part.etag };
+  }
+
+  async completeMultipartUpload(command: CompleteMultipartFileUploadCommand): Promise<FileObjectMetadata> {
+    const parts = sortedUploadedMultipartParts(command.parts).map((part) => ({
+      partNumber: part.partNumber,
+      etag: part.etag
+    }));
+    const upload = this.bucket.resumeMultipartUpload(command.key, command.uploadId);
+    return metadataFromR2Object(await upload.complete(parts));
+  }
+
+  async abortMultipartUpload(command: AbortMultipartFileUploadCommand): Promise<void> {
+    await this.bucket.resumeMultipartUpload(command.key, command.uploadId).abort();
   }
 
   async delete(key: string): Promise<void> {

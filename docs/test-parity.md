@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk job schedule filter preservation slice:
+As of the R2 multipart storage slice:
 
-- Vitest files: `73`
-- Vitest cases: `769`
+- Vitest files: `74`
+- Vitest cases: `777`
 
 ## Implication
 

@@ -1,20 +1,45 @@
-import type {
-  CreateDirectFileUploadCommand,
-  DirectFileUpload,
-  FileContent,
-  FileObjectMetadata,
-  FileStorage,
-  PutFileObjectCommand,
-  StoredFileObject
+import {
+  type AbortMultipartFileUploadCommand,
+  type CompleteMultipartFileUploadCommand,
+  type CreateDirectFileUploadCommand,
+  type CreateMultipartFileUploadCommand,
+  type DirectFileUpload,
+  type FileContent,
+  type FileObjectMetadata,
+  type FileStorage,
+  type MultipartFilePartContent,
+  type MultipartFileStorage,
+  type MultipartFileUpload,
+  type PutFileObjectCommand,
+  type StoredFileObject,
+  type UploadMultipartFilePartCommand,
+  type UploadedMultipartFilePart
 } from "../../ports/file-storage.js";
+import { notFound } from "../../core/errors.js";
+import {
+  ensureMultipartPartNumber,
+  ensureR2CompatibleMultipartPartSizes,
+  sortedUploadedMultipartParts
+} from "../multipart-file-storage.js";
 
 interface StoredEntry {
   readonly bytes: Uint8Array;
   readonly metadata: FileObjectMetadata;
 }
 
+interface MultipartEntry {
+  readonly key: string;
+  readonly contentType: string;
+  readonly filename: string;
+  readonly customMetadata: Readonly<Record<string, string>>;
+  readonly parts: Map<number, { readonly bytes: Uint8Array; readonly etag: string }>;
+}
+
 export class InMemoryFileStorage implements FileStorage {
   private readonly objects = new Map<string, StoredEntry>();
+  private readonly multipartUploadEntries = new Map<string, MultipartEntry>();
+  readonly multipartUploads: MultipartFileStorage = this;
+  private nextMultipartUploadSequence = 1;
 
   async put(command: PutFileObjectCommand): Promise<FileObjectMetadata> {
     const bytes = new Uint8Array(await toArrayBuffer(command.body));
@@ -61,6 +86,67 @@ export class InMemoryFileStorage implements FileStorage {
     };
   }
 
+  async createMultipartUpload(command: CreateMultipartFileUploadCommand): Promise<MultipartFileUpload> {
+    const uploadId = `memory-multipart-${String(this.nextMultipartUploadSequence)}`;
+    this.nextMultipartUploadSequence += 1;
+    this.multipartUploadEntries.set(uploadId, {
+      key: command.key,
+      contentType: command.contentType,
+      filename: command.filename,
+      customMetadata: command.customMetadata ?? {},
+      parts: new Map()
+    });
+    return { key: command.key, uploadId };
+  }
+
+  async uploadMultipartPart(command: UploadMultipartFilePartCommand): Promise<UploadedMultipartFilePart> {
+    ensureMultipartPartNumber(command.partNumber);
+    const upload = this.multipartUpload(command.key, command.uploadId);
+    const bytes = new Uint8Array(await toArrayBuffer(command.body));
+    const etag = `"memory-${command.uploadId}-part-${command.partNumber}-${bytes.byteLength}-${checksum(bytes)}"`;
+    upload.parts.set(command.partNumber, { bytes, etag });
+    return { partNumber: command.partNumber, etag };
+  }
+
+  async completeMultipartUpload(command: CompleteMultipartFileUploadCommand): Promise<FileObjectMetadata> {
+    const upload = this.multipartUpload(command.key, command.uploadId);
+    const ordered = sortedUploadedMultipartParts(command.parts);
+    const chunks = ordered.map((part) => {
+      const stored = upload.parts.get(part.partNumber);
+      if (!stored || stored.etag !== part.etag) {
+        throw notFound(`Multipart upload part ${String(part.partNumber)} was not found`);
+      }
+      return stored.bytes;
+    });
+    ensureR2CompatibleMultipartPartSizes(chunks.map((chunk) => chunk.byteLength));
+    const size = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    const etag = `"memory-${command.key}-multipart-${size}"`;
+    const metadata: FileObjectMetadata = {
+      key: command.key,
+      size,
+      etag,
+      httpEtag: etag,
+      uploadedAt: new Date(0).toISOString(),
+      contentType: upload.contentType,
+      filename: upload.filename,
+      customMetadata: upload.customMetadata
+    };
+    this.objects.set(command.key, { bytes, metadata });
+    this.multipartUploadEntries.delete(command.uploadId);
+    return metadata;
+  }
+
+  async abortMultipartUpload(command: AbortMultipartFileUploadCommand): Promise<void> {
+    this.multipartUpload(command.key, command.uploadId);
+    this.multipartUploadEntries.delete(command.uploadId);
+  }
+
   async delete(key: string): Promise<void> {
     this.objects.delete(key);
   }
@@ -68,14 +154,25 @@ export class InMemoryFileStorage implements FileStorage {
   has(key: string): boolean {
     return this.objects.has(key);
   }
+
+  private multipartUpload(key: string, uploadId: string): MultipartEntry {
+    const upload = this.multipartUploadEntries.get(uploadId);
+    if (!upload || upload.key !== key) {
+      throw notFound(`Multipart upload '${uploadId}' was not found`);
+    }
+    return upload;
+  }
 }
 
-async function toArrayBuffer(body: FileContent): Promise<ArrayBuffer> {
+async function toArrayBuffer(body: FileContent | MultipartFilePartContent): Promise<ArrayBuffer> {
   if (typeof body === "string") {
     return viewToArrayBuffer(new TextEncoder().encode(body));
   }
   if (body instanceof Blob) {
     return await body.arrayBuffer();
+  }
+  if (body instanceof ReadableStream) {
+    return await streamToArrayBuffer(body);
   }
   if (ArrayBuffer.isView(body)) {
     return viewToArrayBuffer(body);
@@ -83,9 +180,34 @@ async function toArrayBuffer(body: FileContent): Promise<ArrayBuffer> {
   return body.slice(0);
 }
 
+async function streamToArrayBuffer(stream: ReadableStream<Uint8Array>): Promise<ArrayBuffer> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const result = await reader.read();
+    if (result.done) {
+      break;
+    }
+    chunks.push(result.value);
+    size += result.value.byteLength;
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes.buffer;
+}
+
 function viewToArrayBuffer(view: ArrayBufferView): ArrayBuffer {
   const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
   return copy.buffer;
+}
+
+function checksum(bytes: Uint8Array): string {
+  return bytes.reduce((value, byte) => (value + byte) % 65_535, 0).toString(16);
 }

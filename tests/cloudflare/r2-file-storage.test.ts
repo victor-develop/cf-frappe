@@ -136,6 +136,135 @@ describe("R2FileStorage", () => {
       message: "R2 direct uploads require a direct upload signer"
     });
   });
+
+  it("creates R2 multipart uploads with content metadata", async () => {
+    const calls: unknown[] = [];
+    const bucket = fakeBucket({
+      async createMultipartUpload(key, options) {
+        calls.push({ key, options });
+        return fakeMultipartUpload(key, "upload-1");
+      }
+    });
+
+    const upload = await new R2FileStorage(bucket).multipartUploads.createMultipartUpload({
+      key: "acme/files/file_1-video.mp4",
+      contentType: "video/mp4",
+      filename: "video.mp4",
+      customMetadata: { tenantId: "acme" }
+    });
+
+    expect(calls).toEqual([
+      {
+        key: "acme/files/file_1-video.mp4",
+        options: {
+          httpMetadata: {
+            contentType: "video/mp4",
+            contentDisposition: 'attachment; filename="video.mp4"'
+          },
+          customMetadata: { tenantId: "acme" }
+        }
+      }
+    ]);
+    expect(upload).toEqual({
+      key: "acme/files/file_1-video.mp4",
+      uploadId: "upload-1"
+    });
+  });
+
+  it("uploads R2 multipart parts through a resumed upload", async () => {
+    const calls: unknown[] = [];
+    const bucket = fakeBucket({
+      resumeMultipartUpload(key, uploadId) {
+        calls.push({ key, uploadId });
+        return fakeMultipartUpload(key, uploadId, {
+          async uploadPart(partNumber, value) {
+            calls.push({ partNumber, value });
+            return { partNumber, etag: "part-etag" };
+          }
+        });
+      }
+    });
+
+    const stream = new Response("chunk").body as ReadableStream<Uint8Array>;
+
+    const part = await new R2FileStorage(bucket).multipartUploads.uploadMultipartPart({
+      key: "acme/files/file_1-video.mp4",
+      uploadId: "upload-1",
+      partNumber: 2,
+      body: stream
+    });
+
+    expect(calls).toEqual([
+      { key: "acme/files/file_1-video.mp4", uploadId: "upload-1" },
+      { partNumber: 2, value: stream }
+    ]);
+    expect(part).toEqual({ partNumber: 2, etag: "part-etag" });
+  });
+
+  it("completes R2 multipart uploads and maps object metadata", async () => {
+    const calls: unknown[] = [];
+    const bucket = fakeBucket({
+      resumeMultipartUpload(key, uploadId) {
+        calls.push({ key, uploadId });
+        return fakeMultipartUpload(key, uploadId, {
+          async complete(parts) {
+            calls.push({ parts });
+            return fakeObject(key, 10, { contentType: "video/mp4" });
+          }
+        });
+      }
+    });
+
+    const metadata = await new R2FileStorage(bucket).multipartUploads.completeMultipartUpload({
+      key: "acme/files/file_1-video.mp4",
+      uploadId: "upload-1",
+      parts: [
+        { partNumber: 2, etag: "two" },
+        { partNumber: 1, etag: "one" }
+      ]
+    });
+
+    expect(calls).toEqual([
+      { key: "acme/files/file_1-video.mp4", uploadId: "upload-1" },
+      {
+        parts: [
+          { partNumber: 1, etag: "one" },
+          { partNumber: 2, etag: "two" }
+        ]
+      }
+    ]);
+    expect(metadata).toMatchObject({
+      key: "acme/files/file_1-video.mp4",
+      size: 10,
+      etag: "etag",
+      httpEtag: '"etag"',
+      contentType: "video/mp4"
+    });
+  });
+
+  it("aborts R2 multipart uploads through a resumed upload", async () => {
+    const calls: unknown[] = [];
+    const bucket = fakeBucket({
+      resumeMultipartUpload(key, uploadId) {
+        calls.push({ key, uploadId });
+        return fakeMultipartUpload(key, uploadId, {
+          async abort() {
+            calls.push({ aborted: true });
+          }
+        });
+      }
+    });
+
+    await new R2FileStorage(bucket).multipartUploads.abortMultipartUpload({
+      key: "acme/files/file_1-video.mp4",
+      uploadId: "upload-1"
+    });
+
+    expect(calls).toEqual([
+      { key: "acme/files/file_1-video.mp4", uploadId: "upload-1" },
+      { aborted: true }
+    ]);
+  });
 });
 
 function fakeBucket(overrides: Partial<R2Bucket>): R2Bucket {
@@ -195,4 +324,23 @@ function fakeObjectBody(key: string, body: string): R2ObjectBody {
     json: <T>() => response.clone().json() as Promise<T>,
     blob: () => response.clone().blob()
   } as unknown as R2ObjectBody;
+}
+
+function fakeMultipartUpload(
+  key: string,
+  uploadId: string,
+  overrides: Partial<R2MultipartUpload> = {}
+): R2MultipartUpload {
+  return {
+    key,
+    uploadId,
+    async uploadPart(partNumber) {
+      return { partNumber, etag: `etag-${String(partNumber)}` };
+    },
+    async abort() {},
+    async complete() {
+      return fakeObject(key, 0);
+    },
+    ...overrides
+  } as R2MultipartUpload;
 }
