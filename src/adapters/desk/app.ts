@@ -425,6 +425,13 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     return c.redirect("/desk/admin/jobs/schedules", 303);
   });
 
+  app.post("/desk/admin/jobs/schedules/:scheduleId/reset", async (c) => {
+    const schedules = requireJobSchedules(options);
+    const actor = await options.actor(c.req.raw);
+    await schedules.clearOverride(actor, c.req.param("scheduleId"), { metadata: requestMetadata(c.req.raw) });
+    return c.redirect("/desk/admin/jobs/schedules", 303);
+  });
+
   app.post("/desk/admin/jobs/:idempotencyKey/retry", async (c) => {
     const retry = requireJobRetry(options);
     const actor = await options.actor(c.req.raw);

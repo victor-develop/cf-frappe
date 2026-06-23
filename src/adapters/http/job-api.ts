@@ -87,6 +87,17 @@ export function createJobApi(options: JobApiOptions): Hono {
     return c.json({ data });
   });
 
+  app.post("/api/jobs/schedules/:scheduleId/reset", async (c) => {
+    if (!options.schedules) {
+      return c.json({ error: { code: "JOB_SCHEDULE_NOT_FOUND", message: "Job schedules are not enabled" } }, 404);
+    }
+    const actor = await options.actor(c.req.raw);
+    const data = await options.schedules.clearOverride(actor, c.req.param("scheduleId"), {
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data });
+  });
+
   app.post("/api/jobs/executions/:idempotencyKey/retry", async (c) => {
     if (!options.retry) {
       return c.json({ error: { code: "JOB_NOT_FOUND", message: "Job retry is not enabled" } }, 404);

@@ -1571,7 +1571,7 @@ describe("Desk app", () => {
         ],
         events: new InMemoryEventStore(),
         clock: fixedClock(now),
-        ids: deterministicIds(["disable-1", "enable-2"])
+        ids: deterministicIds(["disable-1", "reset-2", "enable-3", "reset-4"])
       }),
       actor: () => admin
     });
@@ -1594,6 +1594,15 @@ describe("Desk app", () => {
     const disabledHtml = await afterDisable.text();
     expect(disabledHtml).toContain("disabled");
     expect(disabledHtml).toContain('formaction="/desk/admin/jobs/schedules/daily/enable"');
+    expect(disabledHtml).toContain('formaction="/desk/admin/jobs/schedules/daily/reset"');
+
+    const resetDaily = await app.request("/desk/admin/jobs/schedules/daily/reset", { method: "POST" });
+    expect(resetDaily.status).toBe(303);
+    expect(resetDaily.headers.get("location")).toBe("/desk/admin/jobs/schedules");
+
+    const afterResetDaily = await app.request("/desk/admin/jobs/schedules");
+    const resetDailyHtml = await afterResetDaily.text();
+    expect(resetDailyHtml).not.toContain('formaction="/desk/admin/jobs/schedules/daily/reset"');
 
     const enabled = await app.request("/desk/admin/jobs/schedules/digest/enable", { method: "POST" });
     expect(enabled.status).toBe(303);
@@ -1603,6 +1612,15 @@ describe("Desk app", () => {
     const enabledHtml = await afterEnable.text();
     expect(enabledHtml).toContain("enabled");
     expect(enabledHtml).toContain('formaction="/desk/admin/jobs/schedules/digest/disable"');
+    expect(enabledHtml).toContain('formaction="/desk/admin/jobs/schedules/digest/reset"');
+
+    const resetDigest = await app.request("/desk/admin/jobs/schedules/digest/reset", { method: "POST" });
+    expect(resetDigest.status).toBe(303);
+    expect(resetDigest.headers.get("location")).toBe("/desk/admin/jobs/schedules");
+
+    const afterResetDigest = await app.request("/desk/admin/jobs/schedules");
+    const resetDigestHtml = await afterResetDigest.text();
+    expect(resetDigestHtml).not.toContain('formaction="/desk/admin/jobs/schedules/digest/reset"');
   });
 
   it("hides schedule run actions when dispatch is not configured", async () => {

@@ -389,7 +389,7 @@ describe("JobScheduleService", () => {
       runner: { run: runner },
       events,
       clock: fixedClock(now),
-      ids: deterministicIds(["disable-daily", "enable-daily", "enable-static-off"])
+      ids: deterministicIds(["disable-daily", "enable-daily", "clear-daily", "enable-static-off", "clear-static-off"])
     });
     const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
 
@@ -432,6 +432,25 @@ describe("JobScheduleService", () => {
     );
     await expect(service.schedulesForCron("0 2 * * *")).resolves.toMatchObject([{ enabled: true }]);
 
+    await expect(service.clearOverride(admin, "daily-reports")).resolves.toMatchObject({
+      schedule: {
+        id: "daily-reports",
+        enabled: true,
+        configuredEnabled: true,
+        overridden: false,
+        dispatchable: true
+      }
+    });
+    await expect(service.dashboard(admin)).resolves.toMatchObject({
+      schedules: expect.arrayContaining([
+        expect.objectContaining({
+          id: "daily-reports",
+          enabled: true,
+          overridden: false
+        })
+      ])
+    });
+
     await expect(service.enable(admin, "initially-off")).resolves.toMatchObject({
       schedule: {
         id: "initially-off",
@@ -440,6 +459,47 @@ describe("JobScheduleService", () => {
         overridden: true,
         overrideEnabled: true,
         dispatchable: true
+      }
+    });
+    await expect(service.clearOverride(admin, "initially-off")).resolves.toMatchObject({
+      schedule: {
+        id: "initially-off",
+        enabled: false,
+        configuredEnabled: false,
+        overridden: false,
+        dispatchable: false
+      }
+    });
+  });
+
+  it("clears runtime schedule overrides idempotently back to metadata defaults", async () => {
+    const registry = createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] });
+    const service = new JobScheduleService({
+      registry,
+      schedules: [{ id: "daily", cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" }],
+      events: new InMemoryEventStore(),
+      clock: fixedClock(now),
+      ids: deterministicIds(["disable-daily", "clear-daily"])
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+
+    await service.disable(admin, "daily");
+
+    await expect(service.clearOverride(admin, "daily")).resolves.toMatchObject({
+      schedule: {
+        id: "daily",
+        enabled: true,
+        configuredEnabled: true,
+        overridden: false,
+        overrideable: true
+      }
+    });
+    await expect(service.clearOverride(admin, "daily")).resolves.toMatchObject({
+      schedule: {
+        id: "daily",
+        enabled: true,
+        configuredEnabled: true,
+        overridden: false
       }
     });
   });

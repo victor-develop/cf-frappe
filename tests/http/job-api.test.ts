@@ -165,7 +165,7 @@ describe("job api", () => {
         runner: { run: runner },
         events: scheduleEvents,
         clock: fixedClock(now),
-        ids: deterministicIds(["disable-1", "enable-2"])
+        ids: deterministicIds(["disable-1", "reset-2", "enable-3", "reset-4"])
       }),
       actor: unsafeHeaderActorResolver
     });
@@ -251,6 +251,23 @@ describe("job api", () => {
       error: { message: "Disabled job schedules cannot be manually dispatched" }
     });
 
+    const resetDaily = await app.request("/api/jobs/schedules/daily/reset", {
+      method: "POST",
+      headers: adminHeaders
+    });
+    expect(resetDaily.status).toBe(200);
+    await expect(resetDaily.json()).resolves.toMatchObject({
+      data: {
+        schedule: {
+          id: "daily",
+          enabled: true,
+          configuredEnabled: true,
+          overridden: false,
+          dispatchable: true
+        }
+      }
+    });
+
     const enable = await app.request("/api/jobs/schedules/digest/enable", {
       method: "POST",
       headers: adminHeaders
@@ -265,6 +282,23 @@ describe("job api", () => {
           overridden: true,
           overrideEnabled: true,
           dispatchable: true
+        }
+      }
+    });
+
+    const resetDigest = await app.request("/api/jobs/schedules/digest/reset", {
+      method: "POST",
+      headers: adminHeaders
+    });
+    expect(resetDigest.status).toBe(200);
+    await expect(resetDigest.json()).resolves.toMatchObject({
+      data: {
+        schedule: {
+          id: "digest",
+          enabled: false,
+          configuredEnabled: false,
+          overridden: false,
+          dispatchable: false
         }
       }
     });

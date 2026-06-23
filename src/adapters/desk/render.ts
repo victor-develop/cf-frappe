@@ -899,8 +899,12 @@ function renderScheduleOverrideAction(schedule: JobScheduleDashboard["schedules"
   }
   const action = schedule.enabled ? "disable" : "enable";
   const label = schedule.enabled ? "Disable" : "Enable";
+  const reset = schedule.overridden
+    ? `<button class="button" type="submit" formaction="/desk/admin/jobs/schedules/${encodeURIComponent(schedule.id)}/reset">Reset</button>`
+    : "";
   return `<form class="inline-action" method="post">
     <button class="button" type="submit" formaction="/desk/admin/jobs/schedules/${encodeURIComponent(schedule.id)}/${action}">${label}</button>
+    ${reset}
   </form>`;
 }
 

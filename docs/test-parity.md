@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the remote data-patch CLI slice:
+As of the resettable job schedule override slice:
 
 - Vitest files: `66`
-- Vitest cases: `546`
+- Vitest cases: `547`
 
 ## Implication
 
