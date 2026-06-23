@@ -116,6 +116,10 @@ export function renderDeskClientScript(): string {
     return "/api/files/" + encodePart(name) + (action === undefined ? "" : "/" + action);
   }
 
+  function profilePath(userId, options) {
+    return withQuery("/api/users/" + encodePart(userId) + "/profile", tenantParams(options || {}));
+  }
+
   function versionBody(options) {
     return options && options.expectedVersion !== undefined ? { expectedVersion: options.expectedVersion } : {};
   }
@@ -158,6 +162,12 @@ export function renderDeskClientScript(): string {
     if (value !== undefined && value !== null) {
       params[key] = value;
     }
+  }
+
+  function tenantParams(options) {
+    var params = {};
+    setParam(params, "tenant", options && options.tenant);
+    return params;
   }
 
   function fileAttachmentParams(params, options) {
@@ -864,6 +874,29 @@ export function renderDeskClientScript(): string {
 
   root.cfFrappe = Object.freeze(Object.assign({}, root.cfFrappe || {}, {
     context: context,
+    auth: Object.freeze({
+      completeEmailVerification: function (input) {
+        return request("/api/auth/email-verification/complete", { method: "POST", body: input || {} }).then(unwrapData);
+      },
+      completePasswordReset: function (input) {
+        return request("/api/auth/password-reset/complete", { method: "POST", body: input || {} }).then(unwrapData);
+      },
+      login: function (input) {
+        return request("/api/auth/login", { method: "POST", body: input || {} }).then(unwrapData);
+      },
+      logout: function () {
+        return request("/api/auth/logout", { method: "POST" }).then(unwrapData);
+      },
+      me: function () {
+        return request("/api/auth/me").then(unwrapData);
+      },
+      requestEmailVerification: function (input) {
+        return request("/api/auth/email-verification/request", { method: "POST", body: input || {} }).then(unwrapData);
+      },
+      requestPasswordReset: function (input) {
+        return request("/api/auth/password-reset/request", { method: "POST", body: input || {} }).then(unwrapData);
+      }
+    }),
     linkOptions: function (doctype, field, params) {
       return request(withQuery("/api/link-options/" + encodePart(doctype) + "/" + encodePart(field), params || {})).then(unwrapData);
     },
@@ -926,6 +959,14 @@ export function renderDeskClientScript(): string {
       },
       reports: function () {
         return request("/api/meta/reports").then(unwrapData);
+      }
+    }),
+    profiles: Object.freeze({
+      get: function (userId, options) {
+        return request(profilePath(userId, options || {})).then(unwrapData);
+      },
+      update: function (userId, input, options) {
+        return request(profilePath(userId, options || {}), { method: "PUT", body: commandBody(input, options) }).then(unwrapData);
       }
     }),
     realtime: Object.freeze({

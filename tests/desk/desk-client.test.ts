@@ -9,6 +9,15 @@ interface DeskClientRuntime {
     readonly script?: string;
     readonly tenantId?: string;
   };
+  readonly auth: {
+    readonly completeEmailVerification: (input: Record<string, unknown>) => Promise<unknown>;
+    readonly completePasswordReset: (input: Record<string, unknown>) => Promise<unknown>;
+    readonly login: (input: Record<string, unknown>) => Promise<unknown>;
+    readonly logout: () => Promise<unknown>;
+    readonly me: () => Promise<unknown>;
+    readonly requestEmailVerification: (input: Record<string, unknown>) => Promise<unknown>;
+    readonly requestPasswordReset: (input: Record<string, unknown>) => Promise<unknown>;
+  };
   readonly realtime: {
     readonly doctypeUrl: (doctype: string, options: DeskRealtimeOptions) => string;
     readonly documentUrl: (doctype: string, name: string, options: DeskRealtimeOptions) => string;
@@ -58,6 +67,14 @@ interface DeskClientRuntime {
   };
   readonly meta: {
     readonly listView: (doctype: string) => Promise<unknown>;
+  };
+  readonly profiles: {
+    readonly get: (userId: string, options?: { readonly tenant?: string }) => Promise<unknown>;
+    readonly update: (
+      userId: string,
+      input: Record<string, unknown>,
+      options?: { readonly expectedVersion?: number; readonly tenant?: string }
+    ) => Promise<unknown>;
   };
   readonly files: {
     readonly bulkDelete: (files: readonly DeskBulkFileSelection[]) => Promise<unknown>;
@@ -490,6 +507,94 @@ describe("Desk client runtime", () => {
       })
     );
     expect(calls[2]?.init.body).toBe(JSON.stringify({ expectedVersion: 3 }));
+  });
+
+  it("wraps same-origin auth APIs with encoded JSON requests", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      if (String(url) === "/api/auth/logout") {
+        return new Response(null, { status: 204 });
+      }
+      return new Response(JSON.stringify({ data: { ok: true } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(
+      runtime.auth.login({ userId: "owner@example.com", password: "secret-123", tenantId: "acme" })
+    ).resolves.toEqual({ ok: true });
+    await expect(runtime.auth.me()).resolves.toEqual({ ok: true });
+    await expect(runtime.auth.requestPasswordReset({ userId: "owner@example.com", tenantId: "acme" })).resolves.toEqual({
+      ok: true
+    });
+    await runtime.auth.completePasswordReset({
+      userId: "owner@example.com",
+      token: "reset-token",
+      password: "secret-456",
+      tenantId: "acme"
+    });
+    await runtime.auth.requestEmailVerification({ userId: "owner@example.com", tenantId: "acme" });
+    await runtime.auth.completeEmailVerification({ userId: "owner@example.com", token: "email-token", tenantId: "acme" });
+    await expect(runtime.auth.logout()).resolves.toBe("");
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "POST /api/auth/login",
+      "GET /api/auth/me",
+      "POST /api/auth/password-reset/request",
+      "POST /api/auth/password-reset/complete",
+      "POST /api/auth/email-verification/request",
+      "POST /api/auth/email-verification/complete",
+      "POST /api/auth/logout"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual([
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin"
+    ]);
+    expect(calls.map((call) => call.init.body)).toEqual([
+      JSON.stringify({ userId: "owner@example.com", password: "secret-123", tenantId: "acme" }),
+      undefined,
+      JSON.stringify({ userId: "owner@example.com", tenantId: "acme" }),
+      JSON.stringify({
+        userId: "owner@example.com",
+        token: "reset-token",
+        password: "secret-456",
+        tenantId: "acme"
+      }),
+      JSON.stringify({ userId: "owner@example.com", tenantId: "acme" }),
+      JSON.stringify({ userId: "owner@example.com", token: "email-token", tenantId: "acme" }),
+      undefined
+    ]);
+  });
+
+  it("wraps same-origin user profile APIs with tenant and version metadata", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { profile: { fullName: "Ada Lovelace" } } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.profiles.get("owner@example.com", { tenant: "acme/east" })).resolves.toEqual({
+      profile: { fullName: "Ada Lovelace" }
+    });
+    await runtime.profiles.update(
+      "owner@example.com",
+      { fullName: "Ada Lovelace", expectedVersion: 1 },
+      { expectedVersion: 7, tenant: "acme/east" }
+    );
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/users/owner%40example.com/profile?tenant=acme%2Feast",
+      "PUT /api/users/owner%40example.com/profile?tenant=acme%2Feast"
+    ]);
+    expect(calls[1]?.init.body).toBe(JSON.stringify({ fullName: "Ada Lovelace", expectedVersion: 7 }));
   });
 
   it("wraps document collaboration and saved-filter resource APIs", async () => {

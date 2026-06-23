@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file client helpers slice:
+As of the auth/profile client helpers slice:
 
 - Vitest files: `73`
-- Vitest cases: `706`
+- Vitest cases: `708`
 
 ## Implication
 

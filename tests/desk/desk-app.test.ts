@@ -1253,8 +1253,10 @@ describe("Desk app", () => {
     expect(response.headers.get("content-type")).toContain("application/javascript");
     const source = await response.text();
     expect(source).toContain("root.cfFrappe");
+    expect(source).toContain("auth: Object.freeze");
     expect(source).toContain("form: Object.freeze");
     expect(source).toContain("files: Object.freeze");
+    expect(source).toContain("profiles: Object.freeze");
     expect(source).toContain("documentTopic(tenantId, doctype, name)");
     expect(source).toContain("userTopic(tenantId, userId)");
     expect(source).toContain("resourcePath(doctype, name) + \"/transition/\"");
