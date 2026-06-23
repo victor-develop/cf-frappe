@@ -958,6 +958,12 @@ export function renderDeskClientScript(): string {
       saveFilter: function (doctype, input) {
         return request(resourcePath(doctype) + "/saved-filters", { method: "POST", body: savedFilterBody(input || {}) }).then(unwrapData);
       },
+      share: function (doctype, name, userId, permissions, options) {
+        return request(resourceActionPath(doctype, name, "shares"), { method: "POST", body: Object.assign({ userId: userId, permissions: permissions || ["read"] }, versionBody(options)) }).then(unwrapData);
+      },
+      shares: function (doctype, name) {
+        return request(resourceActionPath(doctype, name, "shares")).then(unwrapData);
+      },
       submit: function (doctype, name, options) {
         return request(resourcePath(doctype, name) + "/submit", { method: "POST", body: versionBody(options) }).then(unwrapData);
       },
@@ -978,6 +984,9 @@ export function renderDeskClientScript(): string {
       },
       unfollow: function (doctype, name, follower, options) {
         return request(resourceMemberPath(doctype, name, "followers", follower), { method: "DELETE", body: versionBody(options) }).then(unwrapData);
+      },
+      unshare: function (doctype, name, userId, options) {
+        return request(resourceMemberPath(doctype, name, "shares", userId), { method: "DELETE", body: versionBody(options) }).then(unwrapData);
       },
       untag: function (doctype, name, tag, options) {
         return request(resourceMemberPath(doctype, name, "tags", tag), { method: "DELETE", body: versionBody(options) }).then(unwrapData);

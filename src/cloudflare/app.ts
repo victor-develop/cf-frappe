@@ -436,6 +436,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     prints,
     ...(files === undefined ? {} : { files }),
     queries: restrictedQueries,
+    documentShares,
     timeline: restrictedHistory,
     savedFilters,
     savedReports,

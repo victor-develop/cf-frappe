@@ -95,6 +95,14 @@ interface DeskClientRuntime {
     readonly followers: (doctype: string, name: string) => Promise<unknown>;
     readonly listSavedFilters: (doctype: string) => Promise<unknown>;
     readonly saveFilter: (doctype: string, input: Record<string, unknown>) => Promise<unknown>;
+    readonly share: (
+      doctype: string,
+      name: string,
+      userId: string,
+      permissions?: readonly string[],
+      options?: { readonly expectedVersion?: number }
+    ) => Promise<unknown>;
+    readonly shares: (doctype: string, name: string) => Promise<unknown>;
     readonly tag: (
       doctype: string,
       name: string,
@@ -123,6 +131,12 @@ interface DeskClientRuntime {
       doctype: string,
       name: string,
       follower: string,
+      options?: { readonly expectedVersion?: number }
+    ) => Promise<unknown>;
+    readonly unshare: (
+      doctype: string,
+      name: string,
+      userId: string,
       options?: { readonly expectedVersion?: number }
     ) => Promise<unknown>;
     readonly untag: (
@@ -294,6 +308,9 @@ describe("Desk client runtime", () => {
     await runtime.resource.follow("Task Type", "TASK/1", { follower: "owner@example.com", expectedVersion: 13 });
     await runtime.resource.followers("Task Type", "TASK/1");
     await runtime.resource.unfollow("Task Type", "TASK/1", "owner@example.com", { expectedVersion: 14 });
+    await runtime.resource.share("Task Type", "TASK/1", "collab@example.com", ["read", "update"], { expectedVersion: 15 });
+    await runtime.resource.shares("Task Type", "TASK/1");
+    await runtime.resource.unshare("Task Type", "TASK/1", "collab@example.com", { expectedVersion: 16 });
     await runtime.resource.listSavedFilters("Task Type");
     await runtime.resource.saveFilter("Task Type", {
       id: "client-ignored",
@@ -315,6 +332,9 @@ describe("Desk client runtime", () => {
       "POST /api/resource/Task%20Type/TASK%2F1/followers",
       "GET /api/resource/Task%20Type/TASK%2F1/followers",
       "DELETE /api/resource/Task%20Type/TASK%2F1/followers/owner%40example.com",
+      "POST /api/resource/Task%20Type/TASK%2F1/shares",
+      "GET /api/resource/Task%20Type/TASK%2F1/shares",
+      "DELETE /api/resource/Task%20Type/TASK%2F1/shares/collab%40example.com",
       "GET /api/resource/Task%20Type/saved-filters",
       "POST /api/resource/Task%20Type/saved-filters",
       "DELETE /api/resource/Task%20Type/saved-filters/filter%2F1"
@@ -332,6 +352,9 @@ describe("Desk client runtime", () => {
       JSON.stringify({ follower: "owner@example.com", expectedVersion: 13 }),
       undefined,
       JSON.stringify({ expectedVersion: 14 }),
+      JSON.stringify({ userId: "collab@example.com", permissions: ["read", "update"], expectedVersion: 15 }),
+      undefined,
+      JSON.stringify({ expectedVersion: 16 }),
       undefined,
       JSON.stringify({ label: "High priority", filters: [{ field: "priority", value: "High" }] }),
       undefined

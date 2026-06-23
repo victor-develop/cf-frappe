@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the event-sourced document sharing slice:
+As of the generated Desk document sharing controls slice:
 
 - Vitest files: `69`
-- Vitest cases: `593`
+- Vitest cases: `597`
 
 ## Implication
 

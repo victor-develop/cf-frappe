@@ -22,6 +22,7 @@ import type {
   DocumentTags,
   DocumentTimeline
 } from "../../application/document-history-service.js";
+import type { DocumentSharePermission, DocumentShareState } from "../../core/document-shares.js";
 import type { FileDashboard } from "../../application/file-service.js";
 import type { DataPatchDashboard, DataPatchDashboardEntry } from "../../application/data-patch-service.js";
 import type { JobExecutionDashboard } from "../../application/job-history-service.js";
@@ -71,6 +72,10 @@ export interface DeskNavLink {
   readonly href: string;
   readonly label: string;
   readonly id?: string;
+}
+
+export interface DocumentSharePanelState extends DocumentShareState {
+  readonly delegablePermissions: readonly DocumentSharePermission[];
 }
 
 export function renderDeskLayout(options: DeskLayoutOptions): string {
@@ -1478,10 +1483,12 @@ export function renderDocumentTimeline(
     readonly allowAssign?: boolean;
     readonly allowTag?: boolean;
     readonly allowFollow?: boolean;
+    readonly allowShare?: boolean;
     readonly actorId?: string;
     readonly assignments?: DocumentAssignments;
     readonly tags?: DocumentTags;
     readonly followers?: DocumentFollowers;
+    readonly shares?: DocumentSharePanelState;
   } = {}
 ): string {
   const rows = timeline.entries
@@ -1505,6 +1512,9 @@ export function renderDocumentTimeline(
         ...(options.actorId !== undefined ? { actorId: options.actorId } : {})
       })
     : "";
+  const sharePanel = options.shares
+    ? renderSharePanel(timeline, options.shares, { allowShare: options.allowShare ?? false })
+    : "";
   return `<section class="panel timeline" aria-labelledby="document-timeline">
     <div class="timeline-head">
       <h2 id="document-timeline">Timeline</h2>
@@ -1512,6 +1522,7 @@ export function renderDocumentTimeline(
     </div>
     ${tagPanel}
     ${followerPanel}
+    ${sharePanel}
     ${assignmentPanel}
     <div class="table-wrap">
       <table>
@@ -1537,6 +1548,69 @@ function renderTimelineChange(change: DocumentTimeline["entries"][number]["chang
     <span aria-hidden="true">&rarr;</span>
     <span>${escapeHtml(formatValue(change.newValue))}</span>
   </li>`;
+}
+
+function renderSharePanel(
+  timeline: DocumentTimeline,
+  shares: DocumentSharePanelState,
+  options: { readonly allowShare?: boolean }
+): string {
+  const shareRows = shares.grants
+    .map(
+      (grant) => `<li>
+        <span>${escapeHtml(grant.userId)}</span>
+        <small>${grant.permissions.map((permission) => escapeHtml(permission)).join(", ")}</small>
+        ${options.allowShare ? renderUnshareForm(timeline, grant.userId) : ""}
+      </li>`
+    )
+    .join("");
+  const shareForm = options.allowShare ? renderShareForm(timeline, shares.delegablePermissions) : "";
+  return `<div class="timeline-shares">
+    <h3 id="document-shares">Shares</h3>
+    <ul class="share-list">${shareRows || `<li class="empty">No shares.</li>`}</ul>
+    ${shareForm}
+  </div>`;
+}
+
+function renderShareForm(
+  timeline: DocumentTimeline,
+  delegablePermissions: readonly DocumentSharePermission[]
+): string {
+  const action = `/desk/${encodeURIComponent(timeline.doctype)}/${encodeURIComponent(timeline.name)}/shares`;
+  const choices = delegablePermissions.map(renderSharePermissionChoice).join("");
+  return `<form class="timeline-share-form" method="post">
+    <input type="hidden" name="expectedVersion" value="${String(timeline.version)}">
+    <label class="field" for="timeline-share-user"><span>User</span><input id="timeline-share-user" name="user" type="text"></label>
+    <fieldset class="choice-grid">
+      <legend>Permissions</legend>
+      ${choices}
+    </fieldset>
+    <button class="button primary" type="submit" formaction="${action}">Share</button>
+  </form>`;
+}
+
+function renderSharePermissionChoice(permission: DocumentSharePermission): string {
+  const checked = permission === "read" ? " checked" : "";
+  return `<label class="choice"><input type="checkbox" name="permission" value="${permission}"${checked}> <span>${sharePermissionLabel(permission)}</span></label>`;
+}
+
+function sharePermissionLabel(permission: DocumentSharePermission): string {
+  switch (permission) {
+    case "read":
+      return "Read";
+    case "update":
+      return "Update";
+    case "share":
+      return "Share";
+  }
+}
+
+function renderUnshareForm(timeline: DocumentTimeline, userId: string): string {
+  const action = `/desk/${encodeURIComponent(timeline.doctype)}/${encodeURIComponent(timeline.name)}/shares/${encodeURIComponent(userId)}/remove`;
+  return `<form class="inline-action" method="post">
+    <input type="hidden" name="expectedVersion" value="${String(timeline.version)}">
+    <button class="button" type="submit" formaction="${action}">Revoke</button>
+  </form>`;
 }
 
 function renderAssignmentPanel(
@@ -2269,16 +2343,19 @@ tr:last-child td { border-bottom: 0; }
 }
 .timeline-tags,
 .timeline-followers,
+.timeline-shares,
 .timeline-assignments {
   padding: 0 18px 18px;
   border-bottom: 1px solid var(--border);
 }
 .timeline-tags + .timeline-followers,
-.timeline-followers + .timeline-assignments {
+.timeline-followers + .timeline-shares,
+.timeline-shares + .timeline-assignments {
   padding-top: 18px;
 }
 .tag-list,
 .follower-list,
+.share-list,
 .assignment-list {
   display: grid;
   gap: 8px;
@@ -2288,6 +2365,7 @@ tr:last-child td { border-bottom: 0; }
 }
 .tag-list li,
 .follower-list li,
+.share-list li,
 .assignment-list li {
   display: flex;
   align-items: center;
@@ -2298,12 +2376,17 @@ tr:last-child td { border-bottom: 0; }
 .inline-action { margin: 0; }
 .timeline-tag-form,
 .timeline-follower-form,
+.timeline-share-form,
 .timeline-assignment-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
   gap: 12px;
   margin-top: 12px;
+}
+.timeline-share-form .choice-grid {
+  grid-column: 1 / -1;
+  margin: 0;
 }
 .timeline-comment {
   padding: 16px 18px 18px;

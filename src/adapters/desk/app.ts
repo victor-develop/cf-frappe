@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { DataPatchAdminPort } from "../../application/data-patch-service.js";
+import type { DocumentShareService } from "../../application/document-share-service.js";
 import type { DocumentCommandExecutor } from "../../application/document-service.js";
 import type { DocumentHistoryService } from "../../application/document-history-service.js";
 import type { FileService } from "../../application/file-service.js";
@@ -16,6 +17,7 @@ import type { UserAccountService } from "../../application/user-account-service.
 import type { UserNotificationService } from "../../application/user-notification-service.js";
 import type { UserPermissionService } from "../../application/user-permission-service.js";
 import type { UserProfileService } from "../../application/user-profile-service.js";
+import { DOCUMENT_SHARE_PERMISSIONS, documentSharePermissionsForActor } from "../../core/document-shares.js";
 import { FrameworkError } from "../../core/errors.js";
 import { can } from "../../core/permissions.js";
 import type { ModelRegistry } from "../../core/registry.js";
@@ -106,6 +108,7 @@ export interface DeskAppOptions {
   readonly prints?: PrintService;
   readonly files?: FileService;
   readonly queries: QueryService;
+  readonly documentShares?: DocumentShareService;
   readonly timeline?: DocumentHistoryService;
   readonly savedFilters?: SavedListFilterService;
   readonly savedReports?: SavedReportService;
@@ -1198,6 +1201,49 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     }
   });
 
+  if (options.documentShares) {
+    app.post("/desk/:doctype/:name/shares", async (c) => {
+      const actor = await options.actor(c.req.raw);
+      const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+      const name = c.req.param("name");
+      try {
+        const form = await parseDeskShare(c.req.raw);
+        await options.documents.share({
+          actor,
+          doctype: doctype.name,
+          name,
+          userId: form.userId,
+          permissions: form.permissions,
+          ...(form.expectedVersion !== undefined ? { expectedVersion: form.expectedVersion } : {}),
+          metadata: requestMetadata(c.req.raw)
+        });
+        return c.redirect(`/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(name)}`, 303);
+      } catch (error) {
+        return renderDeskError(options, c.req.raw, actor, doctype, "update", error, name);
+      }
+    });
+
+    app.post("/desk/:doctype/:name/shares/:userId/remove", async (c) => {
+      const actor = await options.actor(c.req.raw);
+      const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+      const name = c.req.param("name");
+      try {
+        const expectedVersion = await parseDeskExpectedVersion(c.req.raw);
+        await options.documents.revokeShare({
+          actor,
+          doctype: doctype.name,
+          name,
+          userId: c.req.param("userId"),
+          ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+          metadata: requestMetadata(c.req.raw)
+        });
+        return c.redirect(`/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(name)}`, 303);
+      } catch (error) {
+        return renderDeskError(options, c.req.raw, actor, doctype, "update", error, name);
+      }
+    });
+  }
+
   app.post("/desk/:doctype/:name", async (c) => {
     const actor = await options.actor(c.req.raw);
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
@@ -1720,6 +1766,7 @@ async function renderDeskDocumentPage(
   const assignments = await options.timeline?.getAssignments(actor, doctype.name, document.name);
   const tags = await options.timeline?.getTags(actor, doctype.name, document.name);
   const followers = await options.timeline?.getFollowers(actor, doctype.name, document.name);
+  const shares = await documentSharesForDesk(options, actor, doctype, document);
   const canComment = can(actor, doctype, "comment", document);
   const canAssign = can(actor, doctype, "assign", document);
   const canTag = can(actor, doctype, "tag", document);
@@ -1767,7 +1814,8 @@ async function renderDeskDocumentPage(
               actorId: actor.id,
               ...(assignments ? { assignments } : {}),
               ...(tags ? { tags } : {}),
-              ...(followers ? { followers } : {})
+              ...(followers ? { followers } : {}),
+              ...(shares ? { shares, allowShare: true } : {})
             })
           : ""
       }`
@@ -1788,6 +1836,31 @@ function lifecycleActionsFor(
     return ["cancel"];
   }
   return [];
+}
+
+async function documentSharesForDesk(
+  options: DeskAppOptions,
+  actor: Actor,
+  doctype: DocTypeDefinition,
+  document: DocumentSnapshot
+) {
+  if (options.documentShares === undefined) {
+    return undefined;
+  }
+  try {
+    const state = await options.documentShares.getDocumentShares(actor, doctype, document);
+    return {
+      ...state,
+      delegablePermissions: can(actor, doctype, "share", document)
+        ? DOCUMENT_SHARE_PERMISSIONS
+        : documentSharePermissionsForActor(actor, state.grants)
+    };
+  } catch (error) {
+    if (error instanceof FrameworkError && error.status === 403) {
+      return undefined;
+    }
+    throw error;
+  }
 }
 
 function workflowActionsFor(
@@ -1862,6 +1935,12 @@ interface ParsedDeskAssignment {
 
 interface ParsedDeskTag {
   readonly tag: string;
+  readonly expectedVersion?: number;
+}
+
+interface ParsedDeskShare {
+  readonly userId: string;
+  readonly permissions: readonly string[];
   readonly expectedVersion?: number;
 }
 
@@ -2136,6 +2215,17 @@ async function parseDeskTag(request: Request): Promise<ParsedDeskTag> {
   const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
   return {
     tag: typeof tag === "string" ? tag : "",
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
+async function parseDeskShare(request: Request): Promise<ParsedDeskShare> {
+  const form = await request.formData();
+  const userId = form.get("user");
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  return {
+    userId: typeof userId === "string" ? userId : "",
+    permissions: form.getAll("permission").filter((permission): permission is string => typeof permission === "string"),
     ...(expectedVersion !== undefined ? { expectedVersion } : {})
   };
 }

@@ -34,13 +34,17 @@ import {
 import { createChildTableServices, createLinkedServices, createServices, data, guest, noteDocType, now, owner } from "../helpers";
 
 describe("Desk app", () => {
-  function makeDesk(actor = owner, options: { readonly realtime?: boolean } = {}) {
+  function makeDesk(
+    actor = owner,
+    options: { readonly realtime?: boolean; readonly documentShares?: boolean } = {}
+  ) {
     const services = createServices(["e1", "e2", "e3", "e4"]);
     const app = createDeskApp({
       registry: services.registry,
       documents: services.documents,
       prints: services.prints,
       queries: services.queries,
+      ...(options.documentShares === false ? {} : { documentShares: services.documentShares }),
       reports: services.reports,
       timeline: services.history,
       savedFilters: services.savedFilters,
@@ -70,6 +74,7 @@ describe("Desk app", () => {
       documents: services.documents,
       prints: services.prints,
       queries: services.queries,
+      documentShares: services.documentShares,
       reports: services.reports,
       timeline: services.history,
       savedFilters: services.savedFilters,
@@ -94,6 +99,7 @@ describe("Desk app", () => {
       documents: services.documents,
       prints: services.prints,
       queries: services.queries,
+      documentShares: services.documentShares,
       reports: services.reports,
       timeline: services.history,
       savedFilters: services.savedFilters,
@@ -2028,6 +2034,109 @@ describe("Desk app", () => {
     expect(html).toContain(owner.id);
     expect(html).not.toContain('formaction="/desk/Note/My%20Note/followers"');
     expect(html).not.toContain('formaction="/desk/Note/My%20Note/followers/owner%40example.com/remove"');
+  });
+
+  it("renders and submits document share controls from generated edit forms", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    const initial = await app.request("/desk/Note/My%20Note");
+    expect(initial.status).toBe(200);
+    const initialHtml = await initial.text();
+    expect(initialHtml).toContain('<h3 id="document-shares">Shares</h3>');
+    expect(initialHtml).toContain('formaction="/desk/Note/My%20Note/shares"');
+    expect(initialHtml).toContain('name="user"');
+    expect(initialHtml).toContain('name="permission" value="read" checked');
+
+    const permissions = new URLSearchParams({ user: "collab@example.com", expectedVersion: "1" });
+    permissions.append("permission", "read");
+    permissions.append("permission", "update");
+    const shared = await app.request("/desk/Note/My%20Note/shares", {
+      method: "POST",
+      body: permissions,
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(shared.status).toBe(303);
+    await expect(services.queries.getDocument(owner, "Note", "My Note")).resolves.toMatchObject({ version: 2 });
+
+    const withShare = await app.request("/desk/Note/My%20Note");
+    expect(withShare.status).toBe(200);
+    const sharedHtml = await withShare.text();
+    expect(sharedHtml).toContain("collab@example.com");
+    expect(sharedHtml).toContain("read, update");
+    expect(sharedHtml).toContain('formaction="/desk/Note/My%20Note/shares/collab%40example.com/remove"');
+
+    const revoked = await app.request("/desk/Note/My%20Note/shares/collab%40example.com/remove", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "2" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(revoked.status).toBe(303);
+    await expect(services.queries.getDocument(owner, "Note", "My Note")).resolves.toMatchObject({ version: 3 });
+  });
+
+  it("hides document share controls from read-only generated edit forms", async () => {
+    const { app, services } = makeDesk(guest);
+    await services.documents.create({ actor: owner, doctype: "Note", data: data() });
+    await services.documents.share({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      userId: "collab@example.com",
+      permissions: ["read"],
+      expectedVersion: 1
+    });
+
+    const response = await app.request("/desk/Note/My%20Note");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).not.toContain('<h3 id="document-shares">Shares</h3>');
+    expect(html).not.toContain('formaction="/desk/Note/My%20Note/shares"');
+    expect(html).not.toContain('formaction="/desk/Note/My%20Note/shares/collab%40example.com/remove"');
+  });
+
+  it("does not mount document share form routes when Desk sharing is disabled", async () => {
+    const { app, services } = makeDesk(owner, { documentShares: false });
+    await services.documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    const page = await app.request("/desk/Note/My%20Note");
+    expect(page.status).toBe(200);
+    await expect(page.text()).resolves.not.toContain('<h3 id="document-shares">Shares</h3>');
+
+    const posted = await app.request("/desk/Note/My%20Note/shares", {
+      method: "POST",
+      body: new URLSearchParams({ user: "collab@example.com", permission: "read", expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(posted.status).toBe(404);
+    await expect(services.queries.getDocument(owner, "Note", "My Note")).resolves.toMatchObject({ version: 1 });
+  });
+
+  it("renders only delegable share permissions for share-derived managers", async () => {
+    const collaborator = { id: "collab@example.com", roles: ["Guest"], tenantId: "acme" };
+    const { app, services } = makeDesk(collaborator);
+    await services.documents.create({ actor: owner, doctype: "Note", data: data() });
+    await services.documents.share({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      userId: collaborator.id,
+      permissions: ["share"],
+      expectedVersion: 1
+    });
+
+    const response = await app.request("/desk/Note/My%20Note");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('<h3 id="document-shares">Shares</h3>');
+    expect(html).toContain('name="permission" value="read" checked');
+    expect(html).toContain('name="permission" value="share"');
+    expect(html).not.toContain('name="permission" value="update"');
   });
 
   it("submits and cancels documents from generated edit forms", async () => {
