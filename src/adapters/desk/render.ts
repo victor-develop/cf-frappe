@@ -30,7 +30,8 @@ import type { FileDashboard } from "../../application/file-service.js";
 import type {
   DataPatchApplyPlan,
   DataPatchDashboard,
-  DataPatchDashboardEntry
+  DataPatchDashboardEntry,
+  DataPatchRollbackPlan
 } from "../../application/data-patch-service.js";
 import type { JobExecutionDashboard } from "../../application/job-history-service.js";
 import type { JobScheduleDashboard } from "../../application/job-schedule-service.js";
@@ -1165,8 +1166,13 @@ export function renderJobAdmin(
 
 export function renderDataPatchAdmin(
   dashboard: DataPatchDashboard,
-  options: { readonly error?: string; readonly plan?: DataPatchApplyPlan } = {}
+  options: {
+    readonly error?: string;
+    readonly plan?: DataPatchApplyPlan | DataPatchRollbackPlan;
+    readonly planKind?: "apply" | "rollback";
+  } = {}
 ): string {
+  const canPlanRollback = dashboard.patches.some((patch) => patch.rollbackable === true);
   const rows = dashboard.patches
     .map((patch) => `<tr>
       <td>${escapeHtml(patch.id)}</td>
@@ -1181,12 +1187,13 @@ export function renderDataPatchAdmin(
   return `<form class="panel form" method="post" action="/desk/admin/data-patches/apply">
     <div class="form-head"><h2>Apply Pending Patches</h2><p>${String(dashboard.totals.notApplied)} pending</p></div>
     ${options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : ""}
-    ${options.plan ? renderDataPatchPlan(options.plan) : ""}
+    ${options.plan ? renderDataPatchPlan(options.plan, options.planKind ?? "apply") : ""}
     <div class="fields">
       <label class="field"><span>Limit</span><input name="limit" type="number" min="1" value="1"></label>
     </div>
     <div class="actions">
       <button class="button" type="submit" formaction="/desk/admin/data-patches/plan">Plan Batch</button>
+      ${canPlanRollback ? `<button class="button" type="submit" formaction="/desk/admin/data-patches/rollback-plan">Plan Rollback Batch</button>` : ""}
       <button class="button primary" type="submit">Apply Batch</button>
     </div>
   </form>
@@ -1212,15 +1219,21 @@ function renderDataPatchAction(patch: DataPatchDashboardEntry): string {
       <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/retry">Retry</button>
     </form>`;
   }
+  if (patch.status === "applied" && patch.rollbackable === true) {
+    const label = patch.rollbackLabel ?? "Plan Rollback";
+    return `<form class="inline-action" method="post">
+      <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/rollback-plan">${escapeHtml(label)}</button>
+    </form>`;
+  }
   return "";
 }
 
-function renderDataPatchPlan(plan: DataPatchApplyPlan): string {
+function renderDataPatchPlan(plan: DataPatchApplyPlan | DataPatchRollbackPlan, kind: "apply" | "rollback"): string {
   const planned = plan.patchIds.length === 0 ? "(none)" : plan.patchIds.join(", ");
   const requested = plan.requestedPatchIds === undefined ? "" : `<p>Requested: ${escapeHtml(plan.requestedPatchIds.join(", "))}</p>`;
   const limit = plan.limit === undefined ? "" : `<p>Limit: ${String(plan.limit)}</p>`;
   return `<section class="notice">
-    <h3>Planned Patches</h3>
+    <h3>${kind === "rollback" ? "Planned Rollback" : "Planned Patches"}</h3>
     <p>${escapeHtml(planned)}</p>
     ${requested}
     ${limit}

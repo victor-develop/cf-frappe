@@ -2340,7 +2340,7 @@ describe("Desk app", () => {
   it("renders and applies data patches from the Desk admin surface", async () => {
     const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
     const services = createServices();
-    const resources = { touched: [] as string[] };
+    const resources = { touched: [] as string[], rolledBack: [] as string[] };
     const app = createDeskApp({
       registry: services.registry,
       documents: services.documents,
@@ -2355,6 +2355,12 @@ describe("Desk app", () => {
             run: ({ resources }) => {
               resources.touched.push("first");
               return { touched: resources.touched.length };
+            },
+            rollback: {
+              label: "Undo First",
+              run: ({ resources }) => {
+                resources.rolledBack.push("first");
+              }
             }
           }),
           defineDataPatch<typeof resources>({
@@ -2362,6 +2368,11 @@ describe("Desk app", () => {
             checksum: "v1",
             run: ({ resources }) => {
               resources.touched.push("second");
+            },
+            rollback: {
+              run: ({ resources }) => {
+                resources.rolledBack.push("second");
+              }
             }
           })
         ],
@@ -2402,6 +2413,24 @@ describe("Desk app", () => {
     const appliedHtml = await applied.text();
     expect(appliedHtml).toContain("applied");
     expect(appliedHtml).toContain("{&quot;touched&quot;:1}");
+    expect(appliedHtml).toContain('formaction="/desk/admin/data-patches/core.first/rollback-plan"');
+    expect(appliedHtml).toContain('formaction="/desk/admin/data-patches/crm.second/rollback-plan"');
+    expect(appliedHtml).toContain('formaction="/desk/admin/data-patches/rollback-plan"');
+
+    const rollbackPlan = await app.request("/desk/admin/data-patches/rollback-plan", {
+      method: "POST",
+      body: new URLSearchParams({ limit: "2" })
+    });
+    expect(rollbackPlan.status).toBe(200);
+    const rollbackPlanHtml = await rollbackPlan.text();
+    expect(rollbackPlanHtml).toContain("Planned Rollback");
+    expect(rollbackPlanHtml).toContain("crm.second, core.first");
+    expect(rollbackPlanHtml).toContain("Limit: 2");
+
+    const singleRollbackPlan = await app.request("/desk/admin/data-patches/crm.second/rollback-plan", { method: "POST" });
+    expect(singleRollbackPlan.status).toBe(200);
+    await expect(singleRollbackPlan.text()).resolves.toContain("Requested: crm.second");
+    expect(resources.rolledBack).toEqual([]);
   });
 
   it("renders failed data patch retry actions in the Desk admin surface", async () => {

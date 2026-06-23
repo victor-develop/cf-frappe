@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the nested child-table custom field slice:
+As of the data-patch rollback planning slice:
 
 - Vitest files: `73`
-- Vitest cases: `729`
+- Vitest cases: `734`
 
 ## Implication
 

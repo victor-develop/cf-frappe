@@ -1082,6 +1082,12 @@ export function renderDeskClientScript(): string {
       planOne: function (patchId) {
         return request(dataPatchPath(patchId, "plan"), { method: "POST" }).then(unwrapData);
       },
+      rollbackPlan: function (options) {
+        return request(dataPatchPath(undefined, "rollback-plan"), { method: "POST", body: dataPatchBody(options) }).then(unwrapData);
+      },
+      rollbackPlanOne: function (patchId) {
+        return request(dataPatchPath(patchId, "rollback-plan"), { method: "POST" }).then(unwrapData);
+      },
       retry: function (patchId) {
         return request(dataPatchPath(patchId, "retry"), { method: "POST" }).then(unwrapData);
       },

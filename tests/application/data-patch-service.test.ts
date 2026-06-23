@@ -194,6 +194,199 @@ describe("DataPatchService", () => {
     });
   });
 
+  it("plans applied rollback batches in reverse order without running rollback code", async () => {
+    const resources = { applied: [] as string[], rolledBack: [] as string[] };
+    const service = new DataPatchService({
+      log: new InMemoryDataPatchLog(),
+      resources,
+      patches: [
+        defineDataPatch<typeof resources>({
+          id: "core.first",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.applied.push("first");
+          },
+          rollback: {
+            label: "Undo Core",
+            run: ({ resources }) => {
+              resources.rolledBack.push("first");
+            }
+          }
+        }),
+        defineDataPatch<typeof resources>({
+          id: "crm.second",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.applied.push("second");
+          },
+          rollback: {
+            run: ({ resources }) => {
+              resources.rolledBack.push("second");
+            }
+          }
+        })
+      ],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-first", "claim-second"])
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    await service.apply(admin);
+
+    await expect(service.planRollback(admin)).resolves.toEqual({
+      patchIds: ["crm.second", "core.first"]
+    });
+    await expect(service.planRollback(admin, { limit: 1 })).resolves.toEqual({
+      patchIds: ["crm.second"],
+      limit: 1
+    });
+    await expect(service.planRollback(admin, { patchIds: ["core.first", "crm.second"] })).resolves.toEqual({
+      patchIds: ["crm.second", "core.first"],
+      requestedPatchIds: ["core.first", "crm.second"]
+    });
+    await expect(service.dashboard(admin)).resolves.toMatchObject({
+      patches: [
+        { id: "core.first", rollbackable: true, rollbackLabel: "Undo Core" },
+        { id: "crm.second", rollbackable: true }
+      ]
+    });
+    expect(resources).toEqual({ applied: ["first", "second"], rolledBack: [] });
+  });
+
+  it("rejects rollback plans that skip later applied patches or lack rollback definitions", async () => {
+    const service = new DataPatchService({
+      log: new InMemoryDataPatchLog(),
+      resources: {},
+      patches: [
+        defineDataPatch({
+          id: "core.first",
+          checksum: "v1",
+          run: () => undefined,
+          rollback: { run: () => undefined }
+        }),
+        defineDataPatch({
+          id: "crm.second",
+          checksum: "v1",
+          run: () => undefined,
+          rollback: { run: () => undefined }
+        }),
+        defineDataPatch({ id: "crm.third", checksum: "v1", run: () => undefined })
+      ],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-first", "claim-second", "claim-third"])
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    await service.apply(admin);
+
+    await expect(service.planRollback(admin)).resolves.toEqual({ patchIds: [] });
+    await expect(service.planRollback(admin, { patchIds: ["crm.third"] })).rejects.toMatchObject({
+      code: "DATA_PATCH_ROLLBACK_UNAVAILABLE",
+      message: "Data patch 'crm.third' does not declare a rollback",
+      status: 409
+    });
+    await expect(service.planRollback(admin, { patchIds: ["crm.second"] })).rejects.toMatchObject({
+      code: "DATA_PATCH_ORDER_VIOLATION",
+      message: "Data patch 'crm.second' cannot roll back before later patch 'crm.third' is rolled back",
+      status: 409
+    });
+    await expect(service.planRollback(guest)).rejects.toMatchObject({ code: "PERMISSION_DENIED", status: 403 });
+  });
+
+  it("rejects rollback plans for unapplied, pending, failed, missing, and checksum-drifted patches", async () => {
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const unapplied = new DataPatchService({
+      log: new InMemoryDataPatchLog(),
+      resources: {},
+      patches: [defineDataPatch({ id: "core.unapplied", checksum: "v1", run: () => undefined, rollback: { run: () => undefined } })]
+    });
+    await expect(unapplied.planRollback(admin, { patchIds: ["core.unapplied"] })).rejects.toMatchObject({
+      code: "DATA_PATCH_ROLLBACK_UNAVAILABLE",
+      status: 409
+    });
+    await expect(unapplied.planRollback(admin, { patchIds: ["missing.patch"] })).rejects.toMatchObject({
+      code: "DATA_PATCH_NOT_FOUND",
+      status: 404
+    });
+
+    const pendingLog = new InMemoryDataPatchLog();
+    await pendingLog.claimDataPatch({ id: "core.pending", checksum: "v1", claimId: "claim-pending", claimedAt: now });
+    const pending = new DataPatchService({
+      log: pendingLog,
+      resources: {},
+      patches: [defineDataPatch({ id: "core.pending", checksum: "v1", run: () => undefined, rollback: { run: () => undefined } })]
+    });
+    await expect(pending.planRollback(admin)).rejects.toMatchObject({ code: "DATA_PATCH_PENDING", status: 409 });
+
+    const pendingSuccessorLog = new InMemoryDataPatchLog();
+    await pendingSuccessorLog.claimDataPatch({ id: "core.first", checksum: "v1", claimId: "claim-first", claimedAt: now });
+    await pendingSuccessorLog.completeDataPatch({ id: "core.first", checksum: "v1", claimId: "claim-first", appliedAt: now });
+    await pendingSuccessorLog.claimDataPatch({ id: "crm.pending", checksum: "v1", claimId: "claim-pending", claimedAt: now });
+    const pendingSuccessor = new DataPatchService({
+      log: pendingSuccessorLog,
+      resources: {},
+      patches: [
+        defineDataPatch({ id: "core.first", checksum: "v1", run: () => undefined, rollback: { run: () => undefined } }),
+        defineDataPatch({ id: "crm.pending", checksum: "v1", run: () => undefined, rollback: { run: () => undefined } })
+      ]
+    });
+    await expect(pendingSuccessor.planRollback(admin, { patchIds: ["core.first"] })).rejects.toMatchObject({
+      code: "DATA_PATCH_PENDING",
+      status: 409
+    });
+
+    const failedLog = new InMemoryDataPatchLog();
+    await failedLog.claimDataPatch({ id: "core.failed", checksum: "v1", claimId: "claim-failed", claimedAt: now });
+    await failedLog.failDataPatch({
+      id: "core.failed",
+      checksum: "v1",
+      claimId: "claim-failed",
+      failedAt: now,
+      error: "boom"
+    });
+    const failed = new DataPatchService({
+      log: failedLog,
+      resources: {},
+      patches: [defineDataPatch({ id: "core.failed", checksum: "v1", run: () => undefined, rollback: { run: () => undefined } })]
+    });
+    await expect(failed.planRollback(admin)).rejects.toMatchObject({ code: "DATA_PATCH_FAILED", status: 409 });
+
+    const failedSuccessorLog = new InMemoryDataPatchLog();
+    await failedSuccessorLog.claimDataPatch({ id: "core.first", checksum: "v1", claimId: "claim-first", claimedAt: now });
+    await failedSuccessorLog.completeDataPatch({ id: "core.first", checksum: "v1", claimId: "claim-first", appliedAt: now });
+    await failedSuccessorLog.claimDataPatch({ id: "crm.failed", checksum: "v1", claimId: "claim-failed", claimedAt: now });
+    await failedSuccessorLog.failDataPatch({
+      id: "crm.failed",
+      checksum: "v1",
+      claimId: "claim-failed",
+      failedAt: now,
+      error: "boom"
+    });
+    const failedSuccessor = new DataPatchService({
+      log: failedSuccessorLog,
+      resources: {},
+      patches: [
+        defineDataPatch({ id: "core.first", checksum: "v1", run: () => undefined, rollback: { run: () => undefined } }),
+        defineDataPatch({ id: "crm.failed", checksum: "v1", run: () => undefined, rollback: { run: () => undefined } })
+      ]
+    });
+    await expect(failedSuccessor.planRollback(admin, { patchIds: ["core.first"] })).rejects.toMatchObject({
+      code: "DATA_PATCH_FAILED",
+      status: 409
+    });
+
+    const checksumLog = new InMemoryDataPatchLog();
+    await checksumLog.claimDataPatch({ id: "core.drift", checksum: "v1", claimId: "claim-drift", claimedAt: now });
+    await checksumLog.completeDataPatch({ id: "core.drift", checksum: "v1", claimId: "claim-drift", appliedAt: now });
+    const checksum = new DataPatchService({
+      log: checksumLog,
+      resources: {},
+      patches: [defineDataPatch({ id: "core.drift", checksum: "v2", run: () => undefined, rollback: { run: () => undefined } })]
+    });
+    await expect(checksum.planRollback(admin)).rejects.toMatchObject({
+      code: "DATA_PATCH_CHECKSUM_MISMATCH",
+      status: 409
+    });
+  });
+
   it("plans only pending patches and surfaces blocked journal states", async () => {
     const resources = { touched: [] as string[] };
     const log = new InMemoryDataPatchLog();

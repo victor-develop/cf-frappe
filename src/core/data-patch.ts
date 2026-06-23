@@ -15,6 +15,12 @@ export interface DataPatchDefinition<TResources = unknown> {
   readonly label?: string;
   readonly checksum: string;
   readonly run: DataPatchRun<TResources>;
+  readonly rollback?: DataPatchRollbackDefinition<TResources>;
+}
+
+export interface DataPatchRollbackDefinition<TResources = unknown> {
+  readonly label?: string;
+  readonly run: DataPatchRun<TResources>;
 }
 
 export function defineDataPatch<TResources = unknown>(

@@ -181,6 +181,84 @@ describe("data patch api", () => {
     expect(resources.touched).toEqual(["first", "second", "third"]);
   });
 
+  it("plans rollback batches through data patch admin routes without running rollback code", async () => {
+    const services = createServices();
+    const resources = { applied: [] as string[], rolledBack: [] as string[] };
+    const app = createResourceApi({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: unsafeHeaderActorResolver,
+      dataPatches: new DataPatchService({
+        log: new InMemoryDataPatchLog(),
+        resources,
+        patches: [
+          defineDataPatch<typeof resources>({
+            id: "core.first",
+            checksum: "v1",
+            run: ({ resources }) => {
+              resources.applied.push("first");
+            },
+            rollback: {
+              label: "Undo First",
+              run: ({ resources }) => {
+                resources.rolledBack.push("first");
+              }
+            }
+          }),
+          defineDataPatch<typeof resources>({
+            id: "crm.second",
+            checksum: "v1",
+            run: ({ resources }) => {
+              resources.applied.push("second");
+            },
+            rollback: {
+              run: ({ resources }) => {
+                resources.rolledBack.push("second");
+              }
+            }
+          })
+        ],
+        clock: fixedClock(now),
+        ids: deterministicIds(["claim-first", "claim-second"])
+      })
+    });
+
+    const applied = await app.request("/api/data-patches/apply", { method: "POST", headers: adminHeaders });
+    expect(applied.status).toBe(201);
+
+    const listed = await app.request("/api/data-patches", { headers: adminHeaders });
+    expect(listed.status).toBe(200);
+    await expect(listed.json()).resolves.toMatchObject({
+      data: {
+        patches: [
+          { id: "core.first", rollbackable: true, rollbackLabel: "Undo First" },
+          { id: "crm.second", rollbackable: true }
+        ]
+      }
+    });
+
+    const batch = await app.request("/api/data-patches/rollback-plan", {
+      method: "POST",
+      headers: { ...adminHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ limit: 1 })
+    });
+    expect(batch.status).toBe(200);
+    await expect(batch.json()).resolves.toEqual({
+      data: { patchIds: ["crm.second"], limit: 1 }
+    });
+
+    const single = await app.request("/api/data-patches/crm.second/rollback-plan", {
+      method: "POST",
+      headers: adminHeaders
+    });
+    expect(single.status).toBe(200);
+    await expect(single.json()).resolves.toEqual({
+      data: { patchIds: ["crm.second"], requestedPatchIds: ["crm.second"] }
+    });
+    expect(resources).toEqual({ applied: ["first", "second"], rolledBack: [] });
+  });
+
   it("retries a failed data patch through the admin JSON route", async () => {
     const services = createServices();
     const resources = { attempts: 0 };

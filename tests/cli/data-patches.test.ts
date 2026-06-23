@@ -38,6 +38,24 @@ describe("cf-frappe CLI remote data patches", () => {
       limit: 1
     });
 
+    expect(parseCliArgs([
+      "data-patches",
+      "rollback-plan",
+      "--url",
+      "https://app.example",
+      "--id",
+      "crm.backfill",
+      "--limit",
+      "1"
+    ])).toEqual({
+      kind: "data-patches",
+      action: "rollback-plan",
+      url: "https://app.example",
+      headers: [],
+      patchIds: ["crm.backfill"],
+      limit: 1
+    });
+
     expect(parseCliArgs(["data-patches", "retry", "--url", "https://app.example", "--id", "core.seed"])).toEqual({
       kind: "data-patches",
       action: "retry",
@@ -160,6 +178,39 @@ describe("cf-frappe CLI remote data patches", () => {
     expect(stdout.text()).toContain("Planned data patches at https://app.example");
     expect(stdout.text()).toContain("Plan: core.seed");
     expect(stdout.text()).toContain("Requested: core.seed");
+    expect(stdout.text()).toContain("Limit: 1");
+  });
+
+  it("plans remote data patch rollback without applying compensating code", async () => {
+    const calls: RemoteCall[] = [];
+    const stdout = textBuffer();
+    const exitCode = await runCli(
+      ["data-patches", "rollback-plan", "--url", "https://app.example", "--id", "crm.second", "--limit", "1"],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(calls, {
+          data: {
+            patchIds: ["crm.second"],
+            requestedPatchIds: ["crm.second"],
+            limit: 1
+          }
+        }),
+        stdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("https://app.example/api/data-patches/rollback-plan");
+    expect(calls[0]?.method).toBe("POST");
+    expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({
+      patchIds: ["crm.second"],
+      limit: 1
+    });
+    expect(stdout.text()).toContain("Planned data patch rollback at https://app.example");
+    expect(stdout.text()).toContain("Rollback plan: crm.second");
+    expect(stdout.text()).toContain("Requested: crm.second");
     expect(stdout.text()).toContain("Limit: 1");
   });
 

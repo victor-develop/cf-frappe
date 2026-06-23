@@ -1,4 +1,4 @@
-export type DataPatchRemoteAction = "status" | "plan" | "apply" | "enqueue" | "retry";
+export type DataPatchRemoteAction = "status" | "plan" | "rollback-plan" | "apply" | "enqueue" | "retry";
 
 export interface DataPatchHeaderLiteral {
   readonly kind: "literal";
@@ -106,6 +106,14 @@ export async function runRemoteDataPatchCommand(
       path: "/api/data-patches/plan"
     });
     return formatPlan(command.url, data);
+  }
+  if (command.action === "rollback-plan") {
+    const data = await requestRemoteDataPatch<DataPatchPlanResponse>(command, io, {
+      body: commandBody(command, { includeQueueOptions: false }),
+      method: "POST",
+      path: "/api/data-patches/rollback-plan"
+    });
+    return formatRollbackPlan(command.url, data);
   }
   if (command.action === "retry") {
     const data = await requestRemoteDataPatch<DataPatchRunResponse>(command, io, {
@@ -271,6 +279,21 @@ function formatPlan(baseUrl: string, plan: DataPatchPlanResponse): string {
   const lines = [
     `Planned data patches at ${baseUrl}`,
     `Plan: ${plan.patchIds.length === 0 ? "(none)" : plan.patchIds.join(", ")}`
+  ];
+  if (plan.requestedPatchIds !== undefined) {
+    lines.push(`Requested: ${plan.requestedPatchIds.join(", ")}`);
+  }
+  if (plan.limit !== undefined) {
+    lines.push(`Limit: ${plan.limit}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+function formatRollbackPlan(baseUrl: string, plan: DataPatchPlanResponse): string {
+  const lines = [
+    `Planned data patch rollback at ${baseUrl}`,
+    `Rollback plan: ${plan.patchIds.length === 0 ? "(none)" : plan.patchIds.join(", ")}`
   ];
   if (plan.requestedPatchIds !== undefined) {
     lines.push(`Requested: ${plan.requestedPatchIds.join(", ")}`);

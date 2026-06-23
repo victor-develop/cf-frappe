@@ -342,7 +342,12 @@ function parseDataPatchesArgs(argv: readonly string[]): ParsedCommand {
 }
 
 function dataPatchAction(value: string): DataPatchRemoteAction | undefined {
-  return value === "status" || value === "plan" || value === "apply" || value === "enqueue" || value === "retry"
+  return value === "status" ||
+    value === "plan" ||
+    value === "rollback-plan" ||
+    value === "apply" ||
+    value === "enqueue" ||
+    value === "retry"
     ? value
     : undefined;
 }
@@ -587,6 +592,7 @@ function helpText(): string {
     "  cf-frappe migrate generate [--registry <path>] [--migrations <dir>] [--no-core]",
     "  cf-frappe data-patches status --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches plan --url <origin> [--id <patchId>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe data-patches rollback-plan --url <origin> [--id <patchId>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches apply --url <origin> [--id <patchId>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches retry --url <origin> --id <patchId> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches enqueue --url <origin> [--id <patchId>] [--limit <n>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",

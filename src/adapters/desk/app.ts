@@ -1,6 +1,10 @@
 import { Hono } from "hono";
 import type { CustomFieldService } from "../../application/custom-field-service.js";
-import type { DataPatchAdminPort, DataPatchApplyPlan } from "../../application/data-patch-service.js";
+import type {
+  DataPatchAdminPort,
+  DataPatchApplyPlan,
+  DataPatchRollbackPlan
+} from "../../application/data-patch-service.js";
 import type { DocumentShareService } from "../../application/document-share-service.js";
 import type { DocumentCommandExecutor } from "../../application/document-service.js";
 import type { DocumentHistoryService } from "../../application/document-history-service.js";
@@ -535,7 +539,20 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       const form = await parseDeskDataPatchApply(c.req.raw);
       const plan = await dataPatches.planApply(actor, form.limit === undefined ? {} : { limit: form.limit });
       const dashboard = await dataPatches.dashboard(actor);
-      return renderDeskDataPatchPage(options, actor, dashboard, 200, undefined, plan);
+      return renderDeskDataPatchPage(options, actor, dashboard, 200, undefined, { kind: "apply", plan });
+    } catch (error) {
+      return renderDeskDataPatchFailure(options, actor, dataPatches, error);
+    }
+  });
+
+  app.post("/desk/admin/data-patches/rollback-plan", async (c) => {
+    const dataPatches = requireDataPatches(options);
+    const actor = await options.actor(c.req.raw);
+    try {
+      const form = await parseDeskDataPatchApply(c.req.raw);
+      const plan = await dataPatches.planRollback(actor, form.limit === undefined ? {} : { limit: form.limit });
+      const dashboard = await dataPatches.dashboard(actor);
+      return renderDeskDataPatchPage(options, actor, dashboard, 200, undefined, { kind: "rollback", plan });
     } catch (error) {
       return renderDeskDataPatchFailure(options, actor, dataPatches, error);
     }
@@ -569,7 +586,19 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     try {
       const plan = await dataPatches.planApply(actor, { patchIds: [c.req.param("id")] });
       const dashboard = await dataPatches.dashboard(actor);
-      return renderDeskDataPatchPage(options, actor, dashboard, 200, undefined, plan);
+      return renderDeskDataPatchPage(options, actor, dashboard, 200, undefined, { kind: "apply", plan });
+    } catch (error) {
+      return renderDeskDataPatchFailure(options, actor, dataPatches, error);
+    }
+  });
+
+  app.post("/desk/admin/data-patches/:id/rollback-plan", async (c) => {
+    const dataPatches = requireDataPatches(options);
+    const actor = await options.actor(c.req.raw);
+    try {
+      const plan = await dataPatches.planRollback(actor, { patchIds: [c.req.param("id")] });
+      const dashboard = await dataPatches.dashboard(actor);
+      return renderDeskDataPatchPage(options, actor, dashboard, 200, undefined, { kind: "rollback", plan });
     } catch (error) {
       return renderDeskDataPatchFailure(options, actor, dataPatches, error);
     }
@@ -2113,7 +2142,7 @@ async function renderDeskDataPatchPage(
   dashboard: Parameters<typeof renderDataPatchAdmin>[0],
   status = 200,
   error?: string,
-  plan?: DataPatchApplyPlan
+  planned?: { readonly kind: "apply"; readonly plan: DataPatchApplyPlan } | { readonly kind: "rollback"; readonly plan: DataPatchRollbackPlan }
 ): Promise<Response> {
   const doctypes = options.queries.listDoctypes(actor);
   const reports = listReports(options, actor);
@@ -2127,7 +2156,7 @@ async function renderDeskDataPatchPage(
       showFiles: options.files !== undefined,
       body: renderDataPatchAdmin(dashboard, {
         ...(error === undefined ? {} : { error }),
-        ...(plan === undefined ? {} : { plan })
+        ...(planned === undefined ? {} : { plan: planned.plan, planKind: planned.kind })
       })
     }),
     status

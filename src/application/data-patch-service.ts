@@ -13,6 +13,8 @@ export interface DataPatchDashboardEntry {
   readonly label?: string;
   readonly checksum: string;
   readonly status: DataPatchDashboardStatus;
+  readonly rollbackable?: boolean;
+  readonly rollbackLabel?: string;
   readonly claimedAt?: string;
   readonly appliedAt?: string;
   readonly failedAt?: string;
@@ -34,6 +36,7 @@ export interface DataPatchDashboard {
 export interface DataPatchAdminPort {
   dashboard(actor: Actor): Promise<DataPatchDashboard>;
   planApply(actor: Actor, options?: DataPatchApplyOptions): Promise<DataPatchApplyPlan>;
+  planRollback(actor: Actor, options?: DataPatchRollbackOptions): Promise<DataPatchRollbackPlan>;
   apply(actor: Actor, options?: DataPatchApplyOptions): Promise<DataPatchRunResult>;
   retryFailed(actor: Actor, patchId: string): Promise<DataPatchRunResult>;
 }
@@ -43,7 +46,18 @@ export interface DataPatchApplyOptions {
   readonly limit?: number;
 }
 
+export interface DataPatchRollbackOptions {
+  readonly patchIds?: readonly string[];
+  readonly limit?: number;
+}
+
 export interface DataPatchApplyPlan {
+  readonly patchIds: readonly string[];
+  readonly requestedPatchIds?: readonly string[];
+  readonly limit?: number;
+}
+
+export interface DataPatchRollbackPlan {
   readonly patchIds: readonly string[];
   readonly requestedPatchIds?: readonly string[];
   readonly limit?: number;
@@ -105,6 +119,16 @@ export class DataPatchService<TResources = unknown> {
     };
   }
 
+  async planRollback(actor: Actor, options: DataPatchRollbackOptions = {}): Promise<DataPatchRollbackPlan> {
+    this.authorize(actor);
+    const patches = await this.patchesForRollbackPlan(options);
+    return {
+      patchIds: patches.map((patch) => patch.id),
+      ...(options.patchIds === undefined ? {} : { requestedPatchIds: [...options.patchIds] }),
+      ...(options.limit === undefined ? {} : { limit: options.limit })
+    };
+  }
+
   private async patchesForApply(options: DataPatchApplyOptions): Promise<readonly DataPatchDefinition<TResources>[]> {
     assertApplyLimit(options.limit);
     const runner = this.runner();
@@ -128,6 +152,45 @@ export class DataPatchService<TResources = unknown> {
     }
     const pending = await runner.pendingPatches(selected);
     return options.limit === undefined ? pending : pending.slice(0, options.limit);
+  }
+
+  private async patchesForRollbackPlan(
+    options: DataPatchRollbackOptions
+  ): Promise<readonly DataPatchDefinition<TResources>[]> {
+    assertApplyLimit(options.limit);
+    const recordedById = new Map((await this.log.recordedDataPatches()).map((patch) => [patch.id, patch]));
+    if (options.patchIds !== undefined) {
+      const selected = selectPatches(this.patches, options.patchIds);
+      this.assertSelectedPatchesRollbackable(selected, recordedById);
+      const selectedIds = new Set(selected.map((patch) => patch.id));
+      this.assertNoUnsafeSuccessorsOutsideSelection(selected, selectedIds, recordedById);
+      const rollback = [...selected].reverse();
+      return options.limit === undefined ? rollback : rollback.slice(0, options.limit);
+    }
+    const rollback: DataPatchDefinition<TResources>[] = [];
+    for (const patch of [...this.patches].reverse()) {
+      const recorded = recordedById.get(patch.id);
+      if (recorded === undefined) {
+        continue;
+      }
+      assertChecksumMatches(patch, recorded);
+      if (recorded.status === "pending") {
+        throw new FrameworkError("DATA_PATCH_PENDING", `Data patch '${patch.id}' is pending`, { status: 409 });
+      }
+      if (recorded.status === "failed") {
+        throw new FrameworkError("DATA_PATCH_FAILED", `Data patch '${patch.id}' failed and must be retried first`, {
+          status: 409
+        });
+      }
+      if (patch.rollback === undefined) {
+        break;
+      }
+      rollback.push(patch);
+      if (options.limit !== undefined && rollback.length >= options.limit) {
+        break;
+      }
+    }
+    return rollback;
   }
 
   private runner(): DataPatchRunner<TResources> {
@@ -170,6 +233,69 @@ export class DataPatchService<TResources = unknown> {
       if (recorded.status !== "applied") {
         blocker ??= patch;
       }
+    }
+  }
+
+  private assertSelectedPatchesRollbackable(
+    selected: readonly DataPatchDefinition<TResources>[],
+    recordedById: ReadonlyMap<string, RecordedDataPatch>
+  ): void {
+    for (const patch of selected) {
+      const recorded = recordedById.get(patch.id);
+      if (recorded === undefined) {
+        throw new FrameworkError(
+          "DATA_PATCH_ROLLBACK_UNAVAILABLE",
+          `Data patch '${patch.id}' cannot be rolled back because it has not been applied`,
+          { status: 409 }
+        );
+      }
+      assertChecksumMatches(patch, recorded);
+      if (recorded.status === "pending") {
+        throw new FrameworkError("DATA_PATCH_PENDING", `Data patch '${patch.id}' is pending`, { status: 409 });
+      }
+      if (recorded.status === "failed") {
+        throw new FrameworkError("DATA_PATCH_FAILED", `Data patch '${patch.id}' failed and must be retried first`, {
+          status: 409
+        });
+      }
+      if (patch.rollback === undefined) {
+        throw new FrameworkError(
+          "DATA_PATCH_ROLLBACK_UNAVAILABLE",
+          `Data patch '${patch.id}' does not declare a rollback`,
+          { status: 409 }
+        );
+      }
+    }
+  }
+
+  private assertNoUnsafeSuccessorsOutsideSelection(
+    selected: readonly DataPatchDefinition<TResources>[],
+    selectedIds: ReadonlySet<string>,
+    recordedById: ReadonlyMap<string, RecordedDataPatch>
+  ): void {
+    const earliestSelectedIndex = Math.min(...selected.map((patch) => this.patches.indexOf(patch)));
+    for (const patch of this.patches.slice(earliestSelectedIndex + 1)) {
+      if (selectedIds.has(patch.id)) {
+        continue;
+      }
+      const recorded = recordedById.get(patch.id);
+      if (recorded === undefined) {
+        continue;
+      }
+      assertChecksumMatches(patch, recorded);
+      if (recorded.status === "pending") {
+        throw new FrameworkError("DATA_PATCH_PENDING", `Data patch '${patch.id}' is pending`, { status: 409 });
+      }
+      if (recorded.status === "failed") {
+        throw new FrameworkError("DATA_PATCH_FAILED", `Data patch '${patch.id}' failed and must be retried first`, {
+          status: 409
+        });
+      }
+      throw new FrameworkError(
+        "DATA_PATCH_ORDER_VIOLATION",
+        `Data patch '${selected[0]?.id ?? ""}' cannot roll back before later patch '${patch.id}' is rolled back`,
+        { status: 409 }
+      );
     }
   }
 }
@@ -241,6 +367,8 @@ function dashboardEntry<TResources>(
     ...(patch.label === undefined ? {} : { label: patch.label }),
     checksum: patch.checksum,
     status: recorded.status,
+    ...(recorded.status === "applied" && patch.rollback !== undefined ? { rollbackable: true } : {}),
+    ...(recorded.status === "applied" && patch.rollback?.label !== undefined ? { rollbackLabel: patch.rollback.label } : {}),
     ...(recorded.status === "pending" ? { claimedAt: recorded.claimedAt } : {}),
     ...(recorded.status === "applied" ? { appliedAt: recorded.appliedAt } : {}),
     ...(recorded.status === "applied" && recorded.result !== undefined ? { result: recorded.result } : {}),
