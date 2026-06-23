@@ -1,7 +1,9 @@
 import { Hono } from "hono";
 import type { CustomFieldService } from "../../application/custom-field-service.js";
 import type {
+  DataPatchQueueOptions,
   DataPatchQueuePort,
+  DataPatchRollbackQueueOptions,
   DataPatchRollbackQueuePort,
   DataPatchRollbackRetryQueuePort
 } from "../../application/data-patch-jobs.js";
@@ -553,8 +555,8 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const dataPatchQueue = requireDataPatchQueue(options);
     const actor = await options.actor(c.req.raw);
     try {
-      const form = await parseDeskDataPatchApply(c.req.raw);
-      const result = await dataPatchQueue.enqueue(actor, form.limit === undefined ? {} : { limit: form.limit });
+      const form = await parseDeskDataPatchQueue(c.req.raw);
+      const result = await dataPatchQueue.enqueue(actor, form);
       return c.redirect(dataPatchQueuedLocation("data patch", result.message), 303);
     } catch (error) {
       return renderDeskDataPatchFailure(options, actor, dataPatches, error);
@@ -604,11 +606,8 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const dataPatchRollbackQueue = requireDataPatchRollbackQueue(options);
     const actor = await options.actor(c.req.raw);
     try {
-      const form = await parseDeskDataPatchApply(c.req.raw);
-      const result = await dataPatchRollbackQueue.enqueueRollback(
-        actor,
-        form.limit === undefined ? {} : { limit: form.limit }
-      );
+      const form = await parseDeskDataPatchQueue(c.req.raw);
+      const result = await dataPatchRollbackQueue.enqueueRollback(actor, form);
       return c.redirect(dataPatchQueuedLocation("data patch rollback", result.message), 303);
     } catch (error) {
       return renderDeskDataPatchFailure(options, actor, dataPatches, error);
@@ -2319,6 +2318,7 @@ type DataPatchQueueMessageSummary = {
 type DataPatchQueueLabel = "data patch" | "data patch rollback" | "data patch rollback retry";
 
 const DATA_PATCH_NOTICE_PARAM_LIMIT = 256;
+const DATA_PATCH_QUEUE_DELAY_SECONDS_LIMIT = 86_400;
 
 function dataPatchQueuedMessage(
   label: DataPatchQueueLabel,
@@ -3006,6 +3006,8 @@ interface ParsedDeskDataPatchApply {
   readonly limit?: number;
 }
 
+type ParsedDeskDataPatchQueue = DataPatchQueueOptions & DataPatchRollbackQueueOptions;
+
 interface ParsedDeskJobScheduleDefinition {
   readonly id?: string;
   readonly cron: string;
@@ -3041,6 +3043,40 @@ async function parseDeskJobScheduleDefinition(request: Request): Promise<ParsedD
 
 async function parseDeskDataPatchApply(request: Request): Promise<ParsedDeskDataPatchApply> {
   const form = await readUrlEncodedDeskForm(request);
+  return parseDeskDataPatchApplyForm(form);
+}
+
+async function parseDeskDataPatchQueue(request: Request): Promise<ParsedDeskDataPatchQueue> {
+  const form = await readUrlEncodedDeskForm(request);
+  const apply = parseDeskDataPatchApplyForm(form);
+  const idempotencyKey = stringSearchParamValue(form, "idempotencyKey");
+  const delay = stringSearchParamValue(form, "delaySeconds");
+  const delaySeconds = delay === undefined ? undefined : Number(delay);
+  if (
+    delaySeconds !== undefined &&
+    (!Number.isInteger(delaySeconds) || delaySeconds < 0 || delaySeconds > DATA_PATCH_QUEUE_DELAY_SECONDS_LIMIT)
+  ) {
+    throw new FrameworkError(
+      "BAD_REQUEST",
+      `Data patch enqueue delaySeconds must be an integer between 0 and ${DATA_PATCH_QUEUE_DELAY_SECONDS_LIMIT}`,
+      {
+        status: 400
+      }
+    );
+  }
+  if (idempotencyKey !== undefined && idempotencyKey.length > DATA_PATCH_NOTICE_PARAM_LIMIT) {
+    throw new FrameworkError("BAD_REQUEST", "Data patch enqueue idempotencyKey must be at most 256 characters", {
+      status: 400
+    });
+  }
+  return {
+    ...apply,
+    ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+    ...(delaySeconds === undefined ? {} : { delaySeconds })
+  };
+}
+
+function parseDeskDataPatchApplyForm(form: URLSearchParams): ParsedDeskDataPatchApply {
   const limit = stringSearchParamValue(form, "limit");
   if (limit === undefined) {
     return {};

@@ -1181,6 +1181,7 @@ export function renderDataPatchAdmin(
 ): string {
   const canPlanRollback = dashboard.patches.some((patch) => patch.rollbackable === true);
   const queue = options.queue ?? { apply: false, rollback: false, rollbackRetry: false };
+  const showBatchQueueOptions = queue.apply || (canPlanRollback && queue.rollback);
   const rows = dashboard.patches
     .map((patch) => `<tr>
       <td>${escapeHtml(patch.id)}</td>
@@ -1198,6 +1199,7 @@ export function renderDataPatchAdmin(
     ${options.plan ? renderDataPatchPlan(options.plan, options.planKind ?? "apply") : ""}
     <div class="fields">
       <label class="field"><span>Limit</span><input name="limit" type="number" min="1" value="1"></label>
+      ${showBatchQueueOptions ? renderDataPatchQueueFields() : ""}
     </div>
     <div class="actions">
       <button class="button" type="submit" formaction="/desk/admin/data-patches/plan">Plan Batch</button>
@@ -1216,6 +1218,11 @@ export function renderDataPatchAdmin(
       </table>
     </div>
   </section>`;
+}
+
+function renderDataPatchQueueFields(): string {
+  return `<label class="field"><span>Idempotency Key</span><input name="idempotencyKey" maxlength="256"></label>
+      <label class="field"><span>Delay Seconds</span><input name="delaySeconds" type="number" min="0" max="86400"></label>`;
 }
 
 function renderDataPatchAction(

@@ -2507,21 +2507,59 @@ describe("Desk app", () => {
     const html = await page.text();
     expect(html).toContain('formaction="/desk/admin/data-patches/enqueue"');
     expect(html).toContain('formaction="/desk/admin/data-patches/core.first/enqueue"');
+    expect(html).toContain('name="idempotencyKey"');
+    expect(html).toContain('maxlength="256"');
+    expect(html).toContain('name="delaySeconds"');
+    expect(html).toContain('max="86400"');
     expect(html).not.toContain('formaction="/desk/admin/data-patches/rollback-enqueue"');
+
+    const invalidDelay = await app.request("/desk/admin/data-patches/enqueue", {
+      method: "POST",
+      body: new URLSearchParams({ delaySeconds: "-1" })
+    });
+    expect(invalidDelay.status).toBe(400);
+    await expect(invalidDelay.text()).resolves.toContain(
+      "Data patch enqueue delaySeconds must be an integer between 0 and 86400"
+    );
+    expect(queue.queued()).toEqual([]);
+
+    const tooLongDelay = await app.request("/desk/admin/data-patches/enqueue", {
+      method: "POST",
+      body: new URLSearchParams({ delaySeconds: "86401" })
+    });
+    expect(tooLongDelay.status).toBe(400);
+    await expect(tooLongDelay.text()).resolves.toContain(
+      "Data patch enqueue delaySeconds must be an integer between 0 and 86400"
+    );
+    expect(queue.queued()).toEqual([]);
+
+    const tooLongKey = await app.request("/desk/admin/data-patches/enqueue", {
+      method: "POST",
+      body: new URLSearchParams({ idempotencyKey: "x".repeat(257) })
+    });
+    expect(tooLongKey.status).toBe(400);
+    await expect(tooLongKey.text()).resolves.toContain(
+      "Data patch enqueue idempotencyKey must be at most 256 characters"
+    );
+    expect(queue.queued()).toEqual([]);
 
     const batch = await app.request("/desk/admin/data-patches/enqueue", {
       method: "POST",
-      body: new URLSearchParams({ limit: "1" })
+      body: new URLSearchParams({ limit: "1", idempotencyKey: "patches:first", delaySeconds: "30" })
     });
     expect(batch.status).toBe(303);
     const batchLocation = batch.headers.get("location");
     expect(batchLocation).toContain("/desk/admin/data-patches?");
-    expect(queue.queued()[0]?.message).toMatchObject({
-      tenantId: "acme",
-      jobName: "cf-frappe.data-patches.apply",
-      runId: "job_patch-001",
-      payload: { patchIds: ["core.first"] },
-      metadata: { dispatchSource: "data-patches", requestedBy: "admin@example.com" }
+    expect(queue.queued()[0]).toMatchObject({
+      delaySeconds: 30,
+      message: {
+        tenantId: "acme",
+        jobName: "cf-frappe.data-patches.apply",
+        runId: "job_patch-001",
+        idempotencyKey: "patches:first",
+        payload: { patchIds: ["core.first"] },
+        metadata: { dispatchSource: "data-patches", requestedBy: "admin@example.com" }
+      }
     });
     expect(resources.touched).toEqual([]);
     const batchHtml = await (await app.request(batchLocation!)).text();
@@ -2599,21 +2637,27 @@ describe("Desk app", () => {
     const html = await page.text();
     expect(html).toContain('formaction="/desk/admin/data-patches/rollback-enqueue"');
     expect(html).toContain('formaction="/desk/admin/data-patches/crm.second/rollback-enqueue"');
+    expect(html).toContain('name="idempotencyKey"');
+    expect(html).toContain('name="delaySeconds"');
     expect(html).not.toContain('formaction="/desk/admin/data-patches/enqueue"');
 
     const batch = await app.request("/desk/admin/data-patches/rollback-enqueue", {
       method: "POST",
-      body: new URLSearchParams({ limit: "1" })
+      body: new URLSearchParams({ limit: "1", idempotencyKey: "patches:rollback-second", delaySeconds: "45" })
     });
     expect(batch.status).toBe(303);
     const batchLocation = batch.headers.get("location");
     expect(batchLocation).toContain("/desk/admin/data-patches?");
-    expect(queue.queued()[0]?.message).toMatchObject({
-      tenantId: "acme",
-      jobName: "cf-frappe.data-patches.rollback",
-      runId: "job_patch-rollback-001",
-      payload: { patchIds: ["crm.second"] },
-      metadata: { dispatchSource: "data-patches", requestedBy: "admin@example.com" }
+    expect(queue.queued()[0]).toMatchObject({
+      delaySeconds: 45,
+      message: {
+        tenantId: "acme",
+        jobName: "cf-frappe.data-patches.rollback",
+        runId: "job_patch-rollback-001",
+        idempotencyKey: "patches:rollback-second",
+        payload: { patchIds: ["crm.second"] },
+        metadata: { dispatchSource: "data-patches", requestedBy: "admin@example.com" }
+      }
     });
     expect(resources.rolledBack).toEqual([]);
     const batchHtml = await (await app.request(batchLocation!)).text();
