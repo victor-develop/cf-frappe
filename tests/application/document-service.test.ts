@@ -8,6 +8,7 @@ import {
   ModelBackedUserPermissionGrantValidator,
   UserPermissionService,
   createRegistry,
+  customFieldsCatalogStream,
   defineDocType,
   deterministicIds,
   documentStream,
@@ -542,6 +543,132 @@ describe("DocumentService", () => {
         expect.objectContaining({ field: "bonus_items[0].quantity", code: "min" }),
         expect.objectContaining({ field: "bonus_items[0].product", code: "link_not_found" })
       ])
+    });
+  });
+
+  it("applies child table DocType custom fields to command validation and event payloads", async () => {
+    const registry = createRegistry({
+      doctypes: [productDocType, salesInvoiceItemDocType, salesInvoiceDocType]
+    });
+    const store = new InMemoryDocumentStore();
+    const customFields = new CustomFieldService({
+      registry,
+      events: store,
+      ids: deterministicIds(["custom-field-1"]),
+      clock: fixedClock(now)
+    });
+    const documents = new DocumentService({
+      registry,
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["product-1", "product-2", "invoice-1", "invoice-2"]),
+      doctypeResolver: (base, { tenantId }) => customFields.effectiveDocType(base.name, tenantId)
+    });
+    const admin = { id: "admin@example.com", roles: ["System Manager"], tenantId: "acme" };
+    await customFields.saveField({
+      actor: admin,
+      doctype: "Sales Invoice Item",
+      field: { name: "bonus_product", type: "link", linkTo: "Product" }
+    });
+    await documents.create({ actor: owner, doctype: "Product", data: { sku: "SKU-1", title: "Widget" } });
+    await documents.create({ actor: owner, doctype: "Product", data: { sku: "SKU-2", title: "Cable" } });
+
+    const invoice = await documents.create({
+      actor: owner,
+      doctype: "Sales Invoice",
+      data: {
+        title: "INV-CHILD-CUSTOM",
+        items: [{ product: "SKU-1", quantity: 1, bonus_product: "SKU-2" }]
+      }
+    });
+
+    expect(invoice).toMatchObject({
+      data: {
+        items: [{ product: "SKU-1", quantity: 1, bonus_product: "SKU-2" }]
+      }
+    });
+    await expect(store.readStream(documentStream("acme", "Sales Invoice", "INV-CHILD-CUSTOM"))).resolves.toMatchObject([
+      {
+        payload: {
+          kind: "DocumentCreated",
+          data: { items: [{ product: "SKU-1", quantity: 1, bonus_product: "SKU-2" }] }
+        }
+      }
+    ]);
+    await expect(
+      documents.create({
+        actor: owner,
+        doctype: "Sales Invoice",
+        data: {
+          title: "INV-BROKEN-CHILD-CUSTOM",
+          items: [{ product: "SKU-1", quantity: 1, bonus_product: "Missing" }]
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: expect.arrayContaining([
+        expect.objectContaining({ field: "items[0].bonus_product", code: "link_not_found" })
+      ])
+    });
+  });
+
+  it("does not resolve unrelated invalid custom-field overlays during document commands", async () => {
+    const unrelatedChild = defineDocType({
+      name: "Unrelated Child",
+      fields: [{ name: "title", type: "text" }]
+    });
+    const unrelatedParent = defineDocType({
+      name: "Unrelated Parent",
+      fields: [{ name: "rows", type: "table", tableOf: "Unrelated Child" }]
+    });
+    const registry = createRegistry({
+      doctypes: [noteDocType, projectDocType, unrelatedParent, unrelatedChild]
+    });
+    const store = new InMemoryDocumentStore();
+    await store.append(customFieldsCatalogStream("acme"), 0, [
+      {
+        id: "evt_stale-unrelated-nested-table",
+        tenantId: "acme",
+        stream: customFieldsCatalogStream("acme"),
+        type: "CustomFieldSaved",
+        doctype: "__CustomFields",
+        documentName: "Unrelated Child",
+        actorId: "admin@example.com",
+        occurredAt: now,
+        payload: {
+          kind: "CustomFieldSaved",
+          doctypeName: "Unrelated Child",
+          field: { name: "subitems", type: "table", tableOf: "Project" }
+        },
+        metadata: {}
+      }
+    ]);
+    const customFields = new CustomFieldService({
+      registry,
+      events: store,
+      ids: deterministicIds(["unused-custom-field-id"]),
+      clock: fixedClock(now)
+    });
+    const documents = new DocumentService({
+      registry,
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["note-event-1"]),
+      doctypeResolver: (base, { tenantId }) => customFields.effectiveDocType(base.name, tenantId)
+    });
+
+    await expect(customFields.effectiveDocType("Unrelated Child", "acme")).rejects.toMatchObject({
+      code: "CUSTOM_FIELD_INVALID"
+    });
+    await expect(
+      documents.create({
+        actor: owner,
+        doctype: "Note",
+        data: { title: "Reachable Metadata Only" }
+      })
+    ).resolves.toMatchObject({
+      doctype: "Note",
+      name: "Reachable Metadata Only"
     });
   });
 

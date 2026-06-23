@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the parent table custom field slice:
+As of the child table custom field slice:
 
 - Vitest files: `73`
-- Vitest cases: `692`
+- Vitest cases: `697`
 
 ## Implication
 

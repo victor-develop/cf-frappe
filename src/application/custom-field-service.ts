@@ -80,15 +80,12 @@ export class CustomFieldService {
     const events = await this.tenantCustomFieldEvents(tenantId);
     const state = this.stateFromEvents(tenantId, doctype.name, events);
     const states = this.statesFromEvents(tenantId, events);
-    if (state.fields.some((entry) => entry.enabled)) {
-      this.assertCustomFieldsSupportedOn(doctype, states);
-    }
     for (const entry of state.fields) {
       if (entry.enabled) {
         this.assertCustomFieldRuntimeSupported(entry.field);
         this.assertReferencesResolve(entry.field);
         this.assertTableFieldDoesNotSelfTarget(doctype, entry.field);
-        this.assertTableTargetHasNoCustomFields(entry.field, states);
+        this.assertNestedTableCustomFieldSupported(doctype, entry.field, states);
       }
     }
     return applyCustomFieldsToDocType(doctype, state);
@@ -103,11 +100,10 @@ export class CustomFieldService {
     const states = this.statesFromEvents(tenantId, events);
     const state = this.stateFromEvents(tenantId, doctype.name, events);
     this.assertCustomFieldRuntimeSupported(field);
-    this.assertCustomFieldsSupportedOn(doctype, states);
     assertCustomFieldCanExtend(doctype, field);
     this.assertReferencesResolve(field);
     this.assertTableFieldDoesNotSelfTarget(doctype, field);
-    this.assertTableTargetHasNoCustomFields(field, states);
+    this.assertNestedTableCustomFieldSupported(doctype, field, states);
     ensureExpectedVersion(state, command.expectedVersion);
     const existing = state.fields.find((entry) => entry.field.name === field.name);
     if (existing?.enabled && fieldsEqual(existing.field, field)) {
@@ -225,36 +221,32 @@ export class CustomFieldService {
     }
   }
 
-  private assertCustomFieldsSupportedOn(
+  private assertNestedTableCustomFieldSupported(
     doctype: { readonly name: string },
-    states: readonly CustomFieldState[]
-  ): void {
-    if (!this.isChildTableDocType(doctype.name, states)) {
-      return;
-    }
-    throw new FrameworkError(
-      "CUSTOM_FIELD_INVALID",
-      `Custom fields on child table DocType '${doctype.name}' are not supported yet`,
-      { status: 400 }
-    );
-  }
-
-  private assertTableTargetHasNoCustomFields(
     field: FieldDefinition,
     states: readonly CustomFieldState[]
   ): void {
-    if (field.type !== "table" || field.tableOf === undefined) {
+    if (field.type !== "table") {
       return;
     }
-    const targetState = states.find((state) => state.doctype === field.tableOf);
-    if (!targetState?.fields.some((entry) => entry.enabled)) {
-      return;
+    if (this.isChildTableDocType(doctype.name, states)) {
+      throw new FrameworkError(
+        "CUSTOM_FIELD_INVALID",
+        `Custom table field '${field.name}' on child table DocType '${doctype.name}' is not supported until nested table controls are supported`,
+        { status: 400 }
+      );
     }
-    throw new FrameworkError(
-      "CUSTOM_FIELD_INVALID",
-      `Custom table field '${field.name}' targets child DocType '${field.tableOf}' with custom fields, which is not supported until recursive table overlays are supported`,
-      { status: 400 }
-    );
+    if (field.tableOf !== undefined) {
+      const targetState = states.find((state) => state.doctype === field.tableOf);
+      const nestedTableField = targetState?.fields.find((entry) => entry.enabled && entry.field.type === "table");
+      if (nestedTableField) {
+        throw new FrameworkError(
+          "CUSTOM_FIELD_INVALID",
+          `Custom table field '${field.name}' targets child DocType '${field.tableOf}' with custom table field '${nestedTableField.field.name}', which is not supported until nested table controls are supported`,
+          { status: 400 }
+        );
+      }
+    }
   }
 
   private assertTableFieldDoesNotSelfTarget(

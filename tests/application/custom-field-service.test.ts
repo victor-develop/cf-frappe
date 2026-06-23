@@ -79,7 +79,7 @@ describe("CustomFieldService", () => {
     const service = new CustomFieldService({
       registry: createRegistry({ doctypes: [Note] }),
       events: new InMemoryEventStore(),
-      ids: deterministicIds(["field-1"]),
+      ids: deterministicIds(["field-1", "field-2"]),
       clock: fixedClock(now)
     });
     await service.saveField({
@@ -97,7 +97,7 @@ describe("CustomFieldService", () => {
     const service = new CustomFieldService({
       registry: createRegistry({ doctypes: [Note, InvoiceItem] }),
       events: new InMemoryEventStore(),
-      ids: deterministicIds(["field-1"]),
+      ids: deterministicIds(["field-1", "field-2"]),
       clock: fixedClock(now)
     });
     const saved = await service.saveField({
@@ -277,7 +277,7 @@ describe("CustomFieldService", () => {
     ).resolves.toMatchObject({ fields: [{ field: { name: "project", linkTo: "Project" } }] });
   });
 
-  it("rejects child table DocType custom fields until runtime table overlays are supported", async () => {
+  it("supports custom fields on static child table DocTypes", async () => {
     const InvoiceItem = defineDocType({
       name: "Invoice Item",
       fields: [{ name: "description", type: "text" }]
@@ -299,17 +299,52 @@ describe("CustomFieldService", () => {
         doctype: "Invoice Item",
         field: { name: "reviewed", type: "boolean" }
       })
-    ).rejects.toMatchObject({
-      code: "CUSTOM_FIELD_INVALID",
-      message: "Custom fields on child table DocType 'Invoice Item' are not supported yet"
+    ).resolves.toMatchObject({
+      fields: [{ field: { name: "reviewed", type: "boolean" }, enabled: true }]
+    });
+    await expect(service.effectiveDocType("Invoice Item", "acme")).resolves.toMatchObject({
+      fields: [
+        expect.objectContaining({ name: "description" }),
+        expect.objectContaining({ name: "reviewed", type: "boolean" })
+      ]
     });
   });
 
-  it("rejects child DocType custom fields after a tenant table custom field targets the DocType", async () => {
+  it("rejects table custom fields on static child table DocTypes without appending metadata", async () => {
+    const InvoiceItem = defineDocType({
+      name: "Invoice Item",
+      fields: [{ name: "description", type: "text" }]
+    });
+    const Invoice = defineDocType({
+      name: "Invoice",
+      fields: [{ name: "items", type: "table", tableOf: "Invoice Item" }]
+    });
+    const events = new InMemoryEventStore();
+    const service = new CustomFieldService({
+      registry: createRegistry({ doctypes: [Invoice, InvoiceItem, Project] }),
+      events,
+      ids: deterministicIds(["field-1"]),
+      clock: fixedClock(now)
+    });
+
+    await expect(
+      service.saveField({
+        actor: admin,
+        doctype: "Invoice Item",
+        field: { name: "subitems", type: "table", tableOf: "Project" }
+      })
+    ).rejects.toMatchObject({
+      code: "CUSTOM_FIELD_INVALID",
+      message: "Custom table field 'subitems' on child table DocType 'Invoice Item' is not supported until nested table controls are supported"
+    });
+    await expect(events.readStream(customFieldsCatalogStream("acme"))).resolves.toEqual([]);
+  });
+
+  it("supports custom fields on child DocTypes targeted by tenant table custom fields", async () => {
     const service = new CustomFieldService({
       registry: createRegistry({ doctypes: [Note, InvoiceItem] }),
       events: new InMemoryEventStore(),
-      ids: deterministicIds(["field-1"]),
+      ids: deterministicIds(["field-1", "field-2"]),
       clock: fixedClock(now)
     });
     await service.saveField({
@@ -324,15 +359,20 @@ describe("CustomFieldService", () => {
         doctype: "Invoice Item",
         field: { name: "reviewed", type: "boolean" }
       })
-    ).rejects.toMatchObject({
-      code: "CUSTOM_FIELD_INVALID",
-      message: "Custom fields on child table DocType 'Invoice Item' are not supported yet"
+    ).resolves.toMatchObject({
+      fields: [{ field: { name: "reviewed", type: "boolean" }, enabled: true }]
+    });
+    await expect(service.effectiveDocType("Note", "acme")).resolves.toMatchObject({
+      fields: expect.arrayContaining([expect.objectContaining({ name: "items", tableOf: "Invoice Item" })])
+    });
+    await expect(service.effectiveDocType("Invoice Item", "acme")).resolves.toMatchObject({
+      fields: expect.arrayContaining([expect.objectContaining({ name: "reviewed", type: "boolean" })])
     });
   });
 
-  it("rejects table custom fields targeting DocTypes with enabled custom fields", async () => {
+  it("rejects table custom fields targeting DocTypes with enabled custom table fields", async () => {
     const service = new CustomFieldService({
-      registry: createRegistry({ doctypes: [Note, InvoiceItem] }),
+      registry: createRegistry({ doctypes: [Note, Project, InvoiceItem] }),
       events: new InMemoryEventStore(),
       ids: deterministicIds(["field-1"]),
       clock: fixedClock(now)
@@ -340,7 +380,7 @@ describe("CustomFieldService", () => {
     await service.saveField({
       actor: admin,
       doctype: "Invoice Item",
-      field: { name: "reviewed", type: "boolean" }
+      field: { name: "subitems", type: "table", tableOf: "Project" }
     });
 
     await expect(
@@ -351,7 +391,7 @@ describe("CustomFieldService", () => {
       })
     ).rejects.toMatchObject({
       code: "CUSTOM_FIELD_INVALID",
-      message: "Custom table field 'items' targets child DocType 'Invoice Item' with custom fields, which is not supported until recursive table overlays are supported"
+      message: "Custom table field 'items' targets child DocType 'Invoice Item' with custom table field 'subitems', which is not supported until nested table controls are supported"
     });
   });
 
@@ -377,7 +417,7 @@ describe("CustomFieldService", () => {
     await expect(events.readStream(customFieldsCatalogStream("acme"))).resolves.toEqual([]);
   });
 
-  it("serializes tenant custom-field writes that would otherwise violate table invariants", async () => {
+  it("serializes concurrent tenant custom-field writes through the catalog aggregate", async () => {
     const service = new CustomFieldService({
       registry: createRegistry({ doctypes: [Note, InvoiceItem] }),
       events: new InMemoryEventStore(),
@@ -459,7 +499,7 @@ describe("CustomFieldService", () => {
     ]);
   });
 
-  it("rejects replayed child table DocType custom fields when composing effective metadata", async () => {
+  it("replays child table DocType custom fields when composing effective metadata", async () => {
     const InvoiceItem = defineDocType({
       name: "Invoice Item",
       fields: [{ name: "description", type: "text" }]
@@ -494,13 +534,15 @@ describe("CustomFieldService", () => {
       clock: fixedClock(now)
     });
 
-    await expect(service.effectiveDocType("Invoice Item", "acme")).rejects.toMatchObject({
-      code: "CUSTOM_FIELD_INVALID",
-      message: "Custom fields on child table DocType 'Invoice Item' are not supported yet"
+    await expect(service.effectiveDocType("Invoice Item", "acme")).resolves.toMatchObject({
+      fields: [
+        expect.objectContaining({ name: "description" }),
+        expect.objectContaining({ name: "reviewed", type: "boolean" })
+      ]
     });
   });
 
-  it("rejects replayed parent table custom fields that target DocTypes with custom fields", async () => {
+  it("rejects replayed parent table custom fields that target DocTypes with custom table fields", async () => {
     const events = new InMemoryEventStore();
     await events.append(customFieldsStream("acme", "Note"), 0, [
       {
@@ -533,7 +575,7 @@ describe("CustomFieldService", () => {
         payload: {
           kind: "CustomFieldSaved",
           doctypeName: "Invoice Item",
-          field: { name: "reviewed", type: "boolean" }
+          field: { name: "subitems", type: "table", tableOf: "Project" }
         },
         metadata: {}
       }
@@ -546,7 +588,7 @@ describe("CustomFieldService", () => {
 
     await expect(service.effectiveDocType("Note", "acme")).rejects.toMatchObject({
       code: "CUSTOM_FIELD_INVALID",
-      message: "Custom table field 'items' targets child DocType 'Invoice Item' with custom fields, which is not supported until recursive table overlays are supported"
+      message: "Custom table field 'items' targets child DocType 'Invoice Item' with custom table field 'subitems', which is not supported until nested table controls are supported"
     });
   });
 

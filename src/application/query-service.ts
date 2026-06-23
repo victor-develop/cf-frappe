@@ -136,6 +136,14 @@ export class QueryService {
     return this.resolveDocType(this.getMeta(actor, doctypeName), actor, tenantId);
   }
 
+  async resolveEffectiveDocType(
+    actor: Actor,
+    doctypeName: string,
+    tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
+  ): Promise<DocTypeDefinition> {
+    return this.doctypeFor(actor, doctypeName, tenantId);
+  }
+
   async getEffectiveListView(
     actor: Actor,
     doctypeName: string,

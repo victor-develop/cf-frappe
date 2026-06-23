@@ -192,7 +192,7 @@ describe("Desk app", () => {
       store: services.store,
       doctypeResolver,
       documentShares: services.documentShares,
-      ids: deterministicIds(["custom-product-1", "custom-invoice-1"]),
+      ids: deterministicIds(["custom-product-1", "custom-product-2", "custom-invoice-1", "custom-invoice-2"]),
       clock: fixedClock(now)
     });
     const queries = new QueryService({
@@ -1762,6 +1762,49 @@ describe("Desk app", () => {
     await expect(services.queries.getDocument(admin, "Sales Invoice", "INV-CUSTOM-DESK")).resolves.toMatchObject({
       data: {
         bonus_items: [{ product: "SKU-1", quantity: 2, rate: 0 }]
+      }
+    });
+  });
+
+  it("applies child table DocType custom fields to generated Desk child-table forms", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"] };
+    const { app, services } = makeChildTableCustomFieldDesk(admin);
+    await services.customFields.saveField({
+      actor: admin,
+      doctype: "Sales Invoice Item",
+      field: {
+        name: "bonus_product",
+        label: "Bonus Product",
+        type: "link",
+        linkTo: "Product"
+      }
+    });
+    await services.documents.create({ actor: admin, doctype: "Product", data: { sku: "SKU-1", title: "Widget" } });
+    await services.documents.create({ actor: admin, doctype: "Product", data: { sku: "SKU-2", title: "Cable" } });
+
+    const form = await app.request("/desk/Sales%20Invoice/new");
+    expect(form.status).toBe(200);
+    const html = await form.text();
+    expect(html).toContain("<th>Bonus Product</th>");
+    expect(html).toContain('name="items[0].bonus_product"');
+    expect(html).toContain('<option value="SKU-2">Cable</option>');
+
+    const created = await app.request("/desk/Sales%20Invoice", {
+      method: "POST",
+      body: new URLSearchParams({
+        title: "INV-CHILD-CUSTOM-DESK",
+        "items[0].product": "SKU-1",
+        "items[0].quantity": "1",
+        "items[0].bonus_product": "SKU-2"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(created.status).toBe(303);
+    expect(created.headers.get("location")).toBe("/desk/Sales%20Invoice/INV-CHILD-CUSTOM-DESK");
+    await expect(services.queries.getDocument(admin, "Sales Invoice", "INV-CHILD-CUSTOM-DESK")).resolves.toMatchObject({
+      data: {
+        items: [{ product: "SKU-1", quantity: 1, bonus_product: "SKU-2" }]
       }
     });
   });

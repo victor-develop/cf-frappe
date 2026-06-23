@@ -73,6 +73,13 @@ export type DocumentServiceDocTypeResolver = (
   context: { readonly actor: Actor; readonly tenantId: string }
 ) => DocTypeDefinition | Promise<DocTypeDefinition>;
 
+type RelatedDocTypeResolver = (doctype: string) => DocTypeDefinition | undefined;
+
+interface DocumentServiceDocTypeContext {
+  readonly doctype: DocTypeDefinition;
+  readonly relatedDocType: RelatedDocTypeResolver;
+}
+
 export interface CreateDocumentCommand {
   readonly actor: Actor;
   readonly doctype: string;
@@ -396,7 +403,7 @@ export class DocumentService implements DocumentCommandExecutor {
 
   async create(command: CreateDocumentCommand): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(command.actor, command.tenantId);
-    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
+    const { doctype, relatedDocType } = await this.doctypeContext(command.actor, command.doctype, tenantId);
     if (!can(command.actor, doctype, "create")) {
       throw permissionDenied(`Actor '${command.actor.id}' cannot create ${doctype.name}`);
     }
@@ -407,11 +414,11 @@ export class DocumentService implements DocumentCommandExecutor {
     const data = stripInternalTableFields(
       doctype,
       await this.runBeforeValidate(doctype, withDefaults),
-      (name) => this.relatedDocType(name)
+      relatedDocType
     );
     const issues = [
-      ...(await this.validate(doctype, data)),
-      ...(await this.validateLinks(command.actor, tenantId, doctype, data))
+      ...(await this.validate(doctype, data, relatedDocType)),
+      ...(await this.validateLinks(command.actor, tenantId, doctype, data, relatedDocType))
     ];
     if (issues.length > 0) {
       throw validationFailed(issues);
@@ -457,7 +464,7 @@ export class DocumentService implements DocumentCommandExecutor {
 
   async update(command: UpdateDocumentCommand): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(command.actor, command.tenantId);
-    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
+    const { doctype, relatedDocType } = await this.doctypeContext(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
     if (!(await this.canActOnDocument(command.actor, doctype, "update", existing))) {
@@ -468,15 +475,15 @@ export class DocumentService implements DocumentCommandExecutor {
     ensureDocumentStatus(existing, ["draft"], "update");
 
     const patch = await this.runBeforeValidate(doctype, compactData(command.patch), existing);
-    const patchWithoutInternalFields = stripInternalTableFields(doctype, patch, (name) => this.relatedDocType(name));
+    const patchWithoutInternalFields = stripInternalTableFields(doctype, patch, relatedDocType);
     const unset = normalizeUnsetFields(command.unset);
     const unsetIssues = documentUnsetIssues(doctype, unset, existing.data, patchWithoutInternalFields);
-    const originIssues = childTableOriginIssues(doctype, patch, existing.data, (name) => this.relatedDocType(name));
-    const readOnlyIssues = readonlyIssues(doctype, patchWithoutInternalFields, (name) => this.relatedDocType(name));
-    const normalizedPatch = preserveReadOnlyTableValues(doctype, patch, existing, (name) => this.relatedDocType(name));
+    const originIssues = childTableOriginIssues(doctype, patch, existing.data, relatedDocType);
+    const readOnlyIssues = readonlyIssues(doctype, patchWithoutInternalFields, relatedDocType);
+    const normalizedPatch = preserveReadOnlyTableValues(doctype, patch, existing, relatedDocType);
     const data = applyDocumentDataChange(existing.data, normalizedPatch, unset);
-    const validationIssues = await this.validate(doctype, normalizedPatch, existing, data);
-    const linkIssues = await this.validateLinks(command.actor, tenantId, doctype, normalizedPatch);
+    const validationIssues = await this.validate(doctype, normalizedPatch, relatedDocType, existing, data);
+    const linkIssues = await this.validateLinks(command.actor, tenantId, doctype, normalizedPatch, relatedDocType);
     const issues = [...unsetIssues, ...originIssues, ...readOnlyIssues, ...validationIssues, ...linkIssues];
     if (issues.length > 0) {
       throw validationFailed(issues);
@@ -519,7 +526,7 @@ export class DocumentService implements DocumentCommandExecutor {
 
   async duplicate(command: DuplicateDocumentCommand): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(command.actor, command.tenantId);
-    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
+    const { doctype, relatedDocType } = await this.doctypeContext(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
     if (!(await this.canActOnDocument(command.actor, doctype, "read", existing))) {
@@ -533,7 +540,7 @@ export class DocumentService implements DocumentCommandExecutor {
         ...existing.data,
         ...compactData(command.data ?? {})
       },
-      (name) => this.relatedDocType(name)
+      relatedDocType
     );
     return this.create({
       actor: command.actor,
@@ -552,7 +559,7 @@ export class DocumentService implements DocumentCommandExecutor {
 
   async amend(command: AmendDocumentCommand): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(command.actor, command.tenantId);
-    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
+    const { doctype, relatedDocType } = await this.doctypeContext(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
     if (!(await this.canActOnDocument(command.actor, doctype, "read", existing))) {
@@ -567,7 +574,7 @@ export class DocumentService implements DocumentCommandExecutor {
         ...existing.data,
         ...compactData(command.data ?? {})
       },
-      (name) => this.relatedDocType(name)
+      relatedDocType
     );
     return this.create({
       actor: command.actor,
@@ -655,7 +662,7 @@ export class DocumentService implements DocumentCommandExecutor {
 
   async execute(command: ExecuteDomainCommand): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(command.actor, command.tenantId);
-    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
+    const { doctype, relatedDocType } = await this.doctypeContext(command.actor, command.doctype, tenantId);
     const commandDefinition = doctype.commands?.find((item) => item.name === command.command);
     if (!commandDefinition) {
       throw new FrameworkError("BAD_REQUEST", `${doctype.name} has no command '${command.command}'`, {
@@ -679,25 +686,25 @@ export class DocumentService implements DocumentCommandExecutor {
     ensureDocumentStatus(existing, ["draft"], `execute ${command.command}`);
 
     const input = compactData(command.input);
-    const sanitizedInput = stripInternalTableFields(doctype, input, (name) => this.relatedDocType(name));
+    const sanitizedInput = stripInternalTableFields(doctype, input, relatedDocType);
     const now = this.clock.now();
     const patch = commandDefinition.buildPatch
       ? commandDefinition.buildPatch({ actor: command.actor, document: existing, input, now })
       : pickCommandFields(commandDefinition.fields, input);
     const normalizedPatch = await this.runBeforeValidate(doctype, compactData(patch), existing);
-    const patchWithoutInternalFields = stripInternalTableFields(doctype, normalizedPatch, (name) => this.relatedDocType(name));
-    const originIssues = childTableOriginIssues(doctype, normalizedPatch, existing.data, (name) => this.relatedDocType(name));
+    const patchWithoutInternalFields = stripInternalTableFields(doctype, normalizedPatch, relatedDocType);
+    const originIssues = childTableOriginIssues(doctype, normalizedPatch, existing.data, relatedDocType);
     const readOnlyIssues = commandDefinition.allowReadOnlyFields
       ? []
-      : readonlyIssues(doctype, patchWithoutInternalFields, (name) => this.relatedDocType(name));
+      : readonlyIssues(doctype, patchWithoutInternalFields, relatedDocType);
     const patchWithReadOnlyValues = preserveReadOnlyTableValues(
       doctype,
       normalizedPatch,
       existing,
-      (name) => this.relatedDocType(name)
+      relatedDocType
     );
-    const validationIssues = await this.validate(doctype, patchWithReadOnlyValues, existing);
-    const linkIssues = await this.validateLinks(command.actor, tenantId, doctype, patchWithReadOnlyValues);
+    const validationIssues = await this.validate(doctype, patchWithReadOnlyValues, relatedDocType, existing);
+    const linkIssues = await this.validateLinks(command.actor, tenantId, doctype, patchWithReadOnlyValues, relatedDocType);
     const issues = [...originIssues, ...readOnlyIssues, ...validationIssues, ...linkIssues];
     if (issues.length > 0) {
       throw validationFailed(issues);
@@ -1333,13 +1340,14 @@ export class DocumentService implements DocumentCommandExecutor {
   private async validate(
     doctype: DocTypeDefinition,
     data: MutableDocumentData,
+    relatedDocType: RelatedDocTypeResolver,
     existing?: DocumentSnapshot,
     hookDataOverride?: DocumentData
   ): Promise<readonly ValidationIssue[]> {
     const issues = [
       ...validateDocumentData(doctype, data, {
         partial: existing !== undefined,
-        relatedDocType: (name) => this.relatedDocType(name)
+        relatedDocType
       })
     ];
     const hookData = hookDataOverride ?? (existing ? { ...existing.data, ...compactData(data) } : compactData(data));
@@ -1359,9 +1367,10 @@ export class DocumentService implements DocumentCommandExecutor {
     actor: Actor,
     tenantId: string,
     doctype: DocTypeDefinition,
-    data: MutableDocumentData
+    data: MutableDocumentData,
+    relatedDocType: RelatedDocTypeResolver
   ): Promise<readonly ValidationIssue[]> {
-    return this.validateLinksInData(actor, tenantId, doctype, data);
+    return this.validateLinksInData(actor, tenantId, doctype, data, relatedDocType);
   }
 
   private async validateLinksInData(
@@ -1369,6 +1378,7 @@ export class DocumentService implements DocumentCommandExecutor {
     tenantId: string,
     doctype: DocTypeDefinition,
     data: MutableDocumentData,
+    relatedDocType: RelatedDocTypeResolver,
     pathPrefix = ""
   ): Promise<readonly ValidationIssue[]> {
     const linkableFields = doctype.fields.filter(
@@ -1387,14 +1397,14 @@ export class DocumentService implements DocumentCommandExecutor {
           if (!Array.isArray(value) || !field.tableOf) {
             return [];
           }
-          const child = this.relatedDocType(field.tableOf);
+          const child = relatedDocType(field.tableOf);
           if (!child) {
             return [];
           }
           const rowIssues = await Promise.all(
             value.map((row, index) =>
               isMutableData(row)
-                ? this.validateLinksInData(actor, tenantId, child, row, `${fieldPath}[${index}].`)
+                ? this.validateLinksInData(actor, tenantId, child, row, relatedDocType, `${fieldPath}[${index}].`)
                 : Promise.resolve([])
             )
           );
@@ -1403,7 +1413,7 @@ export class DocumentService implements DocumentCommandExecutor {
         if (typeof value !== "string" || value.length === 0) {
           return [];
         }
-        const targetDoctype = this.relatedDocType(field.linkTo ?? "");
+        const targetDoctype = relatedDocType(field.linkTo ?? "");
         if (!targetDoctype) {
           return [];
         }
@@ -1479,13 +1489,48 @@ export class DocumentService implements DocumentCommandExecutor {
     return documentShareAllows(permissions ?? [], action);
   }
 
-  private relatedDocType(name: string): DocTypeDefinition | undefined {
-    return this.registry.has(name) ? this.registry.get(name) : undefined;
+  private async doctypeContext(
+    actor: Actor,
+    doctypeName: string,
+    tenantId: string
+  ): Promise<DocumentServiceDocTypeContext> {
+    const root = await this.doctypeFor(actor, doctypeName, tenantId);
+    const related = new Map<string, DocTypeDefinition>();
+    related.set(root.name, root);
+    await this.resolveReachableDocTypes(root, actor, tenantId, related);
+    return {
+      doctype: root,
+      relatedDocType: (name) => related.get(name)
+    };
   }
 
   private async doctypeFor(actor: Actor, doctypeName: string, tenantId: string): Promise<DocTypeDefinition> {
     const base = this.registry.get(doctypeName);
+    return this.resolveDocType(base, actor, tenantId);
+  }
+
+  private async resolveDocType(
+    base: DocTypeDefinition,
+    actor: Actor,
+    tenantId: string
+  ): Promise<DocTypeDefinition> {
     return await this.doctypeResolver?.(base, { actor, tenantId }) ?? base;
+  }
+
+  private async resolveReachableDocTypes(
+    doctype: DocTypeDefinition,
+    actor: Actor,
+    tenantId: string,
+    related: Map<string, DocTypeDefinition>
+  ): Promise<void> {
+    for (const name of relatedDocTypeNames(doctype)) {
+      if (related.has(name)) {
+        continue;
+      }
+      const resolved = await this.doctypeFor(actor, name, tenantId);
+      related.set(name, resolved);
+      await this.resolveReachableDocTypes(resolved, actor, tenantId, related);
+    }
   }
 
   private async readDocumentFromEvents(
@@ -1911,6 +1956,17 @@ function ensureSharedGrantIsDelegable(
       `Actor '${actor.id}' cannot grant ${blocked.join(", ")} on ${doctype.name}/${document.name}`
     );
   }
+}
+
+function relatedDocTypeNames(doctype: DocTypeDefinition): readonly string[] {
+  return [
+    ...new Set(
+      doctype.fields.flatMap((field) => [
+        ...(field.type === "table" && field.tableOf ? [field.tableOf] : []),
+        ...(field.type === "link" && field.linkTo ? [field.linkTo] : [])
+      ])
+    )
+  ];
 }
 
 function readonlyIssues(

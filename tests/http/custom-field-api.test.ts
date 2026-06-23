@@ -287,6 +287,72 @@ describe("custom field api", () => {
       error: { code: "VALIDATION_FAILED" }
     });
   });
+
+  it("applies child table DocType custom fields through generated JSON routes", async () => {
+    const { app } = makeChildTableCustomFieldApp();
+    const createdField = await app.request("/api/custom-fields/Sales%20Invoice%20Item", {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        field: {
+          name: "bonus_product",
+          type: "link",
+          linkTo: "Product"
+        },
+        expectedVersion: 0
+      })
+    });
+    expect(createdField.status).toBe(201);
+    await expect(createdField.json()).resolves.toMatchObject({
+      data: { fields: [{ field: { name: "bonus_product", type: "link", linkTo: "Product" } }] }
+    });
+
+    const meta = await app.request("/api/meta/doctypes/Sales%20Invoice%20Item", { headers: adminHeaders });
+    expect(meta.status).toBe(200);
+    await expect(meta.json()).resolves.toMatchObject({
+      data: {
+        fields: expect.arrayContaining([
+          expect.objectContaining({ name: "bonus_product", type: "link", linkTo: "Product" })
+        ])
+      }
+    });
+
+    await app.request("/api/resource/Product", {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({ sku: "SKU-1", title: "Widget" })
+    });
+    await app.request("/api/resource/Product", {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({ sku: "SKU-2", title: "Cable" })
+    });
+    const invoice = await app.request("/api/resource/Sales%20Invoice", {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        title: "INV-CHILD-CUSTOM-HTTP",
+        items: [{ product: "SKU-1", quantity: 1, bonus_product: "SKU-2" }]
+      })
+    });
+    expect(invoice.status).toBe(201);
+    await expect(invoice.json()).resolves.toMatchObject({
+      data: { data: { items: [{ product: "SKU-1", quantity: 1, bonus_product: "SKU-2" }] } }
+    });
+
+    const invalid = await app.request("/api/resource/Sales%20Invoice", {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        title: "INV-BROKEN-CHILD-CUSTOM-HTTP",
+        items: [{ product: "SKU-1", quantity: 1, bonus_product: "Missing" }]
+      })
+    });
+    expect(invalid.status).toBe(422);
+    await expect(invalid.json()).resolves.toMatchObject({
+      error: { code: "VALIDATION_FAILED" }
+    });
+  });
 });
 
 function makeCustomFieldApp(maxJsonBytes = 1_048_576) {
