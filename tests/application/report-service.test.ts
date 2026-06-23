@@ -152,13 +152,19 @@ describe("ReportService", () => {
             name: "double_count",
             label: "Double Count",
             type: "number",
-            formula: { operator: "add", left: "count", right: "count" }
+            formula: { operator: "multiply", left: "count", right: 2 }
           },
           {
             name: "count_ratio",
             label: "Count Ratio",
             type: "number",
-            formula: { operator: "divide", left: "count", right: "count" }
+            formula: { operator: "divide", left: "count", right: 2 }
+          },
+          {
+            name: "divide_by_zero",
+            label: "Divide By Zero",
+            type: "number",
+            formula: { operator: "divide", left: "count", right: 0 }
           }
         ],
         orderBy: "double_count",
@@ -175,14 +181,14 @@ describe("ReportService", () => {
 
     expect(result.order).toMatchObject({ orderBy: "double_count", order: "desc" });
     expect(result.rows).toEqual([
-      { title: "High", double_count: 10, count_ratio: 1 },
-      { title: "Medium", double_count: 6, count_ratio: 1 },
-      { title: "Low", double_count: 2, count_ratio: 1 },
-      { title: "Zero", double_count: 0, count_ratio: null }
+      { title: "High", double_count: 10, count_ratio: 2.5, divide_by_zero: null },
+      { title: "Medium", double_count: 6, count_ratio: 1.5, divide_by_zero: null },
+      { title: "Low", double_count: 2, count_ratio: 0.5, divide_by_zero: null },
+      { title: "Zero", double_count: 0, count_ratio: 0, divide_by_zero: null }
     ]);
 
     const csv = await reports.exportReportCsv(owner, "Count Scores", { limit: 2 });
-    expect(csv.body).toBe("Title,Double Count,Count Ratio\nHigh,10,1\nMedium,6,1");
+    expect(csv.body).toBe("Title,Double Count,Count Ratio,Divide By Zero\nHigh,10,2.5,\nMedium,6,1.5,");
   });
 
   it("sorts chart points by metadata before applying maxPoints", async () => {

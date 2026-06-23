@@ -256,6 +256,74 @@ describe("reports", () => {
     ).toThrow("Report 'Broken Json Order' cannot order by json column 'meta_value'");
   });
 
+  it("validates report formula operands as numeric fields or finite literals", () => {
+    const Note = defineDocType({
+      name: "Note",
+      fields: [
+        { name: "title", type: "text" },
+        { name: "count", type: "integer" }
+      ]
+    });
+
+    const report = defineReport({
+      name: "Literal Formula",
+      doctype: "Note",
+      columns: [
+        {
+          name: "count_percent",
+          type: "number",
+          formula: { operator: "multiply", left: "count", right: 100 }
+        }
+      ]
+    });
+
+    expect(createRegistry({ doctypes: [Note], reports: [report] }).getReport("Literal Formula").columns[0]).toMatchObject({
+      formula: { left: "count", right: 100 }
+    });
+
+    expect(() =>
+      defineReport({
+        name: "Broken Empty Formula",
+        doctype: "Note",
+        columns: [{ name: "broken", formula: { operator: "add", left: "", right: 1 } }]
+      })
+    ).toThrow("Report 'Broken Empty Formula' formula column 'broken' left operand must be a field name or finite numeric literal");
+
+    expect(() =>
+      defineReport({
+        name: "Broken Infinite Formula",
+        doctype: "Note",
+        columns: [{ name: "broken", formula: { operator: "add", left: "count", right: Number.POSITIVE_INFINITY } }]
+      })
+    ).toThrow("Report 'Broken Infinite Formula' formula column 'broken' right operand must be a field name or finite numeric literal");
+
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        reports: [
+          defineReport({
+            name: "Broken Title Formula",
+            doctype: "Note",
+            columns: [{ name: "broken", formula: { operator: "add", left: "title", right: 1 } }]
+          })
+        ]
+      })
+    ).toThrow("Report 'Broken Title Formula' formula column 'broken' requires a numeric left field 'title'");
+
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        reports: [
+          defineReport({
+            name: "Broken Missing Formula",
+            doctype: "Note",
+            columns: [{ name: "broken", formula: { operator: "add", left: "count", right: "missing" } }]
+          })
+        ]
+      })
+    ).toThrow("Report 'Broken Missing Formula' formula column 'broken' references unknown right field 'missing'");
+  });
+
   it("validates report charts against grouped numeric summaries", () => {
     const Note = defineDocType({
       name: "Note",

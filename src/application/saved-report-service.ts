@@ -8,6 +8,7 @@ import {
   type ReportColumnDefinition,
   type ReportDefinition,
   type ReportFilterDefinition,
+  type ReportFormulaOperand,
   type ReportGroupDefinition,
   type ReportOrder,
   type ReportSummaryDefinition
@@ -498,9 +499,19 @@ function chartFromPayload(payload: JsonObject): ReportChartDefinition {
 function formulaFromPayload(payload: JsonObject): NonNullable<ReportColumnDefinition["formula"]> {
   return {
     operator: requiredString(payload.operator, "formula.operator") as NonNullable<ReportColumnDefinition["formula"]>["operator"],
-    left: requiredString(payload.left, "formula.left"),
-    right: requiredString(payload.right, "formula.right")
+    left: formulaOperandFromPayload(payload.left, "formula.left"),
+    right: formulaOperandFromPayload(payload.right, "formula.right")
   };
+}
+
+function formulaOperandFromPayload(value: JsonValue | undefined, field: string): ReportFormulaOperand {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  throw badRequest(`Saved report definition '${field}' is invalid`);
 }
 
 function compactObject(values: Readonly<Record<string, JsonValue | undefined>>): JsonObject {

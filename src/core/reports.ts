@@ -9,6 +9,7 @@ export type ReportChartOrderBy = "key" | "label" | "value";
 export type ReportOrder = "asc" | "desc";
 export type ReportChartOrder = ReportOrder;
 export type ReportFormulaOperator = "add" | "subtract" | "multiply" | "divide";
+export type ReportFormulaOperand = string | number;
 
 const REPORT_FILTER_OPERATORS = ["eq", "contains", "gte", "lte"] as const;
 const REPORT_FILTER_TYPES = ["text", "longText", "integer", "number", "boolean", "date", "datetime", "select", "link"] as const;
@@ -20,8 +21,8 @@ const REPORT_CHART_COLOR_PATTERN = /^#[0-9A-Fa-f]{3}(?:[0-9A-Fa-f]{3})?$/;
 
 export interface ReportFormulaDefinition {
   readonly operator: ReportFormulaOperator;
-  readonly left: string;
-  readonly right: string;
+  readonly left: ReportFormulaOperand;
+  readonly right: ReportFormulaOperand;
 }
 
 export interface ReportColumnDefinition {
@@ -307,7 +308,29 @@ function assertFormulaColumnsValid(report: ReportDefinition): void {
         { status: 400 }
       );
     }
+    assertFormulaOperandSyntax(report.name, column.name, formula.left, "left");
+    assertFormulaOperandSyntax(report.name, column.name, formula.right, "right");
   }
+}
+
+function assertFormulaOperandSyntax(
+  reportName: string,
+  columnName: string,
+  operand: ReportFormulaOperand,
+  side: "left" | "right"
+): void {
+  if (typeof operand === "string") {
+    if (operand.length > 0) {
+      return;
+    }
+  } else if (typeof operand === "number" && Number.isFinite(operand)) {
+    return;
+  }
+  throw new FrameworkError(
+    "REPORT_INVALID",
+    `Report '${reportName}' formula column '${columnName}' ${side} operand must be a field name or finite numeric literal`,
+    { status: 400 }
+  );
 }
 
 function assertFiltersValid(report: ReportDefinition): void {
@@ -465,9 +488,13 @@ function assertFormulaMatchesDocType(
   function assertFormulaOperandMatchesDocType(
     name: string,
     reportColumn: ReportColumnDefinition,
-    fieldName: string,
+    operand: ReportFormulaOperand,
     side: "left" | "right"
   ): void {
+    if (typeof operand === "number") {
+      return;
+    }
+    const fieldName = operand;
     const field = fields.get(fieldName);
     if (!field) {
       throw new FrameworkError(

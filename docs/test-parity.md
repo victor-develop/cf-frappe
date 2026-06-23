@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the workspace metadata client helpers slice:
+As of the report formula literal operands slice:
 
 - Vitest files: `73`
-- Vitest cases: `718`
+- Vitest cases: `719`
 
 ## Implication
 

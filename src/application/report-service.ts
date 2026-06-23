@@ -11,6 +11,7 @@ import {
   type ReportDefinition,
   type ReportFilterDefinition,
   type ReportFilterOperator,
+  type ReportFormulaOperand,
   type ReportGroupDefinition,
   type ReportOrder,
   type ReportSummaryAggregate,
@@ -566,8 +567,8 @@ function reportFormulaValue(
   document: DocumentSnapshot,
   formula: NonNullable<ReportColumnDefinition["formula"]>
 ): number | null {
-  const left = numericDocumentField(document, formula.left);
-  const right = numericDocumentField(document, formula.right);
+  const left = numericFormulaOperand(document, formula.left);
+  const right = numericFormulaOperand(document, formula.right);
   if (left === null || right === null) {
     return null;
   }
@@ -583,8 +584,11 @@ function reportFormulaValue(
   }
 }
 
-function numericDocumentField(document: DocumentSnapshot, field: string): number | null {
-  const value = document.data[field];
+function numericFormulaOperand(document: DocumentSnapshot, operand: ReportFormulaOperand): number | null {
+  if (typeof operand === "number") {
+    return operand;
+  }
+  const value = document.data[operand];
   return typeof value === "number" ? value : null;
 }
 

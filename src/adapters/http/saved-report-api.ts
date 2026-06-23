@@ -6,6 +6,7 @@ import type {
   ReportChartOrderBy,
   ReportColumnDefinition,
   ReportFilterDefinition,
+  ReportFormulaOperand,
   ReportGroupDefinition,
   ReportOrder,
   ReportSummaryDefinition
@@ -206,9 +207,19 @@ function chartValue(value: Record<string, unknown>): ReportChartDefinition {
 function formulaValue(value: Record<string, unknown>): NonNullable<ReportColumnDefinition["formula"]> {
   return {
     operator: requiredString(value.operator, "Saved report formula operator must be a string") as NonNullable<ReportColumnDefinition["formula"]>["operator"],
-    left: requiredString(value.left, "Saved report formula left must be a string"),
-    right: requiredString(value.right, "Saved report formula right must be a string")
+    left: formulaOperandValue(value.left, "Saved report formula left must be a string or finite number"),
+    right: formulaOperandValue(value.right, "Saved report formula right must be a string or finite number")
   };
+}
+
+function formulaOperandValue(value: unknown, message: string): ReportFormulaOperand {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  throw badRequest(message);
 }
 
 function optionalStringField(value: Record<string, unknown>, key: string): Record<string, string> {

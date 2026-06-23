@@ -142,7 +142,7 @@ describe("saved report api", () => {
               name: "double_count",
               label: "Double Count",
               type: "number",
-              formula: { operator: "add", left: "count", right: "count" }
+              formula: { operator: "multiply", left: "count", right: 2 }
             }
           ],
           orderBy: "double_count",
@@ -160,7 +160,7 @@ describe("saved report api", () => {
             {
               name: "double_count",
               label: "Double Count",
-              formula: { operator: "add", left: "count", right: "count" }
+              formula: { operator: "multiply", left: "count", right: 2 }
             }
           ],
           orderBy: "double_count"
@@ -189,6 +189,28 @@ describe("saved report api", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "BAD_REQUEST", message: "Saved report definition must be an object" }
+    });
+
+    const badFormula = await app.request("/api/report-builder/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({
+        label: "Bad formula",
+        definition: {
+          columns: [
+            {
+              name: "broken",
+              type: "number",
+              formula: { operator: "add", left: false, right: 2 }
+            }
+          ]
+        }
+      })
+    });
+
+    expect(badFormula.status).toBe(400);
+    await expect(badFormula.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Saved report formula left must be a string or finite number" }
     });
   });
 

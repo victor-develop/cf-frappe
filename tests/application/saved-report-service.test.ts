@@ -82,7 +82,7 @@ describe("SavedReportService", () => {
             name: "double_count",
             label: "Double Count",
             type: "number",
-            formula: { operator: "add", left: "count", right: "count" }
+            formula: { operator: "multiply", left: "count", right: 2 }
           }
         ],
         filters: [{ name: "priority", field: "priority", type: "select", defaultValue: "High" }],
