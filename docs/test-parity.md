@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the print client helpers slice:
+As of the report-builder client helpers slice:
 
 - Vitest files: `73`
-- Vitest cases: `716`
+- Vitest cases: `717`
 
 ## Implication
 

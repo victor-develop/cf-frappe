@@ -78,6 +78,15 @@ interface DeskClientRuntime {
     readonly html: (format: string, name: string) => Promise<unknown>;
     readonly url: (format: string, name: string) => string;
   };
+  readonly reportBuilder: {
+    readonly create: (doctype: string, input: Record<string, unknown>) => Promise<unknown>;
+    readonly csvUrl: (doctype: string, id: string, options?: Record<string, unknown>) => string;
+    readonly delete: (doctype: string, id: string) => Promise<unknown>;
+    readonly get: (doctype: string, id: string) => Promise<unknown>;
+    readonly list: (doctype: string) => Promise<unknown>;
+    readonly run: (doctype: string, id: string, options?: Record<string, unknown>) => Promise<unknown>;
+    readonly update: (doctype: string, id: string, input: Record<string, unknown>) => Promise<unknown>;
+  };
   readonly profiles: {
     readonly get: (userId: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly update: (
@@ -1135,6 +1144,78 @@ describe("Desk client runtime", () => {
     ]);
     expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin"]);
     expect(calls.map((call) => call.init.body)).toEqual([undefined, undefined, undefined]);
+  });
+
+  it("wraps saved report-builder APIs without browser-side definition validation", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const input = {
+      label: "High counts",
+      definition: {
+        columns: [{ name: "title", field: "title" }, { name: "count", field: "count" }],
+        filters: [{ name: "priority", field: "priority", defaultValue: "High" }],
+        orderBy: "count",
+        order: "desc"
+      }
+    };
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      if ((init?.method ?? "GET") === "DELETE") {
+        return new Response(null, { status: 204 });
+      }
+      return new Response(JSON.stringify({ data: { ok: true }, rows: [] }), {
+        headers: { "content-type": "application/json" },
+        status: (init?.method ?? "GET") === "POST" ? 201 : 200
+      });
+    });
+
+    await expect(runtime.reportBuilder.create("Task Type", input)).resolves.toEqual({ ok: true });
+    await runtime.reportBuilder.list("Task Type");
+    await runtime.reportBuilder.get("Task Type", "report/high-counts");
+    await runtime.reportBuilder.update("Task Type", "report/high-counts", input);
+    await expect(
+      runtime.reportBuilder.run("Task Type", "report/high-counts", {
+        filters: { priority: "High" },
+        orderBy: "count",
+        order: "asc",
+        limit: 5,
+        offset: 10
+      })
+    ).resolves.toEqual({ data: { ok: true }, rows: [] });
+    await expect(runtime.reportBuilder.delete("Task Type", "report/high-counts")).resolves.toBe("");
+
+    expect(
+      runtime.reportBuilder.csvUrl("Task Type", "report/high-counts", {
+        filters: { priority: "High" },
+        order_by: "count",
+        order: "desc",
+        limit: 5,
+        offset: 10
+      })
+    ).toBe("/api/report-builder/Task%20Type/report%2Fhigh-counts/export.csv?filter_priority=High&order_by=count&order=desc&limit=5");
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "POST /api/report-builder/Task%20Type",
+      "GET /api/report-builder/Task%20Type",
+      "GET /api/report-builder/Task%20Type/report%2Fhigh-counts",
+      "PUT /api/report-builder/Task%20Type/report%2Fhigh-counts",
+      "GET /api/report-builder/Task%20Type/report%2Fhigh-counts/run?filter_priority=High&order_by=count&order=asc&limit=5&offset=10",
+      "DELETE /api/report-builder/Task%20Type/report%2Fhigh-counts"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual([
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin"
+    ]);
+    expect(calls.map((call) => call.init.body)).toEqual([
+      JSON.stringify(input),
+      undefined,
+      undefined,
+      JSON.stringify(input),
+      undefined,
+      undefined
+    ]);
   });
 
   it("exposes client-script context and WebSocket realtime URLs", () => {

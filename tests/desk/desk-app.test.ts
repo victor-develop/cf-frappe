@@ -1263,6 +1263,7 @@ describe("Desk app", () => {
     expect(source).toContain("notifications: Object.freeze");
     expect(source).toContain("print: Object.freeze");
     expect(source).toContain("profiles: Object.freeze");
+    expect(source).toContain("reportBuilder: Object.freeze");
     expect(source).toContain("roles: Object.freeze");
     expect(source).toContain("userPermissions: Object.freeze");
     expect(source).toContain("documentTopic(tenantId, doctype, name)");

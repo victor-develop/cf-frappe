@@ -144,6 +144,10 @@ export function renderDeskClientScript(): string {
     return "/api/data-patches" + (patchId === undefined ? "" : "/" + encodePart(patchId)) + (action === undefined ? "" : "/" + action);
   }
 
+  function reportBuilderPath(doctype, id, action) {
+    return "/api/report-builder/" + encodePart(doctype) + (id === undefined ? "" : "/" + encodePart(id)) + (action === undefined ? "" : "/" + action);
+  }
+
   function auditDeletedPath(doctype, name, options) {
     return withQuery("/api/audit/deleted/" + encodePart(doctype) + "/" + encodePart(name), tenantParams(options || {}));
   }
@@ -305,6 +309,24 @@ export function renderDeskClientScript(): string {
   function printFormatParams(options) {
     var params = {};
     setParam(params, "doctype", options && options.doctype);
+    return params;
+  }
+
+  function reportRunParams(options) {
+    var params = {};
+    Object.entries((options && options.filters) || {}).forEach(function (entry) {
+      appendFilterParams(params, entry[0], entry[1]);
+    });
+    setParam(params, "order_by", options && (options.orderBy !== undefined ? options.orderBy : options.order_by));
+    setParam(params, "order", options && options.order);
+    setParam(params, "limit", options && options.limit);
+    setParam(params, "offset", options && options.offset);
+    return params;
+  }
+
+  function reportExportParams(options) {
+    var params = reportRunParams(options);
+    delete params.offset;
     return params;
   }
 
@@ -1267,6 +1289,29 @@ export function renderDeskClientScript(): string {
       },
       run: function (report, options) {
         return request(withQuery("/api/report/" + encodePart(report) + "/run", resourceListParams(options || {})));
+      }
+    }),
+    reportBuilder: Object.freeze({
+      create: function (doctype, input) {
+        return request(reportBuilderPath(doctype), { method: "POST", body: input || {} }).then(unwrapData);
+      },
+      csvUrl: function (doctype, id, options) {
+        return withQuery(reportBuilderPath(doctype, id, "export.csv"), reportExportParams(options || {}));
+      },
+      delete: function (doctype, id) {
+        return request(reportBuilderPath(doctype, id), { method: "DELETE" }).then(unwrapData);
+      },
+      get: function (doctype, id) {
+        return request(reportBuilderPath(doctype, id)).then(unwrapData);
+      },
+      list: function (doctype) {
+        return request(reportBuilderPath(doctype)).then(unwrapData);
+      },
+      run: function (doctype, id, options) {
+        return request(withQuery(reportBuilderPath(doctype, id, "run"), reportRunParams(options || {})));
+      },
+      update: function (doctype, id, input) {
+        return request(reportBuilderPath(doctype, id), { method: "PUT", body: input || {} }).then(unwrapData);
       }
     }),
     roles: Object.freeze({
