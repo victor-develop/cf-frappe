@@ -244,6 +244,12 @@ export function renderFileManager(
     <div class="fields">
       <label class="field"><span>Attached To DocType</span><input name="attached_to_doctype" value="${escapeHtml(dashboard.filters.attachedToDoctype ?? "")}"></label>
       <label class="field"><span>Attached To Name</span><input name="attached_to_name" value="${escapeHtml(dashboard.filters.attachedToName ?? "")}"></label>
+      <label class="field"><span>Filename</span><input name="filename" value="${escapeHtml(dashboard.filters.filename ?? "")}"></label>
+      <label class="field"><span>Content Type</span><input name="content_type" value="${escapeHtml(dashboard.filters.contentType ?? "")}"></label>
+      <label class="field"><span>Uploaded By</span><input name="uploaded_by" value="${escapeHtml(dashboard.filters.uploadedBy ?? "")}"></label>
+      <label class="field"><span>Storage State</span><select name="storage_state">${renderFileFilterOptions(FILE_STORAGE_STATE_FILTER_OPTIONS, dashboard.filters.storageState, "Any state")}</select></label>
+      <label class="field"><span>Scan Status</span><select name="scan_status">${renderFileFilterOptions(FILE_SCAN_STATUS_FILTER_OPTIONS, dashboard.filters.scanStatus, "Any status")}</select></label>
+      <label class="field"><span>Private</span><select name="is_private">${renderFilePrivacyFilterOptions(dashboard.filters.isPrivate)}</select></label>
       <label class="field"><span>Limit</span><input name="limit" type="number" min="1" max="200" value="${String(dashboard.limit)}"></label>
     </div>
     <div class="actions"><button class="button primary" type="submit">Filter</button><a class="button" href="/desk/files">Clear</a></div>
@@ -351,6 +357,47 @@ function attachmentLabel(file: FileDashboard["files"][number]): string {
     return "";
   }
   return `${file.attachedTo.doctype}/${file.attachedTo.name}`;
+}
+
+const FILE_STORAGE_STATE_FILTER_OPTIONS = [
+  { value: "upload_pending", label: "Upload Pending" },
+  { value: "available", label: "Available" },
+  { value: "scan_failed", label: "Scan Failed" },
+  { value: "delete_requested", label: "Delete Requested" }
+] as const;
+
+const FILE_SCAN_STATUS_FILTER_OPTIONS = [
+  { value: "pending", label: "Pending" },
+  { value: "clean", label: "Clean" },
+  { value: "infected", label: "Infected" }
+] as const;
+
+function renderFileFilterOptions(
+  options: readonly { readonly value: string; readonly label: string }[],
+  selectedValue: string | undefined,
+  emptyLabel: string
+): string {
+  const selected = selectedValue ?? "";
+  const rendered = [`<option value=""${selected === "" ? " selected" : ""}>${escapeHtml(emptyLabel)}</option>`];
+  if (selected && !options.some((option) => option.value === selected)) {
+    rendered.push(`<option value="${escapeHtml(selected)}" selected>${escapeHtml(selected)}</option>`);
+  }
+  rendered.push(
+    ...options.map((option) => {
+      const selectedAttribute = option.value === selected ? " selected" : "";
+      return `<option value="${escapeHtml(option.value)}"${selectedAttribute}>${escapeHtml(option.label)}</option>`;
+    })
+  );
+  return rendered.join("");
+}
+
+function renderFilePrivacyFilterOptions(value: boolean | undefined): string {
+  const selected = value === undefined ? "" : value ? "1" : "0";
+  return [
+    `<option value=""${selected === "" ? " selected" : ""}>Any privacy</option>`,
+    `<option value="1"${selected === "1" ? " selected" : ""}>Private</option>`,
+    `<option value="0"${selected === "0" ? " selected" : ""}>Public</option>`
+  ].join("");
 }
 
 export function renderReportList(

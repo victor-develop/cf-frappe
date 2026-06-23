@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the failed data-patch retry slice:
+As of the file manager metadata filter slice:
 
 - Vitest files: `69`
-- Vitest cases: `619`
+- Vitest cases: `620`
 
 ## Implication
 

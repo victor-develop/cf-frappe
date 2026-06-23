@@ -21,9 +21,21 @@ export function createFileApi(options: FileApiOptions): Hono {
     const limit = parseOptionalInteger(c.req.query("limit"));
     const attachedToDoctype = c.req.query("attached_to_doctype");
     const attachedToName = c.req.query("attached_to_name");
+    const filename = c.req.query("filename");
+    const contentType = c.req.query("content_type");
+    const uploadedBy = c.req.query("uploaded_by");
+    const storageState = c.req.query("storage_state");
+    const scanStatus = c.req.query("scan_status");
+    const isPrivate = optionalBooleanQuery(c.req.query("is_private"));
     const dashboard = await options.files.dashboard(actor, {
       ...(attachedToDoctype === undefined ? {} : { attachedToDoctype }),
       ...(attachedToName === undefined ? {} : { attachedToName }),
+      ...(filename === undefined ? {} : { filename }),
+      ...(contentType === undefined ? {} : { contentType }),
+      ...(uploadedBy === undefined ? {} : { uploadedBy }),
+      ...(storageState === undefined ? {} : { storageState }),
+      ...(scanStatus === undefined ? {} : { scanStatus }),
+      ...(isPrivate === undefined ? {} : { isPrivate }),
       ...(limit === undefined ? {} : { limit })
     });
     return c.json({ data: dashboard });
@@ -144,6 +156,14 @@ function booleanQuery(value: string | undefined, fallback: boolean): boolean {
   if (value === undefined) {
     return fallback;
   }
+  return parseBooleanQuery(value);
+}
+
+function optionalBooleanQuery(value: string | undefined): boolean | undefined {
+  return value === undefined || value === "" ? undefined : parseBooleanQuery(value);
+}
+
+function parseBooleanQuery(value: string): boolean {
   if (value === "1" || value.toLowerCase() === "true") {
     return true;
   }

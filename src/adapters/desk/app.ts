@@ -3,7 +3,7 @@ import type { DataPatchAdminPort, DataPatchApplyPlan } from "../../application/d
 import type { DocumentShareService } from "../../application/document-share-service.js";
 import type { DocumentCommandExecutor } from "../../application/document-service.js";
 import type { DocumentHistoryService } from "../../application/document-history-service.js";
-import type { FileService } from "../../application/file-service.js";
+import type { FileDashboard, FileDashboardQuery, FileService } from "../../application/file-service.js";
 import type { JobHistoryService } from "../../application/job-history-service.js";
 import type { JobRetryPort } from "../../application/job-retry-service.js";
 import type { JobScheduleService } from "../../application/job-schedule-service.js";
@@ -219,14 +219,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const files = requireFiles(options);
     const actor = await options.actor(c.req.raw);
     const url = new URL(c.req.url);
-    const limit = parseOptionalInteger(url.searchParams.get("limit") ?? undefined);
-    const attachedToDoctype = url.searchParams.get("attached_to_doctype") ?? undefined;
-    const attachedToName = url.searchParams.get("attached_to_name") ?? undefined;
-    const dashboard = await files.dashboard(actor, {
-      ...(attachedToDoctype === undefined ? {} : { attachedToDoctype }),
-      ...(attachedToName === undefined ? {} : { attachedToName }),
-      ...(limit === undefined ? {} : { limit })
-    });
+    const dashboard = await files.dashboard(actor, fileDashboardQueryFromUrl(url));
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
     return html(
@@ -1586,6 +1579,79 @@ function requireFiles(options: DeskAppOptions): FileService {
   return options.files;
 }
 
+function fileDashboardQueryFromUrl(url: URL): FileDashboardQuery {
+  const limit = parseOptionalInteger(url.searchParams.get("limit") ?? undefined);
+  const isPrivate = optionalBooleanQuery(url.searchParams.get("is_private") ?? undefined);
+  return {
+    ...optionalFileDashboardTextQuery("attachedToDoctype", url.searchParams.get("attached_to_doctype") ?? undefined),
+    ...optionalFileDashboardTextQuery("attachedToName", url.searchParams.get("attached_to_name") ?? undefined),
+    ...optionalFileDashboardTextQuery("filename", url.searchParams.get("filename") ?? undefined),
+    ...optionalFileDashboardTextQuery("contentType", url.searchParams.get("content_type") ?? undefined),
+    ...optionalFileDashboardTextQuery("uploadedBy", url.searchParams.get("uploaded_by") ?? undefined),
+    ...optionalFileDashboardTextQuery("storageState", url.searchParams.get("storage_state") ?? undefined),
+    ...optionalFileDashboardTextQuery("scanStatus", url.searchParams.get("scan_status") ?? undefined),
+    ...(isPrivate === undefined ? {} : { isPrivate }),
+    ...(limit === undefined ? {} : { limit })
+  };
+}
+
+function safeFileDashboardQueryFromUrl(url: URL): FileDashboardQuery {
+  try {
+    return fileDashboardQueryFromUrl(url);
+  } catch {
+    return {};
+  }
+}
+
+function optionalFileDashboardTextQuery<TKey extends string>(
+  key: TKey,
+  value: string | undefined
+): { readonly [K in TKey]?: string } {
+  return value === undefined ? {} : { [key]: value } as { readonly [K in TKey]: string };
+}
+
+function optionalBooleanQuery(value: string | undefined): boolean | undefined {
+  if (value === undefined || value === "") {
+    return undefined;
+  }
+  if (value === "1" || value.toLowerCase() === "true") {
+    return true;
+  }
+  if (value === "0" || value.toLowerCase() === "false") {
+    return false;
+  }
+  throw new FrameworkError("BAD_REQUEST", "Expected boolean query parameter", { status: 400 });
+}
+
+function emptyFileDashboard(query: FileDashboardQuery): FileDashboard {
+  return {
+    files: [],
+    limit: query.limit === undefined || query.limit < 1 || query.limit > 200 ? 50 : query.limit,
+    filters: fileDashboardFiltersFromQuery(query)
+  };
+}
+
+function fileDashboardFiltersFromQuery(query: FileDashboardQuery): FileDashboard["filters"] {
+  return {
+    ...trimmedFileDashboardFilter("attachedToDoctype", query.attachedToDoctype),
+    ...trimmedFileDashboardFilter("attachedToName", query.attachedToName),
+    ...trimmedFileDashboardFilter("filename", query.filename),
+    ...trimmedFileDashboardFilter("contentType", query.contentType),
+    ...trimmedFileDashboardFilter("uploadedBy", query.uploadedBy),
+    ...trimmedFileDashboardFilter("storageState", query.storageState),
+    ...trimmedFileDashboardFilter("scanStatus", query.scanStatus),
+    ...(query.isPrivate === undefined ? {} : { isPrivate: query.isPrivate })
+  };
+}
+
+function trimmedFileDashboardFilter<TKey extends string>(
+  key: TKey,
+  value: string | undefined
+): { readonly [K in TKey]?: string } {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed === "" ? {} : { [key]: trimmed } as { readonly [K in TKey]: string };
+}
+
 function preflightDeskFileUpload(request: Request, maxFileBytes: number): void {
   const contentLength = request.headers.get("content-length");
   if (contentLength === null) {
@@ -1607,7 +1673,8 @@ async function renderDeskFileFailure(
   error: unknown
 ): Promise<Response> {
   const files = requireFiles(options);
-  const dashboard = await files.dashboard(actor).catch(() => ({ files: [], limit: 50, filters: {} }));
+  const dashboardQuery = safeFileDashboardQueryFromUrl(new URL(request.url));
+  const dashboard = await files.dashboard(actor, dashboardQuery).catch(() => emptyFileDashboard(dashboardQuery));
   const doctypes = options.queries.listDoctypes(actor);
   const reports = listReports(options, actor);
   const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";

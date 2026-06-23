@@ -107,6 +107,12 @@ export interface DownloadedFile {
 export interface FileDashboardQuery {
   readonly attachedToDoctype?: string;
   readonly attachedToName?: string;
+  readonly filename?: string;
+  readonly contentType?: string;
+  readonly uploadedBy?: string;
+  readonly storageState?: string;
+  readonly scanStatus?: string;
+  readonly isPrivate?: boolean;
   readonly limit?: number;
 }
 
@@ -139,6 +145,12 @@ export interface FileDashboard {
   readonly filters: {
     readonly attachedToDoctype?: string;
     readonly attachedToName?: string;
+    readonly filename?: string;
+    readonly contentType?: string;
+    readonly uploadedBy?: string;
+    readonly storageState?: string;
+    readonly scanStatus?: string;
+    readonly isPrivate?: boolean;
   };
 }
 
@@ -376,12 +388,14 @@ export class FileService {
   async dashboard(actor: Actor, query: FileDashboardQuery = {}): Promise<FileDashboard> {
     const limit = normalizeLimit(query.limit);
     const filters = {
-      ...(query.attachedToDoctype === undefined || query.attachedToDoctype === ""
-        ? {}
-        : { attachedToDoctype: query.attachedToDoctype }),
-      ...(query.attachedToName === undefined || query.attachedToName === ""
-        ? {}
-        : { attachedToName: query.attachedToName })
+      ...optionalTextFilter("attachedToDoctype", query.attachedToDoctype),
+      ...optionalTextFilter("attachedToName", query.attachedToName),
+      ...optionalTextFilter("filename", query.filename),
+      ...optionalTextFilter("contentType", query.contentType),
+      ...optionalTextFilter("uploadedBy", query.uploadedBy),
+      ...optionalTextFilter("storageState", query.storageState),
+      ...optionalTextFilter("scanStatus", query.scanStatus),
+      ...(query.isPrivate === undefined ? {} : { isPrivate: query.isPrivate })
     };
     const listFilters = [
       ...(filters.attachedToDoctype === undefined
@@ -389,7 +403,25 @@ export class FileService {
         : [{ field: "attached_to_doctype", operator: "eq" as const, value: filters.attachedToDoctype }]),
       ...(filters.attachedToName === undefined
         ? []
-        : [{ field: "attached_to_name", operator: "eq" as const, value: filters.attachedToName }])
+        : [{ field: "attached_to_name", operator: "eq" as const, value: filters.attachedToName }]),
+      ...(filters.filename === undefined
+        ? []
+        : [{ field: "filename", operator: "contains" as const, value: filters.filename }]),
+      ...(filters.contentType === undefined
+        ? []
+        : [{ field: "content_type", operator: "contains" as const, value: filters.contentType }]),
+      ...(filters.uploadedBy === undefined
+        ? []
+        : [{ field: "uploaded_by", operator: "eq" as const, value: filters.uploadedBy }]),
+      ...(filters.storageState === undefined
+        ? []
+        : [{ field: "storage_state", operator: "eq" as const, value: filters.storageState }]),
+      ...(filters.scanStatus === undefined
+        ? []
+        : [{ field: "scan_status", operator: "eq" as const, value: filters.scanStatus }]),
+      ...(filters.isPrivate === undefined
+        ? []
+        : [{ field: "is_private", operator: "eq" as const, value: filters.isPrivate }])
     ];
     const doctype = this.registry.get(this.fileDoctype);
     const files: FileDashboardEntry[] = [];
@@ -614,6 +646,11 @@ export class FileService {
     }
     return result;
   }
+}
+
+function optionalTextFilter<TKey extends string>(key: TKey, value: string | undefined): { readonly [K in TKey]?: string } {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed === "" ? {} : { [key]: trimmed } as { readonly [K in TKey]: string };
 }
 
 function fileDashboardEntry(snapshot: DocumentSnapshot): Omit<FileDashboardEntry, "editable" | "deletable"> {

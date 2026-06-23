@@ -494,7 +494,10 @@ describe("Desk app", () => {
   });
 
   it("renders a Desk file manager for upload, metadata, download, and delete workflows", async () => {
-    const { app, storage } = makeFileDesk(owner, { ids: ["create", "metadata", "request-delete", "delete"] });
+    const { app, storage } = makeFileDesk(owner, {
+      ids: ["create", "create-other", "metadata", "request-delete", "delete"],
+      fileIds: ["object", "other"]
+    });
 
     const home = await app.request("/desk");
     expect(home.status).toBe(200);
@@ -511,13 +514,52 @@ describe("Desk app", () => {
     expect(uploaded.status).toBe(303);
     expect(uploaded.headers.get("location")).toBe("/desk/files");
 
+    const otherUploadForm = new FormData();
+    otherUploadForm.append("file", new Blob(["{}"], { type: "application/json" }), "public.json");
+    const otherUploaded = await app.request("/desk/files", {
+      method: "POST",
+      headers: { "content-length": "512" },
+      body: otherUploadForm
+    });
+    expect(otherUploaded.status).toBe(303);
+
     const list = await app.request("/desk/files");
     expect(list.status).toBe(200);
     const html = await list.text();
     expect(html).toContain("hello.txt");
+    expect(html).toContain("public.json");
     expect(html).toContain("/desk/files/file_object/content");
     expect(html).toContain('action="/desk/files/file_object/metadata"');
     expect(html).toContain('formaction="/desk/files/file_object/delete"');
+    expect(html).toContain('name="filename"');
+    expect(html).toContain('name="content_type"');
+    expect(html).toContain('name="uploaded_by"');
+    expect(html).toContain('name="storage_state"');
+    expect(html).toContain('name="scan_status"');
+    expect(html).toContain('name="is_private"');
+
+    const filteredList = await app.request(
+      "/desk/files?filename=hello&content_type=text/plain&uploaded_by=owner%40example.com&storage_state=available&is_private=1&limit=10"
+    );
+    expect(filteredList.status).toBe(200);
+    const filteredHtml = await filteredList.text();
+    expect(filteredHtml).toContain("hello.txt");
+    expect(filteredHtml).not.toContain("public.json");
+    expect(filteredHtml).toContain('value="hello"');
+    expect(filteredHtml).toContain('value="text/plain"');
+    expect(filteredHtml).toContain('value="owner@example.com"');
+    expect(filteredHtml).toContain('<option value="available" selected>Available</option>');
+    expect(filteredHtml).toContain('<option value="1" selected>Private</option>');
+
+    const publicList = await app.request("/desk/files?is_private=0&limit=10");
+    expect(publicList.status).toBe(200);
+    const publicHtml = await publicList.text();
+    expect(publicHtml).toContain("public.json");
+    expect(publicHtml).not.toContain("hello.txt");
+
+    const invalidPrivacy = await app.request("/desk/files?is_private=maybe");
+    expect(invalidPrivacy.status).toBe(400);
+    await expect(invalidPrivacy.text()).resolves.toContain("Expected boolean query parameter");
 
     const genericCommand = await app.request("/desk/File/file_object/command/updateMetadata", {
       method: "POST",

@@ -161,6 +161,44 @@ describe("file api", () => {
       }
     });
 
+    const filteredList = await app.request(
+      "/api/files?limit=5&filename=private&content_type=text/plain&uploaded_by=owner%40example.com&storage_state=available&is_private=true",
+      {
+        headers: userHeaders("owner@example.com", "User")
+      }
+    );
+    expect(filteredList.status).toBe(200);
+    await expect(filteredList.json()).resolves.toMatchObject({
+      data: {
+        limit: 5,
+        filters: {
+          filename: "private",
+          contentType: "text/plain",
+          uploadedBy: "owner@example.com",
+          storageState: "available",
+          isPrivate: true
+        },
+        files: [
+          {
+            name: "file_object-2",
+            filename: "private.txt",
+            isPrivate: true
+          }
+        ]
+      }
+    });
+
+    const scanFilteredList = await app.request("/api/files?scan_status=clean", {
+      headers: userHeaders("owner@example.com", "User")
+    });
+    expect(scanFilteredList.status).toBe(200);
+    await expect(scanFilteredList.json()).resolves.toMatchObject({
+      data: {
+        filters: { scanStatus: "clean" },
+        files: []
+      }
+    });
+
     const guestList = await app.request("/api/files?limit=10", {
       headers: userHeaders("guest", "Guest")
     });
@@ -185,6 +223,14 @@ describe("file api", () => {
     expect(badLimit.status).toBe(400);
     await expect(badLimit.json()).resolves.toMatchObject({
       error: { message: "File dashboard limit must be between 1 and 200" }
+    });
+
+    const badPrivacy = await app.request("/api/files?is_private=maybe", {
+      headers: userHeaders("owner@example.com", "User")
+    });
+    expect(badPrivacy.status).toBe(400);
+    await expect(badPrivacy.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Expected boolean query parameter" }
     });
   });
 

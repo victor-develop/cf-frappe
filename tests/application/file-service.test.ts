@@ -225,6 +225,80 @@ describe("FileService", () => {
     });
   });
 
+  it("filters readable file metadata by file manager fields", async () => {
+    const scanner = new StaticScanner("clean", { engine: "unit-av" });
+    const services = createFileServices(
+      ["create-1", "create-2", "create-3", "reserve"],
+      ["object-1", "object-2", "object-3", "direct"],
+      { scanner }
+    );
+    const match = await services.files.upload({
+      actor: owner,
+      filename: "invoice-final.pdf",
+      body: "final",
+      contentType: "application/pdf",
+      isPrivate: false
+    });
+    await services.files.upload({
+      actor: owner,
+      filename: "invoice-draft.txt",
+      body: "draft",
+      contentType: "text/plain"
+    });
+    await services.files.upload({
+      actor: otherUser,
+      filename: "invoice-final.pdf",
+      body: "other",
+      contentType: "application/pdf",
+      isPrivate: false
+    });
+    const pending = await services.files.prepareDirectUpload({
+      actor: owner,
+      filename: "browser-upload.csv",
+      size: 12,
+      contentType: "text/csv",
+      isPrivate: false
+    });
+
+    await expect(
+      services.files.dashboard(owner, {
+        filename: " FINAL ",
+        contentType: " pdf ",
+        uploadedBy: owner.id,
+        storageState: " available ",
+        scanStatus: " clean ",
+        isPrivate: false,
+        limit: 10
+      })
+    ).resolves.toMatchObject({
+      files: [{ name: match.snapshot.name, filename: "invoice-final.pdf" }],
+      limit: 10,
+      filters: {
+        filename: "FINAL",
+        contentType: "pdf",
+        uploadedBy: owner.id,
+        storageState: "available",
+        scanStatus: "clean",
+        isPrivate: false
+      }
+    });
+
+    await expect(
+      services.files.dashboard(owner, {
+        storageState: "upload_pending",
+        scanStatus: "pending",
+        isPrivate: false
+      })
+    ).resolves.toMatchObject({
+      files: [{ name: pending.snapshot.name, filename: "browser-upload.csv" }],
+      filters: {
+        storageState: "upload_pending",
+        scanStatus: "pending",
+        isPrivate: false
+      }
+    });
+  });
+
   it("over-fetches permissioned file dashboard pages until the readable limit is filled", async () => {
     const services = createFileServices(
       ["create-1", "create-2", "create-3"],
