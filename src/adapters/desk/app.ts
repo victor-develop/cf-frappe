@@ -275,6 +275,30 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     }
   });
 
+  app.post("/desk/files/bulk-delete", async (c) => {
+    const files = requireFiles(options);
+    const actor = await options.actor(c.req.raw);
+    try {
+      const form = await parseDeskBulkFileDelete(c.req.raw);
+      const result = await files.bulkDelete({
+        actor,
+        files: form.files,
+        metadata: requestMetadata(c.req.raw)
+      });
+      if (result.failed.length > 0) {
+        return renderDeskFileFailure(
+          options,
+          c.req.raw,
+          actor,
+          new FrameworkError("BAD_REQUEST", bulkFileDeleteFailureMessage(result.failed.length), { status: 400 })
+        );
+      }
+      return c.redirect("/desk/files", 303);
+    } catch (error) {
+      return renderDeskFileFailure(options, c.req.raw, actor, error);
+    }
+  });
+
   app.get("/desk/files/:name/content", async (c) => {
     const files = requireFiles(options);
     const actor = await options.actor(c.req.raw);
@@ -2140,6 +2164,13 @@ interface ParsedDeskFileMetadataUpdate {
   readonly expectedVersion?: number;
 }
 
+interface ParsedDeskBulkFileDelete {
+  readonly files: readonly {
+    readonly name: string;
+    readonly expectedVersion?: number;
+  }[];
+}
+
 interface ParsedDeskDataPatchApply {
   readonly limit?: number;
 }
@@ -2232,6 +2263,35 @@ async function parseDeskFileMetadataUpdate(request: Request): Promise<ParsedDesk
     attachedTo: attachedToDoctype && attachedToName ? { doctype: attachedToDoctype, name: attachedToName } : null,
     ...(expectedVersion !== undefined ? { expectedVersion } : {})
   };
+}
+
+async function parseDeskBulkFileDelete(request: Request): Promise<ParsedDeskBulkFileDelete> {
+  const form = await readUrlEncodedDeskForm(request);
+  return {
+    files: form.getAll("file").map((name) => ({
+      name,
+      ...deskBulkFileExpectedVersion(form, name)
+    }))
+  };
+}
+
+function deskBulkFileExpectedVersion(
+  form: URLSearchParams,
+  name: string
+): { readonly expectedVersion?: number } {
+  const raw = stringSearchParamValue(form, `expectedVersion:${name}`);
+  if (raw === undefined) {
+    return {};
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed)) {
+    throw new FrameworkError("BAD_REQUEST", "expectedVersion must be an integer", { status: 400 });
+  }
+  return { expectedVersion: parsed };
+}
+
+function bulkFileDeleteFailureMessage(count: number): string {
+  return count === 1 ? "1 file could not be deleted" : `${String(count)} files could not be deleted`;
 }
 
 function fileNameFromFormValue(file: Blob): string {

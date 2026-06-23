@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file manager metadata filter slice:
+As of the bulk file delete slice:
 
 - Vitest files: `69`
-- Vitest cases: `620`
+- Vitest cases: `625`
 
 ## Implication
 

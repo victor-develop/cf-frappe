@@ -1,6 +1,14 @@
 import type { DocumentCommandExecutor } from "./document-service.js";
 import { QueryService } from "./query-service.js";
-import { badRequest, conflict, FrameworkError, notFound, permissionDenied, validationFailed } from "../core/errors.js";
+import {
+  badRequest,
+  conflict,
+  FrameworkError,
+  notFound,
+  permissionDenied,
+  validationFailed,
+  type FrameworkErrorCode
+} from "../core/errors.js";
 import { FILE_DOCTYPE_NAME } from "../core/file-doctype.js";
 import { can } from "../core/permissions.js";
 import type { ModelRegistry } from "../core/registry.js";
@@ -74,6 +82,35 @@ export interface CompleteDirectUploadCommand extends DownloadFileCommand {
 export interface DeleteFileCommand extends DownloadFileCommand {
   readonly expectedVersion?: number;
   readonly metadata?: DocumentData;
+}
+
+export interface BulkDeleteFileSelection {
+  readonly name: string;
+  readonly expectedVersion?: number;
+}
+
+export interface BulkDeleteFilesCommand {
+  readonly actor: Actor;
+  readonly files: readonly BulkDeleteFileSelection[];
+  readonly tenantId?: string;
+  readonly metadata?: DocumentData;
+}
+
+export interface BulkDeletedFile {
+  readonly name: string;
+  readonly snapshot: DocumentSnapshot;
+}
+
+export interface BulkDeleteFileFailure {
+  readonly name: string;
+  readonly code: FrameworkErrorCode | "UNKNOWN";
+  readonly message: string;
+  readonly status: number;
+}
+
+export interface BulkDeleteFilesResult {
+  readonly deleted: readonly BulkDeletedFile[];
+  readonly failed: readonly BulkDeleteFileFailure[];
 }
 
 export interface UpdateFileMetadataCommand extends DownloadFileCommand {
@@ -583,6 +620,27 @@ export class FileService {
     return snapshot;
   }
 
+  async bulkDelete(command: BulkDeleteFilesCommand): Promise<BulkDeleteFilesResult> {
+    const selections = normalizeBulkDeleteSelections(command.files);
+    const deleted: BulkDeletedFile[] = [];
+    const failed: BulkDeleteFileFailure[] = [];
+    for (const selection of selections) {
+      try {
+        const snapshot = await this.delete({
+          actor: command.actor,
+          name: selection.name,
+          ...(selection.expectedVersion === undefined ? {} : { expectedVersion: selection.expectedVersion }),
+          ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+          metadata: command.metadata ?? {}
+        });
+        deleted.push({ name: selection.name, snapshot });
+      } catch (error) {
+        failed.push(bulkDeleteFailure(selection.name, error));
+      }
+    }
+    return { deleted, failed };
+  }
+
   private preflightCreate(actor: Actor, data: DocumentData): void {
     const doctype = this.registry.get(this.fileDoctype);
     if (!can(actor, doctype, "create")) {
@@ -651,6 +709,54 @@ export class FileService {
 function optionalTextFilter<TKey extends string>(key: TKey, value: string | undefined): { readonly [K in TKey]?: string } {
   const trimmed = value?.trim();
   return trimmed === undefined || trimmed === "" ? {} : { [key]: trimmed } as { readonly [K in TKey]: string };
+}
+
+const MAX_BULK_DELETE_FILES = 100;
+
+function normalizeBulkDeleteSelections(
+  files: readonly BulkDeleteFileSelection[]
+): readonly BulkDeleteFileSelection[] {
+  if (files.length === 0) {
+    throw badRequest("At least one file must be selected");
+  }
+  if (files.length > MAX_BULK_DELETE_FILES) {
+    throw badRequest(`At most ${String(MAX_BULK_DELETE_FILES)} files can be selected`);
+  }
+  const seen = new Set<string>();
+  return files.map((file) => {
+    const name = file.name.trim();
+    if (name === "") {
+      throw badRequest("File name is required");
+    }
+    if (seen.has(name)) {
+      throw badRequest(`Duplicate file selection '${name}'`);
+    }
+    seen.add(name);
+    if (file.expectedVersion !== undefined && !Number.isInteger(file.expectedVersion)) {
+      throw badRequest("expectedVersion must be an integer");
+    }
+    return {
+      name,
+      ...(file.expectedVersion === undefined ? {} : { expectedVersion: file.expectedVersion })
+    };
+  });
+}
+
+function bulkDeleteFailure(name: string, error: unknown): BulkDeleteFileFailure {
+  if (error instanceof FrameworkError) {
+    return {
+      name,
+      code: error.code,
+      message: error.message,
+      status: error.status
+    };
+  }
+  return {
+    name,
+    code: "UNKNOWN",
+    message: error instanceof Error ? error.message : "Bulk delete failed",
+    status: 500
+  };
 }
 
 function fileDashboardEntry(snapshot: DocumentSnapshot): Omit<FileDashboardEntry, "editable" | "deletable"> {

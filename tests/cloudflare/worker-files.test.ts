@@ -80,7 +80,9 @@ describe("CloudFrappe Worker files", () => {
       fakeExecutionContext()
     );
     expect(files.status).toBe(200);
-    await expect(files.text()).resolves.toContain("Upload File");
+    const html = await files.text();
+    expect(html).toContain("Upload File");
+    expect(html).toContain('formaction="/desk/files/bulk-delete"');
   });
 
   it("applies configured file upload limits to the Desk file manager", async () => {

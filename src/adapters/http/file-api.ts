@@ -111,6 +111,18 @@ export function createFileApi(options: FileApiOptions): Hono {
     return new Response(downloaded.object.body, { headers });
   });
 
+  app.post("/api/files/delete", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const body = await readJsonObject(c.req.raw, { maxJsonBytes });
+    const input = bulkDeleteInput(body);
+    const result = await options.files.bulkDelete({
+      actor,
+      files: input.files,
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: result });
+  });
+
   app.post("/api/files/:name/complete-upload", async (c) => {
     const actor = await options.actor(c.req.raw);
     const body = await readJsonObject(c.req.raw, { maxJsonBytes });
@@ -188,6 +200,47 @@ type DirectUploadInput = {
   readonly attachedTo?: Exclude<UpdateFileMetadataCommand["attachedTo"], null>;
   readonly expiresInSeconds?: number;
 };
+
+type BulkDeleteInput = {
+  readonly files: readonly { readonly name: string; readonly expectedVersion?: number }[];
+};
+
+function bulkDeleteInput(body: Record<string, unknown>): BulkDeleteInput {
+  const unknown = Object.keys(body).filter((key) => key !== "files");
+  if (unknown.length > 0) {
+    throw badRequest(`Unknown bulk file delete field '${unknown[0]}'`);
+  }
+  if (!Array.isArray(body.files)) {
+    throw badRequest("files must be an array");
+  }
+  return {
+    files: body.files.map((item, index) => bulkDeleteFileInput(item, index))
+  };
+}
+
+function bulkDeleteFileInput(
+  value: unknown,
+  index: number
+): { readonly name: string; readonly expectedVersion?: number } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw badRequest(`files[${String(index)}] must be an object`);
+  }
+  const item = value as Record<string, unknown>;
+  const unknown = Object.keys(item).filter((key) => !["name", "expectedVersion"].includes(key));
+  if (unknown.length > 0) {
+    throw badRequest(`Unknown bulk file delete field 'files[${String(index)}].${unknown[0]}'`);
+  }
+  if (typeof item.name !== "string") {
+    throw badRequest(`files[${String(index)}].name must be a string`);
+  }
+  if (item.expectedVersion !== undefined) {
+    if (typeof item.expectedVersion !== "number" || !Number.isInteger(item.expectedVersion)) {
+      throw badRequest(`files[${String(index)}].expectedVersion must be an integer`);
+    }
+    return { name: item.name, expectedVersion: item.expectedVersion };
+  }
+  return { name: item.name };
+}
 
 function directUploadInput(body: Record<string, unknown>): DirectUploadInput {
   const unknown = Object.keys(body).filter(

@@ -215,6 +215,7 @@ export function renderFileManager(
     .map((file) => {
       const attachedTo = attachmentLabel(file);
       return `<tr>
+        <td>${file.deletable ? renderFileBulkSelection(file) : ""}</td>
         <td><a href="/desk/files/${encodeURIComponent(file.name)}/content">${escapeHtml(file.filename)}</a></td>
         <td>${escapeHtml(file.name)}</td>
         <td>${escapeHtml(file.contentType)}</td>
@@ -254,11 +255,15 @@ export function renderFileManager(
     </div>
     <div class="actions"><button class="button primary" type="submit">Filter</button><a class="button" href="/desk/files">Clear</a></div>
   </form>
+  <section class="toolbar">
+    <form id="bulk-file-delete" method="post" action="/desk/files/bulk-delete"></form>
+    <button class="button danger" type="submit" form="bulk-file-delete" formaction="/desk/files/bulk-delete">Delete selected</button>
+  </section>
   <section class="panel">
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Filename</th><th>ID</th><th>Content Type</th><th>Size</th><th>Private</th><th>Attached To</th><th>Uploaded By</th><th>Uploaded At</th><th>Action</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="9" class="empty">No files found.</td></tr>`}</tbody>
+        <thead><tr><th>Select</th><th>Filename</th><th>ID</th><th>Content Type</th><th>Size</th><th>Private</th><th>Attached To</th><th>Uploaded By</th><th>Uploaded At</th><th>Action</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="10" class="empty">No files found.</td></tr>`}</tbody>
       </table>
     </div>
   </section>`;
@@ -332,6 +337,11 @@ function renderFileMetadataAction(file: FileDashboard["files"][number]): string 
     <label class="inline-checkbox"><span>Private</span><input name="is_private" type="checkbox" value="1"${file.isPrivate ? " checked" : ""}></label>
     <button class="button" type="submit">Save</button>
   </form>`;
+}
+
+function renderFileBulkSelection(file: FileDashboard["files"][number]): string {
+  return `<input class="bulk-select" form="bulk-file-delete" aria-label="Select ${escapeHtml(file.filename)}" name="file" value="${escapeHtml(file.name)}" type="checkbox">
+    <input form="bulk-file-delete" name="expectedVersion:${escapeHtml(file.name)}" value="${String(file.expectedVersion)}" type="hidden">`;
 }
 
 function renderFileDeleteAction(file: FileDashboard["files"][number]): string {
@@ -2502,6 +2512,10 @@ tr:last-child td { border-bottom: 0; }
   min-height: 44px;
 }
 .choice input {
+  width: auto;
+  min-height: auto;
+}
+.bulk-select {
   width: auto;
   min-height: auto;
 }

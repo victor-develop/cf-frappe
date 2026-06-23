@@ -823,6 +823,97 @@ describe("FileService", () => {
     expect(services.storage.has("acme/files/file_object-delete-me.txt")).toBe(false);
   });
 
+  it("bulk deletes selected files through the same event-sourced delete path", async () => {
+    const services = createFileServices(
+      ["create-1", "create-2", "request-delete-1", "delete-1"],
+      ["object-1", "object-2"]
+    );
+    const selected = await services.files.upload({
+      actor: owner,
+      filename: "selected.txt",
+      body: "selected"
+    });
+    const stale = await services.files.upload({
+      actor: owner,
+      filename: "stale.txt",
+      body: "stale"
+    });
+
+    const result = await services.files.bulkDelete({
+      actor: owner,
+      files: [
+        { name: selected.snapshot.name, expectedVersion: 1 },
+        { name: stale.snapshot.name, expectedVersion: 99 },
+        { name: "missing" }
+      ]
+    });
+
+    expect(result).toMatchObject({
+      deleted: [
+        {
+          name: selected.snapshot.name,
+          snapshot: { docstatus: "deleted", version: 3 }
+        }
+      ],
+      failed: [
+        {
+          name: stale.snapshot.name,
+          code: "DOCUMENT_CONFLICT",
+          status: 409,
+          message: "Expected version 99, found 1"
+        },
+        {
+          name: "missing",
+          code: "DOCUMENT_NOT_FOUND",
+          status: 404
+        }
+      ]
+    });
+    expect(services.storage.has("acme/files/file_object-1-selected.txt")).toBe(false);
+    expect(services.storage.has("acme/files/file_object-2-stale.txt")).toBe(true);
+  });
+
+  it("rejects invalid bulk file delete selections before writing events", async () => {
+    const services = createFileServices(["create"], ["object"]);
+    const uploaded = await services.files.upload({
+      actor: owner,
+      filename: "keep.txt",
+      body: "keep"
+    });
+
+    await expect(services.files.bulkDelete({ actor: owner, files: [] })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "At least one file must be selected"
+    });
+    await expect(
+      services.files.bulkDelete({
+        actor: owner,
+        files: [
+          { name: uploaded.snapshot.name },
+          { name: uploaded.snapshot.name }
+        ]
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: `Duplicate file selection '${uploaded.snapshot.name}'`
+    });
+    expect(services.storage.has("acme/files/file_object-keep.txt")).toBe(true);
+  });
+
+  it("rejects bulk file delete batches above the Worker-safe bound", async () => {
+    const services = createFileServices();
+
+    await expect(
+      services.files.bulkDelete({
+        actor: owner,
+        files: Array.from({ length: 101 }, (_, index) => ({ name: `file-${String(index)}` }))
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "At most 100 files can be selected"
+    });
+  });
+
   it("does not write objects when metadata preflight fails", async () => {
     const store = new InMemoryDocumentStore();
     const storage = new InMemoryFileStorage();

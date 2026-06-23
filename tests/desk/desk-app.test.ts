@@ -495,7 +495,7 @@ describe("Desk app", () => {
 
   it("renders a Desk file manager for upload, metadata, download, and delete workflows", async () => {
     const { app, storage } = makeFileDesk(owner, {
-      ids: ["create", "create-other", "metadata", "request-delete", "delete"],
+      ids: ["create", "create-other", "bulk-request-delete", "bulk-delete", "metadata", "request-delete", "delete"],
       fileIds: ["object", "other"]
     });
 
@@ -537,6 +537,8 @@ describe("Desk app", () => {
     expect(html).toContain('name="storage_state"');
     expect(html).toContain('name="scan_status"');
     expect(html).toContain('name="is_private"');
+    expect(html).toContain('formaction="/desk/files/bulk-delete"');
+    expect(html).toContain('name="file" value="file_other"');
 
     const filteredList = await app.request(
       "/desk/files?filename=hello&content_type=text/plain&uploaded_by=owner%40example.com&storage_state=available&is_private=1&limit=10"
@@ -560,6 +562,19 @@ describe("Desk app", () => {
     const invalidPrivacy = await app.request("/desk/files?is_private=maybe");
     expect(invalidPrivacy.status).toBe(400);
     await expect(invalidPrivacy.text()).resolves.toContain("Expected boolean query parameter");
+
+    const bulkDeleted = await app.request("/desk/files/bulk-delete", {
+      method: "POST",
+      body: new URLSearchParams({
+        file: "file_other",
+        "expectedVersion:file_other": "1"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(bulkDeleted.status).toBe(303);
+    expect(bulkDeleted.headers.get("location")).toBe("/desk/files");
+    expect(storage.has("acme/files/file_other-public.json")).toBe(false);
+    expect(storage.has("acme/files/file_object-hello.txt")).toBe(true);
 
     const genericCommand = await app.request("/desk/File/file_object/command/updateMetadata", {
       method: "POST",
@@ -592,6 +607,43 @@ describe("Desk app", () => {
     });
     expect(deleted.status).toBe(303);
     expect(storage.has("acme/files/file_object-hello.txt")).toBe(false);
+  });
+
+  it("reports Desk bulk file delete failures while preserving successful deletes", async () => {
+    const { app, storage } = makeFileDesk(owner, {
+      ids: ["create-1", "create-2", "request-delete-1", "delete-1"],
+      fileIds: ["selected", "stale"]
+    });
+    const selected = new FormData();
+    selected.append("file", new Blob(["selected"], { type: "text/plain" }), "selected.txt");
+    await app.request("/desk/files", {
+      method: "POST",
+      headers: { "content-length": "512" },
+      body: selected
+    });
+    const stale = new FormData();
+    stale.append("file", new Blob(["stale"], { type: "text/plain" }), "stale.txt");
+    await app.request("/desk/files", {
+      method: "POST",
+      headers: { "content-length": "512" },
+      body: stale
+    });
+
+    const bulkBody = new URLSearchParams();
+    bulkBody.append("file", "file_selected");
+    bulkBody.set("expectedVersion:file_selected", "1");
+    bulkBody.append("file", "file_stale");
+    bulkBody.set("expectedVersion:file_stale", "99");
+    const response = await app.request("/desk/files/bulk-delete", {
+      method: "POST",
+      body: bulkBody,
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toContain("1 file could not be deleted");
+    expect(storage.has("acme/files/file_selected-selected.txt")).toBe(false);
+    expect(storage.has("acme/files/file_stale-stale.txt")).toBe(true);
   });
 
   it("manages record attachments directly from generated Desk document forms", async () => {

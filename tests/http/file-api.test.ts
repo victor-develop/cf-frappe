@@ -301,6 +301,67 @@ describe("file api", () => {
     });
   });
 
+  it("bulk deletes files through the file API with per-file outcomes", async () => {
+    const { app, storage } = makeAppFixture(
+      1024,
+      ["create-1", "create-2", "request-delete-1", "delete-1"],
+      ["object-1", "object-2"]
+    );
+    await app.request("/api/files?filename=selected.txt", {
+      method: "POST",
+      headers: userHeaders("owner@example.com", "User"),
+      body: "selected"
+    });
+    await app.request("/api/files?filename=stale.txt", {
+      method: "POST",
+      headers: userHeaders("owner@example.com", "User"),
+      body: "stale"
+    });
+
+    const response = await app.request("/api/files/delete", {
+      method: "POST",
+      headers: jsonHeaders("owner@example.com", "User"),
+      body: JSON.stringify({
+        files: [
+          { name: "file_object-1", expectedVersion: 1 },
+          { name: "file_object-2", expectedVersion: 99 }
+        ]
+      })
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        deleted: [
+          {
+            name: "file_object-1",
+            snapshot: { docstatus: "deleted", version: 3 }
+          }
+        ],
+        failed: [
+          {
+            name: "file_object-2",
+            code: "DOCUMENT_CONFLICT",
+            status: 409,
+            message: "Expected version 99, found 1"
+          }
+        ]
+      }
+    });
+    expect(storage.has("acme/files/file_object-1-selected.txt")).toBe(false);
+    expect(storage.has("acme/files/file_object-2-stale.txt")).toBe(true);
+
+    const invalid = await app.request("/api/files/delete", {
+      method: "POST",
+      headers: jsonHeaders("owner@example.com", "User"),
+      body: JSON.stringify({ files: [] })
+    });
+    expect(invalid.status).toBe(400);
+    await expect(invalid.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "At least one file must be selected" }
+    });
+  });
+
   it("reserves and completes direct uploads through the file API", async () => {
     const { app, storage } = makeAppFixture(1024, ["reserve", "finalize"], ["direct"]);
 
