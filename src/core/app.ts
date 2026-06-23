@@ -6,6 +6,7 @@ import { createRegistry, type DocumentHooks, type ModelRegistry, type RegistryOp
 import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-format.js";
 import type { ReportDefinition } from "./reports.js";
 import type { DocTypeDefinition } from "./types.js";
+import type { WorkspaceDefinition } from "./workspace.js";
 
 export interface FrameworkAppDefinition {
   readonly name: string;
@@ -17,6 +18,7 @@ export interface FrameworkAppDefinition {
   readonly letterheads?: readonly PrintLetterheadDefinition[];
   readonly printFormats?: readonly PrintFormatDefinition[];
   readonly reports?: readonly ReportDefinition[];
+  readonly workspaces?: readonly WorkspaceDefinition[];
   readonly clientScripts?: readonly ClientScriptDefinition[];
   readonly dataPatches?: readonly DataPatchDefinition[];
   readonly hooks?: Readonly<Record<string, readonly DocumentHooks[]>>;
@@ -41,6 +43,7 @@ export function defineApp(input: FrameworkAppDefinition): FrameworkAppDefinition
     letterheads: Object.freeze([...(input.letterheads ?? [])]),
     printFormats: Object.freeze([...(input.printFormats ?? [])]),
     reports: Object.freeze([...(input.reports ?? [])]),
+    workspaces: Object.freeze([...(input.workspaces ?? [])]),
     clientScripts: Object.freeze([...(input.clientScripts ?? [])]),
     dataPatches: Object.freeze([...(input.dataPatches ?? [])]),
     hooks: freezeHooks(input.hooks ?? {})
@@ -65,6 +68,7 @@ export function registryOptionsFromApps(apps: readonly FrameworkAppDefinition[])
     letterheads: orderedApps.flatMap((app) => app.letterheads ?? []),
     printFormats: orderedApps.flatMap((app) => app.printFormats ?? []),
     reports: orderedApps.flatMap((app) => app.reports ?? []),
+    workspaces: orderedApps.flatMap((app) => app.workspaces ?? []),
     clientScripts: orderedApps.flatMap((app) => app.clientScripts ?? []),
     dataPatches: orderedApps.flatMap((app) => app.dataPatches ?? []),
     hooks

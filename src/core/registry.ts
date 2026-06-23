@@ -9,6 +9,7 @@ import { assertPrintFormatMatchesDocType, assertPrintLetterheadValid } from "./p
 import type { ReportDefinition } from "./reports.js";
 import { assertReportDefinition, assertReportMatchesDocType } from "./reports.js";
 import type { InstalledAppDefinition } from "./app.js";
+import { assertWorkspaceDefinition, defineWorkspace, type WorkspaceDefinition } from "./workspace.js";
 import type {
   DocTypeDefinition,
   DocumentData,
@@ -43,6 +44,7 @@ export interface RegistryOptions {
   readonly letterheads?: readonly PrintLetterheadDefinition[];
   readonly printFormats?: readonly PrintFormatDefinition[];
   readonly reports?: readonly ReportDefinition[];
+  readonly workspaces?: readonly WorkspaceDefinition[];
   readonly clientScripts?: readonly ClientScriptDefinition[];
   readonly dataPatches?: readonly DataPatchDefinition[];
   readonly hooks?: Readonly<Record<string, readonly DocumentHooks[]>>;
@@ -54,6 +56,7 @@ export class ModelRegistry {
   private readonly letterheads = new Map<string, PrintLetterheadDefinition>();
   private readonly printFormats = new Map<string, PrintFormatDefinition>();
   private readonly reports = new Map<string, ReportDefinition>();
+  private readonly workspaces = new Map<string, WorkspaceDefinition>();
   private readonly clientScripts = new Map<string, ClientScriptDefinition>();
   private readonly dataPatches = new Map<string, DataPatchDefinition>();
   private readonly hooks = new Map<string, readonly DocumentHooks[]>();
@@ -74,6 +77,9 @@ export class ModelRegistry {
     }
     for (const format of options.printFormats ?? []) {
       this.registerPrintFormat(format);
+    }
+    for (const workspace of options.workspaces ?? []) {
+      this.registerWorkspace(workspace);
     }
     for (const script of options.clientScripts ?? []) {
       this.registerClientScript(script);
@@ -232,6 +238,18 @@ export class ModelRegistry {
     this.dataPatches.set(definition.id, definition);
   }
 
+  registerWorkspace(workspace: WorkspaceDefinition): void {
+    const definition = defineWorkspace(workspace);
+    if (this.workspaces.has(definition.name)) {
+      throw new FrameworkError("WORKSPACE_DUPLICATE", `Workspace '${definition.name}' is already registered`, {
+        status: 409
+      });
+    }
+    assertWorkspaceDefinition(definition);
+    this.assertWorkspaceReferencesResolve(definition);
+    this.workspaces.set(definition.name, definition);
+  }
+
   registerHooks(doctype: string, hooks: DocumentHooks): void {
     if (!this.doctypes.has(doctype)) {
       throw new FrameworkError("DOCTYPE_NOT_FOUND", `DocType '${doctype}' is not registered`, {
@@ -319,8 +337,43 @@ export class ModelRegistry {
     return [...this.dataPatches.values()];
   }
 
+  getWorkspace(workspaceName: string): WorkspaceDefinition {
+    const definition = this.workspaces.get(workspaceName);
+    if (!definition) {
+      throw new FrameworkError("WORKSPACE_NOT_FOUND", `Workspace '${workspaceName}' is not registered`, {
+        status: 404
+      });
+    }
+    return definition;
+  }
+
+  listWorkspaces(): readonly WorkspaceDefinition[] {
+    return [...this.workspaces.values()].sort((left, right) => left.name.localeCompare(right.name));
+  }
+
   hooksFor(doctype: string): readonly DocumentHooks[] {
     return this.hooks.get(doctype) ?? emptyHooks;
+  }
+
+  private assertWorkspaceReferencesResolve(workspace: WorkspaceDefinition): void {
+    for (const section of workspace.sections) {
+      for (const shortcut of section.shortcuts) {
+        if (shortcut.kind === "doctype" && !this.doctypes.has(shortcut.target ?? "")) {
+          throw new FrameworkError(
+            "WORKSPACE_INVALID",
+            `Workspace '${workspace.name}' shortcut '${shortcut.name}' references unknown DocType '${shortcut.target ?? ""}'`,
+            { status: 400 }
+          );
+        }
+        if (shortcut.kind === "report" && !this.reports.has(shortcut.target ?? "")) {
+          throw new FrameworkError(
+            "WORKSPACE_INVALID",
+            `Workspace '${workspace.name}' shortcut '${shortcut.name}' references unknown report '${shortcut.target ?? ""}'`,
+            { status: 400 }
+          );
+        }
+      }
+    }
   }
 }
 

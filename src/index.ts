@@ -54,6 +54,7 @@ export * from "./core/types.js";
 export * from "./core/user-accounts.js";
 export * from "./core/user-profiles.js";
 export * from "./core/user-permissions.js";
+export * from "./core/workspace.js";
 export * from "./core/workflow.js";
 export * from "./ports/audit-event-store.js";
 export * from "./ports/account-recovery.js";

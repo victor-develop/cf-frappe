@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the bulk file metadata workflow slice:
+As of the metadata-defined workspace slice:
 
-- Vitest files: `69`
-- Vitest cases: `644`
+- Vitest files: `70`
+- Vitest cases: `649`
 
 ## Implication
 

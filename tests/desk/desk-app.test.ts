@@ -6,6 +6,7 @@ import {
   defineClientScript,
   defineDataPatch,
   defineDocType,
+  defineWorkspace,
   deterministicIds,
   DocumentService,
   fileDocType,
@@ -23,6 +24,7 @@ import {
   JobRetryService,
   JobScheduleService,
   QueryService,
+  ReportService,
   RoleService,
   SYSTEM_MANAGER_ROLE,
   UserAccountService,
@@ -41,6 +43,7 @@ import {
   manager,
   noteDocType,
   now,
+  openNotesReport,
   owner
 } from "../helpers";
 
@@ -205,6 +208,62 @@ describe("Desk app", () => {
     expect(html).toContain("/desk/Note");
     expect(html).toContain("/desk/reports/Open%20Notes");
     expect(html).toContain("DocType");
+  });
+
+  it("renders metadata-defined workspaces with permissioned shortcuts", async () => {
+    const registry = createRegistry({
+      doctypes: [noteDocType],
+      reports: [openNotesReport],
+      workspaces: [
+        defineWorkspace({
+          name: "Operations",
+          label: "Operations",
+          description: "Daily workspace",
+          roles: ["User"],
+          sections: [
+            {
+              name: "main",
+              label: "Main",
+              shortcuts: [
+                { name: "notes", label: "Notes", kind: "doctype", target: "Note" },
+                { name: "open-notes", label: "Open Notes", kind: "report", target: "Open Notes" },
+                { name: "manager-only", label: "Manager Only", kind: "doctype", target: "Note", roles: ["Task Manager"] }
+              ]
+            }
+          ]
+        })
+      ]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry,
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["workspace-test"])
+    });
+    const queries = new QueryService({ registry, projections: store });
+    const reports = new ReportService({ registry, queries });
+    const app = createDeskApp({
+      registry,
+      documents,
+      queries,
+      reports,
+      actor: () => owner
+    });
+
+    const home = await app.request("/desk");
+    expect(home.status).toBe(200);
+    const homeHtml = await home.text();
+    expect(homeHtml).toContain('href="/desk/workspaces/Operations"');
+    expect(homeHtml).toContain("Daily workspace");
+
+    const workspace = await app.request("/desk/workspaces/Operations");
+    expect(workspace.status).toBe(200);
+    const html = await workspace.text();
+    expect(html).toContain("Daily workspace");
+    expect(html).toContain('href="/desk/Note"');
+    expect(html).toContain('href="/desk/reports/Open%20Notes"');
+    expect(html).not.toContain("Manager Only");
   });
 
   it("renders and updates a durable notification inbox in Desk", async () => {

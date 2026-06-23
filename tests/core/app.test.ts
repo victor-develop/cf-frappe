@@ -8,6 +8,7 @@ import {
   definePrintFormat,
   definePrintLetterhead,
   defineReport,
+  defineWorkspace,
   FrameworkError,
   registryOptionsFromApps,
   resolveAppInstallOrder
@@ -60,7 +61,7 @@ describe("app manifests", () => {
     expect(registry.hooksFor("Task")).toEqual([coreHook, auditHook]);
   });
 
-  it("carries print, report, and letterhead metadata from apps", () => {
+  it("carries print, report, workspace, and letterhead metadata from apps", () => {
     const Note = defineDocType({ name: "Note", fields: [{ name: "title", type: "text" }] });
     const letterhead = definePrintLetterhead({ name: "Standard", headerHtml: "<strong>Acme</strong>" });
     const printFormat = definePrintFormat({
@@ -70,6 +71,18 @@ describe("app manifests", () => {
       sections: [{ fields: [{ field: "title" }] }]
     });
     const report = defineReport({ name: "All Notes", doctype: "Note", columns: [{ name: "title" }] });
+    const workspace = defineWorkspace({
+      name: "Operations",
+      sections: [
+        {
+          name: "main",
+          shortcuts: [
+            { name: "notes", kind: "doctype", target: "Note" },
+            { name: "all-notes", kind: "report", target: "All Notes" }
+          ]
+        }
+      ]
+    });
     const clientScript = defineClientScript({ name: "note-form", doctype: "Note", src: "/assets/note-form.js" });
 
     const registry = createRegistryFromApps([
@@ -79,6 +92,7 @@ describe("app manifests", () => {
         letterheads: [letterhead],
         printFormats: [printFormat],
         reports: [report],
+        workspaces: [workspace],
         clientScripts: [clientScript]
       })
     ]);
@@ -86,6 +100,7 @@ describe("app manifests", () => {
     expect(registry.getPrintLetterhead("Standard")).toBe(letterhead);
     expect(registry.getPrintFormat("Note Standard")).toBe(printFormat);
     expect(registry.getReport("All Notes")).toBe(report);
+    expect(registry.getWorkspace("Operations")).toEqual(workspace);
     expect(registry.listClientScripts("Note")).toEqual([clientScript]);
   });
 
@@ -126,6 +141,12 @@ describe("app manifests", () => {
       name: "notes",
       modules: ["Notes"],
       doctypes: [defineDocType({ name: "Note", fields: [] })],
+      workspaces: [
+        defineWorkspace({
+          name: "Operations",
+          sections: [{ name: "main", shortcuts: [{ name: "notes", kind: "doctype", target: "Note" }] }]
+        })
+      ],
       hooks: { Note: [hook] },
       clientScripts: [defineClientScript({ name: "note-form", doctype: "Note", src: "/assets/note-form.js" })]
     });
@@ -134,6 +155,7 @@ describe("app manifests", () => {
 
     expect(options.apps).toEqual([{ name: "notes", modules: ["Notes"], dependencies: [] }]);
     expect(options.doctypes?.map((doctype) => doctype.name)).toEqual(["Note"]);
+    expect(options.workspaces?.map((workspace) => workspace.name)).toEqual(["Operations"]);
     expect(options.clientScripts?.map((script) => script.name)).toEqual(["note-form"]);
     expect(options.hooks?.Note).toEqual([hook]);
   });

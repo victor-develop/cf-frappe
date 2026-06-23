@@ -27,6 +27,12 @@ import { FrameworkError } from "../../core/errors.js";
 import { can } from "../../core/permissions.js";
 import type { ModelRegistry } from "../../core/registry.js";
 import { USER_PROFILE_FIELDS, type UserProfileInput } from "../../core/user-profiles.js";
+import {
+  canReadWorkspace,
+  canReadWorkspaceShortcut,
+  type WorkspaceDefinition,
+  type WorkspaceShortcutDefinition
+} from "../../core/workspace.js";
 import { allowedWorkflowTransitions } from "../../core/workflow.js";
 import {
   CHILD_TABLE_ROW_INDEX_FIELD,
@@ -76,13 +82,16 @@ import {
   renderUserNotificationInbox,
   renderUserAccountAdmin,
   renderUserPermissionAdmin,
+  renderWorkspacePage,
   type DeskLayoutOptions,
   type DeskNavLink,
   type FormLifecycleAction,
   type FormLinkOptions,
   type FormTableDefinitions,
   type FormWorkflowAction,
-  type ListBulkAction
+  type ListBulkAction,
+  type WorkspacePageView,
+  type WorkspaceShortcutView
 } from "./render.js";
 
 const MAX_DESK_FORM_BYTES = 1_048_576;
@@ -151,15 +160,17 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
+    const workspaces = listWorkspaces(options, actor);
     return html(
       renderDeskLayoutFor(options, {
         title: "Home",
         adminLinks: adminLinksFor(options, actor),
         doctypes,
         reports,
+        workspaces,
         showNotifications: options.notifications !== undefined,
         showFiles: options.files !== undefined,
-        body: renderDeskHome(doctypes, reports)
+        body: renderDeskHome(doctypes, reports, workspaces)
       })
     );
   });
@@ -207,16 +218,44 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
+    const workspaces = listWorkspaces(options, actor);
     return html(
       renderDeskLayoutFor(options, {
         title: "Reports",
         adminLinks: adminLinksFor(options, actor),
         doctypes,
         reports,
+        workspaces,
         showFiles: options.files !== undefined,
         body: renderReportList(reports, {
           ...(options.savedReports === undefined ? {} : { builderDoctypes: doctypes })
         })
+      })
+    );
+  });
+
+  app.get("/desk/workspaces/:workspace", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const workspace = options.registry.getWorkspace(c.req.param("workspace"));
+    if (!canReadWorkspace(actor, workspace)) {
+      throw new FrameworkError("PERMISSION_DENIED", `Actor '${actor.id}' cannot read workspace '${workspace.name}'`, {
+        status: 403
+      });
+    }
+    const doctypes = options.queries.listDoctypes(actor);
+    const reports = listReports(options, actor);
+    const workspaces = listWorkspaces(options, actor);
+    const page = workspacePageFor(options, actor, workspace, doctypes, reports);
+    return html(
+      renderDeskLayoutFor(options, {
+        title: workspace.label ?? workspace.name,
+        activeWorkspace: workspace.name,
+        adminLinks: adminLinksFor(options, actor),
+        doctypes,
+        reports,
+        workspaces,
+        showFiles: options.files !== undefined,
+        body: renderWorkspacePage(page)
       })
     );
   });
@@ -1649,6 +1688,92 @@ function adminLinksFor(options: DeskAppOptions, actor: Actor): readonly DeskNavL
       ? []
       : [{ id: "job-schedules", label: "Job Schedules", href: "/desk/admin/jobs/schedules" }])
   ];
+}
+
+function listWorkspaces(options: DeskAppOptions, actor: Actor): readonly WorkspaceDefinition[] {
+  return options.registry.listWorkspaces().filter((workspace) => canReadWorkspace(actor, workspace));
+}
+
+function workspacePageFor(
+  options: DeskAppOptions,
+  actor: Actor,
+  workspace: WorkspaceDefinition,
+  doctypes: readonly DocTypeDefinition[],
+  reports: ReturnType<typeof listReports>
+): WorkspacePageView {
+  const adminLinks = adminLinksFor(options, actor);
+  return {
+    workspace,
+    sections: workspace.sections.map((section) => ({
+      name: section.name,
+      label: section.label ?? section.name,
+      shortcuts: section.shortcuts.flatMap((shortcut) =>
+        workspaceShortcutFor(options, actor, shortcut, doctypes, reports, adminLinks)
+      )
+    }))
+  };
+}
+
+function workspaceShortcutFor(
+  options: DeskAppOptions,
+  actor: Actor,
+  shortcut: WorkspaceShortcutDefinition,
+  doctypes: readonly DocTypeDefinition[],
+  reports: ReturnType<typeof listReports>,
+  adminLinks: readonly DeskNavLink[]
+): readonly WorkspaceShortcutView[] {
+  if (!canReadWorkspaceShortcut(actor, shortcut)) {
+    return [];
+  }
+  if (shortcut.kind === "doctype") {
+    const doctype = doctypes.find((item) => item.name === shortcut.target);
+    return doctype
+      ? [{
+          name: shortcut.name,
+          label: shortcut.label ?? doctype.label ?? doctype.name,
+          ...(shortcut.description === undefined ? {} : { description: shortcut.description }),
+          kind: shortcut.kind,
+          href: `/desk/${encodeURIComponent(doctype.name)}`
+        }]
+      : [];
+  }
+  if (shortcut.kind === "report") {
+    const report = reports.find((item) => item.name === shortcut.target);
+    return report
+      ? [{
+          name: shortcut.name,
+          label: shortcut.label ?? report.label ?? report.name,
+          ...(shortcut.description === undefined ? {} : { description: shortcut.description }),
+          kind: shortcut.kind,
+          href: `/desk/reports/${encodeURIComponent(report.name)}`
+        }]
+      : [];
+  }
+  if (shortcut.kind === "file") {
+    return options.files === undefined ? [] : [workspaceShortcutView(shortcut, "Files", "/desk/files")];
+  }
+  if (shortcut.kind === "notifications") {
+    return options.notifications === undefined ? [] : [workspaceShortcutView(shortcut, "Inbox", "/desk/notifications")];
+  }
+  if (shortcut.kind === "admin") {
+    const link = adminLinks.find((item) => item.id === shortcut.target);
+    return link === undefined ? [] : [workspaceShortcutView(shortcut, link.label, link.href)];
+  }
+  return [workspaceShortcutView(shortcut, shortcut.label ?? shortcut.name, shortcut.href ?? "/desk")];
+}
+
+function workspaceShortcutView(
+  shortcut: WorkspaceShortcutDefinition,
+  fallbackLabel: string,
+  href: string
+): WorkspaceShortcutView {
+  return {
+    name: shortcut.name,
+    label: shortcut.label ?? fallbackLabel,
+    ...(shortcut.description === undefined ? {} : { description: shortcut.description }),
+    kind: shortcut.kind,
+    href
+  };
 }
 
 function listPrintFormats(options: DeskAppOptions, actor: Actor, doctype?: string) {

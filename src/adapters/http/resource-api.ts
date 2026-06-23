@@ -19,10 +19,19 @@ import type { UserAccountService } from "../../application/user-account-service.
 import type { UserNotificationService } from "../../application/user-notification-service.js";
 import type { UserPermissionService } from "../../application/user-permission-service.js";
 import type { UserProfileService } from "../../application/user-profile-service.js";
-import { badRequest } from "../../core/errors.js";
+import { badRequest, permissionDenied } from "../../core/errors.js";
 import { isListFilterOperator } from "../../core/list-view.js";
+import { can } from "../../core/permissions.js";
+import { canReadReport } from "../../core/reports.js";
 import type { ModelRegistry } from "../../core/registry.js";
-import type { DocumentData, JsonPrimitive, ListDocumentsFilter, MutableDocumentData } from "../../core/types.js";
+import type { Actor, DocumentData, JsonPrimitive, ListDocumentsFilter, MutableDocumentData } from "../../core/types.js";
+import { SYSTEM_MANAGER_ROLE } from "../../core/types.js";
+import {
+  canReadWorkspace,
+  canReadWorkspaceShortcut,
+  type WorkspaceDefinition,
+  type WorkspaceShortcutDefinition
+} from "../../core/workspace.js";
 import type { ActorResolver } from "./actor.js";
 import { createAuthApi, type AuthSessionOptions } from "./auth-api.js";
 import { createAuditApi } from "./audit-api.js";
@@ -144,6 +153,26 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
   app.get("/api/meta/doctypes/:doctype/list-view", async (c) => {
     const actor = await resolveActor(c.req.raw);
     return c.json({ data: options.queries.getListView(actor, c.req.param("doctype")) });
+  });
+
+  app.get("/api/meta/workspaces", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    const access = workspaceMetadataAccess(options, actor);
+    return c.json({
+      data: options.registry
+        .listWorkspaces()
+        .filter((workspace) => canReadWorkspace(actor, workspace))
+        .map((workspace) => workspaceMetadataForActor(actor, workspace, access))
+    });
+  });
+
+  app.get("/api/meta/workspaces/:workspace", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    const workspace = options.registry.getWorkspace(c.req.param("workspace"));
+    if (!canReadWorkspace(actor, workspace)) {
+      throw permissionDenied(`Actor '${actor.id}' cannot read workspace '${workspace.name}'`);
+    }
+    return c.json({ data: workspaceMetadataForActor(actor, workspace, workspaceMetadataAccess(options, actor)) });
   });
 
   app.get("/api/link-options/:doctype/:field", async (c) => {
@@ -678,6 +707,81 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
   });
 
   return app;
+}
+
+interface WorkspaceMetadataAccess {
+  readonly doctypes: ReadonlySet<string>;
+  readonly reports: ReadonlySet<string>;
+  readonly files: boolean;
+  readonly notifications: boolean;
+  readonly adminTargets: ReadonlySet<string>;
+}
+
+function workspaceMetadataAccess(options: ResourceApiOptions, actor: Actor): WorkspaceMetadataAccess {
+  return {
+    doctypes: new Set(options.queries.listDoctypes(actor).map((doctype) => doctype.name)),
+    reports: new Set(
+      options.registry
+        .listReports()
+        .filter((report) => canReadReport(actor, report) && can(actor, options.registry.get(report.doctype), report.permissionAction ?? "read"))
+        .map((report) => report.name)
+    ),
+    files: options.files !== undefined,
+    notifications: options.notifications !== undefined,
+    adminTargets: workspaceAdminTargets(options, actor)
+  };
+}
+
+function workspaceAdminTargets(options: ResourceApiOptions, actor: Actor): ReadonlySet<string> {
+  if (!actor.roles.includes(SYSTEM_MANAGER_ROLE)) {
+    return new Set();
+  }
+  return new Set([
+    ...(options.userAccounts === undefined ? [] : ["users"]),
+    ...(options.roles === undefined ? [] : ["roles"]),
+    ...(options.userPermissions === undefined ? [] : ["user-permissions"]),
+    ...(options.dataPatches === undefined ? [] : ["data-patches"]),
+    ...(options.jobs === undefined ? [] : ["jobs"]),
+    ...(options.jobSchedules === undefined ? [] : ["job-schedules"])
+  ]);
+}
+
+function workspaceMetadataForActor(
+  actor: Actor,
+  workspace: WorkspaceDefinition,
+  access: WorkspaceMetadataAccess
+): WorkspaceDefinition {
+  return {
+    ...workspace,
+    sections: workspace.sections.map((section) => ({
+      ...section,
+      shortcuts: section.shortcuts.filter(
+        (shortcut) => canReadWorkspaceShortcut(actor, shortcut) && canReadWorkspaceShortcutTarget(shortcut, access)
+      )
+    }))
+  };
+}
+
+function canReadWorkspaceShortcutTarget(
+  shortcut: WorkspaceShortcutDefinition,
+  access: WorkspaceMetadataAccess
+): boolean {
+  if (shortcut.kind === "doctype") {
+    return access.doctypes.has(shortcut.target ?? "");
+  }
+  if (shortcut.kind === "report") {
+    return access.reports.has(shortcut.target ?? "");
+  }
+  if (shortcut.kind === "file") {
+    return access.files;
+  }
+  if (shortcut.kind === "notifications") {
+    return access.notifications;
+  }
+  if (shortcut.kind === "admin") {
+    return access.adminTargets.has(shortcut.target ?? "");
+  }
+  return true;
 }
 
 async function readJson(

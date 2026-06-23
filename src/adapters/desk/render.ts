@@ -16,6 +16,7 @@ import {
 } from "../../core/types.js";
 import { isReportChartColor, type ReportDefinition } from "../../core/reports.js";
 import type { ClientScriptDefinition, ClientScriptScope } from "../../core/client-script.js";
+import type { WorkspaceDefinition, WorkspaceShortcutKind } from "../../core/workspace.js";
 import type {
   DocumentAssignments,
   DocumentFollowers,
@@ -72,11 +73,13 @@ export interface DeskLayoutOptions {
   readonly active?: string;
   readonly activeReport?: string;
   readonly activeAdmin?: string;
+  readonly activeWorkspace?: string;
   readonly showFiles?: boolean;
   readonly showNotifications?: boolean;
   readonly adminLinks?: readonly DeskNavLink[];
   readonly doctypes: readonly DocTypeDefinition[];
   readonly reports?: readonly ReportDefinition[];
+  readonly workspaces?: readonly WorkspaceDefinition[];
   readonly message?: string;
 }
 
@@ -90,7 +93,32 @@ export interface DocumentSharePanelState extends DocumentShareState {
   readonly delegablePermissions: readonly DocumentSharePermission[];
 }
 
+export interface WorkspaceShortcutView {
+  readonly name: string;
+  readonly label: string;
+  readonly description?: string;
+  readonly kind: WorkspaceShortcutKind;
+  readonly href: string;
+}
+
+export interface WorkspaceSectionView {
+  readonly name: string;
+  readonly label: string;
+  readonly shortcuts: readonly WorkspaceShortcutView[];
+}
+
+export interface WorkspacePageView {
+  readonly workspace: WorkspaceDefinition;
+  readonly sections: readonly WorkspaceSectionView[];
+}
+
 export function renderDeskLayout(options: DeskLayoutOptions): string {
+  const workspaceNav = (options.workspaces ?? [])
+    .map(
+      (workspace) =>
+        `<a class="nav-link${workspace.name === options.activeWorkspace ? " is-active" : ""}" href="/desk/workspaces/${encodeURIComponent(workspace.name)}">${escapeHtml(workspace.label ?? workspace.name)}</a>`
+    )
+    .join("");
   const nav = options.doctypes
     .map(
       (doctype) =>
@@ -122,6 +150,7 @@ export function renderDeskLayout(options: DeskLayoutOptions): string {
   <aside class="sidebar" aria-label="Desk navigation">
     <a class="brand" href="/desk">cf-frappe</a>
     <nav>
+      ${workspaceNav ? `<p class="nav-heading">Workspaces</p>${workspaceNav}` : ""}
       ${nav ? `<p class="nav-heading">DocTypes</p>${nav}` : ""}
       ${reportNav ? `<p class="nav-heading">Reports</p>${reportNav}` : ""}
       ${options.showNotifications ? `<p class="nav-heading">Notifications</p><a class="nav-link" href="/desk/notifications">Inbox</a>` : ""}
@@ -145,8 +174,17 @@ export function renderDeskLayout(options: DeskLayoutOptions): string {
 
 export function renderDeskHome(
   doctypes: readonly DocTypeDefinition[],
-  reports: readonly ReportDefinition[] = []
+  reports: readonly ReportDefinition[] = [],
+  workspaces: readonly WorkspaceDefinition[] = []
 ): string {
+  const workspaceCards = workspaces
+    .map(
+      (workspace) => `<a class="workspace-card" href="/desk/workspaces/${encodeURIComponent(workspace.name)}">
+        <strong>${escapeHtml(workspace.label ?? workspace.name)}</strong>
+        <span>${escapeHtml(workspace.description ?? workspace.module ?? "")}</span>
+      </a>`
+    )
+    .join("");
   const rows = doctypes
     .map(
       (doctype) => `<tr>
@@ -157,7 +195,8 @@ export function renderDeskHome(
       </tr>`
     )
     .join("");
-  return `<section class="panel">
+  return `${workspaceCards ? `<section class="workspace-grid">${workspaceCards}</section>` : ""}
+  <section class="panel">
     <div class="table-wrap">
       <table>
         <thead><tr><th>DocType</th><th>Module</th><th>Fields</th><th>Description</th></tr></thead>
@@ -166,6 +205,48 @@ export function renderDeskHome(
     </div>
   </section>
   ${renderReportList(reports)}`;
+}
+
+export function renderWorkspacePage(view: WorkspacePageView): string {
+  const sections = view.sections
+    .map((section) => {
+      const shortcuts = section.shortcuts
+        .map(
+          (shortcut) => `<a class="workspace-card" href="${escapeHtml(shortcut.href)}">
+            <strong>${escapeHtml(shortcut.label)}</strong>
+            <span>${escapeHtml(shortcut.description ?? workspaceShortcutKindLabel(shortcut.kind))}</span>
+          </a>`
+        )
+        .join("");
+      return `<section class="workspace-section">
+        <h2>${escapeHtml(section.label)}</h2>
+        <div class="workspace-grid">${shortcuts || `<p class="empty">No shortcuts available.</p>`}</div>
+      </section>`;
+    })
+    .join("");
+  const description = view.workspace.description
+    ? `<p class="muted">${escapeHtml(view.workspace.description)}</p>`
+    : "";
+  return `${description}${sections || `<section class="panel form"><p class="empty">No shortcuts available.</p></section>`}`;
+}
+
+function workspaceShortcutKindLabel(kind: WorkspaceShortcutKind): string {
+  if (kind === "doctype") {
+    return "DocType";
+  }
+  if (kind === "report") {
+    return "Report";
+  }
+  if (kind === "file") {
+    return "Files";
+  }
+  if (kind === "notifications") {
+    return "Notifications";
+  }
+  if (kind === "admin") {
+    return "Admin";
+  }
+  return "Link";
 }
 
 export function renderUserNotificationInbox(inbox: UserNotificationInbox): string {
@@ -2277,6 +2358,27 @@ h3 { margin: 0 0 12px; font-size: 16px; line-height: 1.35; letter-spacing: 0; }
   margin-bottom: 16px;
 }
 .toolbar .compact-field { min-width: 160px; }
+.workspace-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.workspace-section { margin-bottom: 18px; }
+.workspace-section h2 { margin-bottom: 10px; }
+.workspace-card {
+  display: grid;
+  gap: 4px;
+  min-height: 88px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+}
+.workspace-card:hover { border-color: var(--primary); }
+.workspace-card span { color: var(--muted); }
 .panel {
   background: var(--surface);
   border: 1px solid var(--border);

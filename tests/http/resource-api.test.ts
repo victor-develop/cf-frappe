@@ -1,5 +1,24 @@
-import { createResourceApi, SYSTEM_MANAGER_ROLE, unsafeHeaderActorResolver } from "../../src";
-import { createLinkedServices, createSeriesServices, createServices, owner } from "../helpers";
+import {
+  createRegistry,
+  createResourceApi,
+  defineWorkspace,
+  deterministicIds,
+  DocumentService,
+  fixedClock,
+  InMemoryDocumentStore,
+  QueryService,
+  SYSTEM_MANAGER_ROLE,
+  unsafeHeaderActorResolver
+} from "../../src";
+import {
+  createLinkedServices,
+  createSeriesServices,
+  createServices,
+  noteDocType,
+  now,
+  openNotesReport,
+  owner
+} from "../helpers";
 
 describe("resource api", () => {
   function makeApp() {
@@ -49,6 +68,53 @@ describe("resource api", () => {
       actor: unsafeHeaderActorResolver
     });
     return { app, services };
+  }
+
+  function makeWorkspaceApp() {
+    const registry = createRegistry({
+      doctypes: [noteDocType],
+      reports: [openNotesReport],
+      workspaces: [
+        defineWorkspace({
+          name: "Operations",
+          label: "Operations",
+          roles: ["User"],
+          sections: [
+            {
+              name: "main",
+              label: "Main",
+              shortcuts: [
+                { name: "notes", kind: "doctype", target: "Note" },
+                { name: "open-notes", kind: "report", target: "Open Notes" },
+                { name: "manager-only", kind: "doctype", target: "Note", roles: ["Task Manager"] },
+                { name: "files", kind: "file" },
+                { name: "inbox", kind: "notifications" },
+                { name: "users-admin", kind: "admin", target: "users" }
+              ]
+            }
+          ]
+        }),
+        defineWorkspace({
+          name: "Managers",
+          roles: ["Task Manager"],
+          sections: [{ name: "main", shortcuts: [{ name: "notes", kind: "doctype", target: "Note" }] }]
+        })
+      ]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry,
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["workspace-test"])
+    });
+    const queries = new QueryService({ registry, projections: store });
+    return createResourceApi({
+      registry,
+      documents,
+      queries,
+      actor: unsafeHeaderActorResolver
+    });
   }
 
   const userHeaders = {
@@ -153,6 +219,64 @@ describe("resource api", () => {
         pageSize: 25
       }
     });
+  });
+
+  it("returns role-filtered workspace metadata", async () => {
+    const app = makeWorkspaceApp();
+
+    const listed = await app.request("/api/meta/workspaces", { headers: userHeaders });
+    expect(listed.status).toBe(200);
+    const listedBody = await listed.json();
+    expect(listedBody).toMatchObject({
+      data: [
+        {
+          name: "Operations",
+          sections: [
+            {
+              name: "main",
+              shortcuts: [
+                { name: "notes", kind: "doctype", target: "Note" },
+                { name: "open-notes", kind: "report", target: "Open Notes" }
+              ]
+            }
+          ]
+        }
+      ]
+    });
+    expect(JSON.stringify(listedBody)).not.toContain("manager-only");
+    expect(JSON.stringify(listedBody)).not.toContain("files");
+    expect(JSON.stringify(listedBody)).not.toContain("inbox");
+    expect(JSON.stringify(listedBody)).not.toContain("users-admin");
+    const direct = await app.request("/api/meta/workspaces/Operations", { headers: userHeaders });
+    expect(direct.status).toBe(200);
+    const directBody = await direct.json();
+    expect(JSON.stringify(directBody)).not.toContain("manager-only");
+    expect(JSON.stringify(directBody)).not.toContain("files");
+    expect(JSON.stringify(directBody)).not.toContain("inbox");
+    expect(JSON.stringify(directBody)).not.toContain("users-admin");
+
+    const hidden = await app.request("/api/meta/workspaces/Managers", { headers: userHeaders });
+    expect(hidden.status).toBe(403);
+    await expect(hidden.json()).resolves.toMatchObject({
+      error: {
+        code: "PERMISSION_DENIED",
+        message: "Actor 'owner@example.com' cannot read workspace 'Managers'"
+      }
+    });
+
+    const managerList = await app.request("/api/meta/workspaces", { headers: managerHeaders });
+    expect(managerList.status).toBe(200);
+    await expect(managerList.json()).resolves.toMatchObject({
+      data: [{ name: "Managers" }]
+    });
+
+    const adminList = await app.request("/api/meta/workspaces", { headers: adminHeaders });
+    expect(adminList.status).toBe(200);
+    const adminBody = JSON.stringify(await adminList.json());
+    expect(adminBody).toContain("manager-only");
+    expect(adminBody).not.toContain("files");
+    expect(adminBody).not.toContain("inbox");
+    expect(adminBody).not.toContain("users-admin");
   });
 
   it("protects resolved list-view metadata with DocType read permissions", async () => {
