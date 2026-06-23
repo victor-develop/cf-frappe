@@ -149,6 +149,8 @@ interface DeskClientRuntime {
     readonly planOne: (patchId: string) => Promise<unknown>;
     readonly rollbackPlan: (options?: Record<string, unknown>) => Promise<unknown>;
     readonly rollbackPlanOne: (patchId: string) => Promise<unknown>;
+    readonly rollback: (options?: Record<string, unknown>) => Promise<unknown>;
+    readonly rollbackOne: (patchId: string) => Promise<unknown>;
     readonly retry: (patchId: string) => Promise<unknown>;
     readonly status: () => Promise<unknown>;
   };
@@ -910,6 +912,8 @@ describe("Desk client runtime", () => {
     await runtime.dataPatches.applyOne("crm.second");
     await runtime.dataPatches.rollbackPlan({ patchIds: ["crm.second"], limit: 1 });
     await runtime.dataPatches.rollbackPlanOne("crm.second");
+    await runtime.dataPatches.rollback({ limit: 1 });
+    await runtime.dataPatches.rollbackOne("crm.second");
     await runtime.dataPatches.retry("crm.second");
     await runtime.dataPatches.enqueue({ patchIds: ["crm.second"], limit: 1, idempotencyKey: "patches:batch", delaySeconds: 5 });
     await runtime.dataPatches.enqueueOne("crm.second", {
@@ -927,11 +931,15 @@ describe("Desk client runtime", () => {
       "POST /api/data-patches/crm.second/apply",
       "POST /api/data-patches/rollback-plan",
       "POST /api/data-patches/crm.second/rollback-plan",
+      "POST /api/data-patches/rollback",
+      "POST /api/data-patches/crm.second/rollback",
       "POST /api/data-patches/crm.second/retry",
       "POST /api/data-patches/enqueue",
       "POST /api/data-patches/crm.second/enqueue"
     ]);
     expect(calls.map((call) => call.init.credentials)).toEqual([
+      "same-origin",
+      "same-origin",
       "same-origin",
       "same-origin",
       "same-origin",
@@ -950,6 +958,8 @@ describe("Desk client runtime", () => {
       undefined,
       undefined,
       JSON.stringify({ patchIds: ["crm.second"], limit: 1 }),
+      undefined,
+      JSON.stringify({ limit: 1 }),
       undefined,
       undefined,
       JSON.stringify({ patchIds: ["crm.second"], limit: 1, idempotencyKey: "patches:batch", delaySeconds: 5 }),

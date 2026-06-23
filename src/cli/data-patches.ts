@@ -1,4 +1,4 @@
-export type DataPatchRemoteAction = "status" | "plan" | "rollback-plan" | "apply" | "enqueue" | "retry";
+export type DataPatchRemoteAction = "status" | "plan" | "rollback-plan" | "apply" | "rollback" | "enqueue" | "retry";
 
 export interface DataPatchHeaderLiteral {
   readonly kind: "literal";
@@ -44,6 +44,9 @@ interface DataPatchDashboardResponse {
     readonly pending: number;
     readonly applied: number;
     readonly failed: number;
+    readonly rollbackPending?: number;
+    readonly rolledBack?: number;
+    readonly rollbackFailed?: number;
   };
   readonly patches: readonly DataPatchDashboardEntryResponse[];
 }
@@ -60,6 +63,11 @@ interface DataPatchRunResponse {
   readonly skipped: readonly DataPatchRecordResponse[];
 }
 
+interface DataPatchRollbackResponse {
+  readonly rolledBack: readonly DataPatchRollbackRecordResponse[];
+  readonly skipped: readonly DataPatchRollbackRecordResponse[];
+}
+
 interface DataPatchPlanResponse {
   readonly patchIds: readonly string[];
   readonly requestedPatchIds?: readonly string[];
@@ -67,6 +75,11 @@ interface DataPatchPlanResponse {
 }
 
 interface DataPatchRecordResponse {
+  readonly id: string;
+  readonly checksum: string;
+}
+
+interface DataPatchRollbackRecordResponse {
   readonly id: string;
   readonly checksum: string;
 }
@@ -121,6 +134,14 @@ export async function runRemoteDataPatchCommand(
       path: `/api/data-patches/${encodeURIComponent(singlePatchId(command))}/retry`
     });
     return formatRetry(command.url, data);
+  }
+  if (command.action === "rollback") {
+    const data = await requestRemoteDataPatch<DataPatchRollbackResponse>(command, io, {
+      body: commandBody(command, { includeQueueOptions: false }),
+      method: "POST",
+      path: "/api/data-patches/rollback"
+    });
+    return formatRollback(command.url, data);
   }
   const data = await requestRemoteDataPatch<DataPatchRunResponse>(command, io, {
     body: commandBody(command, { includeQueueOptions: false }),
@@ -245,7 +266,7 @@ function remoteErrorMessage(payload: Record<string, unknown>): string {
 function formatDashboard(baseUrl: string, dashboard: DataPatchDashboardResponse): string {
   return [
     `Data patches at ${baseUrl}`,
-    `total ${dashboard.totals.total}, not applied ${dashboard.totals.notApplied}, pending ${dashboard.totals.pending}, applied ${dashboard.totals.applied}, failed ${dashboard.totals.failed}`,
+    `total ${dashboard.totals.total}, not applied ${dashboard.totals.notApplied}, pending ${dashboard.totals.pending}, applied ${dashboard.totals.applied}, failed ${dashboard.totals.failed}, rollback pending ${dashboard.totals.rollbackPending ?? 0}, rolled back ${dashboard.totals.rolledBack ?? 0}, rollback failed ${dashboard.totals.rollbackFailed ?? 0}`,
     ...dashboard.patches.map((patch) =>
       `- ${patch.id} [${patch.status}] checksum ${patch.checksum}${patch.label === undefined ? "" : ` - ${patch.label}`}`
     ),
@@ -269,6 +290,17 @@ function formatRetry(baseUrl: string, result: DataPatchRunResponse): string {
     `Retried data patch at ${baseUrl}`,
     "Applied:",
     ...recordLines(result.applied),
+    "Skipped:",
+    ...recordLines(result.skipped),
+    ""
+  ].join("\n");
+}
+
+function formatRollback(baseUrl: string, result: DataPatchRollbackResponse): string {
+  return [
+    `Rolled back data patches at ${baseUrl}`,
+    "Rolled back:",
+    ...recordLines(result.rolledBack),
     "Skipped:",
     ...recordLines(result.skipped),
     ""

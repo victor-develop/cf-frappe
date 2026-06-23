@@ -146,6 +146,119 @@ describe("D1DataPatchLog", () => {
     expect(db.executedSql.some((sql) => sql.includes("DELETE FROM cf_frappe_data_patches"))).toBe(true);
   });
 
+  it("claims, completes, and lists data patch rollbacks", async () => {
+    const db = new FakeD1Database();
+    const log = new D1DataPatchLog(db as unknown as D1Database);
+
+    await log.claimDataPatch({ id: "accounts.seed", checksum: "v1", claimId: "claim-apply", claimedAt: now });
+    await log.completeDataPatch({
+      id: "accounts.seed",
+      checksum: "v1",
+      claimId: "claim-apply",
+      appliedAt: now,
+      result: { touched: 1 }
+    });
+
+    await expect(log.claimDataPatchRollback({
+      id: "accounts.seed",
+      checksum: "v1",
+      claimId: "claim-rollback",
+      claimedAt: now
+    })).resolves.toEqual({
+      kind: "claimed",
+      claim: { id: "accounts.seed", checksum: "v1", claimId: "claim-rollback", claimedAt: now }
+    });
+    await expect(log.recordedDataPatches()).resolves.toEqual([
+      {
+        id: "accounts.seed",
+        checksum: "v1",
+        appliedAt: now,
+        result: { touched: 1 },
+        rollbackClaimedAt: now,
+        status: "rollback_pending"
+      }
+    ]);
+    await log.completeDataPatchRollback({
+      id: "accounts.seed",
+      checksum: "v1",
+      claimId: "claim-rollback",
+      rolledBackAt: now,
+      result: { undone: 1 }
+    });
+
+    await expect(log.appliedDataPatches()).resolves.toEqual([]);
+    await expect(log.recordedDataPatches()).resolves.toEqual([
+      {
+        id: "accounts.seed",
+        checksum: "v1",
+        appliedAt: now,
+        result: { touched: 1 },
+        rolledBackAt: now,
+        rollbackResult: { undone: 1 },
+        status: "rolled_back"
+      }
+    ]);
+    await expect(log.claimDataPatchRollback({
+      id: "accounts.seed",
+      checksum: "v1",
+      claimId: "claim-again",
+      claimedAt: now
+    })).resolves.toMatchObject({
+      kind: "rolled_back",
+      patch: { id: "accounts.seed", rolledBackAt: now }
+    });
+    await expect(log.claimDataPatch({
+      id: "accounts.seed",
+      checksum: "v1",
+      claimId: "claim-apply-again",
+      claimedAt: now
+    })).rejects.toMatchObject({
+      code: "DATA_PATCH_APPLY_UNAVAILABLE",
+      status: 409
+    });
+  });
+
+  it("records failed D1 rollback attempts", async () => {
+    const db = new FakeD1Database();
+    const log = new D1DataPatchLog(db as unknown as D1Database);
+
+    await log.claimDataPatch({ id: "accounts.seed", checksum: "v1", claimId: "claim-apply", claimedAt: now });
+    await log.completeDataPatch({ id: "accounts.seed", checksum: "v1", claimId: "claim-apply", appliedAt: now });
+    await log.claimDataPatchRollback({
+      id: "accounts.seed",
+      checksum: "v1",
+      claimId: "claim-rollback",
+      claimedAt: now
+    });
+    await log.failDataPatchRollback({
+      id: "accounts.seed",
+      checksum: "v1",
+      claimId: "claim-rollback",
+      failedAt: now,
+      error: "rollback boom"
+    });
+
+    await expect(log.recordedDataPatches()).resolves.toEqual([
+      {
+        id: "accounts.seed",
+        checksum: "v1",
+        appliedAt: now,
+        rollbackFailedAt: now,
+        rollbackError: "rollback boom",
+        status: "rollback_failed"
+      }
+    ]);
+    await expect(log.claimDataPatchRollback({
+      id: "accounts.seed",
+      checksum: "v1",
+      claimId: "claim-again",
+      claimedAt: now
+    })).resolves.toMatchObject({
+      kind: "rollback_failed",
+      patch: { rollbackError: "rollback boom" }
+    });
+  });
+
   it("rejects retry clearing for non-failed D1 journal records", async () => {
     const db = new FakeD1Database();
     const log = new D1DataPatchLog(db as unknown as D1Database);
@@ -240,7 +353,7 @@ describe("D1DataPatchLog", () => {
 class FakeD1Database {
   readonly patches = new Map<string, {
     checksum: string;
-    status: "pending" | "applied" | "failed";
+    status: "pending" | "applied" | "failed" | "rollback_pending" | "rolled_back" | "rollback_failed";
     claim_id: string | null;
     claimed_at: string | null;
     applied_at: string | null;
@@ -248,6 +361,13 @@ class FakeD1Database {
     error: string | null;
     result_json: string | null;
     result_present: number;
+    rollback_claim_id?: string | null;
+    rollback_claimed_at?: string | null;
+    rolled_back_at?: string | null;
+    rollback_failed_at?: string | null;
+    rollback_error?: string | null;
+    rollback_result_json?: string | null;
+    rollback_result_present?: number;
   }>();
   readonly executedSql: string[] = [];
   beforeDelete: (() => void) | undefined;
@@ -287,7 +407,14 @@ class FakeD1PreparedStatement {
             failed_at: patch.failed_at,
             error: patch.error,
             result_json: patch.result_json,
-            result_present: patch.result_present
+            result_present: patch.result_present,
+            rollback_claim_id: patch.rollback_claim_id ?? null,
+            rollback_claimed_at: patch.rollback_claimed_at ?? null,
+            rolled_back_at: patch.rolled_back_at ?? null,
+            rollback_failed_at: patch.rollback_failed_at ?? null,
+            rollback_error: patch.rollback_error ?? null,
+            rollback_result_json: patch.rollback_result_json ?? null,
+            rollback_result_present: patch.rollback_result_present ?? 0
           }))
       };
     }
@@ -310,7 +437,14 @@ class FakeD1PreparedStatement {
             failed_at: patch.failed_at,
             error: patch.error,
             result_json: patch.result_json,
-            result_present: patch.result_present
+            result_present: patch.result_present,
+            rollback_claim_id: patch.rollback_claim_id ?? null,
+            rollback_claimed_at: patch.rollback_claimed_at ?? null,
+            rolled_back_at: patch.rolled_back_at ?? null,
+            rollback_failed_at: patch.rollback_failed_at ?? null,
+            rollback_error: patch.rollback_error ?? null,
+            rollback_result_json: patch.rollback_result_json ?? null,
+            rollback_result_present: patch.rollback_result_present ?? 0
           };
     }
     return null;
@@ -329,7 +463,14 @@ class FakeD1PreparedStatement {
           failed_at: null,
           error: null,
           result_json: null,
-          result_present: 0
+          result_present: 0,
+          rollback_claim_id: null,
+          rollback_claimed_at: null,
+          rolled_back_at: null,
+          rollback_failed_at: null,
+          rollback_error: null,
+          rollback_result_json: null,
+          rollback_result_present: 0
         });
       }
     }
@@ -359,6 +500,53 @@ class FakeD1PreparedStatement {
           status: "failed",
           failed_at: String(failed_at),
           error: String(error)
+        });
+        return { success: true, meta: { changes: 1 } };
+      }
+      return { success: true, meta: { changes: 0 } };
+    }
+    if (this.sql.includes("SET status = 'rollback_pending'")) {
+      const [rollback_claim_id, rollback_claimed_at, id, checksum] = this.params;
+      const patch = this.db.patches.get(String(id));
+      if (patch?.status === "applied" && patch.checksum === checksum) {
+        this.db.patches.set(String(id), {
+          ...patch,
+          status: "rollback_pending",
+          rollback_claim_id: String(rollback_claim_id),
+          rollback_claimed_at: String(rollback_claimed_at),
+          rollback_failed_at: null,
+          rollback_error: null
+        });
+        return { success: true, meta: { changes: 1 } };
+      }
+      return { success: true, meta: { changes: 0 } };
+    }
+    if (this.sql.includes("SET status = 'rolled_back'")) {
+      const [rolled_back_at, rollback_result_json, rollback_result_present, id, checksum, rollback_claim_id] = this.params;
+      const patch = this.db.patches.get(String(id));
+      if (patch?.status === "rollback_pending" && patch.checksum === checksum && patch.rollback_claim_id === rollback_claim_id) {
+        this.db.patches.set(String(id), {
+          ...patch,
+          status: "rolled_back",
+          rolled_back_at: String(rolled_back_at),
+          rollback_result_json: rollback_result_json === null ? null : String(rollback_result_json),
+          rollback_result_present: Number(rollback_result_present),
+          rollback_failed_at: null,
+          rollback_error: null
+        });
+        return { success: true, meta: { changes: 1 } };
+      }
+      return { success: true, meta: { changes: 0 } };
+    }
+    if (this.sql.includes("SET status = 'rollback_failed'")) {
+      const [rollback_failed_at, rollback_error, id, checksum, rollback_claim_id] = this.params;
+      const patch = this.db.patches.get(String(id));
+      if (patch?.status === "rollback_pending" && patch.checksum === checksum && patch.rollback_claim_id === rollback_claim_id) {
+        this.db.patches.set(String(id), {
+          ...patch,
+          status: "rollback_failed",
+          rollback_failed_at: String(rollback_failed_at),
+          rollback_error: String(rollback_error)
         });
         return { success: true, meta: { changes: 1 } };
       }

@@ -68,6 +68,138 @@ describe("DataPatchRunner", () => {
     await expect(runner.pendingPatches()).rejects.toMatchObject({ code: "DATA_PATCH_FAILED" });
   });
 
+  it("rolls back applied patches once and records rollback results", async () => {
+    const resources = { applied: [] as string[], rolledBack: [] as string[] };
+    const log = new InMemoryDataPatchLog();
+    const patches = [
+      defineDataPatch<typeof resources>({
+        id: "core.seed",
+        checksum: "v1",
+        run: ({ resources }) => {
+          resources.applied.push("core");
+        },
+        rollback: {
+          run: ({ resources }) => {
+            resources.rolledBack.push("core");
+            return { rolledBack: resources.rolledBack.length };
+          }
+        }
+      })
+    ];
+    const runner = new DataPatchRunner({
+      log,
+      patches,
+      resources,
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-core", "rollback-core", "rollback-core-again"])
+    });
+
+    await runner.apply();
+
+    await expect(runner.rollback()).resolves.toEqual({
+      rolledBack: [{ id: "core.seed", checksum: "v1", rolledBackAt: now, result: { rolledBack: 1 } }],
+      skipped: []
+    });
+    await expect(log.recordedDataPatches()).resolves.toEqual([
+      {
+        id: "core.seed",
+        checksum: "v1",
+        appliedAt: now,
+        rolledBackAt: now,
+        rollbackResult: { rolledBack: 1 },
+        status: "rolled_back"
+      }
+    ]);
+    await expect(runner.rollback()).resolves.toMatchObject({
+      rolledBack: [],
+      skipped: [{ id: "core.seed", checksum: "v1", rolledBackAt: now }]
+    });
+    expect(resources).toEqual({ applied: ["core"], rolledBack: ["core"] });
+  });
+
+  it("defaults direct rollback execution to reverse manifest order", async () => {
+    const resources = { applied: [] as string[], rolledBack: [] as string[] };
+    const patches = [
+      defineDataPatch<typeof resources>({
+        id: "core.first",
+        checksum: "v1",
+        run: ({ resources }) => {
+          resources.applied.push("first");
+        },
+        rollback: {
+          run: ({ resources }) => {
+            resources.rolledBack.push("first");
+          }
+        }
+      }),
+      defineDataPatch<typeof resources>({
+        id: "crm.second",
+        checksum: "v1",
+        run: ({ resources }) => {
+          resources.applied.push("second");
+        },
+        rollback: {
+          run: ({ resources }) => {
+            resources.rolledBack.push("second");
+          }
+        }
+      })
+    ];
+    const runner = new DataPatchRunner({
+      log: new InMemoryDataPatchLog(),
+      patches,
+      resources,
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-first", "claim-second", "rollback-second", "rollback-first"])
+    });
+
+    await runner.apply();
+    await expect(runner.rollback()).resolves.toMatchObject({
+      rolledBack: [{ id: "crm.second" }, { id: "core.first" }],
+      skipped: []
+    });
+
+    expect(resources).toEqual({ applied: ["first", "second"], rolledBack: ["second", "first"] });
+  });
+
+  it("records rollback failures and blocks apply while rollback state is unresolved", async () => {
+    const log = new InMemoryDataPatchLog();
+    const runner = new DataPatchRunner({
+      log,
+      resources: {},
+      patches: [
+        defineDataPatch({
+          id: "core.seed",
+          checksum: "v1",
+          run: () => undefined,
+          rollback: {
+            run: () => {
+              throw new Error("rollback boom");
+            }
+          }
+        })
+      ],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-core", "rollback-core"])
+    });
+
+    await runner.apply();
+
+    await expect(runner.rollback()).rejects.toThrow("rollback boom");
+    await expect(log.recordedDataPatches()).resolves.toEqual([
+      {
+        id: "core.seed",
+        checksum: "v1",
+        appliedAt: now,
+        rollbackFailedAt: now,
+        rollbackError: "rollback boom",
+        status: "rollback_failed"
+      }
+    ]);
+    await expect(runner.apply()).rejects.toMatchObject({ code: "DATA_PATCH_ROLLBACK_FAILED" });
+    await expect(runner.pendingPatches()).rejects.toMatchObject({ code: "DATA_PATCH_ROLLBACK_FAILED" });
+  });
+
   it("rejects duplicate patches, checksum drift, and concurrent claims", async () => {
     const log = new InMemoryDataPatchLog();
     const first = defineDataPatch({ id: "accounts.backfill", checksum: "v1", run: () => undefined });

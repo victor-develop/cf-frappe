@@ -1,6 +1,7 @@
 import {
   D1_CORE_MIGRATION_ID,
   D1_DATA_PATCH_MIGRATION_ID,
+  D1_DATA_PATCH_ROLLBACK_MIGRATION_ID,
   D1_JOB_EXECUTION_MESSAGE_MIGRATION_ID,
   D1_JOB_EXECUTION_MIGRATION_ID,
   planD1Migrations,
@@ -56,7 +57,11 @@ export function starterProjectFiles(input: StarterProjectTemplateInput): readonl
       contents: starterMigrationSql(D1_JOB_EXECUTION_MESSAGE_MIGRATION_ID)
     },
     { path: "migrations/0004_cf_frappe_data_patches.sql", contents: starterMigrationSql(D1_DATA_PATCH_MIGRATION_ID) },
-    { path: "migrations/0005_doctype_task_v1_indexes.sql", contents: starterMigrationSql(STARTER_TASK_INDEX_MIGRATION_ID) }
+    {
+      path: "migrations/0005_cf_frappe_data_patch_rollbacks.sql",
+      contents: starterMigrationSql(D1_DATA_PATCH_ROLLBACK_MIGRATION_ID)
+    },
+    { path: "migrations/0006_doctype_task_v1_indexes.sql", contents: starterMigrationSql(STARTER_TASK_INDEX_MIGRATION_ID) }
   ];
 }
 
@@ -207,6 +212,7 @@ npx cf-frappe data-patches status --url https://your-worker.example --header-env
 npx cf-frappe data-patches plan --url https://your-worker.example --id crm.customer_status_v1 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe data-patches rollback-plan --url https://your-worker.example --limit 2 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe data-patches apply --url https://your-worker.example --id crm.customer_status_v1 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe data-patches rollback --url https://your-worker.example --id crm.customer_status_v1 --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 
 ## Deploy

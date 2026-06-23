@@ -558,6 +558,18 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     }
   });
 
+  app.post("/desk/admin/data-patches/rollback", async (c) => {
+    const dataPatches = requireDataPatches(options);
+    const actor = await options.actor(c.req.raw);
+    try {
+      const form = await parseDeskDataPatchApply(c.req.raw);
+      await dataPatches.rollback(actor, form.limit === undefined ? {} : { limit: form.limit });
+      return c.redirect("/desk/admin/data-patches", 303);
+    } catch (error) {
+      return renderDeskDataPatchFailure(options, actor, dataPatches, error);
+    }
+  });
+
   app.post("/desk/admin/data-patches/:id/apply", async (c) => {
     const dataPatches = requireDataPatches(options);
     const actor = await options.actor(c.req.raw);
@@ -599,6 +611,17 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       const plan = await dataPatches.planRollback(actor, { patchIds: [c.req.param("id")] });
       const dashboard = await dataPatches.dashboard(actor);
       return renderDeskDataPatchPage(options, actor, dashboard, 200, undefined, { kind: "rollback", plan });
+    } catch (error) {
+      return renderDeskDataPatchFailure(options, actor, dataPatches, error);
+    }
+  });
+
+  app.post("/desk/admin/data-patches/:id/rollback", async (c) => {
+    const dataPatches = requireDataPatches(options);
+    const actor = await options.actor(c.req.raw);
+    try {
+      await dataPatches.rollback(actor, { patchIds: [c.req.param("id")] });
+      return c.redirect("/desk/admin/data-patches", 303);
     } catch (error) {
       return renderDeskDataPatchFailure(options, actor, dataPatches, error);
     }

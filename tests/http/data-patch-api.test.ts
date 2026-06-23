@@ -220,7 +220,7 @@ describe("data patch api", () => {
           })
         ],
         clock: fixedClock(now),
-        ids: deterministicIds(["claim-first", "claim-second"])
+        ids: deterministicIds(["claim-first", "claim-second", "rollback-second", "rollback-first"])
       })
     });
 
@@ -256,7 +256,32 @@ describe("data patch api", () => {
     await expect(single.json()).resolves.toEqual({
       data: { patchIds: ["crm.second"], requestedPatchIds: ["crm.second"] }
     });
-    expect(resources).toEqual({ applied: ["first", "second"], rolledBack: [] });
+
+    const rolledBack = await app.request("/api/data-patches/rollback", {
+      method: "POST",
+      headers: { ...adminHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ limit: 1 })
+    });
+    expect(rolledBack.status).toBe(201);
+    await expect(rolledBack.json()).resolves.toEqual({
+      data: {
+        rolledBack: [{ id: "crm.second", checksum: "v1", rolledBackAt: now }],
+        skipped: []
+      }
+    });
+
+    const rolledBackSingle = await app.request("/api/data-patches/core.first/rollback", {
+      method: "POST",
+      headers: adminHeaders
+    });
+    expect(rolledBackSingle.status).toBe(201);
+    await expect(rolledBackSingle.json()).resolves.toEqual({
+      data: {
+        rolledBack: [{ id: "core.first", checksum: "v1", rolledBackAt: now }],
+        skipped: []
+      }
+    });
+    expect(resources).toEqual({ applied: ["first", "second"], rolledBack: ["second", "first"] });
   });
 
   it("retries a failed data patch through the admin JSON route", async () => {

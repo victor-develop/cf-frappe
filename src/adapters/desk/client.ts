@@ -1088,6 +1088,12 @@ export function renderDeskClientScript(): string {
       rollbackPlanOne: function (patchId) {
         return request(dataPatchPath(patchId, "rollback-plan"), { method: "POST" }).then(unwrapData);
       },
+      rollback: function (options) {
+        return request(dataPatchPath(undefined, "rollback"), { method: "POST", body: dataPatchBody(options) }).then(unwrapData);
+      },
+      rollbackOne: function (patchId) {
+        return request(dataPatchPath(patchId, "rollback"), { method: "POST" }).then(unwrapData);
+      },
       retry: function (patchId) {
         return request(dataPatchPath(patchId, "retry"), { method: "POST" }).then(unwrapData);
       },

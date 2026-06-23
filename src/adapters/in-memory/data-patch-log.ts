@@ -2,20 +2,30 @@ import { FrameworkError } from "../../core/errors.js";
 import type {
   AppliedDataPatch,
   ClaimDataPatch,
+  ClaimRollbackDataPatch,
+  CompleteRollbackDataPatch,
   CompleteDataPatch,
   DataPatchClaimResult,
   DataPatchLog,
+  DataPatchRollbackClaimResult,
   FailDataPatch,
+  FailRollbackDataPatch,
   FailedDataPatch,
   PendingDataPatch,
   RecordedDataPatch,
+  RollbackFailedDataPatch,
+  RollbackPendingDataPatch,
+  RolledBackDataPatch,
   RetryFailedDataPatch
 } from "../../ports/data-patch-log.js";
 
 type InMemoryDataPatchEntry =
   | (PendingDataPatch & { readonly status: "pending"; readonly claimId: string })
   | (AppliedDataPatch & { readonly status: "applied" })
-  | (FailedDataPatch & { readonly status: "failed"; readonly claimId: string });
+  | (FailedDataPatch & { readonly status: "failed"; readonly claimId: string })
+  | (RollbackPendingDataPatch & { readonly status: "rollback_pending"; readonly claimId: string })
+  | (RolledBackDataPatch & { readonly status: "rolled_back" })
+  | (RollbackFailedDataPatch & { readonly status: "rollback_failed"; readonly claimId: string });
 
 export class InMemoryDataPatchLog implements DataPatchLog {
   private readonly patches = new Map<string, InMemoryDataPatchEntry>();
@@ -77,11 +87,70 @@ export class InMemoryDataPatchLog implements DataPatchLog {
     assertRetryableFailedPatch(existing, patch.id, patch.checksum);
     this.patches.delete(patch.id);
   }
+
+  async claimDataPatchRollback(patch: ClaimRollbackDataPatch): Promise<DataPatchRollbackClaimResult> {
+    const existing = this.patches.get(patch.id);
+    assertRollbackClaimable(existing, patch.id, patch.checksum);
+    if (existing.status !== "applied") {
+      return rollbackClaimResult(existing);
+    }
+    const claimed = Object.freeze({
+      ...existing,
+      claimId: patch.claimId,
+      rollbackClaimedAt: patch.claimedAt,
+      status: "rollback_pending" as const
+    });
+    this.patches.set(patch.id, claimed);
+    return {
+      kind: "claimed",
+      claim: { id: patch.id, checksum: patch.checksum, claimId: patch.claimId, claimedAt: patch.claimedAt }
+    };
+  }
+
+  async completeDataPatchRollback(patch: CompleteRollbackDataPatch): Promise<void> {
+    const existing = this.patches.get(patch.id);
+    assertRollbackPendingClaim(existing, patch.id, patch.checksum, patch.claimId);
+    this.patches.set(patch.id, Object.freeze({
+      id: patch.id,
+      checksum: patch.checksum,
+      appliedAt: existing.appliedAt,
+      ...(existing.result === undefined ? {} : { result: existing.result }),
+      rolledBackAt: patch.rolledBackAt,
+      ...(patch.result === undefined ? {} : { rollbackResult: patch.result }),
+      status: "rolled_back" as const
+    }));
+  }
+
+  async failDataPatchRollback(patch: FailRollbackDataPatch): Promise<void> {
+    const existing = this.patches.get(patch.id);
+    assertRollbackPendingClaim(existing, patch.id, patch.checksum, patch.claimId);
+    this.patches.set(patch.id, Object.freeze({
+      id: patch.id,
+      checksum: patch.checksum,
+      appliedAt: existing.appliedAt,
+      ...(existing.result === undefined ? {} : { result: existing.result }),
+      claimId: patch.claimId,
+      rollbackFailedAt: patch.failedAt,
+      rollbackError: patch.error,
+      status: "rollback_failed" as const
+    }));
+  }
 }
 
 function recordFromEntry(entry: InMemoryDataPatchEntry): RecordedDataPatch {
   if (entry.status === "applied") {
     return { ...appliedPatchFromRecord(entry), status: "applied" };
+  }
+  if (entry.status === "rollback_pending") {
+    const { claimId: _claimId, ...patch } = entry;
+    return patch;
+  }
+  if (entry.status === "rollback_failed") {
+    const { claimId: _claimId, ...patch } = entry;
+    return patch;
+  }
+  if (entry.status === "rolled_back") {
+    return entry;
   }
   if (entry.status === "failed") {
     const { claimId: _claimId, ...patch } = entry;
@@ -100,8 +169,35 @@ function claimResult(entry: InMemoryDataPatchEntry): DataPatchClaimResult {
     const { status: _status, claimId: _claimId, ...patch } = entry;
     return { kind: "failed", patch };
   }
+  if (entry.status === "rollback_pending" || entry.status === "rollback_failed" || entry.status === "rolled_back") {
+    throw dataPatchApplyUnavailable(entry.id, `journal status is '${entry.status}'`);
+  }
   const { status: _status, claimId: _claimId, ...patch } = entry;
   return { kind: "pending", patch };
+}
+
+function rollbackClaimResult(entry: InMemoryDataPatchEntry): DataPatchRollbackClaimResult {
+  if (entry.status === "pending") {
+    const { status: _status, claimId: _claimId, ...patch } = entry;
+    return { kind: "pending", patch };
+  }
+  if (entry.status === "failed") {
+    const { status: _status, claimId: _claimId, ...patch } = entry;
+    return { kind: "failed", patch };
+  }
+  if (entry.status === "rollback_pending") {
+    const { status: _status, claimId: _claimId, ...patch } = entry;
+    return { kind: "rollback_pending", patch };
+  }
+  if (entry.status === "rollback_failed") {
+    const { status: _status, claimId: _claimId, ...patch } = entry;
+    return { kind: "rollback_failed", patch };
+  }
+  if (entry.status === "rolled_back") {
+    const { status: _status, ...patch } = entry;
+    return { kind: "rolled_back", patch };
+  }
+  throw dataPatchRollbackUnavailable(entry.id, `journal status is '${entry.status}'`);
 }
 
 function appliedPatchFromRecord(record: RecordedDataPatch & { readonly status: "applied" }): AppliedDataPatch {
@@ -156,10 +252,61 @@ function assertRetryableFailedPatch(
   throw dataPatchRetryUnavailable(id, `journal status is '${entry.status}'`);
 }
 
+function assertRollbackClaimable(
+  entry: InMemoryDataPatchEntry | undefined,
+  id: string,
+  checksum: string
+): asserts entry is InMemoryDataPatchEntry {
+  if (entry === undefined) {
+    throw dataPatchRollbackUnavailable(id, "no applied journal entry exists");
+  }
+  assertChecksumValueMatches(id, checksum, entry.checksum);
+  if (
+    entry.status === "applied" ||
+    entry.status === "pending" ||
+    entry.status === "failed" ||
+    entry.status === "rollback_pending" ||
+    entry.status === "rollback_failed" ||
+    entry.status === "rolled_back"
+  ) {
+    return;
+  }
+}
+
+function assertRollbackPendingClaim(
+  entry: InMemoryDataPatchEntry | undefined,
+  id: string,
+  checksum: string,
+  claimId: string
+): asserts entry is RollbackPendingDataPatch & { readonly status: "rollback_pending"; readonly claimId: string } {
+  if (entry?.status === "rollback_pending" && entry.checksum === checksum && entry.claimId === claimId) {
+    return;
+  }
+  throw new FrameworkError("DATA_PATCH_ROLLBACK_PENDING", `Data patch '${id}' rollback is not claimed by this runner`, {
+    status: 409
+  });
+}
+
+function dataPatchApplyUnavailable(id: string, reason: string): FrameworkError {
+  return new FrameworkError(
+    "DATA_PATCH_APPLY_UNAVAILABLE",
+    `Data patch '${id}' cannot be applied because ${reason}`,
+    { status: 409 }
+  );
+}
+
 function dataPatchRetryUnavailable(id: string, reason: string): FrameworkError {
   return new FrameworkError(
     "DATA_PATCH_RETRY_UNAVAILABLE",
     `Data patch '${id}' cannot be retried because ${reason}`,
+    { status: 409 }
+  );
+}
+
+function dataPatchRollbackUnavailable(id: string, reason: string): FrameworkError {
+  return new FrameworkError(
+    "DATA_PATCH_ROLLBACK_UNAVAILABLE",
+    `Data patch '${id}' cannot be rolled back because ${reason}`,
     { status: 409 }
   );
 }

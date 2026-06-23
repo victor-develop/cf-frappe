@@ -346,6 +346,7 @@ function dataPatchAction(value: string): DataPatchRemoteAction | undefined {
     value === "plan" ||
     value === "rollback-plan" ||
     value === "apply" ||
+    value === "rollback" ||
     value === "enqueue" ||
     value === "retry"
     ? value
@@ -594,6 +595,7 @@ function helpText(): string {
     "  cf-frappe data-patches plan --url <origin> [--id <patchId>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches rollback-plan --url <origin> [--id <patchId>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches apply --url <origin> [--id <patchId>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe data-patches rollback --url <origin> [--id <patchId>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches retry --url <origin> --id <patchId> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches enqueue --url <origin> [--id <patchId>] [--limit <n>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe --help",
@@ -602,7 +604,7 @@ function helpText(): string {
     "  init   Create a Cloudflare-ready cf-frappe starter app",
     "  install   Save, install, and wire an app module into a generated app registry",
     "  migrate generate   Write reviewable D1 migration files from app metadata",
-    "  data-patches   Inspect, plan, apply, or enqueue remote app-declared data patches through the admin API",
+    "  data-patches   Inspect, plan, apply, rollback, or enqueue remote app-declared data patches through the admin API",
     "",
     "Use --header-env for secret-bearing auth headers so tokens stay out of shell history.",
     ""

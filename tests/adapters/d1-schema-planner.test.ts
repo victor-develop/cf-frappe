@@ -2,6 +2,8 @@ import {
   D1_CORE_MIGRATION_ID,
   D1_CORE_SCHEMA_STATEMENTS,
   D1_DATA_PATCH_MIGRATION_ID,
+  D1_DATA_PATCH_ROLLBACK_MIGRATION_ID,
+  D1_DATA_PATCH_ROLLBACK_SCHEMA_STATEMENTS,
   D1_DATA_PATCH_SCHEMA_STATEMENTS,
   D1_JOB_EXECUTION_MIGRATION_ID,
   D1_JOB_EXECUTION_MESSAGE_MIGRATION_ID,
@@ -69,6 +71,7 @@ describe("D1 schema planner", () => {
       D1_JOB_EXECUTION_MIGRATION_ID,
       D1_JOB_EXECUTION_MESSAGE_MIGRATION_ID,
       D1_DATA_PATCH_MIGRATION_ID,
+      D1_DATA_PATCH_ROLLBACK_MIGRATION_ID,
       "doctype_task_v7_indexes"
     ]);
     expect(migrations[0]!.checksum).toMatch(/^fnv1a32:[a-f0-9]{8}$/);
@@ -106,6 +109,11 @@ describe("D1 schema planner", () => {
       statements: D1_DATA_PATCH_SCHEMA_STATEMENTS
     });
     expect(migrations[4]).toMatchObject({
+      id: D1_DATA_PATCH_ROLLBACK_MIGRATION_ID,
+      label: "cf-frappe data patch rollback journal",
+      statements: D1_DATA_PATCH_ROLLBACK_SCHEMA_STATEMENTS
+    });
+    expect(migrations[5]).toMatchObject({
       label: "Task projection indexes",
       statements: [
         {
@@ -294,6 +302,16 @@ describe("D1 schema planner", () => {
       )
     );
   });
+
+  it("keeps the checked-in Wrangler data patch rollback migration exactly equivalent to the TypeScript plan", () => {
+    const fileSql = readFileSync(new URL("../../migrations/0005_cf_frappe_data_patch_rollbacks.sql", import.meta.url), "utf8");
+
+    expect(splitSqlStatements(fileSql)).toEqual(
+      D1_DATA_PATCH_ROLLBACK_SCHEMA_STATEMENTS.map((statement) =>
+        normalizeSql(renderD1Migration({ ...dataPatchRollbackMigrationStub, statements: [statement] }))
+      )
+    );
+  });
 });
 
 const coreMigrationStub = {
@@ -313,6 +331,11 @@ const jobExecutionMessageMigrationStub = {
 
 const dataPatchMigrationStub = {
   id: D1_DATA_PATCH_MIGRATION_ID,
+  checksum: "test"
+};
+
+const dataPatchRollbackMigrationStub = {
+  id: D1_DATA_PATCH_ROLLBACK_MIGRATION_ID,
   checksum: "test"
 };
 

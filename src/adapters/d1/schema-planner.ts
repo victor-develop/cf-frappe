@@ -27,6 +27,7 @@ export const D1_CORE_MIGRATION_ID = "0001_cf_frappe_core";
 export const D1_JOB_EXECUTION_MIGRATION_ID = "0002_cf_frappe_job_executions";
 export const D1_JOB_EXECUTION_MESSAGE_MIGRATION_ID = "0003_cf_frappe_job_execution_messages";
 export const D1_DATA_PATCH_MIGRATION_ID = "0004_cf_frappe_data_patches";
+export const D1_DATA_PATCH_ROLLBACK_MIGRATION_ID = "0005_cf_frappe_data_patch_rollbacks";
 
 export const D1_CORE_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
   {
@@ -163,6 +164,48 @@ export const D1_DATA_PATCH_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
   }
 ];
 
+export const D1_DATA_PATCH_ROLLBACK_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
+  {
+    name: "rename_cf_frappe_data_patches_for_rollbacks",
+    sql: "ALTER TABLE cf_frappe_data_patches RENAME TO cf_frappe_data_patches_before_rollbacks;"
+  },
+  {
+    name: "create_cf_frappe_data_patches_with_rollbacks",
+    sql:
+      "CREATE TABLE cf_frappe_data_patches (" +
+      "id TEXT PRIMARY KEY, " +
+      "checksum TEXT NOT NULL, " +
+      "status TEXT NOT NULL CHECK (status IN ('pending', 'applied', 'failed', 'rollback_pending', 'rolled_back', 'rollback_failed')), " +
+      "claim_id TEXT, " +
+      "claimed_at TEXT, " +
+      "applied_at TEXT, " +
+      "failed_at TEXT, " +
+      "error TEXT, " +
+      "result_json TEXT, " +
+      "result_present INTEGER NOT NULL DEFAULT 0, " +
+      "rollback_claim_id TEXT, " +
+      "rollback_claimed_at TEXT, " +
+      "rolled_back_at TEXT, " +
+      "rollback_failed_at TEXT, " +
+      "rollback_error TEXT, " +
+      "rollback_result_json TEXT, " +
+      "rollback_result_present INTEGER NOT NULL DEFAULT 0" +
+      ");"
+  },
+  {
+    name: "copy_cf_frappe_data_patch_rows_for_rollbacks",
+    sql:
+      "INSERT INTO cf_frappe_data_patches (" +
+      "id, checksum, status, claim_id, claimed_at, applied_at, failed_at, error, result_json, result_present, rollback_result_present" +
+      ") SELECT id, checksum, status, claim_id, claimed_at, applied_at, failed_at, error, result_json, result_present, 0 " +
+      "FROM cf_frappe_data_patches_before_rollbacks;"
+  },
+  {
+    name: "drop_cf_frappe_data_patches_before_rollbacks",
+    sql: "DROP TABLE cf_frappe_data_patches_before_rollbacks;"
+  }
+];
+
 export function planD1ProjectionIndexes(
   doctypes: readonly DocTypeDefinition[]
 ): readonly PlannedSqlStatement[] {
@@ -233,6 +276,11 @@ export function planD1Migrations(
           id: D1_DATA_PATCH_MIGRATION_ID,
           label: "cf-frappe data patch journal",
           statements: D1_DATA_PATCH_SCHEMA_STATEMENTS
+        }),
+        defineD1Migration({
+          id: D1_DATA_PATCH_ROLLBACK_MIGRATION_ID,
+          label: "cf-frappe data patch rollback journal",
+          statements: D1_DATA_PATCH_ROLLBACK_SCHEMA_STATEMENTS
         })
       ]
     : [];

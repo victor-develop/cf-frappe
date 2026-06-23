@@ -2377,7 +2377,7 @@ describe("Desk app", () => {
           })
         ],
         clock: fixedClock(now),
-        ids: deterministicIds(["claim-first", "claim-second"])
+        ids: deterministicIds(["claim-first", "claim-second", "rollback-second", "rollback-first"])
       }),
       actor: () => admin
     });
@@ -2416,6 +2416,8 @@ describe("Desk app", () => {
     expect(appliedHtml).toContain('formaction="/desk/admin/data-patches/core.first/rollback-plan"');
     expect(appliedHtml).toContain('formaction="/desk/admin/data-patches/crm.second/rollback-plan"');
     expect(appliedHtml).toContain('formaction="/desk/admin/data-patches/rollback-plan"');
+    expect(appliedHtml).toContain('formaction="/desk/admin/data-patches/crm.second/rollback"');
+    expect(appliedHtml).toContain('formaction="/desk/admin/data-patches/rollback"');
 
     const rollbackPlan = await app.request("/desk/admin/data-patches/rollback-plan", {
       method: "POST",
@@ -2431,6 +2433,23 @@ describe("Desk app", () => {
     expect(singleRollbackPlan.status).toBe(200);
     await expect(singleRollbackPlan.text()).resolves.toContain("Requested: crm.second");
     expect(resources.rolledBack).toEqual([]);
+
+    const singleRollback = await app.request("/desk/admin/data-patches/crm.second/rollback", { method: "POST" });
+    expect(singleRollback.status).toBe(303);
+    expect(singleRollback.headers.get("location")).toBe("/desk/admin/data-patches");
+    expect(resources.rolledBack).toEqual(["second"]);
+
+    const partialRollbackHtml = await (await app.request("/desk/admin/data-patches")).text();
+    expect(partialRollbackHtml).toContain("rolled_back");
+    expect(partialRollbackHtml).toContain('formaction="/desk/admin/data-patches/core.first/rollback"');
+
+    const batchRollback = await app.request("/desk/admin/data-patches/rollback", {
+      method: "POST",
+      body: new URLSearchParams({ limit: "1" })
+    });
+    expect(batchRollback.status).toBe(303);
+    expect(batchRollback.headers.get("location")).toBe("/desk/admin/data-patches");
+    expect(resources.rolledBack).toEqual(["second", "first"]);
   });
 
   it("renders failed data patch retry actions in the Desk admin surface", async () => {
@@ -2478,6 +2497,46 @@ describe("Desk app", () => {
     const appliedHtml = await applied.text();
     expect(appliedHtml).toContain("applied");
     expect(appliedHtml).not.toContain('formaction="/desk/admin/data-patches/core.retry/retry"');
+  });
+
+  it("renders failed rollback details in the Desk data patch admin surface", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
+    const services = createServices();
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      dataPatches: new DataPatchService({
+        log: new InMemoryDataPatchLog(),
+        resources: {},
+        patches: [
+          defineDataPatch({
+            id: "core.rollback",
+            checksum: "v1",
+            run: () => ({ applied: true }),
+            rollback: {
+              run: () => {
+                throw new Error("rollback boom");
+              }
+            }
+          })
+        ],
+        clock: fixedClock(now),
+        ids: deterministicIds(["claim-apply", "claim-rollback"])
+      }),
+      actor: () => admin
+    });
+
+    await expect(app.request("/desk/admin/data-patches/apply", { method: "POST" })).resolves.toMatchObject({
+      status: 303
+    });
+    const failedRollback = await app.request("/desk/admin/data-patches/core.rollback/rollback", { method: "POST" });
+
+    expect(failedRollback.status).toBe(500);
+    const html = await failedRollback.text();
+    expect(html).toContain("rollback_failed");
+    expect(html).toContain(now);
+    expect(html).toContain("rollback boom");
   });
 
   it("renders enabled admin surfaces in the Desk navigation", async () => {

@@ -43,6 +43,13 @@ export function createDataPatchApi(options: DataPatchApiOptions): Hono {
     return c.json({ data }, 201);
   });
 
+  app.post("/api/data-patches/rollback", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const rollbackOptions = await dataPatchApplyOptions(c.req.raw, maxJsonBytes);
+    const data = await options.dataPatches.rollback(actor, rollbackOptions);
+    return c.json({ data }, 201);
+  });
+
   app.post("/api/data-patches/:id/plan", async (c) => {
     const actor = await options.actor(c.req.raw);
     const data = await options.dataPatches.planApply(actor, { patchIds: [c.req.param("id")] });
@@ -58,6 +65,12 @@ export function createDataPatchApi(options: DataPatchApiOptions): Hono {
   app.post("/api/data-patches/:id/apply", async (c) => {
     const actor = await options.actor(c.req.raw);
     const data = await options.dataPatches.apply(actor, { patchIds: [c.req.param("id")] });
+    return c.json({ data }, 201);
+  });
+
+  app.post("/api/data-patches/:id/rollback", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const data = await options.dataPatches.rollback(actor, { patchIds: [c.req.param("id")] });
     return c.json({ data }, 201);
   });
 

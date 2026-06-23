@@ -5,7 +5,12 @@ import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 import { cryptoIdGenerator } from "../ports/id-generator.js";
-import type { AppliedDataPatch, DataPatchLog, RecordedDataPatch } from "../ports/data-patch-log.js";
+import type {
+  AppliedDataPatch,
+  DataPatchLog,
+  RecordedDataPatch,
+  RolledBackDataPatch
+} from "../ports/data-patch-log.js";
 
 export interface DataPatchRunnerOptions<TResources = unknown> {
   readonly log: DataPatchLog;
@@ -25,6 +30,18 @@ export interface DataPatchRunRecord {
 export interface DataPatchRunResult {
   readonly applied: readonly DataPatchRunRecord[];
   readonly skipped: readonly AppliedDataPatch[];
+}
+
+export interface DataPatchRollbackRecord {
+  readonly id: string;
+  readonly checksum: string;
+  readonly rolledBackAt: string;
+  readonly result?: JsonValue;
+}
+
+export interface DataPatchRollbackRunResult {
+  readonly rolledBack: readonly DataPatchRollbackRecord[];
+  readonly skipped: readonly RolledBackDataPatch[];
 }
 
 export class DataPatchRunner<TResources = unknown> {
@@ -131,6 +148,90 @@ export class DataPatchRunner<TResources = unknown> {
 
     return { applied, skipped };
   }
+
+  async rollback(
+    patches?: readonly DataPatchDefinition<TResources>[]
+  ): Promise<DataPatchRollbackRunResult> {
+    const planned = normalizePatches(patches ?? [...this.patches].reverse());
+    const rolledBack: DataPatchRollbackRecord[] = [];
+    const skipped: RolledBackDataPatch[] = [];
+
+    for (const patch of planned) {
+      if (patch.rollback === undefined) {
+        throw new FrameworkError(
+          "DATA_PATCH_ROLLBACK_UNAVAILABLE",
+          `Data patch '${patch.id}' does not declare a rollback`,
+          { status: 409 }
+        );
+      }
+      const claim = await this.log.claimDataPatchRollback({
+        id: patch.id,
+        checksum: patch.checksum,
+        claimId: this.ids.next(),
+        claimedAt: this.clock.now()
+      });
+      if (claim.kind === "rolled_back") {
+        skipped.push(claim.patch);
+        continue;
+      }
+      if (claim.kind === "pending") {
+        throw new FrameworkError(
+          "DATA_PATCH_PENDING",
+          `Data patch '${patch.id}' is already claimed and has not completed`,
+          { status: 409 }
+        );
+      }
+      if (claim.kind === "failed") {
+        throw new FrameworkError(
+          "DATA_PATCH_FAILED",
+          `Data patch '${patch.id}' previously failed at '${claim.patch.failedAt}': ${claim.patch.error}`,
+          { status: 409 }
+        );
+      }
+      if (claim.kind === "rollback_pending") {
+        throw new FrameworkError(
+          "DATA_PATCH_ROLLBACK_PENDING",
+          `Data patch '${patch.id}' rollback is already claimed and has not completed`,
+          { status: 409 }
+        );
+      }
+      if (claim.kind === "rollback_failed") {
+        throw new FrameworkError(
+          "DATA_PATCH_ROLLBACK_FAILED",
+          `Data patch '${patch.id}' rollback previously failed at '${claim.patch.rollbackFailedAt}': ${claim.patch.rollbackError}`,
+          { status: 409 }
+        );
+      }
+
+      let result: JsonValue | undefined;
+      try {
+        result = normalizeResult(await patch.rollback.run({ resources: this.resources }));
+      } catch (error) {
+        await this.log.failDataPatchRollback({
+          id: patch.id,
+          checksum: patch.checksum,
+          claimId: claim.claim.claimId,
+          failedAt: this.clock.now(),
+          error: errorMessage(error)
+        });
+        throw error;
+      }
+
+      const record = {
+        id: patch.id,
+        checksum: patch.checksum,
+        rolledBackAt: this.clock.now(),
+        ...(result === undefined ? {} : { result })
+      };
+      await this.log.completeDataPatchRollback({
+        ...record,
+        claimId: claim.claim.claimId
+      });
+      rolledBack.push(record);
+    }
+
+    return { rolledBack, skipped };
+  }
 }
 
 function normalizePatches<TResources>(
@@ -178,6 +279,27 @@ function assertRecordedPatchAllowsSkip<TResources>(
     throw new FrameworkError(
       "DATA_PATCH_PENDING",
       `Data patch '${patch.id}' is already claimed and has not completed`,
+      { status: 409 }
+    );
+  }
+  if (recorded.status === "rollback_pending") {
+    throw new FrameworkError(
+      "DATA_PATCH_ROLLBACK_PENDING",
+      `Data patch '${patch.id}' rollback is already claimed and has not completed`,
+      { status: 409 }
+    );
+  }
+  if (recorded.status === "rollback_failed") {
+    throw new FrameworkError(
+      "DATA_PATCH_ROLLBACK_FAILED",
+      `Data patch '${patch.id}' rollback previously failed at '${recorded.rollbackFailedAt}': ${recorded.rollbackError}`,
+      { status: 409 }
+    );
+  }
+  if (recorded.status === "rolled_back") {
+    throw new FrameworkError(
+      "DATA_PATCH_ROLLBACK_UNAVAILABLE",
+      `Data patch '${patch.id}' has already been rolled back`,
       { status: 409 }
     );
   }

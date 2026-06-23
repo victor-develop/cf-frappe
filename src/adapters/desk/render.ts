@@ -1194,6 +1194,7 @@ export function renderDataPatchAdmin(
     <div class="actions">
       <button class="button" type="submit" formaction="/desk/admin/data-patches/plan">Plan Batch</button>
       ${canPlanRollback ? `<button class="button" type="submit" formaction="/desk/admin/data-patches/rollback-plan">Plan Rollback Batch</button>` : ""}
+      ${canPlanRollback ? `<button class="button" type="submit" formaction="/desk/admin/data-patches/rollback">Rollback Batch</button>` : ""}
       <button class="button primary" type="submit">Apply Batch</button>
     </div>
   </form>
@@ -1223,6 +1224,7 @@ function renderDataPatchAction(patch: DataPatchDashboardEntry): string {
     const label = patch.rollbackLabel ?? "Plan Rollback";
     return `<form class="inline-action" method="post">
       <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/rollback-plan">${escapeHtml(label)}</button>
+      <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/rollback">Rollback</button>
     </form>`;
   }
   return "";
@@ -1241,12 +1243,24 @@ function renderDataPatchPlan(plan: DataPatchApplyPlan | DataPatchRollbackPlan, k
 }
 
 function dataPatchTimestamp(patch: DataPatchDashboardEntry): string {
-  return patch.appliedAt ?? patch.failedAt ?? patch.claimedAt ?? "";
+  return patch.rolledBackAt ??
+    patch.rollbackFailedAt ??
+    patch.rollbackClaimedAt ??
+    patch.appliedAt ??
+    patch.failedAt ??
+    patch.claimedAt ??
+    "";
 }
 
 function dataPatchDetail(patch: DataPatchDashboardEntry): string {
   if (patch.status === "failed") {
     return patch.error ?? "";
+  }
+  if (patch.status === "rollback_failed") {
+    return patch.rollbackError ?? "";
+  }
+  if (patch.status === "rolled_back" && patch.rollbackResult !== undefined) {
+    return JSON.stringify(patch.rollbackResult);
   }
   if (patch.status === "applied" && patch.result !== undefined) {
     return JSON.stringify(patch.result);

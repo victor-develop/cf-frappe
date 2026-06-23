@@ -56,6 +56,24 @@ describe("cf-frappe CLI remote data patches", () => {
       limit: 1
     });
 
+    expect(parseCliArgs([
+      "data-patches",
+      "rollback",
+      "--url",
+      "https://app.example",
+      "--id",
+      "crm.backfill",
+      "--limit",
+      "1"
+    ])).toEqual({
+      kind: "data-patches",
+      action: "rollback",
+      url: "https://app.example",
+      headers: [],
+      patchIds: ["crm.backfill"],
+      limit: 1
+    });
+
     expect(parseCliArgs(["data-patches", "retry", "--url", "https://app.example", "--id", "core.seed"])).toEqual({
       kind: "data-patches",
       action: "retry",
@@ -124,7 +142,16 @@ describe("cf-frappe CLI remote data patches", () => {
         env: (name) => name === "CF_FRAPPE_AUTH" ? "Bearer test-token" : undefined,
         fetch: fakeFetch(calls, {
           data: {
-            totals: { total: 2, notApplied: 1, pending: 0, applied: 1, failed: 0 },
+            totals: {
+              total: 2,
+              notApplied: 1,
+              pending: 0,
+              applied: 1,
+              failed: 0,
+              rollbackPending: 0,
+              rolledBack: 0,
+              rollbackFailed: 0
+            },
             patches: [
               { id: "core.seed", checksum: "v1", status: "applied", appliedAt: "2026-01-01T00:00:00Z" },
               { id: "crm.backfill", label: "CRM Backfill", checksum: "v2", status: "not_applied" }
@@ -143,7 +170,9 @@ describe("cf-frappe CLI remote data patches", () => {
     expect(calls[0]?.headers.get("authorization")).toBe("Bearer test-token");
     expect(calls[0]?.headers.get("x-cf-frappe-user")).toBe("admin@example.com");
     expect(stdout.text()).toContain("Data patches at https://app.example/cf");
-    expect(stdout.text()).toContain("total 2, not applied 1, pending 0, applied 1, failed 0");
+    expect(stdout.text()).toContain(
+      "total 2, not applied 1, pending 0, applied 1, failed 0, rollback pending 0, rolled back 0, rollback failed 0"
+    );
     expect(stdout.text()).toContain("- core.seed [applied] checksum v1");
     expect(stdout.text()).toContain("- crm.backfill [not_applied] checksum v2 - CRM Backfill");
   });
@@ -212,6 +241,39 @@ describe("cf-frappe CLI remote data patches", () => {
     expect(stdout.text()).toContain("Rollback plan: crm.second");
     expect(stdout.text()).toContain("Requested: crm.second");
     expect(stdout.text()).toContain("Limit: 1");
+  });
+
+  it("rolls back selected remote data patches through the admin API", async () => {
+    const calls: RemoteCall[] = [];
+    const stdout = textBuffer();
+    const exitCode = await runCli(
+      ["data-patches", "rollback", "--url", "https://app.example", "--id", "crm.second", "--limit", "1"],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(calls, {
+          data: {
+            rolledBack: [{ id: "crm.second", checksum: "v1", rolledBackAt: "2026-01-01T00:00:00Z" }],
+            skipped: []
+          }
+        }, 201),
+        stdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("https://app.example/api/data-patches/rollback");
+    expect(calls[0]?.method).toBe("POST");
+    expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({
+      patchIds: ["crm.second"],
+      limit: 1
+    });
+    expect(stdout.text()).toContain("Rolled back data patches at https://app.example");
+    expect(stdout.text()).toContain("Rolled back:");
+    expect(stdout.text()).toContain("- crm.second (v1)");
+    expect(stdout.text()).toContain("Skipped:");
+    expect(stdout.text()).toContain("- (none)");
   });
 
   it("retries one failed remote data patch through the admin API", async () => {

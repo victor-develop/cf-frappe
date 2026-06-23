@@ -1,4 +1,4 @@
-import { DataPatchRunner, type DataPatchRunResult } from "./data-patch-runner.js";
+import { DataPatchRunner, type DataPatchRollbackRunResult, type DataPatchRunResult } from "./data-patch-runner.js";
 import { FrameworkError, badRequest, notFound, permissionDenied } from "../core/errors.js";
 import { assertDataPatchId, defineDataPatch, type DataPatchDefinition } from "../core/data-patch.js";
 import { SYSTEM_MANAGER_ROLE, type Actor, type JsonValue } from "../core/types.js";
@@ -6,7 +6,14 @@ import type { Clock } from "../ports/clock.js";
 import type { DataPatchLog, RecordedDataPatch } from "../ports/data-patch-log.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 
-export type DataPatchDashboardStatus = "not_applied" | "pending" | "applied" | "failed";
+export type DataPatchDashboardStatus =
+  | "not_applied"
+  | "pending"
+  | "applied"
+  | "failed"
+  | "rollback_pending"
+  | "rolled_back"
+  | "rollback_failed";
 
 export interface DataPatchDashboardEntry {
   readonly id: string;
@@ -20,6 +27,11 @@ export interface DataPatchDashboardEntry {
   readonly failedAt?: string;
   readonly error?: string;
   readonly result?: JsonValue;
+  readonly rollbackClaimedAt?: string;
+  readonly rolledBackAt?: string;
+  readonly rollbackFailedAt?: string;
+  readonly rollbackError?: string;
+  readonly rollbackResult?: JsonValue;
 }
 
 export interface DataPatchDashboard {
@@ -30,6 +42,9 @@ export interface DataPatchDashboard {
     readonly pending: number;
     readonly applied: number;
     readonly failed: number;
+    readonly rollbackPending: number;
+    readonly rolledBack: number;
+    readonly rollbackFailed: number;
   };
 }
 
@@ -38,6 +53,7 @@ export interface DataPatchAdminPort {
   planApply(actor: Actor, options?: DataPatchApplyOptions): Promise<DataPatchApplyPlan>;
   planRollback(actor: Actor, options?: DataPatchRollbackOptions): Promise<DataPatchRollbackPlan>;
   apply(actor: Actor, options?: DataPatchApplyOptions): Promise<DataPatchRunResult>;
+  rollback(actor: Actor, options?: DataPatchRollbackOptions): Promise<DataPatchRollbackRunResult>;
   retryFailed(actor: Actor, patchId: string): Promise<DataPatchRunResult>;
 }
 
@@ -99,6 +115,11 @@ export class DataPatchService<TResources = unknown> {
   async apply(actor: Actor, options: DataPatchApplyOptions = {}): Promise<DataPatchRunResult> {
     this.authorize(actor);
     return this.runner().apply(await this.patchesForApply(options));
+  }
+
+  async rollback(actor: Actor, options: DataPatchRollbackOptions = {}): Promise<DataPatchRollbackRunResult> {
+    this.authorize(actor);
+    return this.runner().rollback(await this.patchesForRollbackPlan(options));
   }
 
   async retryFailed(actor: Actor, patchId: string): Promise<DataPatchRunResult> {
@@ -182,6 +203,23 @@ export class DataPatchService<TResources = unknown> {
           status: 409
         });
       }
+      if (recorded.status === "rollback_pending") {
+        throw new FrameworkError(
+          "DATA_PATCH_ROLLBACK_PENDING",
+          `Data patch '${patch.id}' rollback is pending`,
+          { status: 409 }
+        );
+      }
+      if (recorded.status === "rollback_failed") {
+        throw new FrameworkError(
+          "DATA_PATCH_ROLLBACK_FAILED",
+          `Data patch '${patch.id}' rollback failed and must be investigated first`,
+          { status: 409 }
+        );
+      }
+      if (recorded.status === "rolled_back") {
+        continue;
+      }
       if (patch.rollback === undefined) {
         break;
       }
@@ -258,6 +296,27 @@ export class DataPatchService<TResources = unknown> {
           status: 409
         });
       }
+      if (recorded.status === "rollback_pending") {
+        throw new FrameworkError(
+          "DATA_PATCH_ROLLBACK_PENDING",
+          `Data patch '${patch.id}' rollback is pending`,
+          { status: 409 }
+        );
+      }
+      if (recorded.status === "rollback_failed") {
+        throw new FrameworkError(
+          "DATA_PATCH_ROLLBACK_FAILED",
+          `Data patch '${patch.id}' rollback failed and must be investigated first`,
+          { status: 409 }
+        );
+      }
+      if (recorded.status === "rolled_back") {
+        throw new FrameworkError(
+          "DATA_PATCH_ROLLBACK_UNAVAILABLE",
+          `Data patch '${patch.id}' has already been rolled back`,
+          { status: 409 }
+        );
+      }
       if (patch.rollback === undefined) {
         throw new FrameworkError(
           "DATA_PATCH_ROLLBACK_UNAVAILABLE",
@@ -290,6 +349,23 @@ export class DataPatchService<TResources = unknown> {
         throw new FrameworkError("DATA_PATCH_FAILED", `Data patch '${patch.id}' failed and must be retried first`, {
           status: 409
         });
+      }
+      if (recorded.status === "rollback_pending") {
+        throw new FrameworkError(
+          "DATA_PATCH_ROLLBACK_PENDING",
+          `Data patch '${patch.id}' rollback is pending`,
+          { status: 409 }
+        );
+      }
+      if (recorded.status === "rollback_failed") {
+        throw new FrameworkError(
+          "DATA_PATCH_ROLLBACK_FAILED",
+          `Data patch '${patch.id}' rollback failed and must be investigated first`,
+          { status: 409 }
+        );
+      }
+      if (recorded.status === "rolled_back") {
+        continue;
       }
       throw new FrameworkError(
         "DATA_PATCH_ORDER_VIOLATION",
@@ -372,7 +448,30 @@ function dashboardEntry<TResources>(
     ...(recorded.status === "pending" ? { claimedAt: recorded.claimedAt } : {}),
     ...(recorded.status === "applied" ? { appliedAt: recorded.appliedAt } : {}),
     ...(recorded.status === "applied" && recorded.result !== undefined ? { result: recorded.result } : {}),
-    ...(recorded.status === "failed" ? { failedAt: recorded.failedAt, error: recorded.error } : {})
+    ...(recorded.status === "failed" ? { failedAt: recorded.failedAt, error: recorded.error } : {}),
+    ...(recorded.status === "rollback_pending"
+      ? {
+          appliedAt: recorded.appliedAt,
+          ...(recorded.result === undefined ? {} : { result: recorded.result }),
+          rollbackClaimedAt: recorded.rollbackClaimedAt
+        }
+      : {}),
+    ...(recorded.status === "rolled_back"
+      ? {
+          appliedAt: recorded.appliedAt,
+          ...(recorded.result === undefined ? {} : { result: recorded.result }),
+          rolledBackAt: recorded.rolledBackAt,
+          ...(recorded.rollbackResult === undefined ? {} : { rollbackResult: recorded.rollbackResult })
+        }
+      : {}),
+    ...(recorded.status === "rollback_failed"
+      ? {
+          appliedAt: recorded.appliedAt,
+          ...(recorded.result === undefined ? {} : { result: recorded.result }),
+          rollbackFailedAt: recorded.rollbackFailedAt,
+          rollbackError: recorded.rollbackError
+        }
+      : {})
   };
 }
 
@@ -396,6 +495,9 @@ function dashboardTotals(patches: readonly DataPatchDashboardEntry[]): DataPatch
     notApplied: patches.filter((patch) => patch.status === "not_applied").length,
     pending: patches.filter((patch) => patch.status === "pending").length,
     applied: patches.filter((patch) => patch.status === "applied").length,
-    failed: patches.filter((patch) => patch.status === "failed").length
+    failed: patches.filter((patch) => patch.status === "failed").length,
+    rollbackPending: patches.filter((patch) => patch.status === "rollback_pending").length,
+    rolledBack: patches.filter((patch) => patch.status === "rolled_back").length,
+    rollbackFailed: patches.filter((patch) => patch.status === "rollback_failed").length
   };
 }

@@ -49,7 +49,16 @@ describe("DataPatchService", () => {
         { id: "core.seed", label: "Seed Core", checksum: "v1", status: "not_applied" },
         { id: "crm.backfill", checksum: "v1", status: "not_applied" }
       ],
-      totals: { total: 2, notApplied: 2, pending: 0, applied: 0, failed: 0 }
+      totals: {
+        total: 2,
+        notApplied: 2,
+        pending: 0,
+        applied: 0,
+        failed: 0,
+        rollbackPending: 0,
+        rolledBack: 0,
+        rollbackFailed: 0
+      }
     });
 
     await expect(service.apply(admin)).resolves.toEqual({
@@ -66,7 +75,16 @@ describe("DataPatchService", () => {
         { id: "core.seed", label: "Seed Core", checksum: "v1", status: "applied", appliedAt: now, result: { touched: 1 } },
         { id: "crm.backfill", checksum: "v1", status: "applied", appliedAt: now }
       ],
-      totals: { total: 2, notApplied: 0, pending: 0, applied: 2, failed: 0 }
+      totals: {
+        total: 2,
+        notApplied: 0,
+        pending: 0,
+        applied: 2,
+        failed: 0,
+        rollbackPending: 0,
+        rolledBack: 0,
+        rollbackFailed: 0
+      }
     });
     await expect(service.apply(admin)).resolves.toMatchObject({
       applied: [],
@@ -101,7 +119,16 @@ describe("DataPatchService", () => {
         { id: "core.pending", checksum: "v1", status: "pending", claimedAt: now },
         { id: "core.failed", checksum: "v1", status: "failed", failedAt: now, error: "boom" }
       ],
-      totals: { total: 2, notApplied: 0, pending: 1, applied: 0, failed: 1 }
+      totals: {
+        total: 2,
+        notApplied: 0,
+        pending: 1,
+        applied: 0,
+        failed: 1,
+        rollbackPending: 0,
+        rolledBack: 0,
+        rollbackFailed: 0
+      }
     });
     await expect(service.apply(admin)).rejects.toMatchObject({ code: "DATA_PATCH_PENDING" });
   });
@@ -250,6 +277,63 @@ describe("DataPatchService", () => {
       ]
     });
     expect(resources).toEqual({ applied: ["first", "second"], rolledBack: [] });
+  });
+
+  it("executes rollback batches in reverse order and projects rolled-back dashboard state", async () => {
+    const resources = { applied: [] as string[], rolledBack: [] as string[] };
+    const service = new DataPatchService({
+      log: new InMemoryDataPatchLog(),
+      resources,
+      patches: [
+        defineDataPatch<typeof resources>({
+          id: "core.first",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.applied.push("first");
+          },
+          rollback: {
+            run: ({ resources }) => {
+              resources.rolledBack.push("first");
+              return { rolledBack: resources.rolledBack.length };
+            }
+          }
+        }),
+        defineDataPatch<typeof resources>({
+          id: "crm.second",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.applied.push("second");
+          },
+          rollback: {
+            run: ({ resources }) => {
+              resources.rolledBack.push("second");
+              return { rolledBack: resources.rolledBack.length };
+            }
+          }
+        })
+      ],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-first", "claim-second", "rollback-second", "rollback-first"])
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    await service.apply(admin);
+
+    await expect(service.rollback(admin)).resolves.toEqual({
+      rolledBack: [
+        { id: "crm.second", checksum: "v1", rolledBackAt: now, result: { rolledBack: 1 } },
+        { id: "core.first", checksum: "v1", rolledBackAt: now, result: { rolledBack: 2 } }
+      ],
+      skipped: []
+    });
+    await expect(service.dashboard(admin)).resolves.toMatchObject({
+      patches: [
+        { id: "core.first", status: "rolled_back", rolledBackAt: now, rollbackResult: { rolledBack: 2 } },
+        { id: "crm.second", status: "rolled_back", rolledBackAt: now, rollbackResult: { rolledBack: 1 } }
+      ],
+      totals: { applied: 0, rolledBack: 2, rollbackPending: 0, rollbackFailed: 0 }
+    });
+    await expect(service.rollback(guest)).rejects.toMatchObject({ code: "PERMISSION_DENIED", status: 403 });
+    expect(resources).toEqual({ applied: ["first", "second"], rolledBack: ["second", "first"] });
   });
 
   it("rejects rollback plans that skip later applied patches or lack rollback definitions", async () => {
