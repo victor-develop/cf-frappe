@@ -157,11 +157,25 @@ describe("event folding", () => {
         sequence: 8,
         type: "DocumentUnfollowed",
         payload: { kind: "DocumentUnfollowed", followerId: "owner@example.com" }
+      },
+      {
+        ...base,
+        id: "evt9",
+        sequence: 9,
+        type: "DocumentShared",
+        payload: { kind: "DocumentShared", userId: "collab@example.com", permissions: ["read"] }
+      },
+      {
+        ...base,
+        id: "evt10",
+        sequence: 10,
+        type: "DocumentShareRevoked",
+        payload: { kind: "DocumentShareRevoked", userId: "collab@example.com" }
       }
     ];
 
     expect(foldDocument(events)).toMatchObject({
-      version: 8,
+      version: 10,
       docstatus: "draft",
       data: { title: "One" }
     });

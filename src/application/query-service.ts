@@ -1,6 +1,7 @@
 import { FrameworkError, notFound, permissionDenied } from "../core/errors.js";
 import { resolveFormView } from "../core/form-view.js";
 import { mergeListFilters, normalizeListFilters, resolveListView } from "../core/list-view.js";
+import { documentShareAllows, type DocumentShareProvider } from "../core/document-shares.js";
 import { can } from "../core/permissions.js";
 import type { ModelRegistry } from "../core/registry.js";
 import {
@@ -28,17 +29,20 @@ export interface QueryServiceOptions {
   readonly registry: ModelRegistry;
   readonly projections: ProjectionStore;
   readonly userPermissions?: UserPermissionProvider;
+  readonly documentShares?: DocumentShareProvider;
 }
 
 export class QueryService {
   private readonly registry: ModelRegistry;
   private readonly projections: ProjectionStore;
   private readonly userPermissions: UserPermissionProvider | undefined;
+  private readonly documentShares: DocumentShareProvider | undefined;
 
   constructor(options: QueryServiceOptions) {
     this.registry = options.registry;
     this.projections = options.projections;
     this.userPermissions = options.userPermissions;
+    this.documentShares = options.documentShares;
   }
 
   listDoctypes(actor: Actor): readonly DocTypeDefinition[] {
@@ -208,7 +212,7 @@ export class QueryService {
         offset
       });
       for (const document of result.data) {
-        if (!canReadLinkTarget(actor, source, field, target, document, grants)) {
+        if (!(await this.canReadLinkTarget(actor, source, field, target, document, grants))) {
           continue;
         }
         const option = toLinkOption(document, target);
@@ -243,27 +247,42 @@ export class QueryService {
     if (document.docstatus === "deleted") {
       return false;
     }
-    if (!can(actor, doctype, "read", document)) {
+    const staticRead = can(actor, doctype, "read", document);
+    const sharedRead = staticRead ? false : await this.shareAllows(actor, document, "read");
+    if (!staticRead && !sharedRead) {
       return false;
     }
     const grants = await this.userPermissions?.permissionsFor(actor, document.tenantId);
     return documentMatchesUserPermissions(doctype, document, grants ?? []);
   }
-}
 
-function canReadLinkTarget(
-  actor: Actor,
-  source: DocTypeDefinition,
-  field: FieldDefinition,
-  target: DocTypeDefinition,
-  document: DocumentSnapshot,
-  grants: readonly UserPermissionGrant[]
-): boolean {
-  return (
-    document.docstatus !== "deleted" &&
-    can(actor, target, "read", document) &&
-    linkTargetMatchesUserPermissions(source, field, document, grants)
-  );
+  private async canReadLinkTarget(
+    actor: Actor,
+    source: DocTypeDefinition,
+    field: FieldDefinition,
+    target: DocTypeDefinition,
+    document: DocumentSnapshot,
+    grants: readonly UserPermissionGrant[]
+  ): Promise<boolean> {
+    if (document.docstatus === "deleted") {
+      return false;
+    }
+    const staticRead = can(actor, target, "read", document);
+    const sharedRead = staticRead ? false : await this.shareAllows(actor, document, "read");
+    return (
+      (staticRead || sharedRead) &&
+      linkTargetMatchesUserPermissions(source, field, document, grants)
+    );
+  }
+
+  private async shareAllows(
+    actor: Actor,
+    document: DocumentSnapshot,
+    action: Parameters<typeof can>[2]
+  ): Promise<boolean> {
+    const permissions = await this.documentShares?.sharedPermissionsFor(actor, document);
+    return documentShareAllows(permissions ?? [], action);
+  }
 }
 
 function mergeDefaultFilters(

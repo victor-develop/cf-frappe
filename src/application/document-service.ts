@@ -1,4 +1,15 @@
 import { foldDocument, foldDocumentAssignments, foldDocumentFollowers, foldDocumentTags } from "../core/events.js";
+import {
+  documentShareAllows,
+  documentShareGrantKey,
+  foldDocumentShares,
+  invalidDocumentSharePermissions,
+  normalizeDocumentShareGrant,
+  normalizeDocumentShareUserId,
+  type DocumentShareGrant,
+  type DocumentSharePermission,
+  type DocumentShareProvider
+} from "../core/document-shares.js";
 import { can } from "../core/permissions.js";
 import { applyDefaults, compactData, validateDocumentData } from "../core/schema.js";
 import { documentStream, namingSeriesStream } from "../core/streams.js";
@@ -35,6 +46,7 @@ export interface DocumentServiceOptions {
   readonly registry: ModelRegistry;
   readonly store: DocumentStore;
   readonly userPermissions?: UserPermissionProvider;
+  readonly documentShares?: DocumentShareProvider;
   readonly clock?: Clock;
   readonly ids?: IdGenerator;
   readonly onHookError?: (error: unknown, event: DomainEvent) => void | Promise<void>;
@@ -194,6 +206,27 @@ export interface UnfollowDocumentCommand {
   readonly metadata?: DocumentData;
 }
 
+export interface ShareDocumentCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly userId: string;
+  readonly permissions: readonly string[];
+  readonly tenantId?: string;
+  readonly expectedVersion?: number;
+  readonly metadata?: DocumentData;
+}
+
+export interface RevokeDocumentShareCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly userId: string;
+  readonly tenantId?: string;
+  readonly expectedVersion?: number;
+  readonly metadata?: DocumentData;
+}
+
 export interface DocumentCommandExecutor {
   create(command: CreateDocumentCommand): Promise<DocumentSnapshot>;
   update(command: UpdateDocumentCommand): Promise<DocumentSnapshot>;
@@ -210,6 +243,8 @@ export interface DocumentCommandExecutor {
   untag(command: UntagDocumentCommand): Promise<DocumentSnapshot>;
   follow(command: FollowDocumentCommand): Promise<DocumentSnapshot>;
   unfollow(command: UnfollowDocumentCommand): Promise<DocumentSnapshot>;
+  share(command: ShareDocumentCommand): Promise<DocumentSnapshot>;
+  revokeShare(command: RevokeDocumentShareCommand): Promise<DocumentSnapshot>;
 }
 
 const NAMING_SERIES_DOCTYPE = "__NamingSeries";
@@ -223,6 +258,7 @@ const MAX_ACTIVITY_EXTERNAL_ID_LENGTH = 256;
 const MAX_ASSIGNEE_ID_LENGTH = 320;
 const MAX_TAG_LENGTH = 80;
 const MAX_FOLLOWER_ID_LENGTH = 320;
+const MAX_SHARE_USER_ID_LENGTH = 320;
 
 export class DocumentService implements DocumentCommandExecutor {
   private readonly registry: ModelRegistry;
@@ -230,6 +266,7 @@ export class DocumentService implements DocumentCommandExecutor {
   private readonly clock: Clock;
   private readonly ids: IdGenerator;
   private readonly userPermissions: UserPermissionProvider | undefined;
+  private readonly documentShares: DocumentShareProvider | undefined;
   private readonly onHookError: ((error: unknown, event: DomainEvent) => void | Promise<void>) | undefined;
   private readonly afterCommit: ((context: AfterCommitContext) => void | Promise<void>) | undefined;
 
@@ -239,6 +276,7 @@ export class DocumentService implements DocumentCommandExecutor {
     this.clock = options.clock ?? systemClock;
     this.ids = options.ids ?? cryptoIdGenerator;
     this.userPermissions = options.userPermissions;
+    this.documentShares = options.documentShares;
     this.onHookError = options.onHookError;
     this.afterCommit = options.afterCommit;
   }
@@ -309,7 +347,7 @@ export class DocumentService implements DocumentCommandExecutor {
     const tenantId = resolveTenant(command.actor, command.tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
-    if (!can(command.actor, doctype, "update", existing)) {
+    if (!(await this.canActOnDocument(command.actor, doctype, "update", existing))) {
       throw permissionDenied(`Actor '${command.actor.id}' cannot update ${doctype.name}/${command.name}`);
     }
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
@@ -439,7 +477,7 @@ export class DocumentService implements DocumentCommandExecutor {
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
     const permissionAction = commandDefinition.permissionAction ?? "update";
-    if (!can(command.actor, doctype, permissionAction, existing)) {
+    if (!(await this.canActOnDocument(command.actor, doctype, permissionAction, existing))) {
       throw permissionDenied(`Actor '${command.actor.id}' cannot execute ${command.command} on ${doctype.name}/${command.name}`);
     }
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
@@ -650,6 +688,81 @@ export class DocumentService implements DocumentCommandExecutor {
       eventType: (doctype) => doctype.events?.unfollow ?? `${doctype.name}Unfollowed`,
       alreadyDone: (followers, followerId) => !followers.includes(followerId)
     });
+  }
+
+  async share(command: ShareDocumentCommand): Promise<DocumentSnapshot> {
+    const doctype = this.registry.get(command.doctype);
+    const tenantId = resolveTenant(command.actor, command.tenantId);
+    const stream = documentStream(tenantId, doctype.name, command.name);
+    const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, command.name);
+    const staticShareAllowed = can(command.actor, doctype, "share", existing);
+    const sharedPermissions = staticShareAllowed
+      ? []
+      : (await this.documentShares?.sharedPermissionsFor(command.actor, existing)) ?? [];
+    if (!staticShareAllowed && !documentShareAllows(sharedPermissions, "share")) {
+      throw permissionDenied(`Actor '${command.actor.id}' cannot share ${doctype.name}/${command.name}`);
+    }
+    await this.ensureUserPermissionAccess(command.actor, doctype, existing);
+    ensureExpectedVersion(existing, command.expectedVersion);
+    const grant = normalizeValidDocumentShareGrant(command);
+    if (!staticShareAllowed) {
+      ensureSharedGrantIsDelegable(command.actor, doctype, existing, sharedPermissions, grant);
+    }
+    const state = foldDocumentShares(tenantId, doctype.name, command.name, events);
+    const current = state.grants.find((item) => item.userId === grant.userId);
+    if (current && documentShareGrantKey(current) === documentShareGrantKey(grant)) {
+      return existing;
+    }
+    const now = this.clock.now();
+    const event = this.newEvent({
+      tenantId,
+      stream,
+      type: doctype.events?.share ?? `${doctype.name}Shared`,
+      doctype: doctype.name,
+      documentName: command.name,
+      actorId: command.actor.id,
+      occurredAt: now,
+      payload: {
+        kind: "DocumentShared",
+        userId: grant.userId,
+        permissions: grant.permissions
+      },
+      metadata: command.metadata ?? {}
+    });
+    return this.commitActivityEvent(doctype, existing, stream, event);
+  }
+
+  async revokeShare(command: RevokeDocumentShareCommand): Promise<DocumentSnapshot> {
+    const doctype = this.registry.get(command.doctype);
+    const tenantId = resolveTenant(command.actor, command.tenantId);
+    const stream = documentStream(tenantId, doctype.name, command.name);
+    const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, command.name);
+    if (!(await this.canActOnDocument(command.actor, doctype, "share", existing))) {
+      throw permissionDenied(`Actor '${command.actor.id}' cannot revoke shares for ${doctype.name}/${command.name}`);
+    }
+    await this.ensureUserPermissionAccess(command.actor, doctype, existing);
+    ensureExpectedVersion(existing, command.expectedVersion);
+    const userId = normalizeValidDocumentShareUserId(command.userId);
+    const state = foldDocumentShares(tenantId, doctype.name, command.name, events);
+    if (state.grants.every((grant) => grant.userId !== userId)) {
+      return existing;
+    }
+    const now = this.clock.now();
+    const event = this.newEvent({
+      tenantId,
+      stream,
+      type: doctype.events?.unshare ?? `${doctype.name}ShareRevoked`,
+      doctype: doctype.name,
+      documentName: command.name,
+      actorId: command.actor.id,
+      occurredAt: now,
+      payload: {
+        kind: "DocumentShareRevoked",
+        userId
+      },
+      metadata: command.metadata ?? {}
+    });
+    return this.commitActivityEvent(doctype, existing, stream, event);
   }
 
   async delete(command: DeleteDocumentCommand): Promise<DocumentSnapshot> {
@@ -908,6 +1021,29 @@ export class DocumentService implements DocumentCommandExecutor {
     return commit.snapshot;
   }
 
+  private async commitActivityEvent(
+    doctype: DocTypeDefinition,
+    existing: DocumentSnapshot,
+    stream: string,
+    event: NewDomainEvent
+  ): Promise<DocumentSnapshot> {
+    const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
+      if (!saved) {
+        throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
+      }
+      return {
+        ...existing,
+        version: saved.sequence,
+        updatedAt: saved.occurredAt
+      };
+    });
+    const [saved] = commit.events;
+    if (saved) {
+      await this.runAfterCommit(doctype, saved, commit.snapshot);
+    }
+    return commit.snapshot;
+  }
+
   private async changeDocStatus(options: {
     readonly command: SubmitDocumentCommand | CancelDocumentCommand;
     readonly doctype: DocTypeDefinition;
@@ -1043,12 +1179,7 @@ export class DocumentService implements DocumentCommandExecutor {
           return [];
         }
         const target = await this.readDocumentFromEvents(tenantId, targetDoctype, value);
-        if (
-          target &&
-          target.docstatus !== "deleted" &&
-          can(actor, targetDoctype, "read", target) &&
-          (await this.matchesLinkUserPermissions(actor, doctype, field, target))
-        ) {
+        if (target && await this.canReadLinkedDocument(actor, doctype, field, targetDoctype, target)) {
           return [];
         }
         return [
@@ -1090,6 +1221,33 @@ export class DocumentService implements DocumentCommandExecutor {
   ): Promise<boolean> {
     const grants = await this.userPermissions?.permissionsFor(actor, target.tenantId);
     return linkTargetMatchesUserPermissions(sourceDoctype, field, target, grants ?? []);
+  }
+
+  private async canReadLinkedDocument(
+    actor: Actor,
+    sourceDoctype: DocTypeDefinition,
+    field: FieldDefinition,
+    targetDoctype: DocTypeDefinition,
+    target: DocumentSnapshot
+  ): Promise<boolean> {
+    return (
+      target.docstatus !== "deleted" &&
+      (await this.canActOnDocument(actor, targetDoctype, "read", target)) &&
+      (await this.matchesLinkUserPermissions(actor, sourceDoctype, field, target))
+    );
+  }
+
+  private async canActOnDocument(
+    actor: Actor,
+    doctype: DocTypeDefinition,
+    action: Parameters<typeof can>[2],
+    document: DocumentSnapshot
+  ): Promise<boolean> {
+    if (can(actor, doctype, action, document)) {
+      return true;
+    }
+    const permissions = await this.documentShares?.sharedPermissionsFor(actor, document);
+    return documentShareAllows(permissions ?? [], action);
   }
 
   private relatedDocType(name: string): DocTypeDefinition | undefined {
@@ -1402,6 +1560,54 @@ function normalizeFollowerId(follower: string): string {
     throw badRequest(`Follower exceeds ${MAX_FOLLOWER_ID_LENGTH} characters`);
   }
   return normalized;
+}
+
+function normalizeValidDocumentShareGrant(command: {
+  readonly userId: string;
+  readonly permissions: readonly string[];
+}): DocumentShareGrant {
+  const invalidPermissions = invalidDocumentSharePermissions(command.permissions);
+  if (invalidPermissions.length > 0) {
+    throw badRequest(`Share permissions are invalid: ${invalidPermissions.join(", ")}`);
+  }
+  const grant = normalizeDocumentShareGrant(command);
+  if (grant.userId.length === 0) {
+    throw badRequest("Share user is required");
+  }
+  if (grant.userId.length > MAX_SHARE_USER_ID_LENGTH) {
+    throw badRequest(`Share user exceeds ${MAX_SHARE_USER_ID_LENGTH} characters`);
+  }
+  if (grant.permissions.length === 0) {
+    throw badRequest("Share permissions are required");
+  }
+  return grant;
+}
+
+function normalizeValidDocumentShareUserId(userId: string): string {
+  const normalized = normalizeDocumentShareUserId(userId);
+  if (normalized.length === 0) {
+    throw badRequest("Share user is required");
+  }
+  if (normalized.length > MAX_SHARE_USER_ID_LENGTH) {
+    throw badRequest(`Share user exceeds ${MAX_SHARE_USER_ID_LENGTH} characters`);
+  }
+  return normalized;
+}
+
+function ensureSharedGrantIsDelegable(
+  actor: Actor,
+  doctype: DocTypeDefinition,
+  document: DocumentSnapshot,
+  actorPermissions: readonly DocumentSharePermission[],
+  grant: DocumentShareGrant
+): void {
+  const actorPermissionSet = new Set(actorPermissions);
+  const blocked = grant.permissions.filter((permission) => !actorPermissionSet.has(permission));
+  if (blocked.length > 0) {
+    throw permissionDenied(
+      `Actor '${actor.id}' cannot grant ${blocked.join(", ")} on ${doctype.name}/${document.name}`
+    );
+  }
 }
 
 function readonlyIssues(

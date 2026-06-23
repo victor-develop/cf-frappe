@@ -216,6 +216,32 @@ describe("DocumentHistoryService", () => {
     });
   });
 
+  it("summarizes document share activity in the timeline", async () => {
+    const { documents, history } = createServices(["create-1", "share-1", "revoke-1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Shared Timeline" }) });
+    await documents.share({
+      actor: owner,
+      doctype: "Note",
+      name: "Shared Timeline",
+      userId: "collab@example.com",
+      permissions: ["read", "update"]
+    });
+    await documents.revokeShare({
+      actor: owner,
+      doctype: "Note",
+      name: "Shared Timeline",
+      userId: "collab@example.com"
+    });
+
+    const timeline = await history.getTimeline(owner, "Note", "Shared Timeline");
+
+    expect(timeline.entries.map(({ kind, summary, changes }) => ({ kind, summary, changes }))).toEqual([
+      { kind: "DocumentCreated", summary: "Created document", changes: expect.any(Array) },
+      { kind: "DocumentShared", summary: "Shared with collab@example.com (read, update)", changes: [] },
+      { kind: "DocumentShareRevoked", summary: "Revoked share for collab@example.com", changes: [] }
+    ]);
+  });
+
   it("does not expose orphaned events without a readable projection", async () => {
     const { history } = createServices(["create-1"]);
 

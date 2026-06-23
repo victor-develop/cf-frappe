@@ -42,6 +42,9 @@ function documentUserNotificationRecipients(event: DomainEvent): readonly string
     case "DocumentFollowed":
     case "DocumentUnfollowed":
       return [event.payload.followerId];
+    case "DocumentShared":
+    case "DocumentShareRevoked":
+      return [event.payload.userId];
     default:
       return [];
   }

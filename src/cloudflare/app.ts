@@ -12,6 +12,7 @@ import { JobHistoryService } from "../application/job-history-service.js";
 import { JobRetryService } from "../application/job-retry-service.js";
 import { JobScheduleService } from "../application/job-schedule-service.js";
 import { DocumentHistoryService } from "../application/document-history-service.js";
+import { DocumentShareService } from "../application/document-share-service.js";
 import { PrintService } from "../application/print-service.js";
 import { QueryService } from "../application/query-service.js";
 import { ReportService } from "../application/report-service.js";
@@ -70,6 +71,7 @@ export interface CloudFrappeRuntimeServices {
   readonly registry: ModelRegistry;
   readonly documents: DocumentCommandExecutor;
   readonly audit: AuditService;
+  readonly documentShares: DocumentShareService;
   readonly history: DocumentHistoryService;
   readonly savedFilters: SavedListFilterService;
   readonly userAccounts?: UserAccountService;
@@ -257,6 +259,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     events,
     validator: new ModelBackedUserPermissionGrantValidator({ registry: options.registry, events })
   });
+  const documentShares = new DocumentShareService({ events });
   const roleValidator = options.auth?.validateRolesWithCatalog
     ? new RoleCatalogUserRoleValidator({ events })
     : undefined;
@@ -287,7 +290,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
         ...(options.auth.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
       })
     : undefined;
-  const restrictedQueries = new QueryService({ registry: options.registry, projections, userPermissions });
+  const restrictedQueries = new QueryService({ registry: options.registry, projections, userPermissions, documentShares });
   const restrictedHistory = new DocumentHistoryService({ events, queries: restrictedQueries });
   const prints = new PrintService({ registry: options.registry, queries: restrictedQueries });
   const reports = new ReportService({ registry: options.registry, queries: restrictedQueries });
@@ -304,6 +307,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     registry: options.registry,
     documents,
     audit,
+    documentShares,
     history: restrictedHistory,
     savedFilters,
     ...(userAccounts === undefined ? {} : { userAccounts }),
@@ -402,6 +406,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   const app = createResourceApi({
     registry: options.registry,
     documents,
+    documentShares,
     prints,
     queries: restrictedQueries,
     timeline: restrictedHistory,

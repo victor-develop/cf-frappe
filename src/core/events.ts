@@ -87,6 +87,8 @@ export function foldDocumentFrom(
       case "DocumentUntagged":
       case "DocumentFollowed":
       case "DocumentUnfollowed":
+      case "DocumentShared":
+      case "DocumentShareRevoked":
         if (snapshot) {
           const current: DocumentSnapshot = snapshot;
           snapshot = {

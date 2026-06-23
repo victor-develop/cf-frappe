@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the event-sourced user notification inbox slice:
+As of the event-sourced document sharing slice:
 
-- Vitest files: `68`
-- Vitest cases: `581`
+- Vitest files: `69`
+- Vitest cases: `593`
 
 ## Implication
 

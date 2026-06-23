@@ -7,6 +7,7 @@ describe("resource api", () => {
     return createResourceApi({
       registry: services.registry,
       documents: services.documents,
+      documentShares: services.documentShares,
       queries: services.queries,
       timeline: services.history,
       savedFilters: services.savedFilters,
@@ -60,6 +61,12 @@ describe("resource api", () => {
     ...userHeaders,
     "x-cf-frappe-user": "admin@example.com",
     "x-cf-frappe-roles": SYSTEM_MANAGER_ROLE
+  };
+  const collaboratorHeaders = {
+    "content-type": "application/json",
+    "x-cf-frappe-user": "collab@example.com",
+    "x-cf-frappe-roles": "User",
+    "x-cf-frappe-tenant": "acme"
   };
 
   it("returns health", async () => {
@@ -712,6 +719,67 @@ describe("resource api", () => {
 
     const empty = await app.request("/api/resource/Note/HTTP%20Followed/followers", { headers: userHeaders });
     await expect(empty.json()).resolves.toMatchObject({ data: { followers: [] } });
+  });
+
+  it("shares and revokes resources through event-sourced share routes", async () => {
+    const app = makeApp();
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Shared", body: "Body" })
+    });
+
+    const deniedBeforeShare = await app.request("/api/resource/Note/HTTP%20Shared", {
+      headers: collaboratorHeaders
+    });
+    expect(deniedBeforeShare.status).toBe(403);
+
+    const shared = await app.request("/api/resource/Note/HTTP%20Shared/shares", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ userId: "collab@example.com", permissions: ["write"], expectedVersion: 1 })
+    });
+
+    expect(shared.status).toBe(201);
+    await expect(shared.json()).resolves.toMatchObject({ data: { version: 2 } });
+
+    const current = await app.request("/api/resource/Note/HTTP%20Shared/shares", { headers: userHeaders });
+    expect(current.status).toBe(200);
+    await expect(current.json()).resolves.toMatchObject({
+      data: {
+        version: 2,
+        grants: [{ userId: "collab@example.com", permissions: ["read", "update"] }]
+      }
+    });
+
+    const sharedRead = await app.request("/api/resource/Note/HTTP%20Shared", {
+      headers: collaboratorHeaders
+    });
+    expect(sharedRead.status).toBe(200);
+    await expect(sharedRead.json()).resolves.toMatchObject({ data: { name: "HTTP Shared" } });
+
+    const sharedUpdate = await app.request("/api/resource/Note/HTTP%20Shared", {
+      method: "PUT",
+      headers: collaboratorHeaders,
+      body: JSON.stringify({ body: "Updated through share", expectedVersion: 2 })
+    });
+    expect(sharedUpdate.status).toBe(200);
+    await expect(sharedUpdate.json()).resolves.toMatchObject({
+      data: { version: 3, data: { body: "Updated through share" } }
+    });
+
+    const revoked = await app.request("/api/resource/Note/HTTP%20Shared/shares/collab%40example.com", {
+      method: "DELETE",
+      headers: userHeaders,
+      body: JSON.stringify({ expectedVersion: 3 })
+    });
+    expect(revoked.status).toBe(200);
+    await expect(revoked.json()).resolves.toMatchObject({ data: { version: 4 } });
+
+    const deniedAfterRevoke = await app.request("/api/resource/Note/HTTP%20Shared", {
+      headers: collaboratorHeaders
+    });
+    expect(deniedAfterRevoke.status).toBe(403);
   });
 
   it("returns bounded resource timeline pages from query parameters", async () => {

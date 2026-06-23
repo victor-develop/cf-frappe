@@ -62,9 +62,19 @@ describe("DurableObjectCommandExecutor", () => {
     await executor.untag({ actor: owner, doctype: "Note", name: "My Note", tag: "Urgent" });
     await executor.follow({ actor: owner, doctype: "Note", name: "My Note" });
     await executor.unfollow({ actor: owner, doctype: "Note", name: "My Note" });
+    await executor.share({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      userId: "collab@example.com",
+      permissions: ["read"]
+    });
+    await executor.revokeShare({ actor: owner, doctype: "Note", name: "My Note", userId: "collab@example.com" });
     await executor.delete({ actor: owner, doctype: "Note", name: "My Note" });
 
     expect(names).toEqual([
+      "acme:Note:My Note",
+      "acme:Note:My Note",
       "acme:Note:My Note",
       "acme:Note:My Note",
       "acme:Note:My Note",
@@ -94,6 +104,8 @@ describe("DurableObjectCommandExecutor", () => {
       { kind: "untag" },
       { kind: "follow" },
       { kind: "unfollow" },
+      { kind: "share" },
+      { kind: "revokeShare" },
       { kind: "delete" }
     ]);
   });

@@ -5,6 +5,7 @@ import {
   definePrintFormat,
   defineReport,
   deterministicIds,
+  DocumentShareService,
   DocumentHistoryService,
   DocumentService,
   fixedClock,
@@ -73,10 +74,10 @@ export const noteDocType = defineDocType({
     { roles: ["Guest"], actions: ["read"] },
     {
       roles: ["User"],
-      actions: ["read", "create", "update", "submit", "cancel", "transition", "comment", "assign", "activity", "tag", "follow"],
+      actions: ["read", "create", "update", "submit", "cancel", "transition", "comment", "assign", "activity", "tag", "follow", "share"],
       when: ({ actor, document }) => !document || document.data.created_by === actor.id
     },
-    { roles: ["Task Manager"], actions: ["read", "create", "update", "delete", "submit", "cancel", "transition", "comment", "assign", "activity", "tag", "follow"] }
+    { roles: ["Task Manager"], actions: ["read", "create", "update", "delete", "submit", "cancel", "transition", "comment", "assign", "activity", "tag", "follow", "share"] }
   ],
   commands: [
     {
@@ -163,7 +164,7 @@ export const projectDocType = defineDocType({
   permissions: [
     {
       roles: ["User"],
-      actions: ["read", "create", "update", "delete"],
+      actions: ["read", "create", "update", "delete", "share"],
       when: ({ actor, document }) => !document || document.data.created_by === actor.id
     }
   ]
@@ -286,6 +287,7 @@ export function createServices(
 ) {
   const registry = createTestRegistry();
   const store = new InMemoryDocumentStore();
+  const documentShares = new DocumentShareService({ events: store });
   const userPermissions = new UserPermissionService({
     events: store,
     clock: fixedClock(now),
@@ -296,12 +298,13 @@ export function createServices(
     registry,
     store,
     userPermissions,
+    documentShares,
     clock: fixedClock(now),
     ids: deterministicIds(ids),
     ...(options.afterCommit === undefined ? {} : { afterCommit: options.afterCommit }),
     ...(options.onHookError === undefined ? {} : { onHookError: options.onHookError })
   });
-  const queries = new QueryService({ registry, projections: store, userPermissions });
+  const queries = new QueryService({ registry, projections: store, userPermissions, documentShares });
   const history = new DocumentHistoryService({ events: store, queries });
   const audit = new AuditService({ events: store });
   const savedFilters = new SavedListFilterService({
@@ -319,12 +322,13 @@ export function createServices(
     clock: fixedClock(now),
     ids: deterministicIds(options.savedReportIds ?? ["saved-report-1", "saved-report-event-1", "saved-report-event-2"])
   });
-  return { registry, store, events: store, projections: store, documents, history, audit, savedFilters, savedReports, userPermissions, prints, queries, reports };
+  return { registry, store, events: store, projections: store, documents, documentShares, history, audit, savedFilters, savedReports, userPermissions, prints, queries, reports };
 }
 
 export function createLinkedServices(ids: readonly string[] = ["evt1", "evt2", "evt3", "evt4"]) {
   const registry = createRegistry({ doctypes: [projectDocType, taskDocType] });
   const store = new InMemoryDocumentStore();
+  const documentShares = new DocumentShareService({ events: store });
   const userPermissions = new UserPermissionService({
     events: store,
     clock: fixedClock(now),
@@ -335,11 +339,12 @@ export function createLinkedServices(ids: readonly string[] = ["evt1", "evt2", "
     registry,
     store,
     userPermissions,
+    documentShares,
     clock: fixedClock(now),
     ids: deterministicIds(ids)
   });
-  const queries = new QueryService({ registry, projections: store, userPermissions });
-  return { registry, store, events: store, projections: store, documents, queries, userPermissions };
+  const queries = new QueryService({ registry, projections: store, userPermissions, documentShares });
+  return { registry, store, events: store, projections: store, documents, documentShares, queries, userPermissions };
 }
 
 export function createChildTableServices(ids: readonly string[] = ["evt1", "evt2", "evt3", "evt4"]) {
@@ -347,27 +352,31 @@ export function createChildTableServices(ids: readonly string[] = ["evt1", "evt2
     doctypes: [productDocType, salesInvoiceItemDocType, salesInvoiceDocType]
   });
   const store = new InMemoryDocumentStore();
+  const documentShares = new DocumentShareService({ events: store });
   const documents = new DocumentService({
     registry,
     store,
+    documentShares,
     clock: fixedClock(now),
     ids: deterministicIds(ids)
   });
-  const queries = new QueryService({ registry, projections: store });
-  return { registry, store, events: store, projections: store, documents, queries };
+  const queries = new QueryService({ registry, projections: store, documentShares });
+  return { registry, store, events: store, projections: store, documents, documentShares, queries };
 }
 
 export function createSeriesServices(ids: readonly string[] = ["evt1", "evt2", "evt3", "evt4"]) {
   const registry = createRegistry({ doctypes: [supportTicketDocType] });
   const store = new InMemoryDocumentStore();
+  const documentShares = new DocumentShareService({ events: store });
   const documents = new DocumentService({
     registry,
     store,
+    documentShares,
     clock: fixedClock(now),
     ids: deterministicIds(ids)
   });
-  const queries = new QueryService({ registry, projections: store });
-  return { registry, store, events: store, projections: store, documents, queries };
+  const queries = new QueryService({ registry, projections: store, documentShares });
+  return { registry, store, events: store, projections: store, documents, documentShares, queries };
 }
 
 export function data(overrides: DocumentData = {}): DocumentData {

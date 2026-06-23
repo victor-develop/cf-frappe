@@ -17,6 +17,7 @@ import {
 } from "../../src";
 import {
   createCloudFrappeWorker,
+  type AggregateCoordinatorCommand,
   type AggregateCoordinatorRpc,
   type RealtimeHubNamespace,
   type RpcDurableObjectNamespace
@@ -123,6 +124,44 @@ describe("CloudFrappe Worker routing", () => {
         notifications: []
       }
     });
+  });
+
+  it("routes document share API commands through the aggregate namespace", async () => {
+    const calls: AggregateCoordinatorCommand[] = [];
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => owner
+    });
+    const env = {
+      DB: fakeD1(),
+      AGGREGATES: fakeTransactingNamespace(calls)
+    };
+
+    const shared = await worker.fetch!(
+      cfRequest("http://localhost/api/resource/Note/My%20Note/shares", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId: "collab@example.com", permissions: ["read"], expectedVersion: 1 })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+    const revoked = await worker.fetch!(
+      cfRequest("http://localhost/api/resource/Note/My%20Note/shares/collab%40example.com", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ expectedVersion: 2 })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(shared.status).toBe(201);
+    expect(revoked.status).toBe(200);
+    expect(calls).toMatchObject([
+      { kind: "share", doctype: "Note", name: "My Note", userId: "collab@example.com", permissions: ["read"] },
+      { kind: "revokeShare", doctype: "Note", name: "My Note", userId: "collab@example.com" }
+    ]);
   });
 
   it("mounts saved report-builder definitions on the Worker API", async () => {
@@ -1049,6 +1088,32 @@ function fakeNamespace(): RpcDurableObjectNamespace<AggregateCoordinatorRpc> {
       return {
         transact() {
           throw new Error("Command path should not be used in this test");
+        }
+      };
+    }
+  };
+}
+
+function fakeTransactingNamespace(calls: AggregateCoordinatorCommand[]): RpcDurableObjectNamespace<AggregateCoordinatorRpc> {
+  return {
+    idFromName(name: string) {
+      return name as unknown as DurableObjectId;
+    },
+    get() {
+      return {
+        transact(command: AggregateCoordinatorCommand) {
+          calls.push(command);
+          const name = "name" in command ? command.name : "My Note";
+          return Promise.resolve({
+            tenantId: "acme",
+            doctype: command.doctype,
+            name,
+            version: command.kind === "share" ? 2 : 3,
+            docstatus: "draft" as const,
+            data: { title: name },
+            createdAt: now,
+            updatedAt: now
+          });
         }
       };
     }

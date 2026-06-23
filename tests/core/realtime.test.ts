@@ -120,6 +120,16 @@ describe("realtime topics", () => {
         type: "NoteUnfollowed",
         payload: { kind: "DocumentUnfollowed", followerId: "owner@example.com" },
         recipientId: "owner@example.com"
+      },
+      {
+        type: "NoteShared",
+        payload: { kind: "DocumentShared", userId: "collab@example.com", permissions: ["read"] },
+        recipientId: "collab@example.com"
+      },
+      {
+        type: "NoteShareRevoked",
+        payload: { kind: "DocumentShareRevoked", userId: "collab@example.com" },
+        recipientId: "collab@example.com"
       }
     ];
     for (const item of cases) {

@@ -279,6 +279,8 @@ function diffEvent(
     case "DocumentUntagged":
     case "DocumentFollowed":
     case "DocumentUnfollowed":
+    case "DocumentShared":
+    case "DocumentShareRevoked":
     case "SavedListFilterSaved":
     case "SavedListFilterDeleted":
     case "SavedReportSaved":
@@ -371,6 +373,10 @@ function summarize(payload: DocumentEventPayload): string {
       return `Followed by ${payload.followerId}`;
     case "DocumentUnfollowed":
       return `Unfollowed by ${payload.followerId}`;
+    case "DocumentShared":
+      return `Shared with ${payload.userId} (${payload.permissions.join(", ")})`;
+    case "DocumentShareRevoked":
+      return `Revoked share for ${payload.userId}`;
     case "SavedListFilterSaved":
       return `Saved list filter ${payload.label}`;
     case "SavedListFilterDeleted":

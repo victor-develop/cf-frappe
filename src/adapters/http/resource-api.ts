@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AuditService } from "../../application/audit-service.js";
 import type { DataPatchQueuePort } from "../../application/data-patch-jobs.js";
 import type { DataPatchAdminPort } from "../../application/data-patch-service.js";
+import type { DocumentShareService } from "../../application/document-share-service.js";
 import type { DocumentCommandExecutor } from "../../application/document-service.js";
 import type { DocumentHistoryService } from "../../application/document-history-service.js";
 import type { FileService } from "../../application/file-service.js";
@@ -42,6 +43,7 @@ import { createUserProfileApi } from "./user-profile-api.js";
 export interface ResourceApiOptions {
   readonly registry: ModelRegistry;
   readonly documents: DocumentCommandExecutor;
+  readonly documentShares?: DocumentShareService;
   readonly queries: QueryService;
   readonly timeline?: DocumentHistoryService;
   readonly savedFilters?: SavedListFilterService;
@@ -353,6 +355,48 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     });
   }
 
+  if (options.documentShares) {
+    const documentShares = options.documentShares;
+    app.get("/api/resource/:doctype/:name/shares", async (c) => {
+      const actor = await resolveActor(c.req.raw);
+      const doctype = options.registry.get(c.req.param("doctype"));
+      const document = await options.queries.getDocument(actor, doctype.name, c.req.param("name"));
+      const data = await documentShares.getDocumentShares(actor, doctype, document);
+      return c.json({ data });
+    });
+
+    app.post("/api/resource/:doctype/:name/shares", async (c) => {
+      const actor = await resolveActor(c.req.raw);
+      const body = await readJson(c.req.raw, { maxJsonBytes });
+      const expectedVersion = numberValue(body.expectedVersion);
+      const snapshot = await options.documents.share({
+        actor,
+        doctype: c.req.param("doctype"),
+        name: c.req.param("name"),
+        userId: stringValue(body.userId) ?? "",
+        permissions: permissionsValue(body.permissions),
+        ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.json({ data: snapshot }, 201);
+    });
+
+    app.delete("/api/resource/:doctype/:name/shares/:userId", async (c) => {
+      const actor = await resolveActor(c.req.raw);
+      const body = await readJson(c.req.raw, { allowEmpty: true, maxJsonBytes });
+      const expectedVersion = numberValue(body.expectedVersion);
+      const snapshot = await options.documents.revokeShare({
+        actor,
+        doctype: c.req.param("doctype"),
+        name: c.req.param("name"),
+        userId: c.req.param("userId"),
+        ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.json({ data: snapshot });
+    });
+  }
+
   app.get("/api/resource/:doctype/:name", async (c) => {
     const actor = await resolveActor(c.req.raw);
     const data = await options.queries.getDocument(actor, c.req.param("doctype"), c.req.param("name"));
@@ -650,6 +694,19 @@ function filtersValue(value: unknown): readonly ListDocumentsFilter[] {
       value: filterValue
     };
   });
+}
+
+function permissionsValue(value: unknown): readonly string[] {
+  if (value === undefined) {
+    return ["read"];
+  }
+  if (!Array.isArray(value)) {
+    throw badRequest("Share permissions must be an array");
+  }
+  if (!value.every((item) => typeof item === "string")) {
+    throw badRequest("Share permissions must be strings");
+  }
+  return value;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

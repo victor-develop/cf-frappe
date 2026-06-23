@@ -358,6 +358,10 @@ function notificationSubject(payload: Extract<DomainEvent["payload"], { readonly
       return `${payload.actorId} followed ${target}`;
     case "DocumentUnfollowed":
       return `${payload.actorId} unfollowed ${target}`;
+    case "DocumentShared":
+      return `${payload.actorId} shared ${target} with you`;
+    case "DocumentShareRevoked":
+      return `${payload.actorId} revoked your share on ${target}`;
     default:
       return `${payload.actorId} updated ${target}`;
   }

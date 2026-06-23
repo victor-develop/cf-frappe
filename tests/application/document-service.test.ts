@@ -889,6 +889,222 @@ describe("DocumentService", () => {
     ).rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
   });
 
+  it("shares and revokes documents as idempotent stream events without mutating document data", async () => {
+    const { documents, events, projections, documentShares, registry } = createServices(["e1", "share-1", "revoke-1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    const shared = await documents.share({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      userId: " collab@example.com ",
+      permissions: ["write", "share"],
+      expectedVersion: 1
+    });
+    const duplicateShare = await documents.share({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      userId: "collab@example.com",
+      permissions: ["share", "read", "update"],
+      expectedVersion: 2
+    });
+    const revoked = await documents.revokeShare({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      userId: "collab@example.com",
+      expectedVersion: 2
+    });
+    const absentRevoke = await documents.revokeShare({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      userId: "missing@example.com",
+      expectedVersion: 3
+    });
+
+    expect(shared).toMatchObject({ version: 2, docstatus: "draft", data: { body: "Body" } });
+    expect(duplicateShare.version).toBe(2);
+    expect(revoked).toMatchObject({ version: 3, docstatus: "draft", data: { body: "Body" } });
+    expect(absentRevoke.version).toBe(3);
+    await expect(projections.get("acme", "Note", "My Note")).resolves.toMatchObject({ version: 3 });
+    await expect(events.readStream("acme:Note:My%20Note")).resolves.toMatchObject([
+      expect.anything(),
+      {
+        type: "NoteShared",
+        actorId: owner.id,
+        payload: { kind: "DocumentShared", userId: "collab@example.com", permissions: ["read", "share", "update"] }
+      },
+      {
+        type: "NoteShareRevoked",
+        actorId: owner.id,
+        payload: { kind: "DocumentShareRevoked", userId: "collab@example.com" }
+      }
+    ]);
+    await expect(
+      documentShares.getDocumentShares(owner, registry.get("Note"), revoked)
+    ).resolves.toMatchObject({ grants: [] });
+  });
+
+  it("allows shared users to read, update, and delegate only granted document actions", async () => {
+    const { documents, queries } = createServices(["e1", "share-read", "share-update", "share-delegate", "update-1"]);
+    const collaborator = { ...owner, id: "collab@example.com" };
+    const delegated = { ...owner, id: "delegated@example.com" };
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Shared Note" }) });
+
+    await expect(queries.getDocument(collaborator, "Note", "Shared Note")).rejects.toMatchObject({
+      code: "PERMISSION_DENIED"
+    });
+
+    await documents.share({
+      actor: owner,
+      doctype: "Note",
+      name: "Shared Note",
+      userId: collaborator.id,
+      permissions: ["read"],
+      expectedVersion: 1
+    });
+    await expect(queries.getDocument(collaborator, "Note", "Shared Note")).resolves.toMatchObject({
+      name: "Shared Note"
+    });
+    await expect(
+      documents.update({
+        actor: collaborator,
+        doctype: "Note",
+        name: "Shared Note",
+        patch: { body: "blocked" },
+        expectedVersion: 2
+      })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+
+    await documents.share({
+      actor: owner,
+      doctype: "Note",
+      name: "Shared Note",
+      userId: collaborator.id,
+      permissions: ["update", "share"],
+      expectedVersion: 2
+    });
+    await expect(
+      documents.share({
+        actor: collaborator,
+        doctype: "Note",
+        name: "Shared Note",
+        userId: delegated.id,
+        permissions: ["read"],
+        expectedVersion: 3
+      })
+    ).resolves.toMatchObject({ version: 4 });
+    await expect(
+      documents.update({
+        actor: collaborator,
+        doctype: "Note",
+        name: "Shared Note",
+        patch: { body: "shared update" },
+        expectedVersion: 4
+      })
+    ).resolves.toMatchObject({ version: 5, data: { body: "shared update" } });
+    await expect(queries.getDocument(delegated, "Note", "Shared Note")).resolves.toMatchObject({
+      name: "Shared Note"
+    });
+  });
+
+  it("does not let shared share-only access delegate update permissions", async () => {
+    const { documents, queries } = createServices(["e1", "share-1", "delegate-1", "delegate-2"]);
+    const collaborator = { ...owner, id: "collab@example.com" };
+    const delegated = { ...owner, id: "delegated@example.com" };
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Share Only" }) });
+    await documents.share({
+      actor: owner,
+      doctype: "Note",
+      name: "Share Only",
+      userId: collaborator.id,
+      permissions: ["share"],
+      expectedVersion: 1
+    });
+
+    await expect(
+      documents.share({
+        actor: collaborator,
+        doctype: "Note",
+        name: "Share Only",
+        userId: delegated.id,
+        permissions: ["update"],
+        expectedVersion: 2
+      })
+    ).rejects.toMatchObject({
+      code: "PERMISSION_DENIED",
+      message: "Actor 'collab@example.com' cannot grant update on Note/Share Only"
+    });
+    await expect(
+      documents.share({
+        actor: collaborator,
+        doctype: "Note",
+        name: "Share Only",
+        userId: delegated.id,
+        permissions: ["read"],
+        expectedVersion: 2
+      })
+    ).resolves.toMatchObject({ version: 3 });
+    await expect(queries.getDocument(delegated, "Note", "Share Only")).resolves.toMatchObject({
+      name: "Share Only"
+    });
+  });
+
+  it("requires share permission, non-empty share users and permissions, and current optimistic versions", async () => {
+    const { documents } = createServices(["e1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    await expect(
+      documents.share({
+        actor: guest,
+        doctype: "Note",
+        name: "My Note",
+        userId: "collab@example.com",
+        permissions: ["read"]
+      })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+
+    await expect(
+      documents.share({ actor: owner, doctype: "Note", name: "My Note", userId: "   ", permissions: ["read"] })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Share user is required"
+    });
+
+    await expect(
+      documents.share({ actor: owner, doctype: "Note", name: "My Note", userId: "collab@example.com", permissions: [] })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Share permissions are required"
+    });
+
+    await expect(
+      documents.share({
+        actor: owner,
+        doctype: "Note",
+        name: "My Note",
+        userId: "collab@example.com",
+        permissions: ["delete"]
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Share permissions are invalid: delete"
+    });
+
+    await expect(
+      documents.share({
+        actor: owner,
+        doctype: "Note",
+        name: "My Note",
+        userId: "collab@example.com",
+        permissions: ["read"],
+        expectedVersion: 0
+      })
+    ).rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
+  });
+
   it("assigns and unassigns users as document stream events without mutating document data", async () => {
     const { documents, events, projections } = createServices(["e1", "assign-1", "unassign-1"]);
     await documents.create({ actor: owner, doctype: "Note", data: data() });

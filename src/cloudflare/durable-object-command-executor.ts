@@ -8,6 +8,8 @@ import type {
   ExecuteDomainCommand,
   FollowDocumentCommand,
   RecordDocumentActivityCommand,
+  RevokeDocumentShareCommand,
+  ShareDocumentCommand,
   SubmitDocumentCommand,
   TagDocumentCommand,
   TransitionDocumentCommand,
@@ -102,6 +104,14 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
 
   unfollow(command: UnfollowDocumentCommand): Promise<DocumentSnapshot> {
     return this.stubForNamed(command).transact({ ...command, kind: "unfollow" });
+  }
+
+  share(command: ShareDocumentCommand): Promise<DocumentSnapshot> {
+    return this.stubForNamed(command).transact({ ...command, kind: "share" });
+  }
+
+  revokeShare(command: RevokeDocumentShareCommand): Promise<DocumentSnapshot> {
+    return this.stubForNamed(command).transact({ ...command, kind: "revokeShare" });
   }
 
   private stubForCreate(command: CreateDocumentCommand): AggregateCoordinatorRpc {

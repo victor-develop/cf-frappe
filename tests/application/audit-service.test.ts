@@ -169,6 +169,48 @@ describe("AuditService", () => {
     });
   });
 
+  it("searches document share events by audit kind", async () => {
+    const { audit, documents } = createServices(["create-1", "share-1", "revoke-1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Share Audit" }) });
+    await documents.share({
+      actor: owner,
+      doctype: "Note",
+      name: "Share Audit",
+      userId: "collab@example.com",
+      permissions: ["read"],
+      expectedVersion: 1
+    });
+    await documents.revokeShare({
+      actor: owner,
+      doctype: "Note",
+      name: "Share Audit",
+      userId: "collab@example.com",
+      expectedVersion: 2
+    });
+
+    const shared = await audit.search(admin, {
+      doctype: "Note",
+      name: "Share Audit",
+      kind: "DocumentShared"
+    });
+    const revoked = await audit.search(admin, {
+      doctype: "Note",
+      name: "Share Audit",
+      kind: "DocumentShareRevoked"
+    });
+
+    expect(shared.events).toHaveLength(1);
+    expect(shared.events[0]).toMatchObject({
+      id: "evt_share-1",
+      payload: { kind: "DocumentShared", userId: "collab@example.com", permissions: ["read"] }
+    });
+    expect(revoked.events).toHaveLength(1);
+    expect(revoked.events[0]).toMatchObject({
+      id: "evt_revoke-1",
+      payload: { kind: "DocumentShareRevoked", userId: "collab@example.com" }
+    });
+  });
+
   it("searches saved report events by audit kind", async () => {
     const { audit, savedReports } = createServices(["create-1"], {
       savedReportIds: ["audit", "event-1", "event-2"]

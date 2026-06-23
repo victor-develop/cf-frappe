@@ -60,7 +60,8 @@ export type PermissionAction =
   | "assign"
   | "activity"
   | "tag"
-  | "follow";
+  | "follow"
+  | "share";
 
 export interface Actor {
   readonly id: string;
@@ -161,6 +162,8 @@ export interface DocTypeDefinition<TData extends DocumentData = DocumentData> {
     readonly untag?: string;
     readonly follow?: string;
     readonly unfollow?: string;
+    readonly share?: string;
+    readonly unshare?: string;
   };
   readonly description?: string;
   readonly __data?: TData;
@@ -237,6 +240,15 @@ export type DocumentEventPayload =
   | {
       readonly kind: "DocumentUnfollowed";
       readonly followerId: string;
+    }
+  | {
+      readonly kind: "DocumentShared";
+      readonly userId: string;
+      readonly permissions: readonly import("./document-shares.js").DocumentSharePermission[];
+    }
+  | {
+      readonly kind: "DocumentShareRevoked";
+      readonly userId: string;
     }
   | {
       readonly kind: "UserPermissionAllowed";

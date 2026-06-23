@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { DocumentShareService } from "../application/document-share-service.js";
 import { DocumentService } from "../application/document-service.js";
 import { UserPermissionService } from "../application/user-permission-service.js";
 import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator.js";
@@ -12,6 +13,7 @@ import type {
   CreateDocumentCommand,
   DeleteDocumentCommand,
   FollowDocumentCommand,
+  ShareDocumentCommand,
   RecordDocumentActivityCommand,
   SubmitDocumentCommand,
   TagDocumentCommand,
@@ -19,6 +21,7 @@ import type {
   UnassignDocumentCommand,
   UntagDocumentCommand,
   UnfollowDocumentCommand,
+  RevokeDocumentShareCommand,
   UpdateDocumentCommand
 } from "../application/document-service.js";
 import type { ExecuteDomainCommand } from "../application/document-service.js";
@@ -43,7 +46,9 @@ export type AggregateCoordinatorCommand =
   | ({ readonly kind: "tag" } & TagDocumentCommand)
   | ({ readonly kind: "untag" } & UntagDocumentCommand)
   | ({ readonly kind: "follow" } & FollowDocumentCommand)
-  | ({ readonly kind: "unfollow" } & UnfollowDocumentCommand);
+  | ({ readonly kind: "unfollow" } & UnfollowDocumentCommand)
+  | ({ readonly kind: "share" } & ShareDocumentCommand)
+  | ({ readonly kind: "revokeShare" } & RevokeDocumentShareCommand);
 
 export interface AggregateCoordinatorEnv {
   readonly DB: D1Database;
@@ -87,6 +92,7 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
       this.service = new DocumentService({
         registry: options.registry,
         store: new D1DocumentStore(env.DB),
+        documentShares: new DocumentShareService({ events }),
         userPermissions: new UserPermissionService({
           events,
           validator: new ModelBackedUserPermissionGrantValidator({ registry: options.registry, events })
@@ -130,6 +136,10 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
           return this.service.follow(command);
         case "unfollow":
           return this.service.unfollow(command);
+        case "share":
+          return this.service.share(command);
+        case "revokeShare":
+          return this.service.revokeShare(command);
       }
     }
   };
