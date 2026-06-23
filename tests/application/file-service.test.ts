@@ -12,7 +12,7 @@ import {
   UserPermissionService,
   documentStream
 } from "../../src";
-import type { FileStorage, PutFileObjectCommand } from "../../src";
+import type { FileScanner, FileScanTarget, FileStorage, PutFileObjectCommand } from "../../src";
 import { guest, now, owner } from "../helpers";
 
 const otherUser = {
@@ -49,6 +49,126 @@ describe("FileService", () => {
     await expect(new Response((await services.storage.get("acme/files/file_object-invoice.pdf"))?.body).text()).resolves.toBe(
       "hello"
     );
+  });
+
+  it("records clean scanner results in event-sourced File metadata", async () => {
+    const scanner = new StaticScanner("clean", { engine: "unit-av", message: "ok" });
+    const services = createFileServices(["create"], ["object"], { scanner });
+
+    const uploaded = await services.files.upload({
+      actor: owner,
+      filename: "clean.txt",
+      body: "safe",
+      contentType: "text/plain",
+      isPrivate: false
+    });
+
+    expect(scanner.targets).toEqual([
+      expect.objectContaining({
+        key: "acme/files/file_object-clean.txt",
+        filename: "clean.txt",
+        size: 4,
+        contentType: "text/plain",
+        source: "buffered_upload",
+        actorId: owner.id,
+        tenantId: "acme"
+      })
+    ]);
+    expect(uploaded.snapshot).toMatchObject({
+      version: 1,
+      data: {
+        storage_state: "available",
+        scan_status: "clean",
+        scan_checked_at: now,
+        scan_engine: "unit-av",
+        scan_message: "ok"
+      }
+    });
+    await expect(services.store.readStream(documentStream("acme", "File", "file_object"))).resolves.toMatchObject([
+      {
+        type: "FileCreated",
+        payload: {
+          kind: "DocumentCreated",
+          data: {
+            scan_status: "clean",
+            scan_checked_at: now,
+            scan_engine: "unit-av"
+          }
+        }
+      }
+    ]);
+  });
+
+  it("keeps an event-sourced scan-failed audit record and removes content for infected buffered uploads", async () => {
+    const scanner = new StaticScanner("infected", { engine: "unit-av", message: "EICAR-Test-File" });
+    const services = createFileServices(["create"], ["object"], { scanner });
+
+    await expect(
+      services.files.upload({
+        actor: owner,
+        filename: "infected.txt",
+        body: "bad!",
+        contentType: "text/plain",
+        isPrivate: false
+      })
+    ).rejects.toMatchObject({
+      code: "FILE_SCAN_FAILED",
+      message: "File scan failed: EICAR-Test-File"
+    });
+
+    expect(services.storage.has("acme/files/file_object-infected.txt")).toBe(false);
+    await expect(services.queries.getDocument(owner, "File", "file_object")).resolves.toMatchObject({
+      version: 1,
+      data: {
+        filename: "infected.txt",
+        storage_state: "scan_failed",
+        scan_status: "infected",
+        scan_checked_at: now,
+        scan_engine: "unit-av",
+        scan_message: "EICAR-Test-File"
+      }
+    });
+    await expect(services.files.download({ actor: owner, name: "file_object" })).rejects.toMatchObject({
+      code: "FILE_SCAN_FAILED",
+      status: 409
+    });
+    await expect(services.files.download({ actor: guest, name: "file_object" })).rejects.toMatchObject({
+      code: "PERMISSION_DENIED"
+    });
+    await expect(services.store.readStream(documentStream("acme", "File", "file_object"))).resolves.toMatchObject([
+      {
+        type: "FileScanFailed",
+        payload: {
+          kind: "DocumentCreated",
+          data: {
+            storage_state: "scan_failed",
+            scan_status: "infected"
+          }
+        }
+      }
+    ]);
+  });
+
+  it("removes buffered upload content when scanner adapters fail before metadata is created", async () => {
+    const services = createFileServices(["create"], ["object"], {
+      scanner: {
+        async scan() {
+          throw new Error("scanner unavailable");
+        }
+      }
+    });
+
+    await expect(
+      services.files.upload({
+        actor: owner,
+        filename: "scanner-error.txt",
+        body: "safe?",
+        contentType: "text/plain"
+      })
+    ).rejects.toThrow("scanner unavailable");
+
+    expect(services.storage.has("acme/files/file_object-scanner-error.txt")).toBe(false);
+    await expect(services.store.readStream(documentStream("acme", "File", "file_object"))).resolves.toEqual([]);
   });
 
   it("lists readable file metadata with attachment filters", async () => {
@@ -315,6 +435,170 @@ describe("FileService", () => {
     ]);
   });
 
+  it("scans direct upload objects before making them available", async () => {
+    const scanner = new StaticScanner("clean", { engine: "unit-av", message: "direct-ok" });
+    const services = createFileServices(["reserve", "complete"], ["direct"], { scanner });
+
+    const prepared = await services.files.prepareDirectUpload({
+      actor: owner,
+      filename: "direct-clean.txt",
+      size: 5,
+      contentType: "text/plain",
+      isPrivate: false
+    });
+
+    expect(prepared.snapshot).toMatchObject({
+      data: {
+        storage_state: "upload_pending",
+        scan_status: "pending"
+      }
+    });
+    await services.storage.put({
+      key: "acme/files/file_direct-direct-clean.txt",
+      body: "hello",
+      contentType: "text/plain",
+      filename: "direct-clean.txt",
+      size: 5
+    });
+
+    await expect(
+      services.files.completeDirectUpload({
+        actor: owner,
+        name: prepared.snapshot.name,
+        expectedVersion: prepared.snapshot.version
+      })
+    ).resolves.toMatchObject({
+      version: 2,
+      data: {
+        storage_state: "available",
+        scan_status: "clean",
+        scan_checked_at: now,
+        scan_engine: "unit-av",
+        scan_message: "direct-ok"
+      }
+    });
+    expect(scanner.targets).toEqual([
+      expect.objectContaining({
+        key: "acme/files/file_direct-direct-clean.txt",
+        filename: "direct-clean.txt",
+        source: "direct_upload",
+        size: 5,
+        contentType: "text/plain"
+      })
+    ]);
+    await expect(services.store.readStream(documentStream("acme", "File", "file_direct"))).resolves.toMatchObject([
+      { type: "FileDirectUploadReserved" },
+      {
+        type: "FileDirectUploadCompleted",
+        payload: {
+          kind: "DomainCommandApplied",
+          patch: {
+            storage_state: "available",
+            scan_status: "clean",
+            scan_checked_at: now
+          }
+        }
+      }
+    ]);
+  });
+
+  it("marks infected direct uploads as scan-failed without making content downloadable", async () => {
+    const scanner = new StaticScanner("infected", { engine: "unit-av", message: "blocked" });
+    const services = createFileServices(["reserve", "scan-failed"], ["direct"], { scanner });
+    const prepared = await services.files.prepareDirectUpload({
+      actor: owner,
+      filename: "direct-bad.txt",
+      size: 5,
+      contentType: "text/plain",
+      isPrivate: false
+    });
+    await services.storage.put({
+      key: "acme/files/file_direct-direct-bad.txt",
+      body: "hello",
+      contentType: "text/plain",
+      filename: "direct-bad.txt",
+      size: 5
+    });
+
+    await expect(
+      services.files.completeDirectUpload({
+        actor: owner,
+        name: prepared.snapshot.name,
+        expectedVersion: prepared.snapshot.version
+      })
+    ).rejects.toMatchObject({
+      code: "FILE_SCAN_FAILED",
+      message: "File scan failed: blocked"
+    });
+
+    expect(services.storage.has("acme/files/file_direct-direct-bad.txt")).toBe(false);
+    await expect(services.queries.getDocument(owner, "File", prepared.snapshot.name)).resolves.toMatchObject({
+      version: 2,
+      data: {
+        storage_state: "scan_failed",
+        scan_status: "infected",
+        scan_checked_at: now,
+        scan_engine: "unit-av",
+        scan_message: "blocked"
+      }
+    });
+    await expect(services.files.download({ actor: owner, name: prepared.snapshot.name })).rejects.toMatchObject({
+      code: "FILE_SCAN_FAILED",
+      status: 409
+    });
+    await expect(services.files.download({ actor: guest, name: prepared.snapshot.name })).rejects.toMatchObject({
+      code: "PERMISSION_DENIED"
+    });
+  });
+
+  it("keeps direct uploads pending for retry when scanner adapters fail", async () => {
+    const services = createFileServices(["reserve"], ["direct"], {
+      scanner: {
+        async scan() {
+          throw new Error("scanner unavailable");
+        }
+      }
+    });
+    const prepared = await services.files.prepareDirectUpload({
+      actor: owner,
+      filename: "direct-retry.txt",
+      size: 5,
+      contentType: "text/plain",
+      isPrivate: false
+    });
+    await services.storage.put({
+      key: "acme/files/file_direct-direct-retry.txt",
+      body: "hello",
+      contentType: "text/plain",
+      filename: "direct-retry.txt",
+      size: 5
+    });
+
+    await expect(
+      services.files.completeDirectUpload({
+        actor: owner,
+        name: prepared.snapshot.name,
+        expectedVersion: prepared.snapshot.version
+      })
+    ).rejects.toThrow("scanner unavailable");
+
+    expect(services.storage.has("acme/files/file_direct-direct-retry.txt")).toBe(true);
+    await expect(services.queries.getDocument(owner, "File", prepared.snapshot.name)).resolves.toMatchObject({
+      version: 1,
+      data: {
+        storage_state: "upload_pending",
+        scan_status: "pending"
+      }
+    });
+    await expect(services.files.download({ actor: owner, name: prepared.snapshot.name })).rejects.toMatchObject({
+      code: "FILE_UPLOAD_PENDING",
+      status: 409
+    });
+    await expect(services.store.readStream(documentStream("acme", "File", "file_direct"))).resolves.toMatchObject([
+      { type: "FileDirectUploadReserved" }
+    ]);
+  });
+
   it("keeps direct uploads pending when finalized object metadata does not match the reservation", async () => {
     const services = createFileServices(["reserve"], ["direct"]);
     const prepared = await services.files.prepareDirectUpload({
@@ -559,7 +843,11 @@ describe("FileService", () => {
   });
 });
 
-function createFileServices(ids: readonly string[] = ["create"], fileIds: readonly string[] = ["object"]) {
+function createFileServices(
+  ids: readonly string[] = ["create"],
+  fileIds: readonly string[] = ["object"],
+  options: { readonly scanner?: FileScanner } = {}
+) {
   const registry = createRegistry({ doctypes: [fileDocType] });
   const store = new InMemoryDocumentStore();
   const storage = new InMemoryFileStorage();
@@ -583,9 +871,27 @@ function createFileServices(ids: readonly string[] = ["create"], fileIds: readon
     queries,
     storage,
     clock: fixedClock(now),
-    ids: deterministicIds(fileIds)
+    ids: deterministicIds(fileIds),
+    ...(options.scanner === undefined ? {} : { scanner: options.scanner })
   });
   return { registry, store, storage, documents, queries, userPermissions, files };
+}
+
+class StaticScanner implements FileScanner {
+  readonly targets: FileScanTarget[] = [];
+
+  constructor(
+    private readonly status: "clean" | "infected",
+    private readonly result: { readonly engine?: string; readonly message?: string } = {}
+  ) {}
+
+  async scan(target: FileScanTarget) {
+    this.targets.push(target);
+    return {
+      status: this.status,
+      ...this.result
+    };
+  }
 }
 
 class FailingDeleteStorage implements FileStorage {

@@ -14,6 +14,7 @@ import {
 } from "../core/types.js";
 import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
+import type { FileScanner, FileScanResult, FileScanSource, FileScanTarget } from "../ports/file-scanner.js";
 import type { DirectFileUpload, FileContent, FileObjectMetadata, FileStorage, StoredFileObject } from "../ports/file-storage.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 import { cryptoIdGenerator } from "../ports/id-generator.js";
@@ -27,6 +28,7 @@ export interface FileServiceOptions {
   readonly ids?: IdGenerator;
   readonly maxFileBytes?: number;
   readonly fileDoctype?: string;
+  readonly scanner?: FileScanner;
 }
 
 export interface UploadFileCommand {
@@ -116,6 +118,10 @@ export interface FileDashboardEntry {
   readonly isPrivate: boolean;
   readonly storageState: string;
   readonly directUploadExpiresAt?: string;
+  readonly scanStatus?: string;
+  readonly scanCheckedAt?: string;
+  readonly scanEngine?: string;
+  readonly scanMessage?: string;
   readonly uploadedBy: string;
   readonly uploadedAt: string;
   readonly expectedVersion: number;
@@ -145,6 +151,7 @@ export class FileService {
   private readonly ids: IdGenerator;
   private readonly maxFileBytes: number;
   private readonly fileDoctype: string;
+  private readonly scanner: FileScanner | undefined;
 
   constructor(options: FileServiceOptions) {
     this.registry = options.registry;
@@ -155,6 +162,7 @@ export class FileService {
     this.ids = options.ids ?? cryptoIdGenerator;
     this.maxFileBytes = options.maxFileBytes ?? 25 * 1024 * 1024;
     this.fileDoctype = options.fileDoctype ?? FILE_DOCTYPE_NAME;
+    this.scanner = options.scanner;
   }
 
   async upload(command: UploadFileCommand): Promise<UploadedFile> {
@@ -197,8 +205,39 @@ export class FileService {
         uploadedBy: command.actor.id
       }
     });
+    let scan: FileScanResult | undefined;
+    try {
+      scan = await this.scanObject({
+        actor: command.actor,
+        tenantId,
+        filename,
+        source: "buffered_upload",
+        object
+      });
+    } catch (error) {
+      await this.storage.delete(key).catch(() => undefined);
+      throw error;
+    }
 
     try {
+      const scanPatch = scan ? fileScanPatch(scan, this.clock.now()) : {};
+      if (scan?.status === "infected") {
+        const snapshot = await this.documents.create({
+          actor: command.actor,
+          doctype: this.fileDoctype,
+          name: fileName,
+          tenantId,
+          data: {
+            ...data,
+            storage_state: "scan_failed",
+            etag: object.httpEtag ?? object.etag,
+            ...scanPatch
+          },
+          eventType: "FileScanFailed",
+          metadata: command.metadata ?? {}
+        });
+        throw fileScanFailed(scan, snapshot);
+      }
       const snapshot = await this.documents.create({
         actor: command.actor,
         doctype: this.fileDoctype,
@@ -207,6 +246,7 @@ export class FileService {
         data: {
           ...data,
           etag: object.httpEtag ?? object.etag,
+          ...scanPatch
         },
         metadata: command.metadata ?? {}
       });
@@ -243,6 +283,7 @@ export class FileService {
       uploaded_at: this.clock.now(),
       storage_state: "upload_pending",
       direct_upload_expires_at: expiresAt,
+      ...(this.scanner === undefined ? {} : { scan_status: "pending" }),
       ...(command.attachedTo
         ? {
             attached_to_doctype: command.attachedTo.doctype,
@@ -290,6 +331,32 @@ export class FileService {
       throw notFound(`${this.fileDoctype}/${command.name} content was not found`);
     }
     ensureDirectUploadMatches(current, object);
+    const scan = await this.scanObject({
+      actor: command.actor,
+      tenantId,
+      filename: stringField(current, "filename"),
+      source: "direct_upload",
+      object
+    });
+    const scanPatch = scan ? fileScanPatch(scan, this.clock.now()) : {};
+    if (scan?.status === "infected") {
+      const snapshot = await this.documents.execute({
+        actor: command.actor,
+        doctype: this.fileDoctype,
+        name: command.name,
+        command: "failScan",
+        input: {
+          storage_state: "scan_failed",
+          etag: object.httpEtag ?? object.etag,
+          ...scanPatch
+        },
+        ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+        ...(command.expectedVersion === undefined ? {} : { expectedVersion: command.expectedVersion }),
+        metadata: command.metadata ?? {}
+      });
+      await this.storage.delete(stringField(current, "key")).catch(() => undefined);
+      throw fileScanFailed(scan, snapshot);
+    }
     return this.documents.execute({
       actor: command.actor,
       doctype: this.fileDoctype,
@@ -297,7 +364,8 @@ export class FileService {
       command: "completeDirectUpload",
       input: {
         storage_state: "available",
-        etag: object.httpEtag ?? object.etag
+        etag: object.httpEtag ?? object.etag,
+        ...scanPatch
       },
       ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
       ...(command.expectedVersion === undefined ? {} : { expectedVersion: command.expectedVersion }),
@@ -433,6 +501,11 @@ export class FileService {
         status: 409
       });
     }
+    if (snapshot.data.storage_state === "scan_failed") {
+      throw new FrameworkError("FILE_SCAN_FAILED", `${this.fileDoctype}/${command.name} did not pass file scanning`, {
+        status: 409
+      });
+    }
     if (snapshot.data.storage_state === "delete_requested") {
       throw new FrameworkError("DOCUMENT_DELETED", `${this.fileDoctype}/${command.name} is pending deletion`, {
         status: 410
@@ -513,6 +586,34 @@ export class FileService {
     }
     await this.queries.getDocument(actor, attachedTo.doctype, attachedTo.name, tenantId);
   }
+
+  private async scanObject(command: {
+    readonly actor: Actor;
+    readonly tenantId: string;
+    readonly filename: string;
+    readonly source: FileScanSource;
+    readonly object: FileObjectMetadata;
+  }): Promise<FileScanResult | undefined> {
+    if (!this.scanner) {
+      return undefined;
+    }
+    const target: FileScanTarget = {
+      actorId: command.actor.id,
+      tenantId: command.tenantId,
+      key: command.object.key,
+      filename: command.filename,
+      contentType: command.object.contentType ?? "application/octet-stream",
+      size: command.object.size,
+      source: command.source,
+      etag: command.object.etag,
+      ...(command.object.httpEtag === undefined ? {} : { httpEtag: command.object.httpEtag })
+    };
+    const result = await this.scanner.scan(target);
+    if (result.status !== "clean" && result.status !== "infected") {
+      throw badRequest("File scanner returned an invalid status");
+    }
+    return result;
+  }
 }
 
 function fileDashboardEntry(snapshot: DocumentSnapshot): Omit<FileDashboardEntry, "editable" | "deletable"> {
@@ -528,6 +629,10 @@ function fileDashboardEntry(snapshot: DocumentSnapshot): Omit<FileDashboardEntry
     ...(stringData(snapshot, "direct_upload_expires_at")
       ? { directUploadExpiresAt: stringData(snapshot, "direct_upload_expires_at") }
       : {}),
+    ...(stringData(snapshot, "scan_status") ? { scanStatus: stringData(snapshot, "scan_status") } : {}),
+    ...(stringData(snapshot, "scan_checked_at") ? { scanCheckedAt: stringData(snapshot, "scan_checked_at") } : {}),
+    ...(stringData(snapshot, "scan_engine") ? { scanEngine: stringData(snapshot, "scan_engine") } : {}),
+    ...(stringData(snapshot, "scan_message") ? { scanMessage: stringData(snapshot, "scan_message") } : {}),
     uploadedBy: stringData(snapshot, "uploaded_by"),
     uploadedAt: stringData(snapshot, "uploaded_at"),
     expectedVersion: snapshot.version,
@@ -603,6 +708,26 @@ function ensureDirectUploadMatches(snapshot: DocumentSnapshot, object: FileObjec
   if (normalizeContentType(object.contentType) !== normalizeContentType(stringData(snapshot, "content_type"))) {
     throw badRequest("Direct upload object content type mismatch");
   }
+}
+
+function fileScanPatch(result: FileScanResult, checkedAt: string): DocumentData {
+  return {
+    scan_status: result.status,
+    scan_checked_at: result.checkedAt ?? checkedAt,
+    ...(result.engine === undefined || result.engine === "" ? {} : { scan_engine: result.engine }),
+    ...(result.message === undefined || result.message === "" ? {} : { scan_message: result.message })
+  };
+}
+
+function fileScanFailed(result: FileScanResult, snapshot: DocumentSnapshot): FrameworkError {
+  const message = typeof snapshot.data.scan_message === "string" && snapshot.data.scan_message
+    ? snapshot.data.scan_message
+    : result.message;
+  return new FrameworkError(
+    "FILE_SCAN_FAILED",
+    message ? `File scan failed: ${message}` : "File scan failed",
+    { status: 422 }
+  );
 }
 
 function normalizeContentType(value: string | undefined): string {

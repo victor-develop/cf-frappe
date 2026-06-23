@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the direct file upload reservation/finalization slice:
+As of the event-sourced file scan hook slice:
 
 - Vitest files: `66`
-- Vitest cases: `555`
+- Vitest cases: `562`
 
 ## Implication
 

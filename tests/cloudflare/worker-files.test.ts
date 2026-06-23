@@ -11,7 +11,7 @@ import {
   type AggregateCoordinatorCommand,
   type RpcDurableObjectNamespace
 } from "../../src/cloudflare";
-import type { DocumentData } from "../../src";
+import type { DocumentData, FileScanTarget } from "../../src";
 import { now, owner } from "../helpers";
 
 describe("CloudFrappe Worker files", () => {
@@ -112,6 +112,54 @@ describe("CloudFrappe Worker files", () => {
     expect(response.status).toBe(400);
     await expect(response.text()).resolves.toContain("File exceeds 4 bytes");
     expect(storage.has("acme/files/file_object-hello.txt")).toBe(false);
+  });
+
+  it("passes configured scanner results into worker file metadata", async () => {
+    const scanTargets: FileScanTarget[] = [];
+    const worker = createCloudFrappeWorker({
+      registry: createRegistry({ doctypes: [fileDocType] }),
+      actor: () => owner,
+      files: {
+        storage: () => new InMemoryFileStorage(),
+        scanner: () => ({
+          async scan(target) {
+            scanTargets.push(target);
+            return { status: "clean", engine: "worker-av", message: "ok" };
+          }
+        }),
+        clock: fixedClock(now),
+        ids: deterministicIds(["object"])
+      }
+    });
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/api/files?filename=scanned.txt", {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: "hello"
+      }),
+      { DB: fakeD1(), AGGREGATES: fakeNamespace([]) },
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        data: {
+          scan_status: "clean",
+          scan_checked_at: now,
+          scan_engine: "worker-av",
+          scan_message: "ok"
+        }
+      }
+    });
+    expect(scanTargets).toEqual([
+      expect.objectContaining({
+        key: "acme/files/file_object-scanned.txt",
+        source: "buffered_upload",
+        actorId: owner.id
+      })
+    ]);
   });
 });
 
