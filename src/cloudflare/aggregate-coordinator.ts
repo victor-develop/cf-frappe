@@ -3,7 +3,8 @@ import { DocumentService } from "../application/document-service.js";
 import { UserPermissionService } from "../application/user-permission-service.js";
 import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator.js";
 import type { DomainEvent } from "../core/types.js";
-import { createDocumentRealtimeHooks } from "../application/realtime.js";
+import { createDocumentDeliveryHooks } from "../application/realtime.js";
+import { UserNotificationService } from "../application/user-notification-service.js";
 import type {
   AssignDocumentCommand,
   CancelDocumentCommand,
@@ -53,6 +54,7 @@ export interface AggregateCoordinatorOptions<Env extends AggregateCoordinatorEnv
   readonly clock?: Clock;
   readonly ids?: IdGenerator;
   readonly realtime?: (env: Env) => RealtimePublisher;
+  readonly notifications?: boolean;
   readonly onHookError?: (error: unknown, event: DomainEvent) => void | Promise<void>;
 }
 
@@ -72,6 +74,16 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
     constructor(_ctx: DurableObjectState, env: Env) {
       super(_ctx, env);
       const events = new D1EventStore(env.DB);
+      const notifications = options.notifications === false
+        ? undefined
+        : new UserNotificationService({
+            events,
+            ...(options.clock ? { clock: options.clock } : {})
+          });
+      const deliveryHooks = createDocumentDeliveryHooks({
+        ...(options.realtime ? { realtime: options.realtime(env) } : {}),
+        ...(notifications ? { notifications } : {})
+      });
       this.service = new DocumentService({
         registry: options.registry,
         store: new D1DocumentStore(env.DB),
@@ -82,7 +94,7 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
         ...(options.clock ? { clock: options.clock } : {}),
         ...(options.ids ? { ids: options.ids } : {}),
         ...(options.onHookError ? { onHookError: options.onHookError } : {}),
-        ...(options.realtime ? { afterCommit: createDocumentRealtimeHooks(options.realtime(env)).afterCommit } : {})
+        ...(deliveryHooks.afterCommit ? { afterCommit: deliveryHooks.afterCommit } : {})
       });
     }
 

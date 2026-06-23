@@ -32,6 +32,7 @@ import type { SavedListFilter } from "../../application/saved-list-filter-servic
 import type { SavedReport } from "../../application/saved-report-service.js";
 import type { PrintFormatDefinition } from "../../core/print-format.js";
 import type { UserAccount } from "../../core/user-accounts.js";
+import type { UserNotificationInbox } from "../../application/user-notification-service.js";
 import { USER_PROFILE_FIELDS, type UserProfileState } from "../../core/user-profiles.js";
 import type { UserPermissionState } from "../../core/user-permissions.js";
 import { DESK_CLIENT_SCRIPT_PATH } from "./client.js";
@@ -59,6 +60,7 @@ export interface DeskLayoutOptions {
   readonly activeReport?: string;
   readonly activeAdmin?: string;
   readonly showFiles?: boolean;
+  readonly showNotifications?: boolean;
   readonly adminLinks?: readonly DeskNavLink[];
   readonly doctypes: readonly DocTypeDefinition[];
   readonly reports?: readonly ReportDefinition[];
@@ -105,6 +107,7 @@ export function renderDeskLayout(options: DeskLayoutOptions): string {
     <nav>
       ${nav ? `<p class="nav-heading">DocTypes</p>${nav}` : ""}
       ${reportNav ? `<p class="nav-heading">Reports</p>${reportNav}` : ""}
+      ${options.showNotifications ? `<p class="nav-heading">Notifications</p><a class="nav-link" href="/desk/notifications">Inbox</a>` : ""}
       ${options.showFiles ? `<p class="nav-heading">Files</p><a class="nav-link" href="/desk/files">Files</a>` : ""}
       ${adminNav ? `<p class="nav-heading">Admin</p>${adminNav}` : ""}
     </nav>
@@ -146,6 +149,53 @@ export function renderDeskHome(
     </div>
   </section>
   ${renderReportList(reports)}`;
+}
+
+export function renderUserNotificationInbox(inbox: UserNotificationInbox): string {
+  const rows = inbox.notifications
+    .map((notification) => `<tr>
+        <td>${notification.read ? "read" : "unread"}</td>
+        <td>${escapeHtml(notification.subject)}</td>
+        <td>${escapeHtml(notification.doctype)}</td>
+        <td>${escapeHtml(notification.documentName)}</td>
+        <td>${escapeHtml(notification.actorId)}</td>
+        <td>${escapeHtml(notification.createdAt)}</td>
+        <td>${notification.dismissed ? "yes" : "no"}</td>
+        <td>${renderNotificationActions(notification)}</td>
+      </tr>`)
+    .join("");
+  return `<form class="panel form list-filters" method="get" action="/desk/notifications">
+    <div class="fields">
+      <label class="field checkbox"><input name="unread" value="1" type="checkbox"${inbox.filters.unreadOnly ? " checked" : ""}><span>Unread</span></label>
+      <label class="field checkbox"><input name="include_dismissed" value="1" type="checkbox"${inbox.filters.includeDismissed ? " checked" : ""}><span>Dismissed</span></label>
+      <label class="field"><span>Limit</span><input name="limit" type="number" min="1" max="200" value="${String(inbox.limit)}"></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Filter</button></div>
+  </form>
+  <section class="toolbar">
+    <span class="muted">${String(inbox.unreadCount)} unread</span>
+  </section>
+  <section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Status</th><th>Subject</th><th>DocType</th><th>Name</th><th>Actor</th><th>Created</th><th>Dismissed</th><th>Action</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="8" class="empty">No notifications.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+function renderNotificationActions(notification: UserNotificationInbox["notifications"][number]): string {
+  const read = notification.read
+    ? ""
+    : `<button class="button" type="submit" formaction="/desk/notifications/${encodeURIComponent(notification.id)}/read">Read</button>`;
+  const dismiss = notification.dismissed
+    ? ""
+    : `<button class="button" type="submit" formaction="/desk/notifications/${encodeURIComponent(notification.id)}/dismiss">Dismiss</button>`;
+  if (!read && !dismiss) {
+    return "";
+  }
+  return `<form class="inline-action" method="post">${read}${dismiss}</form>`;
 }
 
 export function renderFileManager(

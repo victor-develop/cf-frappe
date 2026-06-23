@@ -26,6 +26,7 @@ import {
   RoleService,
   SYSTEM_MANAGER_ROLE,
   UserAccountService,
+  UserNotificationService,
   UserProfileService,
   type DocTypeDefinition,
   type PasswordHasher
@@ -176,6 +177,59 @@ describe("Desk app", () => {
     expect(html).toContain("/desk/Note");
     expect(html).toContain("/desk/reports/Open%20Notes");
     expect(html).toContain("DocType");
+  });
+
+  it("renders and updates a durable notification inbox in Desk", async () => {
+    const services = createServices();
+    const notifications = new UserNotificationService({
+      events: new InMemoryEventStore(),
+      clock: fixedClock("2026-01-01T01:00:00.000Z"),
+      ids: deterministicIds(["record-1", "read-1", "dismiss-1"])
+    });
+    await notifications.recordFromDomainEvent({
+      id: "evt_assign",
+      tenantId: "acme",
+      stream: "acme:Note:My Note",
+      sequence: 2,
+      type: "NoteAssigned",
+      doctype: "Note",
+      documentName: "My Note",
+      actorId: "owner@example.com",
+      occurredAt: now,
+      payload: { kind: "DocumentAssigned", assigneeId: "support@example.com" },
+      metadata: {}
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      notifications,
+      actor: () => ({ id: "support@example.com", roles: ["User"], tenantId: "acme" })
+    });
+    const actionBase = "/desk/notifications/evt_assign%3Auser%3Asupport%2540example.com";
+
+    const response = await app.request("/desk/notifications");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("owner@example.com assigned you to Note My Note");
+    expect(html).toContain("1 unread");
+    expect(html).toContain(`formaction="${actionBase}/read"`);
+    expect(html).toContain(`formaction="${actionBase}/dismiss"`);
+
+    const read = await app.request(`${actionBase}/read`, { method: "POST" });
+
+    expect(read.status).toBe(303);
+    const readInbox = await app.request("/desk/notifications");
+    expect(await readInbox.text()).toContain("<td>read</td>");
+
+    const dismiss = await app.request(`${actionBase}/dismiss`, { method: "POST" });
+
+    expect(dismiss.status).toBe(303);
+    const hidden = await app.request("/desk/notifications");
+    expect(await hidden.text()).toContain("No notifications.");
+    const included = await app.request("/desk/notifications?include_dismissed=1");
+    expect(await included.text()).toContain("<td>yes</td>");
   });
 
   it("renders report list and report result pages", async () => {

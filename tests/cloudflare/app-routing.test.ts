@@ -102,6 +102,29 @@ describe("CloudFrappe Worker routing", () => {
     await expect(response.json()).resolves.toMatchObject({ data: { tenantId: "acme", events: [] } });
   });
 
+  it("mounts durable user notification inbox routes on the Worker API", async () => {
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => owner
+    });
+    const env = {
+      DB: fakeD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const response = await worker.fetch!(cfRequest("http://localhost/api/notifications"), env, fakeExecutionContext());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        tenantId: "acme",
+        userId: "owner@example.com",
+        unreadCount: 0,
+        notifications: []
+      }
+    });
+  });
+
   it("mounts saved report-builder definitions on the Worker API", async () => {
     const worker = createCloudFrappeWorker({
       registry: createTestRegistry(),
@@ -514,6 +537,31 @@ describe("CloudFrappe Worker routing", () => {
     );
     expect(desk.status).toBe(200);
     await expect(desk.text()).resolves.toContain("Create Role");
+  });
+
+  it("uses custom auth admin roles for Worker notification inbox inspection", async () => {
+    const worker = createCloudFrappeWorker<CloudFrappeAuthTestEnv>({
+      registry: createTestRegistry(),
+      actor: () => ({ id: "desk-admin@example.com", roles: ["Desk Admin"], tenantId: "acme" }),
+      auth: {
+        sessionSecret: (env) => env.SESSION_SECRET,
+        sessionMaxAgeSeconds: 60,
+        secure: false,
+        adminRoles: ["Desk Admin"]
+      }
+    });
+    const env = { DB: fakeD1(), AGGREGATES: fakeNamespace(), SESSION_SECRET: "edge-secret" };
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/api/notifications?user=owner%40example.com"),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: { userId: "owner@example.com", notifications: [] }
+    });
   });
 
   it("can validate account roles against the Worker role catalog", async () => {

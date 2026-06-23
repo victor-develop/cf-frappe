@@ -13,6 +13,7 @@ import type { RoleService } from "../../application/role-service.js";
 import type { SavedListFilterService } from "../../application/saved-list-filter-service.js";
 import type { SavedReportDefinition, SavedReportService } from "../../application/saved-report-service.js";
 import type { UserAccountService } from "../../application/user-account-service.js";
+import type { UserNotificationService } from "../../application/user-notification-service.js";
 import type { UserPermissionService } from "../../application/user-permission-service.js";
 import type { UserProfileService } from "../../application/user-profile-service.js";
 import { FrameworkError } from "../../core/errors.js";
@@ -65,8 +66,10 @@ import {
   renderRoleAdmin,
   renderSavedReportBuilder,
   renderSavedReportView,
+  renderUserNotificationInbox,
   renderUserAccountAdmin,
   renderUserPermissionAdmin,
+  type DeskLayoutOptions,
   type DeskNavLink,
   type FormLifecycleAction,
   type FormLinkOptions,
@@ -108,6 +111,7 @@ export interface DeskAppOptions {
   readonly savedReports?: SavedReportService;
   readonly roles?: RoleService;
   readonly userAccounts?: UserAccountService;
+  readonly notifications?: UserNotificationService;
   readonly userProfiles?: UserProfileService;
   readonly userPermissions?: UserPermissionService;
   readonly reports?: ReportService;
@@ -139,15 +143,55 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
     return html(
-      renderDeskLayout({
+      renderDeskLayoutFor(options, {
         title: "Home",
         adminLinks: adminLinksFor(options, actor),
         doctypes,
         reports,
+        showNotifications: options.notifications !== undefined,
         showFiles: options.files !== undefined,
         body: renderDeskHome(doctypes, reports)
       })
     );
+  });
+
+  app.get("/desk/notifications", async (c) => {
+    const notifications = requireNotifications(options);
+    const actor = await options.actor(c.req.raw);
+    const url = new URL(c.req.url);
+    const limit = parseOptionalInteger(url.searchParams.get("limit") ?? undefined);
+    const inbox = await notifications.inbox(actor, {
+      ...(limit === undefined ? {} : { limit }),
+      unreadOnly: truthyDeskParam(url.searchParams.get("unread")),
+      includeDismissed: truthyDeskParam(url.searchParams.get("include_dismissed"))
+    });
+    const doctypes = options.queries.listDoctypes(actor);
+    const reports = listReports(options, actor);
+    return html(
+      renderDeskLayoutFor(options, {
+        title: "Notifications",
+        adminLinks: adminLinksFor(options, actor),
+        doctypes,
+        reports,
+        showNotifications: true,
+        showFiles: options.files !== undefined,
+        body: renderUserNotificationInbox(inbox)
+      })
+    );
+  });
+
+  app.post("/desk/notifications/:notificationId/read", async (c) => {
+    const notifications = requireNotifications(options);
+    const actor = await options.actor(c.req.raw);
+    await notifications.markRead(actor, c.req.param("notificationId"), { metadata: requestMetadata(c.req.raw) });
+    return c.redirect("/desk/notifications", 303);
+  });
+
+  app.post("/desk/notifications/:notificationId/dismiss", async (c) => {
+    const notifications = requireNotifications(options);
+    const actor = await options.actor(c.req.raw);
+    await notifications.dismiss(actor, c.req.param("notificationId"), { metadata: requestMetadata(c.req.raw) });
+    return c.redirect("/desk/notifications", 303);
   });
 
   app.get("/desk/reports", async (c) => {
@@ -155,7 +199,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
     return html(
-      renderDeskLayout({
+      renderDeskLayoutFor(options, {
         title: "Reports",
         adminLinks: adminLinksFor(options, actor),
         doctypes,
@@ -183,7 +227,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
     return html(
-      renderDeskLayout({
+      renderDeskLayoutFor(options, {
         title: "Files",
         adminLinks: adminLinksFor(options, actor),
         doctypes,
@@ -274,7 +318,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
     return html(
-      renderDeskLayout({
+      renderDeskLayoutFor(options, {
         title: "User Permissions",
         activeAdmin: "user-permissions",
         adminLinks: adminLinksFor(options, actor),
@@ -332,7 +376,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
     return html(
-      renderDeskLayout({
+      renderDeskLayoutFor(options, {
         title: "Jobs",
         activeAdmin: "jobs",
         adminLinks: adminLinksFor(options, actor),
@@ -389,7 +433,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
     return html(
-      renderDeskLayout({
+      renderDeskLayoutFor(options, {
         title: "Job Schedules",
         activeAdmin: "job-schedules",
         adminLinks: adminLinksFor(options, actor),
@@ -695,7 +739,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const reports = listReports(options, actor);
     const saved = await savedReports.list(actor, doctype.name);
     return html(
-      renderDeskLayout({
+      renderDeskLayoutFor(options, {
         title: `${doctype.label ?? doctype.name} Report Builder`,
         adminLinks: adminLinksFor(options, actor),
         active: doctype.name,
@@ -779,7 +823,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     });
     const base = `/desk/report-builder/${encodeURIComponent(doctype.name)}/${encodeURIComponent(saved.id)}`;
     return html(
-      renderDeskLayout({
+      renderDeskLayoutFor(options, {
         title: saved.label,
         adminLinks: adminLinksFor(options, actor),
         active: doctype.name,
@@ -810,7 +854,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     });
     const exportHref = `/desk/reports/${encodeURIComponent(result.report.name)}/export.csv${url.search}`;
     return html(
-      renderDeskLayout({
+      renderDeskLayoutFor(options, {
         title: result.report.label ?? result.report.name,
         adminLinks: adminLinksFor(options, actor),
         activeReport: result.report.name,
@@ -868,7 +912,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     });
     const savedFilters = await options.savedFilters?.list(actor, doctype.name);
     return html(
-      renderDeskLayout({
+      renderDeskLayoutFor(options, {
         title: doctype.label ?? doctype.name,
         adminLinks: adminLinksFor(options, actor),
         active: doctype.name,
@@ -927,7 +971,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
     return html(
-      renderDeskLayout({
+      renderDeskLayoutFor(options, {
         title: `New ${doctype.label ?? doctype.name}`,
         adminLinks: adminLinksFor(options, actor),
         active: doctype.name,
@@ -1264,7 +1308,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
 
   app.notFound((c) =>
     html(
-      renderDeskLayout({
+      renderDeskLayoutFor(options, {
         title: "Not found",
         doctypes: [],
         reports: [],
@@ -1284,7 +1328,7 @@ async function renderDeskFailure(options: DeskAppOptions, request: Request, erro
   const doctypes = actor === undefined ? [] : options.queries.listDoctypes(actor);
   const reports = actor === undefined ? [] : listReports(options, actor);
   return html(
-    renderDeskLayout({
+    renderDeskLayoutFor(options, {
       title: status === 404 ? "Not found" : "Request failed",
       ...(actor === undefined ? {} : { adminLinks: adminLinksFor(options, actor) }),
       doctypes,
@@ -1312,7 +1356,7 @@ async function renderDeskError(
   const document = name ? await options.queries.getDocument(actor, doctype.name, name).catch(() => undefined) : undefined;
   const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
   return html(
-    renderDeskLayout({
+    renderDeskLayoutFor(options, {
       title: mode === "create" ? `New ${doctype.label ?? doctype.name}` : name ?? doctype.name,
       adminLinks: adminLinksFor(options, actor),
       active: doctype.name,
@@ -1431,6 +1475,21 @@ function requireJobSchedules(options: DeskAppOptions): JobScheduleService {
   return options.jobSchedules;
 }
 
+function requireNotifications(options: DeskAppOptions): UserNotificationService {
+  if (!options.notifications) {
+    throw new FrameworkError("DOCUMENT_NOT_FOUND", "Notifications are not enabled", { status: 404 });
+  }
+  return options.notifications;
+}
+
+function renderDeskLayoutFor(options: DeskAppOptions, layout: DeskLayoutOptions): string {
+  return renderDeskLayout({
+    ...layout,
+    showNotifications: layout.showNotifications ?? options.notifications !== undefined,
+    showFiles: layout.showFiles ?? options.files !== undefined
+  });
+}
+
 function requireSavedReports(options: DeskAppOptions): SavedReportService {
   if (!options.savedReports) {
     throw new FrameworkError("REPORT_NOT_FOUND", "Saved reports are not enabled", { status: 404 });
@@ -1471,7 +1530,7 @@ async function renderDeskFileFailure(
   const reports = listReports(options, actor);
   const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
   return html(
-    renderDeskLayout({
+    renderDeskLayoutFor(options, {
       title: "Files",
       adminLinks: adminLinksFor(options, actor),
       doctypes,
@@ -1493,7 +1552,7 @@ async function renderDeskDataPatchPage(
   const doctypes = options.queries.listDoctypes(actor);
   const reports = listReports(options, actor);
   return html(
-    renderDeskLayout({
+    renderDeskLayoutFor(options, {
       title: "Data Patches",
       activeAdmin: "data-patches",
       adminLinks: adminLinksFor(options, actor),
@@ -1539,7 +1598,7 @@ async function renderDeskSavedReportBuilderFailure(
   const reports = listReports(options, actor);
   const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
   return html(
-    renderDeskLayout({
+    renderDeskLayoutFor(options, {
       title: `${doctype.label ?? doctype.name} Report Builder`,
       adminLinks: adminLinksFor(options, actor),
       active: doctype.name,
@@ -1564,7 +1623,7 @@ async function renderDeskUserAccountPage(
     ? await options.userProfiles.get(actor, state.account.userId).catch(() => undefined)
     : undefined;
   return html(
-    renderDeskLayout({
+    renderDeskLayoutFor(options, {
       title: "Users",
       activeAdmin: "users",
       adminLinks: adminLinksFor(options, actor),
@@ -1615,7 +1674,7 @@ async function renderDeskRolePage(
   const doctypes = options.queries.listDoctypes(actor);
   const reports = listReports(options, actor);
   return html(
-    renderDeskLayout({
+    renderDeskLayoutFor(options, {
       title: "Roles",
       activeAdmin: "roles",
       adminLinks: adminLinksFor(options, actor),
@@ -1691,7 +1750,7 @@ async function renderDeskDocumentPage(
   const realtimeRoute = deskRealtimeRoute(options);
   const presence = realtimeRoute ? renderDocumentPresencePanel(document, { realtimeRoute }) : "";
   return html(
-    renderDeskLayout({
+    renderDeskLayoutFor(options, {
       title: document.name,
       adminLinks: adminLinksFor(options, actor),
       active: doctype.name,
@@ -2258,6 +2317,10 @@ function optionalBooleanSearchParamValue(form: URLSearchParams, key: string, lab
     return false;
   }
   throw new FrameworkError("BAD_REQUEST", `${label} must be true or false`, { status: 400 });
+}
+
+function truthyDeskParam(value: string | null): boolean {
+  return value === "1" || value === "true" || value === "yes";
 }
 
 function reportColumnFor(

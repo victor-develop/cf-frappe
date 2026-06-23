@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the event-sourced runtime job schedule definition slice:
+As of the event-sourced user notification inbox slice:
 
-- Vitest files: `66`
-- Vitest cases: `570`
+- Vitest files: `68`
+- Vitest cases: `581`
 
 ## Implication
 

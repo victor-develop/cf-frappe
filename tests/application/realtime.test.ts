@@ -1,8 +1,12 @@
 import {
+  createDocumentDeliveryHooks,
   createDocumentRealtimeHooks,
+  InMemoryEventStore,
   InMemoryRealtimePublisher
 } from "../../src";
+import { UserNotificationService, deterministicIds } from "../../src";
 import { createServices, data, owner } from "../helpers";
+import type { RealtimePublishResult } from "../../src";
 
 describe("document realtime hooks", () => {
   it("publishes committed domain events to realtime topics", async () => {
@@ -64,5 +68,38 @@ describe("document realtime hooks", () => {
     });
     expect(JSON.stringify(publisher.events()[2]?.payload)).not.toContain("snapshot");
     expect(JSON.stringify(publisher.events()[2]?.payload)).not.toContain('"event":');
+  });
+
+  it("records durable notifications even when realtime fan-out fails", async () => {
+    const notifications = new UserNotificationService({
+      events: new InMemoryEventStore(),
+      ids: deterministicIds(["record-1"])
+    });
+    const hooks = createDocumentDeliveryHooks({
+      notifications,
+      realtime: {
+        publish(): Promise<RealtimePublishResult> {
+          throw new Error("realtime unavailable");
+        }
+      }
+    });
+    const services = createServices(["create-1", "assign-1"], {
+      afterCommit: async (context) => {
+        await hooks.afterCommit?.(context);
+      }
+    });
+
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Delivery" }) });
+    await services.documents.assign({
+      actor: owner,
+      doctype: "Note",
+      name: "Delivery",
+      assignee: "support@example.com",
+      expectedVersion: 1
+    });
+
+    await expect(notifications.inbox({ id: "support@example.com", roles: ["User"], tenantId: "acme" })).resolves.toMatchObject({
+      notifications: [{ id: "evt_assign-1:user:support%40example.com", documentName: "Delivery" }]
+    });
   });
 });

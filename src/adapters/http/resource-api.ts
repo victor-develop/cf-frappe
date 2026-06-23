@@ -15,6 +15,7 @@ import type { RoleService } from "../../application/role-service.js";
 import type { SavedListFilterService } from "../../application/saved-list-filter-service.js";
 import type { SavedReportService } from "../../application/saved-report-service.js";
 import type { UserAccountService } from "../../application/user-account-service.js";
+import type { UserNotificationService } from "../../application/user-notification-service.js";
 import type { UserPermissionService } from "../../application/user-permission-service.js";
 import type { UserProfileService } from "../../application/user-profile-service.js";
 import { badRequest } from "../../core/errors.js";
@@ -28,6 +29,7 @@ import { createDataPatchApi } from "./data-patch-api.js";
 import { toErrorResponse } from "./errors.js";
 import { createFileApi } from "./file-api.js";
 import { createJobApi } from "./job-api.js";
+import { createNotificationApi } from "./notification-api.js";
 import { createPrintApi } from "./print-api.js";
 import { createReportApi } from "./report-api.js";
 import { listFiltersFromUrl, parseOptionalInteger, readJsonObject, requestMetadata } from "./request.js";
@@ -56,6 +58,7 @@ export interface ResourceApiOptions {
   readonly jobs?: JobHistoryService;
   readonly jobRetry?: JobRetryPort;
   readonly jobSchedules?: JobScheduleService;
+  readonly notifications?: UserNotificationService;
   readonly userAccounts?: UserAccountService;
   readonly userProfiles?: UserProfileService;
   readonly auth?: AuthSessionOptions;
@@ -82,6 +85,16 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
   );
 
   app.get("/health", (c) => c.json({ ok: true }));
+
+  if (options.notifications) {
+    app.route(
+      "/",
+      createNotificationApi({
+        notifications: options.notifications,
+        actor: resolveActor
+      })
+    );
+  }
 
   if (options.userAccounts) {
     if (options.auth) {

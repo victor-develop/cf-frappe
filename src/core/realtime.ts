@@ -1,4 +1,14 @@
-import { DEFAULT_TENANT_ID, SYSTEM_MANAGER_ROLE, type Actor, type DocumentSnapshot, type DomainEvent, type JsonValue } from "./types.js";
+import {
+  DEFAULT_TENANT_ID,
+  SYSTEM_MANAGER_ROLE,
+  type Actor,
+  type DocumentSnapshot,
+  type DomainEvent,
+  type JsonValue
+} from "./types.js";
+import { documentUserNotificationsFromDomainEvent } from "./notifications.js";
+export { documentUserNotificationsFromDomainEvent } from "./notifications.js";
+export type { DocumentUserNotificationPayload } from "./notifications.js";
 
 export type RealtimeTopic = string;
 
@@ -113,37 +123,14 @@ export function realtimeEventFromDomainEvent(event: DomainEvent, snapshot: Docum
 }
 
 export function realtimeUserNotificationsFromDomainEvent(event: DomainEvent): readonly RealtimeEvent[] {
-  return realtimeUserNotificationRecipients(event).map((recipientId) => ({
-    id: `${event.id}:user:${encodeTopicPart(recipientId)}`,
+  return documentUserNotificationsFromDomainEvent(event).map((notification) => ({
+    id: `${event.id}:user:${encodeTopicPart(notification.recipientId)}`,
     type: event.type,
-    topics: [userRealtimeTopic(event.tenantId, recipientId)],
+    topics: [userRealtimeTopic(event.tenantId, notification.recipientId)],
     tenantId: event.tenantId,
     occurredAt: event.occurredAt,
-    payload: {
-      kind: "DocumentUserNotification",
-      eventId: event.id,
-      eventType: event.type,
-      payloadKind: event.payload.kind,
-      tenantId: event.tenantId,
-      doctype: event.doctype,
-      documentName: event.documentName,
-      actorId: event.actorId,
-      recipientId
-    }
+    payload: notification as unknown as JsonValue
   }));
-}
-
-function realtimeUserNotificationRecipients(event: DomainEvent): readonly string[] {
-  switch (event.payload.kind) {
-    case "DocumentAssigned":
-    case "DocumentUnassigned":
-      return [event.payload.assigneeId];
-    case "DocumentFollowed":
-    case "DocumentUnfollowed":
-      return [event.payload.followerId];
-    default:
-      return [];
-  }
 }
 
 function encodeTopicPart(value: string): string {

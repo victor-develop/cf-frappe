@@ -19,6 +19,7 @@ import { RoleService } from "../application/role-service.js";
 import { SavedListFilterService } from "../application/saved-list-filter-service.js";
 import { SavedReportService } from "../application/saved-report-service.js";
 import { UserAccountService } from "../application/user-account-service.js";
+import { UserNotificationService } from "../application/user-notification-service.js";
 import { UserProfileService } from "../application/user-profile-service.js";
 import { UserPermissionService } from "../application/user-permission-service.js";
 import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator.js";
@@ -72,6 +73,7 @@ export interface CloudFrappeRuntimeServices {
   readonly history: DocumentHistoryService;
   readonly savedFilters: SavedListFilterService;
   readonly userAccounts?: UserAccountService;
+  readonly notifications: UserNotificationService;
   readonly userProfiles?: UserProfileService;
   readonly userPermissions: UserPermissionService;
   readonly prints: PrintService;
@@ -293,6 +295,10 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     events,
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
   });
+  const notifications = new UserNotificationService({
+    events,
+    ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
+  });
   const savedReports = new SavedReportService({ registry: options.registry, events, reports });
   const baseServices: Omit<CloudFrappeRuntimeServices, "files"> = {
     registry: options.registry,
@@ -301,6 +307,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     history: restrictedHistory,
     savedFilters,
     ...(userAccounts === undefined ? {} : { userAccounts }),
+    notifications,
     ...(userProfiles === undefined ? {} : { userProfiles }),
     userPermissions,
     prints,
@@ -415,6 +422,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(jobHistory === undefined ? {} : { jobs: jobHistory }),
     ...(jobRetry === undefined ? {} : { jobRetry }),
     ...(jobSchedules === undefined ? {} : { jobSchedules }),
+    notifications,
     ...(options.files?.maxFileBytes === undefined ? {} : { maxFileBytes: options.files.maxFileBytes })
   });
   const desk = createDeskApp({
@@ -435,6 +443,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(jobHistory === undefined ? {} : { jobs: jobHistory }),
     ...(jobRetry === undefined ? {} : { jobRetry }),
     ...(jobSchedules === undefined ? {} : { jobSchedules }),
+    notifications,
     ...(options.realtime === undefined ? {} : { realtime: { route: options.realtime.route ?? "/api/realtime" } }),
     ...(options.files?.maxFileBytes === undefined ? {} : { maxFileBytes: options.files.maxFileBytes }),
     actor

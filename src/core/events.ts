@@ -112,6 +112,9 @@ export function foldDocumentFrom(
       case "UserAccountEnabled":
       case "UserAccountDisabled":
       case "UserProfileChanged":
+      case "UserNotificationRecorded":
+      case "UserNotificationRead":
+      case "UserNotificationDismissed":
       case "RoleCreated":
       case "RoleDescriptionChanged":
       case "RoleEnabled":

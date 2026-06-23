@@ -6,6 +6,7 @@ export * from "./data-patch-api.js";
 export * from "./errors.js";
 export * from "./file-api.js";
 export * from "./job-api.js";
+export * from "./notification-api.js";
 export * from "./print-api.js";
 export * from "./report-api.js";
 export * from "./request.js";
