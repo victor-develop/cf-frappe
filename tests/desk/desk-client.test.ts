@@ -72,6 +72,12 @@ interface DeskClientRuntime {
   readonly meta: {
     readonly listView: (doctype: string) => Promise<unknown>;
   };
+  readonly print: {
+    readonly format: (format: string) => Promise<unknown>;
+    readonly formats: (options?: { readonly doctype?: string }) => Promise<unknown>;
+    readonly html: (format: string, name: string) => Promise<unknown>;
+    readonly url: (format: string, name: string) => string;
+  };
   readonly profiles: {
     readonly get: (userId: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly update: (
@@ -1101,6 +1107,34 @@ describe("Desk client runtime", () => {
 
     expect(calls[0]?.url).toBe("/api/meta/doctypes/Task%20Type/list-view");
     expect(calls[0]?.init.credentials).toBe("same-origin");
+  });
+
+  it("wraps print metadata and document routes without browser-side rendering decisions", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      if (String(url).startsWith("/api/print/")) {
+        return new Response("<!doctype html><title>Printable</title>", {
+          headers: { "content-type": "text/html" }
+        });
+      }
+      return new Response(JSON.stringify({ data: { ok: true } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.print.formats({ doctype: "Task Type" })).resolves.toEqual({ ok: true });
+    await expect(runtime.print.format("Task Standard")).resolves.toEqual({ ok: true });
+    await expect(runtime.print.html("Task Standard", "TASK/1")).resolves.toBe("<!doctype html><title>Printable</title>");
+
+    expect(runtime.print.url("Task Standard", "TASK/1")).toBe("/api/print/Task%20Standard/TASK%2F1");
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/meta/print-formats?doctype=Task+Type",
+      "GET /api/meta/print-formats/Task%20Standard",
+      "GET /api/print/Task%20Standard/TASK%2F1"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin"]);
+    expect(calls.map((call) => call.init.body)).toEqual([undefined, undefined, undefined]);
   });
 
   it("exposes client-script context and WebSocket realtime URLs", () => {

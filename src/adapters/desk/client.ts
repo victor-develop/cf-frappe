@@ -148,6 +148,14 @@ export function renderDeskClientScript(): string {
     return withQuery("/api/audit/deleted/" + encodePart(doctype) + "/" + encodePart(name), tenantParams(options || {}));
   }
 
+  function printDocumentPath(format, name) {
+    return "/api/print/" + encodePart(format) + "/" + encodePart(name);
+  }
+
+  function printFormatPath(format) {
+    return "/api/meta/print-formats" + (format === undefined ? "" : "/" + encodePart(format));
+  }
+
   function jobExecutionPath(idempotencyKey, action) {
     return "/api/jobs/executions/" + encodePart(idempotencyKey) + (action === undefined ? "" : "/" + action);
   }
@@ -291,6 +299,12 @@ export function renderDeskClientScript(): string {
     setParam(params, "since", options && options.since);
     setParam(params, "until", options && options.until);
     setParam(params, "limit", options && options.limit);
+    return params;
+  }
+
+  function printFormatParams(options) {
+    var params = {};
+    setParam(params, "doctype", options && options.doctype);
     return params;
   }
 
@@ -1167,6 +1181,18 @@ export function renderDeskClientScript(): string {
       update: function (userId, input, options) {
         return request(profilePath(userId, options || {}), { method: "PUT", body: commandBody(input, options) }).then(unwrapData);
       }
+    }),
+    print: Object.freeze({
+      format: function (format) {
+        return request(printFormatPath(format)).then(unwrapData);
+      },
+      formats: function (options) {
+        return request(withQuery(printFormatPath(), printFormatParams(options || {}))).then(unwrapData);
+      },
+      html: function (format, name) {
+        return request(printDocumentPath(format, name));
+      },
+      url: printDocumentPath
     }),
     realtime: Object.freeze({
       connect: function (topic, options) {

@@ -1261,6 +1261,7 @@ describe("Desk app", () => {
     expect(source).toContain("files: Object.freeze");
     expect(source).toContain("jobs: Object.freeze");
     expect(source).toContain("notifications: Object.freeze");
+    expect(source).toContain("print: Object.freeze");
     expect(source).toContain("profiles: Object.freeze");
     expect(source).toContain("roles: Object.freeze");
     expect(source).toContain("userPermissions: Object.freeze");
