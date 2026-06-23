@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the browser multipart upload orchestration slice:
+As of the nested Desk report-builder formula controls slice:
 
-- Vitest files: `74`
-- Vitest cases: `793`
+- Vitest files: `75`
+- Vitest cases: `812`
 
 ## Implication
 

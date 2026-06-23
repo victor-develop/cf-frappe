@@ -56,6 +56,8 @@ import {
 
 type ReportChartPointResult = ReportRunResult["charts"][number]["points"][number];
 
+const REPORT_BUILDER_FORMULA_NESTED_LEVELS = 1;
+
 export type FormLinkOptions = Readonly<Record<string, readonly LinkOption[]>>;
 export type FormTableDefinitions = Readonly<Record<string, DocTypeDefinition>>;
 export type FormLifecycleAction = "submit" | "cancel";
@@ -615,6 +617,22 @@ export function renderSavedReportBuilder(
     ...numericFields.map((field) => renderReportBuilderCheckbox("summary", field, false))
   ].join("");
   const formulaFieldOptions = renderReportBuilderFieldOptions(numericFields);
+  const formulaControls = [
+    `<label class="field"><span>Formula Label</span><input name="formulaLabel"></label>`,
+    renderReportBuilderFormulaOperandControls(
+      "formulaLeft",
+      "Formula Left",
+      formulaFieldOptions,
+      REPORT_BUILDER_FORMULA_NESTED_LEVELS
+    ),
+    renderReportBuilderFormulaOperatorControl("formula", "Formula"),
+    renderReportBuilderFormulaOperandControls(
+      "formulaRight",
+      "Formula Right",
+      formulaFieldOptions,
+      REPORT_BUILDER_FORMULA_NESTED_LEVELS
+    )
+  ].join("");
   const groupOptions = renderReportBuilderFieldOptions(
     visibleFields.filter(isDeskGroupableReportField)
   );
@@ -649,26 +667,7 @@ export function renderSavedReportBuilder(
       ${summaryOptions}
     </fieldset>
     <div class="fields">
-      <label class="field"><span>Formula Label</span><input name="formulaLabel"></label>
-      <label class="field"><span>Formula Left Type</span><select name="formulaLeftKind">
-        <option value="field">Field</option>
-        <option value="literal">Number</option>
-      </select></label>
-      <label class="field"><span>Formula Left</span><select name="formulaLeft">${formulaFieldOptions}</select></label>
-      <label class="field"><span>Formula Left Number</span><input name="formulaLeftLiteral" type="number" step="any"></label>
-      <label class="field"><span>Formula Operator</span><select name="formulaOperator">
-        <option value=""></option>
-        <option value="add">Add</option>
-        <option value="subtract">Subtract</option>
-        <option value="multiply">Multiply</option>
-        <option value="divide">Divide</option>
-      </select></label>
-      <label class="field"><span>Formula Right Type</span><select name="formulaRightKind">
-        <option value="field">Field</option>
-        <option value="literal">Number</option>
-      </select></label>
-      <label class="field"><span>Formula Right</span><select name="formulaRight">${formulaFieldOptions}</select></label>
-      <label class="field"><span>Formula Right Number</span><input name="formulaRightLiteral" type="number" step="any"></label>
+      ${formulaControls}
     </div>
     <div class="fields">
       <label class="field"><span>Group By</span><select name="groupBy">${groupOptions}</select></label>
@@ -782,6 +781,41 @@ function renderReportBuilderFieldOptions(fields: readonly FieldDefinition[]): st
     `<option value=""></option>`,
     ...fields.map((field) => `<option value="${escapeHtml(field.name)}">${escapeHtml(deskReportFieldLabel(field))}</option>`)
   ].join("");
+}
+
+function renderReportBuilderFormulaOperandControls(
+  prefix: string,
+  label: string,
+  fieldOptions: string,
+  nestedLevels: number
+): string {
+  const nestedKindOption = nestedLevels > 0 ? `<option value="nested">Nested formula</option>` : "";
+  const nestedFormulaControls =
+    nestedLevels > 0
+      ? [
+          renderReportBuilderFormulaOperatorControl(prefix, label),
+          renderReportBuilderFormulaOperandControls(`${prefix}Left`, `${label} Left`, fieldOptions, nestedLevels - 1),
+          renderReportBuilderFormulaOperandControls(`${prefix}Right`, `${label} Right`, fieldOptions, nestedLevels - 1)
+        ].join("")
+      : "";
+  return `<label class="field"><span>${escapeHtml(label)} Type</span><select name="${escapeHtml(prefix)}Kind">
+        <option value="field">Field</option>
+        <option value="literal">Number</option>
+        ${nestedKindOption}
+      </select></label>
+      <label class="field"><span>${escapeHtml(label)}</span><select name="${escapeHtml(prefix)}">${fieldOptions}</select></label>
+      <label class="field"><span>${escapeHtml(label)} Number</span><input name="${escapeHtml(prefix)}Literal" type="number" step="any"></label>
+      ${nestedFormulaControls}`;
+}
+
+function renderReportBuilderFormulaOperatorControl(prefix: string, label: string): string {
+  return `<label class="field"><span>${escapeHtml(label)} Operator</span><select name="${escapeHtml(prefix)}Operator">
+        <option value=""></option>
+        <option value="add">Add</option>
+        <option value="subtract">Subtract</option>
+        <option value="multiply">Multiply</option>
+        <option value="divide">Divide</option>
+      </select></label>`;
 }
 
 export function renderUserPermissionAdmin(state: UserPermissionState): string {

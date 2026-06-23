@@ -40,7 +40,7 @@ import { DOCUMENT_SHARE_PERMISSIONS, documentSharePermissionsForActor } from "..
 import { FrameworkError } from "../../core/errors.js";
 import { can } from "../../core/permissions.js";
 import type { ModelRegistry } from "../../core/registry.js";
-import { isReportChartColor, type ReportFormulaOperand } from "../../core/reports.js";
+import { isReportChartColor, REPORT_FORMULA_MAX_DEPTH, type ReportFormulaOperand } from "../../core/reports.js";
 import { USER_PROFILE_FIELDS, type UserProfileInput } from "../../core/user-profiles.js";
 import {
   canReadWorkspace,
@@ -131,7 +131,7 @@ type SavedReportColumnDefinition = SavedReportDefinition["columns"][number];
 type SavedReportSummaryDefinition = NonNullable<SavedReportDefinition["summaries"]>[number];
 type SavedReportGroupDefinition = NonNullable<SavedReportDefinition["groups"]>[number];
 type SavedReportChartDefinition = NonNullable<SavedReportDefinition["charts"]>[number];
-type DeskFormulaOperandKind = "field" | "literal";
+type DeskFormulaOperandKind = "field" | "literal" | "nested";
 
 interface ParsedDeskReportChartControls {
   readonly type: DeskReportChartType;
@@ -3731,43 +3731,87 @@ function reportFormulaOperandFor(
   form: URLSearchParams,
   side: "left" | "right"
 ): ReportFormulaOperand | undefined {
-  const key = side === "left" ? "formulaLeft" : "formulaRight";
-  const literalKey = side === "left" ? "formulaLeftLiteral" : "formulaRightLiteral";
-  const kindKey = side === "left" ? "formulaLeftKind" : "formulaRightKind";
+  return reportFormulaOperandAt(fields, form, side === "left" ? "formulaLeft" : "formulaRight", side, 2);
+}
+
+function reportFormulaOperandAt(
+  fields: ReadonlyMap<string, FieldDefinition>,
+  form: URLSearchParams,
+  key: string,
+  label: string,
+  nestedFormulaDepth: number
+): ReportFormulaOperand | undefined {
+  const literalKey = `${key}Literal`;
+  const kindKey = `${key}Kind`;
   const fieldName = stringSearchParamValue(form, key);
   const literal = stringSearchParamValue(form, literalKey);
-  const kind = reportFormulaOperandKindValue(stringSearchParamValue(form, kindKey), side);
+  const kind = reportFormulaOperandKindValue(stringSearchParamValue(form, kindKey), label);
+  if (kind === "nested") {
+    return reportNestedFormulaOperandAt(fields, form, key, label, nestedFormulaDepth);
+  }
   if (fieldName === undefined && literal === undefined) {
     return undefined;
   }
   if ((kind ?? "field") === "literal") {
     if (literal === undefined) {
-      throw new FrameworkError("BAD_REQUEST", `Report formula ${side} number is required`, { status: 400 });
+      throw new FrameworkError("BAD_REQUEST", `Report formula ${label} number is required`, { status: 400 });
     }
     const parsed = Number(literal);
     if (!Number.isFinite(parsed)) {
-      throw new FrameworkError("BAD_REQUEST", `Report formula ${side} number must be finite`, { status: 400 });
+      throw new FrameworkError("BAD_REQUEST", `Report formula ${label} number must be finite`, { status: 400 });
     }
     return parsed;
   }
   if (fieldName === undefined) {
-    throw new FrameworkError("BAD_REQUEST", `Report formula ${side} field is required`, { status: 400 });
+    throw new FrameworkError("BAD_REQUEST", `Report formula ${label} field is required`, { status: 400 });
   }
-  assertDeskNumericFormulaField(fields, fieldName, side);
+  assertDeskNumericFormulaField(fields, fieldName, label);
   return fieldName;
+}
+
+function reportNestedFormulaOperandAt(
+  fields: ReadonlyMap<string, FieldDefinition>,
+  form: URLSearchParams,
+  key: string,
+  label: string,
+  depth: number
+): ReportFormulaOperand {
+  if (depth > REPORT_FORMULA_MAX_DEPTH) {
+    throw new FrameworkError(
+      "BAD_REQUEST",
+      `Report formula ${label} exceeds maximum formula depth of ${REPORT_FORMULA_MAX_DEPTH}`,
+      { status: 400 }
+    );
+  }
+  const operator = optionalEnumSearchParamValue(
+    form,
+    `${key}Operator`,
+    REPORT_FORMULA_OPERATORS,
+    `Report formula ${label} operator`
+  );
+  const left = reportFormulaOperandAt(fields, form, `${key}Left`, `${label} left`, depth + 1);
+  const right = reportFormulaOperandAt(fields, form, `${key}Right`, `${label} right`, depth + 1);
+  if (operator === undefined || left === undefined || right === undefined) {
+    throw new FrameworkError(
+      "BAD_REQUEST",
+      `Report formula ${label} nested formula requires an operator, left operand, and right operand`,
+      { status: 400 }
+    );
+  }
+  return { operator, left, right };
 }
 
 function reportFormulaOperandKindValue(
   value: string | undefined,
-  side: "left" | "right"
+  label: string
 ): DeskFormulaOperandKind | undefined {
   if (value === undefined) {
     return undefined;
   }
-  if (value === "field" || value === "literal") {
+  if (value === "field" || value === "literal" || value === "nested") {
     return value;
   }
-  throw new FrameworkError("BAD_REQUEST", `Report formula ${side} operand type must be field or literal`, {
+  throw new FrameworkError("BAD_REQUEST", `Report formula ${label} operand type must be field, literal, or nested`, {
     status: 400
   });
 }
@@ -3775,11 +3819,11 @@ function reportFormulaOperandKindValue(
 function assertDeskNumericFormulaField(
   fields: ReadonlyMap<string, FieldDefinition>,
   name: string,
-  side: "left" | "right"
+  label: string
 ): void {
   const field = fields.get(name);
   if (!field || field.hidden || !isDeskNumericReportField(field)) {
-    throw new FrameworkError("BAD_REQUEST", `Unknown report formula ${side} field '${name}'`, { status: 400 });
+    throw new FrameworkError("BAD_REQUEST", `Unknown report formula ${label} field '${name}'`, { status: 400 });
   }
 }
 

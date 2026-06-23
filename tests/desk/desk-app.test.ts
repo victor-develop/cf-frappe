@@ -499,6 +499,9 @@ describe("Desk app", () => {
     expect(builderHtml).toContain('name="formulaLabel"');
     expect(builderHtml).toContain('name="formulaLeftKind"');
     expect(builderHtml).toContain('name="formulaLeftLiteral" type="number" step="any"');
+    expect(builderHtml).toContain('name="formulaLeftOperator"');
+    expect(builderHtml).toContain('name="formulaLeftLeftKind"');
+    expect(builderHtml).toContain('name="formulaLeftRightLiteral" type="number" step="any"');
     expect(builderHtml).toContain('<select name="formulaOperator">');
     expect(builderHtml).toContain('name="formulaRightKind"');
     expect(builderHtml).toContain('name="formulaRightLiteral" type="number" step="any"');
@@ -601,6 +604,62 @@ describe("Desk app", () => {
     await expect(afterDelete.text()).resolves.toContain("No saved reports.");
   });
 
+  it("builds nested saved report formulas from visual Desk report-builder controls", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Nested Count", priority: "High", count: 7 })
+    });
+
+    const body = new URLSearchParams();
+    body.set("label", "Nested formula report");
+    body.append("column", "title");
+    body.append("column", "count");
+    body.set("formulaLabel", "Adjusted Count");
+    body.set("formulaLeftKind", "nested");
+    body.set("formulaLeftOperator", "multiply");
+    body.set("formulaLeftLeftKind", "field");
+    body.set("formulaLeftLeft", "count");
+    body.set("formulaLeftRightKind", "literal");
+    body.set("formulaLeftRightLiteral", "2");
+    body.set("formulaOperator", "add");
+    body.set("formulaRightKind", "literal");
+    body.set("formulaRightLiteral", "1");
+
+    const saved = await app.request("/desk/report-builder/Note", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body
+    });
+
+    expect(saved.status).toBe(303);
+    expect(saved.headers.get("location")).toBe("/desk/report-builder/Note/report_saved-report-1");
+    await expect(services.savedReports.get(owner, "Note", "report_saved-report-1")).resolves.toMatchObject({
+      definition: {
+        columns: [
+          expect.objectContaining({ name: "title" }),
+          expect.objectContaining({ name: "count" }),
+          expect.objectContaining({
+            name: "adjusted_count",
+            label: "Adjusted Count",
+            formula: {
+              operator: "add",
+              left: { operator: "multiply", left: "count", right: 2 },
+              right: 1
+            }
+          })
+        ]
+      }
+    });
+
+    const run = await app.request("/desk/report-builder/Note/report_saved-report-1");
+    expect(run.status).toBe(200);
+    const html = await run.text();
+    expect(html).toContain("<th>Adjusted Count</th>");
+    expect(html).toContain("<td>15</td>");
+  });
+
   it("rejects invalid Desk report-builder formula literal operands without persisting them", async () => {
     const { app } = makeDesk();
     const invalidLiteral = new URLSearchParams();
@@ -644,8 +703,23 @@ describe("Desk app", () => {
     body.append("column", "count");
     body.set("formulaLeftKind", "field");
     body.set("formulaLeft", "");
+    body.set("formulaLeftOperator", "");
+    body.set("formulaLeftLeftKind", "field");
+    body.set("formulaLeftLeft", "");
+    body.set("formulaLeftLeftLiteral", "");
+    body.set("formulaLeftRightKind", "field");
+    body.set("formulaLeftRight", "");
+    body.set("formulaLeftRightLiteral", "");
+    body.set("formulaOperator", "");
     body.set("formulaRightKind", "field");
     body.set("formulaRight", "");
+    body.set("formulaRightOperator", "");
+    body.set("formulaRightLeftKind", "field");
+    body.set("formulaRightLeft", "");
+    body.set("formulaRightLeftLiteral", "");
+    body.set("formulaRightRightKind", "field");
+    body.set("formulaRightRight", "");
+    body.set("formulaRightRightLiteral", "");
     body.set("groupBy", "priority");
     body.set("chartType", "bar");
     body.set("chartSummary", "sum_count");
