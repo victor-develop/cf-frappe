@@ -42,6 +42,30 @@ describe("event folding", () => {
     });
   });
 
+  it("folds explicit field unsets from update events", () => {
+    const events: DomainEvent[] = [
+      {
+        ...base,
+        sequence: 1,
+        type: "DocumentCreated",
+        payload: { kind: "DocumentCreated", data: { title: "One", body: "draft", legacy: "old" }, docstatus: "draft" }
+      },
+      {
+        ...base,
+        id: "evt2",
+        sequence: 2,
+        type: "DocumentUpdated",
+        payload: { kind: "DocumentUpdated", patch: { body: "updated" }, unset: ["legacy"] }
+      }
+    ];
+
+    expect(foldDocument(events)).toMatchObject({
+      version: 2,
+      data: { title: "One", body: "updated" }
+    });
+    expect(foldDocument(events)?.data).not.toHaveProperty("legacy");
+  });
+
   it("marks a document deleted without losing its data", () => {
     const events: DomainEvent[] = [
       {

@@ -263,7 +263,7 @@ function diffEvent(
       ];
     }
     case "DocumentUpdated":
-      return diffPatch(event.payload.patch, before, after);
+      return diffPatch(event.payload.patch, before, after, event.payload.unset);
     case "WorkflowTransitioned":
     case "DomainCommandApplied":
       return diffPatch(event.payload.patch, before, after);
@@ -317,9 +317,10 @@ function diffEvent(
 function diffPatch(
   patch: DocumentData,
   before: DocumentSnapshot | null,
-  after: DocumentSnapshot | null
+  after: DocumentSnapshot | null,
+  unset: readonly string[] = []
 ): readonly DocumentTimelineChange[] {
-  return Object.keys(patch)
+  return [...new Set([...Object.keys(patch), ...unset])]
     .sort()
     .map((field) => change(field, before?.data[field], after?.data[field]))
     .filter((item) => !jsonEquals(item.oldValue, item.newValue));
@@ -350,7 +351,7 @@ function summarize(payload: DocumentEventPayload): string {
     case "DocumentCreated":
       return "Created document";
     case "DocumentUpdated":
-      return updatedSummary(payload.patch);
+      return updatedSummary(payload.patch, payload.unset);
     case "DocumentDeleted":
       return "Deleted document";
     case "DocumentSubmitted":
@@ -442,9 +443,17 @@ function summarize(payload: DocumentEventPayload): string {
   }
 }
 
-function updatedSummary(patch: DocumentData): string {
-  const fields = Object.keys(patch);
-  return fields.length > 0 ? `Updated ${fields.join(", ")}` : "Updated document";
+function updatedSummary(patch: DocumentData, unset: readonly string[] = []): string {
+  const updated = Object.keys(patch);
+  const removed = unset.filter((field) => !updated.includes(field));
+  if (updated.length === 0 && removed.length === 0) {
+    return "Updated document";
+  }
+  const parts = [
+    ...(updated.length === 0 ? [] : [`Updated ${updated.join(", ")}`]),
+    ...(removed.length === 0 ? [] : [`removed ${removed.join(", ")}`])
+  ];
+  return parts.join("; ");
 }
 
 function summarizeText(text: string): string {

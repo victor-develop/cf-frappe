@@ -1,4 +1,10 @@
-import { foldDocument, foldDocumentAssignments, foldDocumentFollowers, foldDocumentTags } from "../core/events.js";
+import {
+  applyDocumentDataChange,
+  foldDocument,
+  foldDocumentAssignments,
+  foldDocumentFollowers,
+  foldDocumentTags
+} from "../core/events.js";
 import {
   documentShareAllows,
   documentShareGrantKey,
@@ -68,6 +74,7 @@ export interface UpdateDocumentCommand {
   readonly doctype: string;
   readonly name: string;
   readonly patch: MutableDocumentData;
+  readonly unset?: readonly string[];
   readonly tenantId?: string;
   readonly expectedVersion?: number;
   readonly metadata?: DocumentData;
@@ -356,17 +363,25 @@ export class DocumentService implements DocumentCommandExecutor {
 
     const patch = await this.runBeforeValidate(doctype, compactData(command.patch), existing);
     const patchWithoutInternalFields = stripInternalTableFields(doctype, patch, (name) => this.relatedDocType(name));
+    const unset = normalizeUnsetFields(command.unset);
+    const unsetIssues = documentUnsetIssues(doctype, unset, existing.data, patchWithoutInternalFields);
     const originIssues = childTableOriginIssues(doctype, patch, existing.data, (name) => this.relatedDocType(name));
     const readOnlyIssues = readonlyIssues(doctype, patchWithoutInternalFields, (name) => this.relatedDocType(name));
     const normalizedPatch = preserveReadOnlyTableValues(doctype, patch, existing, (name) => this.relatedDocType(name));
-    const validationIssues = await this.validate(doctype, normalizedPatch, existing);
+    const data = applyDocumentDataChange(existing.data, normalizedPatch, unset);
+    const validationIssues = await this.validate(doctype, normalizedPatch, existing, data);
     const linkIssues = await this.validateLinks(command.actor, tenantId, doctype, normalizedPatch);
-    const issues = [...originIssues, ...readOnlyIssues, ...validationIssues, ...linkIssues];
+    const issues = [...unsetIssues, ...originIssues, ...readOnlyIssues, ...validationIssues, ...linkIssues];
     if (issues.length > 0) {
       throw validationFailed(issues);
     }
 
     const now = this.clock.now();
+    const payload = {
+      kind: "DocumentUpdated" as const,
+      patch: normalizedPatch,
+      ...(unset.length === 0 ? {} : { unset })
+    };
     const event = this.newEvent({
       tenantId,
       stream,
@@ -375,7 +390,7 @@ export class DocumentService implements DocumentCommandExecutor {
       documentName: command.name,
       actorId: command.actor.id,
       occurredAt: now,
-      payload: { kind: "DocumentUpdated", patch: normalizedPatch },
+      payload,
       metadata: command.metadata ?? {}
     });
     const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
@@ -385,7 +400,7 @@ export class DocumentService implements DocumentCommandExecutor {
       return {
         ...existing,
         version: saved.sequence,
-        data: { ...existing.data, ...normalizedPatch },
+        data,
         updatedAt: saved.occurredAt
       };
     });
@@ -1105,7 +1120,8 @@ export class DocumentService implements DocumentCommandExecutor {
   private async validate(
     doctype: DocTypeDefinition,
     data: MutableDocumentData,
-    existing?: DocumentSnapshot
+    existing?: DocumentSnapshot,
+    hookDataOverride?: DocumentData
   ): Promise<readonly ValidationIssue[]> {
     const issues = [
       ...validateDocumentData(doctype, data, {
@@ -1113,7 +1129,7 @@ export class DocumentService implements DocumentCommandExecutor {
         relatedDocType: (name) => this.relatedDocType(name)
       })
     ];
-    const hookData = existing ? { ...existing.data, ...compactData(data) } : compactData(data);
+    const hookData = hookDataOverride ?? (existing ? { ...existing.data, ...compactData(data) } : compactData(data));
     for (const hook of this.registry.hooksFor(doctype.name)) {
       const context = existing
         ? { doctype, data: hookData, existing }
@@ -1644,6 +1660,56 @@ function readonlyIssues(
       );
     });
   return [...topLevelIssues, ...childIssues];
+}
+
+function normalizeUnsetFields(fields: readonly string[] | undefined): readonly string[] {
+  if (fields === undefined) {
+    return [];
+  }
+  const normalized = fields.map((field) => field.trim()).filter((field) => field.length > 0);
+  return [...new Set(normalized)];
+}
+
+function documentUnsetIssues(
+  doctype: DocTypeDefinition,
+  unset: readonly string[],
+  existingData: DocumentData,
+  patch: DocumentData
+): readonly ValidationIssue[] {
+  const fields = new Map(doctype.fields.map((field) => [field.name, field]));
+  return unset.flatMap((field) => {
+    const definition = fields.get(field);
+    const issues: ValidationIssue[] = [];
+    if (Object.prototype.hasOwnProperty.call(patch, field)) {
+      issues.push({
+        field,
+        code: "unset_patch_conflict",
+        message: `Field '${field}' cannot be patched and unset in the same update`
+      });
+    }
+    if (definition?.required) {
+      issues.push({
+        field,
+        code: "required",
+        message: `Field '${field}' is required`
+      });
+    }
+    if (definition?.readOnly) {
+      issues.push({
+        field,
+        code: "readonly",
+        message: `Field '${field}' is read only`
+      });
+    }
+    if (definition === undefined && !Object.prototype.hasOwnProperty.call(existingData, field)) {
+      issues.push({
+        field,
+        code: "unknown_field",
+        message: `Field '${field}' is not defined on ${doctype.name}`
+      });
+    }
+    return issues;
+  });
 }
 
 function childTableOriginIssues(

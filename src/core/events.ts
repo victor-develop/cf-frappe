@@ -29,7 +29,7 @@ export function foldDocumentFrom(
           snapshot = {
             ...current,
             version: event.sequence,
-            data: { ...current.data, ...cloneData(event.payload.patch) },
+            data: applyDocumentDataChange(current.data, event.payload.patch, event.payload.unset),
             updatedAt: event.occurredAt
           };
         }
@@ -177,6 +177,21 @@ export function foldDocumentFollowers(events: readonly DomainEvent[]): readonly 
     }
   }
   return [...followers].sort((left, right) => left.localeCompare(right));
+}
+
+export function applyDocumentDataChange(
+  data: DocumentData,
+  patch: DocumentData = {},
+  unset: readonly string[] = []
+): DocumentData {
+  const next: Record<string, unknown> = {
+    ...cloneData(data),
+    ...cloneData(patch)
+  };
+  for (const field of unset) {
+    delete next[field];
+  }
+  return next as DocumentData;
 }
 
 function cloneData<TData extends DocumentData>(data: TData): TData {

@@ -195,6 +195,7 @@ export type DocumentEventPayload =
   | {
       readonly kind: "DocumentUpdated";
       readonly patch: DocumentData;
+      readonly unset?: readonly string[];
     }
   | {
       readonly kind: "DocumentDeleted";

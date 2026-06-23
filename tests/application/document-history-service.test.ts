@@ -139,6 +139,30 @@ describe("DocumentHistoryService", () => {
     });
   });
 
+  it("includes explicitly unset fields in update timeline summaries and changes", async () => {
+    const { documents, history } = createServices(["create-1", "update-1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Unset Timeline" }) });
+    await documents.update({
+      actor: owner,
+      doctype: "Note",
+      name: "Unset Timeline",
+      patch: { count: 1 },
+      unset: ["body"]
+    });
+
+    const timeline = await history.getTimeline(owner, "Note", "Unset Timeline");
+
+    expect(timeline.entries[1]).toMatchObject({
+      kind: "DocumentUpdated",
+      summary: "Updated count; removed body",
+      payload: { kind: "DocumentUpdated", patch: { count: 1 }, unset: ["body"] },
+      changes: [
+        { field: "body", oldValue: "Body" },
+        { field: "count", oldValue: 0, newValue: 1 }
+      ]
+    });
+  });
+
   it("summarizes assignment activity and derives current assignees from the event stream", async () => {
     const { documents, history } = createServices(["create-1", "assign-1", "assign-2", "unassign-1"]);
     await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Assigned Note" }) });

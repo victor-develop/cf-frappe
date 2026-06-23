@@ -1257,6 +1257,119 @@ describe("DocumentService", () => {
     });
   });
 
+  it("renames stale schema fields through append-only update unsets", async () => {
+    const v1 = defineDocType({
+      name: "Migrating Doc",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "old_status", type: "text" },
+        { name: "status", type: "text" }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }]
+    });
+    const v2 = defineDocType({
+      name: "Migrating Doc",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "status", type: "text" }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }]
+    });
+    const store = new InMemoryDocumentStore();
+    const documentsV1 = new DocumentService({
+      registry: createRegistry({ doctypes: [v1] }),
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["create-1"])
+    });
+    const documentsV2 = new DocumentService({
+      registry: createRegistry({ doctypes: [v2] }),
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["rename-1"])
+    });
+
+    await documentsV1.create({
+      actor: owner,
+      doctype: "Migrating Doc",
+      data: { title: "Ticket-1", old_status: "Open" }
+    });
+
+    const updated = await documentsV2.update({
+      actor: owner,
+      doctype: "Migrating Doc",
+      name: "Ticket-1",
+      patch: { status: "Open" },
+      unset: [" old_status ", "old_status"]
+    });
+
+    expect(updated.data).toEqual({ title: "Ticket-1", status: "Open" });
+    await expect(store.get("acme", "Migrating Doc", "Ticket-1")).resolves.toMatchObject({
+      version: 2,
+      data: { title: "Ticket-1", status: "Open" }
+    });
+    expect((await store.get("acme", "Migrating Doc", "Ticket-1"))?.data).not.toHaveProperty("old_status");
+    await expect(store.readStream(documentStream("acme", "Migrating Doc", "Ticket-1"))).resolves.toMatchObject([
+      expect.anything(),
+      {
+        payload: {
+          kind: "DocumentUpdated",
+          patch: { status: "Open" },
+          unset: ["old_status"]
+        }
+      }
+    ]);
+  });
+
+  it("rejects unsafe update unsets before committing events", async () => {
+    const { documents, events } = createServices(["e1", "e2"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    await expect(
+      documents.update({
+        actor: owner,
+        doctype: "Note",
+        name: "My Note",
+        patch: { body: "New" },
+        unset: ["body", "title", "created_by", "missing"]
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: expect.arrayContaining([
+        expect.objectContaining({ field: "body", code: "unset_patch_conflict" }),
+        expect.objectContaining({ field: "title", code: "required" }),
+        expect.objectContaining({ field: "created_by", code: "readonly" }),
+        expect.objectContaining({ field: "missing", code: "unknown_field" })
+      ])
+    });
+    await expect(events.currentVersion(documentStream("acme", "Note", "My Note"))).resolves.toBe(1);
+  });
+
+  it("runs custom validation hooks against post-unset document data", async () => {
+    const { documents, events } = createServices(["e1", "e2"]);
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ priority: "High", body: "Required context" })
+    });
+
+    await expect(
+      documents.update({
+        actor: owner,
+        doctype: "Note",
+        name: "My Note",
+        patch: {},
+        unset: ["body"]
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "body", code: "high_priority_body" })]
+    });
+    await expect(events.currentVersion(documentStream("acme", "Note", "My Note"))).resolves.toBe(1);
+  });
+
   it("rejects stale writes", async () => {
     const { documents } = createServices(["e1", "e2"]);
     await documents.create({ actor: owner, doctype: "Note", data: data() });

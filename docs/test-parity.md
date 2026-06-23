@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Cloudflare job worker pools slice:
+As of the event-level document field unsets slice:
 
 - Vitest files: `69`
-- Vitest cases: `603`
+- Vitest cases: `608`
 
 ## Implication
 
