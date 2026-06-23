@@ -416,6 +416,112 @@ describe("FileService", () => {
     });
   });
 
+  it("bulk updates selected file metadata through the same event-sourced command path", async () => {
+    const services = createFileServices(
+      ["create-target", "create-selected", "create-stale", "metadata-selected"],
+      ["target", "selected", "stale"]
+    );
+    const target = await services.files.upload({
+      actor: owner,
+      filename: "target.txt",
+      body: "target",
+      isPrivate: false
+    });
+    const selected = await services.files.upload({
+      actor: owner,
+      filename: "selected.txt",
+      body: "selected"
+    });
+    const stale = await services.files.upload({
+      actor: owner,
+      filename: "stale.txt",
+      body: "stale"
+    });
+
+    const result = await services.files.bulkUpdateMetadata({
+      actor: owner,
+      files: [
+        { name: selected.snapshot.name, expectedVersion: 1 },
+        { name: stale.snapshot.name, expectedVersion: 99 },
+        { name: "missing" }
+      ],
+      isPrivate: false,
+      attachedTo: { doctype: "File", name: target.snapshot.name }
+    });
+
+    expect(result).toMatchObject({
+      updated: [
+        {
+          name: selected.snapshot.name,
+          snapshot: {
+            version: 2,
+            data: {
+              filename: "selected.txt",
+              is_private: false,
+              attached_to_doctype: "File",
+              attached_to_name: target.snapshot.name
+            }
+          }
+        }
+      ],
+      failed: [
+        {
+          name: stale.snapshot.name,
+          code: "DOCUMENT_CONFLICT",
+          status: 409,
+          message: "Expected version 99, found 1"
+        },
+        {
+          name: "missing",
+          code: "DOCUMENT_NOT_FOUND",
+          status: 404
+        }
+      ]
+    });
+    await expect(services.queries.getDocument(owner, "File", stale.snapshot.name)).resolves.toMatchObject({
+      version: 1,
+      data: { filename: "stale.txt", is_private: true }
+    });
+    await expect(services.store.readStream(documentStream("acme", "File", selected.snapshot.name))).resolves.toMatchObject([
+      { type: "FileCreated" },
+      {
+        type: "FileMetadataUpdated",
+        payload: {
+          kind: "DomainCommandApplied",
+          command: "updateMetadata",
+          patch: {
+            is_private: false,
+            attached_to_doctype: "File",
+            attached_to_name: target.snapshot.name
+          }
+        }
+      }
+    ]);
+  });
+
+  it("rejects bulk file metadata updates without a metadata patch before writing events", async () => {
+    const services = createFileServices(["create"], ["object"]);
+    const uploaded = await services.files.upload({
+      actor: owner,
+      filename: "keep.txt",
+      body: "keep"
+    });
+
+    await expect(
+      services.files.bulkUpdateMetadata({
+        actor: owner,
+        files: [{ name: uploaded.snapshot.name, expectedVersion: 1 }]
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "At least one file metadata field must be provided"
+    });
+    await expect(services.queries.getDocument(owner, "File", uploaded.snapshot.name)).resolves.toMatchObject({
+      version: 1,
+      data: { filename: "keep.txt" }
+    });
+  });
+
   it("reserves and finalizes direct browser uploads through event-sourced File metadata", async () => {
     const services = createFileServices(["reserve", "finalize"], ["direct"]);
 

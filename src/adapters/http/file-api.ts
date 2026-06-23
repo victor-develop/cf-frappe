@@ -123,6 +123,20 @@ export function createFileApi(options: FileApiOptions): Hono {
     return c.json({ data: result });
   });
 
+  app.post("/api/files/bulk-metadata", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const body = await readJsonObject(c.req.raw, { maxJsonBytes });
+    const input = bulkMetadataInput(body);
+    const result = await options.files.bulkUpdateMetadata({
+      actor,
+      files: input.files,
+      ...(input.isPrivate === undefined ? {} : { isPrivate: input.isPrivate }),
+      ...(input.attachedTo === undefined ? {} : { attachedTo: input.attachedTo }),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: result });
+  });
+
   app.post("/api/files/:name/complete-upload", async (c) => {
     const actor = await options.actor(c.req.raw);
     const body = await readJsonObject(c.req.raw, { maxJsonBytes });
@@ -205,6 +219,11 @@ type BulkDeleteInput = {
   readonly files: readonly { readonly name: string; readonly expectedVersion?: number }[];
 };
 
+type BulkMetadataInput = BulkDeleteInput & {
+  readonly isPrivate?: boolean;
+  readonly attachedTo?: UpdateFileMetadataCommand["attachedTo"];
+};
+
 function bulkDeleteInput(body: Record<string, unknown>): BulkDeleteInput {
   const unknown = Object.keys(body).filter((key) => key !== "files");
   if (unknown.length > 0) {
@@ -214,13 +233,58 @@ function bulkDeleteInput(body: Record<string, unknown>): BulkDeleteInput {
     throw badRequest("files must be an array");
   }
   return {
-    files: body.files.map((item, index) => bulkDeleteFileInput(item, index))
+    files: body.files.map((item, index) => bulkFileSelectionInput(item, index, "delete"))
   };
 }
 
-function bulkDeleteFileInput(
+function bulkMetadataInput(body: Record<string, unknown>): BulkMetadataInput {
+  const unknown = Object.keys(body).filter(
+    (key) =>
+      ![
+        "files",
+        "isPrivate",
+        "is_private",
+        "attachedTo",
+        "attached_to_doctype",
+        "attached_to_name"
+      ].includes(key)
+  );
+  if (unknown.length > 0) {
+    throw badRequest(`Unknown bulk file metadata field '${unknown[0]}'`);
+  }
+  if (!Array.isArray(body.files)) {
+    throw badRequest("files must be an array");
+  }
+  const hasIsPrivate = body.isPrivate !== undefined;
+  const hasSnakeIsPrivate = body.is_private !== undefined;
+  if (hasIsPrivate && hasSnakeIsPrivate) {
+    throw badRequest("Provide only one of isPrivate or is_private");
+  }
+  const isPrivate = hasIsPrivate ? body.isPrivate : body.is_private;
+  if (isPrivate !== undefined && typeof isPrivate !== "boolean") {
+    throw badRequest("is_private must be a boolean");
+  }
+  const hasAttachedTo = body.attachedTo !== undefined;
+  const hasSnakeAttachment = body.attached_to_doctype !== undefined || body.attached_to_name !== undefined;
+  if (hasAttachedTo && hasSnakeAttachment) {
+    throw badRequest("Provide either attachedTo or attached_to_doctype/attached_to_name");
+  }
+  const attachedTo = hasAttachedTo
+    ? parseAttachedToObject(body.attachedTo)
+    : hasSnakeAttachment
+      ? parseAttachedToFields(body.attached_to_doctype, body.attached_to_name)
+      : undefined;
+  return {
+    files: body.files.map((item, index) => bulkFileSelectionInput(item, index, "metadata")),
+    ...(isPrivate === undefined ? {} : { isPrivate }),
+    ...(attachedTo === undefined ? {} : { attachedTo })
+  };
+}
+
+function bulkFileSelectionInput(
   value: unknown,
-  index: number
+  index: number,
+  operation: "delete" | "metadata"
 ): { readonly name: string; readonly expectedVersion?: number } {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw badRequest(`files[${String(index)}] must be an object`);
@@ -228,7 +292,7 @@ function bulkDeleteFileInput(
   const item = value as Record<string, unknown>;
   const unknown = Object.keys(item).filter((key) => !["name", "expectedVersion"].includes(key));
   if (unknown.length > 0) {
-    throw badRequest(`Unknown bulk file delete field 'files[${String(index)}].${unknown[0]}'`);
+    throw badRequest(`Unknown bulk file ${operation} field 'files[${String(index)}].${unknown[0]}'`);
   }
   if (typeof item.name !== "string") {
     throw badRequest(`files[${String(index)}].name must be a string`);

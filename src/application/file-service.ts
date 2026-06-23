@@ -84,19 +84,40 @@ export interface DeleteFileCommand extends DownloadFileCommand {
   readonly metadata?: DocumentData;
 }
 
-export interface BulkDeleteFileSelection {
+export interface BulkFileSelection {
   readonly name: string;
   readonly expectedVersion?: number;
 }
 
+export type BulkDeleteFileSelection = BulkFileSelection;
+
 export interface BulkDeleteFilesCommand {
   readonly actor: Actor;
-  readonly files: readonly BulkDeleteFileSelection[];
+  readonly files: readonly BulkFileSelection[];
   readonly tenantId?: string;
   readonly metadata?: DocumentData;
 }
 
+export interface BulkUpdateFileMetadataCommand {
+  readonly actor: Actor;
+  readonly files: readonly BulkFileSelection[];
+  readonly tenantId?: string;
+  readonly isPrivate?: boolean;
+  readonly attachedTo?:
+    | {
+        readonly doctype: string;
+        readonly name: string;
+      }
+    | null;
+  readonly metadata?: DocumentData;
+}
+
 export interface BulkDeletedFile {
+  readonly name: string;
+  readonly snapshot: DocumentSnapshot;
+}
+
+export interface BulkUpdatedFile {
   readonly name: string;
   readonly snapshot: DocumentSnapshot;
 }
@@ -108,9 +129,16 @@ export interface BulkDeleteFileFailure {
   readonly status: number;
 }
 
+export type BulkUpdateFileMetadataFailure = BulkDeleteFileFailure;
+
 export interface BulkDeleteFilesResult {
   readonly deleted: readonly BulkDeletedFile[];
   readonly failed: readonly BulkDeleteFileFailure[];
+}
+
+export interface BulkUpdateFileMetadataResult {
+  readonly updated: readonly BulkUpdatedFile[];
+  readonly failed: readonly BulkUpdateFileMetadataFailure[];
 }
 
 export interface UpdateFileMetadataCommand extends DownloadFileCommand {
@@ -621,7 +649,7 @@ export class FileService {
   }
 
   async bulkDelete(command: BulkDeleteFilesCommand): Promise<BulkDeleteFilesResult> {
-    const selections = normalizeBulkDeleteSelections(command.files);
+    const selections = normalizeBulkFileSelections(command.files);
     const deleted: BulkDeletedFile[] = [];
     const failed: BulkDeleteFileFailure[] = [];
     for (const selection of selections) {
@@ -639,6 +667,32 @@ export class FileService {
       }
     }
     return { deleted, failed };
+  }
+
+  async bulkUpdateMetadata(command: BulkUpdateFileMetadataCommand): Promise<BulkUpdateFileMetadataResult> {
+    const selections = normalizeBulkFileSelections(command.files);
+    if (command.isPrivate === undefined && command.attachedTo === undefined) {
+      throw badRequest("At least one file metadata field must be provided");
+    }
+    const updated: BulkUpdatedFile[] = [];
+    const failed: BulkUpdateFileMetadataFailure[] = [];
+    for (const selection of selections) {
+      try {
+        const snapshot = await this.updateMetadata({
+          actor: command.actor,
+          name: selection.name,
+          ...(command.isPrivate === undefined ? {} : { isPrivate: command.isPrivate }),
+          ...(command.attachedTo === undefined ? {} : { attachedTo: command.attachedTo }),
+          ...(selection.expectedVersion === undefined ? {} : { expectedVersion: selection.expectedVersion }),
+          ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+          metadata: command.metadata ?? {}
+        });
+        updated.push({ name: selection.name, snapshot });
+      } catch (error) {
+        failed.push(bulkFileFailure(selection.name, error, "Bulk metadata update failed"));
+      }
+    }
+    return { updated, failed };
   }
 
   private preflightCreate(actor: Actor, data: DocumentData): void {
@@ -711,16 +765,16 @@ function optionalTextFilter<TKey extends string>(key: TKey, value: string | unde
   return trimmed === undefined || trimmed === "" ? {} : { [key]: trimmed } as { readonly [K in TKey]: string };
 }
 
-const MAX_BULK_DELETE_FILES = 100;
+const MAX_BULK_FILES = 100;
 
-function normalizeBulkDeleteSelections(
-  files: readonly BulkDeleteFileSelection[]
-): readonly BulkDeleteFileSelection[] {
+function normalizeBulkFileSelections(
+  files: readonly BulkFileSelection[]
+): readonly BulkFileSelection[] {
   if (files.length === 0) {
     throw badRequest("At least one file must be selected");
   }
-  if (files.length > MAX_BULK_DELETE_FILES) {
-    throw badRequest(`At most ${String(MAX_BULK_DELETE_FILES)} files can be selected`);
+  if (files.length > MAX_BULK_FILES) {
+    throw badRequest(`At most ${String(MAX_BULK_FILES)} files can be selected`);
   }
   const seen = new Set<string>();
   return files.map((file) => {
@@ -743,6 +797,10 @@ function normalizeBulkDeleteSelections(
 }
 
 function bulkDeleteFailure(name: string, error: unknown): BulkDeleteFileFailure {
+  return bulkFileFailure(name, error, "Bulk delete failed");
+}
+
+function bulkFileFailure(name: string, error: unknown, fallback: string): BulkDeleteFileFailure {
   if (error instanceof FrameworkError) {
     return {
       name,
@@ -754,7 +812,7 @@ function bulkDeleteFailure(name: string, error: unknown): BulkDeleteFileFailure 
   return {
     name,
     code: "UNKNOWN",
-    message: error instanceof Error ? error.message : "Bulk delete failed",
+    message: error instanceof Error ? error.message : fallback,
     status: 500
   };
 }

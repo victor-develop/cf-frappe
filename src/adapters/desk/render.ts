@@ -219,11 +219,15 @@ export function renderFileManager(
   dashboard: FileDashboard,
   options: { readonly error?: string } = {}
 ): string {
+  const bulkFileActionFormId = "bulk-file-action";
+  const hasBulkDelete = dashboard.files.some((file) => file.deletable);
+  const hasBulkMetadata = dashboard.files.some((file) => file.editable);
+  const hasBulkActions = hasBulkDelete || hasBulkMetadata;
   const rows = dashboard.files
     .map((file) => {
       const attachedTo = attachmentLabel(file);
       return `<tr>
-        <td>${file.deletable ? renderFileBulkSelection(file) : ""}</td>
+        <td>${file.deletable || file.editable ? renderFileBulkSelection(file, bulkFileActionFormId) : ""}</td>
         <td><a href="/desk/files/${encodeURIComponent(file.name)}/content">${escapeHtml(file.filename)}</a></td>
         <td>${escapeHtml(file.name)}</td>
         <td>${escapeHtml(file.contentType)}</td>
@@ -264,8 +268,10 @@ export function renderFileManager(
     <div class="actions"><button class="button primary" type="submit">Filter</button><a class="button" href="/desk/files">Clear</a></div>
   </form>
   <section class="toolbar">
-    <form id="bulk-file-delete" method="post" action="/desk/files/bulk-delete"></form>
-    <button class="button danger" type="submit" form="bulk-file-delete" formaction="/desk/files/bulk-delete">Delete selected</button>
+    ${hasBulkActions ? `<form id="${bulkFileActionFormId}" method="post" action="/desk/files/bulk-delete"></form>` : ""}
+    ${hasBulkMetadata ? renderBulkFileMetadataControls(bulkFileActionFormId) : ""}
+    ${hasBulkDelete ? `<button class="button danger" type="submit" form="${bulkFileActionFormId}" formaction="/desk/files/bulk-delete">Delete selected</button>` : ""}
+    ${hasBulkMetadata ? `<button class="button" type="submit" form="${bulkFileActionFormId}" formaction="/desk/files/bulk-metadata">Update selected metadata</button>` : ""}
   </section>
   <section class="panel">
     <div class="table-wrap">
@@ -347,9 +353,20 @@ function renderFileMetadataAction(file: FileDashboard["files"][number]): string 
   </form>`;
 }
 
-function renderFileBulkSelection(file: FileDashboard["files"][number]): string {
-  return `<input class="bulk-select" form="bulk-file-delete" aria-label="Select ${escapeHtml(file.filename)}" name="file" value="${escapeHtml(file.name)}" type="checkbox">
-    <input form="bulk-file-delete" name="expectedVersion:${escapeHtml(file.name)}" value="${String(file.expectedVersion)}" type="hidden">`;
+function renderFileBulkSelection(file: FileDashboard["files"][number], formId: string): string {
+  return `<input class="bulk-select" form="${formId}" aria-label="Select ${escapeHtml(file.filename)}" name="file" value="${escapeHtml(file.name)}" type="checkbox">
+    <input form="${formId}" name="expectedVersion:${escapeHtml(file.name)}" value="${String(file.expectedVersion)}" type="hidden">`;
+}
+
+function renderBulkFileMetadataControls(formId: string): string {
+  return `<label class="field compact-field"><span>Privacy</span><select form="${formId}" name="bulk_is_private">
+      <option value="">Keep privacy</option>
+      <option value="1">Private</option>
+      <option value="0">Public</option>
+    </select></label>
+    <label class="field compact-field"><span>Attach To DocType</span><input form="${formId}" name="bulk_attached_to_doctype"></label>
+    <label class="field compact-field"><span>Attach To Name</span><input form="${formId}" name="bulk_attached_to_name"></label>
+    <label class="inline-checkbox"><span>Clear attachment</span><input form="${formId}" name="bulk_clear_attachment" type="checkbox" value="1"></label>`;
 }
 
 function renderFileDeleteAction(file: FileDashboard["files"][number]): string {
@@ -2252,7 +2269,14 @@ h1, h2 { margin: 0; letter-spacing: 0; }
 h1 { font-size: 28px; line-height: 1.2; }
 h2 { font-size: 20px; line-height: 1.3; }
 h3 { margin: 0 0 12px; font-size: 16px; line-height: 1.35; letter-spacing: 0; }
-.toolbar { margin-bottom: 16px; }
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.toolbar .compact-field { min-width: 160px; }
 .panel {
   background: var(--surface);
   border: 1px solid var(--border);

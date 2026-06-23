@@ -362,6 +362,98 @@ describe("file api", () => {
     });
   });
 
+  it("bulk updates file metadata through the file API with per-file outcomes", async () => {
+    const { app } = makeAppFixture(
+      1024,
+      ["create-target", "create-selected", "create-stale", "metadata-selected"],
+      ["target", "selected", "stale"]
+    );
+    await app.request("/api/files?filename=target.txt&is_private=false", {
+      method: "POST",
+      headers: userHeaders("owner@example.com", "User"),
+      body: "target"
+    });
+    await app.request("/api/files?filename=selected.txt", {
+      method: "POST",
+      headers: userHeaders("owner@example.com", "User"),
+      body: "selected"
+    });
+    await app.request("/api/files?filename=stale.txt", {
+      method: "POST",
+      headers: userHeaders("owner@example.com", "User"),
+      body: "stale"
+    });
+
+    const response = await app.request("/api/files/bulk-metadata", {
+      method: "POST",
+      headers: jsonHeaders("owner@example.com", "User"),
+      body: JSON.stringify({
+        files: [
+          { name: "file_selected", expectedVersion: 1 },
+          { name: "file_stale", expectedVersion: 99 }
+        ],
+        is_private: false,
+        attached_to_doctype: "File",
+        attached_to_name: "file_target"
+      })
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        updated: [
+          {
+            name: "file_selected",
+            snapshot: {
+              version: 2,
+              data: {
+                filename: "selected.txt",
+                is_private: false,
+                attached_to_doctype: "File",
+                attached_to_name: "file_target"
+              }
+            }
+          }
+        ],
+        failed: [
+          {
+            name: "file_stale",
+            code: "DOCUMENT_CONFLICT",
+            status: 409,
+            message: "Expected version 99, found 1"
+          }
+        ]
+      }
+    });
+
+    const guestList = await app.request("/api/files?attached_to_doctype=File&attached_to_name=file_target", {
+      headers: userHeaders("guest", "Guest")
+    });
+    expect(guestList.status).toBe(200);
+    await expect(guestList.json()).resolves.toMatchObject({
+      data: {
+        files: [
+          {
+            name: "file_selected",
+            filename: "selected.txt",
+            isPrivate: false,
+            attachedTo: { doctype: "File", name: "file_target" }
+          }
+        ]
+      }
+    });
+
+    const invalid = await app.request("/api/files/bulk-metadata", {
+      method: "POST",
+      headers: jsonHeaders("owner@example.com", "User"),
+      body: JSON.stringify({ files: [{ name: "file_selected", expectedVersion: 2 }] })
+    });
+    expect(invalid.status).toBe(400);
+    await expect(invalid.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "At least one file metadata field must be provided" }
+    });
+  });
+
   it("reserves and completes direct uploads through the file API", async () => {
     const { app, storage } = makeAppFixture(1024, ["reserve", "finalize"], ["direct"]);
 

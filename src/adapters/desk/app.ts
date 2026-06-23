@@ -3,7 +3,12 @@ import type { DataPatchAdminPort, DataPatchApplyPlan } from "../../application/d
 import type { DocumentShareService } from "../../application/document-share-service.js";
 import type { DocumentCommandExecutor } from "../../application/document-service.js";
 import type { DocumentHistoryService } from "../../application/document-history-service.js";
-import type { FileDashboard, FileDashboardQuery, FileService } from "../../application/file-service.js";
+import type {
+  FileDashboard,
+  FileDashboardQuery,
+  FileService,
+  UpdateFileMetadataCommand
+} from "../../application/file-service.js";
 import type { JobHistoryService } from "../../application/job-history-service.js";
 import type { JobRetryPort } from "../../application/job-retry-service.js";
 import type { JobScheduleService } from "../../application/job-schedule-service.js";
@@ -292,6 +297,32 @@ export function createDeskApp(options: DeskAppOptions): Hono {
           c.req.raw,
           actor,
           new FrameworkError("BAD_REQUEST", bulkFileDeleteFailureMessage(result.failed.length), { status: 400 })
+        );
+      }
+      return c.redirect("/desk/files", 303);
+    } catch (error) {
+      return renderDeskFileFailure(options, c.req.raw, actor, error);
+    }
+  });
+
+  app.post("/desk/files/bulk-metadata", async (c) => {
+    const files = requireFiles(options);
+    const actor = await options.actor(c.req.raw);
+    try {
+      const form = await parseDeskBulkFileMetadata(c.req.raw);
+      const result = await files.bulkUpdateMetadata({
+        actor,
+        files: form.files,
+        ...(form.isPrivate === undefined ? {} : { isPrivate: form.isPrivate }),
+        ...(form.attachedTo === undefined ? {} : { attachedTo: form.attachedTo }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      if (result.failed.length > 0) {
+        return renderDeskFileFailure(
+          options,
+          c.req.raw,
+          actor,
+          new FrameworkError("BAD_REQUEST", bulkFileMetadataFailureMessage(result.failed.length), { status: 400 })
         );
       }
       return c.redirect("/desk/files", 303);
@@ -2361,6 +2392,11 @@ interface ParsedDeskBulkFileDelete {
   }[];
 }
 
+interface ParsedDeskBulkFileMetadata extends ParsedDeskBulkFileDelete {
+  readonly isPrivate?: boolean;
+  readonly attachedTo?: UpdateFileMetadataCommand["attachedTo"];
+}
+
 interface ParsedDeskBulkDocumentAction {
   readonly documents: readonly {
     readonly name: string;
@@ -2472,6 +2508,45 @@ async function parseDeskBulkFileDelete(request: Request): Promise<ParsedDeskBulk
   };
 }
 
+async function parseDeskBulkFileMetadata(request: Request): Promise<ParsedDeskBulkFileMetadata> {
+  const form = await readUrlEncodedDeskForm(request);
+  const isPrivate = optionalBooleanSearchParamValue(form, "bulk_is_private", "bulk_is_private");
+  const clearAttachment = form.get("bulk_clear_attachment") !== null;
+  const attachedToDoctype = stringSearchParamValue(form, "bulk_attached_to_doctype");
+  const attachedToName = stringSearchParamValue(form, "bulk_attached_to_name");
+  if (clearAttachment && (attachedToDoctype !== undefined || attachedToName !== undefined)) {
+    throw new FrameworkError("BAD_REQUEST", "Clear attachment cannot be combined with attachment fields", {
+      status: 400
+    });
+  }
+  if (
+    (attachedToDoctype !== undefined && attachedToName === undefined) ||
+    (attachedToDoctype === undefined && attachedToName !== undefined)
+  ) {
+    throw new FrameworkError(
+      "BAD_REQUEST",
+      "bulk_attached_to_doctype and bulk_attached_to_name must be provided together",
+      { status: 400 }
+    );
+  }
+  const attachedTo = clearAttachment
+    ? null
+    : attachedToDoctype !== undefined && attachedToName !== undefined
+      ? { doctype: attachedToDoctype, name: attachedToName }
+      : undefined;
+  if (isPrivate === undefined && attachedTo === undefined) {
+    throw new FrameworkError("BAD_REQUEST", "At least one file metadata field must be provided", { status: 400 });
+  }
+  return {
+    files: form.getAll("file").map((name) => ({
+      name,
+      ...deskBulkExpectedVersion(form, name)
+    })),
+    ...(isPrivate === undefined ? {} : { isPrivate }),
+    ...(attachedTo === undefined ? {} : { attachedTo })
+  };
+}
+
 async function parseDeskBulkDocumentAction(request: Request): Promise<ParsedDeskBulkDocumentAction> {
   const form = await readUrlEncodedDeskForm(request);
   return {
@@ -2496,6 +2571,10 @@ function deskBulkExpectedVersion(form: URLSearchParams, name: string): { readonl
 
 function bulkFileDeleteFailureMessage(count: number): string {
   return count === 1 ? "1 file could not be deleted" : `${String(count)} files could not be deleted`;
+}
+
+function bulkFileMetadataFailureMessage(count: number): string {
+  return count === 1 ? "1 file metadata update failed" : `${String(count)} file metadata updates failed`;
 }
 
 function bulkDocumentDeleteFailureMessage(count: number): string {

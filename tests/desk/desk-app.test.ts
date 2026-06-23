@@ -517,7 +517,16 @@ describe("Desk app", () => {
 
   it("renders a Desk file manager for upload, metadata, download, and delete workflows", async () => {
     const { app, storage } = makeFileDesk(owner, {
-      ids: ["create", "create-other", "bulk-request-delete", "bulk-delete", "metadata", "request-delete", "delete"],
+      ids: [
+        "create",
+        "create-other",
+        "bulk-metadata",
+        "bulk-request-delete",
+        "bulk-delete",
+        "metadata",
+        "request-delete",
+        "delete"
+      ],
       fileIds: ["object", "other"]
     });
 
@@ -559,6 +568,9 @@ describe("Desk app", () => {
     expect(html).toContain('name="storage_state"');
     expect(html).toContain('name="scan_status"');
     expect(html).toContain('name="is_private"');
+    expect(html).toContain('name="bulk_is_private"');
+    expect(html).toContain('name="bulk_attached_to_doctype"');
+    expect(html).toContain('formaction="/desk/files/bulk-metadata"');
     expect(html).toContain('formaction="/desk/files/bulk-delete"');
     expect(html).toContain('name="file" value="file_other"');
 
@@ -585,6 +597,23 @@ describe("Desk app", () => {
     expect(invalidPrivacy.status).toBe(400);
     await expect(invalidPrivacy.text()).resolves.toContain("Expected boolean query parameter");
 
+    const bulkMetadata = await app.request("/desk/files/bulk-metadata", {
+      method: "POST",
+      body: new URLSearchParams({
+        file: "file_object",
+        "expectedVersion:file_object": "1",
+        bulk_is_private: "0"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(bulkMetadata.status).toBe(303);
+    expect(bulkMetadata.headers.get("location")).toBe("/desk/files");
+
+    const publicAfterBulkMetadata = await app.request("/desk/files?is_private=0&limit=10");
+    const publicAfterBulkMetadataHtml = await publicAfterBulkMetadata.text();
+    expect(publicAfterBulkMetadataHtml).toContain("hello.txt");
+    expect(publicAfterBulkMetadataHtml).toContain("public.json");
+
     const bulkDeleted = await app.request("/desk/files/bulk-delete", {
       method: "POST",
       body: new URLSearchParams({
@@ -607,7 +636,7 @@ describe("Desk app", () => {
 
     const metadata = await app.request("/desk/files/file_object/metadata", {
       method: "POST",
-      body: new URLSearchParams({ filename: "renamed.txt", expectedVersion: "1" }),
+      body: new URLSearchParams({ filename: "renamed.txt", expectedVersion: "2" }),
       headers: { "content-type": "application/x-www-form-urlencoded" }
     });
     expect(metadata.status).toBe(303);
@@ -624,7 +653,7 @@ describe("Desk app", () => {
 
     const deleted = await app.request("/desk/files/file_object/delete", {
       method: "POST",
-      body: new URLSearchParams({ expectedVersion: "2" }),
+      body: new URLSearchParams({ expectedVersion: "3" }),
       headers: { "content-type": "application/x-www-form-urlencoded" }
     });
     expect(deleted.status).toBe(303);
@@ -638,6 +667,7 @@ describe("Desk app", () => {
     });
     const selected = new FormData();
     selected.append("file", new Blob(["selected"], { type: "text/plain" }), "selected.txt");
+    selected.set("is_private", "1");
     await app.request("/desk/files", {
       method: "POST",
       headers: { "content-length": "512" },
@@ -645,6 +675,7 @@ describe("Desk app", () => {
     });
     const stale = new FormData();
     stale.append("file", new Blob(["stale"], { type: "text/plain" }), "stale.txt");
+    stale.set("is_private", "1");
     await app.request("/desk/files", {
       method: "POST",
       headers: { "content-length": "512" },
@@ -666,6 +697,52 @@ describe("Desk app", () => {
     await expect(response.text()).resolves.toContain("1 file could not be deleted");
     expect(storage.has("acme/files/file_selected-selected.txt")).toBe(false);
     expect(storage.has("acme/files/file_stale-stale.txt")).toBe(true);
+  });
+
+  it("reports Desk bulk file metadata failures while preserving successful updates", async () => {
+    const { app, files } = makeFileDesk(owner, {
+      ids: ["create-1", "create-2", "metadata-1"],
+      fileIds: ["selected", "stale"]
+    });
+    const selected = new FormData();
+    selected.append("file", new Blob(["selected"], { type: "text/plain" }), "selected.txt");
+    selected.set("is_private", "1");
+    await app.request("/desk/files", {
+      method: "POST",
+      headers: { "content-length": "512" },
+      body: selected
+    });
+    const stale = new FormData();
+    stale.append("file", new Blob(["stale"], { type: "text/plain" }), "stale.txt");
+    stale.set("is_private", "1");
+    await app.request("/desk/files", {
+      method: "POST",
+      headers: { "content-length": "512" },
+      body: stale
+    });
+
+    const bulkBody = new URLSearchParams();
+    bulkBody.append("file", "file_selected");
+    bulkBody.set("expectedVersion:file_selected", "1");
+    bulkBody.append("file", "file_stale");
+    bulkBody.set("expectedVersion:file_stale", "99");
+    bulkBody.set("bulk_is_private", "0");
+    const response = await app.request("/desk/files/bulk-metadata", {
+      method: "POST",
+      body: bulkBody,
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toContain("1 file metadata update failed");
+    await expect(files.get(owner, "file_selected")).resolves.toMatchObject({
+      expectedVersion: 2,
+      isPrivate: false
+    });
+    await expect(files.get(owner, "file_stale")).resolves.toMatchObject({
+      expectedVersion: 1,
+      isPrivate: true
+    });
   });
 
   it("manages record attachments directly from generated Desk document forms", async () => {
