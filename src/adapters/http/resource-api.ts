@@ -3,7 +3,7 @@ import type { AuditService } from "../../application/audit-service.js";
 import type { DataPatchQueuePort } from "../../application/data-patch-jobs.js";
 import type { DataPatchAdminPort } from "../../application/data-patch-service.js";
 import type { DocumentShareService } from "../../application/document-share-service.js";
-import type { DocumentCommandExecutor } from "../../application/document-service.js";
+import type { BulkDeleteDocumentSelection, DocumentCommandExecutor } from "../../application/document-service.js";
 import type { DocumentHistoryService } from "../../application/document-history-service.js";
 import type { FileService } from "../../application/file-service.js";
 import type { JobHistoryService } from "../../application/job-history-service.js";
@@ -287,6 +287,18 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       metadata: requestMetadata(c.req.raw)
     });
     return c.json({ data: snapshot }, 201);
+  });
+
+  app.post("/api/resource/:doctype/delete", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    const body = await readJson(c.req.raw, { maxJsonBytes });
+    const result = await options.documents.bulkDelete({
+      actor,
+      doctype: c.req.param("doctype"),
+      documents: documentSelectionsValue(body.documents),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: result });
   });
 
   if (options.timeline) {
@@ -650,6 +662,26 @@ function numberValue(value: unknown): number | undefined {
     throw badRequest("expectedVersion must be an integer");
   }
   return value;
+}
+
+function documentSelectionsValue(value: unknown): readonly BulkDeleteDocumentSelection[] {
+  if (!Array.isArray(value)) {
+    throw badRequest("documents must be an array");
+  }
+  return value.map((item) => {
+    if (!isRecord(item)) {
+      throw badRequest("document selections must be objects");
+    }
+    const name = stringValue(item.name);
+    if (name === undefined) {
+      throw badRequest("document name is required");
+    }
+    const expectedVersion = numberValue(item.expectedVersion);
+    return {
+      name,
+      ...(expectedVersion === undefined ? {} : { expectedVersion })
+    };
+  });
 }
 
 async function savedFilterFromUrl(

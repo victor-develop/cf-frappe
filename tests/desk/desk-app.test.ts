@@ -31,7 +31,7 @@ import {
   type DocTypeDefinition,
   type PasswordHasher
 } from "../../src";
-import { createChildTableServices, createLinkedServices, createServices, data, guest, noteDocType, now, owner } from "../helpers";
+import { createChildTableServices, createLinkedServices, createServices, data, guest, manager, noteDocType, now, owner } from "../helpers";
 
 describe("Desk app", () => {
   function makeDesk(
@@ -960,6 +960,93 @@ describe("Desk app", () => {
     expect(advancedHtml).toContain('<option value="Low" selected>Low</option>');
     expect(advancedHtml).toContain('name="filter_count__gte" value="2"');
     expect(advancedHtml).toContain('name="filter_count__lte" value="8"');
+  });
+
+  it("renders and submits generated list bulk document deletes", async () => {
+    const { app, services } = makeDesk(manager);
+    await services.documents.create({
+      actor: manager,
+      doctype: "Note",
+      data: data({ title: "Desk Bulk Selected" })
+    });
+    await services.documents.create({
+      actor: manager,
+      doctype: "Note",
+      data: data({ title: "Desk Bulk Keep" })
+    });
+
+    const list = await app.request("/desk/Note");
+
+    expect(list.status).toBe(200);
+    const html = await list.text();
+    expect(html).toContain('formaction="/desk/Note/bulk-delete"');
+    expect(html).toContain('name="document" type="checkbox" value="Desk Bulk Selected"');
+    expect(html).toContain('name="expectedVersion:Desk Bulk Selected" type="hidden" value="1"');
+
+    const deleted = await app.request("/desk/Note/bulk-delete", {
+      method: "POST",
+      body: new URLSearchParams({
+        document: "Desk Bulk Selected",
+        "expectedVersion:Desk Bulk Selected": "1"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(deleted.status).toBe(303);
+    expect(deleted.headers.get("location")).toBe("/desk/Note");
+
+    const after = await app.request("/desk/Note");
+    const afterHtml = await after.text();
+    expect(afterHtml).not.toContain("Desk Bulk Selected");
+    expect(afterHtml).toContain("Desk Bulk Keep");
+  });
+
+  it("hides generated list bulk delete actions from actors without delete permission", async () => {
+    const { app, services } = makeDesk(owner);
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Desk Owner Note" })
+    });
+
+    const response = await app.request("/desk/Note");
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.not.toContain('formaction="/desk/Note/bulk-delete"');
+  });
+
+  it("reports generated list bulk document delete failures while preserving successful deletes", async () => {
+    const { app, services } = makeDesk(manager);
+    await services.documents.create({
+      actor: manager,
+      doctype: "Note",
+      data: data({ title: "Desk Bulk Partial Selected" })
+    });
+    await services.documents.create({
+      actor: manager,
+      doctype: "Note",
+      data: data({ title: "Desk Bulk Partial Stale" })
+    });
+    const body = new URLSearchParams();
+    body.append("document", "Desk Bulk Partial Selected");
+    body.set("expectedVersion:Desk Bulk Partial Selected", "1");
+    body.append("document", "Desk Bulk Partial Stale");
+    body.set("expectedVersion:Desk Bulk Partial Stale", "99");
+
+    const response = await app.request("/desk/Note/bulk-delete", {
+      method: "POST",
+      body,
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toContain("1 document could not be deleted");
+    await expect(services.queries.getDocument(manager, "Note", "Desk Bulk Partial Stale")).resolves.toMatchObject({
+      docstatus: "draft"
+    });
+    await expect(services.queries.getDocument(manager, "Note", "Desk Bulk Partial Selected")).rejects.toMatchObject({
+      code: "DOCUMENT_NOT_FOUND"
+    });
   });
 
   it("saves, applies, and deletes Desk list filters", async () => {

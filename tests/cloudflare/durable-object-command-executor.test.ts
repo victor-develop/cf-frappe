@@ -109,6 +109,81 @@ describe("DurableObjectCommandExecutor", () => {
       { kind: "delete" }
     ]);
   });
+
+  it("routes bulk deletes per aggregate and preserves serializable failure envelopes", async () => {
+    const calls: unknown[] = [];
+    const names: string[] = [];
+    const namespace: RpcDurableObjectNamespace<any> = {
+      idFromName(name: string) {
+        names.push(name);
+        return name as unknown as DurableObjectId;
+      },
+      get() {
+        return {
+          transact() {
+            throw new Error("Bulk delete should use tryTransact");
+          },
+          tryTransact(command: { readonly kind: string; readonly name: string; readonly expectedVersion?: number }) {
+            calls.push(command);
+            if (command.name === "Stale Note") {
+              return Promise.resolve({
+                ok: false as const,
+                failure: {
+                  name: command.name,
+                  code: "DOCUMENT_CONFLICT" as const,
+                  message: "Expected version 99, found 1",
+                  status: 409
+                }
+              });
+            }
+            return Promise.resolve({
+              ok: true as const,
+              snapshot: {
+                tenantId: "acme",
+                doctype: "Note",
+                name: command.name,
+                version: 2,
+                docstatus: "deleted" as const,
+                data: { title: command.name },
+                createdAt: "now",
+                updatedAt: "now"
+              }
+            });
+          }
+        };
+      }
+    };
+    const executor = new DurableObjectCommandExecutor({
+      registry: createTestRegistry(),
+      namespace
+    });
+
+    const result = await executor.bulkDelete({
+      actor: owner,
+      doctype: "Note",
+      documents: [
+        { name: "Selected Note", expectedVersion: 1 },
+        { name: "Stale Note", expectedVersion: 99 }
+      ]
+    });
+
+    expect(names).toEqual(["acme:Note:Selected Note", "acme:Note:Stale Note"]);
+    expect(calls).toMatchObject([
+      { kind: "delete", name: "Selected Note", expectedVersion: 1 },
+      { kind: "delete", name: "Stale Note", expectedVersion: 99 }
+    ]);
+    expect(result).toMatchObject({
+      deleted: [{ name: "Selected Note", snapshot: { docstatus: "deleted", version: 2 } }],
+      failed: [
+        {
+          name: "Stale Note",
+          code: "DOCUMENT_CONFLICT",
+          message: "Expected version 99, found 1",
+          status: 409
+        }
+      ]
+    });
+  });
 });
 
 function fakeNamespace(names: string[], calls: unknown[]): RpcDurableObjectNamespace<any> {
@@ -118,19 +193,23 @@ function fakeNamespace(names: string[], calls: unknown[]): RpcDurableObjectNames
       return name as unknown as DurableObjectId;
     },
     get() {
+      const transact = (command: unknown) => {
+        calls.push(command);
+        return Promise.resolve({
+          tenantId: "acme",
+          doctype: "Note",
+          name: "My Note",
+          version: 1,
+          docstatus: "draft",
+          data: { title: "My Note" },
+          createdAt: "now",
+          updatedAt: "now"
+        });
+      };
       return {
-        transact(command: unknown) {
-          calls.push(command);
-          return Promise.resolve({
-            tenantId: "acme",
-            doctype: "Note",
-            name: "My Note",
-            version: 1,
-            docstatus: "draft",
-            data: { title: "My Note" },
-            createdAt: "now",
-            updatedAt: "now"
-          });
+        transact,
+        async tryTransact(command: unknown) {
+          return { ok: true as const, snapshot: await transact(command) };
         }
       };
     }

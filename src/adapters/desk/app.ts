@@ -967,6 +967,11 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       ...(offset !== undefined ? { offset } : {})
     });
     const savedFilters = await options.savedFilters?.list(actor, doctype.name);
+    const bulkDeleteNames = result.data
+      .filter((document) =>
+        can(actor, doctype, "delete", document) && (document.docstatus === "draft" || document.docstatus === "cancelled")
+      )
+      .map((document) => document.name);
     return html(
       renderDeskLayoutFor(options, {
         title: doctype.label ?? doctype.name,
@@ -978,6 +983,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
           ...(savedFilters ? { savedFilters } : {}),
           ...(savedFilter ? { selectedSavedFilterId: savedFilter.id } : {}),
           clientScripts: options.registry.listClientScripts(doctype.name, "list"),
+          bulkDeleteNames,
           ...deskRealtimeRouteOption(options)
         })
       })
@@ -1016,6 +1022,30 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       id: c.req.param("filterId")
     });
     return c.redirect(`/desk/${encodeURIComponent(doctype.name)}`, 303);
+  });
+
+  app.post("/desk/:doctype/bulk-delete", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    try {
+      const form = await parseDeskBulkDocumentDelete(c.req.raw);
+      const result = await options.documents.bulkDelete({
+        actor,
+        doctype: doctype.name,
+        documents: form.documents,
+        metadata: requestMetadata(c.req.raw)
+      });
+      if (result.failed.length > 0) {
+        return renderDeskFailure(
+          options,
+          c.req.raw,
+          new FrameworkError("BAD_REQUEST", bulkDocumentDeleteFailureMessage(result.failed.length), { status: 400 })
+        );
+      }
+      return c.redirect(`/desk/${encodeURIComponent(doctype.name)}`, 303);
+    } catch (error) {
+      return renderDeskFailure(options, c.req.raw, error);
+    }
   });
 
   app.get("/desk/:doctype/new", async (c) => {
@@ -2171,6 +2201,13 @@ interface ParsedDeskBulkFileDelete {
   }[];
 }
 
+interface ParsedDeskBulkDocumentDelete {
+  readonly documents: readonly {
+    readonly name: string;
+    readonly expectedVersion?: number;
+  }[];
+}
+
 interface ParsedDeskDataPatchApply {
   readonly limit?: number;
 }
@@ -2270,15 +2307,22 @@ async function parseDeskBulkFileDelete(request: Request): Promise<ParsedDeskBulk
   return {
     files: form.getAll("file").map((name) => ({
       name,
-      ...deskBulkFileExpectedVersion(form, name)
+      ...deskBulkExpectedVersion(form, name)
     }))
   };
 }
 
-function deskBulkFileExpectedVersion(
-  form: URLSearchParams,
-  name: string
-): { readonly expectedVersion?: number } {
+async function parseDeskBulkDocumentDelete(request: Request): Promise<ParsedDeskBulkDocumentDelete> {
+  const form = await readUrlEncodedDeskForm(request);
+  return {
+    documents: form.getAll("document").map((name) => ({
+      name,
+      ...deskBulkExpectedVersion(form, name)
+    }))
+  };
+}
+
+function deskBulkExpectedVersion(form: URLSearchParams, name: string): { readonly expectedVersion?: number } {
   const raw = stringSearchParamValue(form, `expectedVersion:${name}`);
   if (raw === undefined) {
     return {};
@@ -2292,6 +2336,10 @@ function deskBulkFileExpectedVersion(
 
 function bulkFileDeleteFailureMessage(count: number): string {
   return count === 1 ? "1 file could not be deleted" : `${String(count)} files could not be deleted`;
+}
+
+function bulkDocumentDeleteFailureMessage(count: number): string {
+  return count === 1 ? "1 document could not be deleted" : `${String(count)} documents could not be deleted`;
 }
 
 function fileNameFromFormValue(file: Blob): string {

@@ -1365,6 +1365,7 @@ export function renderListView(
     readonly selectedSavedFilterId?: string;
     readonly clientScripts?: readonly ClientScriptDefinition[];
     readonly realtimeRoute?: string;
+    readonly bulkDeleteNames?: readonly string[];
   } = {}
 ): string {
   const fields = listView.columns;
@@ -1378,12 +1379,18 @@ export function renderListView(
     .join("");
   const savedFilterPanel = renderSavedFilters(doctype, options.savedFilters ?? [], options.selectedSavedFilterId);
   const header = fields.map((field) => `<th>${escapeHtml(field.label ?? field.name)}</th>`).join("");
+  const bulkDeleteNames = new Set(options.bulkDeleteNames ?? []);
+  const hasBulkDelete = bulkDeleteNames.size > 0;
+  const bulkDeleteFormId = "bulk-document-delete";
+  const bulkDeleteAction = `/desk/${encodeURIComponent(doctype.name)}/bulk-delete`;
   const rows = documents
     .map((document) => {
       const cells = fields
         .map((field) => `<td>${escapeHtml(formatValue(document.data[field.name]))}</td>`)
         .join("");
+      const selectable = bulkDeleteNames.has(document.name);
       return `<tr>
+        ${hasBulkDelete ? renderBulkDeleteCell(document, selectable, bulkDeleteFormId) : ""}
         <td><a href="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(document.name)}">${escapeHtml(document.name)}</a></td>
         ${cells}
         <td>${String(document.version)}</td>
@@ -1393,18 +1400,27 @@ export function renderListView(
     .join("");
   return `<section class="toolbar">
     <a class="button primary" href="/desk/${encodeURIComponent(doctype.name)}/new">New ${escapeHtml(labelFor(doctype))}</a>
+    ${hasBulkDelete ? `<form id="${bulkDeleteFormId}" method="post" action="${bulkDeleteAction}"></form><button class="button danger" type="submit" form="${bulkDeleteFormId}" formaction="${bulkDeleteAction}">Delete selected</button>` : ""}
   </section>
   ${savedFilterPanel}
   ${filterForm ? `<form class="panel form list-filters" method="get"><div class="fields">${filterForm}<label class="field" for="saved-filter-label"><span>Saved filter name</span><input id="saved-filter-label" name="saved_filter_label" type="text"></label></div><div class="actions"><button class="button primary" type="submit">Filter</button><button class="button" type="submit" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/saved-filters">Save filter</button><a class="button" href="/desk/${encodeURIComponent(doctype.name)}?default_filters=0">Clear</a></div></form>` : ""}
   <section class="panel">
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Name</th>${header}<th>Version</th><th>Updated</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="${fields.length + 3}" class="empty">No documents yet.</td></tr>`}</tbody>
+        <thead><tr>${hasBulkDelete ? "<th>Select</th>" : ""}<th>Name</th>${header}<th>Version</th><th>Updated</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="${fields.length + (hasBulkDelete ? 4 : 3)}" class="empty">No documents yet.</td></tr>`}</tbody>
       </table>
     </div>
   </section>
   ${renderClientScripts(doctype.name, "list", options.clientScripts ?? [], undefined, undefined, options.realtimeRoute)}`;
+}
+
+function renderBulkDeleteCell(document: DocumentSnapshot, selectable: boolean, formId: string): string {
+  if (!selectable) {
+    return "<td></td>";
+  }
+  const name = escapeHtml(document.name);
+  return `<td><input form="${formId}" name="document" type="checkbox" value="${name}" aria-label="Select ${name} for deletion"><input form="${formId}" name="expectedVersion:${name}" type="hidden" value="${String(document.version)}"></td>`;
 }
 
 function renderSavedFilters(

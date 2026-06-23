@@ -1191,6 +1191,9 @@ function fakeNamespace(): RpcDurableObjectNamespace<AggregateCoordinatorRpc> {
       return {
         transact() {
           throw new Error("Command path should not be used in this test");
+        },
+        tryTransact() {
+          throw new Error("Command path should not be used in this test");
         }
       };
     }
@@ -1203,20 +1206,24 @@ function fakeTransactingNamespace(calls: AggregateCoordinatorCommand[]): RpcDura
       return name as unknown as DurableObjectId;
     },
     get() {
+      const transact = (command: AggregateCoordinatorCommand) => {
+        calls.push(command);
+        const name = "name" in command ? command.name : "My Note";
+        return Promise.resolve({
+          tenantId: "acme",
+          doctype: command.doctype,
+          name,
+          version: command.kind === "share" ? 2 : 3,
+          docstatus: "draft" as const,
+          data: { title: name },
+          createdAt: now,
+          updatedAt: now
+        });
+      };
       return {
-        transact(command: AggregateCoordinatorCommand) {
-          calls.push(command);
-          const name = "name" in command ? command.name : "My Note";
-          return Promise.resolve({
-            tenantId: "acme",
-            doctype: command.doctype,
-            name,
-            version: command.kind === "share" ? 2 : 3,
-            docstatus: "draft" as const,
-            data: { title: name },
-            createdAt: now,
-            updatedAt: now
-          });
+        transact,
+        async tryTransact(command: AggregateCoordinatorCommand) {
+          return { ok: true as const, snapshot: await transact(command) };
         }
       };
     }

@@ -46,7 +46,15 @@ import {
   type NewDomainEvent,
   type ValidationIssue
 } from "../core/types.js";
-import { badRequest, conflict, FrameworkError, notFound, permissionDenied, validationFailed } from "../core/errors.js";
+import {
+  badRequest,
+  conflict,
+  FrameworkError,
+  notFound,
+  permissionDenied,
+  validationFailed,
+  type FrameworkErrorCode
+} from "../core/errors.js";
 
 export interface DocumentServiceOptions {
   readonly registry: ModelRegistry;
@@ -88,6 +96,36 @@ export interface DeleteDocumentCommand {
   readonly tenantId?: string;
   readonly expectedVersion?: number;
   readonly metadata?: DocumentData;
+}
+
+export interface BulkDeleteDocumentSelection {
+  readonly name: string;
+  readonly expectedVersion?: number;
+}
+
+export interface BulkDeleteDocumentsCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly documents: readonly BulkDeleteDocumentSelection[];
+  readonly tenantId?: string;
+  readonly metadata?: DocumentData;
+}
+
+export interface BulkDeletedDocument {
+  readonly name: string;
+  readonly snapshot: DocumentSnapshot;
+}
+
+export interface BulkDeleteDocumentFailure {
+  readonly name: string;
+  readonly code: FrameworkErrorCode | "UNKNOWN";
+  readonly message: string;
+  readonly status: number;
+}
+
+export interface BulkDeleteDocumentsResult {
+  readonly deleted: readonly BulkDeletedDocument[];
+  readonly failed: readonly BulkDeleteDocumentFailure[];
 }
 
 export interface SubmitDocumentCommand {
@@ -240,6 +278,7 @@ export interface DocumentCommandExecutor {
   submit(command: SubmitDocumentCommand): Promise<DocumentSnapshot>;
   cancel(command: CancelDocumentCommand): Promise<DocumentSnapshot>;
   delete(command: DeleteDocumentCommand): Promise<DocumentSnapshot>;
+  bulkDelete(command: BulkDeleteDocumentsCommand): Promise<BulkDeleteDocumentsResult>;
   transition(command: TransitionDocumentCommand): Promise<DocumentSnapshot>;
   execute(command: ExecuteDomainCommand): Promise<DocumentSnapshot>;
   comment(command: AddDocumentCommentCommand): Promise<DocumentSnapshot>;
@@ -820,6 +859,28 @@ export class DocumentService implements DocumentCommandExecutor {
       await this.runAfterCommit(doctype, saved, commit.snapshot);
     }
     return commit.snapshot;
+  }
+
+  async bulkDelete(command: BulkDeleteDocumentsCommand): Promise<BulkDeleteDocumentsResult> {
+    const selections = normalizeBulkDeleteDocumentSelections(command.documents);
+    const deleted: BulkDeletedDocument[] = [];
+    const failed: BulkDeleteDocumentFailure[] = [];
+    for (const selection of selections) {
+      try {
+        const snapshot = await this.delete({
+          actor: command.actor,
+          doctype: command.doctype,
+          name: selection.name,
+          ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+          ...(selection.expectedVersion === undefined ? {} : { expectedVersion: selection.expectedVersion }),
+          metadata: command.metadata ?? {}
+        });
+        deleted.push({ name: selection.name, snapshot });
+      } catch (error) {
+        failed.push(bulkDeleteDocumentFailure(selection.name, error));
+      }
+    }
+    return { deleted, failed };
   }
 
   async submit(command: SubmitDocumentCommand): Promise<DocumentSnapshot> {
@@ -1470,6 +1531,54 @@ function ensureDocumentStatus(
       { status: 409 }
     );
   }
+}
+
+const MAX_BULK_DELETE_DOCUMENTS = 100;
+
+export function normalizeBulkDeleteDocumentSelections(
+  documents: readonly BulkDeleteDocumentSelection[]
+): readonly BulkDeleteDocumentSelection[] {
+  if (documents.length === 0) {
+    throw badRequest("At least one document must be selected");
+  }
+  if (documents.length > MAX_BULK_DELETE_DOCUMENTS) {
+    throw badRequest(`At most ${String(MAX_BULK_DELETE_DOCUMENTS)} documents can be selected`);
+  }
+  const seen = new Set<string>();
+  return documents.map((document) => {
+    const name = document.name.trim();
+    if (name === "") {
+      throw badRequest("Document name is required");
+    }
+    if (seen.has(name)) {
+      throw badRequest(`Duplicate document selection '${name}'`);
+    }
+    seen.add(name);
+    if (document.expectedVersion !== undefined && !Number.isInteger(document.expectedVersion)) {
+      throw badRequest("expectedVersion must be an integer");
+    }
+    return {
+      name,
+      ...(document.expectedVersion === undefined ? {} : { expectedVersion: document.expectedVersion })
+    };
+  });
+}
+
+export function bulkDeleteDocumentFailure(name: string, error: unknown): BulkDeleteDocumentFailure {
+  if (error instanceof FrameworkError) {
+    return {
+      name,
+      code: error.code,
+      message: error.message,
+      status: error.status
+    };
+  }
+  return {
+    name,
+    code: "UNKNOWN",
+    message: error instanceof Error ? error.message : "Bulk delete failed",
+    status: 500
+  };
 }
 
 function normalizeCommentText(text: string): string {

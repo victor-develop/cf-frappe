@@ -62,6 +62,11 @@ describe("resource api", () => {
     "x-cf-frappe-user": "admin@example.com",
     "x-cf-frappe-roles": SYSTEM_MANAGER_ROLE
   };
+  const managerHeaders = {
+    ...userHeaders,
+    "x-cf-frappe-user": "manager@example.com",
+    "x-cf-frappe-roles": "Task Manager"
+  };
   const collaboratorHeaders = {
     "content-type": "application/json",
     "x-cf-frappe-user": "collab@example.com",
@@ -236,6 +241,61 @@ describe("resource api", () => {
     });
     expect(deleted.status).toBe(200);
     await expect(deleted.json()).resolves.toMatchObject({ data: { docstatus: "deleted" } });
+  });
+
+  it("bulk deletes resources with per-document outcomes", async () => {
+    const app = makeApp();
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Bulk Selected", body: "Selected" })
+    });
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Bulk Stale", body: "Stale" })
+    });
+
+    const response = await app.request("/api/resource/Note/delete", {
+      method: "POST",
+      headers: managerHeaders,
+      body: JSON.stringify({
+        documents: [
+          { name: "HTTP Bulk Selected", expectedVersion: 1 },
+          { name: "HTTP Bulk Stale", expectedVersion: 99 },
+          { name: "Missing HTTP Bulk" }
+        ]
+      })
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        deleted: [{ name: "HTTP Bulk Selected", snapshot: { docstatus: "deleted" } }],
+        failed: [
+          { name: "HTTP Bulk Stale", code: "DOCUMENT_CONFLICT", status: 409 },
+          { name: "Missing HTTP Bulk", code: "DOCUMENT_NOT_FOUND", status: 404 }
+        ]
+      }
+    });
+
+    const list = await app.request("/api/resource/Note?limit=10", { headers: userHeaders });
+    await expect(list.json()).resolves.toMatchObject({ data: [{ name: "HTTP Bulk Stale" }] });
+  });
+
+  it("rejects invalid bulk resource delete bodies", async () => {
+    const app = makeApp();
+
+    const response = await app.request("/api/resource/Note/delete", {
+      method: "POST",
+      headers: managerHeaders,
+      body: JSON.stringify({ documents: [] })
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "At least one document must be selected" }
+    });
   });
 
   it("returns a permissioned resource timeline from the document event stream", async () => {

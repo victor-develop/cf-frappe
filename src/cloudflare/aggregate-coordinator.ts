@@ -1,9 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
 import { DocumentShareService } from "../application/document-share-service.js";
-import { DocumentService } from "../application/document-service.js";
+import { DocumentService, bulkDeleteDocumentFailure } from "../application/document-service.js";
+import type { BulkDeleteDocumentFailure } from "../application/document-service.js";
 import { UserPermissionService } from "../application/user-permission-service.js";
 import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator.js";
-import type { DomainEvent } from "../core/types.js";
+import type { DomainEvent, DocumentSnapshot } from "../core/types.js";
 import { createDocumentDeliveryHooks } from "../application/realtime.js";
 import { UserNotificationService } from "../application/user-notification-service.js";
 import type {
@@ -50,6 +51,16 @@ export type AggregateCoordinatorCommand =
   | ({ readonly kind: "share" } & ShareDocumentCommand)
   | ({ readonly kind: "revokeShare" } & RevokeDocumentShareCommand);
 
+export type AggregateCoordinatorTransactResult =
+  | {
+      readonly ok: true;
+      readonly snapshot: DocumentSnapshot;
+    }
+  | {
+      readonly ok: false;
+      readonly failure: BulkDeleteDocumentFailure;
+    };
+
 export interface AggregateCoordinatorEnv {
   readonly DB: D1Database;
 }
@@ -67,7 +78,8 @@ export type AggregateCoordinatorClass<Env extends AggregateCoordinatorEnv = Aggr
   ctx: DurableObjectState,
   env: Env
 ) => {
-  transact(command: AggregateCoordinatorCommand): Promise<unknown>;
+  transact(command: AggregateCoordinatorCommand): Promise<DocumentSnapshot>;
+  tryTransact(command: AggregateCoordinatorCommand): Promise<AggregateCoordinatorTransactResult>;
 };
 
 export function createAggregateCoordinatorClass<Env extends AggregateCoordinatorEnv = AggregateCoordinatorEnv>(
@@ -104,7 +116,7 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
       });
     }
 
-    async transact(command: AggregateCoordinatorCommand): Promise<unknown> {
+    async transact(command: AggregateCoordinatorCommand): Promise<DocumentSnapshot> {
       switch (command.kind) {
         case "create":
           return this.service.create(command);
@@ -142,5 +154,17 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
           return this.service.revokeShare(command);
       }
     }
+
+    async tryTransact(command: AggregateCoordinatorCommand): Promise<AggregateCoordinatorTransactResult> {
+      try {
+        return { ok: true, snapshot: await this.transact(command) };
+      } catch (error) {
+        return { ok: false, failure: bulkDeleteDocumentFailure(documentNameForFailure(command), error) };
+      }
+    }
   };
+}
+
+function documentNameForFailure(command: AggregateCoordinatorCommand): string {
+  return command.kind === "create" ? command.name ?? "_new" : command.name;
 }

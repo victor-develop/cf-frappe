@@ -455,6 +455,9 @@ function fakeNamespace(): RpcDurableObjectNamespace<AggregateCoordinatorRpc> {
       return {
         transact() {
           throw new Error("Command path should not be used in this test");
+        },
+        tryTransact() {
+          throw new Error("Command path should not be used in this test");
         }
       };
     }

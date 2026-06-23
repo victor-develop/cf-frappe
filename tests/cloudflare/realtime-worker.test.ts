@@ -436,6 +436,9 @@ function fakeAggregateNamespace(): RpcDurableObjectNamespace<AggregateCoordinato
       return {
         transact() {
           throw new Error("Command path should not be used");
+        },
+        tryTransact() {
+          throw new Error("Command path should not be used");
         }
       };
     }

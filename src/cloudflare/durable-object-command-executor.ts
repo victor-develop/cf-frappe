@@ -2,6 +2,10 @@ import type {
   AssignDocumentCommand,
   CancelDocumentCommand,
   AddDocumentCommentCommand,
+  BulkDeleteDocumentFailure,
+  BulkDeleteDocumentsCommand,
+  BulkDeleteDocumentsResult,
+  BulkDeletedDocument,
   CreateDocumentCommand,
   DeleteDocumentCommand,
   DocumentCommandExecutor,
@@ -18,13 +22,15 @@ import type {
   UnfollowDocumentCommand,
   UpdateDocumentCommand
 } from "../application/document-service.js";
+import { normalizeBulkDeleteDocumentSelections } from "../application/document-service.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { DocumentSnapshot } from "../core/types.js";
 import { DEFAULT_TENANT_ID, type DocTypeDefinition } from "../core/types.js";
-import type { AggregateCoordinatorCommand } from "./aggregate-coordinator.js";
+import type { AggregateCoordinatorCommand, AggregateCoordinatorTransactResult } from "./aggregate-coordinator.js";
 
 export interface AggregateCoordinatorRpc {
   transact(command: AggregateCoordinatorCommand): Promise<DocumentSnapshot>;
+  tryTransact(command: AggregateCoordinatorCommand): Promise<AggregateCoordinatorTransactResult>;
 }
 
 export interface RpcDurableObjectNamespace<T> {
@@ -64,6 +70,30 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
 
   delete(command: DeleteDocumentCommand): Promise<DocumentSnapshot> {
     return this.stubForNamed(command).transact({ ...command, kind: "delete" });
+  }
+
+  async bulkDelete(command: BulkDeleteDocumentsCommand): Promise<BulkDeleteDocumentsResult> {
+    const selections = normalizeBulkDeleteDocumentSelections(command.documents);
+    const deleted: BulkDeletedDocument[] = [];
+    const failed: BulkDeleteDocumentFailure[] = [];
+    for (const selection of selections) {
+      const deleteCommand = {
+        actor: command.actor,
+        doctype: command.doctype,
+        name: selection.name,
+        ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+        ...(selection.expectedVersion === undefined ? {} : { expectedVersion: selection.expectedVersion }),
+        metadata: command.metadata ?? {},
+        kind: "delete" as const
+      };
+      const result = await this.stubForNamed(deleteCommand).tryTransact(deleteCommand);
+      if (result.ok) {
+        deleted.push({ name: selection.name, snapshot: result.snapshot });
+      } else {
+        failed.push(result.failure);
+      }
+    }
+    return { deleted, failed };
   }
 
   transition(command: TransitionDocumentCommand): Promise<DocumentSnapshot> {

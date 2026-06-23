@@ -172,21 +172,25 @@ function fakeNamespace(names: string[]): RpcDurableObjectNamespace<AggregateCoor
       return name as unknown as DurableObjectId;
     },
     get() {
+      const transact = (command: AggregateCoordinatorCommand) => {
+        if (command.kind !== "create") {
+          throw new Error("Only create is expected");
+        }
+        return Promise.resolve({
+          tenantId: command.tenantId ?? command.actor.tenantId ?? "default",
+          doctype: command.doctype,
+          name: command.name ?? "missing",
+          version: 1,
+          docstatus: "draft" as const,
+          data: command.data as DocumentData,
+          createdAt: now,
+          updatedAt: now
+        });
+      };
       return {
-        transact(command: AggregateCoordinatorCommand) {
-          if (command.kind !== "create") {
-            throw new Error("Only create is expected");
-          }
-          return Promise.resolve({
-            tenantId: command.tenantId ?? command.actor.tenantId ?? "default",
-            doctype: command.doctype,
-            name: command.name ?? "missing",
-            version: 1,
-            docstatus: "draft" as const,
-            data: command.data as DocumentData,
-            createdAt: now,
-            updatedAt: now
-          });
+        transact,
+        async tryTransact(command: AggregateCoordinatorCommand) {
+          return { ok: true as const, snapshot: await transact(command) };
         }
       };
     }

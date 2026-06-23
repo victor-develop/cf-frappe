@@ -1526,4 +1526,95 @@ describe("DocumentService", () => {
       documents.update({ actor: manager, doctype: "Note", name: "My Note", patch: { body: "Nope" } })
     ).rejects.toBeInstanceOf(FrameworkError);
   });
+
+  it("bulk deletes selected documents through the same event-sourced delete path", async () => {
+    const { documents, projections } = createServices(["e1", "e2", "e3"]);
+    const selected = await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Selected Note" })
+    });
+    const stale = await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Stale Note" })
+    });
+
+    const result = await documents.bulkDelete({
+      actor: manager,
+      doctype: "Note",
+      documents: [
+        { name: selected.name, expectedVersion: selected.version },
+        { name: stale.name, expectedVersion: 99 },
+        { name: "Missing Note" }
+      ]
+    });
+
+    expect(result).toMatchObject({
+      deleted: [
+        {
+          name: selected.name,
+          snapshot: { docstatus: "deleted", version: 2 }
+        }
+      ],
+      failed: [
+        {
+          name: stale.name,
+          code: "DOCUMENT_CONFLICT",
+          status: 409,
+          message: "Expected version 99, found 1"
+        },
+        {
+          name: "Missing Note",
+          code: "DOCUMENT_NOT_FOUND",
+          status: 404
+        }
+      ]
+    });
+    await expect(projections.get("acme", "Note", selected.name)).resolves.toMatchObject({ docstatus: "deleted" });
+    await expect(projections.get("acme", "Note", stale.name)).resolves.toMatchObject({ docstatus: "draft" });
+  });
+
+  it("rejects invalid bulk document delete selections before writing events", async () => {
+    const { documents, events } = createServices(["e1"]);
+    const kept = await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Keep Note" })
+    });
+
+    await expect(documents.bulkDelete({ actor: manager, doctype: "Note", documents: [] })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "At least one document must be selected"
+    });
+    await expect(
+      documents.bulkDelete({
+        actor: manager,
+        doctype: "Note",
+        documents: [
+          { name: kept.name },
+          { name: kept.name }
+        ]
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: `Duplicate document selection '${kept.name}'`
+    });
+    await expect(events.currentVersion(documentStream("acme", "Note", kept.name))).resolves.toBe(1);
+  });
+
+  it("rejects bulk document delete batches above the Worker-safe bound", async () => {
+    const { documents } = createServices();
+
+    await expect(
+      documents.bulkDelete({
+        actor: manager,
+        doctype: "Note",
+        documents: Array.from({ length: 101 }, (_, index) => ({ name: `note-${String(index)}` }))
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "At most 100 documents can be selected"
+    });
+  });
 });

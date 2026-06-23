@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the bulk file delete slice:
+As of the bulk document delete slice:
 
 - Vitest files: `69`
-- Vitest cases: `625`
+- Vitest cases: `634`
 
 ## Implication
 
