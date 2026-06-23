@@ -144,6 +144,10 @@ export function renderDeskClientScript(): string {
     return "/api/data-patches" + (patchId === undefined ? "" : "/" + encodePart(patchId)) + (action === undefined ? "" : "/" + action);
   }
 
+  function auditDeletedPath(doctype, name, options) {
+    return withQuery("/api/audit/deleted/" + encodePart(doctype) + "/" + encodePart(name), tenantParams(options || {}));
+  }
+
   function jobExecutionPath(idempotencyKey, action) {
     return "/api/jobs/executions/" + encodePart(idempotencyKey) + (action === undefined ? "" : "/" + action);
   }
@@ -275,6 +279,19 @@ export function renderDeskClientScript(): string {
       headers["content-type"] = contentType;
     }
     return headers;
+  }
+
+  function auditEventParams(options) {
+    var params = {};
+    setParam(params, "tenant", options && options.tenant);
+    setParam(params, "doctype", options && options.doctype);
+    setParam(params, "name", options && options.name);
+    setParam(params, "actor_id", options && (options.actorId !== undefined ? options.actorId : options.actor_id));
+    setParam(params, "kind", options && options.kind);
+    setParam(params, "since", options && options.since);
+    setParam(params, "until", options && options.until);
+    setParam(params, "limit", options && options.limit);
+    return params;
   }
 
   function jobDashboardParams(options) {
@@ -954,6 +971,14 @@ export function renderDeskClientScript(): string {
 
   root.cfFrappe = Object.freeze(Object.assign({}, root.cfFrappe || {}, {
     context: context,
+    audit: Object.freeze({
+      deleted: function (doctype, name, options) {
+        return request(auditDeletedPath(doctype, name, options || {})).then(unwrapData);
+      },
+      events: function (options) {
+        return request(withQuery("/api/audit/events", auditEventParams(options || {}))).then(unwrapData);
+      }
+    }),
     auth: Object.freeze({
       completeEmailVerification: function (input) {
         return request("/api/auth/email-verification/complete", { method: "POST", body: input || {} }).then(unwrapData);

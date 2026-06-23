@@ -18,6 +18,10 @@ interface DeskClientRuntime {
     readonly requestEmailVerification: (input: Record<string, unknown>) => Promise<unknown>;
     readonly requestPasswordReset: (input: Record<string, unknown>) => Promise<unknown>;
   };
+  readonly audit: {
+    readonly deleted: (doctype: string, name: string, options?: Record<string, unknown>) => Promise<unknown>;
+    readonly events: (options?: Record<string, unknown>) => Promise<unknown>;
+  };
   readonly realtime: {
     readonly doctypeUrl: (doctype: string, options: DeskRealtimeOptions) => string;
     readonly documentUrl: (doctype: string, name: string, options: DeskRealtimeOptions) => string;
@@ -646,6 +650,39 @@ describe("Desk client runtime", () => {
       JSON.stringify({ userId: "owner@example.com", token: "email-token", tenantId: "acme" }),
       undefined
     ]);
+  });
+
+  it("wraps audit search and deleted recovery APIs without browser-side validation", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { ok: true } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(
+      runtime.audit.events({
+        tenant: "acme/east",
+        doctype: "Task Type",
+        name: "TASK/1",
+        actorId: "owner@example.com",
+        kind: "DocumentUpdated",
+        since: "2026-01-01T00:00:00.000Z",
+        until: "2026-01-02T00:00:00.000Z",
+        limit: 5
+      })
+    ).resolves.toEqual({ ok: true });
+    await runtime.audit.events({ actor_id: "support@example.com" });
+    await runtime.audit.deleted("Task Type", "TASK/1", { tenant: "acme/east" });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/audit/events?tenant=acme%2Feast&doctype=Task+Type&name=TASK%2F1&actor_id=owner%40example.com&kind=DocumentUpdated&since=2026-01-01T00%3A00%3A00.000Z&until=2026-01-02T00%3A00%3A00.000Z&limit=5",
+      "GET /api/audit/events?actor_id=support%40example.com",
+      "GET /api/audit/deleted/Task%20Type/TASK%2F1?tenant=acme%2Feast"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin"]);
+    expect(calls.map((call) => call.init.body)).toEqual([undefined, undefined, undefined]);
   });
 
   it("wraps same-origin user profile APIs with tenant and version metadata", async () => {
