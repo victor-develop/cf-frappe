@@ -13,6 +13,7 @@ import {
   JobRetryService,
   JobScheduleService,
   DEFAULT_TENANT_ID,
+  jobScheduleDefinitionsStream,
   permanentJobError,
   retryableJobError,
   SYSTEM_MANAGER_ROLE
@@ -327,6 +328,8 @@ describe("JobScheduleService", () => {
           id: "1",
           cron: "0 2 * * *",
           jobName: "reports.daily",
+          source: "configured",
+          editable: false,
           enabled: true,
           configuredEnabled: true,
           overridden: false,
@@ -502,6 +505,221 @@ describe("JobScheduleService", () => {
         overridden: false
       }
     });
+  });
+
+  it("saves, dispatches, updates, and deletes tenant-owned runtime schedule definitions from events", async () => {
+    const registry = createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] });
+    const events = new InMemoryEventStore();
+    const runner = vi.fn(async () => jobMessage("reports.daily", "job_runtime", "acme"));
+    const service = new JobScheduleService({
+      registry,
+      schedules: [{ id: "static-daily", cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" }],
+      runner: { run: runner },
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["save-runtime", "update-runtime", "delete-runtime"])
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+
+    await expect(
+      service.save(admin, {
+        id: "runtime-daily",
+        cron: "15 4 * * *",
+        jobName: "reports.daily",
+        enabled: true,
+        payload: { scope: "runtime" },
+        metadata: { source: "desk" },
+        idempotencyKey: "runtime-daily-key",
+        delaySeconds: 45
+      })
+    ).resolves.toMatchObject({
+      schedule: {
+        id: "runtime-daily",
+        source: "runtime",
+        editable: true,
+        cron: "15 4 * * *",
+        jobName: "reports.daily",
+        tenantId: "acme",
+        enabled: true,
+        configuredEnabled: true,
+        overrideable: false,
+        registered: true,
+        dispatchable: true,
+        delaySeconds: 45
+      }
+    });
+
+    await expect(service.dashboard(admin)).resolves.toMatchObject({
+      schedules: [
+        { id: "static-daily", source: "configured", editable: false },
+        { id: "runtime-daily", source: "runtime", editable: true, delaySeconds: 45 }
+      ]
+    });
+    await expect(service.schedulesForCron("15 4 * * *")).resolves.toMatchObject([
+      {
+        id: "runtime-daily",
+        cron: "15 4 * * *",
+        jobName: "reports.daily",
+        tenantId: "acme",
+        payload: { scope: "runtime" },
+        metadata: { source: "desk" },
+        idempotencyKey: "runtime-daily-key",
+        delaySeconds: 45
+      }
+    ]);
+    await expect(service.dispatch(admin, "runtime-daily")).resolves.toMatchObject({
+      schedule: { id: "runtime-daily", source: "runtime", dispatchable: true },
+      message: { idempotencyKey: "reports.daily:job_runtime" }
+    });
+    expect(runner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "runtime-daily",
+        payload: { scope: "runtime" },
+        metadata: { source: "desk" }
+      }),
+      admin
+    );
+
+    await expect(
+      service.save(admin, {
+        id: "runtime-daily",
+        cron: "30 5 * * *",
+        jobName: "reports.daily",
+        enabled: false
+      })
+    ).resolves.toMatchObject({
+      schedule: {
+        id: "runtime-daily",
+        cron: "30 5 * * *",
+        enabled: false,
+        configuredEnabled: false,
+        dispatchable: false
+      }
+    });
+    await expect(service.schedulesForCron("15 4 * * *")).resolves.toEqual([]);
+    await expect(service.dispatch(admin, "runtime-daily")).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Disabled job schedules cannot be manually dispatched"
+    });
+
+    await expect(service.delete(admin, "runtime-daily")).resolves.toMatchObject({
+      schedule: { id: "runtime-daily", deleted: true, editable: true }
+    });
+    await expect(service.dashboard(admin)).resolves.toMatchObject({
+      schedules: [{ id: "static-daily" }]
+    });
+    await expect(service.schedulesForCron("30 5 * * *")).resolves.toEqual([]);
+    await expect(events.readStream(jobScheduleDefinitionsStream())).resolves.toMatchObject([
+      { type: "JobScheduleSaved", payload: { kind: "JobScheduleSaved", scheduleId: "runtime-daily" } },
+      { type: "JobScheduleSaved", payload: { kind: "JobScheduleSaved", scheduleId: "runtime-daily" } },
+      { type: "JobScheduleDeleted", payload: { kind: "JobScheduleDeleted", scheduleId: "runtime-daily" } }
+    ]);
+  });
+
+  it("keeps runtime schedule ids tenant-scoped in the global definition stream", async () => {
+    const registry = createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] });
+    const events = new InMemoryEventStore();
+    const service = new JobScheduleService({
+      registry,
+      schedules: [],
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["save-acme", "save-beta"])
+    });
+    const acmeAdmin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const betaAdmin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "beta" };
+
+    await service.save(acmeAdmin, {
+      id: "runtime-daily",
+      cron: "15 4 * * *",
+      jobName: "reports.daily",
+      payload: { tenant: "acme" }
+    });
+    await service.save(betaAdmin, {
+      id: "runtime-daily",
+      cron: "15 4 * * *",
+      jobName: "reports.daily",
+      payload: { tenant: "beta" }
+    });
+
+    await expect(service.dashboard(acmeAdmin)).resolves.toMatchObject({
+      schedules: [{ id: "runtime-daily", tenantId: "acme" }]
+    });
+    await expect(service.dashboard(betaAdmin)).resolves.toMatchObject({
+      schedules: [{ id: "runtime-daily", tenantId: "beta" }]
+    });
+    await expect(service.schedulesForCron("15 4 * * *")).resolves.toMatchObject([
+      { id: "runtime-daily", tenantId: "acme", payload: { tenant: "acme" } },
+      { id: "runtime-daily", tenantId: "beta", payload: { tenant: "beta" } }
+    ]);
+    await expect(events.searchEvents({ tenantId: "acme", payloadKinds: ["JobScheduleSaved"] })).resolves.toMatchObject([
+      {
+        tenantId: "acme",
+        payload: { kind: "JobScheduleSaved", scheduleId: "runtime-daily", tenantId: "acme" }
+      }
+    ]);
+  });
+
+  it("validates runtime schedule crons against an explicit trigger catalog", async () => {
+    const registry = createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] });
+    const service = new JobScheduleService({
+      registry,
+      schedules: [],
+      events: new InMemoryEventStore(),
+      runtimeCronTriggers: ["15 4 * * *"],
+      clock: fixedClock(now),
+      ids: deterministicIds(["save-runtime"])
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+
+    await expect(
+      service.save(admin, { id: "runtime-daily", cron: "15 4 * * *", jobName: "reports.daily" })
+    ).resolves.toMatchObject({ schedule: { id: "runtime-daily", cron: "15 4 * * *" } });
+    await expect(
+      service.save(admin, { id: "runtime-hourly", cron: "0 * * * *", jobName: "reports.daily" })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Job schedule cron '0 * * * *' is not configured as a Worker Cron Trigger"
+    });
+  });
+
+  it("preserves payload metadata and idempotency key for form-style runtime schedule updates", async () => {
+    const registry = createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] });
+    const service = new JobScheduleService({
+      registry,
+      schedules: [],
+      events: new InMemoryEventStore(),
+      clock: fixedClock(now),
+      ids: deterministicIds(["save-runtime", "update-runtime"])
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+
+    await service.save(admin, {
+      id: "runtime-daily",
+      cron: "15 4 * * *",
+      jobName: "reports.daily",
+      payload: { scope: "api" },
+      metadata: { source: "api" },
+      idempotencyKey: "runtime-key",
+      delaySeconds: 30
+    });
+    await service.save(admin, {
+      id: "runtime-daily",
+      cron: "30 5 * * *",
+      jobName: "reports.daily",
+      enabled: false,
+      preserveExistingFields: true
+    });
+
+    await expect(service.schedulesForCron("30 5 * * *")).resolves.toMatchObject([
+      {
+        id: "runtime-daily",
+        payload: { scope: "api" },
+        metadata: { source: "api" },
+        idempotencyKey: "runtime-key",
+        enabled: false
+      }
+    ]);
   });
 
   it("keeps dynamic schedules immutable and validates configured schedule ids", async () => {

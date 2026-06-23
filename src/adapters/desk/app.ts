@@ -398,16 +398,35 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         body: renderJobScheduleAdmin(dashboard, {
           allowRun: schedules.canDispatch(),
           allowOverride: schedules.canOverride(),
+          allowEdit: schedules.canEditDefinitions(),
           showHistoryLink: options.jobs !== undefined
         })
       })
     );
   });
 
+  app.post("/desk/admin/jobs/schedules", async (c) => {
+    const schedules = requireJobSchedules(options);
+    const actor = await options.actor(c.req.raw);
+    await schedules.save(actor, {
+      ...await parseDeskJobScheduleDefinition(c.req.raw),
+      preserveExistingFields: true,
+      eventMetadata: requestMetadata(c.req.raw)
+    });
+    return c.redirect("/desk/admin/jobs/schedules", 303);
+  });
+
   app.post("/desk/admin/jobs/schedules/:scheduleId/run", async (c) => {
     const schedules = requireJobSchedules(options);
     const actor = await options.actor(c.req.raw);
     await schedules.dispatch(actor, c.req.param("scheduleId"));
+    return c.redirect("/desk/admin/jobs/schedules", 303);
+  });
+
+  app.post("/desk/admin/jobs/schedules/:scheduleId/delete", async (c) => {
+    const schedules = requireJobSchedules(options);
+    const actor = await options.actor(c.req.raw);
+    await schedules.delete(actor, c.req.param("scheduleId"), { metadata: requestMetadata(c.req.raw) });
     return c.redirect("/desk/admin/jobs/schedules", 303);
   });
 
@@ -1878,6 +1897,39 @@ interface ParsedDeskFileMetadataUpdate {
 
 interface ParsedDeskDataPatchApply {
   readonly limit?: number;
+}
+
+interface ParsedDeskJobScheduleDefinition {
+  readonly id?: string;
+  readonly cron: string;
+  readonly jobName: string;
+  readonly enabled: boolean;
+  readonly delaySeconds?: number;
+}
+
+async function parseDeskJobScheduleDefinition(request: Request): Promise<ParsedDeskJobScheduleDefinition> {
+  const form = await readUrlEncodedDeskForm(request);
+  const id = stringSearchParamValue(form, "id");
+  const cron = stringSearchParamValue(form, "cron");
+  const jobName = stringSearchParamValue(form, "jobName");
+  const delay = stringSearchParamValue(form, "delaySeconds");
+  if (cron === undefined) {
+    throw new FrameworkError("BAD_REQUEST", "cron is required", { status: 400 });
+  }
+  if (jobName === undefined) {
+    throw new FrameworkError("BAD_REQUEST", "jobName is required", { status: 400 });
+  }
+  const parsedDelay = delay === undefined ? undefined : Number(delay);
+  if (parsedDelay !== undefined && (!Number.isInteger(parsedDelay) || parsedDelay < 0)) {
+    throw new FrameworkError("BAD_REQUEST", "delaySeconds must be a non-negative integer", { status: 400 });
+  }
+  return {
+    ...(id === undefined ? {} : { id }),
+    cron,
+    jobName,
+    enabled: form.get("enabled") !== null,
+    ...(parsedDelay === undefined ? {} : { delaySeconds: parsedDelay })
+  };
 }
 
 async function parseDeskDataPatchApply(request: Request): Promise<ParsedDeskDataPatchApply> {

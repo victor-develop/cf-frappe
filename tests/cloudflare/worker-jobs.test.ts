@@ -178,6 +178,104 @@ describe("CloudFrappe Worker jobs", () => {
     });
   });
 
+  it("exposes and dispatches runtime-only schedules when their cron trigger is configured", async () => {
+    const queue = new InMemoryJobQueue();
+    const noRetry = vi.fn();
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => ({ id: "admin@example.com", roles: ["System Manager"], tenantId: "acme" }),
+      jobs: {
+        registry: createJobRegistry<CloudFrappeRuntimeServices>({
+          jobs: [{ name: "reports.daily", description: "Build reports", handler: () => undefined }]
+        }),
+        queue: () => queue,
+        schedules: [],
+        cronTriggers: ["15 4 * * *"],
+        clock: fixedClock(now),
+        ids: deterministicIds(["save-runtime", "manual-001", "cron-001"])
+      }
+    });
+    const env = { DB: fakeD1(), AGGREGATES: fakeNamespace() };
+
+    const rejected = await worker.fetch!(
+      cfRequest("http://localhost/api/jobs/schedules", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: "runtime-hourly", cron: "0 * * * *", jobName: "reports.daily" })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(rejected.status).toBe(400);
+    await expect(rejected.json()).resolves.toMatchObject({
+      error: { message: "Job schedule cron '0 * * * *' is not configured as a Worker Cron Trigger" }
+    });
+
+    const created = await worker.fetch!(
+      cfRequest("http://localhost/api/jobs/schedules", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "runtime-daily",
+          cron: "15 4 * * *",
+          jobName: "reports.daily",
+          payload: { source: "runtime" }
+        })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(created.status).toBe(201);
+
+    const list = await worker.fetch!(
+      cfRequest("http://localhost/api/jobs/schedules"),
+      env,
+      fakeExecutionContext()
+    );
+    await expect(list.json()).resolves.toMatchObject({
+      data: {
+        schedules: [
+          {
+            id: "runtime-daily",
+            source: "runtime",
+            editable: true,
+            cron: "15 4 * * *",
+            jobName: "reports.daily",
+            tenantId: "acme",
+            dispatchable: true
+          }
+        ]
+      }
+    });
+
+    const run = await worker.fetch!(
+      cfRequest("http://localhost/api/jobs/schedules/runtime-daily/run", { method: "POST" }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(run.status).toBe(201);
+    expect(queue.queued()[0]?.message).toMatchObject({
+      tenantId: "acme",
+      runId: "job_manual-001",
+      payload: { source: "runtime" },
+      idempotencyKey: `manual:15 4 * * *:${Date.parse(now)}:reports.daily`
+    });
+
+    await worker.scheduled?.(
+      { cron: "15 4 * * *", scheduledTime: Date.parse("2026-01-01T04:15:00.000Z"), noRetry },
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(noRetry).not.toHaveBeenCalled();
+    expect(queue.queued()[1]?.message).toMatchObject({
+      tenantId: "acme",
+      runId: "job_cron-001",
+      payload: { source: "runtime" },
+      idempotencyKey: "scheduled:15 4 * * *:1767240900000:reports.daily"
+    });
+  });
+
   it("shares configured job execution history with the Desk admin surface", async () => {
     const executionLog = new InMemoryJobExecutionLog();
     const queue = new InMemoryJobQueue();
@@ -275,19 +373,84 @@ function fakeNamespace(): RpcDurableObjectNamespace<AggregateCoordinatorRpc> {
 }
 
 function fakeD1(): D1Database {
+  const events: Array<{
+    readonly id: string;
+    readonly tenant_id: string;
+    readonly stream: string;
+    readonly sequence: number;
+    readonly type: string;
+    readonly doctype: string;
+    readonly document_name: string;
+    readonly actor_id: string;
+    readonly occurred_at: string;
+    readonly payload_json: string;
+    readonly metadata_json: string;
+  }> = [];
   return {
-    prepare() {
+    prepare(sql: string) {
       return {
-        bind() {
+        params: [] as unknown[],
+        bind(...params: unknown[]) {
+          this.params = params;
           return this;
         },
         async all() {
+          if (sql.includes("FROM cf_frappe_events")) {
+            const stream = String(this.params[0] ?? "");
+            const maxSequence = sql.includes("sequence <= ?") ? Number(this.params[1]) : undefined;
+            const limit = sql.includes("LIMIT ?") ? Number(this.params.at(-1)) : undefined;
+            const ordered = events
+              .filter((event) => event.stream === stream)
+              .filter((event) => maxSequence === undefined || event.sequence <= maxSequence)
+              .sort((left, right) =>
+                sql.includes("ORDER BY sequence DESC")
+                  ? right.sequence - left.sequence
+                  : left.sequence - right.sequence
+              );
+            return { results: limit === undefined ? ordered : ordered.slice(0, limit) };
+          }
           return { results: [] };
         },
         async first() {
+          if (sql.includes("COALESCE(MAX(sequence), 0)")) {
+            const stream = String(this.params[0] ?? "");
+            return {
+              version: events
+                .filter((event) => event.stream === stream)
+                .reduce((version, event) => Math.max(version, event.sequence), 0)
+            };
+          }
           return null;
         },
         async run() {
+          if (sql.includes("INSERT INTO cf_frappe_events")) {
+            const [
+              id,
+              tenantId,
+              stream,
+              sequence,
+              type,
+              doctype,
+              documentName,
+              actorId,
+              occurredAt,
+              payloadJson,
+              metadataJson
+            ] = this.params;
+            events.push({
+              id: String(id),
+              tenant_id: String(tenantId),
+              stream: String(stream),
+              sequence: Number(sequence),
+              type: String(type),
+              doctype: String(doctype),
+              document_name: String(documentName),
+              actor_id: String(actorId),
+              occurred_at: String(occurredAt),
+              payload_json: String(payloadJson),
+              metadata_json: String(metadataJson)
+            });
+          }
           return { success: true };
         }
       };

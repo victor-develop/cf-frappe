@@ -120,6 +120,8 @@ export function foldDocumentFrom(
       case "SavedReportDeleted":
       case "JobScheduleOverrideSet":
       case "JobScheduleOverrideCleared":
+      case "JobScheduleSaved":
+      case "JobScheduleDeleted":
         break;
     }
   }

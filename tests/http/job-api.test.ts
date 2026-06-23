@@ -305,6 +305,98 @@ describe("job api", () => {
 
     expect(runner).toHaveBeenCalledOnce();
   });
+
+  it("creates, updates, and deletes runtime job schedule definitions through the admin API", async () => {
+    const services = createServices();
+    const scheduleEvents = new InMemoryEventStore();
+    const registry = createJobRegistry({
+      jobs: [{ name: "reports.daily", description: "Build reports", handler: () => undefined }]
+    });
+    const app = createResourceApi({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      jobSchedules: new JobScheduleService({
+        registry,
+        schedules: [],
+        events: scheduleEvents,
+        clock: fixedClock(now),
+        ids: deterministicIds(["save-runtime", "update-runtime", "delete-runtime"])
+      }),
+      actor: unsafeHeaderActorResolver
+    });
+
+    const created = await app.request("/api/jobs/schedules", {
+      method: "POST",
+      headers: { ...adminHeaders, "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "runtime-daily",
+        cron: "15 4 * * *",
+        jobName: "reports.daily",
+        enabled: true,
+        payload: { scope: "runtime" },
+        metadata: { source: "api" },
+        delaySeconds: 30
+      })
+    });
+
+    expect(created.status).toBe(201);
+    await expect(created.json()).resolves.toMatchObject({
+      data: {
+        schedule: {
+          id: "runtime-daily",
+          source: "runtime",
+          editable: true,
+          cron: "15 4 * * *",
+          enabled: true,
+          registered: true,
+          delaySeconds: 30
+        }
+      }
+    });
+
+    const list = await app.request("/api/jobs/schedules", { headers: adminHeaders });
+    await expect(list.json()).resolves.toMatchObject({
+      data: {
+        schedules: [{ id: "runtime-daily", source: "runtime", editable: true, tenantId: "acme" }]
+      }
+    });
+
+    const updated = await app.request("/api/jobs/schedules/runtime-daily", {
+      method: "PUT",
+      headers: { ...adminHeaders, "content-type": "application/json" },
+      body: JSON.stringify({
+        cron: "30 5 * * *",
+        jobName: "reports.daily",
+        enabled: false
+      })
+    });
+
+    expect(updated.status).toBe(200);
+    await expect(updated.json()).resolves.toMatchObject({
+      data: {
+        schedule: {
+          id: "runtime-daily",
+          cron: "30 5 * * *",
+          enabled: false,
+          configuredEnabled: false,
+          dispatchable: false
+        }
+      }
+    });
+
+    const deleted = await app.request("/api/jobs/schedules/runtime-daily", {
+      method: "DELETE",
+      headers: adminHeaders
+    });
+
+    expect(deleted.status).toBe(200);
+    await expect(deleted.json()).resolves.toMatchObject({
+      data: { schedule: { id: "runtime-daily", deleted: true } }
+    });
+    const afterDelete = await app.request("/api/jobs/schedules", { headers: adminHeaders });
+    await expect(afterDelete.json()).resolves.toMatchObject({ data: { schedules: [] } });
+  });
 });
 
 const adminHeaders = {

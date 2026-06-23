@@ -303,6 +303,8 @@ function diffEvent(
     case "RoleDisabled":
     case "JobScheduleOverrideSet":
     case "JobScheduleOverrideCleared":
+    case "JobScheduleSaved":
+    case "JobScheduleDeleted":
       return [];
   }
 }
@@ -414,6 +416,10 @@ function summarize(payload: DocumentEventPayload): string {
       return `${payload.enabled ? "Enabled" : "Disabled"} job schedule ${payload.scheduleId}`;
     case "JobScheduleOverrideCleared":
       return `Cleared override for job schedule ${payload.scheduleId}`;
+    case "JobScheduleSaved":
+      return `Saved job schedule ${payload.scheduleId}`;
+    case "JobScheduleDeleted":
+      return `Deleted job schedule ${payload.scheduleId}`;
     case "WorkflowTransitioned":
       return workflowSummary(payload);
     case "DomainCommandApplied":

@@ -127,6 +127,7 @@ export interface CloudFrappeJobOptions<
   readonly resources?: (env: TEnv, services: CloudFrappeRuntimeServices) => TResources;
   readonly executionLog?: (env: TEnv, services: CloudFrappeRuntimeServices) => JobExecutionLog;
   readonly schedules?: readonly ScheduledJobDefinition<TEnv>[];
+  readonly cronTriggers?: readonly string[];
   readonly retry?: JobRetryPolicy;
   readonly clock?: Clock;
   readonly ids?: IdGenerator;
@@ -341,7 +342,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   const jobHistory = jobExecutionLog && jobOptions
     ? new JobHistoryService({ registry: jobOptions.registry, executionLog: jobExecutionLog })
     : undefined;
-  const jobRuntime = jobOptions && (jobExecutionLog || schedules.length > 0 || dataPatchQueueEnabled)
+  const jobRuntime = jobOptions
     ? jobsForEnv(
         jobRuntimeCache,
         jobOptions,
@@ -361,10 +362,11 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
         ...(jobOptions.clock === undefined ? {} : { clock: jobOptions.clock })
       })
     : undefined;
-  const jobSchedules = jobOptions && schedules.length > 0 && jobRuntime
+  const jobSchedules = jobOptions && jobRuntime
     ? new JobScheduleService({
         registry: jobOptions.registry,
         schedules,
+        runtimeCronTriggers: runtimeCronTriggersFor(jobOptions),
         events,
         ...(jobOptions.clock === undefined ? {} : { clock: jobOptions.clock }),
         ...(jobOptions.ids === undefined ? {} : { ids: jobOptions.ids }),
@@ -377,7 +379,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
               scheduledTime: Date.parse(dispatchedAt),
               env,
               dispatcher: jobRuntime.dispatcher,
-              schedule,
+              schedule: schedule as unknown as ScheduledJobDefinition<TEnv>,
               idempotencyPrefix: "manual",
               metadata: {
                 dispatchSource: "manual",
@@ -446,6 +448,17 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   };
   cache.set(env, runtimeApps);
   return runtimeApps;
+}
+
+function runtimeCronTriggersFor<TEnv extends CloudFrappeEnv, TResources>(
+  options: CloudFrappeJobOptions<TEnv, TResources>
+): readonly string[] {
+  return [
+    ...new Set([
+      ...(options.cronTriggers ?? []),
+      ...(options.schedules ?? []).map((schedule) => schedule.cron)
+    ])
+  ];
 }
 
 function dataPatchesForEnv<TEnv extends CloudFrappeEnv, TResources>(

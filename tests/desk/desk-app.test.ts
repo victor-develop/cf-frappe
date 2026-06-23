@@ -1623,6 +1623,125 @@ describe("Desk app", () => {
     expect(resetDigestHtml).not.toContain('formaction="/desk/admin/jobs/schedules/digest/reset"');
   });
 
+  it("creates, updates, and deletes runtime job schedules from the Desk admin surface", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const services = createServices();
+    const jobs = createJobRegistry({
+      jobs: [{ name: "reports.daily", description: "Build reports", handler: () => undefined }]
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      jobSchedules: new JobScheduleService({
+        registry: jobs,
+        schedules: [],
+        events: new InMemoryEventStore(),
+        clock: fixedClock(now),
+        ids: deterministicIds(["save-runtime", "update-runtime", "delete-runtime"])
+      }),
+      actor: () => admin
+    });
+
+    const empty = await app.request("/desk/admin/jobs/schedules");
+    const emptyHtml = await empty.text();
+    expect(emptyHtml).toContain('action="/desk/admin/jobs/schedules"');
+    expect(emptyHtml).toContain("Save runtime schedule");
+
+    const created = await app.request("/desk/admin/jobs/schedules", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        id: "runtime-daily",
+        cron: "15 4 * * *",
+        jobName: "reports.daily",
+        delaySeconds: "30",
+        enabled: "true"
+      }).toString()
+    });
+    expect(created.status).toBe(303);
+    expect(created.headers.get("location")).toBe("/desk/admin/jobs/schedules");
+
+    const afterCreate = await app.request("/desk/admin/jobs/schedules");
+    const createdHtml = await afterCreate.text();
+    expect(createdHtml).toContain("runtime-daily");
+    expect(createdHtml).toContain("15 4 * * *");
+    expect(createdHtml).toContain("<td>runtime</td>");
+    expect(createdHtml).toContain('formaction="/desk/admin/jobs/schedules/runtime-daily/delete"');
+
+    const updated = await app.request("/desk/admin/jobs/schedules", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        id: "runtime-daily",
+        cron: "30 5 * * *",
+        jobName: "reports.daily"
+      }).toString()
+    });
+    expect(updated.status).toBe(303);
+
+    const afterUpdate = await app.request("/desk/admin/jobs/schedules");
+    const updatedHtml = await afterUpdate.text();
+    expect(updatedHtml).toContain("30 5 * * *");
+    expect(updatedHtml).toContain("<td>no</td>");
+
+    const deleted = await app.request("/desk/admin/jobs/schedules/runtime-daily/delete", { method: "POST" });
+    expect(deleted.status).toBe(303);
+    const afterDelete = await app.request("/desk/admin/jobs/schedules");
+    await expect(afterDelete.text()).resolves.not.toContain("runtime-daily");
+  });
+
+  it("preserves API-only runtime schedule fields when updating from the Desk admin surface", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const services = createServices();
+    const jobs = createJobRegistry({
+      jobs: [{ name: "reports.daily", description: "Build reports", handler: () => undefined }]
+    });
+    const jobSchedules = new JobScheduleService({
+      registry: jobs,
+      schedules: [],
+      events: new InMemoryEventStore(),
+      clock: fixedClock(now),
+      ids: deterministicIds(["save-runtime", "update-runtime"])
+    });
+    await jobSchedules.save(admin, {
+      id: "runtime-daily",
+      cron: "15 4 * * *",
+      jobName: "reports.daily",
+      payload: { scope: "api" },
+      metadata: { source: "api" },
+      idempotencyKey: "runtime-key",
+      delaySeconds: 30
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      jobSchedules,
+      actor: () => admin
+    });
+
+    const updated = await app.request("/desk/admin/jobs/schedules", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        id: "runtime-daily",
+        cron: "30 5 * * *",
+        jobName: "reports.daily"
+      }).toString()
+    });
+
+    expect(updated.status).toBe(303);
+    await expect(jobSchedules.schedulesForCron("30 5 * * *")).resolves.toMatchObject([
+      {
+        id: "runtime-daily",
+        payload: { scope: "api" },
+        metadata: { source: "api" },
+        idempotencyKey: "runtime-key"
+      }
+    ]);
+  });
+
   it("hides schedule run actions when dispatch is not configured", async () => {
     const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
     const services = createServices();

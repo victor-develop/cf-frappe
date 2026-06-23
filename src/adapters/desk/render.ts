@@ -848,10 +848,16 @@ function renderJobRetryAction(idempotencyKey: string, status: JobExecutionDashbo
 
 export function renderJobScheduleAdmin(
   dashboard: JobScheduleDashboard,
-  options: { readonly allowRun?: boolean; readonly allowOverride?: boolean; readonly showHistoryLink?: boolean } = {}
+  options: {
+    readonly allowRun?: boolean;
+    readonly allowOverride?: boolean;
+    readonly allowEdit?: boolean;
+    readonly showHistoryLink?: boolean;
+  } = {}
 ): string {
   const rows = dashboard.schedules
     .map((schedule) => `<tr>
+        <td>${escapeHtml(schedule.source)}</td>
         <td>${escapeHtml(schedule.id)}</td>
         <td>${escapeHtml(schedule.cron)}</td>
         <td>${escapeHtml(schedule.jobName)}</td>
@@ -861,10 +867,11 @@ export function renderJobScheduleAdmin(
         <td>${schedule.registered ? "yes" : "no"}</td>
         <td>${escapeHtml(schedule.delaySeconds === undefined ? "" : String(schedule.delaySeconds))}</td>
         <td>${escapeHtml(dynamicScheduleFields(schedule))}</td>
-        <td>${options.allowRun ? renderScheduleRunAction(schedule.id, schedule.dispatchable) : ""}${options.allowOverride ? renderScheduleOverrideAction(schedule) : ""}</td>
+        <td>${options.allowRun ? renderScheduleRunAction(schedule.id, schedule.dispatchable) : ""}${options.allowOverride ? renderScheduleOverrideAction(schedule) : ""}${options.allowEdit ? renderScheduleDefinitionAction(schedule) : ""}</td>
       </tr>`)
     .join("");
-  return `<form class="panel form list-filters" method="get" action="/desk/admin/jobs/schedules">
+  const editor = options.allowEdit ? renderJobScheduleEditor() : "";
+  return `${editor}<form class="panel form list-filters" method="get" action="/desk/admin/jobs/schedules">
     <div class="fields">
       <label class="field"><span>Cron</span><input name="cron" value="${escapeHtml(dashboard.filters.cron ?? "")}"></label>
       <label class="field"><span>Job</span><input name="job" value="${escapeHtml(dashboard.filters.jobName ?? "")}"></label>
@@ -877,11 +884,24 @@ export function renderJobScheduleAdmin(
   <section class="panel">
     <div class="table-wrap">
       <table>
-        <thead><tr><th>ID</th><th>Cron</th><th>Job</th><th>Tenant</th><th>Enabled</th><th>Override</th><th>Registered</th><th>Delay</th><th>Dynamic</th><th>Action</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="10" class="empty">No schedules configured.</td></tr>`}</tbody>
+        <thead><tr><th>Source</th><th>ID</th><th>Cron</th><th>Job</th><th>Tenant</th><th>Enabled</th><th>Override</th><th>Registered</th><th>Delay</th><th>Dynamic</th><th>Action</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="11" class="empty">No schedules configured.</td></tr>`}</tbody>
       </table>
     </div>
   </section>`;
+}
+
+function renderJobScheduleEditor(): string {
+  return `<form class="panel form" method="post" action="/desk/admin/jobs/schedules">
+    <div class="fields">
+      <label class="field"><span>ID</span><input name="id"></label>
+      <label class="field"><span>Cron</span><input name="cron" required></label>
+      <label class="field"><span>Job</span><input name="jobName" required></label>
+      <label class="field"><span>Delay</span><input name="delaySeconds" type="number" min="0"></label>
+      <label class="field checkbox"><input name="enabled" value="true" type="checkbox" checked><span>Enabled</span></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Save runtime schedule</button></div>
+  </form>`;
 }
 
 function renderScheduleRunAction(scheduleId: string, dispatchable: boolean): string {
@@ -905,6 +925,15 @@ function renderScheduleOverrideAction(schedule: JobScheduleDashboard["schedules"
   return `<form class="inline-action" method="post">
     <button class="button" type="submit" formaction="/desk/admin/jobs/schedules/${encodeURIComponent(schedule.id)}/${action}">${label}</button>
     ${reset}
+  </form>`;
+}
+
+function renderScheduleDefinitionAction(schedule: JobScheduleDashboard["schedules"][number]): string {
+  if (!schedule.editable) {
+    return "";
+  }
+  return `<form class="inline-action" method="post">
+    <button class="button" type="submit" formaction="/desk/admin/jobs/schedules/${encodeURIComponent(schedule.id)}/delete">Delete</button>
   </form>`;
 }
 

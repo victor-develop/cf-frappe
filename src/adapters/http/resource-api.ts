@@ -225,7 +225,8 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
         ...(options.jobs === undefined ? {} : { jobs: options.jobs }),
         ...(options.jobRetry === undefined ? {} : { retry: options.jobRetry }),
         ...(options.jobSchedules === undefined ? {} : { schedules: options.jobSchedules }),
-        actor: resolveActor
+        actor: resolveActor,
+        maxJsonBytes
       })
     );
   }

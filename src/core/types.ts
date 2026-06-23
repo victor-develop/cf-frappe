@@ -368,6 +368,23 @@ export type DocumentEventPayload =
       readonly scheduleId: string;
     }
   | {
+      readonly kind: "JobScheduleSaved";
+      readonly scheduleId: string;
+      readonly cron: string;
+      readonly jobName: string;
+      readonly tenantId: TenantId;
+      readonly enabled: boolean;
+      readonly payload?: DocumentData;
+      readonly metadata?: DocumentData;
+      readonly idempotencyKey?: string;
+      readonly delaySeconds?: number;
+    }
+  | {
+      readonly kind: "JobScheduleDeleted";
+      readonly scheduleId: string;
+      readonly tenantId: TenantId;
+    }
+  | {
       readonly kind: "WorkflowTransitioned";
       readonly action: string;
       readonly from: string;

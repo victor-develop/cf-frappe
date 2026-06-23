@@ -36,6 +36,10 @@ export function jobScheduleOverridesStream(tenantId: TenantId): StreamName {
   return documentStream(tenantId, "__JobSchedules", "overrides");
 }
 
+export function jobScheduleDefinitionsStream(): StreamName {
+  return documentStream("__global__", "__JobSchedules", "definitions");
+}
+
 export function escapePart(value: string): string {
   return encodeURIComponent(value).replaceAll(".", "%2E");
 }
