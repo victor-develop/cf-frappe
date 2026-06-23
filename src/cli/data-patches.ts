@@ -1,4 +1,4 @@
-export type DataPatchRemoteAction = "status" | "plan" | "apply" | "enqueue";
+export type DataPatchRemoteAction = "status" | "plan" | "apply" | "enqueue" | "retry";
 
 export interface DataPatchHeaderLiteral {
   readonly kind: "literal";
@@ -106,6 +106,13 @@ export async function runRemoteDataPatchCommand(
       path: "/api/data-patches/plan"
     });
     return formatPlan(command.url, data);
+  }
+  if (command.action === "retry") {
+    const data = await requestRemoteDataPatch<DataPatchRunResponse>(command, io, {
+      method: "POST",
+      path: `/api/data-patches/${encodeURIComponent(singlePatchId(command))}/retry`
+    });
+    return formatRetry(command.url, data);
   }
   const data = await requestRemoteDataPatch<DataPatchRunResponse>(command, io, {
     body: commandBody(command, { includeQueueOptions: false }),
@@ -249,6 +256,17 @@ function formatRun(baseUrl: string, result: DataPatchRunResponse): string {
   ].join("\n");
 }
 
+function formatRetry(baseUrl: string, result: DataPatchRunResponse): string {
+  return [
+    `Retried data patch at ${baseUrl}`,
+    "Applied:",
+    ...recordLines(result.applied),
+    "Skipped:",
+    ...recordLines(result.skipped),
+    ""
+  ].join("\n");
+}
+
 function formatPlan(baseUrl: string, plan: DataPatchPlanResponse): string {
   const lines = [
     `Planned data patches at ${baseUrl}`,
@@ -281,6 +299,14 @@ function formatEnqueue(baseUrl: string, result: DataPatchQueueResponse): string 
 
 function recordLines(records: readonly DataPatchRecordResponse[]): readonly string[] {
   return records.length === 0 ? ["- (none)"] : records.map((record) => `- ${record.id} (${record.checksum})`);
+}
+
+function singlePatchId(command: DataPatchRemoteCommand): string {
+  const patchIds = command.patchIds ?? [];
+  if (patchIds.length !== 1) {
+    throw new DataPatchRemoteError("Data patch retry requires exactly one --id");
+  }
+  return patchIds[0]!;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -1453,6 +1453,53 @@ describe("Desk app", () => {
     expect(appliedHtml).toContain("{&quot;touched&quot;:1}");
   });
 
+  it("renders failed data patch retry actions in the Desk admin surface", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
+    const services = createServices();
+    const resources = { attempts: 0 };
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      dataPatches: new DataPatchService({
+        log: new InMemoryDataPatchLog(),
+        resources,
+        patches: [
+          defineDataPatch<typeof resources>({
+            id: "core.retry",
+            checksum: "v1",
+            run: ({ resources }) => {
+              resources.attempts += 1;
+              if (resources.attempts === 1) {
+                throw new Error("boom");
+              }
+              return { attempts: resources.attempts };
+            }
+          })
+        ],
+        clock: fixedClock(now),
+        ids: deterministicIds(["claim-failed", "claim-retry"])
+      }),
+      actor: () => admin
+    });
+
+    const failed = await app.request("/desk/admin/data-patches/apply", { method: "POST" });
+    expect(failed.status).toBe(500);
+    const failedHtml = await failed.text();
+    expect(failedHtml).toContain("boom");
+    expect(failedHtml).toContain('formaction="/desk/admin/data-patches/core.retry/retry"');
+
+    const retried = await app.request("/desk/admin/data-patches/core.retry/retry", { method: "POST" });
+    expect(retried.status).toBe(303);
+    expect(retried.headers.get("location")).toBe("/desk/admin/data-patches");
+    expect(resources.attempts).toBe(2);
+
+    const applied = await app.request("/desk/admin/data-patches");
+    const appliedHtml = await applied.text();
+    expect(appliedHtml).toContain("applied");
+    expect(appliedHtml).not.toContain('formaction="/desk/admin/data-patches/core.retry/retry"');
+  });
+
   it("renders enabled admin surfaces in the Desk navigation", async () => {
     const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
     const services = createServices();

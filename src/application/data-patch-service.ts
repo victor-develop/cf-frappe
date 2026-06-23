@@ -35,6 +35,7 @@ export interface DataPatchAdminPort {
   dashboard(actor: Actor): Promise<DataPatchDashboard>;
   planApply(actor: Actor, options?: DataPatchApplyOptions): Promise<DataPatchApplyPlan>;
   apply(actor: Actor, options?: DataPatchApplyOptions): Promise<DataPatchRunResult>;
+  retryFailed(actor: Actor, patchId: string): Promise<DataPatchRunResult>;
 }
 
 export interface DataPatchApplyOptions {
@@ -84,6 +85,14 @@ export class DataPatchService<TResources = unknown> {
   async apply(actor: Actor, options: DataPatchApplyOptions = {}): Promise<DataPatchRunResult> {
     this.authorize(actor);
     return this.runner().apply(await this.patchesForApply(options));
+  }
+
+  async retryFailed(actor: Actor, patchId: string): Promise<DataPatchRunResult> {
+    this.authorize(actor);
+    const patch = selectPatches(this.patches, [patchId])[0]!;
+    await this.assertPredecessorsApplied([patch]);
+    await this.log.retryFailedDataPatch({ id: patch.id, checksum: patch.checksum });
+    return this.runner().apply([patch]);
   }
 
   async planApply(actor: Actor, options: DataPatchApplyOptions = {}): Promise<DataPatchApplyPlan> {

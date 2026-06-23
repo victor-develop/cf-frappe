@@ -245,6 +245,125 @@ describe("DataPatchService", () => {
     await expect(service.planApply(admin)).rejects.toMatchObject({ code: "DATA_PATCH_FAILED", status: 409 });
   });
 
+  it("retries failed data patches by clearing the failed journal and re-entering the runner", async () => {
+    const resources = { attempts: 0 };
+    const log = new InMemoryDataPatchLog();
+    const service = new DataPatchService({
+      log,
+      resources,
+      patches: [
+        defineDataPatch<typeof resources>({
+          id: "core.retry",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.attempts += 1;
+            if (resources.attempts === 1) {
+              throw new Error("boom");
+            }
+            return { attempts: resources.attempts };
+          }
+        })
+      ],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-failed", "claim-retry"])
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+
+    await expect(service.apply(admin)).rejects.toThrow("boom");
+    await expect(service.dashboard(admin)).resolves.toMatchObject({
+      patches: [{ id: "core.retry", status: "failed", error: "boom" }],
+      totals: { failed: 1, applied: 0 }
+    });
+
+    await expect(service.retryFailed(admin, "core.retry")).resolves.toEqual({
+      applied: [{ id: "core.retry", checksum: "v1", appliedAt: now, result: { attempts: 2 } }],
+      skipped: []
+    });
+    await expect(service.dashboard(admin)).resolves.toMatchObject({
+      patches: [{ id: "core.retry", status: "applied", result: { attempts: 2 } }],
+      totals: { failed: 0, applied: 1 }
+    });
+    expect(resources.attempts).toBe(2);
+  });
+
+  it("rejects failed data patch retry when the journal state is not retryable", async () => {
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const appliedLog = new InMemoryDataPatchLog();
+    const appliedService = new DataPatchService({
+      log: appliedLog,
+      resources: {},
+      patches: [defineDataPatch({ id: "core.applied", checksum: "v1", run: () => undefined })],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-applied"])
+    });
+    await appliedService.apply(admin);
+    await expect(appliedService.retryFailed(admin, "core.applied")).rejects.toMatchObject({
+      code: "DATA_PATCH_RETRY_UNAVAILABLE",
+      status: 409
+    });
+    await expect(appliedService.retryFailed(guest, "core.applied")).rejects.toMatchObject({
+      code: "PERMISSION_DENIED",
+      status: 403
+    });
+    await expect(appliedService.retryFailed(admin, "core.missing")).rejects.toMatchObject({
+      code: "DATA_PATCH_NOT_FOUND",
+      status: 404
+    });
+
+    const pendingLog = new InMemoryDataPatchLog();
+    const pendingService = new DataPatchService({
+      log: pendingLog,
+      resources: {},
+      patches: [defineDataPatch({ id: "core.pending", checksum: "v1", run: () => undefined })]
+    });
+    await pendingLog.claimDataPatch({ id: "core.pending", checksum: "v1", claimId: "claim-pending", claimedAt: now });
+    await expect(pendingService.retryFailed(admin, "core.pending")).rejects.toMatchObject({
+      code: "DATA_PATCH_PENDING",
+      status: 409
+    });
+
+    const checksumLog = new InMemoryDataPatchLog();
+    const checksumService = new DataPatchService({
+      log: checksumLog,
+      resources: {},
+      patches: [defineDataPatch({ id: "core.failed", checksum: "v2", run: () => undefined })]
+    });
+    await checksumLog.claimDataPatch({ id: "core.failed", checksum: "v1", claimId: "claim-failed", claimedAt: now });
+    await checksumLog.failDataPatch({
+      id: "core.failed",
+      checksum: "v1",
+      claimId: "claim-failed",
+      failedAt: now,
+      error: "boom"
+    });
+    await expect(checksumService.retryFailed(admin, "core.failed")).rejects.toMatchObject({
+      code: "DATA_PATCH_CHECKSUM_MISMATCH",
+      status: 409
+    });
+
+    const orderedLog = new InMemoryDataPatchLog();
+    const orderedService = new DataPatchService({
+      log: orderedLog,
+      resources: {},
+      patches: [
+        defineDataPatch({ id: "core.first", checksum: "v1", run: () => undefined }),
+        defineDataPatch({ id: "crm.second", checksum: "v1", run: () => undefined })
+      ]
+    });
+    await orderedLog.claimDataPatch({ id: "crm.second", checksum: "v1", claimId: "claim-second", claimedAt: now });
+    await orderedLog.failDataPatch({
+      id: "crm.second",
+      checksum: "v1",
+      claimId: "claim-second",
+      failedAt: now,
+      error: "boom"
+    });
+    await expect(orderedService.retryFailed(admin, "crm.second")).rejects.toMatchObject({
+      code: "DATA_PATCH_ORDER_VIOLATION",
+      status: 409
+    });
+  });
+
   it("enqueues validated data patch plans and executes them through the built-in job", async () => {
     const resources = { touched: [] as string[] };
     const log = new InMemoryDataPatchLog();

@@ -48,6 +48,12 @@ export function createDataPatchApi(options: DataPatchApiOptions): Hono {
     return c.json({ data }, 201);
   });
 
+  app.post("/api/data-patches/:id/retry", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const data = await options.dataPatches.retryFailed(actor, c.req.param("id"));
+    return c.json({ data }, 201);
+  });
+
   if (options.dataPatchQueue) {
     app.post("/api/data-patches/enqueue", async (c) => {
       const actor = await options.actor(c.req.raw);

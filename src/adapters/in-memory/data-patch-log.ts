@@ -8,7 +8,8 @@ import type {
   FailDataPatch,
   FailedDataPatch,
   PendingDataPatch,
-  RecordedDataPatch
+  RecordedDataPatch,
+  RetryFailedDataPatch
 } from "../../ports/data-patch-log.js";
 
 type InMemoryDataPatchEntry =
@@ -70,6 +71,12 @@ export class InMemoryDataPatchLog implements DataPatchLog {
       status: "failed" as const
     }));
   }
+
+  async retryFailedDataPatch(patch: RetryFailedDataPatch): Promise<void> {
+    const existing = this.patches.get(patch.id);
+    assertRetryableFailedPatch(existing, patch.id, patch.checksum);
+    this.patches.delete(patch.id);
+  }
 }
 
 function recordFromEntry(entry: InMemoryDataPatchEntry): RecordedDataPatch {
@@ -125,4 +132,34 @@ function assertPendingClaim(
   throw new FrameworkError("DATA_PATCH_PENDING", `Data patch '${id}' is not claimed by this runner`, {
     status: 409
   });
+}
+
+function assertRetryableFailedPatch(
+  entry: InMemoryDataPatchEntry | undefined,
+  id: string,
+  checksum: string
+): asserts entry is FailedDataPatch & { readonly status: "failed"; readonly claimId: string } {
+  if (entry === undefined) {
+    throw dataPatchRetryUnavailable(id, "no failed journal entry exists");
+  }
+  assertChecksumValueMatches(id, checksum, entry.checksum);
+  if (entry.status === "failed") {
+    return;
+  }
+  if (entry.status === "pending") {
+    throw new FrameworkError(
+      "DATA_PATCH_PENDING",
+      `Data patch '${id}' is already claimed and has not completed`,
+      { status: 409 }
+    );
+  }
+  throw dataPatchRetryUnavailable(id, `journal status is '${entry.status}'`);
+}
+
+function dataPatchRetryUnavailable(id: string, reason: string): FrameworkError {
+  return new FrameworkError(
+    "DATA_PATCH_RETRY_UNAVAILABLE",
+    `Data patch '${id}' cannot be retried because ${reason}`,
+    { status: 409 }
+  );
 }

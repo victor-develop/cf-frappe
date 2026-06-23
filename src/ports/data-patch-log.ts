@@ -63,10 +63,16 @@ export interface FailDataPatch {
   readonly error: string;
 }
 
+export interface RetryFailedDataPatch {
+  readonly id: string;
+  readonly checksum: string;
+}
+
 export interface DataPatchLog {
   recordedDataPatches(): Promise<readonly RecordedDataPatch[]>;
   appliedDataPatches(): Promise<readonly AppliedDataPatch[]>;
   claimDataPatch(patch: ClaimDataPatch): Promise<DataPatchClaimResult>;
   completeDataPatch(patch: CompleteDataPatch): Promise<void>;
   failDataPatch(patch: FailDataPatch): Promise<void>;
+  retryFailedDataPatch(patch: RetryFailedDataPatch): Promise<void>;
 }

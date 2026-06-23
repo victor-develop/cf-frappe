@@ -7,7 +7,8 @@ import type {
   DataPatchClaimResult,
   DataPatchLog,
   FailDataPatch,
-  RecordedDataPatch
+  RecordedDataPatch,
+  RetryFailedDataPatch
 } from "../../ports/data-patch-log.js";
 
 interface DataPatchRow {
@@ -121,6 +122,25 @@ export class D1DataPatchLog implements DataPatchLog {
       .bind(patch.failedAt, patch.error, patch.id, patch.checksum, patch.claimId)
       .run();
     assertChanged(result, patch.id);
+  }
+
+  async retryFailedDataPatch(patch: RetryFailedDataPatch): Promise<void> {
+    await this.ensureDataPatchTable();
+    const row = await this.row(patch.id);
+    assertRetryableFailedRow(row, patch.id, patch.checksum);
+    const result = await this.db
+      .prepare(
+        `DELETE FROM cf_frappe_data_patches
+         WHERE id = ?
+           AND checksum = ?
+           AND status = 'failed'
+           AND claim_id IS ?
+           AND failed_at IS ?
+           AND error IS ?`
+      )
+      .bind(patch.id, patch.checksum, row.claim_id, row.failed_at, row.error)
+      .run();
+    assertRetryCleared(result, patch.id);
   }
 
   private async ensureDataPatchTable(): Promise<void> {
@@ -244,15 +264,63 @@ function parseResult(row: DataPatchRow): JsonValue | undefined {
 }
 
 function assertChanged(result: unknown, id: string): void {
-  const changes = typeof result === "object" &&
+  if (changedRows(result) === 0) {
+    throw new FrameworkError("DATA_PATCH_PENDING", `Data patch '${id}' is not claimed by this runner`, {
+      status: 409
+    });
+  }
+}
+
+function assertRetryableFailedRow(
+  row: DataPatchRow | undefined,
+  id: string,
+  checksum: string
+): asserts row is DataPatchRow & { readonly status: "failed" } {
+  if (row === undefined) {
+    throw dataPatchRetryUnavailable(id, "no failed journal entry exists");
+  }
+  if (row.checksum !== checksum) {
+    throw new FrameworkError(
+      "DATA_PATCH_CHECKSUM_MISMATCH",
+      `Recorded data patch '${id}' has checksum '${row.checksum}' but planned '${checksum}'`,
+      { status: 409 }
+    );
+  }
+  if (row.status === "failed") {
+    return;
+  }
+  if (row.status === "pending") {
+    throw new FrameworkError(
+      "DATA_PATCH_PENDING",
+      `Data patch '${id}' is already claimed and has not completed`,
+      { status: 409 }
+    );
+  }
+  if (row.status === "applied") {
+    throw dataPatchRetryUnavailable(id, "journal status is 'applied'");
+  }
+  throw invalidStatus(row);
+}
+
+function assertRetryCleared(result: unknown, id: string): void {
+  if (changedRows(result) === 0) {
+    throw dataPatchRetryUnavailable(id, "the failed journal entry changed before retry");
+  }
+}
+
+function changedRows(result: unknown): number {
+  return typeof result === "object" &&
     result !== null &&
     "meta" in result &&
     typeof (result as { readonly meta?: { readonly changes?: unknown } }).meta?.changes === "number"
     ? (result as { readonly meta: { readonly changes: number } }).meta.changes
     : 1;
-  if (changes === 0) {
-    throw new FrameworkError("DATA_PATCH_PENDING", `Data patch '${id}' is not claimed by this runner`, {
-      status: 409
-    });
-  }
+}
+
+function dataPatchRetryUnavailable(id: string, reason: string): FrameworkError {
+  return new FrameworkError(
+    "DATA_PATCH_RETRY_UNAVAILABLE",
+    `Data patch '${id}' cannot be retried because ${reason}`,
+    { status: 409 }
+  );
 }

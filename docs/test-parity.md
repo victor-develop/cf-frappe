@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the data-patch dry-run planning slice:
+As of the failed data-patch retry slice:
 
 - Vitest files: `69`
-- Vitest cases: `610`
+- Vitest cases: `619`
 
 ## Implication
 

@@ -274,8 +274,8 @@ function parseDataPatchesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--limit") {
-      if (action === "status") {
-        return { kind: "invalid", message: "Cannot use --limit with data-patches status" };
+      if (action === "status" || action === "retry") {
+        return { kind: "invalid", message: `Cannot use --limit with data-patches ${action}` };
       }
       const value = rest[index + 1];
       if (value === undefined) {
@@ -326,6 +326,9 @@ function parseDataPatchesArgs(argv: readonly string[]): ParsedCommand {
   if (url === undefined) {
     return { kind: "invalid", message: "Missing value for --url" };
   }
+  if (action === "retry" && patchIds.length !== 1) {
+    return { kind: "invalid", message: "Data patch retry requires exactly one --id" };
+  }
   return {
     kind: "data-patches",
     action,
@@ -339,7 +342,9 @@ function parseDataPatchesArgs(argv: readonly string[]): ParsedCommand {
 }
 
 function dataPatchAction(value: string): DataPatchRemoteAction | undefined {
-  return value === "status" || value === "plan" || value === "apply" || value === "enqueue" ? value : undefined;
+  return value === "status" || value === "plan" || value === "apply" || value === "enqueue" || value === "retry"
+    ? value
+    : undefined;
 }
 
 function parseLiteralHeader(value: string): DataPatchHeaderOption | string {
@@ -583,6 +588,7 @@ function helpText(): string {
     "  cf-frappe data-patches status --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches plan --url <origin> [--id <patchId>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches apply --url <origin> [--id <patchId>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe data-patches retry --url <origin> --id <patchId> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches enqueue --url <origin> [--id <patchId>] [--limit <n>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe --help",
     "",

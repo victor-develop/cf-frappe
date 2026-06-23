@@ -436,6 +436,17 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     }
   });
 
+  app.post("/desk/admin/data-patches/:id/retry", async (c) => {
+    const dataPatches = requireDataPatches(options);
+    const actor = await options.actor(c.req.raw);
+    try {
+      await dataPatches.retryFailed(actor, c.req.param("id"));
+      return c.redirect("/desk/admin/data-patches", 303);
+    } catch (error) {
+      return renderDeskDataPatchFailure(options, actor, dataPatches, error);
+    }
+  });
+
   app.post("/desk/admin/data-patches/:id/plan", async (c) => {
     const dataPatches = requireDataPatches(options);
     const actor = await options.actor(c.req.raw);

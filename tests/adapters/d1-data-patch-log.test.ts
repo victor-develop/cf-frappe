@@ -121,6 +121,100 @@ describe("D1DataPatchLog", () => {
     ).rejects.toMatchObject({ code: "DATA_PATCH_CHECKSUM_MISMATCH" });
   });
 
+  it("clears only failed data patch records with matching checksums for retry", async () => {
+    const db = new FakeD1Database();
+    const log = new D1DataPatchLog(db as unknown as D1Database);
+
+    await log.claimDataPatch({ id: "accounts.failed", checksum: "v1", claimId: "claim-failed", claimedAt: now });
+    await log.failDataPatch({
+      id: "accounts.failed",
+      checksum: "v1",
+      claimId: "claim-failed",
+      failedAt: now,
+      error: "boom"
+    });
+
+    await expect(log.retryFailedDataPatch({ id: "accounts.failed", checksum: "v2" })).rejects.toMatchObject({
+      code: "DATA_PATCH_CHECKSUM_MISMATCH",
+      status: 409
+    });
+    await log.retryFailedDataPatch({ id: "accounts.failed", checksum: "v1" });
+    await expect(log.recordedDataPatches()).resolves.toEqual([]);
+    await expect(
+      log.claimDataPatch({ id: "accounts.failed", checksum: "v1", claimId: "claim-retry", claimedAt: now })
+    ).resolves.toMatchObject({ kind: "claimed" });
+    expect(db.executedSql.some((sql) => sql.includes("DELETE FROM cf_frappe_data_patches"))).toBe(true);
+  });
+
+  it("rejects retry clearing for non-failed D1 journal records", async () => {
+    const db = new FakeD1Database();
+    const log = new D1DataPatchLog(db as unknown as D1Database);
+
+    await expect(log.retryFailedDataPatch({ id: "accounts.missing", checksum: "v1" })).rejects.toMatchObject({
+      code: "DATA_PATCH_RETRY_UNAVAILABLE",
+      status: 409
+    });
+
+    await log.claimDataPatch({ id: "accounts.pending", checksum: "v1", claimId: "claim-pending", claimedAt: now });
+    await expect(log.retryFailedDataPatch({ id: "accounts.pending", checksum: "v1" })).rejects.toMatchObject({
+      code: "DATA_PATCH_PENDING",
+      status: 409
+    });
+
+    await log.claimDataPatch({ id: "accounts.applied", checksum: "v1", claimId: "claim-applied", claimedAt: now });
+    await log.completeDataPatch({
+      id: "accounts.applied",
+      checksum: "v1",
+      claimId: "claim-applied",
+      appliedAt: now
+    });
+    await expect(log.retryFailedDataPatch({ id: "accounts.applied", checksum: "v1" })).rejects.toMatchObject({
+      code: "DATA_PATCH_RETRY_UNAVAILABLE",
+      status: 409
+    });
+  });
+
+  it("does not clear a newer failed D1 retry attempt after reading an older one", async () => {
+    const db = new FakeD1Database();
+    const log = new D1DataPatchLog(db as unknown as D1Database);
+    await log.claimDataPatch({ id: "accounts.failed", checksum: "v1", claimId: "claim-old", claimedAt: now });
+    await log.failDataPatch({
+      id: "accounts.failed",
+      checksum: "v1",
+      claimId: "claim-old",
+      failedAt: now,
+      error: "old failure"
+    });
+    db.beforeDelete = () => {
+      db.beforeDelete = undefined;
+      db.patches.set("accounts.failed", {
+        checksum: "v1",
+        status: "failed",
+        claim_id: "claim-new",
+        claimed_at: "2026-01-01T00:01:00.000Z",
+        applied_at: null,
+        failed_at: "2026-01-01T00:02:00.000Z",
+        error: "new failure",
+        result_json: null,
+        result_present: 0
+      });
+    };
+
+    await expect(log.retryFailedDataPatch({ id: "accounts.failed", checksum: "v1" })).rejects.toMatchObject({
+      code: "DATA_PATCH_RETRY_UNAVAILABLE",
+      status: 409
+    });
+    await expect(log.recordedDataPatches()).resolves.toEqual([
+      {
+        id: "accounts.failed",
+        checksum: "v1",
+        failedAt: "2026-01-01T00:02:00.000Z",
+        error: "new failure",
+        status: "failed"
+      }
+    ]);
+  });
+
   it("rejects invalid journal statuses", async () => {
     const db = new FakeD1Database();
     const log = new D1DataPatchLog(db as unknown as D1Database);
@@ -156,6 +250,7 @@ class FakeD1Database {
     result_present: number;
   }>();
   readonly executedSql: string[] = [];
+  beforeDelete: (() => void) | undefined;
 
   prepare(sql: string) {
     this.executedSql.push(sql);
@@ -265,6 +360,22 @@ class FakeD1PreparedStatement {
           failed_at: String(failed_at),
           error: String(error)
         });
+        return { success: true, meta: { changes: 1 } };
+      }
+      return { success: true, meta: { changes: 0 } };
+    }
+    if (this.sql.includes("DELETE FROM cf_frappe_data_patches")) {
+      this.db.beforeDelete?.();
+      const [id, checksum, claim_id, failed_at, error] = this.params;
+      const patch = this.db.patches.get(String(id));
+      if (
+        patch?.status === "failed" &&
+        patch.checksum === checksum &&
+        patch.claim_id === claim_id &&
+        patch.failed_at === failed_at &&
+        patch.error === error
+      ) {
+        this.db.patches.delete(String(id));
         return { success: true, meta: { changes: 1 } };
       }
       return { success: true, meta: { changes: 0 } };

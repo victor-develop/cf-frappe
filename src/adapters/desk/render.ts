@@ -879,13 +879,18 @@ export function renderDataPatchAdmin(
 }
 
 function renderDataPatchAction(patch: DataPatchDashboardEntry): string {
-  if (patch.status !== "not_applied") {
-    return "";
+  if (patch.status === "not_applied") {
+    return `<form class="inline-action" method="post">
+      <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/plan">Plan</button>
+      <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/apply">Apply</button>
+    </form>`;
   }
-  return `<form class="inline-action" method="post">
-    <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/plan">Plan</button>
-    <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/apply">Apply</button>
-  </form>`;
+  if (patch.status === "failed") {
+    return `<form class="inline-action" method="post">
+      <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/retry">Retry</button>
+    </form>`;
+  }
+  return "";
 }
 
 function renderDataPatchPlan(plan: DataPatchApplyPlan): string {
