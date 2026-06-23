@@ -9,6 +9,7 @@ import type { DomainEvent, DocumentSnapshot } from "../core/types.js";
 import { createDocumentDeliveryHooks } from "../application/realtime.js";
 import { UserNotificationService } from "../application/user-notification-service.js";
 import type {
+  AmendDocumentCommand,
   AssignDocumentCommand,
   CancelDocumentCommand,
   AddDocumentCommentCommand,
@@ -37,6 +38,7 @@ import type { RealtimePublisher } from "../ports/realtime.js";
 export type AggregateCoordinatorCommand =
   | ({ readonly kind: "create" } & CreateDocumentCommand)
   | ({ readonly kind: "duplicate" } & DuplicateDocumentCommand)
+  | ({ readonly kind: "amend" } & AmendDocumentCommand)
   | ({ readonly kind: "update" } & UpdateDocumentCommand)
   | ({ readonly kind: "submit" } & SubmitDocumentCommand)
   | ({ readonly kind: "cancel" } & CancelDocumentCommand)
@@ -130,6 +132,8 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
           return this.service.create(command);
         case "duplicate":
           return this.service.duplicate(command);
+        case "amend":
+          return this.service.amend(command);
         case "update":
           return this.service.update(command);
         case "submit":

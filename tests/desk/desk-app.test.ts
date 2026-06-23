@@ -2872,6 +2872,36 @@ describe("Desk app", () => {
     });
   });
 
+  it("amends cancelled documents from generated edit forms", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ body: "Original" }) });
+    await services.documents.submit({ actor: owner, doctype: "Note", name: "My Note", expectedVersion: 1 });
+    await services.documents.cancel({ actor: owner, doctype: "Note", name: "My Note", expectedVersion: 2 });
+
+    const edit = await app.request("/desk/Note/My%20Note");
+    expect(edit.status).toBe(200);
+    const html = await edit.text();
+    expect(html).toContain("cancelled");
+    expect(html).toContain('formaction="/desk/Note/My%20Note/amend"');
+    expect(html).not.toContain(">Save</button>");
+
+    const amended = await app.request("/desk/Note/My%20Note/amend", {
+      method: "POST",
+      body: new URLSearchParams({ title: "My Note Rev 1", body: "Amended", expectedVersion: "3" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(amended.status).toBe(303);
+    expect(amended.headers.get("location")).toBe("/desk/Note/My%20Note%20Rev%201");
+    await expect(services.queries.getDocument(owner, "Note", "My Note Rev 1")).resolves.toMatchObject({
+      docstatus: "draft",
+      data: { title: "My Note Rev 1", body: "Amended", created_by: owner.id }
+    });
+    await expect(services.queries.getDocument(owner, "Note", "My Note")).resolves.toMatchObject({
+      docstatus: "cancelled"
+    });
+  });
+
   it("renders printable documents from Desk", async () => {
     const { app, services } = makeDesk();
     await services.documents.create({

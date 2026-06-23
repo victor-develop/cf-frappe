@@ -1687,6 +1687,7 @@ export function renderFormView(
     readonly clientScripts?: readonly ClientScriptDefinition[];
     readonly realtimeRoute?: string;
     readonly canDuplicate?: boolean;
+    readonly canAmend?: boolean;
   }
 ): string {
   const action =
@@ -1747,6 +1748,10 @@ export function renderFormView(
     options.mode === "update" && options.document && options.canDuplicate
       ? `<button class="button" type="submit" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(options.document.name)}/duplicate">Duplicate</button>`
       : "";
+  const amendAction =
+    options.mode === "update" && options.document?.docstatus === "cancelled" && options.canAmend
+      ? `<button class="button" type="submit" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(options.document.name)}/amend">Amend</button>`
+      : "";
   const versionField = options.document
     ? `<input type="hidden" name="expectedVersion" value="${String(options.document.version)}">`
     : "";
@@ -1762,6 +1767,7 @@ export function renderFormView(
       <a class="button" href="/desk/${encodeURIComponent(doctype.name)}">Cancel</a>
       ${canSave ? `<button class="button primary" type="submit">${options.mode === "create" ? "Create" : "Save"}</button>` : ""}
       ${duplicateAction}
+      ${amendAction}
     </div>
     ${commands}
     ${workflowActions}

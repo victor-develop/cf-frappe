@@ -922,6 +922,9 @@ export function renderDeskClientScript(): string {
       assignments: function (doctype, name) {
         return request(resourceActionPath(doctype, name, "assignments")).then(unwrapData);
       },
+      amend: function (doctype, name, input, options) {
+        return request(resourcePath(doctype, name) + "/amend", { method: "POST", body: commandBody(input || {}, options) }).then(unwrapData);
+      },
       cancel: function (doctype, name, options) {
         return request(resourcePath(doctype, name) + "/cancel", { method: "POST", body: versionBody(options) }).then(unwrapData);
       },

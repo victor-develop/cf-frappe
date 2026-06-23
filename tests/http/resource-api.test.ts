@@ -22,7 +22,7 @@ import {
 
 describe("resource api", () => {
   function makeApp() {
-    const services = createServices(["e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8"]);
+    const services = createServices(["e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8", "e9", "e10"]);
     return createResourceApi({
       registry: services.registry,
       documents: services.documents,
@@ -367,6 +367,19 @@ describe("resource api", () => {
     });
     expect(cancelled.status).toBe(200);
     await expect(cancelled.json()).resolves.toMatchObject({ data: { version: 6, docstatus: "cancelled" } });
+
+    const amended = await app.request("/api/resource/Note/HTTP%20Note/amend", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({
+        data: { title: "HTTP Note Rev 1", body: "Amended" },
+        expectedVersion: 6
+      })
+    });
+    expect(amended.status).toBe(201);
+    await expect(amended.json()).resolves.toMatchObject({
+      data: { name: "HTTP Note Rev 1", version: 1, docstatus: "draft", data: { body: "Amended" } }
+    });
 
     const deleted = await app.request("/api/resource/Note/HTTP%20Note", {
       method: "DELETE",

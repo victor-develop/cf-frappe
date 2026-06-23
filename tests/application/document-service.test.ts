@@ -1640,6 +1640,42 @@ describe("DocumentService", () => {
     ]);
   });
 
+  it("amends cancelled documents through the create event path with amendment provenance", async () => {
+    const { documents, events, projections } = createServices(["e1", "e2", "e3", "e4"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data({ body: "Original" }) });
+    await documents.submit({ actor: owner, doctype: "Note", name: "My Note", expectedVersion: 1 });
+    await documents.cancel({ actor: owner, doctype: "Note", name: "My Note", expectedVersion: 2 });
+
+    const amended = await documents.amend({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      data: { title: "My Note Rev 1", body: "Amended" },
+      expectedVersion: 3,
+      metadata: { source: "amend-button" }
+    });
+
+    expect(amended).toMatchObject({
+      name: "My Note Rev 1",
+      version: 1,
+      docstatus: "draft",
+      data: {
+        title: "My Note Rev 1",
+        body: "Amended",
+        created_by: owner.id
+      }
+    });
+    await expect(projections.get("acme", "Note", "My Note")).resolves.toMatchObject({ docstatus: "cancelled" });
+    await expect(projections.get("acme", "Note", "My Note Rev 1")).resolves.toEqual(amended);
+    await expect(events.readStream("acme:Note:My%20Note%20Rev%201")).resolves.toMatchObject([
+      {
+        type: "NoteCreated",
+        payload: { kind: "DocumentCreated", data: { title: "My Note Rev 1", created_by: owner.id } },
+        metadata: { source: "amend-button", amendedFrom: "My Note", amendedFromVersion: 3 }
+      }
+    ]);
+  });
+
   it("enforces source read access and expected versions when duplicating documents", async () => {
     const { documents } = createServices(["e1", "e2"]);
     await documents.create({ actor: manager, doctype: "Note", data: data({ title: "Manager Note" }) });
@@ -1662,6 +1698,44 @@ describe("DocumentService", () => {
         expectedVersion: 2
       })
     ).rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
+  });
+
+  it("enforces source read access, expected versions, and cancelled status when amending documents", async () => {
+    const { documents } = createServices(["e1", "e2", "e3", "e4"]);
+    await documents.create({ actor: manager, doctype: "Note", data: data({ title: "Manager Note" }) });
+    await documents.submit({ actor: manager, doctype: "Note", name: "Manager Note", expectedVersion: 1 });
+    await documents.cancel({ actor: manager, doctype: "Note", name: "Manager Note", expectedVersion: 2 });
+
+    await expect(
+      documents.amend({
+        actor: owner,
+        doctype: "Note",
+        name: "Manager Note",
+        data: { title: "Owner Amendment" },
+        expectedVersion: 3
+      })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+
+    await expect(
+      documents.amend({
+        actor: manager,
+        doctype: "Note",
+        name: "Manager Note",
+        data: { title: "Stale Amendment" },
+        expectedVersion: 2
+      })
+    ).rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
+
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Draft Note" }) });
+    await expect(
+      documents.amend({
+        actor: owner,
+        doctype: "Note",
+        name: "Draft Note",
+        data: { title: "Draft Amendment" },
+        expectedVersion: 1
+      })
+    ).rejects.toMatchObject({ code: "DOCUMENT_STATUS_CONFLICT" });
   });
 
   it("enforces lifecycle permissions and status transitions at the command boundary", async () => {

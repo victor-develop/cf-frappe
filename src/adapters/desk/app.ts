@@ -1549,6 +1549,27 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     }
   });
 
+  app.post("/desk/:doctype/:name/amend", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
+    const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
+    const name = c.req.param("name");
+    try {
+      const form = await parseDeskForm(c.req.raw, doctype, formView, (doctypeName) => options.registry.get(doctypeName));
+      const snapshot = await options.documents.amend({
+        actor,
+        doctype: doctype.name,
+        name,
+        data: form.data,
+        ...(form.expectedVersion !== undefined ? { expectedVersion: form.expectedVersion } : {}),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(`/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(snapshot.name)}`, 303);
+    } catch (error) {
+      return renderDeskError(options, c.req.raw, actor, doctype, "update", error, name);
+    }
+  });
+
   app.post("/desk/:doctype/:name", async (c) => {
     const actor = await options.actor(c.req.raw);
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
@@ -2326,6 +2347,7 @@ async function renderDeskDocumentPage(
     printFormats,
     clientScripts: options.registry.listClientScripts(doctype.name, "form"),
     canDuplicate: can(actor, doctype, "create"),
+    canAmend: document.docstatus === "cancelled" && can(actor, doctype, "create"),
     ...deskRealtimeRouteOption(options)
   });
   const attachments = options.files === undefined

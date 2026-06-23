@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the custom-field runtime application slice:
+As of the document amendment slice:
 
 - Vitest files: `73`
-- Vitest cases: `677`
+- Vitest cases: `681`
 
 ## Implication
 

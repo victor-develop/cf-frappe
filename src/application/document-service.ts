@@ -107,6 +107,18 @@ export interface DuplicateDocumentCommand {
   readonly eventType?: string;
 }
 
+export interface AmendDocumentCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly data?: MutableDocumentData;
+  readonly tenantId?: string;
+  readonly newName?: string;
+  readonly expectedVersion?: number;
+  readonly metadata?: DocumentData;
+  readonly eventType?: string;
+}
+
 export interface DeleteDocumentCommand {
   readonly actor: Actor;
   readonly doctype: string;
@@ -323,6 +335,7 @@ export interface RevokeDocumentShareCommand {
 export interface DocumentCommandExecutor {
   create(command: CreateDocumentCommand): Promise<DocumentSnapshot>;
   duplicate(command: DuplicateDocumentCommand): Promise<DocumentSnapshot>;
+  amend(command: AmendDocumentCommand): Promise<DocumentSnapshot>;
   update(command: UpdateDocumentCommand): Promise<DocumentSnapshot>;
   submit(command: SubmitDocumentCommand): Promise<DocumentSnapshot>;
   bulkSubmit(command: BulkSubmitDocumentsCommand): Promise<BulkDocumentCommandResult>;
@@ -533,6 +546,40 @@ export class DocumentService implements DocumentCommandExecutor {
         ...(command.metadata ?? {}),
         duplicatedFrom: existing.name,
         duplicatedFromVersion: existing.version
+      }
+    });
+  }
+
+  async amend(command: AmendDocumentCommand): Promise<DocumentSnapshot> {
+    const tenantId = resolveTenant(command.actor, command.tenantId);
+    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
+    const stream = documentStream(tenantId, doctype.name, command.name);
+    const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
+    if (!(await this.canActOnDocument(command.actor, doctype, "read", existing))) {
+      throw permissionDenied(`Actor '${command.actor.id}' cannot amend ${doctype.name}/${command.name}`);
+    }
+    await this.ensureUserPermissionAccess(command.actor, doctype, existing);
+    ensureExpectedVersion(existing, command.expectedVersion);
+    ensureDocumentStatus(existing, ["cancelled"], "amend");
+    const data = copyDocumentData(
+      doctype,
+      {
+        ...existing.data,
+        ...compactData(command.data ?? {})
+      },
+      (name) => this.relatedDocType(name)
+    );
+    return this.create({
+      actor: command.actor,
+      doctype: doctype.name,
+      data,
+      ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+      ...(command.newName === undefined ? {} : { name: command.newName }),
+      ...(command.eventType === undefined ? {} : { eventType: command.eventType }),
+      metadata: {
+        ...(command.metadata ?? {}),
+        amendedFrom: existing.name,
+        amendedFromVersion: existing.version
       }
     });
   }

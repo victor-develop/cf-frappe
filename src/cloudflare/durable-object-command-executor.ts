@@ -1,4 +1,5 @@
 import type {
+  AmendDocumentCommand,
   AssignDocumentCommand,
   CancelDocumentCommand,
   AddDocumentCommentCommand,
@@ -66,6 +67,10 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
 
   duplicate(command: DuplicateDocumentCommand): Promise<DocumentSnapshot> {
     return this.stubForDuplicate(command).transact({ ...command, kind: "duplicate" });
+  }
+
+  amend(command: AmendDocumentCommand): Promise<DocumentSnapshot> {
+    return this.stubForAmend(command).transact({ ...command, kind: "amend" });
   }
 
   update(command: UpdateDocumentCommand): Promise<DocumentSnapshot> {
@@ -188,6 +193,16 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
   }
 
   private stubForDuplicate(command: DuplicateDocumentCommand): AggregateCoordinatorRpc {
+    const doctype = this.registry.get(command.doctype);
+    const name =
+      previewSeriesAggregateName(doctype) ??
+      command.newName ??
+      previewName(doctype, command.data ?? {}) ??
+      "_new";
+    return this.stub(resolveTenant(command), doctype.name, name);
+  }
+
+  private stubForAmend(command: AmendDocumentCommand): AggregateCoordinatorRpc {
     const doctype = this.registry.get(command.doctype);
     const name =
       previewSeriesAggregateName(doctype) ??

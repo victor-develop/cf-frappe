@@ -73,6 +73,12 @@ interface DeskClientRuntime {
       options?: { readonly expectedVersion?: number }
     ) => Promise<unknown>;
     readonly assignments: (doctype: string, name: string) => Promise<unknown>;
+    readonly amend: (
+      doctype: string,
+      name: string,
+      input?: Record<string, unknown>,
+      options?: { readonly expectedVersion?: number }
+    ) => Promise<unknown>;
     readonly command: (
       doctype: string,
       name: string,
@@ -263,13 +269,21 @@ describe("Desk client runtime", () => {
       { data: { title: "Queued Copy" }, newName: "TASK-2", expectedVersion: 3 },
       { expectedVersion: 10 }
     );
+    await runtime.resource.amend(
+      "Task",
+      "TASK-1",
+      { data: { title: "Queued Rev 1" }, newName: "TASK-3", expectedVersion: 4 },
+      { expectedVersion: 11 }
+    );
 
     expect(calls.map((call) => call.init.body)).toEqual([
       JSON.stringify({ title: "Queued", expectedVersion: 8 }),
       JSON.stringify({ assignee: "ops", expectedVersion: 9 }),
-      JSON.stringify({ data: { title: "Queued Copy" }, newName: "TASK-2", expectedVersion: 10 })
+      JSON.stringify({ data: { title: "Queued Copy" }, newName: "TASK-2", expectedVersion: 10 }),
+      JSON.stringify({ data: { title: "Queued Rev 1" }, newName: "TASK-3", expectedVersion: 11 })
     ]);
     expect(calls[2]?.url).toBe("/api/resource/Task/TASK-1/duplicate");
+    expect(calls[3]?.url).toBe("/api/resource/Task/TASK-1/amend");
   });
 
   it("maps resource list filter operators to query parameters", async () => {
