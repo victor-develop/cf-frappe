@@ -112,6 +112,10 @@ export function renderDeskClientScript(): string {
     return resourceActionPath(doctype, name, action) + "/" + encodePart(member);
   }
 
+  function filePath(name, action) {
+    return "/api/files/" + encodePart(name) + (action === undefined ? "" : "/" + action);
+  }
+
   function versionBody(options) {
     return options && options.expectedVersion !== undefined ? { expectedVersion: options.expectedVersion } : {};
   }
@@ -144,6 +148,59 @@ export function renderDeskClientScript(): string {
 
   function bulkDocumentsBody(documents) {
     return { documents: documents };
+  }
+
+  function bulkFilesBody(files, input) {
+    return Object.assign({}, input || {}, { files: files });
+  }
+
+  function setParam(params, key, value) {
+    if (value !== undefined && value !== null) {
+      params[key] = value;
+    }
+  }
+
+  function fileAttachmentParams(params, options) {
+    var attachedTo = options && options.attachedTo;
+    if (attachedTo) {
+      setParam(params, "attached_to_doctype", attachedTo.doctype);
+      setParam(params, "attached_to_name", attachedTo.name);
+      return;
+    }
+    if (options && (options.attached_to_doctype !== undefined || options.attached_to_name !== undefined)) {
+      setParam(params, "attached_to_doctype", options.attached_to_doctype);
+      setParam(params, "attached_to_name", options.attached_to_name);
+    }
+  }
+
+  function fileListParams(options) {
+    var params = {};
+    fileAttachmentParams(params, options || {});
+    setParam(params, "content_type", options && (options.contentType !== undefined ? options.contentType : options.content_type));
+    setParam(params, "filename", options && options.filename);
+    setParam(params, "is_private", options && (options.isPrivate !== undefined ? options.isPrivate : options.is_private));
+    setParam(params, "limit", options && options.limit);
+    setParam(params, "scan_status", options && (options.scanStatus !== undefined ? options.scanStatus : options.scan_status));
+    setParam(params, "storage_state", options && (options.storageState !== undefined ? options.storageState : options.storage_state));
+    setParam(params, "uploaded_by", options && (options.uploadedBy !== undefined ? options.uploadedBy : options.uploaded_by));
+    return params;
+  }
+
+  function fileUploadParams(options) {
+    var params = {};
+    fileAttachmentParams(params, options || {});
+    setParam(params, "filename", options && options.filename);
+    setParam(params, "is_private", options && (options.isPrivate !== undefined ? options.isPrivate : options.is_private));
+    return params;
+  }
+
+  function fileUploadHeaders(options) {
+    var headers = {};
+    var contentType = options && (options.contentType !== undefined ? options.contentType : options.content_type);
+    if (contentType !== undefined && contentType !== null) {
+      headers["content-type"] = contentType;
+    }
+    return headers;
   }
 
   function timelineParams(options) {
@@ -819,6 +876,42 @@ export function renderDeskClientScript(): string {
       trigger: function (eventName) {
         var binding = currentFormBinding();
         return binding ? triggerFormEvent(binding, eventName) : undefined;
+      }
+    }),
+    files: Object.freeze({
+      bulkDelete: function (files) {
+        return request("/api/files/delete", { method: "POST", body: bulkFilesBody(files) }).then(unwrapData);
+      },
+      bulkUpdateMetadata: function (files, input) {
+        return request("/api/files/bulk-metadata", { method: "POST", body: bulkFilesBody(files, input) }).then(unwrapData);
+      },
+      completeDirectUpload: function (name, options) {
+        return request(filePath(name, "complete-upload"), { method: "POST", body: versionBody(options) }).then(unwrapData);
+      },
+      contentUrl: function (name) {
+        return filePath(name, "content");
+      },
+      delete: function (name, options) {
+        return request(withQuery(filePath(name), versionBody(options)), { method: "DELETE" }).then(unwrapData);
+      },
+      list: function (options) {
+        return request(withQuery("/api/files", fileListParams(options || {}))).then(unwrapData);
+      },
+      prepareDirectUpload: function (input) {
+        return request("/api/files/direct-upload", { method: "POST", body: input || {} });
+      },
+      previewUrl: function (name) {
+        return filePath(name, "preview");
+      },
+      updateMetadata: function (name, input, options) {
+        return request(filePath(name), { method: "PATCH", body: commandBody(input, options) }).then(unwrapData);
+      },
+      upload: function (body, options) {
+        return request(withQuery("/api/files", fileUploadParams(options || {})), {
+          method: "POST",
+          body: body,
+          headers: fileUploadHeaders(options || {})
+        });
       }
     }),
     meta: Object.freeze({

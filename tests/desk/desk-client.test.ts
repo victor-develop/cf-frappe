@@ -59,6 +59,25 @@ interface DeskClientRuntime {
   readonly meta: {
     readonly listView: (doctype: string) => Promise<unknown>;
   };
+  readonly files: {
+    readonly bulkDelete: (files: readonly DeskBulkFileSelection[]) => Promise<unknown>;
+    readonly bulkUpdateMetadata: (
+      files: readonly DeskBulkFileSelection[],
+      input?: Record<string, unknown>
+    ) => Promise<unknown>;
+    readonly completeDirectUpload: (name: string, options?: { readonly expectedVersion?: number }) => Promise<unknown>;
+    readonly contentUrl: (name: string) => string;
+    readonly delete: (name: string, options?: { readonly expectedVersion?: number }) => Promise<unknown>;
+    readonly list: (options?: Record<string, unknown>) => Promise<unknown>;
+    readonly prepareDirectUpload: (input: Record<string, unknown>) => Promise<unknown>;
+    readonly previewUrl: (name: string) => string;
+    readonly updateMetadata: (
+      name: string,
+      input: Record<string, unknown>,
+      options?: { readonly expectedVersion?: number }
+    ) => Promise<unknown>;
+    readonly upload: (body: Blob, options: Record<string, unknown>) => Promise<unknown>;
+  };
   readonly resource: {
     readonly activity: (
       doctype: string,
@@ -176,6 +195,11 @@ interface DeskClientRuntime {
 }
 
 interface DeskBulkDocumentSelection {
+  readonly name: string;
+  readonly expectedVersion?: number;
+}
+
+interface DeskBulkFileSelection {
   readonly name: string;
   readonly expectedVersion?: number;
 }
@@ -363,6 +387,109 @@ describe("Desk client runtime", () => {
       JSON.stringify({ documents }),
       JSON.stringify({ documents })
     ]);
+  });
+
+  it("wraps same-origin file metadata APIs with encoded JSON requests", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { ok: true } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+    const files = [
+      { name: "file/1", expectedVersion: 2 },
+      { name: "file-2" }
+    ];
+
+    await expect(
+      runtime.files.list({
+        attachedTo: { doctype: "Task Type", name: "TASK/1" },
+        contentType: "text/plain",
+        filename: "brief",
+        isPrivate: false,
+        limit: 5,
+        scanStatus: "clean",
+        storageState: "available",
+        uploadedBy: "owner@example.com"
+      })
+    ).resolves.toEqual({ ok: true });
+    await runtime.files.updateMetadata("file/1", { filename: "renamed.txt", expectedVersion: 1 }, { expectedVersion: 7 });
+    await runtime.files.bulkDelete(files);
+    await runtime.files.bulkUpdateMetadata(files, {
+      attachedTo: { doctype: "Task", name: "TASK-2" },
+      files: [{ name: "ignored" }],
+      isPrivate: true
+    });
+    await runtime.files.delete("file/1", { expectedVersion: 8 });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/files?attached_to_doctype=Task+Type&attached_to_name=TASK%2F1&content_type=text%2Fplain&filename=brief&is_private=false&limit=5&scan_status=clean&storage_state=available&uploaded_by=owner%40example.com",
+      "PATCH /api/files/file%2F1",
+      "POST /api/files/delete",
+      "POST /api/files/bulk-metadata",
+      "DELETE /api/files/file%2F1?expectedVersion=8"
+    ]);
+    expect(calls.map((call) => call.init.body)).toEqual([
+      undefined,
+      JSON.stringify({ filename: "renamed.txt", expectedVersion: 7 }),
+      JSON.stringify({ files }),
+      JSON.stringify({ attachedTo: { doctype: "Task", name: "TASK-2" }, files, isPrivate: true }),
+      undefined
+    ]);
+  });
+
+  it("wraps file upload and direct-upload APIs without hiding upload instructions", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { name: "file_upload" }, object: { etag: "etag" }, upload: { url: "https://upload.example" } }), {
+        headers: { "content-type": "application/json" },
+        status: 201
+      });
+    });
+    const body = new Blob(["hello"], { type: "text/plain" });
+
+    await expect(
+      runtime.files.upload(body, {
+        attachedTo: { doctype: "Task Type", name: "TASK/1" },
+        contentType: "text/plain",
+        filename: "hello.txt",
+        isPrivate: true
+      })
+    ).resolves.toEqual({ data: { name: "file_upload" }, object: { etag: "etag" }, upload: { url: "https://upload.example" } });
+    await expect(
+      runtime.files.prepareDirectUpload({
+        attachedTo: { doctype: "Task Type", name: "TASK/1" },
+        contentType: "text/plain",
+        expiresInSeconds: 60,
+        filename: "hello.txt",
+        isPrivate: true,
+        size: 5
+      })
+    ).resolves.toEqual({ data: { name: "file_upload" }, object: { etag: "etag" }, upload: { url: "https://upload.example" } });
+    await runtime.files.completeDirectUpload("file/1", { expectedVersion: 3 });
+
+    expect(runtime.files.contentUrl("file/1")).toBe("/api/files/file%2F1/content");
+    expect(runtime.files.previewUrl("file/1")).toBe("/api/files/file%2F1/preview");
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "POST /api/files?attached_to_doctype=Task+Type&attached_to_name=TASK%2F1&filename=hello.txt&is_private=true",
+      "POST /api/files/direct-upload",
+      "POST /api/files/file%2F1/complete-upload"
+    ]);
+    expect((calls[0]?.init.headers as Headers).get("content-type")).toBe("text/plain");
+    expect(calls[0]?.init.body).toBe(body);
+    expect(calls[1]?.init.body).toBe(
+      JSON.stringify({
+        attachedTo: { doctype: "Task Type", name: "TASK/1" },
+        contentType: "text/plain",
+        expiresInSeconds: 60,
+        filename: "hello.txt",
+        isPrivate: true,
+        size: 5
+      })
+    );
+    expect(calls[2]?.init.body).toBe(JSON.stringify({ expectedVersion: 3 }));
   });
 
   it("wraps document collaboration and saved-filter resource APIs", async () => {
