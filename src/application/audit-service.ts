@@ -56,6 +56,8 @@ const DOCUMENT_EVENT_KINDS = new Set<DocumentEventPayload["kind"]>([
   "SavedListFilterDeleted",
   "SavedReportSaved",
   "SavedReportDeleted",
+  "CustomFieldSaved",
+  "CustomFieldDisabled",
   "WorkflowTransitioned",
   "DomainCommandApplied"
 ]);

@@ -47,6 +47,10 @@ export interface FieldDefinition {
   readonly defaultValue?: JsonValue | ((context: FieldDefaultContext) => JsonValue);
 }
 
+export interface PersistedFieldDefinition extends Omit<FieldDefinition, "defaultValue"> {
+  readonly defaultValue?: JsonValue;
+}
+
 export type PermissionAction =
   | "read"
   | "create"
@@ -415,6 +419,16 @@ export type DocumentEventPayload =
       readonly kind: "JobScheduleDeleted";
       readonly scheduleId: string;
       readonly tenantId: TenantId;
+    }
+  | {
+      readonly kind: "CustomFieldSaved";
+      readonly doctypeName: DocTypeName;
+      readonly field: PersistedFieldDefinition;
+    }
+  | {
+      readonly kind: "CustomFieldDisabled";
+      readonly doctypeName: DocTypeName;
+      readonly fieldName: string;
     }
   | {
       readonly kind: "WorkflowTransitioned";

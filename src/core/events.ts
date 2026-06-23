@@ -127,6 +127,8 @@ export function foldDocumentFrom(
       case "JobScheduleOverrideCleared":
       case "JobScheduleSaved":
       case "JobScheduleDeleted":
+      case "CustomFieldSaved":
+      case "CustomFieldDisabled":
         break;
     }
   }

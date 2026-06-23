@@ -310,6 +310,8 @@ function diffEvent(
     case "JobScheduleOverrideCleared":
     case "JobScheduleSaved":
     case "JobScheduleDeleted":
+    case "CustomFieldSaved":
+    case "CustomFieldDisabled":
       return [];
   }
 }
@@ -436,6 +438,10 @@ function summarize(payload: DocumentEventPayload): string {
       return `Saved job schedule ${payload.scheduleId}`;
     case "JobScheduleDeleted":
       return `Deleted job schedule ${payload.scheduleId}`;
+    case "CustomFieldSaved":
+      return `Saved custom field ${payload.doctypeName}.${payload.field.name}`;
+    case "CustomFieldDisabled":
+      return `Disabled custom field ${payload.doctypeName}.${payload.fieldName}`;
     case "WorkflowTransitioned":
       return workflowSummary(payload);
     case "DomainCommandApplied":
