@@ -1183,6 +1183,12 @@ export function renderDeskClientScript(): string {
       },
       reports: function () {
         return request("/api/meta/reports").then(unwrapData);
+      },
+      workspace: function (workspace) {
+        return request("/api/meta/workspaces/" + encodePart(workspace)).then(unwrapData);
+      },
+      workspaces: function () {
+        return request("/api/meta/workspaces").then(unwrapData);
       }
     }),
     notifications: Object.freeze({

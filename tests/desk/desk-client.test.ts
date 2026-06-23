@@ -70,7 +70,12 @@ interface DeskClientRuntime {
     readonly msgprint: (message: unknown) => string;
   };
   readonly meta: {
+    readonly doctype: (doctype: string) => Promise<unknown>;
+    readonly doctypes: () => Promise<unknown>;
     readonly listView: (doctype: string) => Promise<unknown>;
+    readonly reports: () => Promise<unknown>;
+    readonly workspace: (workspace: string) => Promise<unknown>;
+    readonly workspaces: () => Promise<unknown>;
   };
   readonly print: {
     readonly format: (format: string) => Promise<unknown>;
@@ -1116,6 +1121,38 @@ describe("Desk client runtime", () => {
 
     expect(calls[0]?.url).toBe("/api/meta/doctypes/Task%20Type/list-view");
     expect(calls[0]?.init.credentials).toBe("same-origin");
+  });
+
+  it("wraps metadata APIs for doctypes, reports, and workspaces", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { route: String(url) } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.meta.doctypes()).resolves.toEqual({ route: "/api/meta/doctypes" });
+    await expect(runtime.meta.doctype("Task Type")).resolves.toEqual({ route: "/api/meta/doctypes/Task%20Type" });
+    await expect(runtime.meta.reports()).resolves.toEqual({ route: "/api/meta/reports" });
+    await expect(runtime.meta.workspaces()).resolves.toEqual({ route: "/api/meta/workspaces" });
+    await expect(runtime.meta.workspace("Team Operations")).resolves.toEqual({ route: "/api/meta/workspaces/Team%20Operations" });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/meta/doctypes",
+      "GET /api/meta/doctypes/Task%20Type",
+      "GET /api/meta/reports",
+      "GET /api/meta/workspaces",
+      "GET /api/meta/workspaces/Team%20Operations"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual([
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin"
+    ]);
+    expect(calls.map((call) => call.init.body)).toEqual([undefined, undefined, undefined, undefined, undefined]);
   });
 
   it("wraps print metadata and document routes without browser-side rendering decisions", async () => {
