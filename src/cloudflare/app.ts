@@ -430,6 +430,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(jobHistory === undefined ? {} : { jobs: jobHistory }),
     ...(jobRetry === undefined ? {} : { jobRetry }),
     ...(jobSchedules === undefined ? {} : { jobSchedules }),
+    ...(options.realtime === undefined ? {} : { realtime: { route: options.realtime.route ?? "/api/realtime" } }),
     ...(options.files?.maxFileBytes === undefined ? {} : { maxFileBytes: options.files.maxFileBytes }),
     actor
   });

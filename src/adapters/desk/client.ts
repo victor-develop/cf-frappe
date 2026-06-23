@@ -209,6 +209,7 @@ export function renderDeskClientScript(): string {
     return {
       doctype: dataset.doctype,
       documentName: dataset.documentName,
+      realtimeRoute: dataset.realtimeRoute,
       script: dataset.cfFrappeScript,
       scope: dataset.scope,
       tenantId: dataset.tenantId
@@ -596,8 +597,16 @@ export function renderDeskClientScript(): string {
     return result;
   }
 
+  function realtimeRouteFromOptions(options) {
+    var route = (options && options.realtimeRoute) || context().realtimeRoute || "/api/realtime";
+    if (route.charAt(0) !== "/") {
+      route = "/" + route;
+    }
+    return route.length > 1 ? route.replace(/\\/$/, "") : route;
+  }
+
   function realtimeUrl(topic, options) {
-    var url = new URL("/api/realtime", root.location.href);
+    var url = new URL(realtimeRouteFromOptions(options), root.location.href);
     url.searchParams.set("topic", topic);
     if (options && options.replayAfter !== undefined && options.replayAfter !== null) {
       url.searchParams.set("replayAfter", String(options.replayAfter));
@@ -609,12 +618,16 @@ export function renderDeskClientScript(): string {
     return url;
   }
 
-  function realtimePresenceUrl(topic) {
-    return withQuery("/api/realtime/presence", { topic: topic });
+  function realtimePresenceUrl(topic, options) {
+    return withQuery(realtimeRouteFromOptions(options) + "/presence", { topic: topic });
   }
 
-  function realtimePresence(topic) {
-    return request(realtimePresenceUrl(topic)).then(unwrapData);
+  function realtimePresence(topic, options) {
+    return request(realtimePresenceUrl(topic, options)).then(unwrapData);
+  }
+
+  function realtimePresenceDocument(doctype, name, options) {
+    return realtimePresence(documentTopicFromOptions(doctype, name, options), options);
   }
 
   function realtimeSubscribe(topic, handlers, options) {
@@ -706,6 +719,75 @@ export function renderDeskClientScript(): string {
     }
   }
 
+  function hydratePresencePanels() {
+    var panels = document.querySelectorAll('[data-cf-frappe-presence="document"]');
+    if (!panels || panels.length === 0) {
+      return;
+    }
+    Array.prototype.forEach.call(panels, hydratePresencePanel);
+  }
+
+  function hydratePresencePanel(panel) {
+    var pageContext = context();
+    var dataset = panel.dataset || {};
+    var doctype = dataset.doctype || pageContext.doctype;
+    var documentName = dataset.documentName || pageContext.documentName;
+    var realtimeRoute = dataset.realtimeRoute || pageContext.realtimeRoute;
+    var tenantId = dataset.tenantId || pageContext.tenantId;
+    if (!doctype || !documentName || !tenantId) {
+      return;
+    }
+    setPresencePanelState(panel, "loading", "Checking active collaborators.", "Checking active collaborators.");
+    realtimePresenceDocument(doctype, documentName, Object.assign({ tenantId: tenantId }, realtimeRoute ? { realtimeRoute: realtimeRoute } : {}))
+      .then(function (snapshot) {
+        var labels = presenceConnectionLabels(snapshot && snapshot.connections);
+        var count = labels.length;
+        setPresencePanelState(
+          panel,
+          "ready",
+          count === 1 ? "1 active collaborator" : String(count) + " active collaborators",
+          count === 0 ? "No active collaborators are viewing this document." : labels.join(", ")
+        );
+      })
+      .catch(function (error) {
+        setPresencePanelState(
+          panel,
+          "error",
+          "Presence unavailable",
+          error && error.message ? error.message : "Unable to load document presence."
+        );
+      });
+  }
+
+  function presenceConnectionLabels(connections) {
+    var seen = {};
+    var labels = [];
+    (Array.isArray(connections) ? connections : []).forEach(function (connection) {
+      var label = connection && (connection.userId || connection.connectionId);
+      if (!label || seen[label]) {
+        return;
+      }
+      seen[label] = true;
+      labels.push(String(label));
+    });
+    return labels;
+  }
+
+  function setPresencePanelState(panel, state, countText, listText) {
+    if (panel.dataset) {
+      panel.dataset.presenceState = state;
+    }
+    setPanelText(panel, "[data-cf-frappe-presence-count]", countText);
+    setPanelText(panel, "[data-cf-frappe-presence-list]", listText);
+  }
+
+  function setPanelText(panel, selector, value) {
+    var target = typeof panel.querySelector === "function" ? panel.querySelector(selector) : null;
+    if (target) {
+      target.textContent = value;
+    }
+  }
+
   function msgprint(message) {
     var text = message == null ? "" : String(message);
     if (typeof root.alert === "function") {
@@ -779,17 +861,17 @@ export function renderDeskClientScript(): string {
       },
       presence: realtimePresence,
       presenceDoctype: function (doctype, options) {
-        return realtimePresence(doctypeTopicFromOptions(doctype, options));
+        return realtimePresence(doctypeTopicFromOptions(doctype, options), options);
       },
       presenceDocument: function (doctype, name, options) {
-        return realtimePresence(documentTopicFromOptions(doctype, name, options));
+        return realtimePresenceDocument(doctype, name, options);
       },
       presenceTenant: function (options) {
-        return realtimePresence(tenantTopicFromOptions(options));
+        return realtimePresence(tenantTopicFromOptions(options), options);
       },
       presenceUrl: realtimePresenceUrl,
       presenceUser: function (userId, options) {
-        return realtimePresence(userTopicFromOptions(userId, options));
+        return realtimePresence(userTopicFromOptions(userId, options), options);
       },
       subscribe: function (topic, handlers, options) {
         return realtimeSubscribe(topic, handlers, options);
@@ -905,6 +987,7 @@ export function renderDeskClientScript(): string {
       }
     })
   }));
+  ready(hydratePresencePanels);
 }());
 `;
 }

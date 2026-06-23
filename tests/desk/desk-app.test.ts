@@ -33,7 +33,7 @@ import {
 import { createChildTableServices, createLinkedServices, createServices, data, guest, noteDocType, now, owner } from "../helpers";
 
 describe("Desk app", () => {
-  function makeDesk(actor = owner) {
+  function makeDesk(actor = owner, options: { readonly realtime?: boolean } = {}) {
     const services = createServices(["e1", "e2", "e3", "e4"]);
     const app = createDeskApp({
       registry: services.registry,
@@ -45,6 +45,7 @@ describe("Desk app", () => {
       savedFilters: services.savedFilters,
       savedReports: services.savedReports,
       userPermissions: services.userPermissions,
+      ...(options.realtime === undefined ? {} : { realtime: options.realtime }),
       actor: () => actor
     });
     return { app, services };
@@ -707,6 +708,29 @@ describe("Desk app", () => {
     expect(updateHtml).toContain('data-cf-frappe-script="note-&quot;&lt;form&gt;"');
     expect(updateHtml).toContain('data-document-name="Script &quot; &lt;Note&gt;"');
     expect(updateHtml).toContain('data-tenant-id="acme"');
+  });
+
+  it("renders realtime document presence panels on generated update forms when enabled", async () => {
+    const { app, services } = makeDesk(owner, { realtime: true });
+    const document = await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Collaborative Note" })
+    });
+
+    const response = await app.request(`/desk/Note/${encodeURIComponent(document.name)}`);
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('data-cf-frappe-presence="document"');
+    expect(html).toContain('data-doctype="Note"');
+    expect(html).toContain('data-document-name="Collaborative Note"');
+    expect(html).toContain('data-realtime-route="/api/realtime"');
+    expect(html).toContain('data-tenant-id="acme"');
+    expect(html).toContain("Checking active collaborators.");
+
+    const create = await app.request("/desk/Note/new");
+    await expect(create.text()).resolves.not.toContain('data-cf-frappe-presence="document"');
   });
 
   it("serves a built-in Desk client API for model client scripts", async () => {

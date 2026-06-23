@@ -61,6 +61,31 @@ describe("CloudFrappe Worker routing", () => {
     await expect(response.text()).resolves.toContain("root.cfFrappe");
   });
 
+  it("enables generated Desk document presence panels when realtime is configured", async () => {
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => owner,
+      realtime: { namespace: () => fakeRealtimeNamespace([]), route: "/rt" }
+    });
+    const env = {
+      DB: fakeDocumentD1("My Note"),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/desk/Note/My%20Note"),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('data-cf-frappe-presence="document"');
+    expect(html).toContain('data-document-name="My Note"');
+    expect(html).toContain('data-realtime-route="/rt"');
+    expect(html).toContain('data-tenant-id="acme"');
+  });
+
   it("mounts admin audit search on the Worker API", async () => {
     const worker = createCloudFrappeWorker({
       registry: createTestRegistry(),
@@ -1026,6 +1051,52 @@ function fakeD1(): D1Database {
         },
         async first() {
           return null;
+        },
+        async run() {
+          return { success: true };
+        }
+      };
+    },
+    async batch(statements: any[]) {
+      return Promise.all(statements.map((statement) => statement.run()));
+    },
+    dump() {
+      throw new Error("Not implemented");
+    },
+    exec() {
+      throw new Error("Not implemented");
+    },
+    withSession() {
+      throw new Error("Not implemented");
+    }
+  } as unknown as D1Database;
+}
+
+function fakeDocumentD1(name: string): D1Database {
+  return {
+    prepare() {
+      return {
+        bind() {
+          return this;
+        },
+        async all() {
+          return { results: [] };
+        },
+        async first() {
+          return {
+            tenant_id: "acme",
+            doctype: "Note",
+            name,
+            version: 1,
+            docstatus: "draft",
+            data_json: JSON.stringify({
+              title: name,
+              created_by: "owner@example.com",
+              priority: "Medium"
+            }),
+            created_at: "2026-01-01T00:00:00.000Z",
+            updated_at: "2026-01-01T00:00:00.000Z"
+          };
         },
         async run() {
           return { success: true };

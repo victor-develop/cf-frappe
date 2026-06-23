@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the permissioned realtime presence snapshot slice:
+As of the generated Desk realtime presence panel slice:
 
 - Vitest files: `65`
-- Vitest cases: `537`
+- Vitest cases: `540`
 
 ## Implication
 

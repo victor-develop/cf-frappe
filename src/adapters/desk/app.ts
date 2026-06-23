@@ -53,6 +53,7 @@ import {
   renderFileAttachmentPanel,
   renderFileManager,
   renderDataPatchAdmin,
+  renderDocumentPresencePanel,
   renderDocumentTimeline,
   renderFormView,
   renderJobAdmin,
@@ -114,6 +115,7 @@ export interface DeskAppOptions {
   readonly jobs?: JobHistoryService;
   readonly jobRetry?: JobRetryPort;
   readonly jobSchedules?: JobScheduleService;
+  readonly realtime?: boolean | { readonly route?: string };
   readonly maxFileBytes?: number;
   readonly actor: ActorResolver;
 }
@@ -849,7 +851,8 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         body: renderListView(doctype, listView, result.data, effectiveFilters, {
           ...(savedFilters ? { savedFilters } : {}),
           ...(savedFilter ? { selectedSavedFilterId: savedFilter.id } : {}),
-          clientScripts: options.registry.listClientScripts(doctype.name, "list")
+          clientScripts: options.registry.listClientScripts(doctype.name, "list"),
+          ...deskRealtimeRouteOption(options)
         })
       })
     );
@@ -908,7 +911,8 @@ export function createDeskApp(options: DeskAppOptions): Hono {
           mode: "create",
           linkOptions,
           tableDefinitions,
-          clientScripts: options.registry.listClientScripts(doctype.name, "form")
+          clientScripts: options.registry.listClientScripts(doctype.name, "form"),
+          ...deskRealtimeRouteOption(options)
         })
       })
     );
@@ -1297,6 +1301,7 @@ async function renderDeskError(
         ...(document ? { workflowActions: workflowActionsFor(actor, doctype, document) } : {}),
         ...(document ? { printFormats: listPrintFormats(options, actor, doctype.name) } : {}),
         clientScripts: options.registry.listClientScripts(doctype.name, "form"),
+        ...deskRealtimeRouteOption(options),
         error: message
       })
     }),
@@ -1306,6 +1311,18 @@ async function renderDeskError(
 
 function listReports(options: DeskAppOptions, actor: Actor) {
   return options.reports?.listReports(actor) ?? [];
+}
+
+function deskRealtimeRoute(options: DeskAppOptions): string | undefined {
+  if (!options.realtime) {
+    return undefined;
+  }
+  return typeof options.realtime === "object" ? options.realtime.route ?? "/api/realtime" : "/api/realtime";
+}
+
+function deskRealtimeRouteOption(options: DeskAppOptions): { readonly realtimeRoute: string } | Record<string, never> {
+  const route = deskRealtimeRoute(options);
+  return route === undefined ? {} : { realtimeRoute: route };
 }
 
 function adminLinksFor(options: DeskAppOptions, actor: Actor): readonly DeskNavLink[] {
@@ -1630,7 +1647,8 @@ async function renderDeskDocumentPage(
     lifecycleActions,
     workflowActions,
     printFormats,
-    clientScripts: options.registry.listClientScripts(doctype.name, "form")
+    clientScripts: options.registry.listClientScripts(doctype.name, "form"),
+    ...deskRealtimeRouteOption(options)
   });
   const attachments = options.files === undefined
     ? ""
@@ -1644,6 +1662,8 @@ async function renderDeskDocumentPage(
         }),
         result.attachmentError === undefined ? {} : { error: result.attachmentError }
       );
+  const realtimeRoute = deskRealtimeRoute(options);
+  const presence = realtimeRoute ? renderDocumentPresencePanel(document, { realtimeRoute }) : "";
   return html(
     renderDeskLayout({
       title: document.name,
@@ -1652,7 +1672,7 @@ async function renderDeskDocumentPage(
       doctypes,
       reports,
       showFiles: options.files !== undefined,
-      body: `${form}${attachments}${
+      body: `${form}${presence}${attachments}${
         timeline
           ? renderDocumentTimeline(timeline, {
               allowComment: canComment,

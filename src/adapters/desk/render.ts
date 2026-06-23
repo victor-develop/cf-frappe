@@ -242,6 +242,22 @@ export function renderFileAttachmentPanel(
   </section>`;
 }
 
+export function renderDocumentPresencePanel(
+  document: DocumentSnapshot,
+  options: { readonly realtimeRoute?: string } = {}
+): string {
+  const realtimeAttribute = options.realtimeRoute === undefined
+    ? ""
+    : ` data-realtime-route="${escapeHtml(options.realtimeRoute)}"`;
+  return `<section class="panel presence" aria-labelledby="document-presence" data-cf-frappe-presence="document" data-doctype="${escapeHtml(document.doctype)}" data-document-name="${escapeHtml(document.name)}" data-tenant-id="${escapeHtml(document.tenantId)}"${realtimeAttribute}>
+    <div class="presence-head">
+      <h2 id="document-presence">Presence</h2>
+      <p data-cf-frappe-presence-count>Checking active collaborators.</p>
+    </div>
+    <p class="presence-list" data-cf-frappe-presence-list>Checking active collaborators.</p>
+  </section>`;
+}
+
 function renderFileMetadataAction(file: FileDashboard["files"][number]): string {
   return `<form class="inline-action file-metadata-action" method="post" action="/desk/files/${encodeURIComponent(file.name)}/metadata">
     <input type="hidden" name="expectedVersion" value="${String(file.expectedVersion)}">
@@ -1176,6 +1192,7 @@ export function renderListView(
     readonly savedFilters?: readonly SavedListFilter[];
     readonly selectedSavedFilterId?: string;
     readonly clientScripts?: readonly ClientScriptDefinition[];
+    readonly realtimeRoute?: string;
   } = {}
 ): string {
   const fields = listView.columns;
@@ -1215,7 +1232,7 @@ export function renderListView(
       </table>
     </div>
   </section>
-  ${renderClientScripts(doctype.name, "list", options.clientScripts ?? [])}`;
+  ${renderClientScripts(doctype.name, "list", options.clientScripts ?? [], undefined, undefined, options.realtimeRoute)}`;
 }
 
 function renderSavedFilters(
@@ -1257,6 +1274,7 @@ export function renderFormView(
     readonly workflowActions?: readonly FormWorkflowAction[];
     readonly printFormats?: readonly PrintFormatDefinition[];
     readonly clientScripts?: readonly ClientScriptDefinition[];
+    readonly realtimeRoute?: string;
   }
 ): string {
   const action =
@@ -1333,7 +1351,14 @@ export function renderFormView(
     ${lifecycleActions}
     ${printLinks}
   </form>
-  ${renderClientScripts(doctype.name, "form", options.clientScripts ?? [], options.document?.name, options.document?.tenantId)}`;
+  ${renderClientScripts(
+    doctype.name,
+    "form",
+    options.clientScripts ?? [],
+    options.document?.name,
+    options.document?.tenantId,
+    options.realtimeRoute
+  )}`;
 }
 
 function renderClientScripts(
@@ -1341,7 +1366,8 @@ function renderClientScripts(
   scope: Exclude<ClientScriptScope, "both">,
   scripts: readonly ClientScriptDefinition[],
   documentName?: string,
-  documentTenantId?: string
+  documentTenantId?: string,
+  realtimeRoute?: string
 ): string {
   const documentAttribute = documentName === undefined
     ? ""
@@ -1349,11 +1375,14 @@ function renderClientScripts(
   const tenantAttribute = documentTenantId === undefined
     ? ""
     : ` data-tenant-id="${escapeHtml(documentTenantId)}"`;
-  const runtime = `<script src="${DESK_CLIENT_SCRIPT_PATH}" data-cf-frappe-runtime="desk" data-doctype="${escapeHtml(doctype)}" data-scope="${scope}"${documentAttribute}${tenantAttribute}></script>`;
+  const realtimeAttribute = realtimeRoute === undefined
+    ? ""
+    : ` data-realtime-route="${escapeHtml(realtimeRoute)}"`;
+  const runtime = `<script src="${DESK_CLIENT_SCRIPT_PATH}" data-cf-frappe-runtime="desk" data-doctype="${escapeHtml(doctype)}" data-scope="${scope}"${documentAttribute}${tenantAttribute}${realtimeAttribute}></script>`;
   const declared = scripts
     .map((script) => {
       const type = (script.type ?? "module") === "module" ? ' type="module"' : "";
-      return `<script${type} src="${escapeHtml(script.src)}" data-cf-frappe-script="${escapeHtml(script.name)}" data-doctype="${escapeHtml(doctype)}" data-scope="${scope}"${documentAttribute}${tenantAttribute}></script>`;
+      return `<script${type} src="${escapeHtml(script.src)}" data-cf-frappe-script="${escapeHtml(script.name)}" data-doctype="${escapeHtml(doctype)}" data-scope="${scope}"${documentAttribute}${tenantAttribute}${realtimeAttribute}></script>`;
     })
     .join("");
   return `${runtime}${declared}`;
@@ -1990,6 +2019,7 @@ tr:last-child td { border-bottom: 0; }
 }
 .form { padding: 18px; max-width: 860px; }
 .timeline { margin-top: 16px; max-width: 860px; }
+.presence { margin-top: 16px; max-width: 860px; padding: 18px; }
 .list-filters { max-width: none; margin-bottom: 16px; }
 .list-filters .actions { justify-content: flex-start; }
 .report-summary {
@@ -2118,7 +2148,7 @@ tr:last-child td { border-bottom: 0; }
   text-decoration: none;
 }
 .saved-filter-link.is-active { background: #e9eef7; border-color: var(--primary); }
-.form-head, .timeline-head, .attachment-head {
+.form-head, .timeline-head, .attachment-head, .presence-head {
   display: flex;
   justify-content: space-between;
   gap: 16px;
@@ -2130,7 +2160,7 @@ tr:last-child td { border-bottom: 0; }
   padding-bottom: 16px;
   border-bottom: 1px solid var(--border);
 }
-.form-head p, .timeline-head p { margin: 0; color: var(--muted); }
+.form-head p, .timeline-head p, .presence-head p, .presence-list { margin: 0; color: var(--muted); }
 .timeline strong { display: block; }
 .timeline small { color: var(--muted); }
 .timeline-changes {

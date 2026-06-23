@@ -4,6 +4,7 @@ interface DeskClientRuntime {
   readonly context: (script?: { readonly dataset?: Record<string, string> }) => {
     readonly doctype?: string;
     readonly documentName?: string;
+    readonly realtimeRoute?: string;
     readonly scope?: string;
     readonly script?: string;
     readonly tenantId?: string;
@@ -36,11 +37,11 @@ interface DeskClientRuntime {
       handlers: DeskRealtimeHandlers,
       options: DeskRealtimeOptions
     ) => DeskRealtimeSubscription;
-    readonly presence: (topic: string) => Promise<unknown>;
+    readonly presence: (topic: string, options?: DeskRealtimeOptions) => Promise<unknown>;
     readonly presenceDoctype: (doctype: string, options: DeskRealtimeOptions) => Promise<unknown>;
     readonly presenceDocument: (doctype: string, name: string, options: DeskRealtimeOptions) => Promise<unknown>;
     readonly presenceTenant: (options: DeskRealtimeOptions) => Promise<unknown>;
-    readonly presenceUrl: (topic: string) => string;
+    readonly presenceUrl: (topic: string, options?: DeskRealtimeOptions) => string;
     readonly presenceUser: (userId: string, options: DeskRealtimeOptions) => Promise<unknown>;
     readonly tenantUrl: (options: DeskRealtimeOptions) => string;
     readonly userUrl: (userId: string, options: DeskRealtimeOptions) => string;
@@ -169,6 +170,7 @@ interface DeskRealtimeHandlers {
 interface DeskRealtimeOptions {
   readonly tenantId?: string;
   readonly protocols?: string | readonly string[];
+  readonly realtimeRoute?: string;
   readonly replayAfter?: number;
   readonly replayLimit?: number;
 }
@@ -360,6 +362,7 @@ describe("Desk client runtime", () => {
           cfFrappeScript: "task-form",
           doctype: "Task",
           documentName: "TASK-1",
+          realtimeRoute: "/rt",
           scope: "form",
           tenantId: "acme"
         }
@@ -367,6 +370,7 @@ describe("Desk client runtime", () => {
     ).toEqual({
       doctype: "Task",
       documentName: "TASK-1",
+      realtimeRoute: "/rt",
       script: "task-form",
       scope: "form",
       tenantId: "acme"
@@ -391,6 +395,12 @@ describe("Desk client runtime", () => {
     );
     expect(runtime.realtime.presenceUrl("document:acme:Task:TASK-1")).toBe(
       "/api/realtime/presence?topic=document%3Aacme%3ATask%3ATASK-1"
+    );
+    expect(runtime.realtime.documentUrl("Task", "TASK-1", { tenantId: "acme", realtimeRoute: "/rt" })).toBe(
+      "wss://app.example/rt?topic=document%3Aacme%3ATask%3ATASK-1"
+    );
+    expect(runtime.realtime.presenceUrl("document:acme:Task:TASK-1", { realtimeRoute: "/rt" })).toBe(
+      "/rt/presence?topic=document%3Aacme%3ATask%3ATASK-1"
     );
   });
 
@@ -418,6 +428,44 @@ describe("Desk client runtime", () => {
       "/api/realtime/presence?topic=user%3Aacme%3Aowner%2540example.com"
     ]);
     expect(calls.every((call) => call.init.credentials === "same-origin")).toBe(true);
+  });
+
+  it("hydrates generated document presence panels from permissioned realtime snapshots", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const panel = new FakePresencePanel({
+      doctype: "Task",
+      documentName: "TASK-1",
+      realtimeRoute: "/rt",
+      tenantId: "acme"
+    });
+
+    evaluateDeskClient(
+      async (url, init) => {
+        calls.push({ url: String(url), init: init ?? {} });
+        return new Response(JSON.stringify({
+          data: {
+            topic: "document:acme:Task:TASK-1",
+            connections: [
+              { connectionId: "conn-1", userId: "owner@example.com" },
+              { connectionId: "conn-2", userId: "owner@example.com" },
+              { connectionId: "conn-3", userId: "support@example.com" }
+            ]
+          }
+        }), {
+          headers: { "content-type": "application/json" }
+        });
+      },
+      new FakeDocument({ presencePanels: [panel] })
+    );
+    await flushPromises();
+
+    expect(calls.map((call) => call.url)).toEqual([
+      "/rt/presence?topic=document%3Aacme%3ATask%3ATASK-1"
+    ]);
+    expect(calls[0]?.init.credentials).toBe("same-origin");
+    expect(panel.dataset.presenceState).toBe("ready");
+    expect(panel.count.textContent).toBe("2 active collaborators");
+    expect(panel.list.textContent).toBe("owner@example.com, support@example.com");
   });
 
   it("parses realtime subscriptions into events and redacted user notifications", () => {
@@ -717,6 +765,12 @@ function evaluateDeskClient(
   return fakeWindow.cfFrappe;
 }
 
+async function flushPromises(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 class FakeWebSocket {
   readonly listeners: Record<string, Array<(event: unknown) => void>> = {};
   closed?: { readonly code?: number; readonly reason?: string };
@@ -853,14 +907,43 @@ class FakeSubmitter {
   }
 }
 
+class FakePresenceText {
+  textContent = "";
+}
+
+class FakePresencePanel {
+  readonly count = new FakePresenceText();
+  readonly list = new FakePresenceText();
+
+  constructor(readonly dataset: Record<string, string>) {}
+
+  querySelector(selector: string): FakePresenceText | null {
+    if (selector === "[data-cf-frappe-presence-count]") {
+      return this.count;
+    }
+    if (selector === "[data-cf-frappe-presence-list]") {
+      return this.list;
+    }
+    return null;
+  }
+}
+
 class FakeDocument {
   readonly currentScript = undefined;
   readonly readyState = "complete";
   private readonly form: FakeForm | undefined;
+  private readonly presencePanels: readonly FakePresencePanel[];
   private readonly runtime: { readonly dataset: Record<string, string> } | undefined;
 
-  constructor(options: { readonly form?: FakeForm; readonly runtimeDataset?: Record<string, string> } = {}) {
+  constructor(
+    options: {
+      readonly form?: FakeForm;
+      readonly presencePanels?: readonly FakePresencePanel[];
+      readonly runtimeDataset?: Record<string, string>;
+    } = {}
+  ) {
     this.form = options.form;
+    this.presencePanels = options.presencePanels ?? [];
     this.runtime = options.runtimeDataset ? { dataset: options.runtimeDataset } : undefined;
   }
 
@@ -874,5 +957,9 @@ class FakeDocument {
       return this.form ?? null;
     }
     return null;
+  }
+
+  querySelectorAll(selector: string): readonly FakePresencePanel[] {
+    return selector === '[data-cf-frappe-presence="document"]' ? this.presencePanels : [];
   }
 }
