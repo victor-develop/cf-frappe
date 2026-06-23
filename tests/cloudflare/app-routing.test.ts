@@ -1,5 +1,6 @@
 import {
   createDataPatchApplyJob,
+  createDataPatchRollbackJob,
   createJobRegistry,
   createRegistry,
   createInMemoryAccountRecoveryNotifier,
@@ -383,7 +384,7 @@ describe("CloudFrappe Worker routing", () => {
   });
 
   it("enqueues and consumes app-declared data patches through Worker jobs", async () => {
-    const resources = { touched: [] as string[] };
+    const resources = { touched: [] as string[], rolledBack: [] as string[] };
     const log = new InMemoryDataPatchLog();
     const queue = new InMemoryJobQueue();
     const checkedResources: string[] = [];
@@ -402,6 +403,12 @@ describe("CloudFrappe Worker routing", () => {
           run: ({ resources }) => {
             resources.touched.push("crm");
             return { touched: resources.touched.length };
+          },
+          rollback: {
+            run: ({ resources }) => {
+              resources.rolledBack.push("crm");
+              return { rolledBack: resources.rolledBack.length };
+            }
           }
         })
       ]
@@ -413,12 +420,13 @@ describe("CloudFrappe Worker routing", () => {
         log: () => log,
         resources: () => resources,
         clock: fixedClock(now),
-        ids: deterministicIds(["claim-1"])
+        ids: deterministicIds(["claim-1", "rollback-1"])
       },
       jobs: {
         registry: createJobRegistry<any>({
           jobs: [
             createDataPatchApplyJob<any>(),
+            createDataPatchRollbackJob<any>(),
             {
               name: "custom.check",
               handler: ({ resources }) => {
@@ -432,7 +440,7 @@ describe("CloudFrappe Worker routing", () => {
         queue: () => queue,
         resources: () => jobResources,
         clock: fixedClock(now),
-        ids: deterministicIds(["patch-001"])
+        ids: deterministicIds(["patch-001", "patch-rollback-001"])
       }
     });
     const env = {
@@ -483,8 +491,55 @@ describe("CloudFrappe Worker routing", () => {
     );
 
     expect(resources.touched).toEqual(["crm"]);
+    expect(resources.rolledBack).toEqual([]);
     await expect(log.appliedDataPatches()).resolves.toMatchObject([
       { id: "crm.backfill", checksum: "v1", appliedAt: now, result: { touched: 1 } }
+    ]);
+
+    const rollbackEnqueued = await worker.fetch!(
+      cfRequest("http://localhost/api/data-patches/rollback-enqueue?limit=1", { method: "POST" }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(rollbackEnqueued.status).toBe(202);
+    await expect(rollbackEnqueued.json()).resolves.toMatchObject({
+      data: {
+        plan: { patchIds: ["crm.backfill"], limit: 1 },
+        message: {
+          tenantId: "acme",
+          jobName: "cf-frappe.data-patches.rollback",
+          runId: "job_patch-rollback-001",
+          payload: { patchIds: ["crm.backfill"] }
+        }
+      }
+    });
+    const rollbackMessage = queue.queued()[1]!.message;
+
+    await worker.queue?.(
+      {
+        queue: "jobs",
+        metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
+        messages: [
+          {
+            id: "msg_rollback_001",
+            timestamp: new Date(now),
+            body: rollbackMessage,
+            attempts: 1,
+            ack: vi.fn(),
+            retry: vi.fn()
+          } as unknown as Message<JobMessage>
+        ],
+        retryAll: vi.fn(),
+        ackAll: vi.fn()
+      },
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(resources.rolledBack).toEqual(["crm"]);
+    await expect(log.recordedDataPatches()).resolves.toMatchObject([
+      { id: "crm.backfill", checksum: "v1", status: "rolled_back", rolledBackAt: now, rollbackResult: { rolledBack: 1 } }
     ]);
 
     await worker.queue?.(

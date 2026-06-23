@@ -1,5 +1,6 @@
 import {
   createDataPatchApplyJob,
+  createDataPatchRollbackJob,
   createJobRegistry,
   DataPatchQueueService,
   DataPatchService,
@@ -731,6 +732,108 @@ describe("DataPatchService", () => {
     expect(resources.touched).toEqual(["first"]);
   });
 
+  it("enqueues validated data patch rollback plans and executes them through the built-in job", async () => {
+    const resources = { applied: [] as string[], rolledBack: [] as string[] };
+    const log = new InMemoryDataPatchLog();
+    const service = new DataPatchService({
+      log,
+      resources,
+      patches: [
+        defineDataPatch<typeof resources>({
+          id: "core.first",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.applied.push("first");
+          },
+          rollback: {
+            run: ({ resources }) => {
+              resources.rolledBack.push("first");
+              return { rolledBack: resources.rolledBack.length };
+            }
+          }
+        }),
+        defineDataPatch<typeof resources>({
+          id: "crm.second",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.applied.push("second");
+          },
+          rollback: {
+            run: ({ resources }) => {
+              resources.rolledBack.push("second");
+              return { rolledBack: resources.rolledBack.length };
+            }
+          }
+        })
+      ],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-first", "claim-second", "rollback-second"])
+    });
+    const registry = createJobRegistry<{ readonly dataPatches: DataPatchService<typeof resources> }>({
+      jobs: [createDataPatchRollbackJob()]
+    });
+    const queue = new InMemoryJobQueue();
+    const dispatcher = new JobDispatcher({
+      registry,
+      queue,
+      clock: fixedClock(now),
+      ids: deterministicIds(["patch-rollback-001"])
+    });
+    const queueService = new DataPatchQueueService({
+      dataPatches: service,
+      dispatcher
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    await service.apply(admin);
+
+    await expect(
+      queueService.enqueueRollback(admin, {
+        limit: 1,
+        delaySeconds: 45,
+        idempotencyKey: "patches:rollback-second",
+        metadata: { source: "test" }
+      })
+    ).resolves.toMatchObject({
+      plan: { patchIds: ["crm.second"], limit: 1 },
+      message: {
+        tenantId: "acme",
+        jobName: "cf-frappe.data-patches.rollback",
+        runId: "job_patch-rollback-001",
+        idempotencyKey: "patches:rollback-second",
+        payload: {
+          actor: { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },
+          patchIds: ["crm.second"]
+        },
+        metadata: {
+          source: "test",
+          dispatchSource: "data-patches",
+          requestedBy: "admin@example.com"
+        }
+      }
+    });
+    expect(queue.queued()).toEqual([
+      expect.objectContaining({
+        delaySeconds: 45,
+        message: expect.objectContaining({ idempotencyKey: "patches:rollback-second" })
+      })
+    ]);
+    expect(resources.rolledBack).toEqual([]);
+
+    const executor = new JobExecutor({
+      registry,
+      resources: { dataPatches: service },
+      clock: fixedClock(now)
+    });
+    await expect(executor.execute(queue.queued()[0]!.message)).resolves.toEqual({
+      status: "succeeded",
+      result: {
+        rolledBack: [{ id: "crm.second", checksum: "v1", rolledBackAt: now, result: { rolledBack: 1 } }],
+        skipped: []
+      }
+    });
+    expect(resources.rolledBack).toEqual(["second"]);
+  });
+
   it("does not enqueue empty data patch plans", async () => {
     const service = new DataPatchService({
       log: new InMemoryDataPatchLog(),
@@ -752,6 +855,30 @@ describe("DataPatchService", () => {
     await expect(queueService.enqueue(admin)).rejects.toMatchObject({
       code: "BAD_REQUEST",
       message: "No pending data patches to enqueue"
+    });
+  });
+
+  it("does not enqueue empty data patch rollback plans", async () => {
+    const service = new DataPatchService({
+      log: new InMemoryDataPatchLog(),
+      resources: {},
+      patches: []
+    });
+    const registry = createJobRegistry({ jobs: [createDataPatchRollbackJob()] });
+    const queueService = new DataPatchQueueService({
+      dataPatches: service,
+      dispatcher: new JobDispatcher({
+        registry,
+        queue: new InMemoryJobQueue(),
+        clock: fixedClock(now),
+        ids: deterministicIds(["patch-001"])
+      })
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+
+    await expect(queueService.enqueueRollback(admin)).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "No rollbackable data patches to enqueue"
     });
   });
 });

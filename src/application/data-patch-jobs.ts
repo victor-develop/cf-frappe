@@ -1,9 +1,11 @@
 import type {
   DataPatchAdminPort,
   DataPatchApplyOptions,
-  DataPatchApplyPlan
+  DataPatchApplyPlan,
+  DataPatchRollbackOptions,
+  DataPatchRollbackPlan
 } from "./data-patch-service.js";
-import type { DataPatchRunResult } from "./data-patch-runner.js";
+import type { DataPatchRollbackRunResult, DataPatchRunResult } from "./data-patch-runner.js";
 import { badRequest, notFound } from "../core/errors.js";
 import type { JobDefinition, JobPayload } from "../core/jobs.js";
 import type { Actor, DocumentData } from "../core/types.js";
@@ -11,6 +13,7 @@ import type { JobDispatcher } from "./job-dispatcher.js";
 import type { JobMessage } from "../ports/job-queue.js";
 
 export const DATA_PATCH_APPLY_JOB_NAME = "cf-frappe.data-patches.apply";
+export const DATA_PATCH_ROLLBACK_JOB_NAME = "cf-frappe.data-patches.rollback";
 
 export type DataPatchJobActor = DocumentData & {
   readonly id: string;
@@ -24,7 +27,16 @@ export type DataPatchApplyJobPayload = DocumentData & {
   readonly patchIds: readonly string[];
 };
 
+export type DataPatchRollbackJobPayload = DocumentData & {
+  readonly actor: DataPatchJobActor;
+  readonly patchIds: readonly string[];
+};
+
 export interface DataPatchApplyJobResources {
+  readonly dataPatches?: DataPatchAdminPort;
+}
+
+export interface DataPatchRollbackJobResources {
   readonly dataPatches?: DataPatchAdminPort;
 }
 
@@ -32,36 +44,57 @@ export interface DataPatchApplyJobOptions {
   readonly name?: string;
 }
 
-export interface DataPatchQueueOptions extends DataPatchApplyOptions {
+export interface DataPatchRollbackJobOptions {
+  readonly name?: string;
+}
+
+interface DataPatchQueueDeliveryOptions {
   readonly delaySeconds?: number;
   readonly idempotencyKey?: string;
   readonly metadata?: DocumentData;
 }
+
+export interface DataPatchQueueOptions extends DataPatchApplyOptions, DataPatchQueueDeliveryOptions {}
+
+export interface DataPatchRollbackQueueOptions extends DataPatchRollbackOptions, DataPatchQueueDeliveryOptions {}
 
 export interface DataPatchQueueResult {
   readonly plan: DataPatchApplyPlan;
   readonly message: JobMessage<DataPatchApplyJobPayload>;
 }
 
+export interface DataPatchRollbackQueueResult {
+  readonly plan: DataPatchRollbackPlan;
+  readonly message: JobMessage<DataPatchRollbackJobPayload>;
+}
+
 export interface DataPatchQueuePort {
   enqueue(actor: Actor, options?: DataPatchQueueOptions): Promise<DataPatchQueueResult>;
+}
+
+export interface DataPatchRollbackQueuePort {
+  enqueueRollback(actor: Actor, options?: DataPatchRollbackQueueOptions): Promise<DataPatchRollbackQueueResult>;
 }
 
 export interface DataPatchQueueServiceOptions<TResources> {
   readonly dataPatches: DataPatchAdminPort;
   readonly dispatcher: JobDispatcher<TResources>;
+  readonly applyJobName?: string;
   readonly jobName?: string;
+  readonly rollbackJobName?: string;
 }
 
-export class DataPatchQueueService<TResources = unknown> implements DataPatchQueuePort {
+export class DataPatchQueueService<TResources = unknown> implements DataPatchQueuePort, DataPatchRollbackQueuePort {
   private readonly dataPatches: DataPatchAdminPort;
   private readonly dispatcher: JobDispatcher<TResources>;
-  private readonly jobName: string;
+  private readonly applyJobName: string;
+  private readonly rollbackJobName: string;
 
   constructor(options: DataPatchQueueServiceOptions<TResources>) {
     this.dataPatches = options.dataPatches;
     this.dispatcher = options.dispatcher;
-    this.jobName = options.jobName ?? DATA_PATCH_APPLY_JOB_NAME;
+    this.applyJobName = options.applyJobName ?? options.jobName ?? DATA_PATCH_APPLY_JOB_NAME;
+    this.rollbackJobName = options.rollbackJobName ?? DATA_PATCH_ROLLBACK_JOB_NAME;
   }
 
   async enqueue(actor: Actor, options: DataPatchQueueOptions = {}): Promise<DataPatchQueueResult> {
@@ -70,7 +103,33 @@ export class DataPatchQueueService<TResources = unknown> implements DataPatchQue
       throw badRequest("No pending data patches to enqueue");
     }
     const message = await this.dispatcher.dispatch<DataPatchApplyJobPayload>({
-      jobName: this.jobName,
+      jobName: this.applyJobName,
+      payload: {
+        actor: queueActor(actor),
+        patchIds: plan.patchIds
+      },
+      ...(actor.tenantId === undefined ? {} : { tenantId: actor.tenantId }),
+      ...(options.idempotencyKey === undefined ? {} : { idempotencyKey: options.idempotencyKey }),
+      ...(options.delaySeconds === undefined ? {} : { delaySeconds: options.delaySeconds }),
+      metadata: {
+        ...(options.metadata ?? {}),
+        dispatchSource: "data-patches",
+        requestedBy: actor.id
+      }
+    });
+    return { plan, message };
+  }
+
+  async enqueueRollback(
+    actor: Actor,
+    options: DataPatchRollbackQueueOptions = {}
+  ): Promise<DataPatchRollbackQueueResult> {
+    const plan = await this.dataPatches.planRollback(actor, options);
+    if (plan.patchIds.length === 0) {
+      throw badRequest("No rollbackable data patches to enqueue");
+    }
+    const message = await this.dispatcher.dispatch<DataPatchRollbackJobPayload>({
+      jobName: this.rollbackJobName,
       payload: {
         actor: queueActor(actor),
         patchIds: plan.patchIds
@@ -105,6 +164,27 @@ export function createDataPatchApplyJob<TResources extends DataPatchApplyJobReso
         throw badRequest("Data patch apply job requires at least one patch id");
       }
       return runResultJson(await dataPatches.apply(parseJobActor(payload.actor), { patchIds }));
+    }
+  };
+}
+
+export function createDataPatchRollbackJob<
+  TResources extends DataPatchRollbackJobResources = DataPatchRollbackJobResources
+>(options: DataPatchRollbackJobOptions = {}): JobDefinition<JobPayload, TResources> {
+  const name = options.name ?? DATA_PATCH_ROLLBACK_JOB_NAME;
+  return {
+    name,
+    description: "Roll back a validated cf-frappe data patch plan",
+    async handler({ payload, resources }) {
+      const dataPatches = resources.dataPatches;
+      if (dataPatches === undefined) {
+        throw notFound("Data patch service is not available", "DATA_PATCH_NOT_FOUND");
+      }
+      const patchIds = parseJobPatchIds(payload.patchIds);
+      if (patchIds.length === 0) {
+        throw badRequest("Data patch rollback job requires at least one patch id");
+      }
+      return rollbackResultJson(await dataPatches.rollback(parseJobActor(payload.actor), { patchIds }));
     }
   };
 }
@@ -158,6 +238,23 @@ function runResultJson(result: DataPatchRunResult): DocumentData {
       id: record.id,
       checksum: record.checksum,
       appliedAt: record.appliedAt,
+      ...(record.result === undefined ? {} : { result: record.result })
+    }))
+  };
+}
+
+function rollbackResultJson(result: DataPatchRollbackRunResult): DocumentData {
+  return {
+    rolledBack: result.rolledBack.map((record) => ({
+      id: record.id,
+      checksum: record.checksum,
+      rolledBackAt: record.rolledBackAt,
+      ...(record.result === undefined ? {} : { result: record.result })
+    })),
+    skipped: result.skipped.map((record) => ({
+      id: record.id,
+      checksum: record.checksum,
+      rolledBackAt: record.rolledBackAt,
       ...(record.result === undefined ? {} : { result: record.result })
     }))
   };

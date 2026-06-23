@@ -1,4 +1,12 @@
-export type DataPatchRemoteAction = "status" | "plan" | "rollback-plan" | "apply" | "rollback" | "enqueue" | "retry";
+export type DataPatchRemoteAction =
+  | "status"
+  | "plan"
+  | "rollback-plan"
+  | "apply"
+  | "rollback"
+  | "enqueue"
+  | "rollback-enqueue"
+  | "retry";
 
 export interface DataPatchHeaderLiteral {
   readonly kind: "literal";
@@ -111,6 +119,14 @@ export async function runRemoteDataPatchCommand(
       path: "/api/data-patches/enqueue"
     });
     return formatEnqueue(command.url, data);
+  }
+  if (command.action === "rollback-enqueue") {
+    const data = await requestRemoteDataPatch<DataPatchQueueResponse>(command, io, {
+      body: commandBody(command, { includeQueueOptions: true }),
+      method: "POST",
+      path: "/api/data-patches/rollback-enqueue"
+    });
+    return formatRollbackEnqueue(command.url, data);
   }
   if (command.action === "plan") {
     const data = await requestRemoteDataPatch<DataPatchPlanResponse>(command, io, {
@@ -341,6 +357,21 @@ function formatEnqueue(baseUrl: string, result: DataPatchQueueResponse): string 
   const lines = [
     `Enqueued data patch job at ${baseUrl}`,
     `Plan: ${result.plan.patchIds.length === 0 ? "(none)" : result.plan.patchIds.join(", ")}`
+  ];
+  if (result.message.jobName !== undefined || result.message.runId !== undefined) {
+    lines.push(`Job: ${result.message.jobName ?? "(unknown)"} / ${result.message.runId ?? "(unknown)"}`);
+  }
+  if (result.message.idempotencyKey !== undefined) {
+    lines.push(`Idempotency key: ${result.message.idempotencyKey}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+function formatRollbackEnqueue(baseUrl: string, result: DataPatchQueueResponse): string {
+  const lines = [
+    `Enqueued data patch rollback job at ${baseUrl}`,
+    `Rollback plan: ${result.plan.patchIds.length === 0 ? "(none)" : result.plan.patchIds.join(", ")}`
   ];
   if (result.message.jobName !== undefined || result.message.runId !== undefined) {
     lines.push(`Job: ${result.message.jobName ?? "(unknown)"} / ${result.message.runId ?? "(unknown)"}`);

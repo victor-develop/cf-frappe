@@ -1,6 +1,11 @@
 import { Hono } from "hono";
 import type { DataPatchAdminPort, DataPatchApplyOptions } from "../../application/data-patch-service.js";
-import type { DataPatchQueueOptions, DataPatchQueuePort } from "../../application/data-patch-jobs.js";
+import type {
+  DataPatchQueueOptions,
+  DataPatchQueuePort,
+  DataPatchRollbackQueuePort,
+  DataPatchRollbackQueueOptions
+} from "../../application/data-patch-jobs.js";
 import { badRequest } from "../../core/errors.js";
 import type { ActorResolver } from "./actor.js";
 import { readJsonObject } from "./request.js";
@@ -8,6 +13,7 @@ import { readJsonObject } from "./request.js";
 export interface DataPatchApiOptions {
   readonly dataPatches: DataPatchAdminPort;
   readonly dataPatchQueue?: DataPatchQueuePort;
+  readonly dataPatchRollbackQueue?: DataPatchRollbackQueuePort;
   readonly actor: ActorResolver;
   readonly maxJsonBytes?: number;
 }
@@ -99,6 +105,25 @@ export function createDataPatchApi(options: DataPatchApiOptions): Hono {
     });
   }
 
+  if (options.dataPatchRollbackQueue) {
+    app.post("/api/data-patches/rollback-enqueue", async (c) => {
+      const actor = await options.actor(c.req.raw);
+      const enqueueOptions = await dataPatchRollbackQueueOptions(c.req.raw, maxJsonBytes);
+      const data = await options.dataPatchRollbackQueue!.enqueueRollback(actor, enqueueOptions);
+      return c.json({ data }, 202);
+    });
+
+    app.post("/api/data-patches/:id/rollback-enqueue", async (c) => {
+      const actor = await options.actor(c.req.raw);
+      const enqueueOptions = await dataPatchRollbackQueueOptions(c.req.raw, maxJsonBytes, { includePatchIds: false });
+      const data = await options.dataPatchRollbackQueue!.enqueueRollback(actor, {
+        ...enqueueOptions,
+        patchIds: [c.req.param("id")]
+      });
+      return c.json({ data }, 202);
+    });
+  }
+
   return app;
 }
 
@@ -135,6 +160,24 @@ async function dataPatchQueueOptions(
   const delaySeconds = parseDelaySeconds(delayValue);
   return {
     ...apply,
+    ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+    ...(delaySeconds === undefined ? {} : { delaySeconds })
+  };
+}
+
+async function dataPatchRollbackQueueOptions(
+  request: Request,
+  maxJsonBytes: number,
+  options: { readonly includePatchIds?: boolean } = {}
+): Promise<DataPatchRollbackQueueOptions> {
+  const url = new URL(request.url);
+  const body = await readJsonObject(request, { allowEmpty: true, maxJsonBytes });
+  const rollback = dataPatchApplyOptionsFromBody(url, body, { includePatchIds: options.includePatchIds ?? true });
+  const idempotencyKey = parseOptionalNonEmptyString(body.idempotencyKey, "idempotencyKey");
+  const delayValue = Object.hasOwn(body, "delaySeconds") ? body.delaySeconds : undefined;
+  const delaySeconds = parseDelaySeconds(delayValue);
+  return {
+    ...rollback,
     ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
     ...(delaySeconds === undefined ? {} : { delaySeconds })
   };

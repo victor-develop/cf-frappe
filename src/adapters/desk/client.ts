@@ -1094,6 +1094,12 @@ export function renderDeskClientScript(): string {
       rollbackOne: function (patchId) {
         return request(dataPatchPath(patchId, "rollback"), { method: "POST" }).then(unwrapData);
       },
+      rollbackEnqueue: function (options) {
+        return request(dataPatchPath(undefined, "rollback-enqueue"), { method: "POST", body: dataPatchBody(options) }).then(unwrapData);
+      },
+      rollbackEnqueueOne: function (patchId, options) {
+        return request(dataPatchPath(patchId, "rollback-enqueue"), { method: "POST", body: dataPatchBody(options, false) }).then(unwrapData);
+      },
       retry: function (patchId) {
         return request(dataPatchPath(patchId, "retry"), { method: "POST" }).then(unwrapData);
       },

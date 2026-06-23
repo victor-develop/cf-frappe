@@ -151,6 +151,8 @@ interface DeskClientRuntime {
     readonly rollbackPlanOne: (patchId: string) => Promise<unknown>;
     readonly rollback: (options?: Record<string, unknown>) => Promise<unknown>;
     readonly rollbackOne: (patchId: string) => Promise<unknown>;
+    readonly rollbackEnqueue: (options?: Record<string, unknown>) => Promise<unknown>;
+    readonly rollbackEnqueueOne: (patchId: string, options?: Record<string, unknown>) => Promise<unknown>;
     readonly retry: (patchId: string) => Promise<unknown>;
     readonly status: () => Promise<unknown>;
   };
@@ -922,6 +924,18 @@ describe("Desk client runtime", () => {
       idempotencyKey: "patches:single",
       delaySeconds: 10
     });
+    await runtime.dataPatches.rollbackEnqueue({
+      patchIds: ["crm.second"],
+      limit: 1,
+      idempotencyKey: "patches:rollback",
+      delaySeconds: 15
+    });
+    await runtime.dataPatches.rollbackEnqueueOne("crm.second", {
+      patchIds: ["ignored.batch"],
+      limit: 1,
+      idempotencyKey: "patches:rollback-single",
+      delaySeconds: 20
+    });
 
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
       "GET /api/data-patches",
@@ -935,9 +949,13 @@ describe("Desk client runtime", () => {
       "POST /api/data-patches/crm.second/rollback",
       "POST /api/data-patches/crm.second/retry",
       "POST /api/data-patches/enqueue",
-      "POST /api/data-patches/crm.second/enqueue"
+      "POST /api/data-patches/crm.second/enqueue",
+      "POST /api/data-patches/rollback-enqueue",
+      "POST /api/data-patches/crm.second/rollback-enqueue"
     ]);
     expect(calls.map((call) => call.init.credentials)).toEqual([
+      "same-origin",
+      "same-origin",
       "same-origin",
       "same-origin",
       "same-origin",
@@ -963,7 +981,9 @@ describe("Desk client runtime", () => {
       undefined,
       undefined,
       JSON.stringify({ patchIds: ["crm.second"], limit: 1, idempotencyKey: "patches:batch", delaySeconds: 5 }),
-      JSON.stringify({ limit: 1, idempotencyKey: "patches:single", delaySeconds: 10 })
+      JSON.stringify({ limit: 1, idempotencyKey: "patches:single", delaySeconds: 10 }),
+      JSON.stringify({ patchIds: ["crm.second"], limit: 1, idempotencyKey: "patches:rollback", delaySeconds: 15 }),
+      JSON.stringify({ limit: 1, idempotencyKey: "patches:rollback-single", delaySeconds: 20 })
     ]);
   });
 

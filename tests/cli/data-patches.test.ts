@@ -74,6 +74,30 @@ describe("cf-frappe CLI remote data patches", () => {
       limit: 1
     });
 
+    expect(parseCliArgs([
+      "data-patches",
+      "rollback-enqueue",
+      "--url",
+      "https://app.example",
+      "--id",
+      "crm.backfill",
+      "--limit",
+      "1",
+      "--idempotency-key",
+      "patches:rollback",
+      "--delay-seconds",
+      "30"
+    ])).toEqual({
+      kind: "data-patches",
+      action: "rollback-enqueue",
+      url: "https://app.example",
+      headers: [],
+      patchIds: ["crm.backfill"],
+      limit: 1,
+      idempotencyKey: "patches:rollback",
+      delaySeconds: 30
+    });
+
     expect(parseCliArgs(["data-patches", "retry", "--url", "https://app.example", "--id", "core.seed"])).toEqual({
       kind: "data-patches",
       action: "retry",
@@ -383,6 +407,53 @@ describe("cf-frappe CLI remote data patches", () => {
     expect(stdout.text()).toContain("Plan: core.seed");
     expect(stdout.text()).toContain("Job: cf-frappe.data-patches.apply / job_patch-001");
     expect(stdout.text()).toContain("Idempotency key: patches:seed");
+  });
+
+  it("enqueues remote data patch rollback jobs without running rollback inline", async () => {
+    const calls: RemoteCall[] = [];
+    const stdout = textBuffer();
+    const exitCode = await runCli(
+      [
+        "data-patches",
+        "rollback-enqueue",
+        "--url",
+        "https://app.example",
+        "--id",
+        "crm.second",
+        "--idempotency-key",
+        "patches:rollback-second",
+        "--delay-seconds",
+        "30"
+      ],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(calls, {
+          data: {
+            plan: { patchIds: ["crm.second"], requestedPatchIds: ["crm.second"] },
+            message: {
+              runId: "job_patch-rollback-001",
+              jobName: "cf-frappe.data-patches.rollback",
+              idempotencyKey: "patches:rollback-second"
+            }
+          }
+        }, 202),
+        stdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(calls[0]?.url).toBe("https://app.example/api/data-patches/rollback-enqueue");
+    expect(calls[0]?.method).toBe("POST");
+    expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({
+      patchIds: ["crm.second"],
+      idempotencyKey: "patches:rollback-second",
+      delaySeconds: 30
+    });
+    expect(stdout.text()).toContain("Enqueued data patch rollback job at https://app.example");
+    expect(stdout.text()).toContain("Rollback plan: crm.second");
+    expect(stdout.text()).toContain("Job: cf-frappe.data-patches.rollback / job_patch-rollback-001");
+    expect(stdout.text()).toContain("Idempotency key: patches:rollback-second");
   });
 
   it("maps remote data patch API errors to CLI failures", async () => {

@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the data-patch rollback execution slice:
+As of the data-patch rollback queue slice:
 
 - Vitest files: `73`
-- Vitest cases: `743`
+- Vitest cases: `747`
 
 ## Implication
 

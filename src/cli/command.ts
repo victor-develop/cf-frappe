@@ -290,8 +290,8 @@ function parseDataPatchesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--idempotency-key") {
-      if (action !== "enqueue") {
-        return { kind: "invalid", message: "Can only use --idempotency-key with data-patches enqueue" };
+      if (!isDataPatchQueueAction(action)) {
+        return { kind: "invalid", message: "Can only use --idempotency-key with data-patches enqueue commands" };
       }
       const value = rest[index + 1];
       if (value === undefined) {
@@ -305,8 +305,8 @@ function parseDataPatchesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--delay-seconds") {
-      if (action !== "enqueue") {
-        return { kind: "invalid", message: "Can only use --delay-seconds with data-patches enqueue" };
+      if (!isDataPatchQueueAction(action)) {
+        return { kind: "invalid", message: "Can only use --delay-seconds with data-patches enqueue commands" };
       }
       const value = rest[index + 1];
       if (value === undefined) {
@@ -348,9 +348,14 @@ function dataPatchAction(value: string): DataPatchRemoteAction | undefined {
     value === "apply" ||
     value === "rollback" ||
     value === "enqueue" ||
+    value === "rollback-enqueue" ||
     value === "retry"
     ? value
     : undefined;
+}
+
+function isDataPatchQueueAction(action: DataPatchRemoteAction): boolean {
+  return action === "enqueue" || action === "rollback-enqueue";
 }
 
 function parseLiteralHeader(value: string): DataPatchHeaderOption | string {
@@ -598,6 +603,7 @@ function helpText(): string {
     "  cf-frappe data-patches rollback --url <origin> [--id <patchId>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches retry --url <origin> --id <patchId> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches enqueue --url <origin> [--id <patchId>] [--limit <n>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe data-patches rollback-enqueue --url <origin> [--id <patchId>] [--limit <n>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe --help",
     "",
     "Commands:",

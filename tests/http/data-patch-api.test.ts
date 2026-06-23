@@ -1,5 +1,6 @@
 import {
   createDataPatchApplyJob,
+  createDataPatchRollbackJob,
   createJobRegistry,
   createResourceApi,
   DataPatchQueueService,
@@ -440,6 +441,105 @@ describe("data patch api", () => {
     });
   });
 
+  it("enqueues data patch rollback jobs through admin JSON routes", async () => {
+    const services = createServices();
+    const resources = { applied: [] as string[], rolledBack: [] as string[] };
+    const dataPatches = new DataPatchService({
+      log: new InMemoryDataPatchLog(),
+      resources,
+      patches: [
+        defineDataPatch<typeof resources>({
+          id: "core.first",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.applied.push("first");
+          },
+          rollback: {
+            run: ({ resources }) => {
+              resources.rolledBack.push("first");
+            }
+          }
+        }),
+        defineDataPatch<typeof resources>({
+          id: "crm.second",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.applied.push("second");
+          },
+          rollback: {
+            run: ({ resources }) => {
+              resources.rolledBack.push("second");
+            }
+          }
+        })
+      ],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-first", "claim-second"])
+    });
+    const registry = createJobRegistry({ jobs: [createDataPatchRollbackJob()] });
+    const queue = new InMemoryJobQueue();
+    const app = createResourceApi({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: unsafeHeaderActorResolver,
+      dataPatches,
+      dataPatchRollbackQueue: new DataPatchQueueService({
+        dataPatches,
+        dispatcher: new JobDispatcher({
+          registry,
+          queue,
+          clock: fixedClock(now),
+          ids: deterministicIds(["patch-rollback-001", "patch-rollback-002"])
+        })
+      })
+    });
+    await dataPatches.apply({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" });
+
+    const enqueued = await app.request("/api/data-patches/rollback-enqueue?limit=1", {
+      method: "POST",
+      headers: { ...adminHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ idempotencyKey: "patches:rollback-second", delaySeconds: 30 })
+    });
+
+    expect(enqueued.status).toBe(202);
+    await expect(enqueued.json()).resolves.toMatchObject({
+      data: {
+        plan: { patchIds: ["crm.second"], limit: 1 },
+        message: {
+          tenantId: "acme",
+          jobName: "cf-frappe.data-patches.rollback",
+          runId: "job_patch-rollback-001",
+          idempotencyKey: "patches:rollback-second",
+          payload: {
+            actor: { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },
+            patchIds: ["crm.second"]
+          }
+        }
+      }
+    });
+    expect(queue.queued()).toEqual([
+      expect.objectContaining({
+        delaySeconds: 30,
+        message: expect.objectContaining({ idempotencyKey: "patches:rollback-second" })
+      })
+    ]);
+    expect(resources.rolledBack).toEqual([]);
+
+    const single = await app.request("/api/data-patches/crm.second/rollback-enqueue", {
+      method: "POST",
+      headers: { ...adminHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ patchIds: [], idempotencyKey: "patches:route-id" })
+    });
+    expect(single.status).toBe(202);
+    await expect(single.json()).resolves.toMatchObject({
+      data: {
+        plan: { patchIds: ["crm.second"], requestedPatchIds: ["crm.second"] },
+        message: { idempotencyKey: "patches:route-id", payload: { patchIds: ["crm.second"] } }
+      }
+    });
+  });
+
   it("maps invalid data patch apply options to JSON errors", async () => {
     const services = createServices();
     const app = createResourceApi({
@@ -531,7 +631,9 @@ describe("data patch api", () => {
     });
 
     const hidden = await app.request("/api/data-patches/enqueue", { method: "POST", headers: adminHeaders });
+    const hiddenRollback = await app.request("/api/data-patches/rollback-enqueue", { method: "POST", headers: adminHeaders });
 
     expect(hidden.status).toBe(404);
+    expect(hiddenRollback.status).toBe(404);
   });
 });
