@@ -1,5 +1,6 @@
 import {
   CHILD_TABLE_ROW_INDEX_FIELD,
+  CustomFieldService,
   DocumentShareService,
   DocumentService,
   FrameworkError,
@@ -25,7 +26,10 @@ import {
   now,
   noteDocType,
   owner,
-  projectDocType
+  productDocType,
+  projectDocType,
+  salesInvoiceDocType,
+  salesInvoiceItemDocType
 } from "../helpers";
 
 describe("DocumentService", () => {
@@ -470,6 +474,74 @@ describe("DocumentService", () => {
     ]);
     await expect(projections.get("acme", "Sales Invoice", "INV-1")).resolves.toMatchObject({
       data: { items: [{ product: "SKU-1", quantity: 2, rate: 10 }] }
+    });
+  });
+
+  it("applies table custom fields to command validation and event payloads", async () => {
+    const registry = createRegistry({
+      doctypes: [productDocType, salesInvoiceItemDocType, salesInvoiceDocType]
+    });
+    const store = new InMemoryDocumentStore();
+    const customFields = new CustomFieldService({
+      registry,
+      events: store,
+      ids: deterministicIds(["custom-field-1"]),
+      clock: fixedClock(now)
+    });
+    const documents = new DocumentService({
+      registry,
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["product-1", "invoice-1", "invoice-2"]),
+      doctypeResolver: (base, { tenantId }) => customFields.effectiveDocType(base.name, tenantId)
+    });
+    const admin = { id: "admin@example.com", roles: ["System Manager"], tenantId: "acme" };
+    await customFields.saveField({
+      actor: admin,
+      doctype: "Sales Invoice",
+      field: { name: "bonus_items", type: "table", tableOf: "Sales Invoice Item" }
+    });
+    await documents.create({ actor: owner, doctype: "Product", data: { sku: "SKU-1", title: "Widget" } });
+
+    const invoice = await documents.create({
+      actor: owner,
+      doctype: "Sales Invoice",
+      data: {
+        title: "INV-CUSTOM",
+        items: [{ product: "SKU-1", quantity: 1 }],
+        bonus_items: [{ product: "SKU-1", quantity: 2, rate: 0 }]
+      }
+    });
+
+    expect(invoice).toMatchObject({
+      data: {
+        bonus_items: [{ product: "SKU-1", quantity: 2, rate: 0 }]
+      }
+    });
+    await expect(store.readStream(documentStream("acme", "Sales Invoice", "INV-CUSTOM"))).resolves.toMatchObject([
+      {
+        payload: {
+          kind: "DocumentCreated",
+          data: { bonus_items: [{ product: "SKU-1", quantity: 2, rate: 0 }] }
+        }
+      }
+    ]);
+    await expect(
+      documents.create({
+        actor: owner,
+        doctype: "Sales Invoice",
+        data: {
+          title: "INV-BROKEN-CUSTOM",
+          items: [{ product: "SKU-1", quantity: 1 }],
+          bonus_items: [{ product: "Missing", quantity: 0 }]
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: expect.arrayContaining([
+        expect.objectContaining({ field: "bonus_items[0].quantity", code: "min" }),
+        expect.objectContaining({ field: "bonus_items[0].product", code: "link_not_found" })
+      ])
     });
   });
 

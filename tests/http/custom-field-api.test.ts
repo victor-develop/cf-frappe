@@ -10,7 +10,7 @@ import {
   type DocTypeDefinition,
   unsafeHeaderActorResolver
 } from "../../src";
-import { createServices, now } from "../helpers";
+import { createChildTableServices, createServices, now } from "../helpers";
 
 const adminHeaders = {
   "content-type": "application/json",
@@ -223,6 +223,70 @@ describe("custom field api", () => {
       error: { code: "VALIDATION_FAILED" }
     });
   });
+
+  it("applies table custom fields through generated JSON routes", async () => {
+    const { app } = makeChildTableCustomFieldApp();
+    const createdField = await app.request("/api/custom-fields/Sales%20Invoice", {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        field: {
+          name: "bonus_items",
+          type: "table",
+          tableOf: "Sales Invoice Item",
+          inFormView: true
+        },
+        expectedVersion: 0
+      })
+    });
+    expect(createdField.status).toBe(201);
+    await expect(createdField.json()).resolves.toMatchObject({
+      data: { fields: [{ field: { name: "bonus_items", type: "table", tableOf: "Sales Invoice Item" } }] }
+    });
+
+    const meta = await app.request("/api/meta/doctypes/Sales%20Invoice", { headers: adminHeaders });
+    expect(meta.status).toBe(200);
+    await expect(meta.json()).resolves.toMatchObject({
+      data: {
+        fields: expect.arrayContaining([
+          expect.objectContaining({ name: "bonus_items", type: "table", tableOf: "Sales Invoice Item" })
+        ])
+      }
+    });
+
+    await app.request("/api/resource/Product", {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({ sku: "SKU-1", title: "Widget" })
+    });
+    const invoice = await app.request("/api/resource/Sales%20Invoice", {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        title: "INV-CUSTOM-HTTP",
+        items: [{ product: "SKU-1", quantity: 1 }],
+        bonus_items: [{ product: "SKU-1", quantity: 2, rate: 0 }]
+      })
+    });
+    expect(invoice.status).toBe(201);
+    await expect(invoice.json()).resolves.toMatchObject({
+      data: { data: { bonus_items: [{ product: "SKU-1", quantity: 2, rate: 0 }] } }
+    });
+
+    const invalid = await app.request("/api/resource/Sales%20Invoice", {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        title: "INV-BROKEN-CUSTOM-HTTP",
+        items: [{ product: "SKU-1", quantity: 1 }],
+        bonus_items: [{ product: "Missing", quantity: 0 }]
+      })
+    });
+    expect(invalid.status).toBe(422);
+    await expect(invalid.json()).resolves.toMatchObject({
+      error: { code: "VALIDATION_FAILED" }
+    });
+  });
 });
 
 function makeCustomFieldApp(maxJsonBytes = 1_048_576) {
@@ -269,6 +333,43 @@ function makeCustomFieldApp(maxJsonBytes = 1_048_576) {
       actor: unsafeHeaderActorResolver,
       customFields,
       maxJsonBytes
+    })
+  };
+}
+
+function makeChildTableCustomFieldApp() {
+  const services = createChildTableServices(["product-1", "invoice-1", "invoice-2"]);
+  const customFields = new CustomFieldService({
+    registry: services.registry,
+    events: services.store,
+    ids: deterministicIds(["field-1"]),
+    clock: fixedClock(now)
+  });
+  const doctypeResolver = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
+    customFields.effectiveDocType(base.name, context.tenantId);
+  const documents = new DocumentService({
+    registry: services.registry,
+    store: services.store,
+    doctypeResolver,
+    documentShares: services.documentShares,
+    ids: deterministicIds(["doc-product-1", "doc-invoice-1", "doc-invoice-2"]),
+    clock: fixedClock(now)
+  });
+  const queries = new QueryService({
+    registry: services.registry,
+    projections: services.store,
+    doctypeResolver,
+    documentShares: services.documentShares
+  });
+  return {
+    services: { ...services, documents, queries },
+    customFields,
+    app: createResourceApi({
+      registry: services.registry,
+      documents,
+      queries,
+      actor: unsafeHeaderActorResolver,
+      customFields
     })
   };
 }

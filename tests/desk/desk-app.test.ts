@@ -177,6 +177,41 @@ describe("Desk app", () => {
     return { app, services: { ...services, documents, queries, savedFilters, customFields } };
   }
 
+  function makeChildTableCustomFieldDesk(actor = owner) {
+    const services = createChildTableServices(["base-product", "base-invoice"]);
+    const customFields = new CustomFieldService({
+      registry: services.registry,
+      events: services.store,
+      ids: deterministicIds(["custom-field-1"]),
+      clock: fixedClock(now)
+    });
+    const doctypeResolver = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
+      customFields.effectiveDocType(base.name, context.tenantId);
+    const documents = new DocumentService({
+      registry: services.registry,
+      store: services.store,
+      doctypeResolver,
+      documentShares: services.documentShares,
+      ids: deterministicIds(["custom-product-1", "custom-invoice-1"]),
+      clock: fixedClock(now)
+    });
+    const queries = new QueryService({
+      registry: services.registry,
+      projections: services.store,
+      doctypeResolver,
+      documentShares: services.documentShares
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents,
+      queries,
+      documentShares: services.documentShares,
+      customFields,
+      actor: () => actor
+    });
+    return { app, services: { ...services, documents, queries, customFields } };
+  }
+
   function makeLinkedDesk() {
     const services = createLinkedServices(["p1", "p2", "t1"]);
     const app = createDeskApp({
@@ -1684,6 +1719,51 @@ describe("Desk app", () => {
     const savedListHtml = await savedList.text();
     expect(savedListHtml).toContain("Reviewed notes");
     expect(savedListHtml).toContain("Runtime Desk");
+  });
+
+  it("applies table custom fields to generated Desk child-table forms", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"] };
+    const { app, services } = makeChildTableCustomFieldDesk(admin);
+    await services.customFields.saveField({
+      actor: admin,
+      doctype: "Sales Invoice",
+      field: {
+        name: "bonus_items",
+        label: "Bonus Items",
+        type: "table",
+        tableOf: "Sales Invoice Item",
+        inFormView: true
+      }
+    });
+    await services.documents.create({ actor: admin, doctype: "Product", data: { sku: "SKU-1", title: "Widget" } });
+
+    const form = await app.request("/desk/Sales%20Invoice/new");
+    expect(form.status).toBe(200);
+    const html = await form.text();
+    expect(html).toContain("<legend>Bonus Items</legend>");
+    expect(html).toContain('name="bonus_items[0].product"');
+    expect(html).toContain('<option value="SKU-1">Widget</option>');
+
+    const created = await app.request("/desk/Sales%20Invoice", {
+      method: "POST",
+      body: new URLSearchParams({
+        title: "INV-CUSTOM-DESK",
+        "items[0].product": "SKU-1",
+        "items[0].quantity": "1",
+        "bonus_items[0].product": "SKU-1",
+        "bonus_items[0].quantity": "2",
+        "bonus_items[0].rate": "0"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(created.status).toBe(303);
+    expect(created.headers.get("location")).toBe("/desk/Sales%20Invoice/INV-CUSTOM-DESK");
+    await expect(services.queries.getDocument(admin, "Sales Invoice", "INV-CUSTOM-DESK")).resolves.toMatchObject({
+      data: {
+        bonus_items: [{ product: "SKU-1", quantity: 2, rate: 0 }]
+      }
+    });
   });
 
   it("requires custom-field administrators before rendering an empty Desk admin surface", async () => {

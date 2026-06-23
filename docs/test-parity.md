@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document amendment slice:
+As of the parent table custom field slice:
 
 - Vitest files: `73`
-- Vitest cases: `681`
+- Vitest cases: `692`
 
 ## Implication
 

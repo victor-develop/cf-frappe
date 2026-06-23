@@ -16,6 +16,10 @@ export function savedReportsStream(tenantId: TenantId, doctype: DocTypeName, own
   return documentStream(tenantId, "__SavedReports", `${doctype}:${ownerId}`);
 }
 
+export function customFieldsCatalogStream(tenantId: TenantId): StreamName {
+  return documentStream(tenantId, "__CustomFields", "__catalog");
+}
+
 export function customFieldsStream(tenantId: TenantId, doctype: DocTypeName): StreamName {
   return documentStream(tenantId, "__CustomFields", doctype);
 }

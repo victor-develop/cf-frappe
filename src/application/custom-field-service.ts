@@ -1,10 +1,11 @@
 import { badRequest, conflict, FrameworkError, notFound, permissionDenied } from "../core/errors.js";
-import { customFieldsStream } from "../core/streams.js";
+import { customFieldsCatalogStream, customFieldsStream } from "../core/streams.js";
 import {
   DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
   type Actor,
   type DocumentData,
+  type DomainEvent,
   type FieldDefinition,
   type NewDomainEvent,
   type PersistedFieldDefinition,
@@ -47,6 +48,12 @@ export interface DisableCustomFieldCommand {
   readonly metadata?: DocumentData;
 }
 
+interface TenantCustomFieldEvents {
+  readonly catalog: readonly DomainEvent[];
+  readonly legacy: readonly DomainEvent[];
+  readonly catalogVersion: number;
+}
+
 export class CustomFieldService {
   private readonly registry: ModelRegistry;
   private readonly events: EventStore;
@@ -70,14 +77,18 @@ export class CustomFieldService {
 
   async effectiveDocType(doctypeName: string, tenantId: TenantId = DEFAULT_TENANT_ID) {
     const doctype = this.registry.get(doctypeName);
-    const state = await this.stateFor(tenantId, doctype.name);
+    const events = await this.tenantCustomFieldEvents(tenantId);
+    const state = this.stateFromEvents(tenantId, doctype.name, events);
+    const states = this.statesFromEvents(tenantId, events);
     if (state.fields.some((entry) => entry.enabled)) {
-      this.assertCustomFieldsSupportedOn(doctype);
+      this.assertCustomFieldsSupportedOn(doctype, states);
     }
     for (const entry of state.fields) {
       if (entry.enabled) {
         this.assertCustomFieldRuntimeSupported(entry.field);
         this.assertReferencesResolve(entry.field);
+        this.assertTableFieldDoesNotSelfTarget(doctype, entry.field);
+        this.assertTableTargetHasNoCustomFields(entry.field, states);
       }
     }
     return applyCustomFieldsToDocType(doctype, state);
@@ -88,17 +99,21 @@ export class CustomFieldService {
     const doctype = this.registry.get(command.doctype);
     const tenantId = resolveActorTenant(command.actor, command.tenantId);
     const field = normalizeField(command.field);
+    const events = await this.tenantCustomFieldEvents(tenantId);
+    const states = this.statesFromEvents(tenantId, events);
+    const state = this.stateFromEvents(tenantId, doctype.name, events);
     this.assertCustomFieldRuntimeSupported(field);
-    this.assertCustomFieldsSupportedOn(doctype);
+    this.assertCustomFieldsSupportedOn(doctype, states);
     assertCustomFieldCanExtend(doctype, field);
     this.assertReferencesResolve(field);
-    const state = await this.stateFor(tenantId, doctype.name);
+    this.assertTableFieldDoesNotSelfTarget(doctype, field);
+    this.assertTableTargetHasNoCustomFields(field, states);
     ensureExpectedVersion(state, command.expectedVersion);
     const existing = state.fields.find((entry) => entry.field.name === field.name);
     if (existing?.enabled && fieldsEqual(existing.field, field)) {
       return state;
     }
-    const stream = customFieldsStream(tenantId, doctype.name);
+    const stream = customFieldsCatalogStream(tenantId);
     const event = this.event({
       tenantId,
       stream,
@@ -112,7 +127,7 @@ export class CustomFieldService {
       }
     });
     const saved = await this.events.append(stream, state.version, [event]);
-    return foldCustomFields(tenantId, doctype.name, [...(await this.events.readStream(stream, { maxSequence: state.version })), ...saved]);
+    return this.stateFromEvents(tenantId, doctype.name, withSavedCatalogEvents(events, saved));
   }
 
   async disableField(command: DisableCustomFieldCommand): Promise<CustomFieldState> {
@@ -120,7 +135,8 @@ export class CustomFieldService {
     const doctype = this.registry.get(command.doctype);
     const tenantId = resolveActorTenant(command.actor, command.tenantId);
     const fieldName = normalizeRequired(command.fieldName, "Custom field name");
-    const state = await this.stateFor(tenantId, doctype.name);
+    const events = await this.tenantCustomFieldEvents(tenantId);
+    const state = this.stateFromEvents(tenantId, doctype.name, events);
     ensureExpectedVersion(state, command.expectedVersion);
     const existing = state.fields.find((entry) => entry.field.name === fieldName);
     if (!existing) {
@@ -129,7 +145,7 @@ export class CustomFieldService {
     if (!existing.enabled) {
       return state;
     }
-    const stream = customFieldsStream(tenantId, doctype.name);
+    const stream = customFieldsCatalogStream(tenantId);
     const event = this.event({
       tenantId,
       stream,
@@ -143,13 +159,48 @@ export class CustomFieldService {
       }
     });
     const saved = await this.events.append(stream, state.version, [event]);
-    return foldCustomFields(tenantId, doctype.name, [...(await this.events.readStream(stream, { maxSequence: state.version })), ...saved]);
+    return this.stateFromEvents(tenantId, doctype.name, withSavedCatalogEvents(events, saved));
   }
 
   private async stateFor(tenantId: TenantId, doctype: string): Promise<CustomFieldState> {
-    return foldCustomFields(tenantId, doctype, await this.events.readStream(customFieldsStream(tenantId, doctype), {
+    return this.stateFromEvents(tenantId, doctype, await this.tenantCustomFieldEvents(tenantId));
+  }
+
+  private async tenantCustomFieldEvents(tenantId: TenantId): Promise<TenantCustomFieldEvents> {
+    const readOptions = {
       payloadKinds: ["CustomFieldSaved", "CustomFieldDisabled"]
-    }));
+    } as const;
+    const catalog = await this.events.readStream(customFieldsCatalogStream(tenantId), readOptions);
+    const legacy = (
+      await Promise.all(
+        this.registry.list().map((doctype) => this.events.readStream(customFieldsStream(tenantId, doctype.name), readOptions))
+      )
+    ).flat();
+    return {
+      catalog,
+      legacy,
+      catalogVersion: catalog.reduce((version, event) => Math.max(version, event.sequence), 0)
+    };
+  }
+
+  private stateFromEvents(
+    tenantId: TenantId,
+    doctype: string,
+    events: TenantCustomFieldEvents
+  ): CustomFieldState {
+    const legacyForDoctype = events.legacy.filter((event) =>
+      (event.payload.kind === "CustomFieldSaved" || event.payload.kind === "CustomFieldDisabled") &&
+      event.payload.doctypeName === doctype
+    );
+    const folded = foldCustomFields(tenantId, doctype, resequenceForFold([...legacyForDoctype, ...events.catalog]));
+    return Object.freeze({
+      ...folded,
+      version: events.catalogVersion
+    });
+  }
+
+  private statesFromEvents(tenantId: TenantId, events: TenantCustomFieldEvents): readonly CustomFieldState[] {
+    return this.registry.list().map((doctype) => this.stateFromEvents(tenantId, doctype.name, events));
   }
 
   private assertReferencesResolve(field: FieldDefinition): void {
@@ -165,26 +216,76 @@ export class CustomFieldService {
     if (field.type !== "table") {
       return;
     }
-    throw new FrameworkError(
-      "CUSTOM_FIELD_INVALID",
-      `Custom field '${field.name}' cannot be a table field until recursive table overlays are supported`,
-      { status: 400 }
-    );
+    if (field.inListFilter) {
+      throw new FrameworkError(
+        "CUSTOM_FIELD_INVALID",
+        `Custom table field '${field.name}' cannot be a list filter`,
+        { status: 400 }
+      );
+    }
   }
 
-  private assertCustomFieldsSupportedOn(doctype: { readonly name: string }): void {
-    const parent = this.registry
-      .list()
-      .find((candidate) =>
-        candidate.fields.some((field) => field.type === "table" && field.tableOf === doctype.name)
-      );
-    if (!parent) {
+  private assertCustomFieldsSupportedOn(
+    doctype: { readonly name: string },
+    states: readonly CustomFieldState[]
+  ): void {
+    if (!this.isChildTableDocType(doctype.name, states)) {
       return;
     }
     throw new FrameworkError(
       "CUSTOM_FIELD_INVALID",
       `Custom fields on child table DocType '${doctype.name}' are not supported yet`,
       { status: 400 }
+    );
+  }
+
+  private assertTableTargetHasNoCustomFields(
+    field: FieldDefinition,
+    states: readonly CustomFieldState[]
+  ): void {
+    if (field.type !== "table" || field.tableOf === undefined) {
+      return;
+    }
+    const targetState = states.find((state) => state.doctype === field.tableOf);
+    if (!targetState?.fields.some((entry) => entry.enabled)) {
+      return;
+    }
+    throw new FrameworkError(
+      "CUSTOM_FIELD_INVALID",
+      `Custom table field '${field.name}' targets child DocType '${field.tableOf}' with custom fields, which is not supported until recursive table overlays are supported`,
+      { status: 400 }
+    );
+  }
+
+  private assertTableFieldDoesNotSelfTarget(
+    doctype: { readonly name: string },
+    field: FieldDefinition
+  ): void {
+    if (field.type !== "table" || field.tableOf !== doctype.name) {
+      return;
+    }
+    throw new FrameworkError(
+      "CUSTOM_FIELD_INVALID",
+      `Custom table field '${field.name}' cannot target its own DocType '${doctype.name}' until recursive table overlays are supported`,
+      { status: 400 }
+    );
+  }
+
+  private isChildTableDocType(doctypeName: string, states: readonly CustomFieldState[]): boolean {
+    const parent = this.registry
+      .list()
+      .find((candidate) =>
+        candidate.fields.some((field) => field.type === "table" && field.tableOf === doctypeName)
+      );
+    if (parent) {
+      return true;
+    }
+    return states.some((state) =>
+      state.fields.some((entry) =>
+        entry.enabled &&
+        entry.field.type === "table" &&
+        entry.field.tableOf === doctypeName
+      )
     );
   }
 
@@ -276,4 +377,22 @@ function ensureExpectedVersion(state: CustomFieldState, expectedVersion: number 
 
 function fieldsEqual(left: FieldDefinition, right: FieldDefinition): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function withSavedCatalogEvents(
+  events: TenantCustomFieldEvents,
+  saved: readonly DomainEvent[]
+): TenantCustomFieldEvents {
+  return {
+    ...events,
+    catalog: Object.freeze([...events.catalog, ...saved]),
+    catalogVersion: saved.reduce((version, event) => Math.max(version, event.sequence), events.catalogVersion)
+  };
+}
+
+function resequenceForFold(events: readonly DomainEvent[]): readonly DomainEvent[] {
+  return events.map((event, index) => ({
+    ...event,
+    sequence: index + 1
+  }));
 }
