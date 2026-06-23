@@ -492,7 +492,11 @@ describe("Desk app", () => {
     expect(builderHtml).toContain('name="chartXAxisLabel"');
     expect(builderHtml).toContain('name="chartYAxisLabel"');
     expect(builderHtml).toContain('name="formulaLabel"');
+    expect(builderHtml).toContain('name="formulaLeftKind"');
+    expect(builderHtml).toContain('name="formulaLeftLiteral" type="number" step="any"');
     expect(builderHtml).toContain('<select name="formulaOperator">');
+    expect(builderHtml).toContain('name="formulaRightKind"');
+    expect(builderHtml).toContain('name="formulaRightLiteral" type="number" step="any"');
 
     const body = new URLSearchParams();
     body.set("label", "High count desk report");
@@ -500,8 +504,9 @@ describe("Desk app", () => {
     body.append("column", "count");
     body.set("formulaLabel", "Double Count");
     body.set("formulaLeft", "count");
-    body.set("formulaOperator", "add");
-    body.set("formulaRight", "count");
+    body.set("formulaOperator", "multiply");
+    body.set("formulaRightKind", "literal");
+    body.set("formulaRightLiteral", "2");
     body.append("filter", "priority");
     body.set("summaryCount", "1");
     body.append("summary", "count");
@@ -569,7 +574,7 @@ describe("Desk app", () => {
           expect.objectContaining({
             name: "double_count",
             label: "Double Count",
-            formula: { operator: "add", left: "count", right: "count" }
+            formula: { operator: "multiply", left: "count", right: 2 }
           })
         ]
       }
@@ -591,6 +596,30 @@ describe("Desk app", () => {
     await expect(afterDelete.text()).resolves.toContain("No saved reports.");
   });
 
+  it("rejects invalid Desk report-builder formula literal operands without persisting them", async () => {
+    const { app } = makeDesk();
+    const invalidLiteral = new URLSearchParams();
+    invalidLiteral.set("label", "Invalid literal report");
+    invalidLiteral.append("column", "title");
+    invalidLiteral.set("formulaLabel", "Bad Score");
+    invalidLiteral.set("formulaLeft", "count");
+    invalidLiteral.set("formulaOperator", "multiply");
+    invalidLiteral.set("formulaRightKind", "literal");
+    invalidLiteral.set("formulaRightLiteral", "NaN");
+
+    const response = await app.request("/desk/report-builder/Note", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: invalidLiteral
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toContain("Report formula right number must be finite");
+
+    const builder = await app.request("/desk/report-builder/Note");
+    await expect(builder.text()).resolves.toContain("No saved reports.");
+  });
+
   it("builds saved report charts without requiring a matching top-level summary", async () => {
     const { app, services } = makeDesk();
     await services.documents.create({
@@ -608,6 +637,10 @@ describe("Desk app", () => {
     body.set("label", "Chart-only count report");
     body.append("column", "title");
     body.append("column", "count");
+    body.set("formulaLeftKind", "field");
+    body.set("formulaLeft", "");
+    body.set("formulaRightKind", "field");
+    body.set("formulaRight", "");
     body.set("groupBy", "priority");
     body.set("chartType", "bar");
     body.set("chartSummary", "sum_count");

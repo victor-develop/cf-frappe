@@ -28,7 +28,7 @@ import { DOCUMENT_SHARE_PERMISSIONS, documentSharePermissionsForActor } from "..
 import { FrameworkError } from "../../core/errors.js";
 import { can } from "../../core/permissions.js";
 import type { ModelRegistry } from "../../core/registry.js";
-import { isReportChartColor } from "../../core/reports.js";
+import { isReportChartColor, type ReportFormulaOperand } from "../../core/reports.js";
 import { USER_PROFILE_FIELDS, type UserProfileInput } from "../../core/user-profiles.js";
 import {
   canReadWorkspace,
@@ -117,6 +117,7 @@ type SavedReportColumnDefinition = SavedReportDefinition["columns"][number];
 type SavedReportSummaryDefinition = NonNullable<SavedReportDefinition["summaries"]>[number];
 type SavedReportGroupDefinition = NonNullable<SavedReportDefinition["groups"]>[number];
 type SavedReportChartDefinition = NonNullable<SavedReportDefinition["charts"]>[number];
+type DeskFormulaOperandKind = "field" | "literal";
 
 interface ParsedDeskReportChartControls {
   readonly type: DeskReportChartType;
@@ -3319,30 +3320,74 @@ function reportFormulaColumnFor(
   form: URLSearchParams
 ): SavedReportColumnDefinition | undefined {
   const label = stringSearchParamValue(form, "formulaLabel");
-  const left = stringSearchParamValue(form, "formulaLeft");
+  const left = reportFormulaOperandFor(fields, form, "left");
   const operator = optionalEnumSearchParamValue(
     form,
     "formulaOperator",
     REPORT_FORMULA_OPERATORS,
     "Report formula operator"
   );
-  const right = stringSearchParamValue(form, "formulaRight");
+  const right = reportFormulaOperandFor(fields, form, "right");
   if (label === undefined && left === undefined && operator === undefined && right === undefined) {
     return undefined;
   }
   if (label === undefined || left === undefined || operator === undefined || right === undefined) {
-    throw new FrameworkError("BAD_REQUEST", "Report formula requires a label, left field, operator, and right field", {
+    throw new FrameworkError("BAD_REQUEST", "Report formula requires a label, left operand, operator, and right operand", {
       status: 400
     });
   }
-  assertDeskNumericFormulaField(fields, left, "left");
-  assertDeskNumericFormulaField(fields, right, "right");
   return {
     name: reportFormulaColumnName(label),
     label,
     type: "number",
     formula: { operator, left, right }
   };
+}
+
+function reportFormulaOperandFor(
+  fields: ReadonlyMap<string, FieldDefinition>,
+  form: URLSearchParams,
+  side: "left" | "right"
+): ReportFormulaOperand | undefined {
+  const key = side === "left" ? "formulaLeft" : "formulaRight";
+  const literalKey = side === "left" ? "formulaLeftLiteral" : "formulaRightLiteral";
+  const kindKey = side === "left" ? "formulaLeftKind" : "formulaRightKind";
+  const fieldName = stringSearchParamValue(form, key);
+  const literal = stringSearchParamValue(form, literalKey);
+  const kind = reportFormulaOperandKindValue(stringSearchParamValue(form, kindKey), side);
+  if (fieldName === undefined && literal === undefined) {
+    return undefined;
+  }
+  if ((kind ?? "field") === "literal") {
+    if (literal === undefined) {
+      throw new FrameworkError("BAD_REQUEST", `Report formula ${side} number is required`, { status: 400 });
+    }
+    const parsed = Number(literal);
+    if (!Number.isFinite(parsed)) {
+      throw new FrameworkError("BAD_REQUEST", `Report formula ${side} number must be finite`, { status: 400 });
+    }
+    return parsed;
+  }
+  if (fieldName === undefined) {
+    throw new FrameworkError("BAD_REQUEST", `Report formula ${side} field is required`, { status: 400 });
+  }
+  assertDeskNumericFormulaField(fields, fieldName, side);
+  return fieldName;
+}
+
+function reportFormulaOperandKindValue(
+  value: string | undefined,
+  side: "left" | "right"
+): DeskFormulaOperandKind | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === "field" || value === "literal") {
+    return value;
+  }
+  throw new FrameworkError("BAD_REQUEST", `Report formula ${side} operand type must be field or literal`, {
+    status: 400
+  });
 }
 
 function assertDeskNumericFormulaField(

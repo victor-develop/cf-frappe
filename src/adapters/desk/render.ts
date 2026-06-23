@@ -642,7 +642,12 @@ export function renderSavedReportBuilder(
     </fieldset>
     <div class="fields">
       <label class="field"><span>Formula Label</span><input name="formulaLabel"></label>
+      <label class="field"><span>Formula Left Type</span><select name="formulaLeftKind">
+        <option value="field">Field</option>
+        <option value="literal">Number</option>
+      </select></label>
       <label class="field"><span>Formula Left</span><select name="formulaLeft">${formulaFieldOptions}</select></label>
+      <label class="field"><span>Formula Left Number</span><input name="formulaLeftLiteral" type="number" step="any"></label>
       <label class="field"><span>Formula Operator</span><select name="formulaOperator">
         <option value=""></option>
         <option value="add">Add</option>
@@ -650,7 +655,12 @@ export function renderSavedReportBuilder(
         <option value="multiply">Multiply</option>
         <option value="divide">Divide</option>
       </select></label>
+      <label class="field"><span>Formula Right Type</span><select name="formulaRightKind">
+        <option value="field">Field</option>
+        <option value="literal">Number</option>
+      </select></label>
       <label class="field"><span>Formula Right</span><select name="formulaRight">${formulaFieldOptions}</select></label>
+      <label class="field"><span>Formula Right Number</span><input name="formulaRightLiteral" type="number" step="any"></label>
     </div>
     <div class="fields">
       <label class="field"><span>Group By</span><select name="groupBy">${groupOptions}</select></label>

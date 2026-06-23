@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the nested report formula expressions slice:
+As of the Desk report formula literal operand controls slice:
 
 - Vitest files: `73`
-- Vitest cases: `723`
+- Vitest cases: `724`
 
 ## Implication
 
