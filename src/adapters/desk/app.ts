@@ -108,10 +108,12 @@ const MAX_DESK_REPORT_CHART_POINTS = 50;
 const REPORT_CHART_TYPES = ["bar", "line", "pie"] as const;
 const REPORT_CHART_ORDER_BY = ["key", "label", "value"] as const;
 const REPORT_CHART_ORDERS = ["asc", "desc"] as const;
+const REPORT_FORMULA_OPERATORS = ["add", "subtract", "multiply", "divide"] as const;
 
 type DeskReportChartType = (typeof REPORT_CHART_TYPES)[number];
 type DeskReportChartOrderBy = (typeof REPORT_CHART_ORDER_BY)[number];
 type DeskReportChartOrder = (typeof REPORT_CHART_ORDERS)[number];
+type SavedReportColumnDefinition = SavedReportDefinition["columns"][number];
 type SavedReportSummaryDefinition = NonNullable<SavedReportDefinition["summaries"]>[number];
 type SavedReportGroupDefinition = NonNullable<SavedReportDefinition["groups"]>[number];
 type SavedReportChartDefinition = NonNullable<SavedReportDefinition["charts"]>[number];
@@ -2965,7 +2967,11 @@ async function parseDeskSavedReport(
   const columnNames = uniqueFormValues(form, "column");
   const filterNames = uniqueFormValues(form, "filter");
   const summaryNames = uniqueFormValues(form, "summary");
-  const columns = columnNames.map((name) => reportColumnFor(fields, name));
+  const formulaColumn = reportFormulaColumnFor(fields, form);
+  const columns = [
+    ...columnNames.map((name) => reportColumnFor(fields, name)),
+    ...(formulaColumn === undefined ? [] : [formulaColumn])
+  ];
   const filters = filterNames.map((name) => reportFilterFor(fields, name));
   const sumSummaries = summaryNames.map((name) => reportSumSummaryFor(fields, name));
   const summaries = [
@@ -2989,7 +2995,7 @@ async function parseDeskSavedReport(
       ...(summaries.length === 0 ? {} : { summaries }),
       ...(group === undefined ? {} : { groups: [group] }),
       ...(chart === undefined ? {} : { charts: [chart] }),
-      ...(orderBy && columnNames.includes(orderBy) ? { orderBy } : {}),
+      ...(orderBy && columns.some((column) => column.name === orderBy) ? { orderBy } : {}),
       ...(order === "asc" || order === "desc" ? { order } : {})
     }
   };
@@ -3296,7 +3302,7 @@ function truthyDeskParam(value: string | null): boolean {
 function reportColumnFor(
   fields: ReadonlyMap<string, FieldDefinition>,
   name: string
-): SavedReportDefinition["columns"][number] {
+): SavedReportColumnDefinition {
   const field = fields.get(name);
   if (!field || field.hidden) {
     throw new FrameworkError("BAD_REQUEST", `Unknown report column '${name}'`, { status: 400 });
@@ -3306,6 +3312,54 @@ function reportColumnFor(
     label: deskReportFieldLabel(field),
     type: field.type
   };
+}
+
+function reportFormulaColumnFor(
+  fields: ReadonlyMap<string, FieldDefinition>,
+  form: URLSearchParams
+): SavedReportColumnDefinition | undefined {
+  const label = stringSearchParamValue(form, "formulaLabel");
+  const left = stringSearchParamValue(form, "formulaLeft");
+  const operator = optionalEnumSearchParamValue(
+    form,
+    "formulaOperator",
+    REPORT_FORMULA_OPERATORS,
+    "Report formula operator"
+  );
+  const right = stringSearchParamValue(form, "formulaRight");
+  if (label === undefined && left === undefined && operator === undefined && right === undefined) {
+    return undefined;
+  }
+  if (label === undefined || left === undefined || operator === undefined || right === undefined) {
+    throw new FrameworkError("BAD_REQUEST", "Report formula requires a label, left field, operator, and right field", {
+      status: 400
+    });
+  }
+  assertDeskNumericFormulaField(fields, left, "left");
+  assertDeskNumericFormulaField(fields, right, "right");
+  return {
+    name: reportFormulaColumnName(label),
+    label,
+    type: "number",
+    formula: { operator, left, right }
+  };
+}
+
+function assertDeskNumericFormulaField(
+  fields: ReadonlyMap<string, FieldDefinition>,
+  name: string,
+  side: "left" | "right"
+): void {
+  const field = fields.get(name);
+  if (!field || field.hidden || !isDeskNumericReportField(field)) {
+    throw new FrameworkError("BAD_REQUEST", `Unknown report formula ${side} field '${name}'`, { status: 400 });
+  }
+}
+
+function reportFormulaColumnName(label: string): string {
+  const base = label.trim().toLowerCase().replaceAll(/[^a-z0-9_]+/g, "_").replaceAll(/^_+|_+$/g, "");
+  const name = base || "formula";
+  return /^[a-z]/.test(name) ? name : `formula_${name}`;
 }
 
 function reportFilterFor(
@@ -3463,7 +3517,7 @@ function reportChartPalette(value: string | null): readonly string[] {
   return colors;
 }
 
-function optionalEnumSearchParamValue<TValue extends DeskReportChartType | DeskReportChartOrderBy | DeskReportChartOrder>(
+function optionalEnumSearchParamValue<TValue extends string>(
   form: URLSearchParams,
   key: string,
   allowed: readonly TValue[],

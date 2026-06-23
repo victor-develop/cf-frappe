@@ -363,6 +363,9 @@ function buildReportOrderOptions(report: ReportDefinition, doctype: DocTypeDefin
   const fields = new Map(doctype.fields.map((field) => [field.name, field]));
   return report.columns
     .filter((column) => {
+      if (column.formula !== undefined) {
+        return true;
+      }
       const field = fields.get(column.field ?? column.name);
       return field?.type !== "json" && field?.type !== "table";
     })
@@ -404,15 +407,15 @@ interface OrderedReportRow {
 }
 
 class BoundedOrderedReportRows {
+  private readonly columnName: string;
   private readonly direction: 1 | -1;
-  private readonly field: string;
   private readonly heap: OrderedReportRow[] = [];
   private readonly limit: number;
   private readonly report: ReportDefinition;
 
   constructor(report: ReportDefinition, order: ReportOrderControlResult, limit: number) {
     const column = report.columns.find((item) => item.name === order.orderBy);
-    this.field = column?.field ?? column?.name ?? "";
+    this.columnName = column?.name ?? "";
     this.direction = order.order === "desc" ? -1 : 1;
     this.limit = limit;
     this.report = report;
@@ -421,7 +424,7 @@ class BoundedOrderedReportRows {
   add(document: DocumentSnapshot, index: number): void {
     const entry: OrderedReportRow = {
       row: reportRow(document, this.report.columns),
-      sortValue: document.data[this.field],
+      sortValue: reportSortValue(document, this.report.columns, this.columnName),
       index
     };
     if (this.heap.length < this.limit) {
@@ -491,18 +494,30 @@ function sortReportDocuments(
     return documents;
   }
   const column = report.columns.find((item) => item.name === order.orderBy);
-  const field = column?.field ?? column?.name;
-  if (!field) {
+  const columnName = column?.name;
+  if (!columnName) {
     return documents;
   }
   const direction = order.order === "desc" ? -1 : 1;
   return documents
     .map((document, index) => ({ document, index }))
     .sort((left, right) => {
-      const compared = compareDocumentValues(left.document.data[field], right.document.data[field]);
+      const compared = compareDocumentValues(
+        reportSortValue(left.document, report.columns, columnName),
+        reportSortValue(right.document, report.columns, columnName)
+      );
       return compared === 0 ? left.index - right.index : compared * direction;
     })
     .map((item) => item.document);
+}
+
+function reportSortValue(
+  document: DocumentSnapshot,
+  columns: readonly ReportColumnDefinition[],
+  columnName: string
+): JsonValue | undefined {
+  const column = columns.find((item) => item.name === columnName);
+  return column === undefined ? undefined : reportColumnValue(document, column);
 }
 
 function isWorseOrderedRow(left: OrderedReportRow, right: OrderedReportRow, direction: 1 | -1): boolean {
@@ -536,8 +551,41 @@ function matchesReportFilters(document: DocumentSnapshot, report: ReportDefiniti
 
 function reportRow(document: DocumentSnapshot, columns: readonly ReportColumnDefinition[]): ReportRow {
   return Object.fromEntries(
-    columns.map((column) => [column.name, document.data[column.field ?? column.name] ?? null])
+    columns.map((column) => [column.name, reportColumnValue(document, column)])
   ) as ReportRow;
+}
+
+function reportColumnValue(document: DocumentSnapshot, column: ReportColumnDefinition): JsonValue {
+  if (column.formula !== undefined) {
+    return reportFormulaValue(document, column.formula);
+  }
+  return document.data[column.field ?? column.name] ?? null;
+}
+
+function reportFormulaValue(
+  document: DocumentSnapshot,
+  formula: NonNullable<ReportColumnDefinition["formula"]>
+): number | null {
+  const left = numericDocumentField(document, formula.left);
+  const right = numericDocumentField(document, formula.right);
+  if (left === null || right === null) {
+    return null;
+  }
+  switch (formula.operator) {
+    case "add":
+      return left + right;
+    case "subtract":
+      return left - right;
+    case "multiply":
+      return left * right;
+    case "divide":
+      return right === 0 ? null : left / right;
+  }
+}
+
+function numericDocumentField(document: DocumentSnapshot, field: string): number | null {
+  const value = document.data[field];
+  return typeof value === "number" ? value : null;
 }
 
 function reportCsvHeader(columns: readonly ReportColumnDefinition[]): string {

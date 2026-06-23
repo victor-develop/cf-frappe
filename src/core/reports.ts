@@ -8,19 +8,28 @@ export type ReportChartType = "bar" | "line" | "pie";
 export type ReportChartOrderBy = "key" | "label" | "value";
 export type ReportOrder = "asc" | "desc";
 export type ReportChartOrder = ReportOrder;
+export type ReportFormulaOperator = "add" | "subtract" | "multiply" | "divide";
 
 const REPORT_FILTER_OPERATORS = ["eq", "contains", "gte", "lte"] as const;
 const REPORT_FILTER_TYPES = ["text", "longText", "integer", "number", "boolean", "date", "datetime", "select", "link"] as const;
 const REPORT_FIELD_TYPES = ["text", "longText", "integer", "number", "boolean", "date", "datetime", "json", "select", "link", "table"] as const;
 const REPORT_ORDERS = ["asc", "desc"] as const;
 const REPORT_SUMMARY_AGGREGATES = ["count", "sum", "avg", "min", "max"] as const;
+const REPORT_FORMULA_OPERATORS = ["add", "subtract", "multiply", "divide"] as const;
 const REPORT_CHART_COLOR_PATTERN = /^#[0-9A-Fa-f]{3}(?:[0-9A-Fa-f]{3})?$/;
+
+export interface ReportFormulaDefinition {
+  readonly operator: ReportFormulaOperator;
+  readonly left: string;
+  readonly right: string;
+}
 
 export interface ReportColumnDefinition {
   readonly name: string;
   readonly label?: string;
   readonly field?: string;
   readonly type?: FieldType;
+  readonly formula?: ReportFormulaDefinition;
 }
 
 export interface ReportFilterDefinition {
@@ -84,6 +93,14 @@ export interface ReportDefinition {
 
 export function defineReport(definition: ReportDefinition): ReportDefinition {
   assertReportDefinition(definition);
+  const columns = Object.freeze(
+    definition.columns.map((column) =>
+      Object.freeze({
+        ...column,
+        ...(column.formula === undefined ? {} : { formula: Object.freeze({ ...column.formula }) })
+      })
+    )
+  );
   const summaries = definition.summaries ? Object.freeze([...definition.summaries]) : undefined;
   const groups = definition.groups
     ? Object.freeze(
@@ -107,7 +124,7 @@ export function defineReport(definition: ReportDefinition): ReportDefinition {
     : undefined;
   return Object.freeze({
     ...definition,
-    columns: Object.freeze([...definition.columns]),
+    columns,
     ...(definition.filters ? { filters: Object.freeze([...definition.filters]) } : {}),
     ...(summaries ? { summaries } : {}),
     ...(groups ? { groups } : {}),
@@ -144,6 +161,7 @@ export function assertReportDefinition(definition: ReportDefinition): void {
   }
   assertFiltersValid(definition);
   assertSummariesValid(definition);
+  assertFormulaColumnsValid(definition);
   assertDisplayTypesValid(definition);
   assertReportOrderValid(definition);
   assertChartsReferenceGroups(definition);
@@ -163,6 +181,11 @@ export function isReportChartColor(value: string): boolean {
 export function assertReportMatchesDocType(report: ReportDefinition, doctype: DocTypeDefinition): void {
   const fields = new Map(doctype.fields.map((field) => [field.name, field]));
   for (const column of report.columns) {
+    const formula = column.formula;
+    if (formula !== undefined) {
+      assertFormulaMatchesDocType(report.name, { ...column, formula }, fields);
+      continue;
+    }
     const field = column.field ?? column.name;
     if (!fields.has(field)) {
       throw new FrameworkError(
@@ -243,6 +266,9 @@ function assertReportOrderMatchesDocType(
     return;
   }
   const column = report.columns.find((item) => item.name === report.orderBy);
+  if (column?.formula !== undefined) {
+    return;
+  }
   const fieldName = column?.field ?? column?.name;
   const field = fieldName ? fields.get(fieldName) : undefined;
   if (fieldName && (field?.type === "json" || field?.type === "table")) {
@@ -251,6 +277,36 @@ function assertReportOrderMatchesDocType(
       `Report '${report.name}' cannot order by ${field.type} column '${report.orderBy}'`,
       { status: 400 }
     );
+  }
+}
+
+function assertFormulaColumnsValid(report: ReportDefinition): void {
+  for (const column of report.columns) {
+    const formula = column.formula;
+    if (formula === undefined) {
+      continue;
+    }
+    if (column.field !== undefined) {
+      throw new FrameworkError(
+        "REPORT_INVALID",
+        `Report '${report.name}' formula column '${column.name}' cannot also reference field '${column.field}'`,
+        { status: 400 }
+      );
+    }
+    if (!REPORT_FORMULA_OPERATORS.includes(formula.operator)) {
+      throw new FrameworkError(
+        "REPORT_INVALID",
+        `Report '${report.name}' formula column '${column.name}' has invalid operator '${String(formula.operator)}'`,
+        { status: 400 }
+      );
+    }
+    if (column.type !== undefined && column.type !== "integer" && column.type !== "number") {
+      throw new FrameworkError(
+        "REPORT_INVALID",
+        `Report '${report.name}' formula column '${column.name}' must use a numeric display type`,
+        { status: 400 }
+      );
+    }
   }
 }
 
@@ -394,6 +450,38 @@ function assertChartsReferenceGroups(report: ReportDefinition): void {
           { status: 400 }
         );
       }
+    }
+  }
+}
+
+function assertFormulaMatchesDocType(
+  reportName: string,
+  column: ReportColumnDefinition & { readonly formula: ReportFormulaDefinition },
+  fields: ReadonlyMap<string, { readonly type: FieldType }>
+): void {
+  assertFormulaOperandMatchesDocType(reportName, column, column.formula.left, "left");
+  assertFormulaOperandMatchesDocType(reportName, column, column.formula.right, "right");
+
+  function assertFormulaOperandMatchesDocType(
+    name: string,
+    reportColumn: ReportColumnDefinition,
+    fieldName: string,
+    side: "left" | "right"
+  ): void {
+    const field = fields.get(fieldName);
+    if (!field) {
+      throw new FrameworkError(
+        "REPORT_INVALID",
+        `Report '${name}' formula column '${reportColumn.name}' references unknown ${side} field '${fieldName}'`,
+        { status: 400 }
+      );
+    }
+    if (field.type !== "integer" && field.type !== "number") {
+      throw new FrameworkError(
+        "REPORT_INVALID",
+        `Report '${name}' formula column '${reportColumn.name}' requires a numeric ${side} field '${fieldName}'`,
+        { status: 400 }
+      );
     }
   }
 }

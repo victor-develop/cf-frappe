@@ -140,6 +140,51 @@ describe("ReportService", () => {
     ]);
   });
 
+  it("computes formula columns before ordering and CSV export", async () => {
+    const { documents, registry, reports } = createServices(["e1", "e2", "e3", "e4"]);
+    registry.registerReport(
+      defineReport({
+        name: "Count Scores",
+        doctype: "Note",
+        columns: [
+          { name: "title", label: "Title" },
+          {
+            name: "double_count",
+            label: "Double Count",
+            type: "number",
+            formula: { operator: "add", left: "count", right: "count" }
+          },
+          {
+            name: "count_ratio",
+            label: "Count Ratio",
+            type: "number",
+            formula: { operator: "divide", left: "count", right: "count" }
+          }
+        ],
+        orderBy: "double_count",
+        order: "desc",
+        roles: ["User"]
+      })
+    );
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Low", count: 1 }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "High", count: 5 }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Medium", count: 3 }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Zero", count: 0 }) });
+
+    const result = await reports.runReport(owner, "Count Scores", { limit: 4 });
+
+    expect(result.order).toMatchObject({ orderBy: "double_count", order: "desc" });
+    expect(result.rows).toEqual([
+      { title: "High", double_count: 10, count_ratio: 1 },
+      { title: "Medium", double_count: 6, count_ratio: 1 },
+      { title: "Low", double_count: 2, count_ratio: 1 },
+      { title: "Zero", double_count: 0, count_ratio: null }
+    ]);
+
+    const csv = await reports.exportReportCsv(owner, "Count Scores", { limit: 2 });
+    expect(csv.body).toBe("Title,Double Count,Count Ratio\nHigh,10,1\nMedium,6,1");
+  });
+
   it("sorts chart points by metadata before applying maxPoints", async () => {
     const { documents, registry, reports } = createServices(["e1", "e2", "e3", "e4", "e5", "e6"]);
     registry.registerReport(

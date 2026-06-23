@@ -148,7 +148,8 @@ function columnValue(value: Record<string, unknown>): ReportColumnDefinition {
     name: requiredString(value.name, "Saved report column name must be a string"),
     ...optionalStringField(value, "label"),
     ...optionalStringField(value, "field"),
-    ...optionalFieldType(value)
+    ...optionalFieldType(value),
+    ...(value.formula === undefined ? {} : { formula: formulaValue(recordValue(value.formula, "Saved report formula must be an object")) })
   };
 }
 
@@ -199,6 +200,14 @@ function chartValue(value: Record<string, unknown>): ReportChartDefinition {
     ...(value.showValues === undefined ? {} : { showValues: booleanValue(value.showValues, "Saved report chart showValues must be a boolean") }),
     ...optionalStringField(value, "xAxisLabel"),
     ...optionalStringField(value, "yAxisLabel")
+  };
+}
+
+function formulaValue(value: Record<string, unknown>): NonNullable<ReportColumnDefinition["formula"]> {
+  return {
+    operator: requiredString(value.operator, "Saved report formula operator must be a string") as NonNullable<ReportColumnDefinition["formula"]>["operator"],
+    left: requiredString(value.left, "Saved report formula left must be a string"),
+    right: requiredString(value.right, "Saved report formula right must be a string")
   };
 }
 

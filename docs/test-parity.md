@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk report chart drilldowns slice:
+As of the Desk report formula columns slice:
 
 - Vitest files: `73`
-- Vitest cases: `701`
+- Vitest cases: `703`
 
 ## Implication
 

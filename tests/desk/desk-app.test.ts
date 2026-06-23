@@ -491,11 +491,17 @@ describe("Desk app", () => {
     expect(builderHtml).toContain('<select name="chartShowValues">');
     expect(builderHtml).toContain('name="chartXAxisLabel"');
     expect(builderHtml).toContain('name="chartYAxisLabel"');
+    expect(builderHtml).toContain('name="formulaLabel"');
+    expect(builderHtml).toContain('<select name="formulaOperator">');
 
     const body = new URLSearchParams();
     body.set("label", "High count desk report");
     body.append("column", "title");
     body.append("column", "count");
+    body.set("formulaLabel", "Double Count");
+    body.set("formulaLeft", "count");
+    body.set("formulaOperator", "add");
+    body.set("formulaRight", "count");
     body.append("filter", "priority");
     body.set("summaryCount", "1");
     body.append("summary", "count");
@@ -528,6 +534,8 @@ describe("Desk app", () => {
     expect(html).toContain("High count desk report");
     expect(html).toContain("High Count B");
     expect(html.indexOf("High Count B")).toBeLessThan(html.indexOf("High Count A"));
+    expect(html).toContain("<th>Double Count</th>");
+    expect(html).toContain("<td>14</td>");
     expect(html).toContain("<dt>Summaries</dt><dd>Records, Total count</dd>");
     expect(html).toContain("<dt>Groups</dt><dd>By priority</dd>");
     expect(html).toContain("<dt>Charts</dt><dd>Chart</dd>");
@@ -554,6 +562,15 @@ describe("Desk app", () => {
             xAxisLabel: "Priority",
             yAxisLabel: "Total Count"
           })
+        ],
+        columns: [
+          expect.objectContaining({ name: "title" }),
+          expect.objectContaining({ name: "count" }),
+          expect.objectContaining({
+            name: "double_count",
+            label: "Double Count",
+            formula: { operator: "add", left: "count", right: "count" }
+          })
         ]
       }
     });
@@ -563,7 +580,7 @@ describe("Desk app", () => {
     );
     expect(csv.status).toBe(200);
     expect(csv.headers.get("content-disposition")).toBe('attachment; filename="Saved-Report-report_saved-report-1.csv"');
-    await expect(csv.text()).resolves.toBe("title,count\nHigh Count B,7\nHigh Count A,3");
+    await expect(csv.text()).resolves.toBe("title,count,Double Count\nHigh Count B,7,14\nHigh Count A,3,6");
 
     const deleted = await app.request("/desk/report-builder/Note/report_saved-report-1/delete", {
       method: "POST"

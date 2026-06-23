@@ -125,6 +125,58 @@ describe("saved report api", () => {
     await expect(csv.text()).resolves.toBe("Title,Count\nHigh Count B,7");
   });
 
+  it("round-trips formula columns through the report-builder JSON API", async () => {
+    const { app, services } = makeApp();
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Low Count", priority: "Low", count: 1 }) });
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "High Count", priority: "High", count: 4 }) });
+
+    const created = await app.request("/api/report-builder/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({
+        label: "Formula counts",
+        definition: {
+          columns: [
+            { name: "title", label: "Title" },
+            {
+              name: "double_count",
+              label: "Double Count",
+              type: "number",
+              formula: { operator: "add", left: "count", right: "count" }
+            }
+          ],
+          orderBy: "double_count",
+          order: "desc"
+        }
+      })
+    });
+
+    expect(created.status).toBe(201);
+    await expect(created.json()).resolves.toMatchObject({
+      data: {
+        definition: {
+          columns: [
+            { name: "title", label: "Title" },
+            {
+              name: "double_count",
+              label: "Double Count",
+              formula: { operator: "add", left: "count", right: "count" }
+            }
+          ],
+          orderBy: "double_count"
+        }
+      }
+    });
+
+    const run = await app.request("/api/report-builder/Note/report_high-counts/run?limit=1", { headers: userHeaders });
+
+    expect(run.status).toBe(200);
+    await expect(run.json()).resolves.toMatchObject({
+      rows: [{ title: "High Count", double_count: 8 }],
+      order: { orderBy: "double_count", order: "desc" }
+    });
+  });
+
   it("maps malformed saved report JSON to bounded JSON errors", async () => {
     const { app } = makeApp();
 

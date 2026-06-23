@@ -77,7 +77,13 @@ describe("SavedReportService", () => {
       definition: {
         columns: [
           { name: "title", label: "Title" },
-          { name: "count", label: "Count" }
+          { name: "count", label: "Count" },
+          {
+            name: "double_count",
+            label: "Double Count",
+            type: "number",
+            formula: { operator: "add", left: "count", right: "count" }
+          }
         ],
         filters: [{ name: "priority", field: "priority", type: "select", defaultValue: "High" }],
         summaries: [{ name: "total_count", label: "Total Count", aggregate: "sum", field: "count" }],
@@ -90,7 +96,7 @@ describe("SavedReportService", () => {
 
     expect(result).toMatchObject({
       report: { label: "High counts", doctype: "Note" },
-      rows: [{ title: "High Count B", count: 7 }],
+      rows: [{ title: "High Count B", count: 7, double_count: 14 }],
       summary: [{ name: "total_count", value: 10 }],
       total: 2
     });
@@ -103,7 +109,7 @@ describe("SavedReportService", () => {
     });
 
     expect(csv).toMatchObject({ exported: 1, total: 2, truncated: true });
-    expect(csv.body).toBe("Title,Count\nHigh Count B,7");
+    expect(csv.body).toBe("Title,Count,Double Count\nHigh Count B,7,14");
   });
 
   it("round-trips persisted group and chart bounds through saved report events", async () => {
@@ -238,6 +244,26 @@ describe("SavedReportService", () => {
     ).rejects.toMatchObject({
       code: "REPORT_INVALID",
       message: "Report 'Saved Report Draft' column 'missing' references unknown field 'missing'"
+    });
+    await expect(
+      savedReports.save({
+        actor: owner,
+        doctype: "Note",
+        label: "Bad formula",
+        definition: {
+          columns: [
+            {
+              name: "title_score",
+              label: "Title Score",
+              type: "number",
+              formula: { operator: "add", left: "title", right: "count" }
+            }
+          ]
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "REPORT_INVALID",
+      message: "Report 'Saved Report Draft' formula column 'title_score' requires a numeric left field 'title'"
     });
     await expect(
       savedReports.save({

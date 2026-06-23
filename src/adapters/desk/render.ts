@@ -606,6 +606,7 @@ export function renderSavedReportBuilder(
     renderReportBuilderValueCheckbox("summaryCount", "1", "Records", false),
     ...numericFields.map((field) => renderReportBuilderCheckbox("summary", field, false))
   ].join("");
+  const formulaFieldOptions = renderReportBuilderFieldOptions(numericFields);
   const groupOptions = renderReportBuilderFieldOptions(
     visibleFields.filter(isDeskGroupableReportField)
   );
@@ -639,6 +640,18 @@ export function renderSavedReportBuilder(
       <legend>Summaries</legend>
       ${summaryOptions}
     </fieldset>
+    <div class="fields">
+      <label class="field"><span>Formula Label</span><input name="formulaLabel"></label>
+      <label class="field"><span>Formula Left</span><select name="formulaLeft">${formulaFieldOptions}</select></label>
+      <label class="field"><span>Formula Operator</span><select name="formulaOperator">
+        <option value=""></option>
+        <option value="add">Add</option>
+        <option value="subtract">Subtract</option>
+        <option value="multiply">Multiply</option>
+        <option value="divide">Divide</option>
+      </select></label>
+      <label class="field"><span>Formula Right</span><select name="formulaRight">${formulaFieldOptions}</select></label>
+    </div>
     <div class="fields">
       <label class="field"><span>Group By</span><select name="groupBy">${groupOptions}</select></label>
       <label class="field"><span>Chart Type</span><select name="chartType">

@@ -359,7 +359,13 @@ function definitionFromPayload(payload: JsonObject): SavedReportDefinition {
 }
 
 function columnToPayload(column: ReportColumnDefinition): JsonObject {
-  return compactObject({ name: column.name, label: column.label, field: column.field, type: column.type });
+  return compactObject({
+    name: column.name,
+    label: column.label,
+    field: column.field,
+    type: column.type,
+    formula: column.formula === undefined ? undefined : formulaToPayload(column.formula)
+  });
 }
 
 function filterToPayload(filter: ReportFilterDefinition): JsonObject {
@@ -412,13 +418,25 @@ function chartToPayload(chart: ReportChartDefinition): JsonObject {
   });
 }
 
+function formulaToPayload(formula: NonNullable<ReportColumnDefinition["formula"]>): JsonObject {
+  return {
+    operator: formula.operator,
+    left: formula.left,
+    right: formula.right
+  };
+}
+
 function columnFromPayload(payload: JsonObject): ReportColumnDefinition {
   const type = typeof payload.type === "string" ? payload.type as FieldType : undefined;
+  const formula = payload.formula !== undefined && isJsonObject(payload.formula)
+    ? formulaFromPayload(payload.formula)
+    : undefined;
   return {
     name: requiredString(payload.name, "column.name"),
     ...(typeof payload.label === "string" ? { label: payload.label } : {}),
     ...(typeof payload.field === "string" ? { field: payload.field } : {}),
-    ...(type === undefined ? {} : { type })
+    ...(type === undefined ? {} : { type }),
+    ...(formula === undefined ? {} : { formula })
   };
 }
 
@@ -474,6 +492,14 @@ function chartFromPayload(payload: JsonObject): ReportChartDefinition {
     ...(typeof payload.showValues === "boolean" ? { showValues: payload.showValues } : {}),
     ...(typeof payload.xAxisLabel === "string" ? { xAxisLabel: payload.xAxisLabel } : {}),
     ...(typeof payload.yAxisLabel === "string" ? { yAxisLabel: payload.yAxisLabel } : {})
+  };
+}
+
+function formulaFromPayload(payload: JsonObject): NonNullable<ReportColumnDefinition["formula"]> {
+  return {
+    operator: requiredString(payload.operator, "formula.operator") as NonNullable<ReportColumnDefinition["formula"]>["operator"],
+    left: requiredString(payload.left, "formula.left"),
+    right: requiredString(payload.right, "formula.right")
   };
 }
 
