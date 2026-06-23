@@ -254,6 +254,105 @@ describe("file api", () => {
       }
     });
   });
+
+  it("reserves and completes direct uploads through the file API", async () => {
+    const { app, storage } = makeAppFixture(1024, ["reserve", "finalize"], ["direct"]);
+
+    const prepared = await app.request("/api/files/direct-upload", {
+      method: "POST",
+      headers: jsonHeaders("owner@example.com", "User"),
+      body: JSON.stringify({
+        filename: "browser.txt",
+        size: 5,
+        content_type: "text/plain",
+        is_private: false,
+        expiresInSeconds: 60
+      })
+    });
+
+    expect(prepared.status).toBe(201);
+    const preparedBody = await prepared.json() as {
+      data: { readonly name: string; readonly version: number; readonly data: { readonly key: string } };
+      upload: { readonly method: string; readonly url: string; readonly headers: Record<string, string> };
+    };
+    expect(preparedBody).toMatchObject({
+      data: {
+        name: "file_direct",
+        version: 1,
+        data: {
+          filename: "browser.txt",
+          key: "acme/files/file_direct-browser.txt",
+          content_type: "text/plain",
+          size: 5,
+          is_private: false,
+          storage_state: "upload_pending",
+          direct_upload_expires_at: "2026-01-01T00:01:00.000Z"
+        }
+      },
+      upload: {
+        method: "PUT",
+        url: "memory://file-storage/acme%2Ffiles%2Ffile_direct-browser.txt",
+        headers: {
+          "content-type": "text/plain",
+          "content-length": "5"
+        }
+      }
+    });
+
+    const pendingDownload = await app.request("/api/files/file_direct/content", {
+      headers: userHeaders("owner@example.com", "User")
+    });
+    expect(pendingDownload.status).toBe(409);
+    await expect(pendingDownload.json()).resolves.toMatchObject({
+      error: { code: "FILE_UPLOAD_PENDING" }
+    });
+
+    await storage.put({
+      key: preparedBody.data.data.key,
+      body: "hello",
+      contentType: "text/plain",
+      filename: "browser.txt",
+      size: 5
+    });
+
+    const completed = await app.request("/api/files/file_direct/complete-upload", {
+      method: "POST",
+      headers: jsonHeaders("owner@example.com", "User"),
+      body: JSON.stringify({ expectedVersion: preparedBody.data.version })
+    });
+
+    expect(completed.status).toBe(200);
+    await expect(completed.json()).resolves.toMatchObject({
+      data: {
+        name: "file_direct",
+        version: 2,
+        data: {
+          storage_state: "available",
+          etag: '"memory-acme/files/file_direct-browser.txt-5"'
+        }
+      }
+    });
+    const downloaded = await app.request("/api/files/file_direct/content", {
+      headers: userHeaders("guest", "Guest")
+    });
+    expect(downloaded.status).toBe(200);
+    await expect(downloaded.text()).resolves.toBe("hello");
+  });
+
+  it("validates direct upload reservation bodies", async () => {
+    const app = makeApp();
+
+    const response = await app.request("/api/files/direct-upload", {
+      method: "POST",
+      headers: jsonHeaders("owner@example.com", "User"),
+      body: JSON.stringify({ filename: "missing-size.txt" })
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "size must be a non-negative integer" }
+    });
+  });
 });
 
 function makeApp(
@@ -261,8 +360,17 @@ function makeApp(
   documentIds: readonly string[] = ["create"],
   fileIds: readonly string[] = ["object"]
 ) {
+  return makeAppFixture(maxFileBytes, documentIds, fileIds).app;
+}
+
+function makeAppFixture(
+  maxFileBytes = 1024,
+  documentIds: readonly string[] = ["create"],
+  fileIds: readonly string[] = ["object"]
+) {
   const registry = createRegistry({ doctypes: [fileDocType] });
   const store = new InMemoryDocumentStore();
+  const storage = new InMemoryFileStorage();
   const documents = new DocumentService({
     registry,
     store,
@@ -274,12 +382,12 @@ function makeApp(
     registry,
     documents,
     queries,
-    storage: new InMemoryFileStorage(),
+    storage,
     clock: fixedClock(now),
     ids: deterministicIds(fileIds),
     maxFileBytes
   });
-  return createResourceApi({
+  const app = createResourceApi({
     registry,
     documents,
     queries,
@@ -287,6 +395,7 @@ function makeApp(
     files,
     maxFileBytes
   });
+  return { app, storage };
 }
 
 function userHeaders(user: string, roles: string): HeadersInit {
@@ -295,5 +404,12 @@ function userHeaders(user: string, roles: string): HeadersInit {
     "x-cf-frappe-user": user,
     "x-cf-frappe-roles": roles,
     "x-cf-frappe-tenant": "acme"
+  };
+}
+
+function jsonHeaders(user: string, roles: string): HeadersInit {
+  return {
+    ...userHeaders(user, roles),
+    "content-type": "application/json"
   };
 }

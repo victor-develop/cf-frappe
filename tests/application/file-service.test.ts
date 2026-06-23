@@ -9,7 +9,8 @@ import {
   InMemoryFileStorage,
   ModelBackedUserPermissionGrantValidator,
   QueryService,
-  UserPermissionService
+  UserPermissionService,
+  documentStream
 } from "../../src";
 import type { FileStorage, PutFileObjectCommand } from "../../src";
 import { guest, now, owner } from "../helpers";
@@ -221,6 +222,172 @@ describe("FileService", () => {
     });
   });
 
+  it("reserves and finalizes direct browser uploads through event-sourced File metadata", async () => {
+    const services = createFileServices(["reserve", "finalize"], ["direct"]);
+
+    const prepared = await services.files.prepareDirectUpload({
+      actor: owner,
+      filename: "browser.pdf",
+      size: 12,
+      contentType: "application/pdf",
+      isPrivate: false,
+      expiresInSeconds: 60
+    });
+
+    expect(prepared).toMatchObject({
+      snapshot: {
+        doctype: "File",
+        name: "file_direct",
+        version: 1,
+        data: {
+          filename: "browser.pdf",
+          key: "acme/files/file_direct-browser.pdf",
+          content_type: "application/pdf",
+          size: 12,
+          is_private: false,
+          uploaded_by: "owner@example.com",
+          uploaded_at: now,
+          storage_state: "upload_pending",
+          direct_upload_expires_at: "2026-01-01T00:01:00.000Z"
+        }
+      },
+      upload: {
+        method: "PUT",
+        key: "acme/files/file_direct-browser.pdf",
+        url: "memory://file-storage/acme%2Ffiles%2Ffile_direct-browser.pdf",
+        headers: {
+          "content-type": "application/pdf",
+          "content-length": "12"
+        },
+        expiresAt: "2026-01-01T00:01:00.000Z"
+      }
+    });
+    await expect(services.files.download({ actor: owner, name: "file_direct" })).rejects.toMatchObject({
+      code: "FILE_UPLOAD_PENDING",
+      status: 409
+    });
+    await expect(services.files.download({ actor: guest, name: "file_direct" })).rejects.toMatchObject({
+      code: "PERMISSION_DENIED"
+    });
+    await expect(services.files.dashboard(guest)).resolves.toMatchObject({ files: [] });
+
+    await services.storage.put({
+      key: "acme/files/file_direct-browser.pdf",
+      body: "hello world!",
+      contentType: "application/pdf",
+      filename: "browser.pdf",
+      size: 12
+    });
+    await expect(
+      services.files.completeDirectUpload({ actor: owner, name: "file_direct", expectedVersion: 1 })
+    ).resolves.toMatchObject({
+      version: 2,
+      data: {
+        storage_state: "available",
+        etag: '"memory-acme/files/file_direct-browser.pdf-12"'
+      }
+    });
+    await expect(services.files.download({ actor: owner, name: "file_direct" })).resolves.toMatchObject({
+      object: { metadata: { size: 12 } }
+    });
+    await expect(services.files.download({ actor: guest, name: "file_direct" })).resolves.toMatchObject({
+      object: { metadata: { size: 12 } }
+    });
+    await expect(services.store.readStream(documentStream("acme", "File", "file_direct"))).resolves.toMatchObject([
+      {
+        type: "FileDirectUploadReserved",
+        payload: {
+          kind: "DocumentCreated",
+          data: { storage_state: "upload_pending" }
+        }
+      },
+      {
+        type: "FileDirectUploadCompleted",
+        payload: {
+          kind: "DomainCommandApplied",
+          command: "completeDirectUpload",
+          patch: {
+            storage_state: "available",
+            etag: '"memory-acme/files/file_direct-browser.pdf-12"'
+          }
+        }
+      }
+    ]);
+  });
+
+  it("keeps direct uploads pending when finalized object metadata does not match the reservation", async () => {
+    const services = createFileServices(["reserve"], ["direct"]);
+    const prepared = await services.files.prepareDirectUpload({
+      actor: owner,
+      filename: "mismatch.txt",
+      size: 5,
+      contentType: "text/plain"
+    });
+
+    await services.storage.put({
+      key: "acme/files/file_direct-mismatch.txt",
+      body: "too-large",
+      contentType: "text/plain",
+      filename: "mismatch.txt",
+      size: 9
+    });
+
+    await expect(
+      services.files.completeDirectUpload({
+        actor: owner,
+        name: prepared.snapshot.name,
+        expectedVersion: prepared.snapshot.version
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Direct upload object size mismatch"
+    });
+    await expect(services.queries.getDocument(owner, "File", prepared.snapshot.name)).resolves.toMatchObject({
+      version: 1,
+      data: { storage_state: "upload_pending" }
+    });
+  });
+
+  it("rejects same-size direct upload finalization when object content type differs from the reservation", async () => {
+    const services = createFileServices(["reserve"], ["direct"]);
+    const prepared = await services.files.prepareDirectUpload({
+      actor: owner,
+      filename: "same-size.txt",
+      size: 5,
+      contentType: "text/plain",
+      isPrivate: false
+    });
+
+    await services.storage.put({
+      key: "acme/files/file_direct-same-size.txt",
+      body: "hello",
+      contentType: "application/json",
+      filename: "same-size.txt",
+      size: 5
+    });
+
+    await expect(
+      services.files.completeDirectUpload({
+        actor: owner,
+        name: prepared.snapshot.name,
+        expectedVersion: prepared.snapshot.version
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Direct upload object content type mismatch"
+    });
+    await expect(services.queries.getDocument(owner, "File", prepared.snapshot.name)).resolves.toMatchObject({
+      version: 1,
+      data: {
+        content_type: "text/plain",
+        storage_state: "upload_pending"
+      }
+    });
+    await expect(services.files.download({ actor: guest, name: prepared.snapshot.name })).rejects.toMatchObject({
+      code: "PERMISSION_DENIED"
+    });
+  });
+
   it("validates metadata attachment targets before appending file metadata events", async () => {
     const services = createFileServices(["create-1", "metadata-1"], ["object-1"]);
     const uploaded = await services.files.upload({
@@ -428,8 +595,19 @@ class FailingDeleteStorage implements FileStorage {
     return this.storage.put(command);
   }
 
+  head(key: string) {
+    return this.storage.head(key);
+  }
+
   get(key: string) {
     return this.storage.get(key);
+  }
+
+  createDirectUpload(command: Parameters<NonNullable<FileStorage["createDirectUpload"]>>[0]) {
+    if (!this.storage.createDirectUpload) {
+      throw new Error("Direct uploads not supported");
+    }
+    return this.storage.createDirectUpload(command);
   }
 
   async delete(): Promise<void> {

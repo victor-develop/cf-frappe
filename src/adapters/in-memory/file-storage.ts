@@ -1,4 +1,6 @@
 import type {
+  CreateDirectFileUploadCommand,
+  DirectFileUpload,
   FileContent,
   FileObjectMetadata,
   FileStorage,
@@ -31,6 +33,10 @@ export class InMemoryFileStorage implements FileStorage {
     return metadata;
   }
 
+  async head(key: string): Promise<FileObjectMetadata | null> {
+    return this.objects.get(key)?.metadata ?? null;
+  }
+
   async get(key: string): Promise<StoredFileObject | null> {
     const entry = this.objects.get(key);
     if (!entry) {
@@ -39,6 +45,19 @@ export class InMemoryFileStorage implements FileStorage {
     return {
       metadata: entry.metadata,
       body: new Response(entry.bytes.slice().buffer).body as ReadableStream<Uint8Array>
+    };
+  }
+
+  async createDirectUpload(command: CreateDirectFileUploadCommand): Promise<DirectFileUpload> {
+    return {
+      method: "PUT",
+      key: command.key,
+      url: `memory://file-storage/${encodeURIComponent(command.key)}`,
+      headers: {
+        "content-type": command.contentType,
+        "content-length": String(command.size)
+      },
+      expiresAt: command.expiresAt
     };
   }
 

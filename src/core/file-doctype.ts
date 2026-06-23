@@ -12,7 +12,8 @@ export interface FileDocumentData extends DocumentData {
   readonly uploaded_by: string;
   readonly uploaded_at: string;
   readonly etag?: string;
-  readonly storage_state: "available" | "delete_requested";
+  readonly storage_state: "upload_pending" | "available" | "delete_requested";
+  readonly direct_upload_expires_at?: string;
   readonly deletion_requested_at?: string;
   readonly attached_to_doctype?: string;
   readonly attached_to_name?: string;
@@ -37,9 +38,10 @@ export const fileDocType: DocTypeDefinition<FileDocumentData> = defineDocType<Fi
       name: "storage_state",
       label: "Storage State",
       type: "select",
-      options: ["available", "delete_requested"],
+      options: ["upload_pending", "available", "delete_requested"],
       defaultValue: "available"
     },
+    { name: "direct_upload_expires_at", label: "Direct Upload Expires At", type: "datetime", readOnly: true },
     { name: "deletion_requested_at", label: "Deletion Requested At", type: "datetime" },
     { name: "attached_to_doctype", label: "Attached To DocType", type: "text" },
     { name: "attached_to_name", label: "Attached To Name", type: "text" }
@@ -57,7 +59,11 @@ export const fileDocType: DocTypeDefinition<FileDocumentData> = defineDocType<Fi
       roles: ["User"],
       actions: ["read"],
       when: ({ actor, document }) =>
-        Boolean(document && (document.data.uploaded_by === actor.id || document.data.is_private === false))
+        Boolean(
+          document &&
+            (document.data.uploaded_by === actor.id ||
+              (document.data.is_private === false && document.data.storage_state === "available"))
+        )
     },
     {
       roles: ["User"],
@@ -72,7 +78,7 @@ export const fileDocType: DocTypeDefinition<FileDocumentData> = defineDocType<Fi
     {
       roles: ["Guest"],
       actions: ["read"],
-      when: ({ document }) => document?.data.is_private === false
+      when: ({ document }) => document?.data.is_private === false && document.data.storage_state === "available"
     }
   ],
   commands: [
@@ -90,6 +96,14 @@ export const fileDocType: DocTypeDefinition<FileDocumentData> = defineDocType<Fi
       eventType: "FileMetadataUpdated",
       fields: ["filename", "is_private", "attached_to_doctype", "attached_to_name"],
       internal: true,
+      permissionAction: "metadata"
+    },
+    {
+      name: "completeDirectUpload",
+      eventType: "FileDirectUploadCompleted",
+      fields: ["storage_state", "etag"],
+      internal: true,
+      allowReadOnlyFields: true,
       permissionAction: "metadata"
     }
   ],

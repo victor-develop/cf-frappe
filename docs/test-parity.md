@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the resettable job schedule override slice:
+As of the direct file upload reservation/finalization slice:
 
 - Vitest files: `66`
-- Vitest cases: `547`
+- Vitest cases: `555`
 
 ## Implication
 

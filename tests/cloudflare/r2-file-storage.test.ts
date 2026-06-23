@@ -55,6 +55,87 @@ describe("R2FileStorage", () => {
     expect(object?.metadata).toMatchObject({ key: "acme/files/file_1-hello.txt", size: 5 });
     await expect(new Response(object?.body).text()).resolves.toBe("hello");
   });
+
+  it("reads object metadata without downloading bodies", async () => {
+    const calls: string[] = [];
+    const bucket = fakeBucket({
+      async head(key) {
+        calls.push(key);
+        return fakeObject(key, 10, { contentType: "application/pdf" });
+      }
+    });
+
+    const metadata = await new R2FileStorage(bucket).head("acme/files/file_1-report.pdf");
+
+    expect(calls).toEqual(["acme/files/file_1-report.pdf"]);
+    expect(metadata).toMatchObject({
+      key: "acme/files/file_1-report.pdf",
+      size: 10,
+      contentType: "application/pdf",
+      httpEtag: '"etag"'
+    });
+  });
+
+  it("delegates direct upload signing to an injected R2 signer", async () => {
+    const calls: unknown[] = [];
+    const bucket = fakeBucket({});
+    const storage = new R2FileStorage(bucket, {
+      directUploads: {
+        async createUpload(command) {
+          calls.push(command);
+          return {
+            method: "PUT",
+            key: command.key,
+            url: `https://signed.example/${encodeURIComponent(command.key)}`,
+            headers: { "content-type": command.contentType },
+            expiresAt: command.expiresAt
+          };
+        }
+      }
+    });
+
+    const upload = await storage.createDirectUpload({
+      key: "acme/files/file_1-browser.pdf",
+      contentType: "application/pdf",
+      filename: "browser.pdf",
+      size: 12,
+      expiresAt: "2026-01-01T00:15:00.000Z",
+      customMetadata: { tenantId: "acme" }
+    });
+
+    expect(calls).toEqual([
+      {
+        key: "acme/files/file_1-browser.pdf",
+        contentType: "application/pdf",
+        filename: "browser.pdf",
+        size: 12,
+        expiresAt: "2026-01-01T00:15:00.000Z",
+        customMetadata: { tenantId: "acme" }
+      }
+    ]);
+    expect(upload).toEqual({
+      method: "PUT",
+      key: "acme/files/file_1-browser.pdf",
+      url: "https://signed.example/acme%2Ffiles%2Ffile_1-browser.pdf",
+      headers: { "content-type": "application/pdf" },
+      expiresAt: "2026-01-01T00:15:00.000Z"
+    });
+  });
+
+  it("requires an injected signer for direct R2 upload targets", async () => {
+    await expect(
+      new R2FileStorage(fakeBucket({})).createDirectUpload({
+        key: "acme/files/file_1-browser.pdf",
+        contentType: "application/pdf",
+        filename: "browser.pdf",
+        size: 12,
+        expiresAt: "2026-01-01T00:15:00.000Z"
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "R2 direct uploads require a direct upload signer"
+    });
+  });
 });
 
 function fakeBucket(overrides: Partial<R2Bucket>): R2Bucket {

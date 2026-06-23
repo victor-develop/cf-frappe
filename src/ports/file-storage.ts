@@ -11,6 +11,23 @@ export interface PutFileObjectCommand {
   readonly customMetadata?: Readonly<Record<string, string>>;
 }
 
+export interface CreateDirectFileUploadCommand {
+  readonly key: string;
+  readonly contentType: string;
+  readonly filename: string;
+  readonly size: number;
+  readonly expiresAt: string;
+  readonly customMetadata?: Readonly<Record<string, string>>;
+}
+
+export interface DirectFileUpload {
+  readonly method: "PUT" | "POST";
+  readonly key: string;
+  readonly url: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly expiresAt: string;
+}
+
 export interface FileObjectMetadata {
   readonly key: string;
   readonly size: number;
@@ -29,6 +46,8 @@ export interface StoredFileObject {
 
 export interface FileStorage {
   put(command: PutFileObjectCommand): Promise<FileObjectMetadata>;
+  head(key: string): Promise<FileObjectMetadata | null>;
   get(key: string): Promise<StoredFileObject | null>;
+  createDirectUpload?(command: CreateDirectFileUploadCommand): Promise<DirectFileUpload>;
   delete(key: string): Promise<void>;
 }

@@ -48,6 +48,7 @@ export interface CreateDocumentCommand {
   readonly tenantId?: string;
   readonly name?: string;
   readonly metadata?: DocumentData;
+  readonly eventType?: string;
 }
 
 export interface UpdateDocumentCommand {
@@ -278,7 +279,7 @@ export class DocumentService implements DocumentCommandExecutor {
     const event = this.newEvent({
       tenantId,
       stream,
-      type: doctype.events?.create ?? `${doctype.name}Created`,
+      type: command.eventType ?? doctype.events?.create ?? `${doctype.name}Created`,
       doctype: doctype.name,
       documentName: name,
       actorId: command.actor.id,
@@ -460,7 +461,9 @@ export class DocumentService implements DocumentCommandExecutor {
     const normalizedPatch = await this.runBeforeValidate(doctype, compactData(patch), existing);
     const patchWithoutInternalFields = stripInternalTableFields(doctype, normalizedPatch, (name) => this.relatedDocType(name));
     const originIssues = childTableOriginIssues(doctype, normalizedPatch, existing.data, (name) => this.relatedDocType(name));
-    const readOnlyIssues = readonlyIssues(doctype, patchWithoutInternalFields, (name) => this.relatedDocType(name));
+    const readOnlyIssues = commandDefinition.allowReadOnlyFields
+      ? []
+      : readonlyIssues(doctype, patchWithoutInternalFields, (name) => this.relatedDocType(name));
     const patchWithReadOnlyValues = preserveReadOnlyTableValues(
       doctype,
       normalizedPatch,

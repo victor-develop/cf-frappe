@@ -48,6 +48,23 @@ export function createFileApi(options: FileApiOptions): Hono {
     return c.json({ data: uploaded.snapshot, object: uploaded.object }, 201);
   });
 
+  app.post("/api/files/direct-upload", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const body = await readJsonObject(c.req.raw, { maxJsonBytes });
+    const input = directUploadInput(body);
+    const prepared = await options.files.prepareDirectUpload({
+      actor,
+      filename: input.filename,
+      size: input.size,
+      ...(input.contentType === undefined ? {} : { contentType: input.contentType }),
+      ...(input.isPrivate === undefined ? {} : { isPrivate: input.isPrivate }),
+      ...(input.attachedTo === undefined ? {} : { attachedTo: input.attachedTo }),
+      ...(input.expiresInSeconds === undefined ? {} : { expiresInSeconds: input.expiresInSeconds }),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: prepared.snapshot, upload: prepared.upload }, 201);
+  });
+
   app.patch("/api/files/:name", async (c) => {
     const actor = await options.actor(c.req.raw);
     const body = await readJsonObject(c.req.raw, { maxJsonBytes });
@@ -80,6 +97,19 @@ export function createFileApi(options: FileApiOptions): Hono {
     const filename = typeof filenameValue === "string" ? filenameValue : downloaded.snapshot.name;
     headers.set("content-disposition", `attachment; filename="${filename.replace(/["\\]/g, "_")}"`);
     return new Response(downloaded.object.body, { headers });
+  });
+
+  app.post("/api/files/:name/complete-upload", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const body = await readJsonObject(c.req.raw, { maxJsonBytes });
+    const expectedVersion = expectedVersionBody(body);
+    const snapshot = await options.files.completeDirectUpload({
+      actor,
+      name: c.req.param("name"),
+      ...(expectedVersion === undefined ? {} : { expectedVersion }),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: snapshot });
   });
 
   app.delete("/api/files/:name", async (c) => {
@@ -129,6 +159,101 @@ type MutableFileMetadataPatch = {
   attachedTo?: UpdateFileMetadataCommand["attachedTo"];
   expectedVersion?: number;
 };
+
+type DirectUploadInput = {
+  readonly filename: string;
+  readonly size: number;
+  readonly contentType?: string;
+  readonly isPrivate?: boolean;
+  readonly attachedTo?: Exclude<UpdateFileMetadataCommand["attachedTo"], null>;
+  readonly expiresInSeconds?: number;
+};
+
+function directUploadInput(body: Record<string, unknown>): DirectUploadInput {
+  const unknown = Object.keys(body).filter(
+    (key) =>
+      ![
+        "filename",
+        "size",
+        "contentType",
+        "content_type",
+        "isPrivate",
+        "is_private",
+        "attachedTo",
+        "attached_to_doctype",
+        "attached_to_name",
+        "expiresInSeconds"
+      ].includes(key)
+  );
+  if (unknown.length > 0) {
+    throw badRequest(`Unknown direct upload field '${unknown[0]}'`);
+  }
+  if (typeof body.filename !== "string") {
+    throw badRequest("filename must be a string");
+  }
+  if (typeof body.size !== "number" || !Number.isInteger(body.size) || body.size < 0) {
+    throw badRequest("size must be a non-negative integer");
+  }
+  const hasContentType = body.contentType !== undefined;
+  const hasSnakeContentType = body.content_type !== undefined;
+  if (hasContentType && hasSnakeContentType) {
+    throw badRequest("Provide only one of contentType or content_type");
+  }
+  const contentType = hasContentType ? body.contentType : body.content_type;
+  if (contentType !== undefined && typeof contentType !== "string") {
+    throw badRequest("content_type must be a string");
+  }
+  const hasIsPrivate = body.isPrivate !== undefined;
+  const hasSnakeIsPrivate = body.is_private !== undefined;
+  if (hasIsPrivate && hasSnakeIsPrivate) {
+    throw badRequest("Provide only one of isPrivate or is_private");
+  }
+  const isPrivate = hasIsPrivate ? body.isPrivate : body.is_private;
+  if (isPrivate !== undefined && typeof isPrivate !== "boolean") {
+    throw badRequest("is_private must be a boolean");
+  }
+  if (
+    body.expiresInSeconds !== undefined &&
+    (typeof body.expiresInSeconds !== "number" || !Number.isInteger(body.expiresInSeconds))
+  ) {
+    throw badRequest("expiresInSeconds must be an integer");
+  }
+  const hasAttachedTo = body.attachedTo !== undefined;
+  const hasSnakeAttachment = body.attached_to_doctype !== undefined || body.attached_to_name !== undefined;
+  if (hasAttachedTo && hasSnakeAttachment) {
+    throw badRequest("Provide either attachedTo or attached_to_doctype/attached_to_name");
+  }
+  const parsedAttachedTo = hasAttachedTo
+    ? parseAttachedToObject(body.attachedTo)
+    : hasSnakeAttachment
+      ? parseAttachedToFields(body.attached_to_doctype, body.attached_to_name)
+      : undefined;
+  if (parsedAttachedTo === null) {
+    throw badRequest("attachedTo must be an object when reserving a direct upload");
+  }
+  return {
+    filename: body.filename,
+    size: body.size,
+    ...(contentType === undefined ? {} : { contentType }),
+    ...(isPrivate === undefined ? {} : { isPrivate }),
+    ...(parsedAttachedTo === undefined ? {} : { attachedTo: parsedAttachedTo }),
+    ...(body.expiresInSeconds === undefined ? {} : { expiresInSeconds: body.expiresInSeconds })
+  };
+}
+
+function expectedVersionBody(body: Record<string, unknown>): number | undefined {
+  const unknown = Object.keys(body).filter((key) => key !== "expectedVersion");
+  if (unknown.length > 0) {
+    throw badRequest(`Unknown direct upload completion field '${unknown[0]}'`);
+  }
+  if (body.expectedVersion === undefined) {
+    return undefined;
+  }
+  if (typeof body.expectedVersion !== "number" || !Number.isInteger(body.expectedVersion)) {
+    throw badRequest("expectedVersion must be an integer");
+  }
+  return body.expectedVersion;
+}
 
 function fileMetadataPatch(body: Record<string, unknown>): MutableFileMetadataPatch {
   const unknown = Object.keys(body).filter(

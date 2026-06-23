@@ -14,7 +14,7 @@ import {
 } from "../core/types.js";
 import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
-import type { FileContent, FileStorage, StoredFileObject } from "../ports/file-storage.js";
+import type { DirectFileUpload, FileContent, FileObjectMetadata, FileStorage, StoredFileObject } from "../ports/file-storage.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 import { cryptoIdGenerator } from "../ports/id-generator.js";
 
@@ -49,6 +49,26 @@ export interface DownloadFileCommand {
   readonly tenantId?: string;
 }
 
+export interface PrepareDirectUploadCommand {
+  readonly actor: Actor;
+  readonly filename: string;
+  readonly size: number;
+  readonly contentType?: string;
+  readonly tenantId?: string;
+  readonly isPrivate?: boolean;
+  readonly attachedTo?: {
+    readonly doctype: string;
+    readonly name: string;
+  };
+  readonly expiresInSeconds?: number;
+  readonly metadata?: DocumentData;
+}
+
+export interface CompleteDirectUploadCommand extends DownloadFileCommand {
+  readonly expectedVersion?: number;
+  readonly metadata?: DocumentData;
+}
+
 export interface DeleteFileCommand extends DownloadFileCommand {
   readonly expectedVersion?: number;
   readonly metadata?: DocumentData;
@@ -72,6 +92,11 @@ export interface UploadedFile {
   readonly object: StoredFileObject["metadata"];
 }
 
+export interface PreparedDirectUpload {
+  readonly snapshot: DocumentSnapshot;
+  readonly upload: DirectFileUpload;
+}
+
 export interface DownloadedFile {
   readonly snapshot: DocumentSnapshot;
   readonly object: StoredFileObject;
@@ -89,6 +114,8 @@ export interface FileDashboardEntry {
   readonly contentType: string;
   readonly size: number;
   readonly isPrivate: boolean;
+  readonly storageState: string;
+  readonly directUploadExpiresAt?: string;
   readonly uploadedBy: string;
   readonly uploadedAt: string;
   readonly expectedVersion: number;
@@ -188,6 +215,94 @@ export class FileService {
       await this.storage.delete(key).catch(() => undefined);
       throw error;
     }
+  }
+
+  async prepareDirectUpload(command: PrepareDirectUploadCommand): Promise<PreparedDirectUpload> {
+    if (!this.storage.createDirectUpload) {
+      throw badRequest("Direct uploads are not supported by this file storage");
+    }
+    const filename = sanitizeFilename(command.filename);
+    const size = normalizeFileSize(command.size);
+    if (size > this.maxFileBytes) {
+      throw badRequest(`File exceeds ${this.maxFileBytes} bytes`);
+    }
+
+    const contentType = command.contentType ?? "application/octet-stream";
+    const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
+    await this.validateAttachmentTarget(command.actor, tenantId, command.attachedTo);
+    const fileName = this.ids.next("file_");
+    const key = objectKey(tenantId, fileName, filename);
+    const expiresAt = addSeconds(this.clock.now(), normalizeDirectUploadExpiry(command.expiresInSeconds));
+    const data: DocumentData = {
+      filename,
+      key,
+      content_type: contentType,
+      size,
+      is_private: command.isPrivate ?? true,
+      uploaded_by: command.actor.id,
+      uploaded_at: this.clock.now(),
+      storage_state: "upload_pending",
+      direct_upload_expires_at: expiresAt,
+      ...(command.attachedTo
+        ? {
+            attached_to_doctype: command.attachedTo.doctype,
+            attached_to_name: command.attachedTo.name
+          }
+        : {})
+    };
+    this.preflightCreate(command.actor, data);
+    const upload = await this.storage.createDirectUpload({
+      key,
+      contentType,
+      filename,
+      size,
+      expiresAt,
+      customMetadata: {
+        tenantId,
+        uploadedBy: command.actor.id
+      }
+    });
+    const snapshot = await this.documents.create({
+      actor: command.actor,
+      doctype: this.fileDoctype,
+      name: fileName,
+      tenantId,
+      data,
+      eventType: "FileDirectUploadReserved",
+      metadata: command.metadata ?? {}
+    });
+    return { snapshot, upload };
+  }
+
+  async completeDirectUpload(command: CompleteDirectUploadCommand): Promise<DocumentSnapshot> {
+    const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
+    const current = await this.queries.getDocument(command.actor, this.fileDoctype, command.name, tenantId);
+    if (current.data.storage_state === "delete_requested") {
+      throw new FrameworkError("DOCUMENT_DELETED", `${this.fileDoctype}/${command.name} is pending deletion`, {
+        status: 410
+      });
+    }
+    if (current.data.storage_state !== "upload_pending") {
+      throw badRequest(`${this.fileDoctype}/${command.name} is not pending direct upload`);
+    }
+    const object = await this.storage.head(stringField(current, "key"));
+    if (!object) {
+      throw notFound(`${this.fileDoctype}/${command.name} content was not found`);
+    }
+    ensureDirectUploadMatches(current, object);
+    return this.documents.execute({
+      actor: command.actor,
+      doctype: this.fileDoctype,
+      name: command.name,
+      command: "completeDirectUpload",
+      input: {
+        storage_state: "available",
+        etag: object.httpEtag ?? object.etag
+      },
+      ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+      ...(command.expectedVersion === undefined ? {} : { expectedVersion: command.expectedVersion }),
+      metadata: command.metadata ?? {}
+    });
   }
 
   async dashboard(actor: Actor, query: FileDashboardQuery = {}): Promise<FileDashboard> {
@@ -313,6 +428,11 @@ export class FileService {
       command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID
     );
     const key = stringField(snapshot, "key");
+    if (snapshot.data.storage_state === "upload_pending") {
+      throw new FrameworkError("FILE_UPLOAD_PENDING", `${this.fileDoctype}/${command.name} upload has not been finalized`, {
+        status: 409
+      });
+    }
     if (snapshot.data.storage_state === "delete_requested") {
       throw new FrameworkError("DOCUMENT_DELETED", `${this.fileDoctype}/${command.name} is pending deletion`, {
         status: 410
@@ -404,6 +524,10 @@ function fileDashboardEntry(snapshot: DocumentSnapshot): Omit<FileDashboardEntry
     contentType: stringData(snapshot, "content_type"),
     size: numberData(snapshot, "size"),
     isPrivate: snapshot.data.is_private !== false,
+    storageState: stringData(snapshot, "storage_state") || "available",
+    ...(stringData(snapshot, "direct_upload_expires_at")
+      ? { directUploadExpiresAt: stringData(snapshot, "direct_upload_expires_at") }
+      : {}),
     uploadedBy: stringData(snapshot, "uploaded_by"),
     uploadedAt: stringData(snapshot, "uploaded_at"),
     expectedVersion: snapshot.version,
@@ -444,6 +568,45 @@ function byteLength(body: FileContent): number {
     return body.byteLength;
   }
   return body.byteLength;
+}
+
+function normalizeFileSize(size: number): number {
+  if (!Number.isInteger(size) || size < 0) {
+    throw badRequest("size must be a non-negative integer");
+  }
+  return size;
+}
+
+function normalizeDirectUploadExpiry(expiresInSeconds: number | undefined): number {
+  if (expiresInSeconds === undefined) {
+    return 15 * 60;
+  }
+  if (!Number.isInteger(expiresInSeconds) || expiresInSeconds < 60 || expiresInSeconds > 7 * 24 * 60 * 60) {
+    throw badRequest("expiresInSeconds must be between 60 and 604800 seconds");
+  }
+  return expiresInSeconds;
+}
+
+function addSeconds(isoTimestamp: string, seconds: number): string {
+  const timestamp = Date.parse(isoTimestamp);
+  if (!Number.isFinite(timestamp)) {
+    throw badRequest("clock returned an invalid timestamp");
+  }
+  return new Date(timestamp + seconds * 1000).toISOString();
+}
+
+function ensureDirectUploadMatches(snapshot: DocumentSnapshot, object: FileObjectMetadata): void {
+  const expectedSize = numberData(snapshot, "size");
+  if (object.size !== expectedSize) {
+    throw badRequest("Direct upload object size mismatch");
+  }
+  if (normalizeContentType(object.contentType) !== normalizeContentType(stringData(snapshot, "content_type"))) {
+    throw badRequest("Direct upload object content type mismatch");
+  }
+}
+
+function normalizeContentType(value: string | undefined): string {
+  return value?.trim().toLowerCase() ?? "";
 }
 
 function sanitizeFilename(value: string): string {
