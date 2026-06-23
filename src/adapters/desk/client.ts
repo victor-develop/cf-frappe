@@ -132,6 +132,10 @@ export function renderDeskClientScript(): string {
     return withQuery("/api/roles/" + encodePart(role) + "/" + action, tenantParams(options || {}));
   }
 
+  function customFieldPath(doctype, field, options) {
+    return withQuery("/api/custom-fields/" + encodePart(doctype) + (field === undefined ? "" : "/" + encodePart(field)), tenantParams(options || {}));
+  }
+
   function versionBody(options) {
     return options && options.expectedVersion !== undefined ? { expectedVersion: options.expectedVersion } : {};
   }
@@ -160,6 +164,11 @@ export function renderDeskClientScript(): string {
 
   function descriptionBody(input, options) {
     return commandBody(typeof input === "string" ? { description: input } : input, options);
+  }
+
+  function customFieldBody(field, options) {
+    var bodyField = isPlainObject(field) ? withoutKeys(field, ["expectedVersion"]) : field;
+    return Object.assign({ field: bodyField }, versionBody(options));
   }
 
   function savedFilterBody(input) {
@@ -931,6 +940,17 @@ export function renderDeskClientScript(): string {
     linkOptions: function (doctype, field, params) {
       return request(withQuery("/api/link-options/" + encodePart(doctype) + "/" + encodePart(field), params || {})).then(unwrapData);
     },
+    customFields: Object.freeze({
+      disable: function (doctype, field, options) {
+        return request(customFieldPath(doctype, field, options || {}), { method: "DELETE", body: versionBody(options) }).then(unwrapData);
+      },
+      list: function (doctype, options) {
+        return request(customFieldPath(doctype, undefined, options || {})).then(unwrapData);
+      },
+      save: function (doctype, field, options) {
+        return request(customFieldPath(doctype, undefined, options || {}), { method: "POST", body: customFieldBody(field, options) }).then(unwrapData);
+      }
+    }),
     form: Object.freeze({
       current: function () {
         var binding = currentFormBinding();

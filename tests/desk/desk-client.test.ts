@@ -103,6 +103,19 @@ interface DeskClientRuntime {
     readonly get: (role: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly list: (options?: { readonly tenant?: string }) => Promise<unknown>;
   };
+  readonly customFields: {
+    readonly disable: (
+      doctype: string,
+      field: string,
+      options?: { readonly expectedVersion?: number; readonly tenant?: string }
+    ) => Promise<unknown>;
+    readonly list: (doctype: string, options?: { readonly tenant?: string }) => Promise<unknown>;
+    readonly save: (
+      doctype: string,
+      field: Record<string, unknown>,
+      options?: { readonly expectedVersion?: number; readonly tenant?: string }
+    ) => Promise<unknown>;
+  };
   readonly files: {
     readonly bulkDelete: (files: readonly DeskBulkFileSelection[]) => Promise<unknown>;
     readonly bulkUpdateMetadata: (
@@ -700,6 +713,48 @@ describe("Desk client runtime", () => {
       JSON.stringify({ description: "Owns escalations", expectedVersion: 1 }),
       JSON.stringify({ expectedVersion: 2 }),
       JSON.stringify({ expectedVersion: 3 })
+    ]);
+  });
+
+  it("wraps event-sourced custom field APIs with tenant and version metadata", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { doctype: "Task Type", version: 2, fields: [{ name: "severity" }] } }), {
+        headers: { "content-type": "application/json" },
+        status: (init?.method ?? "GET") === "POST" ? 201 : 200
+      });
+    });
+    const expectedField = {
+      name: "severity",
+      label: "Severity",
+      type: "Select",
+      options: ["Low", "High"],
+      inListFilter: true
+    };
+    const field = {
+      ...expectedField,
+      expectedVersion: 99
+    };
+
+    await expect(runtime.customFields.list("Task Type", { tenant: "acme/east" })).resolves.toEqual({
+      doctype: "Task Type",
+      version: 2,
+      fields: [{ name: "severity" }]
+    });
+    await runtime.customFields.save("Task Type", field, { expectedVersion: 1, tenant: "acme/east" });
+    await runtime.customFields.disable("Task Type", "severity/level", { expectedVersion: 2, tenant: "acme/east" });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/custom-fields/Task%20Type?tenant=acme%2Feast",
+      "POST /api/custom-fields/Task%20Type?tenant=acme%2Feast",
+      "DELETE /api/custom-fields/Task%20Type/severity%2Flevel?tenant=acme%2Feast"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin"]);
+    expect(calls.map((call) => call.init.body)).toEqual([
+      undefined,
+      JSON.stringify({ field: expectedField, expectedVersion: 1 }),
+      JSON.stringify({ expectedVersion: 2 })
     ]);
   });
 
