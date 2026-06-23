@@ -653,6 +653,13 @@ export function renderSavedReportBuilder(
       <label class="field"><span>Chart Points</span><input name="chartMaxPoints" type="number" min="1" max="50"></label>
     </div>
     <div class="fields">
+      <label class="field"><span>Chart Palette</span><input name="chartPalette" placeholder="#1f6feb, #2e7d32"></label>
+      <label class="field"><span>Chart Values</span><select name="chartShowValues">
+        <option value="true" selected>Show</option>
+        <option value="false">Hide</option>
+      </select></label>
+    </div>
+    <div class="fields">
       <label class="field"><span>Order By</span><select name="orderBy">${orderOptions}</select></label>
       <label class="field"><span>Order</span><select name="order">
         <option value="asc">Ascending</option>

@@ -27,6 +27,7 @@ import { DOCUMENT_SHARE_PERMISSIONS, documentSharePermissionsForActor } from "..
 import { FrameworkError } from "../../core/errors.js";
 import { can } from "../../core/permissions.js";
 import type { ModelRegistry } from "../../core/registry.js";
+import { isReportChartColor } from "../../core/reports.js";
 import { USER_PROFILE_FIELDS, type UserProfileInput } from "../../core/user-profiles.js";
 import {
   canReadWorkspace,
@@ -119,6 +120,8 @@ interface ParsedDeskReportChartControls {
   readonly maxPoints: number;
   readonly orderBy?: DeskReportChartOrderBy;
   readonly order?: DeskReportChartOrder;
+  readonly colors?: readonly string[];
+  readonly showValues: boolean;
 }
 
 export interface DeskAppOptions {
@@ -3399,10 +3402,13 @@ function parseReportChartControls(form: URLSearchParams): ParsedDeskReportChartC
     "Report chart max points",
     MAX_DESK_REPORT_CHART_POINTS
   ) ?? DEFAULT_DESK_REPORT_CHART_MAX_POINTS;
+  const colors = reportChartPalette(form.get("chartPalette"));
   return {
     type: chartType,
     summary: stringSearchParamValue(form, "chartSummary") ?? "record_count",
     maxPoints,
+    ...(colors.length === 0 ? {} : { colors }),
+    showValues: optionalBooleanSearchParamValue(form, "chartShowValues", "Report chart show values") ?? true,
     ...(orderBy === undefined ? {} : { orderBy }),
     ...(order === undefined ? {} : { order })
   };
@@ -3430,8 +3436,18 @@ function reportChartFor(
     maxPoints: controls.maxPoints,
     ...(controls.orderBy === undefined ? {} : { orderBy: controls.orderBy }),
     ...(controls.order === undefined ? {} : { order: controls.order }),
-    showValues: true
+    ...(controls.colors === undefined ? {} : { colors: controls.colors }),
+    showValues: controls.showValues
   };
+}
+
+function reportChartPalette(value: string | null): readonly string[] {
+  const colors = commaListFormValue(value);
+  const invalid = colors.find((color) => !isReportChartColor(color));
+  if (invalid !== undefined) {
+    throw new FrameworkError("BAD_REQUEST", `Report chart color '${invalid}' is invalid`, { status: 400 });
+  }
+  return colors;
 }
 
 function optionalEnumSearchParamValue<TValue extends DeskReportChartType | DeskReportChartOrderBy | DeskReportChartOrder>(

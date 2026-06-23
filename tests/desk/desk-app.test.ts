@@ -484,6 +484,8 @@ describe("Desk app", () => {
     expect(builderHtml).toContain('<option value="priority">priority</option>');
     expect(builderHtml).toContain('<select name="chartType">');
     expect(builderHtml).toContain('<option value="sum_count">Total count</option>');
+    expect(builderHtml).toContain('name="chartPalette"');
+    expect(builderHtml).toContain('<select name="chartShowValues">');
 
     const body = new URLSearchParams();
     body.set("label", "High count desk report");
@@ -498,6 +500,8 @@ describe("Desk app", () => {
     body.set("chartOrderBy", "value");
     body.set("chartOrder", "desc");
     body.set("chartMaxPoints", "3");
+    body.set("chartPalette", "#123456, #abcdef");
+    body.set("chartShowValues", "false");
     body.set("orderBy", "count");
     body.set("order", "desc");
     const saved = await app.request("/desk/report-builder/Note", {
@@ -524,9 +528,21 @@ describe("Desk app", () => {
     expect(html).toContain("<span>Total count</span><strong>10</strong>");
     expect(html).toContain("By priority");
     expect(html).toContain("chart-svg chart-bar");
+    expect(html).toContain("fill: #123456");
+    expect(html).not.toContain('text-anchor="middle">10</text>');
     expect(html).toContain('<select id="filter-priority" name="filter_priority">');
     expect(html).toContain("/desk/report-builder/Note/report_saved-report-1/export.csv?filter_priority=High&amp;order_by=count&amp;order=desc");
     expect(html).toContain('action="/desk/report-builder/Note/report_saved-report-1/delete"');
+    await expect(services.savedReports.get(owner, "Note", "report_saved-report-1")).resolves.toMatchObject({
+      definition: {
+        charts: [
+          expect.objectContaining({
+            colors: ["#123456", "#abcdef"],
+            showValues: false
+          })
+        ]
+      }
+    });
 
     const csv = await app.request(
       "/desk/report-builder/Note/report_saved-report-1/export.csv?filter_priority=High&order_by=count&order=desc"
@@ -656,6 +672,42 @@ describe("Desk app", () => {
 
     expect(invalidChartLimit.status).toBe(400);
     await expect(invalidChartLimit.text()).resolves.toContain("Report chart max points must be at most 50");
+
+    const invalidChartColorBody = new URLSearchParams();
+    invalidChartColorBody.set("label", "Invalid chart color report");
+    invalidChartColorBody.append("column", "title");
+    invalidChartColorBody.set("groupBy", "priority");
+    invalidChartColorBody.set("chartType", "bar");
+    invalidChartColorBody.set("chartPalette", "#123456, blue");
+    const invalidChartColor = await app.request("/desk/report-builder/Note", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: invalidChartColorBody
+    });
+
+    expect(invalidChartColor.status).toBe(400);
+    await expect(invalidChartColor.text()).resolves.toContain("Report chart color &#39;blue&#39; is invalid");
+
+    const builder = await app.request("/desk/report-builder/Note");
+    await expect(builder.text()).resolves.toContain("No saved reports.");
+  });
+
+  it("rejects invalid saved report chart display controls without persisting them", async () => {
+    const { app } = makeDesk();
+    const invalidValuesBody = new URLSearchParams();
+    invalidValuesBody.set("label", "Invalid chart values report");
+    invalidValuesBody.append("column", "title");
+    invalidValuesBody.set("groupBy", "priority");
+    invalidValuesBody.set("chartType", "bar");
+    invalidValuesBody.set("chartShowValues", "maybe");
+    const invalidValues = await app.request("/desk/report-builder/Note", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: invalidValuesBody
+    });
+
+    expect(invalidValues.status).toBe(400);
+    await expect(invalidValues.text()).resolves.toContain("Report chart show values must be true or false");
 
     const builder = await app.request("/desk/report-builder/Note");
     await expect(builder.text()).resolves.toContain("No saved reports.");
