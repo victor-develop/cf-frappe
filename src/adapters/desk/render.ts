@@ -15,7 +15,7 @@ import {
   type ResolvedFormView,
   type ResolvedListView
 } from "../../core/types.js";
-import { isReportChartColor, type ReportDefinition } from "../../core/reports.js";
+import { isReportChartColor, type ReportDefinition, type ReportFilterOperator } from "../../core/reports.js";
 import type { ClientScriptDefinition, ClientScriptScope } from "../../core/client-script.js";
 import type { WorkspaceDefinition, WorkspaceShortcutKind } from "../../core/workspace.js";
 import type {
@@ -609,7 +609,7 @@ export function renderSavedReportBuilder(
     .join("");
   const filterOptions = visibleFields
     .filter(isDeskGroupableReportField)
-    .map((field) => renderReportBuilderCheckbox("filter", field, false))
+    .map(renderReportBuilderFilterControls)
     .join("");
   const numericFields = visibleFields.filter(isDeskNumericReportField);
   const summaryOptions = [
@@ -774,6 +774,71 @@ function renderReportBuilderValueCheckbox(name: string, value: string, label: st
     <input type="checkbox" name="${escapeHtml(name)}" value="${escapeHtml(value)}"${checked ? " checked" : ""}>
     <span>${escapeHtml(label)}</span>
   </label>`;
+}
+
+function renderReportBuilderFilterControls(field: FieldDefinition): string {
+  const name = escapeHtml(field.name);
+  return `<div class="report-builder-filter">
+    ${renderReportBuilderCheckbox("filter", field, false)}
+    <label class="field"><span>Operator</span><select name="filterOperator:${name}">
+      ${reportBuilderFilterOperatorOptions(field)}
+    </select></label>
+    ${renderReportBuilderFilterDefaultControl(field)}
+    <label class="choice">
+      <input type="checkbox" name="filterRequired:${name}" value="1">
+      <span>Required</span>
+    </label>
+  </div>`;
+}
+
+function reportBuilderFilterOperatorOptions(field: FieldDefinition): string {
+  return reportBuilderFilterOperatorsFor(field)
+    .map(
+      (operator) =>
+        `<option value="${operator.value}"${operator.selected ? " selected" : ""}>${escapeHtml(operator.label)}</option>`
+    )
+    .join("");
+}
+
+function reportBuilderFilterOperatorsFor(
+  field: FieldDefinition
+): readonly { readonly value: ReportFilterOperator; readonly label: string; readonly selected?: boolean }[] {
+  if (field.type === "text" || field.type === "longText") {
+    return [
+      { value: "contains", label: "Contains", selected: true },
+      { value: "eq", label: "Equals" }
+    ];
+  }
+  if (field.type === "link") {
+    return [
+      { value: "eq", label: "Equals", selected: true },
+      { value: "contains", label: "Contains" }
+    ];
+  }
+  if (field.type === "integer" || field.type === "number" || field.type === "date" || field.type === "datetime") {
+    return [
+      { value: "eq", label: "Equals", selected: true },
+      { value: "gte", label: "At least" },
+      { value: "lte", label: "At most" }
+    ];
+  }
+  return [{ value: "eq", label: "Equals", selected: true }];
+}
+
+function renderReportBuilderFilterDefaultControl(field: FieldDefinition): string {
+  const name = `filterDefault:${escapeHtml(field.name)}`;
+  if (field.type === "select") {
+    return `<label class="field"><span>Default</span><select name="${name}">${renderReportSelectOptions(field.options ?? [], "")}</select></label>`;
+  }
+  if (field.type === "boolean") {
+    return `<label class="field"><span>Default</span><select name="${name}">
+      <option value=""></option>
+      <option value="true">True</option>
+      <option value="false">False</option>
+    </select></label>`;
+  }
+  const type = inputTypeForFieldType(field.type);
+  return `<label class="field"><span>Default</span><input name="${name}" type="${type}"></label>`;
 }
 
 function renderReportBuilderFieldOptions(fields: readonly FieldDefinition[]): string {
@@ -3055,6 +3120,15 @@ tr:last-child td { border-bottom: 0; }
   align-items: center;
   gap: 8px;
   min-height: 44px;
+}
+.report-builder-filter {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+.report-builder-filter .field span {
+  color: var(--muted);
+  font-size: 13px;
 }
 .choice input {
   width: auto;

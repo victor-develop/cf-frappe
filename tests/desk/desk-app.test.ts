@@ -32,6 +32,7 @@ import {
   QueryService,
   ReportService,
   RoleService,
+  SavedReportService,
   SavedListFilterService,
   SYSTEM_MANAGER_ROLE,
   UserAccountService,
@@ -486,6 +487,9 @@ describe("Desk app", () => {
     expect(builderHtml).toContain("Note Report Builder");
     expect(builderHtml).toContain('name="column" value="title"');
     expect(builderHtml).toContain('name="filter" value="priority"');
+    expect(builderHtml).toContain('name="filterOperator:priority"');
+    expect(builderHtml).toContain('name="filterDefault:priority"');
+    expect(builderHtml).toContain('name="filterRequired:priority"');
     expect(builderHtml).toContain('name="summaryCount" value="1"');
     expect(builderHtml).toContain('name="summary" value="count"');
     expect(builderHtml).toContain('<select name="groupBy">');
@@ -604,6 +608,103 @@ describe("Desk app", () => {
     await expect(afterDelete.text()).resolves.toContain("No saved reports.");
   });
 
+  it("builds saved report filter presets from visual Desk report-builder controls", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Low Filter Preset", priority: "Low", count: 1 })
+    });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "High Filter Preset", priority: "High", count: 5 })
+    });
+
+    const body = new URLSearchParams();
+    body.set("label", "Preset filter report");
+    body.append("column", "title");
+    body.append("column", "priority");
+    body.append("filter", "priority");
+    body.set("filterOperator:priority", "eq");
+    body.set("filterDefault:priority", "High");
+    body.set("filterRequired:priority", "1");
+
+    const saved = await app.request("/desk/report-builder/Note", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body
+    });
+
+    expect(saved.status).toBe(303);
+    expect(saved.headers.get("location")).toBe("/desk/report-builder/Note/report_saved-report-1");
+    await expect(services.savedReports.get(owner, "Note", "report_saved-report-1")).resolves.toMatchObject({
+      definition: {
+        filters: [
+          expect.objectContaining({
+            name: "priority",
+            defaultValue: "High",
+            required: true
+          })
+        ]
+      }
+    });
+
+    const defaultRun = await app.request("/desk/report-builder/Note/report_saved-report-1");
+    expect(defaultRun.status).toBe(200);
+    const defaultHtml = await defaultRun.text();
+    expect(defaultHtml).toContain("High Filter Preset");
+    expect(defaultHtml).not.toContain("Low Filter Preset");
+    expect(defaultHtml).toContain('<option value="High" selected>High</option>');
+
+    const overrideRun = await app.request("/desk/report-builder/Note/report_saved-report-1?filter_priority=Low");
+    expect(overrideRun.status).toBe(200);
+    const overrideHtml = await overrideRun.text();
+    expect(overrideHtml).toContain("Low Filter Preset");
+    expect(overrideHtml).not.toContain("High Filter Preset");
+  });
+
+  it("keeps link filter presets as exact-match controls by default", async () => {
+    const services = createLinkedServices(["project-1", "task-1"]);
+    const reports = new ReportService({ registry: services.registry, queries: services.queries });
+    const savedReports = new SavedReportService({
+      registry: services.registry,
+      events: services.events,
+      reports,
+      clock: fixedClock(now),
+      ids: deterministicIds(["saved-report-1", "saved-report-event-1"])
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      reports,
+      savedReports,
+      actor: () => owner
+    });
+
+    const builder = await app.request("/desk/report-builder/Task");
+    expect(builder.status).toBe(200);
+    const builderHtml = await builder.text();
+    expect(builderHtml).toContain('name="filterOperator:project"');
+    expect(builderHtml).toContain('<option value="eq" selected>Equals</option>');
+
+    const body = new URLSearchParams();
+    body.set("label", "Task project report");
+    body.append("column", "title");
+    body.append("filter", "project");
+    const saved = await app.request("/desk/report-builder/Task", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body
+    });
+
+    expect(saved.status).toBe(303);
+    const report = await savedReports.get(owner, "Task", "report_saved-report-1");
+    expect(report.definition.filters?.[0]).toMatchObject({ name: "project", field: "project", type: "link" });
+    expect(report.definition.filters?.[0]).not.toHaveProperty("operator");
+  });
+
   it("builds nested saved report formulas from visual Desk report-builder controls", async () => {
     const { app, services } = makeDesk();
     await services.documents.create({
@@ -679,6 +780,49 @@ describe("Desk app", () => {
 
     expect(response.status).toBe(400);
     await expect(response.text()).resolves.toContain("Report formula right number must be finite");
+
+    const builder = await app.request("/desk/report-builder/Note");
+    await expect(builder.text()).resolves.toContain("No saved reports.");
+  });
+
+  it("rejects invalid Desk report-builder filter preset values without persisting them", async () => {
+    const { app } = makeDesk();
+    const invalidDefault = new URLSearchParams();
+    invalidDefault.set("label", "Invalid preset report");
+    invalidDefault.append("column", "title");
+    invalidDefault.append("filter", "count");
+    invalidDefault.set("filterOperator:count", "gte");
+    invalidDefault.set("filterDefault:count", "many");
+
+    const response = await app.request("/desk/report-builder/Note", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: invalidDefault
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toContain("Report filter count default must be an integer");
+
+    const builder = await app.request("/desk/report-builder/Note");
+    await expect(builder.text()).resolves.toContain("No saved reports.");
+  });
+
+  it("rejects required Desk report-builder filter presets without defaults", async () => {
+    const { app } = makeDesk();
+    const missingDefault = new URLSearchParams();
+    missingDefault.set("label", "Missing default report");
+    missingDefault.append("column", "title");
+    missingDefault.append("filter", "priority");
+    missingDefault.set("filterRequired:priority", "1");
+
+    const response = await app.request("/desk/report-builder/Note", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: missingDefault
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toContain("Report filter priority default is required when the filter is required");
 
     const builder = await app.request("/desk/report-builder/Note");
     await expect(builder.text()).resolves.toContain("No saved reports.");

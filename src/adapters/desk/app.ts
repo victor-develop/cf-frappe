@@ -40,7 +40,12 @@ import { DOCUMENT_SHARE_PERMISSIONS, documentSharePermissionsForActor } from "..
 import { FrameworkError } from "../../core/errors.js";
 import { can } from "../../core/permissions.js";
 import type { ModelRegistry } from "../../core/registry.js";
-import { isReportChartColor, REPORT_FORMULA_MAX_DEPTH, type ReportFormulaOperand } from "../../core/reports.js";
+import {
+  isReportChartColor,
+  REPORT_FORMULA_MAX_DEPTH,
+  type ReportFilterOperator,
+  type ReportFormulaOperand
+} from "../../core/reports.js";
 import { USER_PROFILE_FIELDS, type UserProfileInput } from "../../core/user-profiles.js";
 import {
   canReadWorkspace,
@@ -60,6 +65,7 @@ import {
   type DocumentSnapshot,
   type FieldDefinition,
   type FieldType,
+  type JsonPrimitive,
   type JsonValue,
   type LinkOption,
   type ListDocumentsFilter,
@@ -3353,7 +3359,7 @@ async function parseDeskSavedReport(
     ...columnNames.map((name) => reportColumnFor(fields, name)),
     ...(formulaColumn === undefined ? [] : [formulaColumn])
   ];
-  const filters = filterNames.map((name) => reportFilterFor(fields, name));
+  const filters = filterNames.map((name) => reportFilterFor(fields, form, name));
   const sumSummaries = summaryNames.map((name) => reportSumSummaryFor(fields, name));
   const summaries = [
     ...(form.get("summaryCount") === "1" ? [reportRecordCountSummary()] : []),
@@ -3835,19 +3841,86 @@ function reportFormulaColumnName(label: string): string {
 
 function reportFilterFor(
   fields: ReadonlyMap<string, FieldDefinition>,
+  form: URLSearchParams,
   name: string
 ): NonNullable<SavedReportDefinition["filters"]>[number] {
   const field = fields.get(name);
   if (!field || field.hidden || field.type === "json" || field.type === "table") {
     throw new FrameworkError("BAD_REQUEST", `Unknown report filter '${name}'`, { status: 400 });
   }
+  const operator = reportFilterOperatorFor(field, form);
+  const defaultValue = reportFilterDefaultValueFor(field, form);
+  const required = truthyDeskParam(form.get(`filterRequired:${field.name}`));
+  if (required && defaultValue === undefined) {
+    throw new FrameworkError(
+      "BAD_REQUEST",
+      `Report filter ${field.name} default is required when the filter is required`,
+      { status: 400 }
+    );
+  }
   return {
     name: field.name,
     label: deskReportFieldLabel(field),
     field: field.name,
     type: field.type as Exclude<FieldType, "json" | "table">,
-    ...(field.type === "text" || field.type === "longText" ? { operator: "contains" } : {})
+    ...(operator === "eq" ? {} : { operator }),
+    ...(defaultValue === undefined ? {} : { defaultValue }),
+    ...(required ? { required } : {})
   };
+}
+
+function reportFilterOperatorFor(field: FieldDefinition, form: URLSearchParams): ReportFilterOperator {
+  return optionalEnumSearchParamValue(
+    form,
+    `filterOperator:${field.name}`,
+    reportFilterOperatorsFor(field),
+    `Report filter ${field.name} operator`
+  ) ?? defaultReportFilterOperatorFor(field);
+}
+
+function reportFilterOperatorsFor(field: FieldDefinition): readonly ReportFilterOperator[] {
+  if (field.type === "text" || field.type === "longText" || field.type === "link") {
+    return ["contains", "eq"];
+  }
+  if (field.type === "integer" || field.type === "number" || field.type === "date" || field.type === "datetime") {
+    return ["eq", "gte", "lte"];
+  }
+  return ["eq"];
+}
+
+function defaultReportFilterOperatorFor(field: FieldDefinition): ReportFilterOperator {
+  return field.type === "text" || field.type === "longText" ? "contains" : "eq";
+}
+
+function reportFilterDefaultValueFor(field: FieldDefinition, form: URLSearchParams): JsonPrimitive | undefined {
+  const value = stringSearchParamValue(form, `filterDefault:${field.name}`);
+  if (value === undefined) {
+    return undefined;
+  }
+  if (field.type === "integer") {
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed)) {
+      throw new FrameworkError("BAD_REQUEST", `Report filter ${field.name} default must be an integer`, { status: 400 });
+    }
+    return parsed;
+  }
+  if (field.type === "number") {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      throw new FrameworkError("BAD_REQUEST", `Report filter ${field.name} default must be a number`, { status: 400 });
+    }
+    return parsed;
+  }
+  if (field.type === "boolean") {
+    if (value === "true" || value === "1" || value === "on") {
+      return true;
+    }
+    if (value === "false" || value === "0" || value === "off") {
+      return false;
+    }
+    throw new FrameworkError("BAD_REQUEST", `Report filter ${field.name} default must be a boolean`, { status: 400 });
+  }
+  return value;
 }
 
 function reportRecordCountSummary(): SavedReportSummaryDefinition {

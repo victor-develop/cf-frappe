@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the nested Desk report-builder formula controls slice:
+As of the Desk report-builder filter preset controls slice:
 
 - Vitest files: `75`
-- Vitest cases: `812`
+- Vitest cases: `816`
 
 ## Implication
 
