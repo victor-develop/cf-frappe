@@ -1255,6 +1255,7 @@ describe("Desk app", () => {
     expect(source).toContain("root.cfFrappe");
     expect(source).toContain("auth: Object.freeze");
     expect(source).toContain("customFields: Object.freeze");
+    expect(source).toContain("dataPatches: Object.freeze");
     expect(source).toContain("form: Object.freeze");
     expect(source).toContain("files: Object.freeze");
     expect(source).toContain("notifications: Object.freeze");

@@ -116,6 +116,16 @@ interface DeskClientRuntime {
       options?: { readonly expectedVersion?: number; readonly tenant?: string }
     ) => Promise<unknown>;
   };
+  readonly dataPatches: {
+    readonly apply: (options?: Record<string, unknown>) => Promise<unknown>;
+    readonly applyOne: (patchId: string) => Promise<unknown>;
+    readonly enqueue: (options?: Record<string, unknown>) => Promise<unknown>;
+    readonly enqueueOne: (patchId: string, options?: Record<string, unknown>) => Promise<unknown>;
+    readonly plan: (options?: Record<string, unknown>) => Promise<unknown>;
+    readonly planOne: (patchId: string) => Promise<unknown>;
+    readonly retry: (patchId: string) => Promise<unknown>;
+    readonly status: () => Promise<unknown>;
+  };
   readonly customFields: {
     readonly disable: (
       doctype: string,
@@ -808,6 +818,62 @@ describe("Desk client runtime", () => {
       undefined,
       JSON.stringify({ ...expectedGrant, expectedVersion: 1 }),
       JSON.stringify({ ...expectedGrant, expectedVersion: 2 })
+    ]);
+  });
+
+  it("wraps journal-backed data patch APIs without browser-side validation", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { ok: true } }), {
+        headers: { "content-type": "application/json" },
+        status: String(url).includes("/enqueue") ? 202 : (init?.method ?? "GET") === "POST" ? 201 : 200
+      });
+    });
+
+    await expect(runtime.dataPatches.status()).resolves.toEqual({ ok: true });
+    await runtime.dataPatches.plan({ patchIds: ["crm.second"], limit: 2 });
+    await runtime.dataPatches.apply({ limit: 1 });
+    await runtime.dataPatches.planOne("crm.second");
+    await runtime.dataPatches.applyOne("crm.second");
+    await runtime.dataPatches.retry("crm.second");
+    await runtime.dataPatches.enqueue({ patchIds: ["crm.second"], limit: 1, idempotencyKey: "patches:batch", delaySeconds: 5 });
+    await runtime.dataPatches.enqueueOne("crm.second", {
+      patchIds: ["ignored.batch"],
+      limit: 1,
+      idempotencyKey: "patches:single",
+      delaySeconds: 10
+    });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/data-patches",
+      "POST /api/data-patches/plan",
+      "POST /api/data-patches/apply",
+      "POST /api/data-patches/crm.second/plan",
+      "POST /api/data-patches/crm.second/apply",
+      "POST /api/data-patches/crm.second/retry",
+      "POST /api/data-patches/enqueue",
+      "POST /api/data-patches/crm.second/enqueue"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual([
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin"
+    ]);
+    expect(calls.map((call) => call.init.body)).toEqual([
+      undefined,
+      JSON.stringify({ patchIds: ["crm.second"], limit: 2 }),
+      JSON.stringify({ limit: 1 }),
+      undefined,
+      undefined,
+      undefined,
+      JSON.stringify({ patchIds: ["crm.second"], limit: 1, idempotencyKey: "patches:batch", delaySeconds: 5 }),
+      JSON.stringify({ limit: 1, idempotencyKey: "patches:single", delaySeconds: 10 })
     ]);
   });
 

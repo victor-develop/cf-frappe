@@ -140,6 +140,10 @@ export function renderDeskClientScript(): string {
     return withQuery("/api/user-permissions/" + encodePart(userId), tenantParams(options || {}));
   }
 
+  function dataPatchPath(patchId, action) {
+    return "/api/data-patches" + (patchId === undefined ? "" : "/" + encodePart(patchId)) + (action === undefined ? "" : "/" + action);
+  }
+
   function versionBody(options) {
     return options && options.expectedVersion !== undefined ? { expectedVersion: options.expectedVersion } : {};
   }
@@ -177,6 +181,10 @@ export function renderDeskClientScript(): string {
 
   function userPermissionBody(grant, options) {
     return commandBody(grant || {}, options);
+  }
+
+  function dataPatchBody(options, includePatchIds) {
+    return includePatchIds === false ? withoutKeys(options || {}, ["patchIds"]) : Object.assign({}, options || {});
   }
 
   function savedFilterBody(input) {
@@ -968,6 +976,32 @@ export function renderDeskClientScript(): string {
       },
       revoke: function (userId, grant, options) {
         return request(userPermissionPath(userId, options || {}), { method: "DELETE", body: userPermissionBody(grant, options) }).then(unwrapData);
+      }
+    }),
+    dataPatches: Object.freeze({
+      apply: function (options) {
+        return request(dataPatchPath(undefined, "apply"), { method: "POST", body: dataPatchBody(options) }).then(unwrapData);
+      },
+      applyOne: function (patchId) {
+        return request(dataPatchPath(patchId, "apply"), { method: "POST" }).then(unwrapData);
+      },
+      enqueue: function (options) {
+        return request(dataPatchPath(undefined, "enqueue"), { method: "POST", body: dataPatchBody(options) }).then(unwrapData);
+      },
+      enqueueOne: function (patchId, options) {
+        return request(dataPatchPath(patchId, "enqueue"), { method: "POST", body: dataPatchBody(options, false) }).then(unwrapData);
+      },
+      plan: function (options) {
+        return request(dataPatchPath(undefined, "plan"), { method: "POST", body: dataPatchBody(options) }).then(unwrapData);
+      },
+      planOne: function (patchId) {
+        return request(dataPatchPath(patchId, "plan"), { method: "POST" }).then(unwrapData);
+      },
+      retry: function (patchId) {
+        return request(dataPatchPath(patchId, "retry"), { method: "POST" }).then(unwrapData);
+      },
+      status: function () {
+        return request(dataPatchPath()).then(unwrapData);
       }
     }),
     form: Object.freeze({
