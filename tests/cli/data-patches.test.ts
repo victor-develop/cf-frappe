@@ -114,6 +114,27 @@ describe("cf-frappe CLI remote data patches", () => {
       patchIds: ["core.seed"]
     });
 
+    expect(parseCliArgs([
+      "data-patches",
+      "rollback-retry-enqueue",
+      "--url",
+      "https://app.example",
+      "--id",
+      "core.seed",
+      "--idempotency-key",
+      "patches:rollback-retry",
+      "--delay-seconds",
+      "45"
+    ])).toEqual({
+      kind: "data-patches",
+      action: "rollback-retry-enqueue",
+      url: "https://app.example",
+      headers: [],
+      patchIds: ["core.seed"],
+      idempotencyKey: "patches:rollback-retry",
+      delaySeconds: 45
+    });
+
     expect(parseCliArgs(["data-patches", "retry", "--url", "https://app.example"])).toEqual({
       kind: "invalid",
       message: "Data patch retry requires exactly one --id"
@@ -160,6 +181,36 @@ describe("cf-frappe CLI remote data patches", () => {
     ])).toEqual({
       kind: "invalid",
       message: "Cannot use --limit with data-patches rollback-retry"
+    });
+    expect(parseCliArgs(["data-patches", "rollback-retry-enqueue", "--url", "https://app.example"])).toEqual({
+      kind: "invalid",
+      message: "Data patch rollback retry enqueue requires exactly one --id"
+    });
+    expect(parseCliArgs([
+      "data-patches",
+      "rollback-retry-enqueue",
+      "--url",
+      "https://app.example",
+      "--id",
+      "core.seed",
+      "--id",
+      "crm.backfill"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Data patch rollback retry enqueue requires exactly one --id"
+    });
+    expect(parseCliArgs([
+      "data-patches",
+      "rollback-retry-enqueue",
+      "--url",
+      "https://app.example",
+      "--id",
+      "core.seed",
+      "--limit",
+      "1"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Cannot use --limit with data-patches rollback-retry-enqueue"
     });
 
     expect(parseCliArgs(["data-patches", "enqueue", "--url", "https://app.example", "--delay-seconds", "-1"])).toEqual({
@@ -509,6 +560,52 @@ describe("cf-frappe CLI remote data patches", () => {
     expect(stdout.text()).toContain("Rollback plan: crm.second");
     expect(stdout.text()).toContain("Job: cf-frappe.data-patches.rollback / job_patch-rollback-001");
     expect(stdout.text()).toContain("Idempotency key: patches:rollback-second");
+  });
+
+  it("enqueues remote data patch rollback retry jobs without running rollback inline", async () => {
+    const calls: RemoteCall[] = [];
+    const stdout = textBuffer();
+    const exitCode = await runCli(
+      [
+        "data-patches",
+        "rollback-retry-enqueue",
+        "--url",
+        "https://app.example/cf",
+        "--id",
+        "core.seed",
+        "--idempotency-key",
+        "patches:rollback-retry",
+        "--delay-seconds",
+        "45"
+      ],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(calls, {
+          data: {
+            plan: { patchId: "core.seed" },
+            message: {
+              runId: "job_patch-rollback-retry-001",
+              jobName: "cf-frappe.data-patches.rollback-retry",
+              idempotencyKey: "patches:rollback-retry"
+            }
+          }
+        }, 202),
+        stdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(calls[0]?.url).toBe("https://app.example/cf/api/data-patches/core.seed/rollback-retry-enqueue");
+    expect(calls[0]?.method).toBe("POST");
+    expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({
+      idempotencyKey: "patches:rollback-retry",
+      delaySeconds: 45
+    });
+    expect(stdout.text()).toContain("Enqueued data patch rollback retry job at https://app.example/cf");
+    expect(stdout.text()).toContain("Rollback retry: core.seed");
+    expect(stdout.text()).toContain("Job: cf-frappe.data-patches.rollback-retry / job_patch-rollback-retry-001");
+    expect(stdout.text()).toContain("Idempotency key: patches:rollback-retry");
   });
 
   it("maps remote data patch API errors to CLI failures", async () => {

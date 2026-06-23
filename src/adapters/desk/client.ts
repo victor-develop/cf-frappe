@@ -1103,6 +1103,12 @@ export function renderDeskClientScript(): string {
       rollbackRetry: function (patchId) {
         return request(dataPatchPath(patchId, "rollback-retry"), { method: "POST" }).then(unwrapData);
       },
+      rollbackRetryEnqueue: function (patchId, options) {
+        return request(dataPatchPath(patchId, "rollback-retry-enqueue"), {
+          method: "POST",
+          body: dataPatchBody(options, false)
+        }).then(unwrapData);
+      },
       retry: function (patchId) {
         return request(dataPatchPath(patchId, "retry"), { method: "POST" }).then(unwrapData);
       },

@@ -7,7 +7,8 @@ export type DataPatchRemoteAction =
   | "enqueue"
   | "rollback-enqueue"
   | "retry"
-  | "rollback-retry";
+  | "rollback-retry"
+  | "rollback-retry-enqueue";
 
 export interface DataPatchHeaderLiteral {
   readonly kind: "literal";
@@ -83,6 +84,10 @@ interface DataPatchPlanResponse {
   readonly limit?: number;
 }
 
+interface DataPatchRollbackRetryPlanResponse {
+  readonly patchId: string;
+}
+
 interface DataPatchRecordResponse {
   readonly id: string;
   readonly checksum: string;
@@ -93,8 +98,8 @@ interface DataPatchRollbackRecordResponse {
   readonly checksum: string;
 }
 
-interface DataPatchQueueResponse {
-  readonly plan: DataPatchPlanResponse;
+interface DataPatchQueueResponse<TPlan = DataPatchPlanResponse> {
+  readonly plan: TPlan;
   readonly message: {
     readonly jobName?: string;
     readonly runId?: string;
@@ -128,6 +133,14 @@ export async function runRemoteDataPatchCommand(
       path: "/api/data-patches/rollback-enqueue"
     });
     return formatRollbackEnqueue(command.url, data);
+  }
+  if (command.action === "rollback-retry-enqueue") {
+    const data = await requestRemoteDataPatch<DataPatchQueueResponse<DataPatchRollbackRetryPlanResponse>>(command, io, {
+      body: commandBody(command, { includePatchIds: false, includeQueueOptions: true }),
+      method: "POST",
+      path: `/api/data-patches/${encodeURIComponent(singlePatchId(command, "rollback retry enqueue"))}/rollback-retry-enqueue`
+    });
+    return formatRollbackRetryEnqueue(command.url, data);
   }
   if (command.action === "plan") {
     const data = await requestRemoteDataPatch<DataPatchPlanResponse>(command, io, {
@@ -212,10 +225,10 @@ async function requestRemoteDataPatch<TData>(
 
 function commandBody(
   command: DataPatchRemoteCommand,
-  options: { readonly includeQueueOptions: boolean }
+  options: { readonly includePatchIds?: boolean; readonly includeQueueOptions: boolean }
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {};
-  if (command.patchIds !== undefined) {
+  if ((options.includePatchIds ?? true) && command.patchIds !== undefined) {
     body.patchIds = [...command.patchIds];
   }
   if (command.limit !== undefined) {
@@ -391,6 +404,24 @@ function formatRollbackEnqueue(baseUrl: string, result: DataPatchQueueResponse):
   const lines = [
     `Enqueued data patch rollback job at ${baseUrl}`,
     `Rollback plan: ${result.plan.patchIds.length === 0 ? "(none)" : result.plan.patchIds.join(", ")}`
+  ];
+  if (result.message.jobName !== undefined || result.message.runId !== undefined) {
+    lines.push(`Job: ${result.message.jobName ?? "(unknown)"} / ${result.message.runId ?? "(unknown)"}`);
+  }
+  if (result.message.idempotencyKey !== undefined) {
+    lines.push(`Idempotency key: ${result.message.idempotencyKey}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+function formatRollbackRetryEnqueue(
+  baseUrl: string,
+  result: DataPatchQueueResponse<DataPatchRollbackRetryPlanResponse>
+): string {
+  const lines = [
+    `Enqueued data patch rollback retry job at ${baseUrl}`,
+    `Rollback retry: ${result.plan.patchId}`
   ];
   if (result.message.jobName !== undefined || result.message.runId !== undefined) {
     lines.push(`Job: ${result.message.jobName ?? "(unknown)"} / ${result.message.runId ?? "(unknown)"}`);

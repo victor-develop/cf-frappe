@@ -4,7 +4,9 @@ import type {
   DataPatchQueueOptions,
   DataPatchQueuePort,
   DataPatchRollbackQueuePort,
-  DataPatchRollbackQueueOptions
+  DataPatchRollbackQueueOptions,
+  DataPatchRollbackRetryQueueOptions,
+  DataPatchRollbackRetryQueuePort
 } from "../../application/data-patch-jobs.js";
 import { badRequest } from "../../core/errors.js";
 import type { ActorResolver } from "./actor.js";
@@ -14,6 +16,7 @@ export interface DataPatchApiOptions {
   readonly dataPatches: DataPatchAdminPort;
   readonly dataPatchQueue?: DataPatchQueuePort;
   readonly dataPatchRollbackQueue?: DataPatchRollbackQueuePort;
+  readonly dataPatchRollbackRetryQueue?: DataPatchRollbackRetryQueuePort;
   readonly actor: ActorResolver;
   readonly maxJsonBytes?: number;
 }
@@ -130,6 +133,19 @@ export function createDataPatchApi(options: DataPatchApiOptions): Hono {
     });
   }
 
+  if (options.dataPatchRollbackRetryQueue) {
+    app.post("/api/data-patches/:id/rollback-retry-enqueue", async (c) => {
+      const actor = await options.actor(c.req.raw);
+      const enqueueOptions = await dataPatchRollbackRetryQueueOptions(c.req.raw, maxJsonBytes);
+      const data = await options.dataPatchRollbackRetryQueue!.enqueueRollbackRetry(
+        actor,
+        c.req.param("id"),
+        enqueueOptions
+      );
+      return c.json({ data }, 202);
+    });
+  }
+
   return app;
 }
 
@@ -184,6 +200,20 @@ async function dataPatchRollbackQueueOptions(
   const delaySeconds = parseDelaySeconds(delayValue);
   return {
     ...rollback,
+    ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+    ...(delaySeconds === undefined ? {} : { delaySeconds })
+  };
+}
+
+async function dataPatchRollbackRetryQueueOptions(
+  request: Request,
+  maxJsonBytes: number
+): Promise<DataPatchRollbackRetryQueueOptions> {
+  const body = await readJsonObject(request, { allowEmpty: true, maxJsonBytes });
+  const idempotencyKey = parseOptionalNonEmptyString(body.idempotencyKey, "idempotencyKey");
+  const delayValue = Object.hasOwn(body, "delaySeconds") ? body.delaySeconds : undefined;
+  const delaySeconds = parseDelaySeconds(delayValue);
+  return {
     ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
     ...(delaySeconds === undefined ? {} : { delaySeconds })
   };

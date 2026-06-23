@@ -1,6 +1,7 @@
 import {
   createDataPatchApplyJob,
   createDataPatchRollbackJob,
+  createDataPatchRollbackRetryJob,
   createJobRegistry,
   createResourceApi,
   DataPatchQueueService,
@@ -604,6 +605,90 @@ describe("data patch api", () => {
     });
   });
 
+  it("enqueues failed rollback retry jobs through admin JSON routes", async () => {
+    const services = createServices();
+    const resources = { attempts: 0 };
+    const dataPatches = new DataPatchService({
+      log: new InMemoryDataPatchLog(),
+      resources,
+      patches: [
+        defineDataPatch<typeof resources>({
+          id: "core.rollback_retry",
+          checksum: "v1",
+          run: () => undefined,
+          rollback: {
+            run: ({ resources }) => {
+              resources.attempts += 1;
+              if (resources.attempts === 1) {
+                throw new Error("rollback boom");
+              }
+              return { attempts: resources.attempts };
+            }
+          }
+        })
+      ],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-apply", "rollback-failed"])
+    });
+    const registry = createJobRegistry({ jobs: [createDataPatchRollbackRetryJob()] });
+    const queue = new InMemoryJobQueue();
+    const app = createResourceApi({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: unsafeHeaderActorResolver,
+      dataPatches,
+      dataPatchRollbackRetryQueue: new DataPatchQueueService({
+        dataPatches,
+        dispatcher: new JobDispatcher({
+          registry,
+          queue,
+          clock: fixedClock(now),
+          ids: deterministicIds(["patch-rollback-retry-001"])
+        })
+      })
+    });
+    await dataPatches.apply({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" });
+    await expect(dataPatches.rollback(
+      { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },
+      { patchIds: ["core.rollback_retry"] }
+    )).rejects.toThrow("rollback boom");
+
+    const enqueued = await app.request("/api/data-patches/core.rollback_retry/rollback-retry-enqueue", {
+      method: "POST",
+      headers: { ...adminHeaders, "content-type": "application/json" },
+      body: JSON.stringify({
+        patchIds: ["ignored.body"],
+        idempotencyKey: "patches:rollback-retry",
+        delaySeconds: 45
+      })
+    });
+
+    expect(enqueued.status).toBe(202);
+    await expect(enqueued.json()).resolves.toMatchObject({
+      data: {
+        plan: { patchId: "core.rollback_retry" },
+        message: {
+          tenantId: "acme",
+          jobName: "cf-frappe.data-patches.rollback-retry",
+          runId: "job_patch-rollback-retry-001",
+          idempotencyKey: "patches:rollback-retry",
+          payload: {
+            actor: { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },
+            patchId: "core.rollback_retry"
+          }
+        }
+      }
+    });
+    expect(queue.queued()).toEqual([
+      expect.objectContaining({
+        delaySeconds: 45,
+        message: expect.objectContaining({ idempotencyKey: "patches:rollback-retry" })
+      })
+    ]);
+    expect(resources.attempts).toBe(1);
+  });
+
   it("maps invalid data patch apply options to JSON errors", async () => {
     const services = createServices();
     const app = createResourceApi({
@@ -696,8 +781,13 @@ describe("data patch api", () => {
 
     const hidden = await app.request("/api/data-patches/enqueue", { method: "POST", headers: adminHeaders });
     const hiddenRollback = await app.request("/api/data-patches/rollback-enqueue", { method: "POST", headers: adminHeaders });
+    const hiddenRollbackRetry = await app.request("/api/data-patches/core.seed/rollback-retry-enqueue", {
+      method: "POST",
+      headers: adminHeaders
+    });
 
     expect(hidden.status).toBe(404);
     expect(hiddenRollback.status).toBe(404);
+    expect(hiddenRollbackRetry.status).toBe(404);
   });
 });

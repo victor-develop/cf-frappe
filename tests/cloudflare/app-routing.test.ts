@@ -1,6 +1,7 @@
 import {
   createDataPatchApplyJob,
   createDataPatchRollbackJob,
+  createDataPatchRollbackRetryJob,
   createJobRegistry,
   createRegistry,
   createInMemoryAccountRecoveryNotifier,
@@ -397,6 +398,167 @@ describe("CloudFrappe Worker routing", () => {
       }
     });
     expect(resources.attempts).toBe(2);
+  });
+
+  it("enqueues and consumes app-declared failed rollback retries through Worker jobs", async () => {
+    const resources = { attempts: 0, rolledBack: [] as string[] };
+    const log = new InMemoryDataPatchLog();
+    const queue = new InMemoryJobQueue();
+    const registry = createRegistry({
+      dataPatches: [
+        defineDataPatch<any>({
+          id: "core.rollback_retry",
+          checksum: "v1",
+          run: () => undefined,
+          rollback: {
+            run: ({ resources }) => {
+              resources.attempts += 1;
+              if (resources.attempts === 1) {
+                throw new Error("rollback boom");
+              }
+              resources.rolledBack.push("core");
+              return { attempts: resources.attempts };
+            }
+          }
+        })
+      ]
+    });
+    const worker = createCloudFrappeWorker({
+      registry,
+      actor: () => ({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" }),
+      dataPatches: {
+        log: () => log,
+        resources: () => resources,
+        clock: fixedClock(now),
+        ids: deterministicIds(["claim-apply", "rollback-failed", "rollback-retry"])
+      },
+      jobs: {
+        registry: createJobRegistry<any>({
+          jobs: [createDataPatchRollbackRetryJob<any>()]
+        }),
+        queue: () => queue,
+        clock: fixedClock(now),
+        ids: deterministicIds(["patch-rollback-retry-001"])
+      }
+    });
+    const env = {
+      DB: fakeD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const applied = await worker.fetch!(
+      cfRequest("http://localhost/api/data-patches/apply", { method: "POST" }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(applied.status).toBe(201);
+    const failed = await worker.fetch!(
+      cfRequest("http://localhost/api/data-patches/core.rollback_retry/rollback", { method: "POST" }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(failed.status).toBe(500);
+
+    const enqueued = await worker.fetch!(
+      cfRequest("http://localhost/api/data-patches/core.rollback_retry/rollback-retry-enqueue", {
+        body: JSON.stringify({ idempotencyKey: "patches:rollback-retry", delaySeconds: 10 }),
+        headers: { "content-type": "application/json" },
+        method: "POST"
+      }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(enqueued.status).toBe(202);
+    await expect(enqueued.json()).resolves.toMatchObject({
+      data: {
+        plan: { patchId: "core.rollback_retry" },
+        message: {
+          tenantId: "acme",
+          jobName: "cf-frappe.data-patches.rollback-retry",
+          runId: "job_patch-rollback-retry-001",
+          idempotencyKey: "patches:rollback-retry",
+          payload: { patchId: "core.rollback_retry" }
+        }
+      }
+    });
+    expect(resources).toEqual({ attempts: 1, rolledBack: [] });
+    const message = queue.queued()[0]!.message;
+
+    await worker.queue?.(
+      {
+        queue: "jobs",
+        metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
+        messages: [
+          {
+            id: "msg_rollback_retry_001",
+            timestamp: new Date(now),
+            body: message,
+            attempts: 1,
+            ack: vi.fn(),
+            retry: vi.fn()
+          } as unknown as Message<JobMessage>
+        ],
+        retryAll: vi.fn(),
+        ackAll: vi.fn()
+      },
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(resources).toEqual({ attempts: 2, rolledBack: ["core"] });
+    await expect(log.recordedDataPatches()).resolves.toMatchObject([
+      {
+        id: "core.rollback_retry",
+        checksum: "v1",
+        status: "rolled_back",
+        rolledBackAt: now,
+        rollbackResult: { attempts: 2 }
+      }
+    ]);
+  });
+
+  it("keeps rollback retry enqueue hidden until the retry job is registered on the Worker", async () => {
+    const log = new InMemoryDataPatchLog();
+    const queue = new InMemoryJobQueue();
+    const registry = createRegistry({
+      dataPatches: [
+        defineDataPatch<any>({
+          id: "core.rollback_retry",
+          checksum: "v1",
+          run: () => undefined,
+          rollback: { run: () => undefined }
+        })
+      ]
+    });
+    const worker = createCloudFrappeWorker({
+      registry,
+      actor: () => ({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" }),
+      dataPatches: {
+        log: () => log
+      },
+      jobs: {
+        registry: createJobRegistry<any>({
+          jobs: [createDataPatchApplyJob<any>(), createDataPatchRollbackJob<any>()]
+        }),
+        queue: () => queue,
+        clock: fixedClock(now),
+        ids: deterministicIds(["patch-001"])
+      }
+    });
+    const env = {
+      DB: fakeD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const hidden = await worker.fetch!(
+      cfRequest("http://localhost/api/data-patches/core.rollback_retry/rollback-retry-enqueue", { method: "POST" }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(hidden.status).toBe(404);
+    expect(queue.queued()).toEqual([]);
   });
 
   it("uses the default D1 data patch journal for app-declared Worker patches", async () => {

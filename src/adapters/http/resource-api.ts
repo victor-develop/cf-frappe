@@ -1,7 +1,11 @@
 import { Hono } from "hono";
 import type { AuditService } from "../../application/audit-service.js";
 import type { CustomFieldService } from "../../application/custom-field-service.js";
-import type { DataPatchQueuePort, DataPatchRollbackQueuePort } from "../../application/data-patch-jobs.js";
+import type {
+  DataPatchQueuePort,
+  DataPatchRollbackQueuePort,
+  DataPatchRollbackRetryQueuePort
+} from "../../application/data-patch-jobs.js";
 import type { DataPatchAdminPort } from "../../application/data-patch-service.js";
 import type { DocumentShareService } from "../../application/document-share-service.js";
 import type { BulkDocumentSelection, DocumentCommandExecutor } from "../../application/document-service.js";
@@ -69,6 +73,7 @@ export interface ResourceApiOptions {
   readonly dataPatches?: DataPatchAdminPort;
   readonly dataPatchQueue?: DataPatchQueuePort;
   readonly dataPatchRollbackQueue?: DataPatchRollbackQueuePort;
+  readonly dataPatchRollbackRetryQueue?: DataPatchRollbackRetryQueuePort;
   readonly jobs?: JobHistoryService;
   readonly jobRetry?: JobRetryPort;
   readonly jobSchedules?: JobScheduleService;
@@ -263,6 +268,9 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
         ...(options.dataPatchRollbackQueue === undefined
           ? {}
           : { dataPatchRollbackQueue: options.dataPatchRollbackQueue }),
+        ...(options.dataPatchRollbackRetryQueue === undefined
+          ? {}
+          : { dataPatchRollbackRetryQueue: options.dataPatchRollbackRetryQueue }),
         actor: resolveActor,
         maxJsonBytes
       })

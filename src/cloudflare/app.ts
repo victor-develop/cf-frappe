@@ -3,9 +3,11 @@ import { CustomFieldService } from "../application/custom-field-service.js";
 import {
   DATA_PATCH_APPLY_JOB_NAME,
   DATA_PATCH_ROLLBACK_JOB_NAME,
+  DATA_PATCH_ROLLBACK_RETRY_JOB_NAME,
   DataPatchQueueService,
   type DataPatchQueuePort,
-  type DataPatchRollbackQueuePort
+  type DataPatchRollbackQueuePort,
+  type DataPatchRollbackRetryQueuePort
 } from "../application/data-patch-jobs.js";
 import { DataPatchService, type DataPatchAdminPort } from "../application/data-patch-service.js";
 import { JobExecutionError } from "../application/job-errors.js";
@@ -373,7 +375,11 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   const dataPatchRollbackQueueEnabled = dataPatches !== undefined &&
     jobOptions !== undefined &&
     jobOptions.registry.has(DATA_PATCH_ROLLBACK_JOB_NAME);
-  const dataPatchJobQueueEnabled = dataPatchApplyQueueEnabled || dataPatchRollbackQueueEnabled;
+  const dataPatchRollbackRetryQueueEnabled = dataPatches !== undefined &&
+    jobOptions !== undefined &&
+    jobOptions.registry.has(DATA_PATCH_ROLLBACK_RETRY_JOB_NAME);
+  const dataPatchJobQueueEnabled =
+    dataPatchApplyQueueEnabled || dataPatchRollbackQueueEnabled || dataPatchRollbackRetryQueueEnabled;
   const jobHistory = jobExecutionLog && jobOptions
     ? new JobHistoryService({ registry: jobOptions.registry, executionLog: jobExecutionLog })
     : undefined;
@@ -387,7 +393,9 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
         dataPatchJobQueueEnabled ? ({ dataPatches } as unknown as Partial<TJobResources>) : undefined
       )
     : undefined;
-  const dataPatchQueue: (DataPatchQueuePort & DataPatchRollbackQueuePort) | undefined = dataPatchJobQueueEnabled && jobRuntime
+  const dataPatchQueue:
+    | (DataPatchQueuePort & DataPatchRollbackQueuePort & DataPatchRollbackRetryQueuePort)
+    | undefined = dataPatchJobQueueEnabled && jobRuntime
     ? new DataPatchQueueService({ dataPatches, dispatcher: jobRuntime.dispatcher })
     : undefined;
   const jobRetry = jobExecutionLog && jobOptions && jobRuntime
@@ -450,6 +458,9 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(dataPatches === undefined ? {} : { dataPatches }),
     ...(dataPatchQueue === undefined || !dataPatchApplyQueueEnabled ? {} : { dataPatchQueue }),
     ...(dataPatchQueue === undefined || !dataPatchRollbackQueueEnabled ? {} : { dataPatchRollbackQueue: dataPatchQueue }),
+    ...(dataPatchQueue === undefined || !dataPatchRollbackRetryQueueEnabled
+      ? {}
+      : { dataPatchRollbackRetryQueue: dataPatchQueue }),
     ...(jobHistory === undefined ? {} : { jobs: jobHistory }),
     ...(jobRetry === undefined ? {} : { jobRetry }),
     ...(jobSchedules === undefined ? {} : { jobSchedules }),

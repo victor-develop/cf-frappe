@@ -154,6 +154,7 @@ interface DeskClientRuntime {
     readonly rollbackEnqueue: (options?: Record<string, unknown>) => Promise<unknown>;
     readonly rollbackEnqueueOne: (patchId: string, options?: Record<string, unknown>) => Promise<unknown>;
     readonly rollbackRetry: (patchId: string) => Promise<unknown>;
+    readonly rollbackRetryEnqueue: (patchId: string, options?: Record<string, unknown>) => Promise<unknown>;
     readonly retry: (patchId: string) => Promise<unknown>;
     readonly status: () => Promise<unknown>;
   };
@@ -938,6 +939,11 @@ describe("Desk client runtime", () => {
       idempotencyKey: "patches:rollback-single",
       delaySeconds: 20
     });
+    await runtime.dataPatches.rollbackRetryEnqueue("crm.second", {
+      patchIds: ["ignored.batch"],
+      idempotencyKey: "patches:rollback-retry",
+      delaySeconds: 25
+    });
 
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
       "GET /api/data-patches",
@@ -954,9 +960,11 @@ describe("Desk client runtime", () => {
       "POST /api/data-patches/enqueue",
       "POST /api/data-patches/crm.second/enqueue",
       "POST /api/data-patches/rollback-enqueue",
-      "POST /api/data-patches/crm.second/rollback-enqueue"
+      "POST /api/data-patches/crm.second/rollback-enqueue",
+      "POST /api/data-patches/crm.second/rollback-retry-enqueue"
     ]);
     expect(calls.map((call) => call.init.credentials)).toEqual([
+      "same-origin",
       "same-origin",
       "same-origin",
       "same-origin",
@@ -988,7 +996,8 @@ describe("Desk client runtime", () => {
       JSON.stringify({ patchIds: ["crm.second"], limit: 1, idempotencyKey: "patches:batch", delaySeconds: 5 }),
       JSON.stringify({ limit: 1, idempotencyKey: "patches:single", delaySeconds: 10 }),
       JSON.stringify({ patchIds: ["crm.second"], limit: 1, idempotencyKey: "patches:rollback", delaySeconds: 15 }),
-      JSON.stringify({ limit: 1, idempotencyKey: "patches:rollback-single", delaySeconds: 20 })
+      JSON.stringify({ limit: 1, idempotencyKey: "patches:rollback-single", delaySeconds: 20 }),
+      JSON.stringify({ idempotencyKey: "patches:rollback-retry", delaySeconds: 25 })
     ]);
   });
 

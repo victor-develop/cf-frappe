@@ -350,21 +350,28 @@ function dataPatchAction(value: string): DataPatchRemoteAction | undefined {
     value === "enqueue" ||
     value === "rollback-enqueue" ||
     value === "retry" ||
-    value === "rollback-retry"
+    value === "rollback-retry" ||
+    value === "rollback-retry-enqueue"
     ? value
     : undefined;
 }
 
 function isSingleDataPatchAction(action: DataPatchRemoteAction): boolean {
-  return action === "retry" || action === "rollback-retry";
+  return action === "retry" || action === "rollback-retry" || action === "rollback-retry-enqueue";
 }
 
 function dataPatchActionLabel(action: DataPatchRemoteAction): string {
-  return action === "rollback-retry" ? "rollback retry" : action;
+  if (action === "rollback-retry") {
+    return "rollback retry";
+  }
+  if (action === "rollback-retry-enqueue") {
+    return "rollback retry enqueue";
+  }
+  return action;
 }
 
 function isDataPatchQueueAction(action: DataPatchRemoteAction): boolean {
-  return action === "enqueue" || action === "rollback-enqueue";
+  return action === "enqueue" || action === "rollback-enqueue" || action === "rollback-retry-enqueue";
 }
 
 function parseLiteralHeader(value: string): DataPatchHeaderOption | string {
@@ -614,6 +621,7 @@ function helpText(): string {
     "  cf-frappe data-patches rollback-retry --url <origin> --id <patchId> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches enqueue --url <origin> [--id <patchId>] [--limit <n>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches rollback-enqueue --url <origin> [--id <patchId>] [--limit <n>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe data-patches rollback-retry-enqueue --url <origin> --id <patchId> [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe --help",
     "",
     "Commands:",

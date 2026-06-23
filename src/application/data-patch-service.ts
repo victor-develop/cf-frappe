@@ -52,6 +52,7 @@ export interface DataPatchAdminPort {
   dashboard(actor: Actor): Promise<DataPatchDashboard>;
   planApply(actor: Actor, options?: DataPatchApplyOptions): Promise<DataPatchApplyPlan>;
   planRollback(actor: Actor, options?: DataPatchRollbackOptions): Promise<DataPatchRollbackPlan>;
+  planRollbackRetry(actor: Actor, patchId: string): Promise<DataPatchRollbackRetryPlan>;
   apply(actor: Actor, options?: DataPatchApplyOptions): Promise<DataPatchRunResult>;
   rollback(actor: Actor, options?: DataPatchRollbackOptions): Promise<DataPatchRollbackRunResult>;
   retryFailed(actor: Actor, patchId: string): Promise<DataPatchRunResult>;
@@ -78,6 +79,10 @@ export interface DataPatchRollbackPlan {
   readonly patchIds: readonly string[];
   readonly requestedPatchIds?: readonly string[];
   readonly limit?: number;
+}
+
+export interface DataPatchRollbackRetryPlan {
+  readonly patchId: string;
 }
 
 export interface DataPatchServiceOptions<TResources = unknown> {
@@ -133,11 +138,7 @@ export class DataPatchService<TResources = unknown> {
 
   async retryRollbackFailed(actor: Actor, patchId: string): Promise<DataPatchRollbackRunResult> {
     this.authorize(actor);
-    const patch = selectPatches(this.patches, [patchId])[0]!;
-    const recordedById = new Map((await this.log.recordedDataPatches()).map((recorded) => [recorded.id, recorded]));
-    this.assertSelectedPatchRollbackRetryable(patch, recordedById);
-    this.assertNoUnsafeSuccessorsOutsideSelection([patch], new Set([patch.id]), recordedById);
-    return this.runner().retryRollbackFailed(patch);
+    return this.runner().retryRollbackFailed(await this.patchForRollbackRetry(patchId));
   }
 
   async planApply(actor: Actor, options: DataPatchApplyOptions = {}): Promise<DataPatchApplyPlan> {
@@ -158,6 +159,12 @@ export class DataPatchService<TResources = unknown> {
       ...(options.patchIds === undefined ? {} : { requestedPatchIds: [...options.patchIds] }),
       ...(options.limit === undefined ? {} : { limit: options.limit })
     };
+  }
+
+  async planRollbackRetry(actor: Actor, patchId: string): Promise<DataPatchRollbackRetryPlan> {
+    this.authorize(actor);
+    const patch = await this.patchForRollbackRetry(patchId);
+    return { patchId: patch.id };
   }
 
   private async patchesForApply(options: DataPatchApplyOptions): Promise<readonly DataPatchDefinition<TResources>[]> {
@@ -239,6 +246,14 @@ export class DataPatchService<TResources = unknown> {
       }
     }
     return rollback;
+  }
+
+  private async patchForRollbackRetry(patchId: string): Promise<DataPatchDefinition<TResources>> {
+    const patch = selectPatches(this.patches, [patchId])[0]!;
+    const recordedById = new Map((await this.log.recordedDataPatches()).map((recorded) => [recorded.id, recorded]));
+    this.assertSelectedPatchRollbackRetryable(patch, recordedById);
+    this.assertNoUnsafeSuccessorsOutsideSelection([patch], new Set([patch.id]), recordedById);
+    return patch;
   }
 
   private runner(): DataPatchRunner<TResources> {

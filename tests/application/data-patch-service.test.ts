@@ -1,6 +1,7 @@
 import {
   createDataPatchApplyJob,
   createDataPatchRollbackJob,
+  createDataPatchRollbackRetryJob,
   createJobRegistry,
   DataPatchQueueService,
   DataPatchService,
@@ -1096,6 +1097,99 @@ describe("DataPatchService", () => {
     expect(resources.rolledBack).toEqual(["second"]);
   });
 
+  it("enqueues validated data patch rollback retry plans and executes them through the built-in job", async () => {
+    const resources = { rollbackAttempts: 0, rolledBack: [] as string[] };
+    const log = new InMemoryDataPatchLog();
+    const service = new DataPatchService({
+      log,
+      resources,
+      patches: [
+        defineDataPatch<typeof resources>({
+          id: "core.rollback_retry",
+          checksum: "v1",
+          run: () => undefined,
+          rollback: {
+            run: ({ resources }) => {
+              resources.rollbackAttempts += 1;
+              if (resources.rollbackAttempts === 1) {
+                throw new Error("rollback boom");
+              }
+              resources.rolledBack.push("core");
+              return { attempts: resources.rollbackAttempts };
+            }
+          }
+        })
+      ],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-apply", "rollback-failed", "rollback-retry"])
+    });
+    const registry = createJobRegistry<{ readonly dataPatches: DataPatchService<typeof resources> }>({
+      jobs: [createDataPatchRollbackRetryJob()]
+    });
+    const queue = new InMemoryJobQueue();
+    const dispatcher = new JobDispatcher({
+      registry,
+      queue,
+      clock: fixedClock(now),
+      ids: deterministicIds(["patch-rollback-retry-001"])
+    });
+    const queueService = new DataPatchQueueService({
+      dataPatches: service,
+      dispatcher
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    await service.apply(admin);
+    await expect(service.rollback(admin, { patchIds: ["core.rollback_retry"] })).rejects.toThrow("rollback boom");
+
+    await expect(
+      queueService.enqueueRollbackRetry(admin, "core.rollback_retry", {
+        delaySeconds: 60,
+        idempotencyKey: "patches:rollback-retry",
+        metadata: { source: "test" }
+      })
+    ).resolves.toMatchObject({
+      plan: { patchId: "core.rollback_retry" },
+      message: {
+        tenantId: "acme",
+        jobName: "cf-frappe.data-patches.rollback-retry",
+        runId: "job_patch-rollback-retry-001",
+        idempotencyKey: "patches:rollback-retry",
+        payload: {
+          actor: { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },
+          patchId: "core.rollback_retry"
+        },
+        metadata: {
+          source: "test",
+          dispatchSource: "data-patches",
+          requestedBy: "admin@example.com"
+        }
+      }
+    });
+    expect(queue.queued()).toEqual([
+      expect.objectContaining({
+        delaySeconds: 60,
+        message: expect.objectContaining({ idempotencyKey: "patches:rollback-retry" })
+      })
+    ]);
+    expect(resources.rolledBack).toEqual([]);
+
+    const executor = new JobExecutor({
+      registry,
+      resources: { dataPatches: service },
+      clock: fixedClock(now)
+    });
+    await expect(executor.execute(queue.queued()[0]!.message)).resolves.toEqual({
+      status: "succeeded",
+      result: {
+        rolledBack: [
+          { id: "core.rollback_retry", checksum: "v1", rolledBackAt: now, result: { attempts: 2 } }
+        ],
+        skipped: []
+      }
+    });
+    expect(resources).toEqual({ rollbackAttempts: 2, rolledBack: ["core"] });
+  });
+
   it("does not enqueue empty data patch plans", async () => {
     const service = new DataPatchService({
       log: new InMemoryDataPatchLog(),
@@ -1142,5 +1236,38 @@ describe("DataPatchService", () => {
       code: "BAD_REQUEST",
       message: "No rollbackable data patches to enqueue"
     });
+  });
+
+  it("does not enqueue rollback retry plans when no failed rollback exists", async () => {
+    const service = new DataPatchService({
+      log: new InMemoryDataPatchLog(),
+      resources: {},
+      patches: [
+        defineDataPatch({
+          id: "core.seed",
+          checksum: "v1",
+          run: () => undefined,
+          rollback: { run: () => undefined }
+        })
+      ]
+    });
+    const registry = createJobRegistry({ jobs: [createDataPatchRollbackRetryJob()] });
+    const queue = new InMemoryJobQueue();
+    const queueService = new DataPatchQueueService({
+      dataPatches: service,
+      dispatcher: new JobDispatcher({
+        registry,
+        queue,
+        clock: fixedClock(now),
+        ids: deterministicIds(["patch-001"])
+      })
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+
+    await expect(queueService.enqueueRollbackRetry(admin, "core.seed")).rejects.toMatchObject({
+      code: "DATA_PATCH_ROLLBACK_RETRY_UNAVAILABLE",
+      status: 409
+    });
+    expect(queue.queued()).toEqual([]);
   });
 });
