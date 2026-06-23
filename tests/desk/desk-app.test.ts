@@ -3031,7 +3031,7 @@ describe("Desk app", () => {
       actor: () => admin
     });
 
-    const response = await app.request("/desk/admin/jobs/schedules?job=reports.daily");
+    const response = await app.request("/desk/admin/jobs/schedules?job=reports.daily&cron=0%202%20*%20*%20*");
 
     expect(response.status).toBe(200);
     const html = await response.text();
@@ -3042,12 +3042,21 @@ describe("Desk app", () => {
     expect(html).toContain("<th>Enabled</th>");
     expect(html).toContain("payload");
     expect(html).toContain('formaction="/desk/admin/jobs/schedules/1/run"');
+    expect(html).toContain('name="returnCron" value="0 2 * * *"');
+    expect(html).toContain('name="returnJob" value="reports.daily"');
     expect(html).not.toContain('formaction="/desk/admin/jobs/schedules/2/run"');
     expect(html).not.toContain('href="/desk/admin/jobs"');
 
-    const dispatched = await app.request("/desk/admin/jobs/schedules/1/run", { method: "POST" });
+    const dispatched = await app.request("/desk/admin/jobs/schedules/1/run", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        returnCron: "0 2 * * *",
+        returnJob: "reports.daily"
+      }).toString()
+    });
     expect(dispatched.status).toBe(303);
-    expect(dispatched.headers.get("location")).toBe("/desk/admin/jobs/schedules");
+    expect(dispatched.headers.get("location")).toBe("/desk/admin/jobs/schedules?cron=0+2+*+*+*&job=reports.daily");
     expect(runner).toHaveBeenCalledOnce();
   });
 
@@ -3122,6 +3131,61 @@ describe("Desk app", () => {
     expect(resetDigestHtml).not.toContain('formaction="/desk/admin/jobs/schedules/digest/reset"');
   });
 
+  it("keeps job schedule filters after Desk override actions", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const services = createServices();
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      jobSchedules: new JobScheduleService({
+        registry: createJobRegistry({
+          jobs: [{ name: "reports.daily", description: "Build reports", handler: () => undefined }]
+        }),
+        schedules: [
+          { id: "daily", cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" },
+          { id: "digest", cron: "0 3 * * *", jobName: "reports.daily", tenantId: "acme", enabled: false }
+        ],
+        events: new InMemoryEventStore(),
+        clock: fixedClock(now),
+        ids: deterministicIds(["disable-filter", "reset-filter", "enable-filter"])
+      }),
+      actor: () => admin
+    });
+    const dailyBody = new URLSearchParams({
+      returnCron: "0 2 * * *",
+      returnJob: "reports.daily"
+    }).toString();
+    const digestBody = new URLSearchParams({
+      returnCron: "0 3 * * *",
+      returnJob: "reports.daily"
+    }).toString();
+
+    const disabled = await app.request("/desk/admin/jobs/schedules/daily/disable", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: dailyBody
+    });
+    expect(disabled.status).toBe(303);
+    expect(disabled.headers.get("location")).toBe("/desk/admin/jobs/schedules?cron=0+2+*+*+*&job=reports.daily");
+
+    const reset = await app.request("/desk/admin/jobs/schedules/daily/reset", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: dailyBody
+    });
+    expect(reset.status).toBe(303);
+    expect(reset.headers.get("location")).toBe("/desk/admin/jobs/schedules?cron=0+2+*+*+*&job=reports.daily");
+
+    const enabled = await app.request("/desk/admin/jobs/schedules/digest/enable", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: digestBody
+    });
+    expect(enabled.status).toBe(303);
+    expect(enabled.headers.get("location")).toBe("/desk/admin/jobs/schedules?cron=0+3+*+*+*&job=reports.daily");
+  });
+
   it("creates, updates, and deletes runtime job schedules from the Desk admin surface", async () => {
     const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
     const services = createServices();
@@ -3150,6 +3214,18 @@ describe("Desk app", () => {
     expect(emptyHtml).toContain("Save runtime schedule");
     expect(emptyHtml).toContain('name="delaySeconds" type="number" min="0" max="86400"');
 
+    const filteredEmpty = await app.request("/desk/admin/jobs/schedules?job=reports.daily&cron=15%204%20*%20*%20*");
+    const filteredEmptyHtml = await filteredEmpty.text();
+    expect(filteredEmptyHtml).toContain('name="returnCron" value="15 4 * * *"');
+    expect(filteredEmptyHtml).toContain('name="returnJob" value="reports.daily"');
+
+    const escapedFilters = await app.request(
+      "/desk/admin/jobs/schedules?job=reports.daily%26audit&cron=15%20%224%22%20*%20*%20*"
+    );
+    const escapedFiltersHtml = await escapedFilters.text();
+    expect(escapedFiltersHtml).toContain('name="returnCron" value="15 &quot;4&quot; * * *"');
+    expect(escapedFiltersHtml).toContain('name="returnJob" value="reports.daily&amp;audit"');
+
     const invalidDelay = await app.request("/desk/admin/jobs/schedules", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -3173,11 +3249,13 @@ describe("Desk app", () => {
         cron: "15 4 * * *",
         jobName: "reports.daily",
         delaySeconds: "30",
-        enabled: "true"
+        enabled: "true",
+        returnCron: "15 4 * * *",
+        returnJob: "reports.daily"
       }).toString()
     });
     expect(created.status).toBe(303);
-    expect(created.headers.get("location")).toBe("/desk/admin/jobs/schedules");
+    expect(created.headers.get("location")).toBe("/desk/admin/jobs/schedules?cron=15+4+*+*+*&job=reports.daily");
 
     const afterCreate = await app.request("/desk/admin/jobs/schedules");
     const createdHtml = await afterCreate.text();
@@ -3202,8 +3280,16 @@ describe("Desk app", () => {
     expect(updatedHtml).toContain("30 5 * * *");
     expect(updatedHtml).toContain("<td>no</td>");
 
-    const deleted = await app.request("/desk/admin/jobs/schedules/runtime-daily/delete", { method: "POST" });
+    const deleted = await app.request("/desk/admin/jobs/schedules/runtime-daily/delete", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        returnCron: "15 4 * * *",
+        returnJob: "reports.daily"
+      }).toString()
+    });
     expect(deleted.status).toBe(303);
+    expect(deleted.headers.get("location")).toBe("/desk/admin/jobs/schedules?cron=15+4+*+*+*&job=reports.daily");
     const afterDelete = await app.request("/desk/admin/jobs/schedules");
     await expect(afterDelete.text()).resolves.not.toContain("runtime-daily");
   });

@@ -765,47 +765,53 @@ export function createDeskApp(options: DeskAppOptions): Hono {
   app.post("/desk/admin/jobs/schedules", async (c) => {
     const schedules = requireJobSchedules(options);
     const actor = await options.actor(c.req.raw);
+    const form = await parseDeskJobScheduleForm(c.req.raw);
     await schedules.save(actor, {
-      ...await parseDeskJobScheduleDefinition(c.req.raw),
+      ...form.definition,
       preserveExistingFields: true,
       eventMetadata: requestMetadata(c.req.raw)
     });
-    return c.redirect("/desk/admin/jobs/schedules", 303);
+    return c.redirect(jobScheduleAdminLocation(form.returnFilters), 303);
   });
 
   app.post("/desk/admin/jobs/schedules/:scheduleId/run", async (c) => {
     const schedules = requireJobSchedules(options);
     const actor = await options.actor(c.req.raw);
+    const returnFilters = await parseDeskJobScheduleReturnFilters(c.req.raw);
     await schedules.dispatch(actor, c.req.param("scheduleId"));
-    return c.redirect("/desk/admin/jobs/schedules", 303);
+    return c.redirect(jobScheduleAdminLocation(returnFilters), 303);
   });
 
   app.post("/desk/admin/jobs/schedules/:scheduleId/delete", async (c) => {
     const schedules = requireJobSchedules(options);
     const actor = await options.actor(c.req.raw);
+    const returnFilters = await parseDeskJobScheduleReturnFilters(c.req.raw);
     await schedules.delete(actor, c.req.param("scheduleId"), { metadata: requestMetadata(c.req.raw) });
-    return c.redirect("/desk/admin/jobs/schedules", 303);
+    return c.redirect(jobScheduleAdminLocation(returnFilters), 303);
   });
 
   app.post("/desk/admin/jobs/schedules/:scheduleId/enable", async (c) => {
     const schedules = requireJobSchedules(options);
     const actor = await options.actor(c.req.raw);
+    const returnFilters = await parseDeskJobScheduleReturnFilters(c.req.raw);
     await schedules.enable(actor, c.req.param("scheduleId"), { metadata: requestMetadata(c.req.raw) });
-    return c.redirect("/desk/admin/jobs/schedules", 303);
+    return c.redirect(jobScheduleAdminLocation(returnFilters), 303);
   });
 
   app.post("/desk/admin/jobs/schedules/:scheduleId/disable", async (c) => {
     const schedules = requireJobSchedules(options);
     const actor = await options.actor(c.req.raw);
+    const returnFilters = await parseDeskJobScheduleReturnFilters(c.req.raw);
     await schedules.disable(actor, c.req.param("scheduleId"), { metadata: requestMetadata(c.req.raw) });
-    return c.redirect("/desk/admin/jobs/schedules", 303);
+    return c.redirect(jobScheduleAdminLocation(returnFilters), 303);
   });
 
   app.post("/desk/admin/jobs/schedules/:scheduleId/reset", async (c) => {
     const schedules = requireJobSchedules(options);
     const actor = await options.actor(c.req.raw);
+    const returnFilters = await parseDeskJobScheduleReturnFilters(c.req.raw);
     await schedules.clearOverride(actor, c.req.param("scheduleId"), { metadata: requestMetadata(c.req.raw) });
-    return c.redirect("/desk/admin/jobs/schedules", 303);
+    return c.redirect(jobScheduleAdminLocation(returnFilters), 303);
   });
 
   app.post("/desk/admin/jobs/:idempotencyKey/retry", async (c) => {
@@ -2349,6 +2355,18 @@ function dataPatchQueuedLocation(label: DataPatchQueueLabel, message: DataPatchQ
   return `/desk/admin/data-patches?${params.toString()}`;
 }
 
+function jobScheduleAdminLocation(filters: DeskJobScheduleReturnFilters = {}): string {
+  const params = new URLSearchParams();
+  if (filters.cron !== undefined) {
+    params.set("cron", filters.cron);
+  }
+  if (filters.jobName !== undefined) {
+    params.set("job", filters.jobName);
+  }
+  const query = params.toString();
+  return query ? `/desk/admin/jobs/schedules?${query}` : "/desk/admin/jobs/schedules";
+}
+
 function dataPatchQueuedMessageFromUrl(url: string): string | undefined {
   const params = new URL(url).searchParams;
   const label = parseDataPatchQueueLabel(params.get("queued"));
@@ -3029,8 +3047,29 @@ interface ParsedDeskJobScheduleDefinition {
   readonly delaySeconds?: number;
 }
 
-async function parseDeskJobScheduleDefinition(request: Request): Promise<ParsedDeskJobScheduleDefinition> {
+interface DeskJobScheduleReturnFilters {
+  readonly cron?: string;
+  readonly jobName?: string;
+}
+
+interface ParsedDeskJobScheduleForm {
+  readonly definition: ParsedDeskJobScheduleDefinition;
+  readonly returnFilters: DeskJobScheduleReturnFilters;
+}
+
+async function parseDeskJobScheduleForm(request: Request): Promise<ParsedDeskJobScheduleForm> {
   const form = await readUrlEncodedDeskForm(request);
+  return {
+    definition: parseDeskJobScheduleDefinition(form),
+    returnFilters: deskJobScheduleReturnFilters(form)
+  };
+}
+
+async function parseDeskJobScheduleReturnFilters(request: Request): Promise<DeskJobScheduleReturnFilters> {
+  return deskJobScheduleReturnFilters(await readUrlEncodedDeskForm(request));
+}
+
+function parseDeskJobScheduleDefinition(form: URLSearchParams): ParsedDeskJobScheduleDefinition {
   const id = stringSearchParamValue(form, "id");
   const cron = stringSearchParamValue(form, "cron");
   const jobName = stringSearchParamValue(form, "jobName");
@@ -3060,6 +3099,15 @@ async function parseDeskJobScheduleDefinition(request: Request): Promise<ParsedD
     jobName,
     enabled: form.get("enabled") !== null,
     ...(parsedDelay === undefined ? {} : { delaySeconds: parsedDelay })
+  };
+}
+
+function deskJobScheduleReturnFilters(form: URLSearchParams): DeskJobScheduleReturnFilters {
+  const cron = stringSearchParamValue(form, "returnCron");
+  const jobName = stringSearchParamValue(form, "returnJob");
+  return {
+    ...(cron === undefined ? {} : { cron }),
+    ...(jobName === undefined ? {} : { jobName })
   };
 }
 

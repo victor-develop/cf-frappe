@@ -1342,10 +1342,10 @@ export function renderJobScheduleAdmin(
         <td>${schedule.registered ? "yes" : "no"}</td>
         <td>${escapeHtml(schedule.delaySeconds === undefined ? "" : String(schedule.delaySeconds))}</td>
         <td>${escapeHtml(dynamicScheduleFields(schedule))}</td>
-        <td>${options.allowRun ? renderScheduleRunAction(schedule.id, schedule.dispatchable) : ""}${options.allowOverride ? renderScheduleOverrideAction(schedule) : ""}${options.allowEdit ? renderScheduleDefinitionAction(schedule) : ""}</td>
+        <td>${options.allowRun ? renderScheduleRunAction(schedule.id, schedule.dispatchable, dashboard.filters) : ""}${options.allowOverride ? renderScheduleOverrideAction(schedule, dashboard.filters) : ""}${options.allowEdit ? renderScheduleDefinitionAction(schedule, dashboard.filters) : ""}</td>
       </tr>`)
     .join("");
-  const editor = options.allowEdit ? renderJobScheduleEditor() : "";
+  const editor = options.allowEdit ? renderJobScheduleEditor(dashboard.filters) : "";
   return `${editor}<form class="panel form list-filters" method="get" action="/desk/admin/jobs/schedules">
     <div class="fields">
       <label class="field"><span>Cron</span><input name="cron" value="${escapeHtml(dashboard.filters.cron ?? "")}"></label>
@@ -1366,8 +1366,9 @@ export function renderJobScheduleAdmin(
   </section>`;
 }
 
-function renderJobScheduleEditor(): string {
+function renderJobScheduleEditor(filters: JobScheduleDashboard["filters"]): string {
   return `<form class="panel form" method="post" action="/desk/admin/jobs/schedules">
+    ${renderJobScheduleReturnFields(filters)}
     <div class="fields">
       <label class="field"><span>ID</span><input name="id"></label>
       <label class="field"><span>Cron</span><input name="cron" required></label>
@@ -1379,16 +1380,24 @@ function renderJobScheduleEditor(): string {
   </form>`;
 }
 
-function renderScheduleRunAction(scheduleId: string, dispatchable: boolean): string {
+function renderScheduleRunAction(
+  scheduleId: string,
+  dispatchable: boolean,
+  filters: JobScheduleDashboard["filters"]
+): string {
   if (!dispatchable) {
     return "";
   }
   return `<form class="inline-action" method="post">
+    ${renderJobScheduleReturnFields(filters)}
     <button class="button" type="submit" formaction="/desk/admin/jobs/schedules/${encodeURIComponent(scheduleId)}/run">Run</button>
   </form>`;
 }
 
-function renderScheduleOverrideAction(schedule: JobScheduleDashboard["schedules"][number]): string {
+function renderScheduleOverrideAction(
+  schedule: JobScheduleDashboard["schedules"][number],
+  filters: JobScheduleDashboard["filters"]
+): string {
   if (!schedule.overrideable) {
     return "";
   }
@@ -1398,18 +1407,30 @@ function renderScheduleOverrideAction(schedule: JobScheduleDashboard["schedules"
     ? `<button class="button" type="submit" formaction="/desk/admin/jobs/schedules/${encodeURIComponent(schedule.id)}/reset">Reset</button>`
     : "";
   return `<form class="inline-action" method="post">
+    ${renderJobScheduleReturnFields(filters)}
     <button class="button" type="submit" formaction="/desk/admin/jobs/schedules/${encodeURIComponent(schedule.id)}/${action}">${label}</button>
     ${reset}
   </form>`;
 }
 
-function renderScheduleDefinitionAction(schedule: JobScheduleDashboard["schedules"][number]): string {
+function renderScheduleDefinitionAction(
+  schedule: JobScheduleDashboard["schedules"][number],
+  filters: JobScheduleDashboard["filters"]
+): string {
   if (!schedule.editable) {
     return "";
   }
   return `<form class="inline-action" method="post">
+    ${renderJobScheduleReturnFields(filters)}
     <button class="button" type="submit" formaction="/desk/admin/jobs/schedules/${encodeURIComponent(schedule.id)}/delete">Delete</button>
   </form>`;
+}
+
+function renderJobScheduleReturnFields(filters: JobScheduleDashboard["filters"]): string {
+  return [
+    filters.cron === undefined ? "" : `<input type="hidden" name="returnCron" value="${escapeHtml(filters.cron)}">`,
+    filters.jobName === undefined ? "" : `<input type="hidden" name="returnJob" value="${escapeHtml(filters.jobName)}">`
+  ].filter(Boolean).join("");
 }
 
 function dynamicScheduleFields(schedule: JobScheduleDashboard["schedules"][number]): string {
