@@ -43,10 +43,11 @@ export class InMemoryFileStorage implements FileStorage {
 
   async put(command: PutFileObjectCommand): Promise<FileObjectMetadata> {
     const bytes = new Uint8Array(await toArrayBuffer(command.body));
+    const size = command.size ?? bytes.byteLength;
     const etag = `"memory-${command.key}-${bytes.byteLength}"`;
     const metadata: FileObjectMetadata = {
       key: command.key,
-      size: command.size,
+      size,
       etag,
       httpEtag: etag,
       uploadedAt: new Date(0).toISOString(),

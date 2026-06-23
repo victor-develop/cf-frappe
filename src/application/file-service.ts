@@ -85,6 +85,14 @@ export interface TransformFileCommand extends DownloadFileCommand {
   readonly options: FileTransformOptions;
 }
 
+export interface GenerateFileRenditionCommand extends TransformFileCommand {
+  readonly metadata?: DocumentData;
+}
+
+export interface DownloadFileRenditionCommand extends DownloadFileCommand {
+  readonly renditionId: string;
+}
+
 export interface PrepareDirectUploadCommand {
   readonly actor: Actor;
   readonly filename: string;
@@ -231,6 +239,35 @@ export interface TransformedFile {
   readonly transform: TransformedFileObject;
 }
 
+export interface FileRendition {
+  readonly id: string;
+  readonly key: string;
+  readonly status: "pending" | "available" | "failed";
+  readonly options: FileTransformOptions;
+  readonly requestedAt: string;
+  readonly requestedBy: string;
+  readonly sourceEtag?: string;
+  readonly contentType?: string;
+  readonly size?: number;
+  readonly etag?: string;
+  readonly httpEtag?: string;
+  readonly generatedAt?: string;
+  readonly generatedBy?: string;
+  readonly failureMessage?: string;
+}
+
+export interface GeneratedFileRendition {
+  readonly snapshot: DocumentSnapshot;
+  readonly rendition: FileRendition;
+  readonly created: boolean;
+}
+
+export interface DownloadedFileRendition {
+  readonly snapshot: DocumentSnapshot;
+  readonly rendition: FileRendition;
+  readonly object: StoredFileObject;
+}
+
 export interface FileDashboardQuery {
   readonly attachedToDoctype?: string;
   readonly attachedToName?: string;
@@ -265,6 +302,7 @@ export interface FileDashboardEntry {
     readonly doctype: string;
     readonly name: string;
   };
+  readonly renditions?: readonly FileRendition[];
 }
 
 export interface FileDashboard {
@@ -829,33 +867,150 @@ export class FileService {
   }
 
   async download(command: DownloadFileCommand): Promise<DownloadedFile> {
-    const snapshot = await this.queries.getDocument(
-      command.actor,
-      this.fileDoctype,
-      command.name,
-      command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID
-    );
+    const snapshot = await this.availableFileSnapshot(command);
     const key = stringField(snapshot, "key");
-    if (snapshot.data.storage_state === "upload_pending" || snapshot.data.storage_state === "upload_completing") {
-      throw new FrameworkError("FILE_UPLOAD_PENDING", `${this.fileDoctype}/${command.name} upload has not been finalized`, {
-        status: 409
-      });
-    }
-    if (snapshot.data.storage_state === "scan_failed") {
-      throw new FrameworkError("FILE_SCAN_FAILED", `${this.fileDoctype}/${command.name} did not pass file scanning`, {
-        status: 409
-      });
-    }
-    if (snapshot.data.storage_state === "delete_requested") {
-      throw new FrameworkError("DOCUMENT_DELETED", `${this.fileDoctype}/${command.name} is pending deletion`, {
-        status: 410
-      });
-    }
     const object = await this.storage.get(key);
     if (!object) {
       throw notFound(`${this.fileDoctype}/${command.name} content was not found`);
     }
     return { snapshot, object };
+  }
+
+  async generateRendition(command: GenerateFileRenditionCommand): Promise<GeneratedFileRendition> {
+    if (!this.transformer) {
+      throw badRequest("File transforms are not configured");
+    }
+    const downloaded = await this.download(command);
+    const options = normalizeFileTransformOptions(command.options);
+    const sourceContentType = downloaded.object.metadata.contentType ?? stringField(downloaded.snapshot, "content_type");
+    if (!isTransformableFileContentType(sourceContentType)) {
+      throw badRequest(`File '${downloaded.snapshot.name}' cannot be transformed`);
+    }
+    const doctype = this.registry.get(this.fileDoctype);
+    if (!can(command.actor, doctype, "rendition", downloaded.snapshot)) {
+      throw permissionDenied(
+        `Actor '${command.actor.id}' cannot generate renditions for ${this.fileDoctype}/${command.name}`
+      );
+    }
+    const sourceEtag = downloaded.object.metadata.httpEtag ?? downloaded.object.metadata.etag;
+    const renditionId = fileRenditionId(options);
+    const existing = fileRenditions(downloaded.snapshot).find(
+      (rendition) =>
+        rendition.id === renditionId &&
+        rendition.status === "available" &&
+        optionalString(rendition.source_etag) === sourceEtag
+    );
+    if (existing && await this.storage.head(existing.key)) {
+      return {
+        snapshot: downloaded.snapshot,
+        rendition: fileRenditionView(existing),
+        created: false
+      };
+    }
+
+    const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
+    const currentRenditions = fileRenditions(downloaded.snapshot);
+    const pendingExisting = currentRenditions.find(
+      (rendition) =>
+        rendition.id === renditionId &&
+        rendition.status === "pending" &&
+        optionalString(rendition.source_etag) === sourceEtag
+    );
+    if (pendingExisting) {
+      throw conflict(`File rendition '${renditionId}' is already being generated`);
+    }
+    const pending = pendingFileRendition({
+      snapshot: downloaded.snapshot,
+      tenantId,
+      id: renditionId,
+      attemptId: this.ids.next("rendition_"),
+      sourceEtag,
+      options,
+      requestedAt: this.clock.now(),
+      requestedBy: command.actor.id
+    });
+    await this.documents.execute({
+      actor: command.actor,
+      doctype: this.fileDoctype,
+      name: command.name,
+      command: "reserveRendition",
+      input: {
+        renditions: upsertFileRenditionManifest(currentRenditions, pending)
+      },
+      ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+      expectedVersion: downloaded.snapshot.version,
+      metadata: command.metadata ?? {}
+    });
+
+    let object: FileObjectMetadata | undefined;
+    try {
+      const transform = await this.transformDownloadedFile({
+        actor: command.actor,
+        tenantId,
+        downloaded,
+        options
+      });
+      const filename = fileRenditionFilename(stringField(downloaded.snapshot, "filename"), renditionId, transform.contentType);
+      object = await this.storage.put({
+        key: pending.key,
+        body: transform.body,
+        contentType: transform.contentType,
+        filename,
+        ...(transform.contentLength === undefined ? {} : { size: transform.contentLength }),
+        customMetadata: {
+          tenantId,
+          sourceFile: downloaded.snapshot.name,
+          sourceEtag,
+          renditionId
+        }
+      });
+      const completed = completeFileRendition({
+        pending,
+        object,
+        generatedAt: this.clock.now(),
+        generatedBy: command.actor.id
+      });
+      const snapshot = await this.recordRenditionManifest({
+        source: command,
+        command: "completeRendition",
+        rendition: completed
+      });
+      return {
+        snapshot,
+        rendition: fileRenditionView(completed),
+        created: true
+      };
+    } catch (error) {
+      if (object) {
+        await this.storage.delete(object.key).catch(() => undefined);
+      }
+      await this.recordRenditionManifest({
+        source: command,
+        command: "failRendition",
+        rendition: failedFileRendition({
+          pending,
+          message: errorMessage(error)
+        })
+      }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async downloadRendition(command: DownloadFileRenditionCommand): Promise<DownloadedFileRendition> {
+    const snapshot = await this.availableFileSnapshot(command);
+    const rendition = fileRenditions(snapshot).find((item) => item.id === command.renditionId);
+    if (!rendition || rendition.status !== "available") {
+      throw notFound(`${this.fileDoctype}/${command.name} rendition '${command.renditionId}' was not found`);
+    }
+    const object = await this.storage.get(rendition.key);
+    if (!object) {
+      throw notFound(`${this.fileDoctype}/${command.name} rendition '${command.renditionId}' content was not found`);
+    }
+    return {
+      snapshot,
+      rendition: fileRenditionView(rendition),
+      object
+    };
   }
 
   async transform(command: TransformFileCommand): Promise<TransformedFile> {
@@ -869,21 +1024,10 @@ export class FileService {
       throw badRequest(`File '${downloaded.snapshot.name}' cannot be transformed`);
     }
     const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
-    const filename = stringField(downloaded.snapshot, "filename") || downloaded.snapshot.name;
-    const transform = await this.transformer.transform({
-      actorId: command.actor.id,
+    const transform = await this.transformDownloadedFile({
+      actor: command.actor,
       tenantId,
-      source: {
-        key: downloaded.object.metadata.key,
-        filename,
-        contentType,
-        size: downloaded.object.metadata.size,
-        body: downloaded.object.body,
-        etag: downloaded.object.metadata.etag,
-        ...(downloaded.object.metadata.httpEtag === undefined
-          ? {}
-          : { httpEtag: downloaded.object.metadata.httpEtag })
-      },
+      downloaded,
       options
     });
     return {
@@ -914,7 +1058,7 @@ export class FileService {
             expectedVersion: current.version,
             metadata: command.metadata ?? {}
           });
-    await this.storage.delete(stringField(deleteRequested, "key"));
+    await this.deleteFileObjects(deleteRequested);
     const snapshot = await this.documents.delete({
       actor: command.actor,
       doctype: this.fileDoctype,
@@ -981,6 +1125,96 @@ export class FileService {
     const issues = validateDocumentData(doctype, data);
     if (issues.length > 0) {
       throw validationFailed(issues);
+    }
+  }
+
+  private async availableFileSnapshot(command: DownloadFileCommand): Promise<DocumentSnapshot> {
+    const snapshot = await this.queries.getDocument(
+      command.actor,
+      this.fileDoctype,
+      command.name,
+      command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID
+    );
+    if (snapshot.data.storage_state === "upload_pending" || snapshot.data.storage_state === "upload_completing") {
+      throw new FrameworkError("FILE_UPLOAD_PENDING", `${this.fileDoctype}/${command.name} upload has not been finalized`, {
+        status: 409
+      });
+    }
+    if (snapshot.data.storage_state === "scan_failed") {
+      throw new FrameworkError("FILE_SCAN_FAILED", `${this.fileDoctype}/${command.name} did not pass file scanning`, {
+        status: 409
+      });
+    }
+    if (snapshot.data.storage_state === "delete_requested") {
+      throw new FrameworkError("DOCUMENT_DELETED", `${this.fileDoctype}/${command.name} is pending deletion`, {
+        status: 410
+      });
+    }
+    return snapshot;
+  }
+
+  private async transformDownloadedFile(command: {
+    readonly actor: Actor;
+    readonly tenantId: string;
+    readonly downloaded: DownloadedFile;
+    readonly options: FileTransformOptions;
+  }): Promise<TransformedFileObject> {
+    if (!this.transformer) {
+      throw badRequest("File transforms are not configured");
+    }
+    const contentType = command.downloaded.object.metadata.contentType ??
+      stringField(command.downloaded.snapshot, "content_type");
+    const filename = stringField(command.downloaded.snapshot, "filename") || command.downloaded.snapshot.name;
+    return this.transformer.transform({
+      actorId: command.actor.id,
+      tenantId: command.tenantId,
+      source: {
+        key: command.downloaded.object.metadata.key,
+        filename,
+        contentType,
+        size: command.downloaded.object.metadata.size,
+        body: command.downloaded.object.body,
+        etag: command.downloaded.object.metadata.etag,
+        ...(command.downloaded.object.metadata.httpEtag === undefined
+          ? {}
+          : { httpEtag: command.downloaded.object.metadata.httpEtag })
+      },
+      options: command.options
+    });
+  }
+
+  private async recordRenditionManifest(command: {
+    readonly source: GenerateFileRenditionCommand;
+    readonly command: "completeRendition" | "failRendition";
+    readonly rendition: FileRenditionManifestEntry;
+  }): Promise<DocumentSnapshot> {
+    const latest = await this.queries.getDocument(
+      command.source.actor,
+      this.fileDoctype,
+      command.source.name,
+      command.source.tenantId ?? command.source.actor.tenantId ?? DEFAULT_TENANT_ID
+    );
+    return this.documents.execute({
+      actor: command.source.actor,
+      doctype: this.fileDoctype,
+      name: command.source.name,
+      command: command.command,
+      input: {
+        renditions: upsertFileRenditionManifest(fileRenditions(latest), command.rendition)
+      },
+      ...(command.source.tenantId === undefined ? {} : { tenantId: command.source.tenantId }),
+      expectedVersion: latest.version,
+      metadata: command.source.metadata ?? {}
+    });
+  }
+
+  private async deleteFileObjects(snapshot: DocumentSnapshot): Promise<void> {
+    const keys = [
+      stringField(snapshot, "key"),
+      ...fileRenditions(snapshot).map((rendition) => rendition.key)
+    ];
+    for (const key of [...new Set(keys)]) {
+      await this.storage.delete(key);
     }
   }
 
@@ -1103,6 +1337,7 @@ function optionalTextFilter<TKey extends string>(key: TKey, value: string | unde
 }
 
 const MAX_BULK_FILES = 100;
+const MAX_FILE_RENDITIONS = 32;
 
 function normalizeBulkFileSelections(
   files: readonly BulkFileSelection[]
@@ -1154,11 +1389,250 @@ function bulkFileFailure(name: string, error: unknown, fallback: string): BulkDe
   };
 }
 
+interface FileRenditionManifestEntry {
+  readonly [key: string]: JsonValue;
+  readonly id: string;
+  readonly key: string;
+  readonly status: "pending" | "available" | "failed";
+  readonly options: DocumentData;
+  readonly requested_at: string;
+  readonly requested_by: string;
+  readonly source_etag?: string;
+  readonly content_type?: string;
+  readonly size?: number;
+  readonly etag?: string;
+  readonly http_etag?: string;
+  readonly generated_at?: string;
+  readonly generated_by?: string;
+  readonly failure_message?: string;
+}
+
+function fileRenditions(snapshot: DocumentSnapshot): readonly FileRenditionManifestEntry[] {
+  const value = snapshot.data.renditions;
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((entry): FileRenditionManifestEntry[] => {
+    if (!isRenditionManifestEntry(entry)) {
+      return [];
+    }
+    return [entry];
+  });
+}
+
+function isRenditionManifestEntry(value: JsonValue): value is FileRenditionManifestEntry {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const entry = value as Record<string, JsonValue | undefined>;
+  return (
+    typeof entry.id === "string" &&
+    typeof entry.key === "string" &&
+    (entry.status === "pending" || entry.status === "available" || entry.status === "failed") &&
+    isDocumentData(entry.options) &&
+    typeof entry.requested_at === "string" &&
+    typeof entry.requested_by === "string" &&
+    optionalJsonString(entry.source_etag) &&
+    optionalJsonString(entry.content_type) &&
+    optionalJsonInteger(entry.size) &&
+    optionalJsonString(entry.etag) &&
+    optionalJsonString(entry.http_etag) &&
+    optionalJsonString(entry.generated_at) &&
+    optionalJsonString(entry.generated_by) &&
+    optionalJsonString(entry.failure_message)
+  );
+}
+
+function isDocumentData(value: JsonValue | undefined): value is DocumentData {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function optionalJsonString(value: JsonValue | undefined): boolean {
+  return value === undefined || typeof value === "string";
+}
+
+function optionalJsonInteger(value: JsonValue | undefined): boolean {
+  return value === undefined || (typeof value === "number" && Number.isInteger(value) && value >= 0);
+}
+
+function fileRenditionView(entry: FileRenditionManifestEntry): FileRendition {
+  return {
+    id: entry.id,
+    key: entry.key,
+    status: entry.status,
+    options: fileTransformOptionsFromData(entry.options),
+    requestedAt: entry.requested_at,
+    requestedBy: entry.requested_by,
+    ...(entry.source_etag === undefined ? {} : { sourceEtag: entry.source_etag }),
+    ...(entry.content_type === undefined ? {} : { contentType: entry.content_type }),
+    ...(entry.size === undefined ? {} : { size: entry.size }),
+    ...(entry.etag === undefined ? {} : { etag: entry.etag }),
+    ...(entry.http_etag === undefined ? {} : { httpEtag: entry.http_etag }),
+    ...(entry.generated_at === undefined ? {} : { generatedAt: entry.generated_at }),
+    ...(entry.generated_by === undefined ? {} : { generatedBy: entry.generated_by }),
+    ...(entry.failure_message === undefined ? {} : { failureMessage: entry.failure_message })
+  };
+}
+
+function fileTransformOptionsFromData(data: DocumentData): FileTransformOptions {
+  const fit = typeof data.fit === "string" ? data.fit as NonNullable<FileTransformOptions["fit"]> : undefined;
+  const format = typeof data.format === "string" ? data.format as NonNullable<FileTransformOptions["format"]> : undefined;
+  return {
+    ...(typeof data.width === "number" ? { width: data.width } : {}),
+    ...(typeof data.height === "number" ? { height: data.height } : {}),
+    ...(fit === undefined ? {} : { fit }),
+    ...(format === undefined ? {} : { format }),
+    ...(typeof data.quality === "number" ? { quality: data.quality } : {})
+  };
+}
+
+function pendingFileRendition(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly tenantId: string;
+  readonly id: string;
+  readonly attemptId: string;
+  readonly sourceEtag: string;
+  readonly options: FileTransformOptions;
+  readonly requestedAt: string;
+  readonly requestedBy: string;
+}): FileRenditionManifestEntry {
+  const contentType = expectedRenditionContentType(stringData(command.snapshot, "content_type"), command.options);
+  return {
+    id: command.id,
+    key: renditionObjectKey(command.tenantId, command.snapshot.name, command.id, command.attemptId, contentType),
+    status: "pending",
+    options: fileTransformOptionsData(command.options),
+    requested_at: command.requestedAt,
+    requested_by: command.requestedBy,
+    source_etag: command.sourceEtag
+  };
+}
+
+function failedFileRendition(command: {
+  readonly pending: FileRenditionManifestEntry;
+  readonly message: string;
+}): FileRenditionManifestEntry {
+  return {
+    ...command.pending,
+    status: "failed",
+    failure_message: command.message.slice(0, 500)
+  };
+}
+
+function completeFileRendition(command: {
+  readonly pending: FileRenditionManifestEntry;
+  readonly object: FileObjectMetadata;
+  readonly generatedAt: string;
+  readonly generatedBy: string;
+}): FileRenditionManifestEntry {
+  return {
+    ...command.pending,
+    status: "available",
+    content_type: command.object.contentType ?? "application/octet-stream",
+    size: command.object.size,
+    etag: command.object.etag,
+    ...(command.object.httpEtag === undefined ? {} : { http_etag: command.object.httpEtag }),
+    generated_at: command.generatedAt,
+    generated_by: command.generatedBy
+  };
+}
+
+function fileTransformOptionsData(options: FileTransformOptions): DocumentData {
+  return {
+    ...(options.width === undefined ? {} : { width: options.width }),
+    ...(options.height === undefined ? {} : { height: options.height }),
+    ...(options.fit === undefined ? {} : { fit: options.fit }),
+    ...(options.format === undefined ? {} : { format: options.format }),
+    ...(options.quality === undefined ? {} : { quality: options.quality })
+  };
+}
+
+function fileRenditionId(options: FileTransformOptions): string {
+  return [
+    ...(options.width === undefined ? [] : [`w${String(options.width)}`]),
+    ...(options.height === undefined ? [] : [`h${String(options.height)}`]),
+    ...(options.fit === undefined ? [] : [`fit-${options.fit}`]),
+    ...(options.format === undefined ? [] : [`f-${options.format}`]),
+    ...(options.quality === undefined ? [] : [`q${String(options.quality)}`])
+  ].join("-");
+}
+
+function upsertFileRenditionManifest(
+  manifest: readonly FileRenditionManifestEntry[],
+  rendition: FileRenditionManifestEntry
+): readonly FileRenditionManifestEntry[] {
+  const replacing = manifest.some((entry) => entry.id === rendition.id);
+  if (!replacing && manifest.length >= MAX_FILE_RENDITIONS) {
+    throw badRequest(`At most ${String(MAX_FILE_RENDITIONS)} renditions can be stored per file`);
+  }
+  return [
+    ...manifest.filter((entry) => entry.id !== rendition.id),
+    rendition
+  ].sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function expectedRenditionContentType(sourceContentType: string, options: FileTransformOptions): string {
+  if (options.format === "jpeg") {
+    return "image/jpeg";
+  }
+  if (options.format) {
+    return `image/${options.format}`;
+  }
+  return normalizeContentType(sourceContentType) || "application/octet-stream";
+}
+
+function renditionObjectKey(
+  tenantId: string,
+  fileName: string,
+  renditionId: string,
+  attemptId: string,
+  contentType: string
+): string {
+  const tenant = tenantId.replace(/[^A-Za-z0-9_-]+/g, "-") || DEFAULT_TENANT_ID;
+  const safeFileName = fileName.replace(/[^A-Za-z0-9_-]+/g, "-") || "file";
+  const safeAttemptId = attemptId.replace(/[^A-Za-z0-9_-]+/g, "-") || "attempt";
+  const key = `${tenant}/file-renditions/${safeFileName}/${renditionId}-${safeAttemptId}.${fileContentTypeExtension(contentType)}`;
+  if (new TextEncoder().encode(key).byteLength > 1024) {
+    throw badRequest("file rendition key exceeds 1024 bytes");
+  }
+  return key;
+}
+
+function fileRenditionFilename(filename: string, renditionId: string, contentType: string): string {
+  return `${filename}.${renditionId}.${fileContentTypeExtension(contentType)}`.slice(0, 255);
+}
+
+function fileContentTypeExtension(contentType: string): string {
+  const normalized = normalizeContentType(contentType);
+  if (normalized === "image/jpeg") {
+    return "jpg";
+  }
+  if (normalized === "image/png") {
+    return "png";
+  }
+  if (normalized === "image/webp") {
+    return "webp";
+  }
+  if (normalized === "image/avif") {
+    return "avif";
+  }
+  return "bin";
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function fileDashboardEntry(snapshot: DocumentSnapshot): Omit<FileDashboardEntry, "editable" | "deletable"> {
   const attachedToDoctype = stringData(snapshot, "attached_to_doctype");
   const attachedToName = stringData(snapshot, "attached_to_name");
   const contentType = stringData(snapshot, "content_type");
   const storageState = stringData(snapshot, "storage_state") || "available";
+  const renditions = fileRenditions(snapshot).map(fileRenditionView);
   return {
     name: snapshot.name,
     filename: stringData(snapshot, "filename") || snapshot.name,
@@ -1177,6 +1651,7 @@ function fileDashboardEntry(snapshot: DocumentSnapshot): Omit<FileDashboardEntry
     uploadedBy: stringData(snapshot, "uploaded_by"),
     uploadedAt: stringData(snapshot, "uploaded_at"),
     expectedVersion: snapshot.version,
+    ...(renditions.length === 0 ? {} : { renditions }),
     ...(attachedToDoctype && attachedToName
       ? { attachedTo: { doctype: attachedToDoctype, name: attachedToName } }
       : {})

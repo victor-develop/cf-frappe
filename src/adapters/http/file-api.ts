@@ -6,7 +6,7 @@ import {
 } from "../../application/file-service.js";
 import type { FileTransformFit, FileTransformFormat, FileTransformOptions } from "../../ports/file-transformer.js";
 import { badRequest } from "../../core/errors.js";
-import { fileContentHeaders, transformedFileContentHeaders } from "../file-content.js";
+import { fileContentHeaders, fileRenditionContentHeaders, transformedFileContentHeaders } from "../file-content.js";
 import type { ActorResolver } from "./actor.js";
 import { parseOptionalInteger, readBoundedBytes, readJsonObject, requestMetadata } from "./request.js";
 
@@ -146,6 +146,35 @@ export function createFileApi(options: FileApiOptions): Hono {
       options: fileTransformQuery(c.req.raw)
     });
     return new Response(transformed.transform.body, { headers: transformedFileContentHeaders(transformed) });
+  });
+
+  app.post("/api/files/:name/renditions", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const body = await readJsonObject(c.req.raw, { maxJsonBytes });
+    const generated = await options.files.generateRendition({
+      actor,
+      name: c.req.param("name"),
+      options: fileTransformBody(body, "file rendition"),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json(
+      {
+        data: generated.snapshot,
+        rendition: generated.rendition,
+        created: generated.created
+      },
+      generated.created ? 201 : 200
+    );
+  });
+
+  app.get("/api/files/:name/renditions/:renditionId/content", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const downloaded = await options.files.downloadRendition({
+      actor,
+      name: c.req.param("name"),
+      renditionId: c.req.param("renditionId")
+    });
+    return new Response(downloaded.object.body, { headers: fileRenditionContentHeaders(downloaded) });
   });
 
   app.post("/api/files/delete", async (c) => {
@@ -542,6 +571,57 @@ function fileTransformQuery(request: Request): FileTransformOptions {
     ...optionalTransformFormat(params),
     ...optionalTransformInteger(params, "quality")
   };
+}
+
+function fileTransformBody(body: Record<string, unknown>, label: string): FileTransformOptions {
+  const allowed = new Set(["width", "height", "fit", "format", "quality"]);
+  const unknown = Object.keys(body).filter((key) => !allowed.has(key));
+  if (unknown.length > 0) {
+    throw badRequest(`Unknown ${label} field '${unknown[0]}'`);
+  }
+  return {
+    ...optionalTransformBodyInteger(body, "width"),
+    ...optionalTransformBodyInteger(body, "height"),
+    ...optionalTransformBodyFit(body),
+    ...optionalTransformBodyFormat(body),
+    ...optionalTransformBodyInteger(body, "quality")
+  };
+}
+
+function optionalTransformBodyInteger<TKey extends "width" | "height" | "quality">(
+  body: Record<string, unknown>,
+  key: TKey
+): { readonly [K in TKey]?: number } {
+  const value = body[key];
+  if (value === undefined || value === null || value === "") {
+    return {};
+  }
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw badRequest(`${key} must be an integer`);
+  }
+  return { [key]: value } as { readonly [K in TKey]: number };
+}
+
+function optionalTransformBodyFit(body: Record<string, unknown>): Pick<FileTransformOptions, "fit"> {
+  const value = body.fit;
+  if (value === undefined || value === null || value === "") {
+    return {};
+  }
+  if (typeof value !== "string") {
+    throw badRequest("fit must be a string");
+  }
+  return { fit: value as FileTransformFit };
+}
+
+function optionalTransformBodyFormat(body: Record<string, unknown>): Pick<FileTransformOptions, "format"> {
+  const value = body.format;
+  if (value === undefined || value === null || value === "") {
+    return {};
+  }
+  if (typeof value !== "string") {
+    throw badRequest("format must be a string");
+  }
+  return { format: value as FileTransformFormat };
 }
 
 function optionalTransformInteger<TKey extends "width" | "height" | "quality">(

@@ -1349,6 +1349,9 @@ export function renderDeskClientScript(): string {
       delete: function (name, options) {
         return request(withQuery(filePath(name), versionBody(options)), { method: "DELETE" }).then(unwrapData);
       },
+      generateRendition: function (name, options) {
+        return request(filePath(name, "renditions"), { method: "POST", body: options || {} });
+      },
       list: function (options) {
         return request(withQuery("/api/files", fileListParams(options || {}))).then(unwrapData);
       },
@@ -1358,6 +1361,9 @@ export function renderDeskClientScript(): string {
       prepareMultipartUpload: prepareMultipartUpload,
       previewUrl: function (name) {
         return filePath(name, "preview");
+      },
+      renditionContentUrl: function (name, renditionId) {
+        return filePath(name, "renditions/" + encodePart(renditionId) + "/content");
       },
       transformUrl: function (name, options) {
         return withQuery(filePath(name, "transform"), fileTransformParams(options || {}));

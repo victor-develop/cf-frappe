@@ -1,4 +1,4 @@
-import type { DownloadedFile, TransformedFile } from "../application/file-service.js";
+import type { DownloadedFile, DownloadedFileRendition, TransformedFile } from "../application/file-service.js";
 
 export type FileContentDisposition = "attachment" | "inline";
 
@@ -28,6 +28,20 @@ export function transformedFileContentHeaders(transformed: TransformedFile): Hea
   }
   const filenameValue = transformed.snapshot.data.filename;
   const filename = typeof filenameValue === "string" ? filenameValue : transformed.snapshot.name;
+  headers.set("content-disposition", `inline; filename="${filename.replace(/["\\]/g, "_")}"`);
+  return headers;
+}
+
+export function fileRenditionContentHeaders(downloaded: DownloadedFileRendition): Headers {
+  const headers = new Headers();
+  headers.set("content-type", downloaded.object.metadata.contentType ?? downloaded.rendition.contentType ?? "application/octet-stream");
+  headers.set("content-length", String(downloaded.object.metadata.size));
+  headers.set("x-content-type-options", "nosniff");
+  if (downloaded.object.metadata.httpEtag) {
+    headers.set("etag", downloaded.object.metadata.httpEtag);
+  }
+  const filenameValue = downloaded.object.metadata.filename;
+  const filename = filenameValue ?? `${downloaded.snapshot.name}.${downloaded.rendition.id}`;
   headers.set("content-disposition", `inline; filename="${filename.replace(/["\\]/g, "_")}"`);
   return headers;
 }

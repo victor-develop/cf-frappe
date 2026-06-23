@@ -55,6 +55,7 @@ export interface PersistedFieldDefinition extends Omit<FieldDefinition, "default
 
 export type PermissionAction =
   | "read"
+  | "rendition"
   | "create"
   | "metadata"
   | "update"

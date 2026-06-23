@@ -129,6 +129,110 @@ describe("file api", () => {
     ]);
   });
 
+  it("generates and serves persisted image renditions through the file API", async () => {
+    const transformer = new RecordingTransformer();
+    const { app, storage } = makeAppFixture(
+      1024,
+      ["create", "reserve-rendition", "complete-rendition"],
+      ["object", "attempt"],
+      { transformer }
+    );
+    const uploaded = await app.request("/api/files?filename=avatar.png&is_private=false", {
+      method: "POST",
+      headers: { ...userHeaders("owner@example.com", "User"), "content-type": "image/png" },
+      body: "image-bytes"
+    });
+    expect(uploaded.status).toBe(201);
+
+    const generated = await app.request("/api/files/file_object/renditions", {
+      method: "POST",
+      headers: jsonHeaders("owner@example.com", "User"),
+      body: JSON.stringify({ width: 320, height: 240, fit: "cover", format: "webp", quality: 82 })
+    });
+
+    expect(generated.status).toBe(201);
+    await expect(generated.json()).resolves.toMatchObject({
+      data: {
+        name: "file_object",
+        version: 3,
+        data: {
+          renditions: [
+            {
+              id: "w320-h240-fit-cover-f-webp-q82",
+              key: "acme/file-renditions/file_object/w320-h240-fit-cover-f-webp-q82-rendition_attempt.webp",
+              status: "available",
+              content_type: "image/webp",
+              size: 23
+            }
+          ]
+        }
+      },
+      rendition: {
+        id: "w320-h240-fit-cover-f-webp-q82",
+        status: "available",
+        contentType: "image/webp",
+        size: 23
+      },
+      created: true
+    });
+    expect(storage.has("acme/file-renditions/file_object/w320-h240-fit-cover-f-webp-q82-rendition_attempt.webp")).toBe(true);
+
+    const reused = await app.request("/api/files/file_object/renditions", {
+      method: "POST",
+      headers: jsonHeaders("owner@example.com", "User"),
+      body: JSON.stringify({ width: 320, height: 240, fit: "cover", format: "webp", quality: 82 })
+    });
+    expect(reused.status).toBe(200);
+    await expect(reused.json()).resolves.toMatchObject({
+      created: false,
+      data: { version: 3 },
+      rendition: { id: "w320-h240-fit-cover-f-webp-q82" }
+    });
+    expect(transformer.commands).toHaveLength(1);
+
+    const content = await app.request("/api/files/file_object/renditions/w320-h240-fit-cover-f-webp-q82/content", {
+      headers: userHeaders("guest", "Guest")
+    });
+    expect(content.status).toBe(200);
+    expect(content.headers.get("content-type")).toBe("image/webp");
+    expect(content.headers.get("content-length")).toBe("23");
+    expect(content.headers.get("content-disposition")).toBe(
+      'inline; filename="avatar.png.w320-h240-fit-cover-f-webp-q82.webp"'
+    );
+    await expect(content.text()).resolves.toBe("transformed:image-bytes");
+  });
+
+  it("validates file rendition generation bodies", async () => {
+    const transformer = new RecordingTransformer();
+    const { app } = makeAppFixture(1024, ["create"], ["object"], { transformer });
+    await app.request("/api/files?filename=avatar.png&is_private=false", {
+      method: "POST",
+      headers: { ...userHeaders("owner@example.com", "User"), "content-type": "image/png" },
+      body: "image-bytes"
+    });
+
+    const unknown = await app.request("/api/files/file_object/renditions", {
+      method: "POST",
+      headers: jsonHeaders("guest", "Guest"),
+      body: JSON.stringify({ width: 64, resize: "small" })
+    });
+    expect(unknown.status).toBe(400);
+    await expect(unknown.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Unknown file rendition field 'resize'" }
+    });
+
+    const invalid = await app.request("/api/files/file_object/renditions", {
+      method: "POST",
+      headers: jsonHeaders("guest", "Guest"),
+      body: JSON.stringify({ width: 0 })
+    });
+    expect(invalid.status).toBe(400);
+    await expect(invalid.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "width must be an integer from 1 to 4096" }
+    });
+    expect(transformer.commands).toEqual([]);
+  });
+
   it("validates file transform query options", async () => {
     const transformer = new RecordingTransformer();
     const { app } = makeAppFixture(1024, ["create"], ["object"], { transformer });

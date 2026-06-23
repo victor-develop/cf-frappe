@@ -4,14 +4,15 @@ export const MAX_MULTIPART_FILE_PARTS = 10_000;
 export const MIN_MULTIPART_FILE_PART_BYTES = 5 * 1024 * 1024;
 
 export type FileContent = ArrayBuffer | ArrayBufferView | string | Blob;
-export type MultipartFilePartContent = FileContent | ReadableStream<Uint8Array>;
+export type StoredFileContent = FileContent | ReadableStream<Uint8Array>;
+export type MultipartFilePartContent = StoredFileContent;
 
 export interface PutFileObjectCommand {
   readonly key: string;
-  readonly body: FileContent;
+  readonly body: StoredFileContent;
   readonly contentType: string;
   readonly filename: string;
-  readonly size: number;
+  readonly size?: number;
   readonly customMetadata?: Readonly<Record<string, string>>;
 }
 

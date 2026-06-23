@@ -1462,6 +1462,207 @@ describe("FileService", () => {
     ]);
   });
 
+  it("records generated image renditions as event-sourced file metadata", async () => {
+    const transformer = new RecordingTransformer({ includeContentLength: false });
+    const services = createFileServices(["create", "reserve-rendition", "complete-rendition"], ["object", "attempt"], {
+      transformer
+    });
+    const uploaded = await services.files.upload({
+      actor: owner,
+      filename: "avatar.png",
+      body: "image-bytes",
+      contentType: "image/png",
+      isPrivate: false
+    });
+
+    const generated = await services.files.generateRendition({
+      actor: owner,
+      name: uploaded.snapshot.name,
+      options: { width: 128, height: 128, fit: "cover", format: "webp", quality: 80 }
+    });
+
+    expect(generated.created).toBe(true);
+    expect(generated).toMatchObject({
+      snapshot: {
+        name: uploaded.snapshot.name,
+        version: 3,
+        data: {
+          renditions: [
+            {
+              id: "w128-h128-fit-cover-f-webp-q80",
+              key: "acme/file-renditions/file_object/w128-h128-fit-cover-f-webp-q80-rendition_attempt.webp",
+              status: "available",
+              content_type: "image/webp",
+              size: 23,
+              generated_by: owner.id,
+              generated_at: now,
+              options: { width: 128, height: 128, fit: "cover", format: "webp", quality: 80 }
+            }
+          ]
+        }
+      },
+      rendition: {
+        id: "w128-h128-fit-cover-f-webp-q80",
+        status: "available",
+        contentType: "image/webp",
+        size: 23
+      }
+    });
+    await expect(
+      new Response(
+        (await services.storage.get("acme/file-renditions/file_object/w128-h128-fit-cover-f-webp-q80-rendition_attempt.webp"))?.body
+      ).text()
+    ).resolves.toBe("transformed:image-bytes");
+    await expect(
+      services.files.downloadRendition({
+        actor: guest,
+        name: uploaded.snapshot.name,
+        renditionId: generated.rendition.id
+      })
+    ).resolves.toMatchObject({
+      snapshot: { name: uploaded.snapshot.name, version: 3 },
+      rendition: { id: generated.rendition.id, status: "available" },
+      object: { metadata: { contentType: "image/webp", size: 23 } }
+    });
+    await expect(services.store.readStream(documentStream("acme", "File", uploaded.snapshot.name))).resolves.toMatchObject([
+      { type: "FileCreated" },
+      {
+        type: "FileRenditionRequested",
+        payload: {
+          kind: "DomainCommandApplied",
+          command: "reserveRendition",
+          patch: {
+            renditions: [
+              expect.objectContaining({
+                id: "w128-h128-fit-cover-f-webp-q80",
+                status: "pending"
+              })
+            ]
+          }
+        }
+      },
+      {
+        type: "FileRenditionGenerated",
+        payload: {
+          kind: "DomainCommandApplied",
+          command: "completeRendition",
+          patch: {
+            renditions: [
+              expect.objectContaining({
+                id: "w128-h128-fit-cover-f-webp-q80",
+                status: "available"
+              })
+            ]
+          }
+        }
+      }
+    ]);
+  });
+
+  it("reuses available file renditions without transforming again", async () => {
+    const transformer = new RecordingTransformer();
+    const services = createFileServices(
+      ["create", "reserve-rendition", "complete-rendition"],
+      ["object", "attempt"],
+      { transformer }
+    );
+    const uploaded = await services.files.upload({
+      actor: owner,
+      filename: "avatar.png",
+      body: "image-bytes",
+      contentType: "image/png",
+      isPrivate: false
+    });
+    const options = { width: 64, format: "webp" as const };
+
+    const first = await services.files.generateRendition({ actor: owner, name: uploaded.snapshot.name, options });
+    const second = await services.files.generateRendition({ actor: owner, name: uploaded.snapshot.name, options });
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(second.snapshot.version).toBe(first.snapshot.version);
+    expect(second.rendition).toEqual(first.rendition);
+    expect(transformer.commands).toHaveLength(1);
+  });
+
+  it("treats pending file renditions as a generation lock", async () => {
+    const transformer = new BlockingTransformer();
+    const services = createFileServices(
+      ["create", "reserve-rendition", "complete-rendition"],
+      ["object", "attempt-1", "attempt-2"],
+      { transformer }
+    );
+    const uploaded = await services.files.upload({
+      actor: owner,
+      filename: "avatar.png",
+      body: "image-bytes",
+      contentType: "image/png",
+      isPrivate: false
+    });
+    const first = services.files.generateRendition({
+      actor: owner,
+      name: uploaded.snapshot.name,
+      options: { width: 64, format: "webp" }
+    });
+    await transformer.started;
+
+    await expect(
+      services.files.generateRendition({
+        actor: owner,
+        name: uploaded.snapshot.name,
+        options: { width: 64, format: "webp" }
+      })
+    ).rejects.toMatchObject({
+      code: "DOCUMENT_CONFLICT",
+      message: "File rendition 'w64-f-webp' is already being generated"
+    });
+
+    transformer.release();
+    await expect(first).resolves.toMatchObject({
+      created: true,
+      rendition: {
+        id: "w64-f-webp",
+        key: "acme/file-renditions/file_object/w64-f-webp-rendition_attempt-1.webp"
+      }
+    });
+    expect(transformer.commands).toHaveLength(1);
+  });
+
+  it("requires rendition permission before storing generated file derivatives", async () => {
+    const transformer = new RecordingTransformer();
+    const services = createFileServices(["create"], ["object"], { transformer });
+    const uploaded = await services.files.upload({
+      actor: owner,
+      filename: "public.png",
+      body: "image-bytes",
+      contentType: "image/png",
+      isPrivate: false
+    });
+
+    await expect(
+      services.files.generateRendition({ actor: guest, name: uploaded.snapshot.name, options: { width: 64 } })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+    expect(transformer.commands).toEqual([]);
+    await expect(services.store.readStream(documentStream("acme", "File", uploaded.snapshot.name))).resolves.toHaveLength(1);
+  });
+
+  it("inherits download permissions before generating private file renditions", async () => {
+    const transformer = new RecordingTransformer();
+    const services = createFileServices(["create"], ["object"], { transformer });
+    const uploaded = await services.files.upload({
+      actor: owner,
+      filename: "private.png",
+      body: "secret",
+      contentType: "image/png"
+    });
+
+    await expect(
+      services.files.generateRendition({ actor: guest, name: uploaded.snapshot.name, options: { width: 64 } })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+    expect(transformer.commands).toEqual([]);
+    await expect(services.store.readStream(documentStream("acme", "File", uploaded.snapshot.name))).resolves.toHaveLength(1);
+  });
+
   it("inherits download permissions before transforming private files", async () => {
     const transformer = new RecordingTransformer();
     const services = createFileServices(["create"], ["object"], { transformer });
@@ -1499,17 +1700,30 @@ describe("FileService", () => {
   });
 
   it("deletes metadata and object content together", async () => {
-    const services = createFileServices(["create", "request-delete", "delete"]);
+    const transformer = new RecordingTransformer();
+    const services = createFileServices(
+      ["create", "reserve-rendition", "complete-rendition", "request-delete", "delete"],
+      ["object", "attempt"],
+      { transformer }
+    );
     const uploaded = await services.files.upload({
       actor: owner,
-      filename: "delete-me.txt",
-      body: "bye"
+      filename: "delete-me.png",
+      body: "image-bytes",
+      contentType: "image/png",
+      isPrivate: false
+    });
+    const generated = await services.files.generateRendition({
+      actor: owner,
+      name: uploaded.snapshot.name,
+      options: { width: 64, format: "webp" }
     });
 
     await expect(
-      services.files.delete({ actor: owner, name: uploaded.snapshot.name, expectedVersion: 1 })
-    ).resolves.toMatchObject({ docstatus: "deleted", version: 3 });
-    expect(services.storage.has("acme/files/file_object-delete-me.txt")).toBe(false);
+      services.files.delete({ actor: owner, name: uploaded.snapshot.name, expectedVersion: generated.snapshot.version })
+    ).resolves.toMatchObject({ docstatus: "deleted", version: 5 });
+    expect(services.storage.has("acme/files/file_object-delete-me.png")).toBe(false);
+    expect(services.storage.has(generated.rendition.key)).toBe(false);
   });
 
   it("bulk deletes selected files through the same event-sourced delete path", async () => {
@@ -1792,15 +2006,48 @@ class CountingMultipartStorage extends InMemoryFileStorage {
 class RecordingTransformer implements FileTransformer {
   readonly commands: TransformFileObjectCommand[] = [];
 
+  constructor(private readonly options: { readonly includeContentLength?: boolean } = {}) {}
+
   async transform(command: TransformFileObjectCommand) {
     this.commands.push(command);
     const sourceText = await new Response(command.source.body).text();
+    const content = `transformed:${sourceText}`;
     return {
-      body: new Response(`transformed:${sourceText}`).body as ReadableStream<Uint8Array>,
+      body: new Response(content).body as ReadableStream<Uint8Array>,
       contentType: command.options.format ? `image/${command.options.format}` : command.source.contentType,
-      contentLength: `transformed:${sourceText}`.length,
+      ...(this.options.includeContentLength === false ? {} : { contentLength: content.length }),
       etag: '"transform"'
     };
+  }
+}
+
+class BlockingTransformer implements FileTransformer {
+  readonly commands: TransformFileObjectCommand[] = [];
+  private resolveStarted: (() => void) | undefined;
+  private resolveRelease: (() => void) | undefined;
+  readonly started = new Promise<void>((resolve) => {
+    this.resolveStarted = resolve;
+  });
+  private readonly released = new Promise<void>((resolve) => {
+    this.resolveRelease = resolve;
+  });
+
+  async transform(command: TransformFileObjectCommand) {
+    this.commands.push(command);
+    this.resolveStarted?.();
+    await this.released;
+    const sourceText = await new Response(command.source.body).text();
+    const content = `transformed:${sourceText}`;
+    return {
+      body: new Response(content).body as ReadableStream<Uint8Array>,
+      contentType: command.options.format ? `image/${command.options.format}` : command.source.contentType,
+      contentLength: content.length,
+      etag: '"transform"'
+    };
+  }
+
+  release(): void {
+    this.resolveRelease?.();
   }
 }
 

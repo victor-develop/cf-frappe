@@ -200,10 +200,12 @@ interface DeskClientRuntime {
     ) => Promise<unknown>;
     readonly contentUrl: (name: string) => string;
     readonly delete: (name: string, options?: { readonly expectedVersion?: number }) => Promise<unknown>;
+    readonly generateRendition: (name: string, options?: Record<string, unknown>) => Promise<unknown>;
     readonly list: (options?: Record<string, unknown>) => Promise<unknown>;
     readonly prepareDirectUpload: (input: Record<string, unknown>) => Promise<unknown>;
     readonly prepareMultipartUpload: (input: Record<string, unknown>) => Promise<unknown>;
     readonly previewUrl: (name: string) => string;
+    readonly renditionContentUrl: (name: string, renditionId: string) => string;
     readonly transformUrl: (name: string, options?: Record<string, unknown>) => string;
     readonly updateMetadata: (
       name: string,
@@ -610,15 +612,19 @@ describe("Desk client runtime", () => {
       })
     ).resolves.toEqual({ data: { name: "file_upload" }, object: { etag: "etag" }, upload: { url: "https://upload.example" } });
     await runtime.files.completeDirectUpload("file/1", { expectedVersion: 3 });
+    await runtime.files.generateRendition("file/1", { width: 64, format: "webp" });
 
     expect(runtime.files.contentUrl("file/1")).toBe("/api/files/file%2F1/content");
     expect(runtime.files.previewUrl("file/1")).toBe("/api/files/file%2F1/preview");
+    expect(runtime.files.renditionContentUrl("file/1", "w64-f-webp"))
+      .toBe("/api/files/file%2F1/renditions/w64-f-webp/content");
     expect(runtime.files.transformUrl("file/1", { width: 320, height: 240, fit: "cover", format: "webp", quality: 82 }))
       .toBe("/api/files/file%2F1/transform?width=320&height=240&fit=cover&format=webp&quality=82");
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
       "POST /api/files?attached_to_doctype=Task+Type&attached_to_name=TASK%2F1&filename=hello.txt&is_private=true",
       "POST /api/files/direct-upload",
-      "POST /api/files/file%2F1/complete-upload"
+      "POST /api/files/file%2F1/complete-upload",
+      "POST /api/files/file%2F1/renditions"
     ]);
     expect((calls[0]?.init.headers as Headers).get("content-type")).toBe("text/plain");
     expect(calls[0]?.init.body).toBe(body);
@@ -633,6 +639,7 @@ describe("Desk client runtime", () => {
       })
     );
     expect(calls[2]?.init.body).toBe(JSON.stringify({ expectedVersion: 3 }));
+    expect(calls[3]?.init.body).toBe(JSON.stringify({ width: 64, format: "webp" }));
   });
 
   it("orchestrates multipart file uploads with chunk progress", async () => {

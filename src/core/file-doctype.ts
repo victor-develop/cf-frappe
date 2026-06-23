@@ -24,9 +24,27 @@ export interface FileDocumentData extends DocumentData {
   readonly scan_checked_at?: string;
   readonly scan_engine?: string;
   readonly scan_message?: string;
+  readonly renditions?: readonly FileRenditionDocumentData[];
   readonly deletion_requested_at?: string;
   readonly attached_to_doctype?: string;
   readonly attached_to_name?: string;
+}
+
+export interface FileRenditionDocumentData extends DocumentData {
+  readonly id: string;
+  readonly key: string;
+  readonly status: "pending" | "available" | "failed";
+  readonly options: DocumentData;
+  readonly requested_at: string;
+  readonly requested_by: string;
+  readonly source_etag?: string;
+  readonly content_type?: string;
+  readonly size?: number;
+  readonly etag?: string;
+  readonly http_etag?: string;
+  readonly generated_at?: string;
+  readonly generated_by?: string;
+  readonly failure_message?: string;
 }
 
 export const fileDocType: DocTypeDefinition<FileDocumentData> = defineDocType<FileDocumentData>({
@@ -58,6 +76,7 @@ export const fileDocType: DocTypeDefinition<FileDocumentData> = defineDocType<Fi
     { name: "scan_checked_at", label: "Scan Checked At", type: "datetime", readOnly: true },
     { name: "scan_engine", label: "Scan Engine", type: "text", readOnly: true },
     { name: "scan_message", label: "Scan Message", type: "text", readOnly: true },
+    { name: "renditions", label: "Renditions", type: "json", readOnly: true },
     { name: "deletion_requested_at", label: "Deletion Requested At", type: "datetime" },
     { name: "attached_to_doctype", label: "Attached To DocType", type: "text" },
     { name: "attached_to_name", label: "Attached To Name", type: "text" }
@@ -65,7 +84,7 @@ export const fileDocType: DocTypeDefinition<FileDocumentData> = defineDocType<Fi
   permissions: [
     {
       roles: [SYSTEM_MANAGER_ROLE],
-      actions: ["read", "create", "metadata", "update", "delete"]
+      actions: ["read", "rendition", "create", "metadata", "update", "delete"]
     },
     {
       roles: ["User"],
@@ -88,7 +107,7 @@ export const fileDocType: DocTypeDefinition<FileDocumentData> = defineDocType<Fi
     },
     {
       roles: ["User"],
-      actions: ["metadata"],
+      actions: ["metadata", "rendition"],
       when: ({ actor, document }) => document?.data.uploaded_by === actor.id
     },
     {
@@ -152,6 +171,30 @@ export const fileDocType: DocTypeDefinition<FileDocumentData> = defineDocType<Fi
       internal: true,
       allowReadOnlyFields: true,
       permissionAction: "metadata"
+    },
+    {
+      name: "reserveRendition",
+      eventType: "FileRenditionRequested",
+      fields: ["renditions"],
+      internal: true,
+      allowReadOnlyFields: true,
+      permissionAction: "rendition"
+    },
+    {
+      name: "completeRendition",
+      eventType: "FileRenditionGenerated",
+      fields: ["renditions"],
+      internal: true,
+      allowReadOnlyFields: true,
+      permissionAction: "rendition"
+    },
+    {
+      name: "failRendition",
+      eventType: "FileRenditionFailed",
+      fields: ["renditions"],
+      internal: true,
+      allowReadOnlyFields: true,
+      permissionAction: "rendition"
     }
   ],
   indexes: [["attached_to_doctype", "attached_to_name"], ["uploaded_by"], ["is_private"]]
