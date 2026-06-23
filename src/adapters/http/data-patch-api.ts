@@ -22,11 +22,24 @@ export function createDataPatchApi(options: DataPatchApiOptions): Hono {
     return c.json({ data });
   });
 
+  app.post("/api/data-patches/plan", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const applyOptions = await dataPatchApplyOptions(c.req.raw, maxJsonBytes);
+    const data = await options.dataPatches.planApply(actor, applyOptions);
+    return c.json({ data });
+  });
+
   app.post("/api/data-patches/apply", async (c) => {
     const actor = await options.actor(c.req.raw);
     const applyOptions = await dataPatchApplyOptions(c.req.raw, maxJsonBytes);
     const data = await options.dataPatches.apply(actor, applyOptions);
     return c.json({ data }, 201);
+  });
+
+  app.post("/api/data-patches/:id/plan", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const data = await options.dataPatches.planApply(actor, { patchIds: [c.req.param("id")] });
+    return c.json({ data });
   });
 
   app.post("/api/data-patches/:id/apply", async (c) => {

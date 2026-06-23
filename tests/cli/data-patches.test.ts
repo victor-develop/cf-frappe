@@ -29,6 +29,15 @@ describe("cf-frappe CLI remote data patches", () => {
       limit: 2
     });
 
+    expect(parseCliArgs(["data-patches", "plan", "--url", "https://app.example", "--id", "core.seed", "--limit", "1"])).toEqual({
+      kind: "data-patches",
+      action: "plan",
+      url: "https://app.example",
+      headers: [],
+      patchIds: ["core.seed"],
+      limit: 1
+    });
+
     expect(parseCliArgs(["data-patches", "enqueue", "--url", "https://app.example", "--delay-seconds", "-1"])).toEqual({
       kind: "invalid",
       message: "Data patch enqueue delay must be a non-negative integer"
@@ -80,6 +89,39 @@ describe("cf-frappe CLI remote data patches", () => {
     expect(stdout.text()).toContain("total 2, not applied 1, pending 0, applied 1, failed 0");
     expect(stdout.text()).toContain("- core.seed [applied] checksum v1");
     expect(stdout.text()).toContain("- crm.backfill [not_applied] checksum v2 - CRM Backfill");
+  });
+
+  it("plans selected remote data patches without applying or enqueueing them", async () => {
+    const calls: RemoteCall[] = [];
+    const stdout = textBuffer();
+    const exitCode = await runCli(
+      ["data-patches", "plan", "--url", "https://app.example", "--id", "core.seed", "--limit", "1"],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(calls, {
+          data: {
+            patchIds: ["core.seed"],
+            requestedPatchIds: ["core.seed"],
+            limit: 1
+          }
+        }),
+        stdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("https://app.example/api/data-patches/plan");
+    expect(calls[0]?.method).toBe("POST");
+    expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({
+      patchIds: ["core.seed"],
+      limit: 1
+    });
+    expect(stdout.text()).toContain("Planned data patches at https://app.example");
+    expect(stdout.text()).toContain("Plan: core.seed");
+    expect(stdout.text()).toContain("Requested: core.seed");
+    expect(stdout.text()).toContain("Limit: 1");
   });
 
   it("applies selected remote data patches with bounded JSON options", async () => {

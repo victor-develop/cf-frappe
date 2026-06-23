@@ -227,6 +227,41 @@ describe("CloudFrappe Worker routing", () => {
       }
     });
 
+    const planned = await worker.fetch!(
+      cfRequest("http://localhost/api/data-patches/plan", {
+        method: "POST",
+        body: JSON.stringify({ limit: 1 })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(planned.status).toBe(200);
+    await expect(planned.json()).resolves.toMatchObject({
+      data: {
+        patchIds: ["crm.backfill"],
+        limit: 1
+      }
+    });
+    expect(resources.touched).toEqual([]);
+    await expect(log.recordedDataPatches()).resolves.toEqual([]);
+
+    const targetedPlan = await worker.fetch!(
+      cfRequest("http://localhost/api/data-patches/crm.backfill/plan", { method: "POST" }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(targetedPlan.status).toBe(200);
+    await expect(targetedPlan.json()).resolves.toMatchObject({
+      data: {
+        patchIds: ["crm.backfill"],
+        requestedPatchIds: ["crm.backfill"]
+      }
+    });
+    expect(resources.touched).toEqual([]);
+    await expect(log.recordedDataPatches()).resolves.toEqual([]);
+
     const applied = await worker.fetch!(
       cfRequest("http://localhost/api/data-patches/apply", { method: "POST" }),
       env,
@@ -466,7 +501,20 @@ describe("CloudFrappe Worker routing", () => {
     const html = await dashboard.text();
     expect(html).toContain("Data Patches");
     expect(html).toContain("crm.backfill");
+    expect(html).toContain('formaction="/desk/admin/data-patches/plan"');
+    expect(html).toContain('formaction="/desk/admin/data-patches/crm.backfill/plan"');
     expect(html).toContain('formaction="/desk/admin/data-patches/crm.backfill/apply"');
+
+    const planned = await worker.fetch!(
+      cfRequest("http://localhost/desk/admin/data-patches/crm.backfill/plan", { method: "POST" }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(planned.status).toBe(200);
+    const plannedHtml = await planned.text();
+    expect(plannedHtml).toContain("Planned Patches");
+    expect(plannedHtml).toContain("crm.backfill");
+    expect(resources.touched).toEqual([]);
 
     const applied = await worker.fetch!(
       cfRequest("http://localhost/desk/admin/data-patches/crm.backfill/apply", { method: "POST" }),

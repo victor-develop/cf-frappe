@@ -24,7 +24,11 @@ import type {
 } from "../../application/document-history-service.js";
 import type { DocumentSharePermission, DocumentShareState } from "../../core/document-shares.js";
 import type { FileDashboard } from "../../application/file-service.js";
-import type { DataPatchDashboard, DataPatchDashboardEntry } from "../../application/data-patch-service.js";
+import type {
+  DataPatchApplyPlan,
+  DataPatchDashboard,
+  DataPatchDashboardEntry
+} from "../../application/data-patch-service.js";
 import type { JobExecutionDashboard } from "../../application/job-history-service.js";
 import type { JobScheduleDashboard } from "../../application/job-schedule-service.js";
 import type { ReportRunResult } from "../../application/report-service.js";
@@ -839,7 +843,7 @@ export function renderJobAdmin(
 
 export function renderDataPatchAdmin(
   dashboard: DataPatchDashboard,
-  options: { readonly error?: string } = {}
+  options: { readonly error?: string; readonly plan?: DataPatchApplyPlan } = {}
 ): string {
   const rows = dashboard.patches
     .map((patch) => `<tr>
@@ -855,10 +859,14 @@ export function renderDataPatchAdmin(
   return `<form class="panel form" method="post" action="/desk/admin/data-patches/apply">
     <div class="form-head"><h2>Apply Pending Patches</h2><p>${String(dashboard.totals.notApplied)} pending</p></div>
     ${options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : ""}
+    ${options.plan ? renderDataPatchPlan(options.plan) : ""}
     <div class="fields">
       <label class="field"><span>Limit</span><input name="limit" type="number" min="1" value="1"></label>
     </div>
-    <div class="actions"><button class="button primary" type="submit">Apply Batch</button></div>
+    <div class="actions">
+      <button class="button" type="submit" formaction="/desk/admin/data-patches/plan">Plan Batch</button>
+      <button class="button primary" type="submit">Apply Batch</button>
+    </div>
   </form>
   <section class="panel">
     <div class="table-wrap">
@@ -875,8 +883,21 @@ function renderDataPatchAction(patch: DataPatchDashboardEntry): string {
     return "";
   }
   return `<form class="inline-action" method="post">
+    <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/plan">Plan</button>
     <button class="button" type="submit" formaction="/desk/admin/data-patches/${encodeURIComponent(patch.id)}/apply">Apply</button>
   </form>`;
+}
+
+function renderDataPatchPlan(plan: DataPatchApplyPlan): string {
+  const planned = plan.patchIds.length === 0 ? "(none)" : plan.patchIds.join(", ");
+  const requested = plan.requestedPatchIds === undefined ? "" : `<p>Requested: ${escapeHtml(plan.requestedPatchIds.join(", "))}</p>`;
+  const limit = plan.limit === undefined ? "" : `<p>Limit: ${String(plan.limit)}</p>`;
+  return `<section class="notice">
+    <h3>Planned Patches</h3>
+    <p>${escapeHtml(planned)}</p>
+    ${requested}
+    ${limit}
+  </section>`;
 }
 
 function dataPatchTimestamp(patch: DataPatchDashboardEntry): string {

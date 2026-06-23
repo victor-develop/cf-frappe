@@ -88,7 +88,7 @@ export class DataPatchService<TResources = unknown> {
 
   async planApply(actor: Actor, options: DataPatchApplyOptions = {}): Promise<DataPatchApplyPlan> {
     this.authorize(actor);
-    const patches = await this.patchesForApply(options);
+    const patches = await this.patchesForPlan(options);
     return {
       patchIds: patches.map((patch) => patch.id),
       ...(options.patchIds === undefined ? {} : { requestedPatchIds: [...options.patchIds] }),
@@ -108,6 +108,17 @@ export class DataPatchService<TResources = unknown> {
     }
     const pending = await runner.pendingPatches(selected);
     return pending.slice(0, options.limit);
+  }
+
+  private async patchesForPlan(options: DataPatchApplyOptions): Promise<readonly DataPatchDefinition<TResources>[]> {
+    assertApplyLimit(options.limit);
+    const runner = this.runner();
+    const selected = selectPatches(this.patches, options.patchIds);
+    if (options.patchIds !== undefined) {
+      await this.assertPredecessorsApplied(selected);
+    }
+    const pending = await runner.pendingPatches(selected);
+    return options.limit === undefined ? pending : pending.slice(0, options.limit);
   }
 
   private runner(): DataPatchRunner<TResources> {

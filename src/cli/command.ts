@@ -339,7 +339,7 @@ function parseDataPatchesArgs(argv: readonly string[]): ParsedCommand {
 }
 
 function dataPatchAction(value: string): DataPatchRemoteAction | undefined {
-  return value === "status" || value === "apply" || value === "enqueue" ? value : undefined;
+  return value === "status" || value === "plan" || value === "apply" || value === "enqueue" ? value : undefined;
 }
 
 function parseLiteralHeader(value: string): DataPatchHeaderOption | string {
@@ -581,6 +581,7 @@ function helpText(): string {
     "  cf-frappe install <module> [--version <range>] [--export <name>] [--as <localName>] [--registry <path>] [--package-manager <npm|pnpm|yarn|bun>] [--no-install] [--no-save]",
     "  cf-frappe migrate generate [--registry <path>] [--migrations <dir>] [--no-core]",
     "  cf-frappe data-patches status --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe data-patches plan --url <origin> [--id <patchId>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches apply --url <origin> [--id <patchId>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches enqueue --url <origin> [--id <patchId>] [--limit <n>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe --help",
@@ -589,7 +590,7 @@ function helpText(): string {
     "  init   Create a Cloudflare-ready cf-frappe starter app",
     "  install   Save, install, and wire an app module into a generated app registry",
     "  migrate generate   Write reviewable D1 migration files from app metadata",
-    "  data-patches   Inspect, apply, or enqueue remote app-declared data patches through the admin API",
+    "  data-patches   Inspect, plan, apply, or enqueue remote app-declared data patches through the admin API",
     "",
     "Use --header-env for secret-bearing auth headers so tokens stay out of shell history.",
     ""

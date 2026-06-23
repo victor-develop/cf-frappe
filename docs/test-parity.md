@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the event-level document field unsets slice:
+As of the data-patch dry-run planning slice:
 
 - Vitest files: `69`
-- Vitest cases: `608`
+- Vitest cases: `610`
 
 ## Implication
 

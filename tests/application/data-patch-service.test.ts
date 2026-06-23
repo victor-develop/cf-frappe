@@ -194,6 +194,57 @@ describe("DataPatchService", () => {
     });
   });
 
+  it("plans only pending patches and surfaces blocked journal states", async () => {
+    const resources = { touched: [] as string[] };
+    const log = new InMemoryDataPatchLog();
+    const patches = [
+      defineDataPatch<typeof resources>({
+        id: "core.first",
+        checksum: "v1",
+        run: ({ resources }) => {
+          resources.touched.push("first");
+        }
+      }),
+      defineDataPatch<typeof resources>({
+        id: "crm.second",
+        checksum: "v1",
+        run: ({ resources }) => {
+          resources.touched.push("second");
+        }
+      })
+    ];
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const service = new DataPatchService({
+      log,
+      resources,
+      patches,
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-first", "claim-second"])
+    });
+
+    await service.apply(admin, { patchIds: ["core.first"] });
+
+    await expect(service.planApply(admin)).resolves.toEqual({
+      patchIds: ["crm.second"]
+    });
+    await expect(service.planApply(admin, { patchIds: ["core.first"] })).resolves.toEqual({
+      patchIds: [],
+      requestedPatchIds: ["core.first"]
+    });
+    expect(resources.touched).toEqual(["first"]);
+
+    await log.claimDataPatch({ id: "crm.second", checksum: "v1", claimId: "claim-second", claimedAt: now });
+    await expect(service.planApply(admin)).rejects.toMatchObject({ code: "DATA_PATCH_PENDING", status: 409 });
+    await log.failDataPatch({
+      id: "crm.second",
+      checksum: "v1",
+      claimId: "claim-second",
+      failedAt: now,
+      error: "boom"
+    });
+    await expect(service.planApply(admin)).rejects.toMatchObject({ code: "DATA_PATCH_FAILED", status: 409 });
+  });
+
   it("enqueues validated data patch plans and executes them through the built-in job", async () => {
     const resources = { touched: [] as string[] };
     const log = new InMemoryDataPatchLog();

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { DataPatchAdminPort } from "../../application/data-patch-service.js";
+import type { DataPatchAdminPort, DataPatchApplyPlan } from "../../application/data-patch-service.js";
 import type { DocumentShareService } from "../../application/document-share-service.js";
 import type { DocumentCommandExecutor } from "../../application/document-service.js";
 import type { DocumentHistoryService } from "../../application/document-history-service.js";
@@ -412,12 +412,37 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     }
   });
 
+  app.post("/desk/admin/data-patches/plan", async (c) => {
+    const dataPatches = requireDataPatches(options);
+    const actor = await options.actor(c.req.raw);
+    try {
+      const form = await parseDeskDataPatchApply(c.req.raw);
+      const plan = await dataPatches.planApply(actor, form.limit === undefined ? {} : { limit: form.limit });
+      const dashboard = await dataPatches.dashboard(actor);
+      return renderDeskDataPatchPage(options, actor, dashboard, 200, undefined, plan);
+    } catch (error) {
+      return renderDeskDataPatchFailure(options, actor, dataPatches, error);
+    }
+  });
+
   app.post("/desk/admin/data-patches/:id/apply", async (c) => {
     const dataPatches = requireDataPatches(options);
     const actor = await options.actor(c.req.raw);
     try {
       await dataPatches.apply(actor, { patchIds: [c.req.param("id")] });
       return c.redirect("/desk/admin/data-patches", 303);
+    } catch (error) {
+      return renderDeskDataPatchFailure(options, actor, dataPatches, error);
+    }
+  });
+
+  app.post("/desk/admin/data-patches/:id/plan", async (c) => {
+    const dataPatches = requireDataPatches(options);
+    const actor = await options.actor(c.req.raw);
+    try {
+      const plan = await dataPatches.planApply(actor, { patchIds: [c.req.param("id")] });
+      const dashboard = await dataPatches.dashboard(actor);
+      return renderDeskDataPatchPage(options, actor, dashboard, 200, undefined, plan);
     } catch (error) {
       return renderDeskDataPatchFailure(options, actor, dataPatches, error);
     }
@@ -1593,7 +1618,8 @@ async function renderDeskDataPatchPage(
   actor: Actor,
   dashboard: Parameters<typeof renderDataPatchAdmin>[0],
   status = 200,
-  error?: string
+  error?: string,
+  plan?: DataPatchApplyPlan
 ): Promise<Response> {
   const doctypes = options.queries.listDoctypes(actor);
   const reports = listReports(options, actor);
@@ -1605,7 +1631,10 @@ async function renderDeskDataPatchPage(
       doctypes,
       reports,
       showFiles: options.files !== undefined,
-      body: renderDataPatchAdmin(dashboard, error === undefined ? {} : { error })
+      body: renderDataPatchAdmin(dashboard, {
+        ...(error === undefined ? {} : { error }),
+        ...(plan === undefined ? {} : { plan })
+      })
     }),
     status
   );

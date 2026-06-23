@@ -1,4 +1,4 @@
-export type DataPatchRemoteAction = "status" | "apply" | "enqueue";
+export type DataPatchRemoteAction = "status" | "plan" | "apply" | "enqueue";
 
 export interface DataPatchHeaderLiteral {
   readonly kind: "literal";
@@ -60,15 +60,19 @@ interface DataPatchRunResponse {
   readonly skipped: readonly DataPatchRecordResponse[];
 }
 
+interface DataPatchPlanResponse {
+  readonly patchIds: readonly string[];
+  readonly requestedPatchIds?: readonly string[];
+  readonly limit?: number;
+}
+
 interface DataPatchRecordResponse {
   readonly id: string;
   readonly checksum: string;
 }
 
 interface DataPatchQueueResponse {
-  readonly plan: {
-    readonly patchIds: readonly string[];
-  };
+  readonly plan: DataPatchPlanResponse;
   readonly message: {
     readonly jobName?: string;
     readonly runId?: string;
@@ -94,6 +98,14 @@ export async function runRemoteDataPatchCommand(
       path: "/api/data-patches/enqueue"
     });
     return formatEnqueue(command.url, data);
+  }
+  if (command.action === "plan") {
+    const data = await requestRemoteDataPatch<DataPatchPlanResponse>(command, io, {
+      body: commandBody(command, { includeQueueOptions: false }),
+      method: "POST",
+      path: "/api/data-patches/plan"
+    });
+    return formatPlan(command.url, data);
   }
   const data = await requestRemoteDataPatch<DataPatchRunResponse>(command, io, {
     body: commandBody(command, { includeQueueOptions: false }),
@@ -235,6 +247,21 @@ function formatRun(baseUrl: string, result: DataPatchRunResponse): string {
     ...recordLines(result.skipped),
     ""
   ].join("\n");
+}
+
+function formatPlan(baseUrl: string, plan: DataPatchPlanResponse): string {
+  const lines = [
+    `Planned data patches at ${baseUrl}`,
+    `Plan: ${plan.patchIds.length === 0 ? "(none)" : plan.patchIds.join(", ")}`
+  ];
+  if (plan.requestedPatchIds !== undefined) {
+    lines.push(`Requested: ${plan.requestedPatchIds.join(", ")}`);
+  }
+  if (plan.limit !== undefined) {
+    lines.push(`Limit: ${plan.limit}`);
+  }
+  lines.push("");
+  return lines.join("\n");
 }
 
 function formatEnqueue(baseUrl: string, result: DataPatchQueueResponse): string {
