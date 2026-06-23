@@ -49,10 +49,17 @@ export interface ReportGroupResult {
   readonly rows: readonly ReportGroupRow[];
 }
 
+export interface ReportChartDrilldown {
+  readonly filter: string;
+  readonly value: JsonPrimitive;
+  readonly query: string;
+}
+
 export interface ReportChartPoint {
   readonly key: JsonPrimitive;
   readonly label: string;
   readonly value: number | null;
+  readonly drilldown?: ReportChartDrilldown;
 }
 
 export interface ReportChartResult {
@@ -180,7 +187,7 @@ export class ReportService {
       order,
       summary: buildReportSummary(filtered, report.summaries ?? []),
       groups: limitReportGroups(groups, report.groups ?? []),
-      charts: buildReportCharts(groups, report.charts ?? []),
+      charts: buildReportCharts(groups, report),
       rows,
       limit,
       offset,
@@ -630,19 +637,22 @@ function limitReportGroups(
 
 function buildReportCharts(
   groups: readonly ReportGroupResult[],
-  charts: readonly ReportChartDefinition[]
+  report: ReportDefinition
 ): readonly ReportChartResult[] {
-  return charts.map((chart) => {
+  return (report.charts ?? []).map((chart) => {
     const group = groups.find((item) => item.name === chart.group);
+    const drilldownFilter = group === undefined ? undefined : exactDrilldownFilterForGroup(report, group);
     const orderBy = chart.orderBy ?? "key";
     const order = chart.order ?? "asc";
     const points = sortChartPoints(
       (group?.rows ?? []).map((row) => {
         const summary = row.summaries.find((item) => item.name === chart.summary);
+        const drilldown = drilldownFilter === undefined ? undefined : reportChartDrilldown(drilldownFilter, row.key);
         return {
           key: row.key,
           label: row.label,
-          value: typeof summary?.value === "number" ? summary.value : null
+          value: typeof summary?.value === "number" ? summary.value : null,
+          ...(drilldown === undefined ? {} : { drilldown })
         };
       }),
       orderBy,
@@ -664,6 +674,31 @@ function buildReportCharts(
       points
     };
   });
+}
+
+function exactDrilldownFilterForGroup(
+  report: ReportDefinition,
+  group: ReportGroupResult
+): ReportFilterDefinition | undefined {
+  return (report.filters ?? []).find((filter) =>
+    filter.field === group.field && (filter.operator ?? "eq") === "eq"
+  );
+}
+
+function reportChartDrilldown(
+  filter: ReportFilterDefinition,
+  value: JsonPrimitive
+): ReportChartDrilldown | undefined {
+  if (value === null) {
+    return undefined;
+  }
+  const params = new URLSearchParams();
+  params.set(`filter_${filter.name}`, String(value));
+  return {
+    filter: filter.name,
+    value,
+    query: params.toString()
+  };
 }
 
 function sortChartPoints(

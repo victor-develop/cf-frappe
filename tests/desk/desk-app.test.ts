@@ -439,6 +439,9 @@ describe("Desk app", () => {
     expect(html).toContain('<select id="report-order-by" name="order_by">');
     expect(html).toContain('<option value="title" selected>Title</option>');
     expect(html).toContain('<option value="desc" selected>Descending</option>');
+    expect(html).toContain(
+      '<a class="chart-drilldown" href="/desk/reports/Open%20Notes?filter_priority=High&amp;order_by=title&amp;order=desc"><g>'
+    );
     expect(html).toContain("/desk/reports/Open%20Notes/export.csv?filter_priority=High&amp;order_by=title&amp;order=desc");
 
     const csv = await app.request("/desk/reports/Open%20Notes/export.csv?filter_priority=High&order_by=title&order=desc");
@@ -537,6 +540,9 @@ describe("Desk app", () => {
     expect(html).toContain("fill: #123456");
     expect(html).not.toContain('text-anchor="middle">10</text>');
     expect(html).toContain('<select id="filter-priority" name="filter_priority">');
+    expect(html).toContain(
+      '<a class="chart-drilldown" href="/desk/report-builder/Note/report_saved-report-1?filter_priority=High&amp;order_by=count&amp;order=desc"><g>'
+    );
     expect(html).toContain("/desk/report-builder/Note/report_saved-report-1/export.csv?filter_priority=High&amp;order_by=count&amp;order=desc");
     expect(html).toContain('action="/desk/report-builder/Note/report_saved-report-1/delete"');
     await expect(services.savedReports.get(owner, "Note", "report_saved-report-1")).resolves.toMatchObject({

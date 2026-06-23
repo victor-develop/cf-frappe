@@ -74,7 +74,18 @@ describe("ReportService", () => {
           order: "asc",
           colors: [],
           showValues: true,
-          points: [{ key: "High", label: "High", value: 1 }]
+          points: [
+            {
+              key: "High",
+              label: "High",
+              value: 1,
+              drilldown: {
+                filter: "priority",
+                value: "High",
+                query: "filter_priority=High"
+              }
+            }
+          ]
         }
       ],
       total: 1

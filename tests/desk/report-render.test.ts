@@ -154,6 +154,71 @@ describe("Desk report rendering", () => {
     expect(html).not.toContain("High (3)");
     expect(html).not.toContain("Medium (2)");
   });
+
+  it("renders chart drilldown links by merging point queries into the current report route", () => {
+    const html = renderReportView(
+      reportResult([
+        {
+          name: "priority_bar",
+          label: "Priority Bar",
+          type: "bar",
+          group: "by_priority",
+          summary: "note_count",
+          orderBy: "key",
+          order: "asc",
+          colors: [],
+          showValues: true,
+          points: [
+            {
+              key: "High & <urgent>",
+              label: "<High>",
+              value: 5,
+              drilldown: {
+                filter: "priority",
+                value: "High & <urgent>",
+                query: "filter_priority=High+%26+%3Curgent%3E"
+              }
+            }
+          ]
+        },
+        {
+          name: "priority_mix",
+          label: "Priority Mix",
+          type: "pie",
+          group: "by_priority",
+          summary: "note_count",
+          orderBy: "key",
+          order: "asc",
+          colors: [],
+          showValues: true,
+          points: [
+            {
+              key: "High & urgent",
+              label: "High & urgent",
+              value: 3,
+              drilldown: {
+                filter: "priority",
+                value: "High & urgent",
+                query: "filter_priority=High+%26+urgent"
+              }
+            }
+          ]
+        }
+      ]),
+      {
+        drilldownBaseHref: "/desk/reports/Open%20Notes?filter_priority=Low&order_by=title&order=desc"
+      }
+    );
+
+    expect(html).toContain(
+      '<a class="chart-drilldown" href="/desk/reports/Open%20Notes?filter_priority=High+%26+%3Curgent%3E&amp;order_by=title&amp;order=desc"><g>'
+    );
+    expect(html).toContain("&lt;High&gt;");
+    expect(html).toContain(
+      '<li><a class="chart-drilldown" href="/desk/reports/Open%20Notes?filter_priority=High+%26+urgent&amp;order_by=title&amp;order=desc">'
+    );
+    expect(html).toContain("High &amp; urgent (3)");
+  });
 });
 
 function reportResult(charts: ReportRunResult["charts"]): ReportRunResult {

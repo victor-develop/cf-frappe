@@ -50,7 +50,22 @@ describe("report api", () => {
         { name: "title", type: "text", operator: "contains", options: [] }
       ],
       groups: [{ name: "by_priority", rows: [{ key: "High" }] }],
-      charts: [{ name: "notes_by_priority", points: [{ key: "High", value: 1 }] }],
+      charts: [
+        {
+          name: "notes_by_priority",
+          points: [
+            {
+              key: "High",
+              value: 1,
+              drilldown: {
+                filter: "priority",
+                value: "High",
+                query: "filter_priority=High"
+              }
+            }
+          ]
+        }
+      ],
       total: 1
     });
   });

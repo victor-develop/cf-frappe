@@ -52,6 +52,8 @@ import {
   isDeskNumericReportField
 } from "./report-builder.js";
 
+type ReportChartPointResult = ReportRunResult["charts"][number]["points"][number];
+
 export type FormLinkOptions = Readonly<Record<string, readonly LinkOption[]>>;
 export type FormTableDefinitions = Readonly<Record<string, DocTypeDefinition>>;
 export type FormLifecycleAction = "submit" | "cancel";
@@ -696,6 +698,7 @@ export function renderSavedReportView(
     readonly listHref: string;
     readonly exportHref: string;
     readonly deleteAction: string;
+    readonly drilldownBaseHref?: string;
   }
 ): string {
   return `<section class="toolbar saved-report-toolbar">
@@ -713,7 +716,10 @@ export function renderSavedReportView(
       <div><dt>Updated</dt><dd>${escapeHtml(saved.updatedAt)}</dd></div>
     </dl>
   </section>
-  ${renderReportView(result, { exportHref: options.exportHref })}`;
+  ${renderReportView(result, {
+    exportHref: options.exportHref,
+    ...(options.drilldownBaseHref === undefined ? {} : { drilldownBaseHref: options.drilldownBaseHref })
+  })}`;
 }
 
 function renderSavedReportDefinitionMeta(definition: SavedReport["definition"]): string {
@@ -1324,7 +1330,7 @@ function dynamicScheduleFields(schedule: JobScheduleDashboard["schedules"][numbe
 
 export function renderReportView(
   result: ReportRunResult,
-  options: { readonly exportHref?: string } = {}
+  options: { readonly exportHref?: string; readonly drilldownBaseHref?: string } = {}
 ): string {
   const filterForm = result.filters.map(renderReportFilterControl).join("");
   const orderForm = renderReportOrderControls(result.order);
@@ -1343,7 +1349,7 @@ export function renderReportView(
     : "";
   return `${controls ? `<form class="panel form report-filters" method="get"><div class="fields">${controls}</div><div class="actions"><button class="button primary" type="submit">Run</button>${exportAction}</div></form>` : exportAction ? `<section class="toolbar">${exportAction}</section>` : ""}
   ${renderReportSummary(result.summary)}
-  ${renderReportCharts(result.charts)}
+  ${renderReportCharts(result.charts, options.drilldownBaseHref)}
   ${renderReportGroups(result.groups)}
   <section class="panel">
     <div class="table-wrap">
@@ -1422,22 +1428,22 @@ function renderJobStatusOptions(status: JobExecutionDashboard["filters"]["status
     .join("");
 }
 
-function renderReportCharts(charts: ReportRunResult["charts"]): string {
+function renderReportCharts(charts: ReportRunResult["charts"], drilldownBaseHref: string | undefined): string {
   if (charts.length === 0) {
     return "";
   }
-  return `<section class="report-charts">${charts.map(renderReportChart).join("")}</section>`;
+  return `<section class="report-charts">${charts.map((chart) => renderReportChart(chart, drilldownBaseHref)).join("")}</section>`;
 }
 
-function renderReportChart(chart: ReportRunResult["charts"][number]): string {
+function renderReportChart(chart: ReportRunResult["charts"][number], drilldownBaseHref: string | undefined): string {
   const points = chart.points.filter((point) => point.value !== null);
   const svg = points.length === 0
     ? `<p class="empty">No chart data.</p>`
     : chart.type === "line"
-      ? renderLineChart(chart, points)
+      ? renderLineChart(chart, points, drilldownBaseHref)
       : chart.type === "pie"
-        ? renderPieChart(chart, points)
-        : renderBarChart(chart, points);
+        ? renderPieChart(chart, points, drilldownBaseHref)
+        : renderBarChart(chart, points, drilldownBaseHref);
   return `<section class="panel report-chart">
     <h2>${escapeHtml(chart.label)}</h2>
     ${svg}
@@ -1446,7 +1452,8 @@ function renderReportChart(chart: ReportRunResult["charts"][number]): string {
 
 function renderBarChart(
   chart: ReportRunResult["charts"][number],
-  points: readonly ReportRunResult["charts"][number]["points"][number][]
+  points: readonly ReportChartPointResult[],
+  drilldownBaseHref: string | undefined
 ): string {
   const width = 520;
   const height = 220;
@@ -1465,11 +1472,11 @@ function renderBarChart(
       const valueLabel = chart.showValues
         ? `<text x="${x + barWidth / 2}" y="${Math.max(14, y - 6)}" text-anchor="middle">${escapeHtml(formatValue(value))}</text>`
         : "";
-      return `<g>
+      return renderChartPointLink(point, drilldownBaseHref, `<g>
         <rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="3" style="fill: ${chartColor(chart, index)}"></rect>
         ${valueLabel}
         <text x="${x + barWidth / 2}" y="202" text-anchor="middle">${escapeHtml(point.label)}</text>
-      </g>`;
+      </g>`);
     })
     .join("");
   return `<svg class="chart-svg chart-bar" role="img" aria-label="${escapeHtml(chartAriaLabel(chart))}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet">${bars}${renderChartAxisLabels(chart, width, height)}</svg>`;
@@ -1477,7 +1484,8 @@ function renderBarChart(
 
 function renderLineChart(
   chart: ReportRunResult["charts"][number],
-  points: readonly ReportRunResult["charts"][number]["points"][number][]
+  points: readonly ReportChartPointResult[],
+  drilldownBaseHref: string | undefined
 ): string {
   const width = 520;
   const height = 220;
@@ -1491,11 +1499,11 @@ function renderLineChart(
   const path = coords.map((coord, index) => `${index === 0 ? "M" : "L"} ${coord.x} ${coord.y}`).join(" ");
   const markers = coords
     .map(
-      ({ point, x, y }, index) => `<g>
+      ({ point, x, y }, index) => renderChartPointLink(point, drilldownBaseHref, `<g>
         <circle cx="${x}" cy="${y}" r="4" style="fill: ${chartColor(chart, index)}"></circle>
         ${chart.showValues ? `<text x="${x}" y="${Math.max(14, y - 8)}" text-anchor="middle">${escapeHtml(formatValue(point.value ?? 0))}</text>` : ""}
         <text x="${x}" y="202" text-anchor="middle">${escapeHtml(point.label)}</text>
-      </g>`
+      </g>`)
     )
     .join("");
   return `<svg class="chart-svg chart-line" role="img" aria-label="${escapeHtml(chartAriaLabel(chart))}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet"><path d="${path}" style="stroke: ${chartColor(chart, 0)}"></path>${markers}${renderChartAxisLabels(chart, width, height)}</svg>`;
@@ -1503,7 +1511,8 @@ function renderLineChart(
 
 function renderPieChart(
   chart: ReportRunResult["charts"][number],
-  points: readonly ReportRunResult["charts"][number]["points"][number][]
+  points: readonly ReportChartPointResult[],
+  drilldownBaseHref: string | undefined
 ): string {
   const positivePoints = points.filter((point) => (point.value ?? 0) > 0);
   const total = positivePoints.reduce((sum, point) => sum + (point.value ?? 0), 0);
@@ -1517,16 +1526,42 @@ function renderPieChart(
       const dash = (value / total) * 100;
       const circle = `<circle r="70" cx="110" cy="110" stroke-dasharray="${dash} ${100 - dash}" stroke-dashoffset="${-offset}" style="stroke: ${chartColor(chart, index)}"></circle>`;
       offset += dash;
-      return circle;
+      return renderChartPointLink(point, drilldownBaseHref, circle);
     })
     .join("");
   const legend = positivePoints
     .map((point, index) => {
       const value = chart.showValues ? ` (${escapeHtml(formatValue(point.value ?? 0))})` : "";
-      return `<li><span class="chart-swatch chart-swatch-${index % 6}" style="background: ${chartColor(chart, index)}"></span>${escapeHtml(point.label)}${value}</li>`;
+      return `<li>${renderChartPointLink(point, drilldownBaseHref, `<span class="chart-swatch chart-swatch-${index % 6}" style="background: ${chartColor(chart, index)}"></span>${escapeHtml(point.label)}${value}`)}</li>`;
     })
     .join("");
   return `<div class="chart-pie-wrap"><svg class="chart-svg chart-pie" role="img" aria-label="${escapeHtml(chart.label)}" viewBox="0 0 220 220">${rings}</svg><ul>${legend}</ul></div>`;
+}
+
+function renderChartPointLink(
+  point: ReportChartPointResult,
+  drilldownBaseHref: string | undefined,
+  content: string
+): string {
+  const href = chartPointDrilldownHref(point, drilldownBaseHref);
+  return href === undefined
+    ? content
+    : `<a class="chart-drilldown" href="${escapeHtml(href)}">${content}</a>`;
+}
+
+function chartPointDrilldownHref(
+  point: ReportChartPointResult,
+  drilldownBaseHref: string | undefined
+): string | undefined {
+  if (drilldownBaseHref === undefined || point.drilldown === undefined) {
+    return undefined;
+  }
+  const url = new URL(drilldownBaseHref, "https://cf-frappe.local");
+  const drilldown = new URLSearchParams(point.drilldown.query);
+  drilldown.forEach((value, key) => {
+    url.searchParams.set(key, value);
+  });
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 const chartPalette = ["#1f6feb", "#2e7d32", "#ad1457", "#ef6c00", "#00695c", "#6a1b9a"];

@@ -1023,7 +1023,8 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         body: renderSavedReportView(saved, result, {
           listHref: `/desk/report-builder/${encodeURIComponent(doctype.name)}`,
           exportHref: `${base}/export.csv${url.search}`,
-          deleteAction: `${base}/delete`
+          deleteAction: `${base}/delete`,
+          drilldownBaseHref: `${base}${url.search}`
         })
       })
     );
@@ -1043,6 +1044,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       limit: 100
     });
     const exportHref = `/desk/reports/${encodeURIComponent(result.report.name)}/export.csv${url.search}`;
+    const drilldownBaseHref = `/desk/reports/${encodeURIComponent(result.report.name)}${url.search}`;
     return html(
       renderDeskLayoutFor(options, {
         title: result.report.label ?? result.report.name,
@@ -1050,7 +1052,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         activeReport: result.report.name,
         doctypes,
         reports,
-        body: renderReportView(result, { exportHref })
+        body: renderReportView(result, { exportHref, drilldownBaseHref })
       })
     );
   });
