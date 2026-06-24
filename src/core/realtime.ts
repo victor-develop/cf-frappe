@@ -30,6 +30,8 @@ export type RealtimeTopicScope =
 export const REALTIME_COLLABORATION_MESSAGE_TYPE = "cf-frappe.realtime.collaboration";
 export const DOCUMENT_FIELD_EDIT_MESSAGE_TYPE = "cf-frappe.collaboration.field_edit";
 export const DOCUMENT_FIELD_EDIT_EVENT_TYPE = "DocumentFieldEditIntent";
+export const DOCUMENT_SHARED_DRAFT_MESSAGE_TYPE = "cf-frappe.collaboration.shared_draft";
+export const DOCUMENT_SHARED_DRAFT_EVENT_TYPE = "DocumentSharedDraftPatch";
 
 export interface RealtimeConnectionIdentity {
   readonly connectionId: string;
@@ -42,6 +44,13 @@ export interface DocumentFieldEditMessage {
   readonly field: string;
   readonly editing?: boolean;
   readonly value?: JsonValue;
+}
+
+export interface DocumentSharedDraftMessage {
+  readonly type: typeof DOCUMENT_SHARED_DRAFT_MESSAGE_TYPE;
+  readonly baseVersion?: number;
+  readonly patch?: Readonly<Record<string, JsonValue>>;
+  readonly unset?: readonly string[];
 }
 
 export function tenantRealtimeTopic(tenantId: string): RealtimeTopic {
@@ -185,6 +194,41 @@ export function realtimeEventFromDocumentFieldEdit(input: {
   };
 }
 
+export function realtimeEventFromDocumentSharedDraft(input: {
+  readonly id: string;
+  readonly topic: RealtimeTopic;
+  readonly connection: RealtimeConnectionIdentity;
+  readonly message: unknown;
+  readonly occurredAt: string;
+}): RealtimeEvent | null {
+  const scope = parseRealtimeTopic(input.topic);
+  if (!scope || scope.kind !== "document") {
+    return null;
+  }
+  const message = documentSharedDraftMessage(input.message);
+  if (!message) {
+    return null;
+  }
+  return {
+    id: input.id,
+    type: DOCUMENT_SHARED_DRAFT_EVENT_TYPE,
+    topics: [input.topic],
+    tenantId: scope.tenantId,
+    occurredAt: input.occurredAt,
+    payload: {
+      kind: DOCUMENT_SHARED_DRAFT_EVENT_TYPE,
+      tenantId: scope.tenantId,
+      doctype: scope.doctype,
+      name: scope.name,
+      ...(message.baseVersion === undefined ? {} : { baseVersion: message.baseVersion }),
+      ...(message.patch === undefined ? {} : { patch: message.patch as JsonValue }),
+      ...(message.unset === undefined ? {} : { unset: message.unset as unknown as JsonValue }),
+      connectionId: input.connection.connectionId,
+      ...(input.connection.userId === undefined ? {} : { actorId: input.connection.userId })
+    }
+  };
+}
+
 function encodeTopicPart(value: string): string {
   return encodeURIComponent(value);
 }
@@ -230,6 +274,88 @@ function documentFieldEditMessage(value: unknown): DocumentFieldEditMessage | nu
     return null;
   }
   return message;
+}
+
+function documentSharedDraftMessage(value: unknown): DocumentSharedDraftMessage | null {
+  if (!isRecord(value) || value.type !== DOCUMENT_SHARED_DRAFT_MESSAGE_TYPE) {
+    return null;
+  }
+  const baseVersion = value.baseVersion;
+  if (
+    baseVersion !== undefined &&
+    (typeof baseVersion !== "number" || !Number.isInteger(baseVersion) || baseVersion < 0)
+  ) {
+    return null;
+  }
+  const patch = value.patch === undefined ? undefined : documentSharedDraftPatch(value.patch);
+  const unset = value.unset === undefined ? undefined : documentSharedDraftUnset(value.unset);
+  if (patch === null || unset === null) {
+    return null;
+  }
+  const patchKeys = patch ? Object.keys(patch) : [];
+  const unsetFields = unset ?? [];
+  if (patchKeys.length === 0 && unsetFields.length === 0) {
+    return null;
+  }
+  if (unsetFields.some((field) => patchKeys.includes(field))) {
+    return null;
+  }
+  const message: {
+    type: typeof DOCUMENT_SHARED_DRAFT_MESSAGE_TYPE;
+    baseVersion?: number;
+    patch?: Readonly<Record<string, JsonValue>>;
+    unset?: readonly string[];
+  } = {
+    type: DOCUMENT_SHARED_DRAFT_MESSAGE_TYPE
+  };
+  if (baseVersion !== undefined) {
+    message.baseVersion = baseVersion;
+  }
+  if (patchKeys.length > 0 && patch) {
+    message.patch = patch;
+  }
+  if (unsetFields.length > 0) {
+    message.unset = unsetFields;
+  }
+  if (JSON.stringify(message).length > 16_384) {
+    return null;
+  }
+  return message;
+}
+
+function documentSharedDraftPatch(value: unknown): Readonly<Record<string, JsonValue>> | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const patch: Record<string, JsonValue> = {};
+  for (const [rawField, fieldValue] of Object.entries(value)) {
+    const field = documentSharedDraftField(rawField);
+    if (!field || Object.prototype.hasOwnProperty.call(patch, field) || !isJsonValue(fieldValue)) {
+      return null;
+    }
+    patch[field] = fieldValue;
+  }
+  return patch;
+}
+
+function documentSharedDraftUnset(value: unknown): readonly string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const unset: string[] = [];
+  for (const item of value) {
+    const field = typeof item === "string" ? documentSharedDraftField(item) : null;
+    if (!field || unset.includes(field)) {
+      return null;
+    }
+    unset.push(field);
+  }
+  return unset;
+}
+
+function documentSharedDraftField(value: string): string | null {
+  const field = value.trim();
+  return field.length > 0 && field.length <= 256 ? field : null;
 }
 
 function isJsonValue(value: unknown, depth = 0): value is JsonValue {

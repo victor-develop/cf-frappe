@@ -2,10 +2,13 @@ import {
   canSubscribeToRealtimeTopic,
   DOCUMENT_FIELD_EDIT_EVENT_TYPE,
   DOCUMENT_FIELD_EDIT_MESSAGE_TYPE,
+  DOCUMENT_SHARED_DRAFT_EVENT_TYPE,
+  DOCUMENT_SHARED_DRAFT_MESSAGE_TYPE,
   documentRealtimeTopic,
   doctypeRealtimeTopic,
   parseRealtimeTopic,
   realtimeEventFromDocumentFieldEdit,
+  realtimeEventFromDocumentSharedDraft,
   realtimeEventFromDomainEvent,
   realtimeUserNotificationsFromDomainEvent,
   tenantRealtimeTopic,
@@ -128,6 +131,73 @@ describe("realtime topics", () => {
         topic: documentRealtimeTopic("acme", "Task", "TASK-1"),
         connection: { connectionId: "conn-1" },
         message: { type: DOCUMENT_FIELD_EDIT_MESSAGE_TYPE, field: "" },
+        occurredAt: now
+      })
+    ).toBeNull();
+  });
+
+  it("models transient shared draft patches as document-scoped collaboration events", () => {
+    expect(
+      realtimeEventFromDocumentSharedDraft({
+        id: "draft-1",
+        topic: documentRealtimeTopic("acme", "Task", "TASK-1"),
+        connection: {
+          connectionId: "conn-1",
+          tenantId: "acme",
+          userId: "owner@example.com"
+        },
+        message: {
+          type: DOCUMENT_SHARED_DRAFT_MESSAGE_TYPE,
+          baseVersion: 3,
+          patch: { " title ": "Draft title", priority: "High" },
+          unset: [" obsolete "],
+          actorId: "spoof@example.com"
+        },
+        occurredAt: now
+      })
+    ).toEqual({
+      id: "draft-1",
+      type: DOCUMENT_SHARED_DRAFT_EVENT_TYPE,
+      topics: ["document:acme:Task:TASK-1"],
+      tenantId: "acme",
+      occurredAt: now,
+      payload: {
+        kind: DOCUMENT_SHARED_DRAFT_EVENT_TYPE,
+        tenantId: "acme",
+        doctype: "Task",
+        name: "TASK-1",
+        baseVersion: 3,
+        patch: { title: "Draft title", priority: "High" },
+        unset: ["obsolete"],
+        connectionId: "conn-1",
+        actorId: "owner@example.com"
+      }
+    });
+
+    expect(
+      realtimeEventFromDocumentSharedDraft({
+        id: "draft-2",
+        topic: doctypeRealtimeTopic("acme", "Task"),
+        connection: { connectionId: "conn-1" },
+        message: { type: DOCUMENT_SHARED_DRAFT_MESSAGE_TYPE, patch: { title: "Draft" } },
+        occurredAt: now
+      })
+    ).toBeNull();
+    expect(
+      realtimeEventFromDocumentSharedDraft({
+        id: "draft-3",
+        topic: documentRealtimeTopic("acme", "Task", "TASK-1"),
+        connection: { connectionId: "conn-1" },
+        message: { type: DOCUMENT_SHARED_DRAFT_MESSAGE_TYPE, baseVersion: -1, patch: { title: "Draft" } },
+        occurredAt: now
+      })
+    ).toBeNull();
+    expect(
+      realtimeEventFromDocumentSharedDraft({
+        id: "draft-4",
+        topic: documentRealtimeTopic("acme", "Task", "TASK-1"),
+        connection: { connectionId: "conn-1" },
+        message: { type: DOCUMENT_SHARED_DRAFT_MESSAGE_TYPE, patch: { title: "Draft" }, unset: ["title"] },
         occurredAt: now
       })
     ).toBeNull();

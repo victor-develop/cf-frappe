@@ -6,6 +6,8 @@ import {
 import {
   DOCUMENT_FIELD_EDIT_EVENT_TYPE,
   DOCUMENT_FIELD_EDIT_MESSAGE_TYPE,
+  DOCUMENT_SHARED_DRAFT_EVENT_TYPE,
+  DOCUMENT_SHARED_DRAFT_MESSAGE_TYPE,
   REALTIME_COLLABORATION_MESSAGE_TYPE,
   type RealtimeEvent
 } from "../../src";
@@ -127,6 +129,67 @@ describe("RealtimeHub Durable Object", () => {
           name: "TASK-1",
           field: "title",
           editing: true,
+          connectionId: "conn-origin",
+          actorId: "owner@example.com"
+        }
+      }
+    });
+  });
+
+  it("rebroadcasts shared draft patches with server-owned identity", async () => {
+    const originSent: string[] = [];
+    const peerSent: string[] = [];
+    const otherTopicSent: string[] = [];
+    const origin = fakeSocket(originSent, {
+      topic: "document:acme:Task:TASK-1",
+      connectionId: "conn-origin",
+      connectedAt: "2026-06-23T00:00:01.000Z",
+      tenantId: "acme",
+      userId: "owner@example.com"
+    });
+    const peer = fakeSocket(peerSent, {
+      topic: "document:acme:Task:TASK-1",
+      connectionId: "conn-peer",
+      connectedAt: "2026-06-23T00:00:02.000Z",
+      tenantId: "acme",
+      userId: "support@example.com"
+    });
+    const otherTopic = fakeSocket(otherTopicSent, {
+      topic: "document:acme:Task:TASK-2",
+      connectionId: "conn-other",
+      connectedAt: "2026-06-23T00:00:03.000Z",
+      tenantId: "acme",
+      userId: "other@example.com"
+    });
+    vi.stubGlobal("crypto", { randomUUID: () => "draft-event" });
+    const Hub = createRealtimeHubClass();
+    const hub = new Hub(fakeState([origin, peer, otherTopic]), {});
+
+    await hub.webSocketMessage(origin, JSON.stringify({
+      type: DOCUMENT_SHARED_DRAFT_MESSAGE_TYPE,
+      baseVersion: 3,
+      patch: { title: "Draft title" },
+      unset: ["obsolete"],
+      actorId: "spoof@example.com"
+    }));
+
+    expect(originSent).toEqual([]);
+    expect(otherTopicSent).toEqual([]);
+    expect(peerSent).toHaveLength(1);
+    expect(JSON.parse(peerSent[0]!) as unknown).toMatchObject({
+      type: REALTIME_COLLABORATION_MESSAGE_TYPE,
+      event: {
+        id: "collaboration:conn-origin:draft-event",
+        type: DOCUMENT_SHARED_DRAFT_EVENT_TYPE,
+        topics: ["document:acme:Task:TASK-1"],
+        tenantId: "acme",
+        payload: {
+          kind: DOCUMENT_SHARED_DRAFT_EVENT_TYPE,
+          doctype: "Task",
+          name: "TASK-1",
+          baseVersion: 3,
+          patch: { title: "Draft title" },
+          unset: ["obsolete"],
           connectionId: "conn-origin",
           actorId: "owner@example.com"
         }

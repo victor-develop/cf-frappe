@@ -14,6 +14,7 @@ export function renderDeskClientScript(): string {
   var softDisabledProperty = "__cfFrappeSoftDisabled";
   var realtimeCollaborationMessageType = "cf-frappe.realtime.collaboration";
   var fieldEditMessageType = "cf-frappe.collaboration.field_edit";
+  var sharedDraftMessageType = "cf-frappe.collaboration.shared_draft";
 
   function encodePart(value) {
     return encodeURIComponent(String(value));
@@ -1519,6 +1520,9 @@ export function renderDeskClientScript(): string {
       },
       merge_save: function () {
         return mergeSaveForm(binding);
+      },
+      share_draft: function (input) {
+        return sendFormSharedDraft(binding, input);
       }
     };
     return frm;
@@ -1635,6 +1639,44 @@ export function renderDeskClientScript(): string {
       return;
     }
     binding.collaborationSubscription.sendFieldEdit(field.name, { editing: editing });
+  }
+
+  function sendFormSharedDraft(binding, input) {
+    var messageInput = isPlainObject(input) ? input : {};
+    if (!Object.prototype.hasOwnProperty.call(messageInput, "patch")) {
+      var plan = currentFormLocalChangePlan(binding);
+      messageInput = Object.assign({
+        baseVersion: binding.baseVersion,
+        patch: plan.patch
+      }, plan.unset.length > 0 ? { unset: plan.unset } : {}, messageInput);
+    }
+    messageInput = withoutUnsetPatchFields(messageInput);
+    if (!hasSharedDraftChanges(messageInput)) {
+      return realtimeSharedDraftMessage(messageInput);
+    }
+    if (!binding.collaborationSubscription || typeof binding.collaborationSubscription.sendSharedDraft !== "function") {
+      return realtimeSharedDraftMessage(messageInput);
+    }
+    return binding.collaborationSubscription.sendSharedDraft(messageInput);
+  }
+
+  function hasSharedDraftChanges(input) {
+    return (isPlainObject(input && input.patch) && Object.keys(input.patch).length > 0) ||
+      (Array.isArray(input && input.unset) && input.unset.length > 0);
+  }
+
+  function withoutUnsetPatchFields(input) {
+    if (!isPlainObject(input && input.patch) || !Array.isArray(input && input.unset)) {
+      return input;
+    }
+    var unset = input.unset.map(function (field) {
+      return String(field || "").trim();
+    });
+    var patch = Object.assign({}, input.patch);
+    unset.forEach(function (field) {
+      delete patch[field];
+    });
+    return Object.assign({}, input, { patch: patch });
   }
 
   function readFormData(form) {
@@ -2028,6 +2070,9 @@ export function renderDeskClientScript(): string {
       sendFieldEdit: function (field, input) {
         return realtimeSendFieldEdit(socket, field, input);
       },
+      sendSharedDraft: function (input) {
+        return realtimeSendSharedDraft(socket, input);
+      },
       socket: socket,
       topic: topic,
       url: url
@@ -2106,6 +2151,9 @@ export function renderDeskClientScript(): string {
     if (payload && payload.kind === "DocumentFieldEditIntent") {
       callRealtimeHandler(callbacks.fieldEdit, [payload, event, message, subscription]);
     }
+    if (payload && payload.kind === "DocumentSharedDraftPatch") {
+      callRealtimeHandler(callbacks.sharedDraft, [payload, event, message, subscription]);
+    }
   }
 
   function realtimeFieldEditMessage(field, input) {
@@ -2123,6 +2171,29 @@ export function renderDeskClientScript(): string {
 
   function realtimeSendFieldEdit(socket, field, input) {
     var message = realtimeFieldEditMessage(field, input);
+    socket.send(JSON.stringify(message));
+    return message;
+  }
+
+  function realtimeSharedDraftMessage(input) {
+    var options = isPlainObject(input) ? input : {};
+    var message = {
+      type: sharedDraftMessageType
+    };
+    if (Number.isInteger(options.baseVersion) && options.baseVersion >= 0) {
+      message.baseVersion = options.baseVersion;
+    }
+    if (isPlainObject(options.patch)) {
+      message.patch = options.patch;
+    }
+    if (Array.isArray(options.unset)) {
+      message.unset = options.unset;
+    }
+    return message;
+  }
+
+  function realtimeSendSharedDraft(socket, input) {
+    var message = realtimeSharedDraftMessage(input);
     socket.send(JSON.stringify(message));
     return message;
   }
@@ -2976,7 +3047,14 @@ export function renderDeskClientScript(): string {
           return realtimeFieldEditMessage(field, input);
         }
         return subscription.sendFieldEdit(field, input);
-      }
+      },
+      sendSharedDraft: function (subscription, input) {
+        if (!subscription || typeof subscription.sendSharedDraft !== "function") {
+          return realtimeSharedDraftMessage(input);
+        }
+        return subscription.sendSharedDraft(input);
+      },
+      sharedDraftMessage: realtimeSharedDraftMessage
     }),
     report: Object.freeze({
       csvUrl: function (report, options) {

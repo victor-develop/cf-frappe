@@ -1,8 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   DOCUMENT_FIELD_EDIT_MESSAGE_TYPE,
+  DOCUMENT_SHARED_DRAFT_MESSAGE_TYPE,
   REALTIME_COLLABORATION_MESSAGE_TYPE,
   realtimeEventFromDocumentFieldEdit,
+  realtimeEventFromDocumentSharedDraft,
   type RealtimeEvent,
   type RealtimeTopic
 } from "../core/realtime.js";
@@ -195,7 +197,7 @@ export function createRealtimeHubClass(options: RealtimeHubOptions = {}): Realti
           ws.send(JSON.stringify({ type: "pong" }));
           return;
         }
-        if (parsed.type === DOCUMENT_FIELD_EDIT_MESSAGE_TYPE) {
+        if (parsed.type === DOCUMENT_FIELD_EDIT_MESSAGE_TYPE || parsed.type === DOCUMENT_SHARED_DRAFT_MESSAGE_TYPE) {
           this.broadcastCollaboration(ws, parsed);
         }
       } catch {
@@ -219,13 +221,14 @@ export function createRealtimeHubClass(options: RealtimeHubOptions = {}): Realti
         return;
       }
       const occurredAt = new Date().toISOString();
-      const event = realtimeEventFromDocumentFieldEdit({
+      const eventInput = {
         id: generatedCollaborationEventId(attachment.connectionId, occurredAt),
         topic: attachment.topic,
         connection: attachment,
         message: parsed,
         occurredAt
-      });
+      };
+      const event = realtimeEventFromDocumentFieldEdit(eventInput) ?? realtimeEventFromDocumentSharedDraft(eventInput);
       if (!event) {
         origin.send(JSON.stringify({ type: "error", message: "Invalid collaboration message" }));
         return;

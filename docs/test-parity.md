@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the generated presence-panel merge action slice:
+As of the shared draft collaboration patch slice:
 
 - Vitest files: `93`
-- Vitest cases: `1042`
+- Vitest cases: `1047`
 
 ## Implication
 

@@ -84,6 +84,11 @@ interface DeskClientRuntime {
       field: string,
       input?: unknown
     ) => Record<string, unknown>;
+    readonly sendSharedDraft: (
+      subscription: DeskRealtimeSubscription,
+      input: Record<string, unknown>
+    ) => Record<string, unknown>;
+    readonly sharedDraftMessage: (input: Record<string, unknown>) => Record<string, unknown>;
   };
   readonly form: {
     readonly current: () => DeskFormRuntime | null;
@@ -446,6 +451,12 @@ interface DeskRealtimeHandlers {
     message: unknown,
     subscription: DeskRealtimeSubscription
   ) => void;
+  readonly sharedDraft?: (
+    payload: Record<string, unknown>,
+    event: Record<string, unknown>,
+    message: unknown,
+    subscription: DeskRealtimeSubscription
+  ) => void;
 }
 
 interface DeskRealtimeOptions {
@@ -463,6 +474,7 @@ interface DeskRealtimeSubscription {
   readonly close: (code?: number, reason?: string) => void;
   readonly send: (message: unknown) => unknown;
   readonly sendFieldEdit: (field: string, input?: unknown) => Record<string, unknown>;
+  readonly sendSharedDraft: (input: Record<string, unknown>) => Record<string, unknown>;
 }
 
 interface DeskFormRuntime {
@@ -482,6 +494,7 @@ interface DeskFormRuntime {
   readonly refresh: () => boolean;
   readonly refresh_field: (fieldname: string) => void;
   readonly save: (options?: { readonly merge?: boolean }) => boolean | Promise<unknown>;
+  readonly share_draft: (input?: Record<string, unknown>) => Record<string, unknown>;
   readonly set_df_property: (fieldname: string, property: string, value: unknown) => DeskFormRuntime;
   readonly set_value: (fieldname: string, value: unknown) => Promise<unknown>;
   readonly toggle_display: (fieldname: string, show: boolean) => DeskFormRuntime;
@@ -2821,6 +2834,49 @@ describe("Desk client runtime", () => {
     ]);
   });
 
+  it("parses realtime shared draft patch messages for document subscriptions", () => {
+    const sockets: FakeWebSocket[] = [];
+    const runtime = evaluateDeskClient(fetch, new FakeDocument(), sockets);
+    const seen: string[] = [];
+    const subscription = runtime.realtime.subscribeDocument("Task", "TASK-1", {
+      collaboration: (event, _message, sub) => {
+        seen.push(`collaboration:${String(event.type)}:${sub.topic}`);
+      },
+      sharedDraft: (payload, event, _message, sub) => {
+        const patch = payload.patch as { readonly title?: string };
+        const unset = payload.unset as readonly string[];
+        seen.push(
+          `draft:${String(payload.actorId)}:${String(payload.baseVersion)}:${String(patch.title)}:${unset.join(",")}:${String(event.id)}:${sub.url}`
+        );
+      },
+      message: (message) => {
+        seen.push(`message:${String((message as { readonly type?: string }).type)}`);
+      }
+    }, { tenantId: "acme" });
+
+    sockets[0]?.emitMessage(JSON.stringify({
+      type: "cf-frappe.realtime.collaboration",
+      event: {
+        id: "draft-1",
+        type: "DocumentSharedDraftPatch",
+        payload: {
+          kind: "DocumentSharedDraftPatch",
+          baseVersion: 3,
+          patch: { title: "Draft title" },
+          unset: ["obsolete"],
+          connectionId: "conn-1",
+          actorId: "support@example.com"
+        }
+      }
+    }));
+
+    expect(seen).toEqual([
+      "message:cf-frappe.realtime.collaboration",
+      "collaboration:DocumentSharedDraftPatch:document:acme:Task:TASK-1",
+      `draft:support@example.com:3:Draft title:obsolete:draft-1:${subscription.url}`
+    ]);
+  });
+
   it("sends transient field-edit collaboration messages over realtime subscriptions", () => {
     const sockets: FakeWebSocket[] = [];
     const runtime = evaluateDeskClient(fetch, new FakeDocument(), sockets);
@@ -2844,6 +2900,41 @@ describe("Desk client runtime", () => {
         field: "title",
         editing: true,
         value: "Queued"
+      })
+    ]);
+  });
+
+  it("sends explicit shared draft patches over realtime subscriptions", () => {
+    const sockets: FakeWebSocket[] = [];
+    const runtime = evaluateDeskClient(fetch, new FakeDocument(), sockets);
+    const subscription = runtime.realtime.subscribeDocument("Task", "TASK-1", {}, { tenantId: "acme" });
+
+    expect(runtime.collaboration.sharedDraftMessage({
+      baseVersion: 3,
+      patch: { title: "Draft title" },
+      unset: ["obsolete"]
+    })).toEqual({
+      type: "cf-frappe.collaboration.shared_draft",
+      baseVersion: 3,
+      patch: { title: "Draft title" },
+      unset: ["obsolete"]
+    });
+    expect(runtime.collaboration.sendSharedDraft(subscription, {
+      baseVersion: 3,
+      patch: { title: "Draft title" },
+      unset: ["obsolete"]
+    })).toEqual({
+      type: "cf-frappe.collaboration.shared_draft",
+      baseVersion: 3,
+      patch: { title: "Draft title" },
+      unset: ["obsolete"]
+    });
+    expect(sockets[0]?.sent).toEqual([
+      JSON.stringify({
+        type: "cf-frappe.collaboration.shared_draft",
+        baseVersion: 3,
+        patch: { title: "Draft title" },
+        unset: ["obsolete"]
       })
     ]);
   });
@@ -3293,6 +3384,65 @@ describe("Desk client runtime", () => {
         type: "cf-frappe.collaboration.field_edit",
         field: "title",
         editing: false
+      }
+    ]);
+  });
+
+  it("shares generated form draft patches only through explicit form calls", () => {
+    const sockets: FakeWebSocket[] = [];
+    const title = new FakeField("title", "Queued");
+    const obsolete = new FakeField("obsolete", "remove me");
+    const expectedVersion = new FakeField("expectedVersion", "3", "hidden");
+    const runtime = evaluateDeskClient(
+      fetch,
+      new FakeDocument({
+        form: new FakeForm([title, obsolete, expectedVersion]),
+        runtimeDataset: {
+          doctype: "Task",
+          documentName: "TASK-1",
+          documentVersion: "3",
+          realtimeRoute: "/rt",
+          scope: "form",
+          tenantId: "acme"
+        }
+      }),
+      sockets
+    );
+
+    expect(runtime.form.current()?.share_draft()).toEqual({
+      type: "cf-frappe.collaboration.shared_draft",
+      baseVersion: 3,
+      patch: {}
+    });
+    expect(sockets[0]?.sent).toEqual([]);
+
+    title.value = "Draft title";
+    title.emit("input");
+    obsolete.value = "";
+    obsolete.emit("change");
+
+    expect(runtime.form.current()?.share_draft({ unset: ["obsolete"] })).toEqual({
+      type: "cf-frappe.collaboration.shared_draft",
+      baseVersion: 3,
+      patch: { title: "Draft title" },
+      unset: ["obsolete"]
+    });
+    expect(sockets[0]?.sent.map((message) => JSON.parse(message) as unknown)).toEqual([
+      {
+        type: "cf-frappe.collaboration.field_edit",
+        field: "title",
+        editing: true
+      },
+      {
+        type: "cf-frappe.collaboration.field_edit",
+        field: "obsolete",
+        editing: true
+      },
+      {
+        type: "cf-frappe.collaboration.shared_draft",
+        baseVersion: 3,
+        patch: { title: "Draft title" },
+        unset: ["obsolete"]
       }
     ]);
   });
