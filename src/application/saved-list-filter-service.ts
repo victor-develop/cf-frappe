@@ -1,5 +1,5 @@
 import { badRequest, notFound, permissionDenied } from "../core/errors.js";
-import { mergeListFilters, normalizeListFilters } from "../core/list-view.js";
+import { andListFilterExpressions, mergeListFilters, normalizeListFilterExpression, normalizeListFilters } from "../core/list-view.js";
 import { can } from "../core/permissions.js";
 import type { ModelRegistry } from "../core/registry.js";
 import { savedListFiltersStream } from "../core/streams.js";
@@ -8,6 +8,7 @@ import {
   type Actor,
   type DocTypeDefinition,
   type DomainEvent,
+  type ListFilterExpression,
   type ListDocumentsFilter,
   type NewDomainEvent,
   type TenantId
@@ -40,6 +41,7 @@ export interface SavedListFilter {
   readonly label: string;
   readonly ownerId: string;
   readonly filters: readonly ListDocumentsFilter[];
+  readonly filterExpression?: ListFilterExpression;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -49,6 +51,7 @@ export interface SaveListFilterCommand {
   readonly doctype: string;
   readonly label: string;
   readonly filters: readonly ListDocumentsFilter[];
+  readonly filterExpression?: ListFilterExpression;
   readonly id?: string;
   readonly tenantId?: TenantId;
 }
@@ -58,6 +61,11 @@ export interface DeleteListFilterCommand {
   readonly doctype: string;
   readonly id: string;
   readonly tenantId?: TenantId;
+}
+
+export interface SavedListFilterMerge {
+  readonly filters: readonly ListDocumentsFilter[];
+  readonly filterExpression?: ListFilterExpression;
 }
 
 export class SavedListFilterService {
@@ -112,6 +120,9 @@ export class SavedListFilterService {
     const id = command.id ?? this.ids.next("filter_");
     const label = normalizeLabel(command.label);
     const normalizedFilters = normalizeListFilters(doctype, command.filters);
+    const normalizedFilterExpression = command.filterExpression === undefined
+      ? undefined
+      : normalizeListFilterExpression(doctype, command.filterExpression);
     const now = this.clock.now();
     const event = newEvent({
       id: this.ids.next("evt_"),
@@ -127,7 +138,8 @@ export class SavedListFilterService {
         filterId: id,
         label,
         ownerId: command.actor.id,
-        filters: normalizedFilters
+        filters: normalizedFilters,
+        ...(normalizedFilterExpression === undefined ? {} : { filterExpression: normalizedFilterExpression })
       },
       metadata: {}
     });
@@ -139,6 +151,7 @@ export class SavedListFilterService {
       label,
       ownerId: command.actor.id,
       filters: normalizedFilters,
+      ...(normalizedFilterExpression === undefined ? {} : { filterExpression: normalizedFilterExpression }),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now
     };
@@ -185,6 +198,22 @@ export class SavedListFilterService {
     return savedFilter ? mergeListFilters(savedFilter.filters, explicitFilters) : explicitFilters;
   }
 
+  mergeSavedFilterInputs(
+    savedFilter: SavedListFilter | undefined,
+    explicitFilters: readonly ListDocumentsFilter[],
+    explicitFilterExpression: ListFilterExpression | undefined
+  ): SavedListFilterMerge {
+    const filters = this.mergeSavedFilter(savedFilter, explicitFilters);
+    const filterExpression = andListFilterExpressions([
+      savedFilter?.filterExpression,
+      explicitFilterExpression
+    ]);
+    return {
+      filters,
+      ...(filterExpression === undefined ? {} : { filterExpression })
+    };
+  }
+
   private async readableDoctype(actor: Actor, doctypeName: string, tenantId: TenantId): Promise<DocTypeDefinition> {
     const base = this.registry.get(doctypeName);
     const doctype = (await this.doctypeResolver?.(base, { actor, tenantId })) ?? base;
@@ -224,6 +253,7 @@ function foldSavedListFilters(
           label: event.payload.label,
           ownerId: event.payload.ownerId,
           filters: event.payload.filters,
+          ...(event.payload.filterExpression === undefined ? {} : { filterExpression: event.payload.filterExpression }),
           createdAt: existing?.createdAt ?? event.occurredAt,
           updatedAt: event.occurredAt
         });

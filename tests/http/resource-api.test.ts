@@ -20,6 +20,7 @@ import {
   createSeriesServices,
   createServices,
   noteDocType,
+  deepListFilterExpressionJson,
   now,
   openNotesReport,
   owner
@@ -27,7 +28,19 @@ import {
 
 describe("resource api", () => {
   function makeApp() {
-    const services = createServices(["e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8", "e9", "e10"]);
+    const services = createServices(
+      ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8", "e9", "e10"],
+      {
+        savedFilterIds: [
+          "saved-filter-1",
+          "saved-filter-event-1",
+          "saved-filter-2",
+          "saved-filter-event-2",
+          "saved-filter-3",
+          "saved-filter-event-3"
+        ]
+      }
+    );
     return createResourceApi({
       registry: services.registry,
       documents: services.documents,
@@ -1281,6 +1294,26 @@ describe("resource api", () => {
       "HTTP High"
     ]);
 
+    const compoundExpression = encodeURIComponent(JSON.stringify({
+      kind: "group",
+      match: "any",
+      filters: [
+        { field: "priority", value: "High" },
+        { field: "count", operator: "between", value: [1, 1] }
+      ]
+    }));
+    const compound = await app.request(`/api/resource/Note?default_filters=0&filter_expression=${compoundExpression}`, {
+      headers: userHeaders
+    });
+    expect(compound.status).toBe(200);
+    const compoundJson = (await compound.json()) as { readonly total: number; readonly data: readonly { readonly name: string }[] };
+    expect(compoundJson.total).toBe(3);
+    expect(compoundJson.data.map((document) => document.name).sort()).toEqual([
+      "HTTP Closed High",
+      "HTTP High",
+      "HTTP Low"
+    ]);
+
     const membership = await app.request("/api/resource/Note?filter_priority__in=High&filter_priority__in=Low", {
       headers: userHeaders
     });
@@ -1544,8 +1577,45 @@ describe("resource api", () => {
       total: 1
     });
 
+    const expressionSaved = await app.request("/api/resource/Note/saved-filters", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({
+        label: "Expression API notes",
+        filters: [],
+        filterExpression: {
+          kind: "group",
+          match: "any",
+          filters: [
+            { field: "priority", value: "High" },
+            { field: "count", operator: "lte", value: 1 }
+          ]
+        }
+      })
+    });
+    expect(expressionSaved.status).toBe(201);
+    const expressionSavedJson = await expressionSaved.json() as { data: { id: string; filterExpression: unknown } };
+    expect(expressionSavedJson.data.filterExpression).toMatchObject({
+      kind: "group",
+      match: "any"
+    });
+    const expressionFiltered = await app.request(`/api/resource/Note?saved_filter=${expressionSavedJson.data.id}`, {
+      headers: userHeaders
+    });
+    expect(expressionFiltered.status).toBe(200);
+    const expressionFilteredJson = await expressionFiltered.json() as {
+      readonly total: number;
+      readonly data: readonly { readonly name: string }[];
+    };
+    expect(expressionFilteredJson.total).toBe(2);
+    expect(expressionFilteredJson.data.map((document) => document.name).sort()).toEqual(["API High", "API Low"]);
+
     const listed = await app.request("/api/resource/Note/saved-filters", { headers: userHeaders });
-    await expect(listed.json()).resolves.toMatchObject({ data: [{ id: savedJson.data.id }] });
+    const listedJson = await listed.json() as { readonly data: readonly { readonly id: string }[] };
+    expect(listedJson.data.map((filter) => filter.id).sort()).toEqual([
+      expressionSavedJson.data.id,
+      savedJson.data.id
+    ].sort());
 
     const deleted = await app.request(`/api/resource/Note/saved-filters/${savedJson.data.id}`, {
       method: "DELETE",
@@ -1562,6 +1632,23 @@ describe("resource api", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "BAD_REQUEST", message: "Filter field 'missing' is not defined on Note" }
+    });
+
+    const malformedExpression = await app.request("/api/resource/Note?filter_expression=not-json", {
+      headers: userHeaders
+    });
+    expect(malformedExpression.status).toBe(400);
+    await expect(malformedExpression.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Filter expression must be valid JSON" }
+    });
+
+    const overDeepExpression = encodeURIComponent(deepListFilterExpressionJson(6000));
+    const overDeep = await app.request(`/api/resource/Note?filter_expression=${overDeepExpression}`, {
+      headers: userHeaders
+    });
+    expect(overDeep.status).toBe(400);
+    await expect(overDeep.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "List filter expression cannot exceed 5 levels" }
     });
 
     const invalidOrder = await app.request("/api/resource/Note?order=sideways", { headers: userHeaders });
@@ -1596,6 +1683,16 @@ describe("resource api", () => {
       error: { code: "BAD_REQUEST", message: "Saved filter range value must be a two-item scalar array" }
     });
 
+    const overDeepSavedFilter = await app.request("/api/resource/Note/saved-filters", {
+      method: "POST",
+      headers: userHeaders,
+      body: `{"label":"Too deep","filterExpression":${deepListFilterExpressionJson(6000)}}`
+    });
+    expect(overDeepSavedFilter.status).toBe(400);
+    await expect(overDeepSavedFilter.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "List filter expression cannot exceed 5 levels" }
+    });
+
     const emptyRangeSavedFilter = await app.request("/api/resource/Note/saved-filters", {
       method: "POST",
       headers: userHeaders,
@@ -1620,6 +1717,20 @@ describe("resource api", () => {
     expect(invalidPresenceSavedFilter.status).toBe(400);
     await expect(invalidPresenceSavedFilter.json()).resolves.toMatchObject({
       error: { code: "BAD_REQUEST", message: "Saved filter presence value must be set or not set" }
+    });
+
+    const invalidExpressionSavedFilter = await app.request("/api/resource/Note/saved-filters", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({
+        label: "Invalid expression",
+        filters: [],
+        filterExpression: { kind: "group", match: "all", filters: [] }
+      })
+    });
+    expect(invalidExpressionSavedFilter.status).toBe(400);
+    await expect(invalidExpressionSavedFilter.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "List filter group must include at least one filter" }
     });
   });
 

@@ -54,6 +54,82 @@ describe("SavedListFilterService", () => {
     ]);
   });
 
+  it("saves and merges compound filter expressions", async () => {
+    const { events, registry } = createServices(["create-1"]);
+    const savedFilters = new SavedListFilterService({
+      registry,
+      events,
+      ids: deterministicFilterIds(["filter-compound", "event-1"]),
+      clock: { now: () => "2026-01-02T00:00:00.000Z" }
+    });
+
+    const saved = await savedFilters.save({
+      actor: owner,
+      doctype: "Note",
+      label: "High or mid-count",
+      filters: [{ field: "workflow_state", value: "Open" }],
+      filterExpression: {
+        kind: "group",
+        match: "any",
+        filters: [
+          { field: "priority", value: "High" },
+          { field: "count", operator: "between", value: ["2", "5"] }
+        ]
+      }
+    });
+
+    expect(saved).toMatchObject({
+      filters: [{ field: "workflow_state", value: "Open" }],
+      filterExpression: {
+        kind: "group",
+        match: "any",
+        filters: [
+          { field: "priority", value: "High" },
+          { field: "count", operator: "between", value: [2, 5] }
+        ]
+      }
+    });
+    await expect(events.readStream("acme:__SavedListFilters:Note%3Aowner%40example%2Ecom")).resolves.toMatchObject([
+      {
+        payload: {
+          kind: "SavedListFilterSaved",
+          filterExpression: {
+            kind: "group",
+            match: "any",
+            filters: [
+              { field: "priority", value: "High" },
+              { field: "count", operator: "between", value: [2, 5] }
+            ]
+          }
+        }
+      }
+    ]);
+
+    const secondService = new SavedListFilterService({ registry, events });
+    const folded = await secondService.get(owner, "Note", saved.id);
+    expect(folded.filterExpression).toEqual(saved.filterExpression);
+    expect(
+      secondService.mergeSavedFilterInputs(
+        folded,
+        [{ field: "priority", value: "Low" }],
+        { field: "system.name", operator: "contains", value: "Q2" }
+      )
+    ).toMatchObject({
+      filters: [
+        { field: "workflow_state", value: "Open" },
+        { field: "priority", value: "Low" }
+      ],
+      filterExpression: {
+        kind: "group",
+        match: "all",
+        filters: [
+          saved.filterExpression,
+          { field: "system.name", operator: "contains", value: "Q2" }
+        ]
+      }
+    });
+  });
+
   it("updates and deletes only filters owned by the actor", async () => {
     const { events, registry } = createServices(["create-1"]);
     const savedFilters = new SavedListFilterService({

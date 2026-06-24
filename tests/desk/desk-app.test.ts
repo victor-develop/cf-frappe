@@ -55,6 +55,7 @@ import {
   createSeriesServices,
   createServices,
   data,
+  deepListFilterExpressionJson,
   guest,
   manager,
   noteDocType,
@@ -2561,6 +2562,27 @@ describe("Desk app", () => {
     expect(advancedHtml).toContain('name="filter_count__gte" value="2"');
     expect(advancedHtml).toContain('name="filter_count__lte" value="8"');
 
+    const compoundExpression = encodeURIComponent(JSON.stringify({
+      kind: "group",
+      match: "any",
+      filters: [
+        { field: "priority", value: "High" },
+        { field: "count", operator: "between", value: [1, 1] }
+      ]
+    }));
+    const compound = await app.request(`/desk/Note?default_filters=0&filter_expression=${compoundExpression}`);
+    expect(compound.status).toBe(200);
+    const compoundHtml = await compound.text();
+    expect(compoundHtml).toContain("Desk High");
+    expect(compoundHtml).toContain("Desk Closed High");
+    expect(compoundHtml).toContain("Desk Low");
+    expect(compoundHtml).not.toContain("Desk Empty Body");
+    expect(compoundHtml).toContain('name="filter_expression"');
+    expect(compoundHtml).toContain("&quot;match&quot;: &quot;any&quot;");
+    expect(compoundHtml).toContain("<strong>Any</strong>");
+    expect(compoundHtml).toContain("priority eq High");
+    expect(compoundHtml).toContain("/desk/Note/export.csv?default_filters=0&amp;filter_expression=");
+
     const between = await app.request("/desk/Note?filter_count__between=6&filter_count__between=8");
     expect(between.status).toBe(200);
     const betweenHtml = await between.text();
@@ -2643,6 +2665,16 @@ describe("Desk app", () => {
       "Name,title,priority,workflow_state,Version,Updated",
       "Desk Empty Body,Desk Empty Body,Low,Open,1,2026-01-01T00:00:00.000Z"
     ].join("\n"));
+  });
+
+  it("rejects over-deep Desk compound list filter expressions without overflowing the parser", async () => {
+    const { app } = makeDesk();
+    const expression = encodeURIComponent(deepListFilterExpressionJson(6000));
+
+    const response = await app.request(`/desk/Note?filter_expression=${expression}`);
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toContain("List filter expression cannot exceed 5 levels");
   });
 
   it("lists Desk resources with presence filters for missing fields", async () => {
@@ -2902,7 +2934,14 @@ describe("Desk app", () => {
 
     const saved = await app.request("/desk/Note/saved-filters", {
       method: "POST",
-      body: new URLSearchParams({ saved_filter_label: "High notes", filter_priority: "High" }),
+      body: new URLSearchParams({
+        saved_filter_label: "High notes",
+        filter_expression: JSON.stringify({
+          kind: "group",
+          match: "any",
+          filters: [{ field: "priority", value: "High" }]
+        })
+      }),
       headers: { "content-type": "application/x-www-form-urlencoded" }
     });
 
@@ -2916,6 +2955,7 @@ describe("Desk app", () => {
     expect(html).toContain("High notes");
     expect(html).toContain("Desk Saved High");
     expect(html).not.toContain("Desk Saved Low");
+    expect(html).toContain("<strong>Any</strong>");
     expect(html).toContain("/desk/Note/saved-filters/");
     expect(html).toContain("/delete");
 

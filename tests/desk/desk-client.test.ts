@@ -550,6 +550,37 @@ describe("Desk client runtime", () => {
     );
   });
 
+  it("maps resource compound filter expressions to query parameters", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: [] }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+    const filterExpression = {
+      kind: "group",
+      match: "any",
+      filters: [
+        { field: "priority", value: "High" },
+        { field: "count", operator: "between", value: [1, 3] }
+      ]
+    };
+    const encoded = encodeURIComponent(JSON.stringify(filterExpression));
+
+    await runtime.resource.list("Task", {
+      filterExpression,
+      filters: { workflow_state: "Open" }
+    });
+
+    expect(calls[0]?.url).toBe(
+      `/api/resource/Task?filter_expression=${encoded}&filter_workflow_state=Open`
+    );
+    expect(runtime.resource.csvUrl("Task", { filterExpression })).toBe(
+      `/api/resource/Task/export.csv?filter_expression=${encoded}`
+    );
+  });
+
   it("marks intentional empty resource filters in query parameters", async () => {
     const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
     const runtime = evaluateDeskClient(async (url, init) => {

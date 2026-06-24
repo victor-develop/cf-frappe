@@ -1,7 +1,20 @@
 import { badRequest } from "../../core/errors.js";
-import { LIST_FILTER_OPERATORS, isListMembershipOperator, isListOrderDirection, isListRangeOperator } from "../../core/list-view.js";
+import {
+  LIST_FILTER_OPERATORS,
+  MAX_LIST_FILTER_EXPRESSION_DEPTH,
+  MAX_LIST_FILTER_EXPRESSION_NODES,
+  isListFilterGroupMatch,
+  isListFilterOperator,
+  isListMembershipOperator,
+  isListOrderDirection,
+  isListPresenceOperator,
+  isListRangeOperator
+} from "../../core/list-view.js";
 import type {
   DocumentData,
+  JsonPrimitive,
+  ListFilterExpression,
+  ListFilterValue,
   ListDocumentsFilter,
   ListDocumentsQuery,
   ListFilterOperator,
@@ -9,6 +22,7 @@ import type {
 } from "../../core/types.js";
 
 const SENSITIVE_QUERY_KEYS = new Set(["token", "password", "secret", "api_key", "apikey", "key"]);
+const FILTER_EXPRESSION_QUERY_KEY = "filter_expression";
 
 export function parseOptionalInteger(value: string | undefined): number | undefined {
   if (value === undefined) {
@@ -38,6 +52,9 @@ export function listFiltersFromUrl(url: URL, options: ListFiltersFromUrlOptions 
   const emptyFilterKeys = new Set(url.searchParams.getAll("empty_filter"));
   const fields = new Set(options.fields ?? []);
   url.searchParams.forEach((value, key) => {
+    if (key === FILTER_EXPRESSION_QUERY_KEY) {
+      return;
+    }
     const parsed = parseFilterKey(key, fields);
     if (!parsed || (value === "" && !emptyFilterKeys.has(key))) {
       return;
@@ -64,6 +81,78 @@ export function listFiltersFromUrl(url: URL, options: ListFiltersFromUrlOptions 
       ? { field: filter.field, operator: filter.operator, value: filter.values }
       : filter
   );
+}
+
+export function listFilterExpressionFromUrl(url: URL): ListFilterExpression | undefined {
+  const raw = nonEmptyQueryValue(url.searchParams.get(FILTER_EXPRESSION_QUERY_KEY));
+  if (raw === undefined) {
+    return undefined;
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(raw) as unknown;
+  } catch {
+    throw badRequest("Filter expression must be valid JSON");
+  }
+  return listFilterExpressionFromValue(value, "Filter expression");
+}
+
+export function listFilterExpressionFromValue(
+  value: unknown,
+  label = "Filter expression"
+): ListFilterExpression {
+  return listFilterExpressionNodeFromValue(value, label, 1, { remaining: MAX_LIST_FILTER_EXPRESSION_NODES });
+}
+
+function listFilterExpressionNodeFromValue(
+  value: unknown,
+  label: string,
+  depth: number,
+  budget: ListFilterExpressionParseBudget
+): ListFilterExpression {
+  budget.remaining -= 1;
+  if (budget.remaining < 0) {
+    throw badRequest(
+      `List filter expression cannot exceed ${MAX_LIST_FILTER_EXPRESSION_DEPTH} levels or ${MAX_LIST_FILTER_EXPRESSION_NODES} nodes`
+    );
+  }
+  if (!isRecord(value)) {
+    throw badRequest(`${label} must be an object`);
+  }
+  if ("field" in value) {
+    return listFilterPredicateFromValue(value, label);
+  }
+  if (depth > MAX_LIST_FILTER_EXPRESSION_DEPTH) {
+    throw badRequest(`List filter expression cannot exceed ${MAX_LIST_FILTER_EXPRESSION_DEPTH} levels`);
+  }
+  if (value.kind !== undefined && value.kind !== "group") {
+    throw badRequest(`${label} kind must be group`);
+  }
+  if (!isListFilterGroupMatch(value.match)) {
+    throw badRequest(`${label} match must be all or any`);
+  }
+  if (!Array.isArray(value.filters)) {
+    throw badRequest(`${label} filters must be an array`);
+  }
+  return {
+    kind: "group",
+    match: value.match,
+    filters: value.filters.map((item) =>
+      listFilterExpressionNodeFromValue(item, `${label} group filter`, depth + 1, budget)
+    )
+  };
+}
+
+export function listFiltersFromValue(value: unknown, label = "Saved filter"): readonly ListDocumentsFilter[] {
+  if (!Array.isArray(value)) {
+    throw badRequest(`${label} filters must be an array`);
+  }
+  return value.map((item) => {
+    if (!isRecord(item)) {
+      throw badRequest(`${label} entries must be objects`);
+    }
+    return listFilterPredicateFromValue(item, label);
+  });
 }
 
 export function listOrderFromUrl(url: URL): Pick<ListDocumentsQuery, "orderBy" | "order"> {
@@ -174,6 +263,68 @@ interface PendingArrayFilter {
   readonly field: string;
   readonly operator: "in" | "not_in" | "between" | "not_between";
   readonly values: string[];
+}
+
+interface ListFilterExpressionParseBudget {
+  remaining: number;
+}
+
+function listFilterPredicateFromValue(value: unknown, label: string): ListDocumentsFilter {
+  if (!isRecord(value)) {
+    throw badRequest(`${label} must be an object`);
+  }
+  const field = value.field;
+  const operator = value.operator;
+  const filterValue = value.value;
+  if (typeof field !== "string") {
+    throw badRequest(`${label} field must be a string`);
+  }
+  if (operator !== undefined && !isListFilterOperator(operator)) {
+    throw badRequest(`${label} operator is invalid`);
+  }
+  const normalizedOperator = operator ?? "eq";
+  return {
+    field,
+    ...(normalizedOperator === "eq" ? {} : { operator: normalizedOperator }),
+    value: listFilterValueFromUnknown(filterValue, normalizedOperator, label)
+  };
+}
+
+function listFilterValueFromUnknown(
+  value: unknown,
+  operator: ListFilterOperator,
+  label: string
+): ListFilterValue {
+  if (isListMembershipOperator(operator)) {
+    if (!Array.isArray(value) || value.length === 0 || !value.every(isJsonPrimitive)) {
+      throw badRequest(`${label} membership value must be a non-empty scalar array`);
+    }
+    return value;
+  }
+  if (isListRangeOperator(operator)) {
+    if (!Array.isArray(value) || value.length !== 2 || !value.every(isJsonPrimitive)) {
+      throw badRequest(`${label} range value must be a two-item scalar array`);
+    }
+    return value;
+  }
+  if (isListPresenceOperator(operator)) {
+    if (value !== "set" && value !== "not set") {
+      throw badRequest(`${label} presence value must be set or not set`);
+    }
+    return value;
+  }
+  if (!isJsonPrimitive(value)) {
+    throw badRequest(`${label} value must be scalar`);
+  }
+  return value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isJsonPrimitive(value: unknown): value is JsonPrimitive {
+  return value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean";
 }
 
 function parseListOrder(value: string): NonNullable<ListDocumentsQuery["order"]> {

@@ -4,73 +4,87 @@ import type {
   ListFilterValue,
   JsonValue,
   ListDocumentsFilter,
+  ListFilterExpression,
   ListOrderDirection
 } from "../../core/types.js";
+import { isListFilterGroup, listFilterExpressionFromFilters } from "../../core/list-view.js";
 
 export function matchesListFilters(
   document: DocumentSnapshot,
   filters: readonly ListDocumentsFilter[] = []
 ): boolean {
-  return filters.every((filter) => {
-    const actual = listFilterValue(document, filter.field);
-    switch (filter.operator ?? "eq") {
-      case "eq":
-        return actual === scalarFilterValue(filter);
-      case "ne":
-        return actual !== undefined && actual !== null && actual !== scalarFilterValue(filter);
-      case "in":
-        return actual !== undefined && actual !== null && arrayIncludes(filter.value, actual);
-      case "not_in":
-        return actual !== undefined && actual !== null && !arrayIncludes(filter.value, actual);
-      case "is":
-        return presenceFilterValue(filter) === "set"
-          ? actual !== undefined && actual !== null
-          : actual === undefined || actual === null;
-      case "contains":
-        if (actual === undefined || actual === null) {
-          return false;
-        }
-        return String(actual ?? "").toLowerCase().includes(String(scalarFilterValue(filter)).toLowerCase());
-      case "like":
-        return actual !== undefined && actual !== null && likePatternMatches(actual, patternFilterValue(filter));
-      case "not_like":
-        return actual !== undefined && actual !== null && !likePatternMatches(actual, patternFilterValue(filter));
-      case "gt":
-        if (actual === undefined || actual === null) {
-          return false;
-        }
-        return compareValues(actual, scalarFilterValue(filter)) > 0;
-      case "gte":
-        if (actual === undefined || actual === null) {
-          return false;
-        }
-        return compareValues(actual, scalarFilterValue(filter)) >= 0;
-      case "lt":
-        if (actual === undefined || actual === null) {
-          return false;
-        }
-        return compareValues(actual, scalarFilterValue(filter)) < 0;
-      case "lte":
-        if (actual === undefined || actual === null) {
-          return false;
-        }
-        return compareValues(actual, scalarFilterValue(filter)) <= 0;
-      case "between": {
-        if (actual === undefined || actual === null) {
-          return false;
-        }
-        const [minimum, maximum] = rangeFilterValues(filter);
-        return compareValues(actual, minimum) >= 0 && compareValues(actual, maximum) <= 0;
+  const expression = listFilterExpressionFromFilters(filters);
+  return expression === undefined || matchesListFilterExpression(document, expression);
+}
+
+export function matchesListFilterExpression(document: DocumentSnapshot, expression: ListFilterExpression): boolean {
+  if (isListFilterGroup(expression)) {
+    return expression.match === "all"
+      ? expression.filters.every((filter) => matchesListFilterExpression(document, filter))
+      : expression.filters.some((filter) => matchesListFilterExpression(document, filter));
+  }
+  return matchesListFilterPredicate(document, expression);
+}
+
+function matchesListFilterPredicate(document: DocumentSnapshot, filter: ListDocumentsFilter): boolean {
+  const actual = listFilterValue(document, filter.field);
+  switch (filter.operator ?? "eq") {
+    case "eq":
+      return actual === scalarFilterValue(filter);
+    case "ne":
+      return actual !== undefined && actual !== null && actual !== scalarFilterValue(filter);
+    case "in":
+      return actual !== undefined && actual !== null && arrayIncludes(filter.value, actual);
+    case "not_in":
+      return actual !== undefined && actual !== null && !arrayIncludes(filter.value, actual);
+    case "is":
+      return presenceFilterValue(filter) === "set"
+        ? actual !== undefined && actual !== null
+        : actual === undefined || actual === null;
+    case "contains":
+      if (actual === undefined || actual === null) {
+        return false;
       }
-      case "not_between": {
-        if (actual === undefined || actual === null) {
-          return false;
-        }
-        const [minimum, maximum] = rangeFilterValues(filter);
-        return compareValues(actual, minimum) < 0 || compareValues(actual, maximum) > 0;
+      return String(actual ?? "").toLowerCase().includes(String(scalarFilterValue(filter)).toLowerCase());
+    case "like":
+      return actual !== undefined && actual !== null && likePatternMatches(actual, patternFilterValue(filter));
+    case "not_like":
+      return actual !== undefined && actual !== null && !likePatternMatches(actual, patternFilterValue(filter));
+    case "gt":
+      if (actual === undefined || actual === null) {
+        return false;
       }
+      return compareValues(actual, scalarFilterValue(filter)) > 0;
+    case "gte":
+      if (actual === undefined || actual === null) {
+        return false;
+      }
+      return compareValues(actual, scalarFilterValue(filter)) >= 0;
+    case "lt":
+      if (actual === undefined || actual === null) {
+        return false;
+      }
+      return compareValues(actual, scalarFilterValue(filter)) < 0;
+    case "lte":
+      if (actual === undefined || actual === null) {
+        return false;
+      }
+      return compareValues(actual, scalarFilterValue(filter)) <= 0;
+    case "between": {
+      if (actual === undefined || actual === null) {
+        return false;
+      }
+      const [minimum, maximum] = rangeFilterValues(filter);
+      return compareValues(actual, minimum) >= 0 && compareValues(actual, maximum) <= 0;
     }
-  });
+    case "not_between": {
+      if (actual === undefined || actual === null) {
+        return false;
+      }
+      const [minimum, maximum] = rangeFilterValues(filter);
+      return compareValues(actual, minimum) < 0 || compareValues(actual, maximum) > 0;
+    }
+  }
 }
 
 function listFilterValue(document: DocumentSnapshot, field: string): JsonValue | number | string | undefined {

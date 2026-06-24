@@ -98,6 +98,52 @@ describe("QueryService", () => {
     ).resolves.toMatchObject({ data: [{ name: "Urgent Launch" }], total: 1 });
   });
 
+  it("filters list results through nested compound expressions", async () => {
+    const { documents, queries } = createServices(["e1", "e2", "e3", "e4"]);
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "High Open", priority: "High", workflow_state: "Open", count: 10 })
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Count Open", priority: "Low", workflow_state: "Open", count: 3 })
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Count Closed", priority: "Low", workflow_state: "Closed", count: 3 })
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Miss Open", priority: "Medium", workflow_state: "Open", count: 9 })
+    });
+
+    const result = await queries.listDocuments(owner, "Note", {
+      filters: [{ field: "workflow_state", value: "Open" }],
+      filterExpression: {
+        kind: "group",
+        match: "any",
+        filters: [
+          { field: "priority", value: "High" },
+          {
+            kind: "group",
+            match: "all",
+            filters: [
+              { field: "count", operator: "gte", value: "2" },
+              { field: "count", operator: "lte", value: "4" }
+            ]
+          }
+        ]
+      }
+    });
+
+    expect(result.total).toBe(2);
+    expect(result.data.map((document) => document.name).sort()).toEqual(["Count Open", "High Open"]);
+  });
+
   it("filters list results through inclusive between ranges", async () => {
     const { documents, queries } = createServices(["e1", "e2", "e3"]);
     await documents.create({

@@ -83,6 +83,7 @@ import {
   type JsonValue,
   type LinkOption,
   type ListDocumentsFilter,
+  type ListFilterExpression,
   type MutableDocumentData,
   type ResolvedFormView,
   type WorkflowDefinition,
@@ -90,7 +91,13 @@ import {
 } from "../../core/types.js";
 import { fileContentHeaders } from "../file-content.js";
 import type { ActorResolver } from "../http/actor.js";
-import { listFiltersFromUrl, listOrderFromUrl, parseOptionalInteger, readBoundedText } from "../http/request.js";
+import {
+  listFilterExpressionFromUrl,
+  listFiltersFromUrl,
+  listOrderFromUrl,
+  parseOptionalInteger,
+  readBoundedText
+} from "../http/request.js";
 import { writeCsvExportHeaders, writeReportCsvHeaders } from "../http/report-export.js";
 import { reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request.js";
 import {
@@ -1628,15 +1635,20 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const url = new URL(c.req.url);
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
     const filters = listFiltersFromUrl(url, { fields: listFilterParseFields(doctype) });
+    const urlFilterExpression = listFilterExpressionFromUrl(url);
     const order = listOrderFromUrl(url);
     const savedFilterId = url.searchParams.get("saved_filter") ?? undefined;
     const savedFilter = savedFilterId && options.savedFilters
       ? await options.savedFilters.get(actor, doctype.name, savedFilterId)
       : undefined;
-    const effectiveRequestedFilters = options.savedFilters?.mergeSavedFilter(savedFilter, filters) ?? filters;
+    const filterInput = options.savedFilters?.mergeSavedFilterInputs(savedFilter, filters, urlFilterExpression) ?? {
+      filters,
+      ...(urlFilterExpression === undefined ? {} : { filterExpression: urlFilterExpression })
+    };
     const limit = parseOptionalInteger(url.searchParams.get("limit") ?? undefined);
     const csv = await options.queries.exportDocumentsCsv(actor, doctype.name, {
-      filters: effectiveRequestedFilters,
+      filters: filterInput.filters,
+      ...(filterInput.filterExpression === undefined ? {} : { filterExpression: filterInput.filterExpression }),
       ...order,
       useDefaultFilters: savedFilter ? false : url.searchParams.get("default_filters") !== "0",
       ...(limit !== undefined ? { limit } : {})
@@ -1652,16 +1664,21 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctypes = await listDeskDoctypes(options, actor);
     const reports = listReports(options, actor);
     const filters = listFiltersFromUrl(url, { fields: listFilterParseFields(doctype) });
+    const urlFilterExpression = listFilterExpressionFromUrl(url);
     const order = listOrderFromUrl(url);
     const savedFilterId = url.searchParams.get("saved_filter") ?? undefined;
     const savedFilter = savedFilterId && options.savedFilters
       ? await options.savedFilters.get(actor, doctype.name, savedFilterId)
       : undefined;
-    const effectiveRequestedFilters = options.savedFilters?.mergeSavedFilter(savedFilter, filters) ?? filters;
+    const filterInput = options.savedFilters?.mergeSavedFilterInputs(savedFilter, filters, urlFilterExpression) ?? {
+      filters,
+      ...(urlFilterExpression === undefined ? {} : { filterExpression: urlFilterExpression })
+    };
     const limit = parseOptionalInteger(url.searchParams.get("limit") ?? undefined);
     const offset = parseOptionalInteger(url.searchParams.get("offset") ?? undefined);
-    const { listView, filters: effectiveFilters, result } = await options.queries.listDocumentsForView(actor, doctype.name, {
-      filters: effectiveRequestedFilters,
+    const { listView, filters: effectiveFilters, filterExpression, result } = await options.queries.listDocumentsForView(actor, doctype.name, {
+      filters: filterInput.filters,
+      ...(filterInput.filterExpression === undefined ? {} : { filterExpression: filterInput.filterExpression }),
       ...order,
       useDefaultFilters: savedFilter ? false : url.searchParams.get("default_filters") !== "0",
       ...(limit !== undefined ? { limit } : {}),
@@ -1678,6 +1695,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         doctypes,
         reports,
         body: renderListView(doctype, listView, result.data, effectiveFilters, {
+          ...(filterExpression === undefined ? {} : { filterExpression }),
           ...(savedFilters ? { savedFilters } : {}),
           ...(savedFilter ? { selectedSavedFilterId: savedFilter.id } : {}),
           exportHref,
@@ -1701,7 +1719,8 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         actor,
         doctype: doctype.name,
         label: form.label,
-        filters: form.filters
+        filters: form.filters,
+        ...(form.filterExpression === undefined ? {} : { filterExpression: form.filterExpression })
       });
       return c.redirect(`/desk/${encodeURIComponent(doctype.name)}?saved_filter=${encodeURIComponent(saved.id)}`, 303);
     } catch (error) {
@@ -3549,6 +3568,7 @@ interface ParsedDeskShare {
 interface ParsedDeskSavedFilter {
   readonly label: string;
   readonly filters: readonly ListDocumentsFilter[];
+  readonly filterExpression?: ListFilterExpression;
 }
 
 interface ParsedDeskSavedReport {
@@ -4017,11 +4037,14 @@ async function parseDeskSavedFilter(
       params.append(key, value);
     }
   });
+  const url = new URL(`https://desk.local/?${params.toString()}`);
+  const filterExpression = listFilterExpressionFromUrl(url);
   return {
     label: typeof label === "string" ? label : "",
-    filters: listFiltersFromUrl(new URL(`https://desk.local/?${params.toString()}`), {
+    filters: listFiltersFromUrl(url, {
       fields: listFilterParseFields(doctype)
-    })
+    }),
+    ...(filterExpression === undefined ? {} : { filterExpression })
   };
 }
 

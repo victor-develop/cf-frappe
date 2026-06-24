@@ -463,6 +463,7 @@ export type DocumentEventPayload =
       readonly label: string;
       readonly ownerId: string;
       readonly filters: readonly ListDocumentsFilter[];
+      readonly filterExpression?: ListFilterExpression;
     }
   | {
       readonly kind: "SavedListFilterDeleted";
@@ -608,6 +609,16 @@ export interface ListDocumentsFilter {
   readonly value: ListFilterValue;
 }
 
+export type ListFilterGroupMatch = "all" | "any";
+
+export interface ListFilterGroup {
+  readonly kind: "group";
+  readonly match: ListFilterGroupMatch;
+  readonly filters: readonly ListFilterExpression[];
+}
+
+export type ListFilterExpression = ListDocumentsFilter | ListFilterGroup;
+
 export interface ListFilterOperatorOption {
   readonly operator: ListFilterOperator;
   readonly label: string;
@@ -679,6 +690,7 @@ export interface ListDocumentsQuery {
   readonly tenantId: TenantId;
   readonly doctype: DocTypeName;
   readonly filters?: readonly ListDocumentsFilter[];
+  readonly filterExpression?: ListFilterExpression;
   readonly orderBy?: string;
   readonly order?: ListOrderDirection;
   readonly limit?: number;

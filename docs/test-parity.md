@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the event-sourced field property override slice:
+As of the nested compound list-filter expression slice:
 
 - Vitest files: `88`
-- Vitest cases: `944`
+- Vitest cases: `951`
 
 ## Implication
 

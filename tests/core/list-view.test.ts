@@ -1,4 +1,11 @@
-import { defineDocType, FrameworkError, listFilterControlsForField, listFilterOperatorsForField, resolveListView } from "../../src";
+import {
+  defineDocType,
+  FrameworkError,
+  listFilterControlsForField,
+  listFilterOperatorsForField,
+  normalizeListFilterExpression,
+  resolveListView
+} from "../../src";
 
 describe("list views", () => {
   it("resolves explicit list-view metadata and coerces default filters", () => {
@@ -126,6 +133,75 @@ describe("list views", () => {
     ]);
     expect(listFilterOperatorsForField(Task.fields[3] ?? failField())).toEqual([]);
     expect(listFilterControlsForField(Task.fields[3] ?? failField())).toEqual([]);
+  });
+
+  it("normalizes nested compound filter expressions through field metadata", () => {
+    const Task = defineDocType({
+      name: "Task",
+      fields: [
+        { name: "status", type: "select", options: ["Open", "Closed"] },
+        { name: "count", type: "integer" }
+      ]
+    });
+
+    expect(
+      normalizeListFilterExpression(Task, {
+        kind: "group",
+        match: "any",
+        filters: [
+          { field: "status", value: "Open" },
+          {
+            kind: "group",
+            match: "all",
+            filters: [
+              { field: "count", operator: "gte", value: "2" },
+              { field: "system.version", operator: "gt", value: "1" }
+            ]
+          }
+        ]
+      })
+    ).toEqual({
+      kind: "group",
+      match: "any",
+      filters: [
+        { field: "status", value: "Open" },
+        {
+          kind: "group",
+          match: "all",
+          filters: [
+            { field: "count", operator: "gte", value: 2 },
+            { field: "system.version", operator: "gt", value: 1 }
+          ]
+        }
+      ]
+    });
+  });
+
+  it("bounds compound filter expression depth and node count", () => {
+    const Task = defineDocType({
+      name: "Task",
+      fields: [{ name: "status", type: "text" }]
+    });
+
+    expect(() =>
+      normalizeListFilterExpression(
+        Task,
+        {
+          kind: "group",
+          match: "all",
+          filters: [{ kind: "group", match: "any", filters: [{ field: "status", value: "Open" }] }]
+        },
+        { maxExpressionDepth: 1 }
+      )
+    ).toThrow("List filter expression cannot exceed 1 levels");
+
+    expect(() =>
+      normalizeListFilterExpression(
+        Task,
+        { kind: "group", match: "all", filters: [{ field: "status", value: "Open" }] },
+        { maxExpressionNodes: 1 }
+      )
+    ).toThrow("List filter expression cannot exceed 5 levels or 1 nodes");
   });
 
   it("falls back to field-level list flags", () => {

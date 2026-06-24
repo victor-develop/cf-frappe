@@ -54,12 +54,24 @@ export function renderDeskClientScript(): string {
     Object.entries(options || {}).forEach(function (entry) {
       var key = entry[0];
       var value = entry[1];
-      if (key !== "filters" && key !== "orderBy" && key !== "order_by" && value !== undefined && value !== null) {
+      if (
+        key !== "filters" &&
+        key !== "filterExpression" &&
+        key !== "filter_expression" &&
+        key !== "orderBy" &&
+        key !== "order_by" &&
+        value !== undefined &&
+        value !== null
+      ) {
         params[key] = value;
       }
     });
     setParam(params, "order_by", options && (options.orderBy !== undefined ? options.orderBy : options.order_by));
     setParam(params, "order", options && options.order);
+    setFilterExpressionParam(
+      params,
+      options && (options.filterExpression !== undefined ? options.filterExpression : options.filter_expression)
+    );
     Object.entries((options && options.filters) || {}).forEach(function (entry) {
       appendFilterParams(params, entry[0], entry[1]);
     });
@@ -92,6 +104,13 @@ export function renderDeskClientScript(): string {
     if (value === "" || (Array.isArray(value) && value.some(function (item) { return item === ""; }))) {
       appendParam(params, "empty_filter", key);
     }
+  }
+
+  function setFilterExpressionParam(params, value) {
+    if (value === undefined || value === null || value === "") {
+      return;
+    }
+    params.filter_expression = typeof value === "string" ? value : JSON.stringify(value);
   }
 
   function appendParam(params, key, value) {

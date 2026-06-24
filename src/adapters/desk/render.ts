@@ -10,11 +10,13 @@ import {
   type JsonValue,
   type LinkOption,
   type ListDocumentsFilter,
+  type ListFilterExpression,
   type ListFilterOperator,
   type ResolvedFormSection,
   type ResolvedFormView,
   type ResolvedListView
 } from "../../core/types.js";
+import { isListFilterGroup } from "../../core/list-view.js";
 import { isReportChartColor, type ReportDefinition, type ReportFilterOperator } from "../../core/reports.js";
 import type { DashboardDefinition } from "../../core/dashboard.js";
 import type { ClientScriptDefinition, ClientScriptScope } from "../../core/client-script.js";
@@ -2354,6 +2356,7 @@ export function renderListView(
   options: {
     readonly savedFilters?: readonly SavedListFilter[];
     readonly selectedSavedFilterId?: string;
+    readonly filterExpression?: ListFilterExpression;
     readonly exportHref?: string;
     readonly clientScripts?: readonly ClientScriptDefinition[];
     readonly realtimeRoute?: string;
@@ -2369,11 +2372,13 @@ export function renderListView(
       return field ? renderFilterControl(field, filters, control) : "";
     })
     .join("");
+  const compoundFilterForm = renderCompoundFilterBuilder(listView, options.filterExpression);
   const orderForm = renderListOrderControls(listView);
-  const savedFilterControl = filterForm
+  const canSaveFilter = Boolean(filterForm || compoundFilterForm);
+  const savedFilterControl = canSaveFilter
     ? `<label class="field" for="saved-filter-label"><span>Saved filter name</span><input id="saved-filter-label" name="saved_filter_label" type="text"></label>`
     : "";
-  const saveFilterButton = filterForm
+  const saveFilterButton = canSaveFilter
     ? `<button class="button" type="submit" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/saved-filters">Save filter</button>`
     : "";
   const savedFilterPanel = renderSavedFilters(doctype, options.savedFilters ?? [], options.selectedSavedFilterId);
@@ -2403,7 +2408,7 @@ export function renderListView(
     ${hasBulkActions ? `<form id="${bulkActionFormId}" method="post" action="${escapeHtml(bulkActions[0]?.action ?? "")}"></form>${bulkActions.map((action) => renderListBulkActionButton(action, bulkActionFormId)).join("")}` : ""}
   </section>
   ${savedFilterPanel}
-  ${filterForm || orderForm ? `<form class="panel form list-filters" method="get"><div class="fields">${filterForm}${orderForm}${savedFilterControl}</div><div class="actions"><button class="button primary" type="submit">Filter</button>${saveFilterButton}<a class="button" href="/desk/${encodeURIComponent(doctype.name)}?default_filters=0">Clear</a></div></form>` : ""}
+  ${filterForm || compoundFilterForm || orderForm ? `<form class="panel form list-filters" method="get"><div class="fields">${filterForm}${compoundFilterForm}${orderForm}${savedFilterControl}</div><div class="actions"><button class="button primary" type="submit">Filter</button>${saveFilterButton}<a class="button" href="/desk/${encodeURIComponent(doctype.name)}?default_filters=0">Clear</a></div></form>` : ""}
   <section class="panel">
     <div class="table-wrap">
       <table>
@@ -2413,6 +2418,38 @@ export function renderListView(
     </div>
   </section>
   ${renderClientScripts(doctype.name, "list", options.clientScripts ?? [], undefined, undefined, options.realtimeRoute)}`;
+}
+
+function renderCompoundFilterBuilder(
+  listView: ResolvedListView,
+  expression: ListFilterExpression | undefined
+): string {
+  if (listView.filterBuilderFields.length === 0) {
+    return "";
+  }
+  const value = expression === undefined ? "" : JSON.stringify(expression, null, 2);
+  const fields = listView.filterBuilderFields
+    .map((field) => {
+      const operators = field.operators.map((operator) => operator.operator).join(", ");
+      return `<li><span>${escapeHtml(field.field)}</span><small>${escapeHtml(operators)}</small></li>`;
+    })
+    .join("");
+  return `<fieldset class="compound-filter-builder">
+    <legend>Compound filters</legend>
+    <label class="field wide" for="filter-expression"><span>Expression</span><textarea id="filter-expression" name="filter_expression" rows="5">${escapeHtml(value)}</textarea></label>
+    <ul class="filter-builder-fields">${fields}</ul>
+    ${expression === undefined ? "" : `<div class="filter-expression-preview">${renderListFilterExpression(expression)}</div>`}
+  </fieldset>`;
+}
+
+function renderListFilterExpression(expression: ListFilterExpression): string {
+  if (isListFilterGroup(expression)) {
+    const label = expression.match === "all" ? "All" : "Any";
+    return `<section class="filter-expression-group"><strong>${label}</strong><ul>${expression.filters
+      .map((filter) => `<li>${renderListFilterExpression(filter)}</li>`)
+      .join("")}</ul></section>`;
+  }
+  return `<span class="filter-expression-leaf">${escapeHtml(expression.field)} ${escapeHtml(expression.operator ?? "eq")} ${escapeHtml(formatValue(expression.value))}</span>`;
 }
 
 function renderListOrderControls(listView: ResolvedListView): string {
@@ -3415,6 +3452,44 @@ tr:last-child td { border-bottom: 0; }
 .presence { margin-top: 16px; max-width: 860px; padding: 18px; }
 .list-filters { max-width: none; margin-bottom: 16px; }
 .list-filters .actions { justify-content: flex-start; }
+.compound-filter-builder {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.compound-filter-builder legend {
+  padding: 0 6px;
+  color: var(--muted);
+  font-weight: 700;
+}
+.filter-builder-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.filter-builder-fields li {
+  display: grid;
+  gap: 2px;
+  min-width: 140px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.filter-builder-fields small,
+.filter-expression-preview {
+  color: var(--muted);
+}
+.filter-expression-group ul {
+  margin: 8px 0 0 18px;
+  padding: 0;
+}
 .report-summary {
   padding: 14px 18px;
 }

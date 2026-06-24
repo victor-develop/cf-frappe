@@ -6,6 +6,9 @@ import type {
   ListFilterValue,
   ListFilterBuilderField,
   ListDocumentsFilter,
+  ListFilterExpression,
+  ListFilterGroup,
+  ListFilterGroupMatch,
   ListFilterControlDefinition,
   ListFilterInputType,
   ListFilterOperator,
@@ -17,6 +20,8 @@ import type {
 
 export const DEFAULT_LIST_PAGE_SIZE = 50;
 export const MAX_LIST_PAGE_SIZE = 200;
+export const MAX_LIST_FILTER_EXPRESSION_DEPTH = 5;
+export const MAX_LIST_FILTER_EXPRESSION_NODES = 64;
 export const DEFAULT_LIST_ORDER_BY = "updatedAt";
 export const DEFAULT_LIST_ORDER: ListOrderDirection = "desc";
 export const LIST_FILTER_OPERATORS = [
@@ -35,6 +40,7 @@ export const LIST_FILTER_OPERATORS = [
   "between",
   "not_between"
 ] as const;
+export const LIST_FILTER_GROUP_MATCHES = ["all", "any"] as const;
 export const LIST_ORDER_DIRECTIONS = ["asc", "desc"] as const;
 const SYSTEM_LIST_ORDER_OPTIONS = [
   { name: "name", label: "Name" },
@@ -68,6 +74,14 @@ const LIST_FILTER_OPERATOR_LABELS: Record<ListFilterOperator, string> = {
 
 export function isListFilterOperator(operator: unknown): operator is ListFilterOperator {
   return typeof operator === "string" && LIST_FILTER_OPERATORS.includes(operator as ListFilterOperator);
+}
+
+export function isListFilterGroupMatch(value: unknown): value is ListFilterGroupMatch {
+  return typeof value === "string" && LIST_FILTER_GROUP_MATCHES.includes(value as ListFilterGroupMatch);
+}
+
+export function isListFilterGroup(expression: ListFilterExpression): expression is ListFilterGroup {
+  return "kind" in expression && expression.kind === "group";
 }
 
 export function isListMembershipOperator(operator: ListFilterOperator): operator is "in" | "not_in" {
@@ -106,6 +120,12 @@ export function listFilterControlsForField(field: FieldDefinition): readonly Lis
 
 interface NormalizeListFiltersOptions {
   readonly errorCode?: FrameworkErrorCode;
+  readonly maxExpressionDepth?: number;
+  readonly maxExpressionNodes?: number;
+}
+
+interface ListFilterExpressionBudget {
+  remaining: number;
 }
 
 export function assertListViewDefinition(doctype: DocTypeDefinition): void {
@@ -183,30 +203,68 @@ export function normalizeListFilters(
   }
   const errorCode = options.errorCode ?? "BAD_REQUEST";
   const fields = fieldMap(doctype);
-  return filters.map((filter) => {
-    const field = systemFilterField(filter.field) ?? fields.get(filter.field);
-    if (!field) {
-      throw new FrameworkError(errorCode, `Filter field '${filter.field}' is not defined on ${doctype.name}`, {
-        status: 400
-      });
-    }
-    if (!isFilterable(field)) {
-      throw new FrameworkError(errorCode, `Filter field '${filter.field}' cannot be a ${field.type} field`, {
-        status: 400
-      });
-    }
-    const operator = normalizeFilterOperator(filter.operator, errorCode);
-    if (!operatorAllowedForField(field, operator)) {
-      throw new FrameworkError(errorCode, `Filter '${filter.field}' does not support ${operator}`, {
-        status: 400
-      });
-    }
-    return {
-      field: filter.field,
-      ...(operator === "eq" ? {} : { operator }),
-      value: coerceFilterValue(field, filter.value, operator, errorCode)
-    };
+  return filters.map((filter) => normalizeListFilterPredicate(doctype, fields, filter, errorCode));
+}
+
+export function normalizeListFilterExpression(
+  doctype: DocTypeDefinition,
+  expression: ListFilterExpression,
+  options: NormalizeListFiltersOptions = {}
+): ListFilterExpression {
+  const errorCode = options.errorCode ?? "BAD_REQUEST";
+  const budget: ListFilterExpressionBudget = {
+    remaining: options.maxExpressionNodes ?? MAX_LIST_FILTER_EXPRESSION_NODES
+  };
+  return normalizeListFilterExpressionNode(doctype, fieldMap(doctype), expression, {
+    budget,
+    depth: 1,
+    errorCode,
+    maxDepth: options.maxExpressionDepth ?? MAX_LIST_FILTER_EXPRESSION_DEPTH,
+    maxNodes: options.maxExpressionNodes ?? MAX_LIST_FILTER_EXPRESSION_NODES
   });
+}
+
+export function listFilterExpressionFromFilters(
+  filters: readonly ListDocumentsFilter[]
+): ListFilterExpression | undefined {
+  if (filters.length === 0) {
+    return undefined;
+  }
+  if (filters.length === 1) {
+    return filters[0];
+  }
+  return {
+    kind: "group",
+    match: "all",
+    filters
+  };
+}
+
+export function andListFilterExpressions(
+  expressions: readonly (ListFilterExpression | undefined)[]
+): ListFilterExpression | undefined {
+  const filters: ListFilterExpression[] = [];
+  for (const expression of expressions) {
+    if (expression === undefined) {
+      continue;
+    }
+    if (isListFilterGroup(expression) && expression.match === "all") {
+      filters.push(...expression.filters);
+      continue;
+    }
+    filters.push(expression);
+  }
+  if (filters.length === 0) {
+    return undefined;
+  }
+  if (filters.length === 1) {
+    return filters[0];
+  }
+  return {
+    kind: "group",
+    match: "all",
+    filters
+  };
 }
 
 export function mergeListFilters(
@@ -232,6 +290,89 @@ function filterIsOverridden(defaultFilter: ListDocumentsFilter, overrideFilter: 
   const defaultOperator = defaultFilter.operator ?? "eq";
   const overrideOperator = overrideFilter.operator ?? "eq";
   return defaultOperator === overrideOperator || defaultOperator === "eq" || overrideOperator === "eq";
+}
+
+function normalizeListFilterExpressionNode(
+  doctype: DocTypeDefinition,
+  fields: ReadonlyMap<string, FieldDefinition>,
+  expression: ListFilterExpression,
+  options: {
+    readonly budget: ListFilterExpressionBudget;
+    readonly depth: number;
+    readonly errorCode: FrameworkErrorCode;
+    readonly maxDepth: number;
+    readonly maxNodes: number;
+  }
+): ListFilterExpression {
+  options.budget.remaining -= 1;
+  if (options.budget.remaining < 0) {
+    throw new FrameworkError(
+      options.errorCode,
+      `List filter expression cannot exceed ${options.maxDepth} levels or ${options.maxNodes} nodes`,
+      { status: 400 }
+    );
+  }
+  if (isListFilterGroup(expression)) {
+    if (options.depth > options.maxDepth) {
+      throw new FrameworkError(
+        options.errorCode,
+        `List filter expression cannot exceed ${options.maxDepth} levels`,
+        { status: 400 }
+      );
+    }
+    if (!isListFilterGroupMatch(expression.match)) {
+      throw new FrameworkError(options.errorCode, "List filter group match must be all or any", { status: 400 });
+    }
+    if (!Array.isArray(expression.filters) || expression.filters.length === 0) {
+      throw new FrameworkError(options.errorCode, "List filter group must include at least one filter", {
+        status: 400
+      });
+    }
+    return {
+      kind: "group",
+      match: expression.match,
+      filters: expression.filters.map((filter) =>
+        normalizeListFilterExpressionNode(doctype, fields, filter, {
+          ...options,
+          depth: options.depth + 1
+        })
+      )
+    };
+  }
+  return normalizeListFilterPredicate(doctype, fields, expression, options.errorCode);
+}
+
+function normalizeListFilterPredicate(
+  doctype: DocTypeDefinition,
+  fields: ReadonlyMap<string, FieldDefinition>,
+  filter: ListDocumentsFilter,
+  errorCode: FrameworkErrorCode
+): ListDocumentsFilter {
+  if (typeof filter.field !== "string") {
+    throw new FrameworkError(errorCode, "Filter field must be a string", { status: 400 });
+  }
+  const field = systemFilterField(filter.field) ?? fields.get(filter.field);
+  if (!field) {
+    throw new FrameworkError(errorCode, `Filter field '${filter.field}' is not defined on ${doctype.name}`, {
+      status: 400
+    });
+  }
+  if (!isFilterable(field)) {
+    throw new FrameworkError(errorCode, `Filter field '${filter.field}' cannot be a ${field.type} field`, {
+      status: 400
+    });
+  }
+  const operator = normalizeFilterOperator(filter.operator, errorCode);
+  if (!operatorAllowedForField(field, operator)) {
+    throw new FrameworkError(errorCode, `Filter '${filter.field}' does not support ${operator}`, {
+      status: 400
+    });
+  }
+  return {
+    field: filter.field,
+    ...(operator === "eq" ? {} : { operator }),
+    value: coerceFilterValue(field, filter.value, operator, errorCode)
+  };
 }
 
 function resolveListColumns(doctype: DocTypeDefinition): readonly FieldDefinition[] {

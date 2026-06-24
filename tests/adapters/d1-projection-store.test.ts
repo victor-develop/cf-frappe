@@ -106,6 +106,43 @@ describe("D1ProjectionStore", () => {
     expect(notInDb.statements[0]?.params).toEqual(["acme", "Note", "Low", "Medium", 50, 0]);
   });
 
+  it("renders nested compound filter expressions with bound parameters", async () => {
+    const db = new FakeD1Database([
+      documentRow({ name: "D1 High", data: { title: "D1 High", priority: "High", count: 10 } }),
+      documentRow({ name: "D1 Count", data: { title: "D1 Count", priority: "Low", count: 3 } }),
+      documentRow({ name: "D1 Miss", data: { title: "D1 Miss", priority: "Low", count: 9 } })
+    ]);
+    const store = new D1ProjectionStore(db as unknown as D1Database);
+
+    const result = await store.list({
+      tenantId: "acme",
+      doctype: "Note",
+      filterExpression: {
+        kind: "group",
+        match: "any",
+        filters: [
+          { field: "priority", value: "High" },
+          {
+            kind: "group",
+            match: "all",
+            filters: [
+              { field: "count", operator: "gte", value: 2 },
+              { field: "count", operator: "lte", value: 4 }
+            ]
+          }
+        ]
+      }
+    });
+
+    expect(result).toMatchObject({ data: [{ name: "D1 High" }, { name: "D1 Count" }], total: 2 });
+    const [rows, count] = db.statements;
+    expect(rows?.sql).toContain(
+      "(json_extract(data_json, '$.priority') = ? OR (json_extract(data_json, '$.count') >= ? AND json_extract(data_json, '$.count') <= ?))"
+    );
+    expect(rows?.params).toEqual(["acme", "Note", "High", 2, 4, 50, 0]);
+    expect(count?.params).toEqual(["acme", "Note", "High", 2, 4]);
+  });
+
   it("filters system projection fields with bound parameters", async () => {
     const db = new FakeD1Database([
       documentRow({
@@ -471,6 +508,17 @@ class FakeD1PreparedStatement {
         return false;
       }
       const data = JSON.parse(row.data_json) as DocumentData;
+      if (
+        this.sql.includes(
+          "(json_extract(data_json, '$.priority') = ? OR (json_extract(data_json, '$.count') >= ? AND json_extract(data_json, '$.count') <= ?))"
+        )
+      ) {
+        return (
+          data.priority === filterParams[0] ||
+          (compares(data.count, filterParams[1], (actual, expected) => actual >= expected) &&
+            compares(data.count, filterParams[2], (actual, expected) => actual <= expected))
+        );
+      }
       if (this.sql.includes("json_extract(data_json, '$.priority') = ?")) {
         return data.priority === filterParams[0];
       }

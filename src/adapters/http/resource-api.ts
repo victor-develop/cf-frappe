@@ -30,11 +30,10 @@ import type { UserPermissionService } from "../../application/user-permission-se
 import type { UserProfileService } from "../../application/user-profile-service.js";
 import type { WorkflowService } from "../../application/workflow-service.js";
 import { badRequest, permissionDenied } from "../../core/errors.js";
-import { isListFilterOperator, isListMembershipOperator, isListPresenceOperator, isListRangeOperator } from "../../core/list-view.js";
 import { can } from "../../core/permissions.js";
 import { canReadReport } from "../../core/reports.js";
 import type { ModelRegistry } from "../../core/registry.js";
-import type { Actor, DocTypeDefinition, DocumentData, JsonPrimitive, ListDocumentsFilter, ListFilterValue, MutableDocumentData } from "../../core/types.js";
+import type { Actor, DocTypeDefinition, DocumentData, MutableDocumentData } from "../../core/types.js";
 import { SYSTEM_MANAGER_ROLE } from "../../core/types.js";
 import type { PrintPdfRenderer } from "../../ports/print-pdf-renderer.js";
 import {
@@ -57,7 +56,16 @@ import { createNotificationApi } from "./notification-api.js";
 import { createNotificationRuleApi } from "./notification-rule-api.js";
 import { createPrintApi } from "./print-api.js";
 import { createReportApi } from "./report-api.js";
-import { listFiltersFromUrl, listOrderFromUrl, parseOptionalInteger, readJsonObject, requestMetadata } from "./request.js";
+import {
+  listFilterExpressionFromUrl,
+  listFilterExpressionFromValue,
+  listFiltersFromUrl,
+  listFiltersFromValue,
+  listOrderFromUrl,
+  parseOptionalInteger,
+  readJsonObject,
+  requestMetadata
+} from "./request.js";
 import { writeCsvExportHeaders } from "./report-export.js";
 import { createRoleApi } from "./role-api.js";
 import { createSavedReportApi } from "./saved-report-api.js";
@@ -399,10 +407,15 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
     const savedFilter = await savedFilterFromUrl(options, actor, doctype.name, url);
     const urlFilters = listFiltersFromUrl(url, { fields: listFilterParseFields(doctype) });
-    const filters = options.savedFilters?.mergeSavedFilter(savedFilter, urlFilters) ?? urlFilters;
+    const urlFilterExpression = listFilterExpressionFromUrl(url);
+    const filterInput = options.savedFilters?.mergeSavedFilterInputs(savedFilter, urlFilters, urlFilterExpression) ?? {
+      filters: urlFilters,
+      ...(urlFilterExpression === undefined ? {} : { filterExpression: urlFilterExpression })
+    };
     const order = listOrderFromUrl(url);
     const csv = await options.queries.exportDocumentsCsv(actor, doctype.name, {
-      filters,
+      filters: filterInput.filters,
+      ...(filterInput.filterExpression === undefined ? {} : { filterExpression: filterInput.filterExpression }),
       ...order,
       useDefaultFilters: savedFilter ? false : url.searchParams.get("default_filters") !== "0",
       ...(limit !== undefined ? { limit } : {})
@@ -419,10 +432,15 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
     const savedFilter = await savedFilterFromUrl(options, actor, doctype.name, url);
     const urlFilters = listFiltersFromUrl(url, { fields: listFilterParseFields(doctype) });
-    const filters = options.savedFilters?.mergeSavedFilter(savedFilter, urlFilters) ?? urlFilters;
+    const urlFilterExpression = listFilterExpressionFromUrl(url);
+    const filterInput = options.savedFilters?.mergeSavedFilterInputs(savedFilter, urlFilters, urlFilterExpression) ?? {
+      filters: urlFilters,
+      ...(urlFilterExpression === undefined ? {} : { filterExpression: urlFilterExpression })
+    };
     const order = listOrderFromUrl(url);
     const { result } = await options.queries.listDocumentsForView(actor, doctype.name, {
-      filters,
+      filters: filterInput.filters,
+      ...(filterInput.filterExpression === undefined ? {} : { filterExpression: filterInput.filterExpression }),
       ...order,
       useDefaultFilters: savedFilter ? false : url.searchParams.get("default_filters") !== "0",
       ...(limit !== undefined ? { limit } : {}),
@@ -545,7 +563,10 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
         actor,
         doctype: c.req.param("doctype"),
         label: stringValue(body.label) ?? "",
-        filters: filtersValue(body.filters)
+        filters: body.filters === undefined ? [] : listFiltersFromValue(body.filters),
+        ...(body.filterExpression === undefined
+          ? {}
+          : { filterExpression: listFilterExpressionFromValue(body.filterExpression, "Saved filter expression") })
       });
       return c.json({ data }, 201);
     });
@@ -1021,58 +1042,6 @@ async function savedFilterFromUrl(
   return options.savedFilters.get(actor, doctype, id);
 }
 
-function filtersValue(value: unknown): readonly ListDocumentsFilter[] {
-  if (!Array.isArray(value)) {
-    throw badRequest("Saved filter filters must be an array");
-  }
-  return value.map((item) => {
-    if (!isRecord(item)) {
-      throw badRequest("Saved filter entries must be objects");
-    }
-    const field = item.field;
-    const operator = item.operator;
-    const filterValue = item.value;
-    if (typeof field !== "string") {
-      throw badRequest("Saved filter field must be a string");
-    }
-    if (operator !== undefined && !isListFilterOperator(operator)) {
-      throw badRequest("Saved filter operator is invalid");
-    }
-    const normalizedOperator = operator ?? "eq";
-    const value = filterValueValue(filterValue, normalizedOperator);
-    return {
-      field,
-      ...(normalizedOperator === "eq" ? {} : { operator: normalizedOperator }),
-      value
-    };
-  });
-}
-
-function filterValueValue(value: unknown, operator: NonNullable<ListDocumentsFilter["operator"]>): ListFilterValue {
-  if (isListMembershipOperator(operator)) {
-    if (!Array.isArray(value) || value.length === 0 || !value.every(isJsonPrimitive)) {
-      throw badRequest("Saved filter membership value must be a non-empty scalar array");
-    }
-    return value;
-  }
-  if (isListRangeOperator(operator)) {
-    if (!Array.isArray(value) || value.length !== 2 || !value.every(isJsonPrimitive)) {
-      throw badRequest("Saved filter range value must be a two-item scalar array");
-    }
-    return value;
-  }
-  if (isListPresenceOperator(operator)) {
-    if (value !== "set" && value !== "not set") {
-      throw badRequest("Saved filter presence value must be set or not set");
-    }
-    return value;
-  }
-  if (!isJsonPrimitive(value)) {
-    throw badRequest("Saved filter value must be scalar");
-  }
-  return value;
-}
-
 function listFilterParseFields(doctype: DocTypeDefinition): readonly string[] {
   return doctype.fields.map((field) => field.name);
 }
@@ -1092,10 +1061,6 @@ function permissionsValue(value: unknown): readonly string[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isJsonPrimitive(value: unknown): value is JsonPrimitive {
-  return value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean";
 }
 
 function withoutKeys(data: MutableDocumentData, keys: readonly string[]): MutableDocumentData {

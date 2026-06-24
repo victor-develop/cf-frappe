@@ -388,3 +388,7 @@ export function createSeriesServices(ids: readonly string[] = ["evt1", "evt2", "
 export function data(overrides: DocumentData = {}): DocumentData {
   return { title: "My Note", body: "Body", ...overrides };
 }
+
+export function deepListFilterExpressionJson(groupDepth: number): string {
+  return `${'{"kind":"group","match":"all","filters":['.repeat(groupDepth)}{"field":"priority","value":"High"}${"]}".repeat(groupDepth)}`;
+}

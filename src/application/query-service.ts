@@ -1,6 +1,12 @@
 import { badRequest, FrameworkError, notFound, permissionDenied } from "../core/errors.js";
 import { resolveFormView } from "../core/form-view.js";
-import { mergeListFilters, normalizeListFilters, normalizeListOrder, resolveListView } from "../core/list-view.js";
+import {
+  mergeListFilters,
+  normalizeListFilterExpression,
+  normalizeListFilters,
+  normalizeListOrder,
+  resolveListView
+} from "../core/list-view.js";
 import { documentShareAllows, type DocumentShareProvider } from "../core/document-shares.js";
 import { can } from "../core/permissions.js";
 import type { ModelRegistry } from "../core/registry.js";
@@ -21,6 +27,7 @@ import {
   type JsonPrimitive,
   type JsonValue,
   type ListDocumentsFilter,
+  type ListFilterExpression,
   type ListDocumentsResult,
   type ListOrderDirection,
   type LinkOption,
@@ -49,6 +56,7 @@ export type QueryServiceDocTypeResolver = (
 export interface DocumentCsvExportOptions {
   readonly tenantId?: string;
   readonly filters?: readonly ListDocumentsFilter[];
+  readonly filterExpression?: ListFilterExpression;
   readonly useDefaultFilters?: boolean;
   readonly orderBy?: string;
   readonly order?: ListOrderDirection;
@@ -115,6 +123,7 @@ export class QueryService {
     options: {
       readonly tenantId?: string;
       readonly filters?: readonly ListDocumentsFilter[];
+      readonly filterExpression?: ListFilterExpression;
       readonly orderBy?: string;
       readonly order?: ListOrderDirection;
       readonly limit?: number;
@@ -130,10 +139,15 @@ export class QueryService {
     const limit = clampLimit(options.limit, options.maxLimit);
     const offset = Math.max(0, options.offset ?? 0);
     const order = normalizeListOrder(doctype, options.orderBy, options.order);
+    const filters = normalizeListFilters(doctype, options.filters ?? []);
+    const filterExpression = options.filterExpression === undefined
+      ? undefined
+      : normalizeListFilterExpression(doctype, options.filterExpression);
     const result = await this.projections.list({
       tenantId,
       doctype: doctype.name,
-      filters: normalizeListFilters(doctype, options.filters ?? []),
+      filters,
+      ...(filterExpression === undefined ? {} : { filterExpression }),
       orderBy: order.orderBy,
       order: order.order,
       limit,
@@ -270,6 +284,7 @@ export class QueryService {
     options: {
       readonly tenantId?: string;
       readonly filters?: readonly ListDocumentsFilter[];
+      readonly filterExpression?: ListFilterExpression;
       readonly useDefaultFilters?: boolean;
       readonly orderBy?: string;
       readonly order?: ListOrderDirection;
@@ -280,6 +295,7 @@ export class QueryService {
   ): Promise<{
     readonly listView: ResolvedListView;
     readonly filters: readonly ListDocumentsFilter[];
+    readonly filterExpression?: ListFilterExpression;
     readonly result: ListDocumentsResult;
   }> {
     const tenantId = options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
@@ -292,6 +308,9 @@ export class QueryService {
       options.useDefaultFilters === false ? [] : listView.filters,
       options.filters ?? []
     );
+    const filterExpression = options.filterExpression === undefined
+      ? undefined
+      : normalizeListFilterExpression(doctype, options.filterExpression);
     const order = normalizeListOrder(
       doctype,
       options.orderBy ?? listView.orderBy,
@@ -300,13 +319,19 @@ export class QueryService {
     const result = await this.listDocuments(actor, doctype.name, {
       tenantId,
       filters,
+      ...(filterExpression === undefined ? {} : { filterExpression }),
       orderBy: order.orderBy,
       order: order.order,
       limit: options.limit ?? listView.pageSize,
       ...(options.maxLimit === undefined ? {} : { maxLimit: options.maxLimit }),
       ...(options.offset !== undefined ? { offset: options.offset } : {})
     });
-    return { listView: { ...listView, orderBy: order.orderBy, order: order.order }, filters, result };
+    return {
+      listView: { ...listView, orderBy: order.orderBy, order: order.order },
+      filters,
+      ...(filterExpression === undefined ? {} : { filterExpression }),
+      result
+    };
   }
 
   async exportDocumentsCsv(
@@ -318,6 +343,7 @@ export class QueryService {
     const { listView, result } = await this.listDocumentsForView(actor, doctypeName, {
       ...(options.tenantId === undefined ? {} : { tenantId: options.tenantId }),
       filters: options.filters ?? [],
+      ...(options.filterExpression === undefined ? {} : { filterExpression: options.filterExpression }),
       ...(options.useDefaultFilters === undefined ? {} : { useDefaultFilters: options.useDefaultFilters }),
       ...(options.orderBy === undefined ? {} : { orderBy: options.orderBy }),
       ...(options.order === undefined ? {} : { order: options.order }),
