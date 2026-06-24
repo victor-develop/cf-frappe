@@ -3,12 +3,14 @@ import { can } from "../core/permissions.js";
 import {
   canReadPrintLetterhead,
   canReadPrintFormat,
+  mergePrintLayouts,
   type PrintFormatDefinition,
   type PrintLetterheadDefinition,
   type PrintSectionDefinition
 } from "../core/print-format.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { Actor, DocumentSnapshot, JsonValue } from "../core/types.js";
+import type { PrintSettingsService } from "./print-settings-service.js";
 import { QueryService } from "./query-service.js";
 
 export interface PrintFieldView {
@@ -32,15 +34,18 @@ export interface PrintDocumentView {
 export interface PrintServiceOptions {
   readonly registry: ModelRegistry;
   readonly queries: QueryService;
+  readonly printSettings?: PrintSettingsService;
 }
 
 export class PrintService {
   private readonly registry: ModelRegistry;
   private readonly queries: QueryService;
+  private readonly printSettings: PrintSettingsService | undefined;
 
   constructor(options: PrintServiceOptions) {
     this.registry = options.registry;
     this.queries = options.queries;
+    this.printSettings = options.printSettings;
   }
 
   listPrintFormats(actor: Actor, doctype?: string): readonly PrintFormatDefinition[] {
@@ -67,8 +72,10 @@ export class PrintService {
     const format = this.getPrintFormat(actor, formatName);
     const document = await this.queries.getDocument(actor, format.doctype, name);
     const letterhead = format.letterhead ? this.getPrintLetterhead(actor, format.letterhead) : undefined;
+    const defaultLayout = (await this.printSettings?.defaultsFor(actor))?.settings.defaultLayout;
+    const layout = mergePrintLayouts(defaultLayout, format.layout);
     return {
-      format,
+      format: layout === format.layout ? format : { ...format, ...(layout === undefined ? {} : { layout }) },
       ...(letterhead ? { letterhead } : {}),
       document,
       sections: (format.sections ?? []).map((section) => printSectionView(section, document))

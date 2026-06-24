@@ -114,6 +114,7 @@ export function foldDocumentFrom(
       case "UserAccountEnabled":
       case "UserAccountDisabled":
       case "UserProfileChanged":
+      case "PrintSettingsChanged":
       case "UserNotificationRecorded":
       case "UserNotificationRead":
       case "UserNotificationDismissed":

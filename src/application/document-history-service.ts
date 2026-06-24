@@ -299,6 +299,7 @@ function diffEvent(
     case "UserAccountEnabled":
     case "UserAccountDisabled":
     case "UserProfileChanged":
+    case "PrintSettingsChanged":
     case "UserNotificationRecorded":
     case "UserNotificationRead":
     case "UserNotificationDismissed":
@@ -416,6 +417,8 @@ function summarize(payload: DocumentEventPayload): string {
       return `Disabled user account ${payload.userId}`;
     case "UserProfileChanged":
       return `Changed profile for ${payload.userId}`;
+    case "PrintSettingsChanged":
+      return "Changed print settings";
     case "UserNotificationRecorded":
       return `Recorded notification ${payload.notificationId}`;
     case "UserNotificationRead":

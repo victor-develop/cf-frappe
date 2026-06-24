@@ -18,6 +18,7 @@ import {
   UserPermissionService,
   ModelBackedUserPermissionGrantValidator
 } from "../src";
+import { PrintSettingsService } from "../src";
 import type { Actor, DocumentData, DomainEvent, ModelRegistry } from "../src";
 import type { AfterCommitContext } from "../src";
 
@@ -313,7 +314,12 @@ export function createServices(
     clock: fixedClock(now),
     ids: deterministicIds(options.savedFilterIds ?? ["saved-filter-1", "saved-filter-event-1", "saved-filter-event-2"])
   });
-  const prints = new PrintService({ registry, queries });
+  const printSettings = new PrintSettingsService({
+    events: store,
+    clock: fixedClock(now),
+    ids: deterministicIds(["print-settings-event-1", "print-settings-event-2"])
+  });
+  const prints = new PrintService({ registry, queries, printSettings });
   const reports = new ReportService({ registry, queries });
   const savedReports = new SavedReportService({
     registry,
@@ -322,7 +328,7 @@ export function createServices(
     clock: fixedClock(now),
     ids: deterministicIds(options.savedReportIds ?? ["saved-report-1", "saved-report-event-1", "saved-report-event-2"])
   });
-  return { registry, store, events: store, projections: store, documents, documentShares, history, audit, savedFilters, savedReports, userPermissions, prints, queries, reports };
+  return { registry, store, events: store, projections: store, documents, documentShares, history, audit, savedFilters, savedReports, userPermissions, printSettings, prints, queries, reports };
 }
 
 export function createLinkedServices(ids: readonly string[] = ["evt1", "evt2", "evt3", "evt4"]) {

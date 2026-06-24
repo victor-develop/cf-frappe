@@ -14,6 +14,7 @@ import type { FileService } from "../../application/file-service.js";
 import type { JobHistoryService } from "../../application/job-history-service.js";
 import type { JobRetryPort } from "../../application/job-retry-service.js";
 import type { JobScheduleService } from "../../application/job-schedule-service.js";
+import type { PrintSettingsService } from "../../application/print-settings-service.js";
 import type { PrintService } from "../../application/print-service.js";
 import { QueryService } from "../../application/query-service.js";
 import type { ReportService } from "../../application/report-service.js";
@@ -67,6 +68,7 @@ export interface ResourceApiOptions {
   readonly maxJsonBytes?: number;
   readonly files?: FileService;
   readonly prints?: PrintService;
+  readonly printSettings?: PrintSettingsService;
   readonly printPdfRenderer?: PrintPdfRenderer;
   readonly reports?: ReportService;
   readonly roles?: RoleService;
@@ -246,8 +248,10 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       "/",
       createPrintApi({
         prints: options.prints,
+        ...(options.printSettings === undefined ? {} : { printSettings: options.printSettings }),
         ...(options.printPdfRenderer === undefined ? {} : { pdfRenderer: options.printPdfRenderer }),
-        actor: resolveActor
+        actor: resolveActor,
+        maxJsonBytes
       })
     );
   }

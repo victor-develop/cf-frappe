@@ -45,6 +45,7 @@ const DOCUMENT_EVENT_KINDS = new Set<DocumentEventPayload["kind"]>([
   "UserAccountEnabled",
   "UserAccountDisabled",
   "UserProfileChanged",
+  "PrintSettingsChanged",
   "UserNotificationRecorded",
   "UserNotificationRead",
   "UserNotificationDismissed",

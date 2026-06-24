@@ -336,6 +336,10 @@ export type DocumentEventPayload =
       readonly profile: DocumentData;
     }
   | {
+      readonly kind: "PrintSettingsChanged";
+      readonly settings: DocumentData;
+    }
+  | {
       readonly kind: "UserNotificationRecorded";
       readonly notificationId: string;
       readonly sourceEventId: string;

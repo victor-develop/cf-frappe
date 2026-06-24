@@ -18,6 +18,7 @@ import { JobRetryService } from "../application/job-retry-service.js";
 import { JobScheduleService } from "../application/job-schedule-service.js";
 import { DocumentHistoryService } from "../application/document-history-service.js";
 import { DocumentShareService } from "../application/document-share-service.js";
+import { PrintSettingsService } from "../application/print-settings-service.js";
 import { PrintService } from "../application/print-service.js";
 import { QueryService } from "../application/query-service.js";
 import { ReportService } from "../application/report-service.js";
@@ -85,6 +86,7 @@ export interface CloudFrappeRuntimeServices {
   readonly userProfiles?: UserProfileService;
   readonly userPermissions: UserPermissionService;
   readonly customFields: CustomFieldService;
+  readonly printSettings: PrintSettingsService;
   readonly prints: PrintService;
   readonly queries: QueryService;
   readonly reports: ReportService;
@@ -315,7 +317,11 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     documentShares
   });
   const restrictedHistory = new DocumentHistoryService({ events, queries: restrictedQueries });
-  const prints = new PrintService({ registry: options.registry, queries: restrictedQueries });
+  const printSettings = new PrintSettingsService({
+    events,
+    ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
+  });
+  const prints = new PrintService({ registry: options.registry, queries: restrictedQueries, printSettings });
   const reports = new ReportService({ registry: options.registry, queries: restrictedQueries });
   const roles = new RoleService({
     events,
@@ -338,6 +344,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(userProfiles === undefined ? {} : { userProfiles }),
     userPermissions,
     customFields,
+    printSettings,
     prints,
     queries: restrictedQueries,
     reports,
@@ -443,6 +450,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     documents,
     documentShares,
     prints,
+    printSettings,
     queries: restrictedQueries,
     timeline: restrictedHistory,
     audit,

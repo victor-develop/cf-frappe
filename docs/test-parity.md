@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the print layout metadata slice:
+As of the global print settings slice:
 
-- Vitest files: `75`
-- Vitest cases: `835`
+- Vitest files: `76`
+- Vitest cases: `838`
 
 ## Implication
 

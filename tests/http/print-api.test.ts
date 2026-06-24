@@ -2,6 +2,7 @@ import {
   createResourceApi,
   definePrintFormat,
   definePrintLetterhead,
+  SYSTEM_MANAGER_ROLE,
   unsafeHeaderActorResolver,
   type PrintPdfRenderer,
   type RenderPrintPdfCommand,
@@ -26,6 +27,11 @@ describe("print api", () => {
     "x-cf-frappe-roles": "User",
     "x-cf-frappe-tenant": "acme"
   };
+  const adminHeaders = {
+    "x-cf-frappe-user": "admin@example.com",
+    "x-cf-frappe-roles": SYSTEM_MANAGER_ROLE,
+    "x-cf-frappe-tenant": "acme"
+  };
 
   function makeApp(options: { readonly printPdfRenderer?: PrintPdfRenderer } = {}) {
     const services = createServices(["e1"]);
@@ -33,6 +39,7 @@ describe("print api", () => {
       registry: services.registry,
       documents: services.documents,
       prints: services.prints,
+      printSettings: services.printSettings,
       ...(options.printPdfRenderer === undefined ? {} : { printPdfRenderer: options.printPdfRenderer }),
       queries: services.queries,
       reports: services.reports,
@@ -112,6 +119,65 @@ describe("print api", () => {
     expect(html).toContain('--print-page-padding: 12mm 10mm 14mm 10mm;');
     expect(html).toContain('--print-font-family: "Inter", ui-serif, Georgia, Cambria, "Times New Roman", serif;');
     expect(html).toContain("--print-font-size: 10pt;");
+  });
+
+  it("stores global print settings and applies them as print layout defaults", async () => {
+    const { app, services } = makeApp();
+    services.registry.registerPrintFormat(
+      definePrintFormat({
+        name: "Note Margin Override",
+        doctype: "Note",
+        sections: [{ fields: [{ field: "title", label: "Title" }] }],
+        layout: {
+          margins: { topMm: 6 }
+        }
+      })
+    );
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Settings Print", priority: "High", body: "Settings body" })
+    });
+
+    const updated = await app.request("/api/print-settings", {
+      method: "PUT",
+      headers: { ...adminHeaders, "content-type": "application/json" },
+      body: JSON.stringify({
+        expectedVersion: 0,
+        defaultLayout: {
+          pageSize: "Letter",
+          orientation: "portrait",
+          margins: { topMm: 12, rightMm: 11, bottomMm: 13, leftMm: 11 },
+          font: { family: "Inter", sizePt: 10 }
+        }
+      })
+    });
+
+    expect(updated.status).toBe(200);
+    await expect(updated.json()).resolves.toMatchObject({
+      data: {
+        version: 1,
+        settings: {
+          defaultLayout: {
+            pageSize: "Letter",
+            orientation: "portrait",
+            margins: { topMm: 12, rightMm: 11, bottomMm: 13, leftMm: 11 },
+            font: { family: "Inter", sizePt: 10 }
+          }
+        }
+      }
+    });
+
+    const settingsResponse = await app.request("/api/print-settings", { headers: adminHeaders });
+    await expect(settingsResponse.json()).resolves.toMatchObject({
+      data: { version: 1, settings: { defaultLayout: { pageSize: "Letter" } } }
+    });
+
+    const standard = await app.request("/api/print/Note%20Standard/Settings%20Print", { headers: userHeaders });
+    const overridden = await app.request("/api/print/Note%20Margin%20Override/Settings%20Print", { headers: userHeaders });
+
+    expect(await standard.text()).toContain("@page { size: Letter portrait; margin: 12mm 11mm 13mm 11mm; }");
+    expect(await overridden.text()).toContain("@page { size: Letter portrait; margin: 6mm 11mm 13mm 11mm; }");
   });
 
   it("renders a printable document as PDF through the configured renderer", async () => {

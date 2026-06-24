@@ -84,6 +84,8 @@ interface DeskClientRuntime {
     readonly html: (format: string, name: string) => Promise<unknown>;
     readonly pdf: (format: string, name: string) => Promise<ArrayBuffer>;
     readonly pdfUrl: (format: string, name: string) => string;
+    readonly settings: (options?: Record<string, unknown>) => Promise<unknown>;
+    readonly updateSettings: (input: Record<string, unknown>, options?: Record<string, unknown>) => Promise<unknown>;
     readonly url: (format: string, name: string) => string;
   };
   readonly reportBuilder: {
@@ -1406,6 +1408,10 @@ describe("Desk client runtime", () => {
     await expect(runtime.print.format("Task Standard")).resolves.toEqual({ ok: true });
     await expect(runtime.print.html("Task Standard", "TASK/1")).resolves.toBe("<!doctype html><title>Printable</title>");
     await expect(runtime.print.pdf("Task Standard", "TASK/1")).resolves.toEqual(pdf.buffer);
+    await expect(runtime.print.settings({ tenant: "acme" })).resolves.toEqual({ ok: true });
+    await expect(
+      runtime.print.updateSettings({ defaultLayout: { pageSize: "A4" } }, { tenant: "acme", expectedVersion: 2 })
+    ).resolves.toEqual({ ok: true });
 
     expect(runtime.print.url("Task Standard", "TASK/1")).toBe("/api/print/Task%20Standard/TASK%2F1");
     expect(runtime.print.pdfUrl("Task Standard", "TASK/1")).toBe("/api/print/Task%20Standard/TASK%2F1/pdf");
@@ -1413,10 +1419,26 @@ describe("Desk client runtime", () => {
       "GET /api/meta/print-formats?doctype=Task+Type",
       "GET /api/meta/print-formats/Task%20Standard",
       "GET /api/print/Task%20Standard/TASK%2F1",
-      "GET /api/print/Task%20Standard/TASK%2F1/pdf"
+      "GET /api/print/Task%20Standard/TASK%2F1/pdf",
+      "GET /api/print-settings?tenant=acme",
+      "PUT /api/print-settings?tenant=acme"
     ]);
-    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin", "same-origin"]);
-    expect(calls.map((call) => call.init.body)).toEqual([undefined, undefined, undefined, undefined]);
+    expect(calls.map((call) => call.init.credentials)).toEqual([
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin"
+    ]);
+    expect(calls.map((call) => call.init.body)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      JSON.stringify({ defaultLayout: { pageSize: "A4" }, expectedVersion: 2 })
+    ]);
   });
 
   it("wraps saved report-builder APIs without browser-side definition validation", async () => {

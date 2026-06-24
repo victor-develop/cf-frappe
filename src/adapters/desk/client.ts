@@ -185,6 +185,10 @@ export function renderDeskClientScript(): string {
     return "/api/meta/print-formats" + (format === undefined ? "" : "/" + encodePart(format));
   }
 
+  function printSettingsPath(options) {
+    return withQuery("/api/print-settings", tenantParams(options || {}));
+  }
+
   function jobExecutionPath(idempotencyKey, action) {
     return "/api/jobs/executions/" + encodePart(idempotencyKey) + (action === undefined ? "" : "/" + action);
   }
@@ -1523,6 +1527,15 @@ export function renderDeskClientScript(): string {
         return requestBinary(printPdfDocumentPath(format, name));
       },
       pdfUrl: printPdfDocumentPath,
+      settings: function (options) {
+        return request(printSettingsPath(options || {})).then(unwrapData);
+      },
+      updateSettings: function (input, options) {
+        return request(printSettingsPath(options || {}), {
+          method: "PUT",
+          body: Object.assign({}, input || {}, versionBody(options || {}))
+        }).then(unwrapData);
+      },
       url: printDocumentPath
     }),
     realtime: Object.freeze({

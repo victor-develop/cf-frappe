@@ -47,6 +47,46 @@ export interface PrintLayoutDefinition {
   readonly font?: PrintFontDefinition;
 }
 
+export function definePrintLayout(layout: PrintLayoutDefinition, ownerLabel = "Print layout"): PrintLayoutDefinition {
+  assertPrintLayoutValid(ownerLabel, layout);
+  return freezePrintLayout(layout)!;
+}
+
+export function mergePrintLayouts(
+  defaults: PrintLayoutDefinition | undefined,
+  override: PrintLayoutDefinition | undefined
+): PrintLayoutDefinition | undefined {
+  if (defaults === undefined) {
+    return override;
+  }
+  if (override === undefined) {
+    return defaults;
+  }
+  const pageSize = override.pageSize ?? defaults.pageSize;
+  const orientation = pageSize !== undefined && typeof pageSize !== "string" ? undefined : override.orientation ?? defaults.orientation;
+  const margins = defaults.margins === undefined && override.margins === undefined
+    ? undefined
+    : {
+        ...(defaults.margins ?? {}),
+        ...(override.margins ?? {})
+      };
+  const font = defaults.font === undefined && override.font === undefined
+    ? undefined
+    : {
+        ...(defaults.font ?? {}),
+        ...(override.font ?? {})
+      };
+  return definePrintLayout(
+    {
+      ...(pageSize === undefined ? {} : { pageSize }),
+      ...(orientation === undefined ? {} : { orientation }),
+      ...(margins === undefined ? {} : { margins }),
+      ...(font === undefined ? {} : { font })
+    },
+    "Merged print layout"
+  );
+}
+
 export interface PrintFormatDefinition {
   readonly name: string;
   readonly label?: string;
@@ -87,7 +127,7 @@ export function definePrintFormat(definition: PrintFormatDefinition): PrintForma
   const sections = definition.sections ?? [];
   const hasTemplate = definition.template !== undefined && definition.template.trim().length > 0;
   assertHasPrintableBody(definition.name, sections, hasTemplate);
-  assertPrintLayoutValid(definition.name, definition.layout);
+  assertPrintLayoutValid(`Print format '${definition.name}'`, definition.layout);
   for (const [index, section] of sections.entries()) {
     if (section.fields.length === 0) {
       throw new FrameworkError(
@@ -131,7 +171,7 @@ export function assertPrintFormatMatchesDocType(format: PrintFormatDefinition, d
   const sections = format.sections ?? [];
   const template = format.template ?? "";
   assertHasPrintableBody(format.name, sections, template.trim().length > 0);
-  assertPrintLayoutValid(format.name, format.layout);
+  assertPrintLayoutValid(`Print format '${format.name}'`, format.layout);
   for (const section of sections) {
     const sectionFields = new Set<string>();
     for (const printField of section.fields) {
@@ -261,74 +301,74 @@ function freezePrintLayout(layout: PrintLayoutDefinition | undefined): PrintLayo
   });
 }
 
-function assertPrintLayoutValid(formatName: string, layout: unknown): void {
+function assertPrintLayoutValid(ownerLabel: string, layout: unknown): void {
   if (layout === undefined) {
     return;
   }
   if (!isRecord(layout)) {
-    throw invalidPrintLayout(formatName, "layout must be an object");
+    throw invalidPrintLayout(ownerLabel, "layout must be an object");
   }
-  assertPrintPageSizeValid(formatName, layout.pageSize);
+  assertPrintPageSizeValid(ownerLabel, layout.pageSize);
   if (isRecord(layout.pageSize) && layout.orientation !== undefined) {
-    throw invalidPrintLayout(formatName, "layout orientation cannot be combined with custom page size");
+    throw invalidPrintLayout(ownerLabel, "layout orientation cannot be combined with custom page size");
   }
   if (layout.orientation !== undefined && layout.orientation !== "portrait" && layout.orientation !== "landscape") {
-    throw invalidPrintLayout(formatName, "layout orientation must be portrait or landscape");
+    throw invalidPrintLayout(ownerLabel, "layout orientation must be portrait or landscape");
   }
-  assertPrintMarginsValid(formatName, layout.margins);
-  assertPrintFontValid(formatName, layout.font);
+  assertPrintMarginsValid(ownerLabel, layout.margins);
+  assertPrintFontValid(ownerLabel, layout.font);
 }
 
-function assertPrintPageSizeValid(formatName: string, pageSize: unknown): void {
+function assertPrintPageSizeValid(ownerLabel: string, pageSize: unknown): void {
   if (pageSize === undefined) {
     return;
   }
   if (typeof pageSize === "string") {
     if (!PRINT_PAGE_SIZE_NAMES.includes(pageSize as PrintPageSizeName)) {
-      throw invalidPrintLayout(formatName, `layout page size '${pageSize}' is not supported`);
+      throw invalidPrintLayout(ownerLabel, `layout page size '${pageSize}' is not supported`);
     }
     return;
   }
   if (!isRecord(pageSize)) {
-    throw invalidPrintLayout(formatName, "layout page size must be a supported name or custom size");
+    throw invalidPrintLayout(ownerLabel, "layout page size must be a supported name or custom size");
   }
-  assertNumberInRange(formatName, "layout custom page widthMm", pageSize.widthMm, 1, 2000, "millimeters");
-  assertNumberInRange(formatName, "layout custom page heightMm", pageSize.heightMm, 1, 2000, "millimeters");
+  assertNumberInRange(ownerLabel, "layout custom page widthMm", pageSize.widthMm, 1, 2000, "millimeters");
+  assertNumberInRange(ownerLabel, "layout custom page heightMm", pageSize.heightMm, 1, 2000, "millimeters");
 }
 
-function assertPrintMarginsValid(formatName: string, margins: unknown): void {
+function assertPrintMarginsValid(ownerLabel: string, margins: unknown): void {
   if (margins === undefined) {
     return;
   }
   if (!isRecord(margins)) {
-    throw invalidPrintLayout(formatName, "layout margins must be an object");
+    throw invalidPrintLayout(ownerLabel, "layout margins must be an object");
   }
   for (const side of ["topMm", "rightMm", "bottomMm", "leftMm"] as const) {
     const value = margins[side];
     if (value !== undefined) {
-      assertNumberInRange(formatName, `layout margin ${side}`, value, 0, 100, "millimeters");
+      assertNumberInRange(ownerLabel, `layout margin ${side}`, value, 0, 100, "millimeters");
     }
   }
 }
 
-function assertPrintFontValid(formatName: string, font: unknown): void {
+function assertPrintFontValid(ownerLabel: string, font: unknown): void {
   if (font === undefined) {
     return;
   }
   if (!isRecord(font)) {
-    throw invalidPrintLayout(formatName, "layout font must be an object");
+    throw invalidPrintLayout(ownerLabel, "layout font must be an object");
   }
   const family = font.family;
   if (family !== undefined && (typeof family !== "string" || !/^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$/.test(family))) {
-    throw invalidPrintLayout(formatName, "layout font family contains unsupported characters");
+    throw invalidPrintLayout(ownerLabel, "layout font family contains unsupported characters");
   }
   if (font.sizePt !== undefined) {
-    assertNumberInRange(formatName, "layout font sizePt", font.sizePt, 6, 72, "points");
+    assertNumberInRange(ownerLabel, "layout font sizePt", font.sizePt, 6, 72, "points");
   }
 }
 
 function assertNumberInRange(
-  formatName: string,
+  ownerLabel: string,
   label: string,
   value: unknown,
   min: number,
@@ -336,12 +376,12 @@ function assertNumberInRange(
   unit: string
 ): void {
   if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max) {
-    throw invalidPrintLayout(formatName, `${label} must be between ${String(min)} and ${String(max)} ${unit}`);
+    throw invalidPrintLayout(ownerLabel, `${label} must be between ${String(min)} and ${String(max)} ${unit}`);
   }
 }
 
-function invalidPrintLayout(formatName: string, message: string): FrameworkError {
-  return new FrameworkError("PRINT_FORMAT_INVALID", `Print format '${formatName}' ${message}`, { status: 400 });
+function invalidPrintLayout(ownerLabel: string, message: string): FrameworkError {
+  return new FrameworkError("PRINT_FORMAT_INVALID", `${ownerLabel} ${message}`, { status: 400 });
 }
 
 function isCustomPrintPageSize(pageSize: PrintLayoutDefinition["pageSize"]): pageSize is PrintCustomPageSizeDefinition {

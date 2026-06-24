@@ -36,6 +36,10 @@ export function userProfilesStream(tenantId: TenantId, userId: string): StreamNa
   return documentStream(tenantId, "__UserProfiles", userId);
 }
 
+export function printSettingsStream(tenantId: TenantId): StreamName {
+  return documentStream(tenantId, "__PrintSettings", "settings");
+}
+
 export function userNotificationsStream(tenantId: TenantId, userId: string): StreamName {
   return documentStream(tenantId, "__UserNotifications", userId);
 }
