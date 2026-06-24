@@ -71,7 +71,7 @@ export function planDocumentFieldMerge(input: PlanDocumentFieldMergeInput): Docu
     const baseValue = input.base.data[field];
     const localValue = input.draft[field];
     const remoteValue = input.remote.data[field];
-    const localChanged = localPresent && !jsonEqual(localValue, baseValue);
+    const localChanged = localPresent ? !jsonEqual(localValue, baseValue) : basePresent;
     const remoteChanged = !jsonEqual(remoteValue, baseValue);
 
     if (localChanged) {

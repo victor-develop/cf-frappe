@@ -18,6 +18,11 @@ import {
 } from "../core/document-shares.js";
 import { can } from "../core/permissions.js";
 import { applyDefaults, compactData, validateDocumentData } from "../core/schema.js";
+import {
+  planDocumentFieldMerge,
+  type DocumentFieldMergePlan,
+  type DocumentMergeSnapshot
+} from "../core/document-merge.js";
 import { documentStream, namingSeriesStream } from "../core/streams.js";
 import {
   documentMatchesUserPermissions,
@@ -101,6 +106,41 @@ export interface UpdateDocumentCommand {
   readonly metadata?: DocumentData;
   readonly eventType?: string;
 }
+
+export interface MergeDocumentCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly baseVersion: number;
+  readonly patch: MutableDocumentData;
+  readonly unset?: readonly string[];
+  readonly tenantId?: string;
+  readonly metadata?: DocumentData;
+  readonly eventType?: string;
+}
+
+export interface MergeDocumentAppliedResult {
+  readonly status: "applied";
+  readonly plan: DocumentFieldMergePlan;
+  readonly document: DocumentSnapshot;
+}
+
+export interface MergeDocumentNoopResult {
+  readonly status: "noop";
+  readonly plan: DocumentFieldMergePlan;
+  readonly document: DocumentSnapshot;
+}
+
+export interface MergeDocumentConflictResult {
+  readonly status: "conflict";
+  readonly plan: DocumentFieldMergePlan;
+  readonly document: DocumentSnapshot;
+}
+
+export type MergeDocumentResult =
+  | MergeDocumentAppliedResult
+  | MergeDocumentNoopResult
+  | MergeDocumentConflictResult;
 
 export interface DuplicateDocumentCommand {
   readonly actor: Actor;
@@ -344,6 +384,7 @@ export interface DocumentCommandExecutor {
   duplicate(command: DuplicateDocumentCommand): Promise<DocumentSnapshot>;
   amend(command: AmendDocumentCommand): Promise<DocumentSnapshot>;
   update(command: UpdateDocumentCommand): Promise<DocumentSnapshot>;
+  merge(command: MergeDocumentCommand): Promise<MergeDocumentResult>;
   submit(command: SubmitDocumentCommand): Promise<DocumentSnapshot>;
   bulkSubmit(command: BulkSubmitDocumentsCommand): Promise<BulkDocumentCommandResult>;
   cancel(command: CancelDocumentCommand): Promise<DocumentSnapshot>;
@@ -472,18 +513,118 @@ export class DocumentService implements DocumentCommandExecutor {
     }
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
-    ensureDocumentStatus(existing, ["draft"], "update");
+    return this.applyDocumentUpdate({
+      action: "update",
+      command,
+      doctype,
+      existing,
+      patch: command.patch,
+      relatedDocType,
+      stream,
+      tenantId,
+      ...(command.unset === undefined ? {} : { unset: command.unset })
+    });
+  }
+
+  async merge(command: MergeDocumentCommand): Promise<MergeDocumentResult> {
+    ensureMergeBaseVersion(command.baseVersion);
+    const tenantId = resolveTenant(command.actor, command.tenantId);
+    const { doctype, relatedDocType } = await this.doctypeContext(command.actor, command.doctype, tenantId);
+    const stream = documentStream(tenantId, doctype.name, command.name);
+    const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, command.name);
+    if (!(await this.canActOnDocument(command.actor, doctype, "update", existing))) {
+      throw permissionDenied(`Actor '${command.actor.id}' cannot update ${doctype.name}/${command.name}`);
+    }
+    await this.ensureUserPermissionAccess(command.actor, doctype, existing);
+
+    const base = foldDocument(events.filter((event) => event.sequence <= command.baseVersion));
+    if (!base || base.version !== command.baseVersion) {
+      throw conflict(`Merge base version ${String(command.baseVersion)} was not found for ${doctype.name}/${command.name}`);
+    }
 
     const patch = await this.runBeforeValidate(doctype, compactData(command.patch), existing);
-    const patchWithoutInternalFields = stripInternalTableFields(doctype, patch, relatedDocType);
-    const unset = normalizeUnsetFields(command.unset);
-    const unsetIssues = documentUnsetIssues(doctype, unset, existing.data, patchWithoutInternalFields);
-    const originIssues = childTableOriginIssues(doctype, patch, existing.data, relatedDocType);
-    const readOnlyIssues = readonlyIssues(doctype, patchWithoutInternalFields, relatedDocType);
     const normalizedPatch = preserveReadOnlyTableValues(doctype, patch, existing, relatedDocType);
-    const data = applyDocumentDataChange(existing.data, normalizedPatch, unset);
-    const validationIssues = await this.validate(doctype, normalizedPatch, relatedDocType, existing, data);
-    const linkIssues = await this.validateLinks(command.actor, tenantId, doctype, normalizedPatch, relatedDocType);
+    const unset = normalizeUnsetFields(command.unset);
+    const draft = applyDocumentDataChange(base.data, normalizedPatch, unset);
+    const plan = planDocumentFieldMerge({
+      base: mergeSnapshotFromDocument(base),
+      remote: mergeSnapshotFromDocument(existing),
+      draft
+    });
+    if (plan.status === "conflict") {
+      return { status: "conflict", plan, document: existing };
+    }
+    if (Object.keys(plan.patch).length === 0 && plan.unset.length === 0) {
+      return { status: "noop", plan, document: existing };
+    }
+
+    const document = await this.applyDocumentUpdate({
+      action: "merge",
+      command,
+      doctype,
+      existing,
+      patch: plan.patch,
+      prevalidatedPatch: compactData(plan.patch),
+      relatedDocType,
+      stream,
+      tenantId,
+      unset: plan.unset
+    });
+    return { status: "applied", plan, document };
+  }
+
+  private async applyDocumentUpdate(options: {
+    readonly action: "update" | "merge";
+    readonly command: UpdateDocumentCommand | MergeDocumentCommand;
+    readonly doctype: DocTypeDefinition;
+    readonly existing: DocumentSnapshot;
+    readonly patch: MutableDocumentData;
+    readonly prevalidatedPatch?: DocumentData;
+    readonly relatedDocType: RelatedDocTypeResolver;
+    readonly stream: string;
+    readonly tenantId: string;
+    readonly unset?: readonly string[];
+  }): Promise<DocumentSnapshot> {
+    ensureDocumentStatus(options.existing, ["draft"], options.action);
+
+    const patch = options.prevalidatedPatch ??
+      await this.runBeforeValidate(options.doctype, compactData(options.patch), options.existing);
+    const patchWithoutInternalFields = stripInternalTableFields(options.doctype, patch, options.relatedDocType);
+    const unset = normalizeUnsetFields(options.unset);
+    const unsetIssues = documentUnsetIssues(
+      options.doctype,
+      unset,
+      options.existing.data,
+      patchWithoutInternalFields
+    );
+    const originIssues = childTableOriginIssues(
+      options.doctype,
+      patch,
+      options.existing.data,
+      options.relatedDocType
+    );
+    const readOnlyIssues = readonlyIssues(options.doctype, patchWithoutInternalFields, options.relatedDocType);
+    const normalizedPatch = preserveReadOnlyTableValues(
+      options.doctype,
+      patch,
+      options.existing,
+      options.relatedDocType
+    );
+    const data = applyDocumentDataChange(options.existing.data, normalizedPatch, unset);
+    const validationIssues = await this.validate(
+      options.doctype,
+      normalizedPatch,
+      options.relatedDocType,
+      options.existing,
+      data
+    );
+    const linkIssues = await this.validateLinks(
+      options.command.actor,
+      options.tenantId,
+      options.doctype,
+      normalizedPatch,
+      options.relatedDocType
+    );
     const issues = [...unsetIssues, ...originIssues, ...readOnlyIssues, ...validationIssues, ...linkIssues];
     if (issues.length > 0) {
       throw validationFailed(issues);
@@ -496,22 +637,22 @@ export class DocumentService implements DocumentCommandExecutor {
       ...(unset.length === 0 ? {} : { unset })
     };
     const event = this.newEvent({
-      tenantId,
-      stream,
-      type: command.eventType ?? doctype.events?.update ?? `${doctype.name}Updated`,
-      doctype: doctype.name,
-      documentName: command.name,
-      actorId: command.actor.id,
+      tenantId: options.tenantId,
+      stream: options.stream,
+      type: options.command.eventType ?? options.doctype.events?.update ?? `${options.doctype.name}Updated`,
+      doctype: options.doctype.name,
+      documentName: options.command.name,
+      actorId: options.command.actor.id,
       occurredAt: now,
       payload,
-      metadata: command.metadata ?? {}
+      metadata: options.command.metadata ?? {}
     });
-    const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
+    const commit = await this.store.commit(options.stream, options.existing.version, [event], ([saved]) => {
       if (!saved) {
         throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
       }
       return {
-        ...existing,
+        ...options.existing,
         version: saved.sequence,
         data,
         updatedAt: saved.occurredAt
@@ -519,7 +660,7 @@ export class DocumentService implements DocumentCommandExecutor {
     });
     const [saved] = commit.events;
     if (saved) {
-      await this.runAfterCommit(doctype, saved, commit.snapshot);
+      await this.runAfterCommit(options.doctype, saved, commit.snapshot);
     }
     return commit.snapshot;
   }
@@ -1719,6 +1860,20 @@ function ensureExpectedVersion(existing: DocumentSnapshot, expectedVersion?: num
   if (expectedVersion !== undefined && existing.version !== expectedVersion) {
     throw conflict(`Expected version ${expectedVersion}, found ${existing.version}`);
   }
+}
+
+function ensureMergeBaseVersion(baseVersion: number): void {
+  if (!Number.isSafeInteger(baseVersion) || baseVersion < 0) {
+    throw badRequest("baseVersion must be a non-negative integer");
+  }
+}
+
+function mergeSnapshotFromDocument(document: DocumentSnapshot): DocumentMergeSnapshot {
+  return {
+    version: document.version,
+    docstatus: document.docstatus,
+    data: document.data
+  };
 }
 
 function ensureDocumentStatus(

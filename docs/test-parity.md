@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document field-merge planning slice:
+As of the server-side document merge apply slice:
 
 - Vitest files: `93`
-- Vitest cases: `1030`
+- Vitest cases: `1039`
 
 ## Implication
 

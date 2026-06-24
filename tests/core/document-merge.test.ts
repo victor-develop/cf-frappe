@@ -39,6 +39,24 @@ describe("document field merge planning", () => {
     });
   });
 
+  it("plans local field removals when the full draft omits a base field", () => {
+    const plan = planDocumentFieldMerge({
+      base: snapshot(1, { title: "Queued", body: "Draft", obsolete: "yes" }),
+      remote: snapshot(2, { title: "Queued", body: "Remote body", obsolete: "yes" }),
+      draft: { title: "Queued", body: "Draft" }
+    });
+
+    expect(plan).toMatchObject({
+      status: "clean",
+      localChangedFields: ["obsolete"],
+      remoteChangedFields: ["body"],
+      mergedFields: ["obsolete"],
+      patch: {},
+      unset: ["obsolete"],
+      conflicts: []
+    });
+  });
+
   it("reports same-field conflicts while preserving independent unsets", () => {
     const plan = planDocumentFieldMerge({
       base: snapshot(1, { title: "Queued", body: "Draft", obsolete: "yes" }),

@@ -144,6 +144,7 @@ describe("DurableObjectCommandExecutor", () => {
     });
 
     await executor.update({ actor: owner, doctype: "Note", name: "My Note", patch: { body: "New" } });
+    await executor.merge({ actor: owner, doctype: "Note", name: "My Note", baseVersion: 1, patch: { title: "Merged" } });
     await executor.submit({ actor: owner, doctype: "Note", name: "My Note" });
     await executor.cancel({ actor: owner, doctype: "Note", name: "My Note" });
     await executor.transition({ actor: owner, doctype: "Note", name: "My Note", action: "close" });
@@ -182,10 +183,12 @@ describe("DurableObjectCommandExecutor", () => {
       "acme:Note:My Note",
       "acme:Note:My Note",
       "acme:Note:My Note",
+      "acme:Note:My Note",
       "acme:Note:My Note"
     ]);
     expect(calls).toMatchObject([
       { kind: "update" },
+      { kind: "merge", baseVersion: 1, patch: { title: "Merged" } },
       { kind: "submit" },
       { kind: "cancel" },
       { kind: "transition" },

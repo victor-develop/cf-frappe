@@ -387,6 +387,15 @@ interface DeskClientRuntime {
       options?: { readonly expectedVersion?: number }
     ) => Promise<unknown>;
     readonly list: (doctype: string, options: Record<string, unknown>) => Promise<unknown>;
+    readonly merge: (
+      doctype: string,
+      name: string,
+      input: {
+        readonly baseVersion: number;
+        readonly patch?: Record<string, unknown>;
+        readonly unset?: readonly string[];
+      }
+    ) => Promise<unknown>;
     readonly update: (
       doctype: string,
       name: string,
@@ -1972,6 +1981,11 @@ describe("Desk client runtime", () => {
       filters: [{ field: "priority", value: "High" }]
     });
     await runtime.resource.deleteSavedFilter("Task Type", "filter/1");
+    await runtime.resource.merge("Task Type", "TASK/1", {
+      baseVersion: 17,
+      patch: { title: "Merged title" },
+      unset: ["obsolete"]
+    });
 
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
       "GET /api/resource/Task%20Type/TASK%2F1/timeline?limit=10&before_sequence=42",
@@ -1991,7 +2005,8 @@ describe("Desk client runtime", () => {
       "DELETE /api/resource/Task%20Type/TASK%2F1/shares/collab%40example.com",
       "GET /api/resource/Task%20Type/saved-filters",
       "POST /api/resource/Task%20Type/saved-filters",
-      "DELETE /api/resource/Task%20Type/saved-filters/filter%2F1"
+      "DELETE /api/resource/Task%20Type/saved-filters/filter%2F1",
+      "POST /api/resource/Task%20Type/TASK%2F1/merge"
     ]);
     expect(calls.map((call) => call.init.body)).toEqual([
       undefined,
@@ -2011,7 +2026,8 @@ describe("Desk client runtime", () => {
       JSON.stringify({ expectedVersion: 16 }),
       undefined,
       JSON.stringify({ label: "High priority", filters: [{ field: "priority", value: "High" }] }),
-      undefined
+      undefined,
+      JSON.stringify({ baseVersion: 17, patch: { title: "Merged title" }, unset: ["obsolete"] })
     ]);
   });
 

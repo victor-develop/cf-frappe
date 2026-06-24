@@ -18,6 +18,8 @@ import type {
   DocumentCommandExecutor,
   ExecuteDomainCommand,
   FollowDocumentCommand,
+  MergeDocumentCommand,
+  MergeDocumentResult,
   RecordDocumentActivityCommand,
   RevokeDocumentShareCommand,
   ShareDocumentCommand,
@@ -33,11 +35,16 @@ import { normalizeBulkDocumentSelections } from "../application/document-service
 import type { ModelRegistry } from "../core/registry.js";
 import type { Actor, DocumentData, DocumentSnapshot } from "../core/types.js";
 import { DEFAULT_TENANT_ID, type DocTypeDefinition } from "../core/types.js";
-import type { AggregateCoordinatorCommand, AggregateCoordinatorTransactResult } from "./aggregate-coordinator.js";
+import type {
+  AggregateCoordinatorCommand,
+  AggregateCoordinatorCommandResult,
+  AggregateCoordinatorTransactResult,
+  SnapshotAggregateCoordinatorCommand
+} from "./aggregate-coordinator.js";
 
 export interface AggregateCoordinatorRpc {
-  transact(command: AggregateCoordinatorCommand): Promise<DocumentSnapshot>;
-  tryTransact(command: AggregateCoordinatorCommand): Promise<AggregateCoordinatorTransactResult>;
+  transact(command: AggregateCoordinatorCommand): Promise<AggregateCoordinatorCommandResult>;
+  tryTransact(command: SnapshotAggregateCoordinatorCommand): Promise<AggregateCoordinatorTransactResult>;
 }
 
 export interface RpcDurableObjectNamespace<T> {
@@ -45,7 +52,10 @@ export interface RpcDurableObjectNamespace<T> {
   get(id: DurableObjectId): T;
 }
 
-type NamedAggregateCoordinatorCommand = Exclude<AggregateCoordinatorCommand, { readonly kind: "create" }>;
+type NamedAggregateCoordinatorCommand = Exclude<
+  AggregateCoordinatorCommand,
+  { readonly kind: "create" } | { readonly kind: "merge" }
+>;
 
 export interface DurableObjectCommandExecutorOptions {
   readonly registry: ModelRegistry;
@@ -62,23 +72,39 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
   }
 
   create(command: CreateDocumentCommand): Promise<DocumentSnapshot> {
-    return this.stubForCreate(command).transact({ ...command, kind: "create" });
+    return this.stubForCreate(command)
+      .transact({ ...command, kind: "create" })
+      .then(snapshotResult);
   }
 
   duplicate(command: DuplicateDocumentCommand): Promise<DocumentSnapshot> {
-    return this.stubForDuplicate(command).transact({ ...command, kind: "duplicate" });
+    return this.stubForDuplicate(command)
+      .transact({ ...command, kind: "duplicate" })
+      .then(snapshotResult);
   }
 
   amend(command: AmendDocumentCommand): Promise<DocumentSnapshot> {
-    return this.stubForAmend(command).transact({ ...command, kind: "amend" });
+    return this.stubForAmend(command)
+      .transact({ ...command, kind: "amend" })
+      .then(snapshotResult);
   }
 
   update(command: UpdateDocumentCommand): Promise<DocumentSnapshot> {
-    return this.stubForNamed(command).transact({ ...command, kind: "update" });
+    return this.stubForNamed(command)
+      .transact({ ...command, kind: "update" })
+      .then(snapshotResult);
+  }
+
+  merge(command: MergeDocumentCommand): Promise<MergeDocumentResult> {
+    return this.stubForNamed(command)
+      .transact({ ...command, kind: "merge" })
+      .then((result) => result as MergeDocumentResult);
   }
 
   submit(command: SubmitDocumentCommand): Promise<DocumentSnapshot> {
-    return this.stubForNamed(command).transact({ ...command, kind: "submit" });
+    return this.stubForNamed(command)
+      .transact({ ...command, kind: "submit" })
+      .then(snapshotResult);
   }
 
   bulkSubmit(command: BulkSubmitDocumentsCommand): Promise<BulkDocumentCommandResult> {
@@ -89,7 +115,9 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
   }
 
   cancel(command: CancelDocumentCommand): Promise<DocumentSnapshot> {
-    return this.stubForNamed(command).transact({ ...command, kind: "cancel" });
+    return this.stubForNamed(command)
+      .transact({ ...command, kind: "cancel" })
+      .then(snapshotResult);
   }
 
   bulkCancel(command: BulkCancelDocumentsCommand): Promise<BulkDocumentCommandResult> {
@@ -100,7 +128,9 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
   }
 
   delete(command: DeleteDocumentCommand): Promise<DocumentSnapshot> {
-    return this.stubForNamed(command).transact({ ...command, kind: "delete" });
+    return this.stubForNamed(command)
+      .transact({ ...command, kind: "delete" })
+      .then(snapshotResult);
   }
 
   async bulkDelete(command: BulkDeleteDocumentsCommand): Promise<BulkDeleteDocumentsResult> {
@@ -112,7 +142,9 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
   }
 
   transition(command: TransitionDocumentCommand): Promise<DocumentSnapshot> {
-    return this.stubForNamed(command).transact({ ...command, kind: "transition" });
+    return this.stubForNamed(command)
+      .transact({ ...command, kind: "transition" })
+      .then(snapshotResult);
   }
 
   bulkTransition(command: BulkTransitionDocumentsCommand): Promise<BulkDocumentCommandResult> {
@@ -143,47 +175,69 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
   }
 
   execute(command: ExecuteDomainCommand): Promise<DocumentSnapshot> {
-    return this.stubForNamed(command).transact({ ...command, kind: "execute" });
+    return this.stubForNamed(command)
+      .transact({ ...command, kind: "execute" })
+      .then(snapshotResult);
   }
 
   comment(command: AddDocumentCommentCommand): Promise<DocumentSnapshot> {
-    return this.stubForNamed(command).transact({ ...command, kind: "comment" });
+    return this.stubForNamed(command)
+      .transact({ ...command, kind: "comment" })
+      .then(snapshotResult);
   }
 
   recordActivity(command: RecordDocumentActivityCommand): Promise<DocumentSnapshot> {
-    return this.stubForNamed(command).transact({ ...command, kind: "recordActivity" });
+    return this.stubForNamed(command)
+      .transact({ ...command, kind: "recordActivity" })
+      .then(snapshotResult);
   }
 
   assign(command: AssignDocumentCommand): Promise<DocumentSnapshot> {
-    return this.stubForNamed(command).transact({ ...command, kind: "assign" });
+    return this.stubForNamed(command)
+      .transact({ ...command, kind: "assign" })
+      .then(snapshotResult);
   }
 
   unassign(command: UnassignDocumentCommand): Promise<DocumentSnapshot> {
-    return this.stubForNamed(command).transact({ ...command, kind: "unassign" });
+    return this.stubForNamed(command)
+      .transact({ ...command, kind: "unassign" })
+      .then(snapshotResult);
   }
 
   tag(command: TagDocumentCommand): Promise<DocumentSnapshot> {
-    return this.stubForNamed(command).transact({ ...command, kind: "tag" });
+    return this.stubForNamed(command)
+      .transact({ ...command, kind: "tag" })
+      .then(snapshotResult);
   }
 
   untag(command: UntagDocumentCommand): Promise<DocumentSnapshot> {
-    return this.stubForNamed(command).transact({ ...command, kind: "untag" });
+    return this.stubForNamed(command)
+      .transact({ ...command, kind: "untag" })
+      .then(snapshotResult);
   }
 
   follow(command: FollowDocumentCommand): Promise<DocumentSnapshot> {
-    return this.stubForNamed(command).transact({ ...command, kind: "follow" });
+    return this.stubForNamed(command)
+      .transact({ ...command, kind: "follow" })
+      .then(snapshotResult);
   }
 
   unfollow(command: UnfollowDocumentCommand): Promise<DocumentSnapshot> {
-    return this.stubForNamed(command).transact({ ...command, kind: "unfollow" });
+    return this.stubForNamed(command)
+      .transact({ ...command, kind: "unfollow" })
+      .then(snapshotResult);
   }
 
   share(command: ShareDocumentCommand): Promise<DocumentSnapshot> {
-    return this.stubForNamed(command).transact({ ...command, kind: "share" });
+    return this.stubForNamed(command)
+      .transact({ ...command, kind: "share" })
+      .then(snapshotResult);
   }
 
   revokeShare(command: RevokeDocumentShareCommand): Promise<DocumentSnapshot> {
-    return this.stubForNamed(command).transact({ ...command, kind: "revokeShare" });
+    return this.stubForNamed(command)
+      .transact({ ...command, kind: "revokeShare" })
+      .then(snapshotResult);
   }
 
   private stubForCreate(command: CreateDocumentCommand): AggregateCoordinatorRpc {
@@ -221,6 +275,10 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
     const id = this.namespace.idFromName(`${tenantId}:${doctype}:${name}`);
     return this.namespace.get(id);
   }
+}
+
+function snapshotResult(result: AggregateCoordinatorCommandResult): DocumentSnapshot {
+  return result as DocumentSnapshot;
 }
 
 function resolveTenant(command: { readonly actor: { readonly tenantId?: string }; readonly tenantId?: string }): string {

@@ -20,6 +20,8 @@ import type {
   DeleteDocumentCommand,
   DuplicateDocumentCommand,
   FollowDocumentCommand,
+  MergeDocumentCommand,
+  MergeDocumentResult,
   ShareDocumentCommand,
   RecordDocumentActivityCommand,
   SubmitDocumentCommand,
@@ -43,6 +45,7 @@ export type AggregateCoordinatorCommand =
   | ({ readonly kind: "duplicate" } & DuplicateDocumentCommand)
   | ({ readonly kind: "amend" } & AmendDocumentCommand)
   | ({ readonly kind: "update" } & UpdateDocumentCommand)
+  | ({ readonly kind: "merge" } & MergeDocumentCommand)
   | ({ readonly kind: "submit" } & SubmitDocumentCommand)
   | ({ readonly kind: "cancel" } & CancelDocumentCommand)
   | ({ readonly kind: "delete" } & DeleteDocumentCommand)
@@ -58,6 +61,9 @@ export type AggregateCoordinatorCommand =
   | ({ readonly kind: "unfollow" } & UnfollowDocumentCommand)
   | ({ readonly kind: "share" } & ShareDocumentCommand)
   | ({ readonly kind: "revokeShare" } & RevokeDocumentShareCommand);
+
+export type AggregateCoordinatorCommandResult = DocumentSnapshot | MergeDocumentResult;
+export type SnapshotAggregateCoordinatorCommand = Exclude<AggregateCoordinatorCommand, { readonly kind: "merge" }>;
 
 export type AggregateCoordinatorTransactResult =
   | {
@@ -86,8 +92,8 @@ export type AggregateCoordinatorClass<Env extends AggregateCoordinatorEnv = Aggr
   ctx: DurableObjectState,
   env: Env
 ) => {
-  transact(command: AggregateCoordinatorCommand): Promise<DocumentSnapshot>;
-  tryTransact(command: AggregateCoordinatorCommand): Promise<AggregateCoordinatorTransactResult>;
+  transact(command: AggregateCoordinatorCommand): Promise<AggregateCoordinatorCommandResult>;
+  tryTransact(command: SnapshotAggregateCoordinatorCommand): Promise<AggregateCoordinatorTransactResult>;
 };
 
 export function createAggregateCoordinatorClass<Env extends AggregateCoordinatorEnv = AggregateCoordinatorEnv>(
@@ -152,7 +158,7 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
       });
     }
 
-    async transact(command: AggregateCoordinatorCommand): Promise<DocumentSnapshot> {
+    async transact(command: AggregateCoordinatorCommand): Promise<AggregateCoordinatorCommandResult> {
       switch (command.kind) {
         case "create":
           return this.service.create(command);
@@ -162,6 +168,8 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
           return this.service.amend(command);
         case "update":
           return this.service.update(command);
+        case "merge":
+          return this.service.merge(command);
         case "submit":
           return this.service.submit(command);
         case "cancel":
@@ -195,9 +203,10 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
       }
     }
 
-    async tryTransact(command: AggregateCoordinatorCommand): Promise<AggregateCoordinatorTransactResult> {
+    async tryTransact(command: SnapshotAggregateCoordinatorCommand): Promise<AggregateCoordinatorTransactResult> {
       try {
-        return { ok: true, snapshot: await this.transact(command) };
+        const snapshot = await this.transact(command) as DocumentSnapshot;
+        return { ok: true, snapshot };
       } catch (error) {
         return { ok: false, failure: bulkDocumentFailure(documentNameForFailure(command), error) };
       }

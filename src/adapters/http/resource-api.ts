@@ -646,6 +646,23 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     return c.json({ data: snapshot });
   });
 
+  app.post("/api/resource/:doctype/:name/merge", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    const body = await readJson(c.req.raw, { maxJsonBytes });
+    const patch = objectValue(body.patch, "Merge patch") ?? {};
+    const unset = stringArrayValue(body.unset, "Merge unset");
+    const result = await options.documents.merge({
+      actor,
+      doctype: c.req.param("doctype"),
+      name: c.req.param("name"),
+      baseVersion: baseVersionValue(body.baseVersion),
+      patch,
+      ...(unset === undefined ? {} : { unset }),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: result });
+  });
+
   app.post("/api/resource/:doctype/:name/duplicate", async (c) => {
     const actor = await resolveActor(c.req.raw);
     const body = await readJson(c.req.raw, { allowEmpty: true, maxJsonBytes });
@@ -996,6 +1013,13 @@ function numberValue(value: unknown): number | undefined {
   return value;
 }
 
+function baseVersionValue(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw badRequest("baseVersion must be a non-negative integer");
+  }
+  return value;
+}
+
 function objectValue(value: unknown, label: string): MutableDocumentData | undefined {
   if (value === undefined) {
     return undefined;
@@ -1004,6 +1028,16 @@ function objectValue(value: unknown, label: string): MutableDocumentData | undef
     throw badRequest(`${label} must be an object`);
   }
   return value as MutableDocumentData;
+}
+
+function stringArrayValue(value: unknown, label: string): readonly string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
+    throw badRequest(`${label} must be an array of strings`);
+  }
+  return value;
 }
 
 function documentSelectionsValue(value: unknown): readonly BulkDocumentSelection[] {

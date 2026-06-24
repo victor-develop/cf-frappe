@@ -1784,6 +1784,305 @@ describe("DocumentService", () => {
     ).rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
   });
 
+  it("merges stale field updates when remote edits touched different fields", async () => {
+    const { documents, events } = createServices(["e1", "e2", "e3"]);
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ body: "Base body", priority: "Low" })
+    });
+    await documents.update({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      patch: { body: "Remote body" },
+      expectedVersion: 1
+    });
+
+    const result = await documents.merge({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      baseVersion: 1,
+      patch: { priority: "High" }
+    });
+
+    expect(result).toMatchObject({
+      status: "applied",
+      plan: {
+        status: "clean",
+        baseVersion: 1,
+        remoteVersion: 2,
+        localChangedFields: ["priority"],
+        remoteChangedFields: ["body"],
+        patch: { priority: "High" },
+        unset: []
+      },
+      document: {
+        version: 3,
+        data: {
+          body: "Remote body",
+          priority: "High"
+        }
+      }
+    });
+    const stream = await events.readStream(documentStream("acme", "Note", "My Note"));
+    expect(stream.at(-1)).toMatchObject({
+      payload: {
+        kind: "DocumentUpdated",
+        patch: { priority: "High" }
+      }
+    });
+  });
+
+  it("merges stale field unsets when remote edits touched different fields", async () => {
+    const { documents, events } = createServices(["e1", "e2", "e3"]);
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ body: "Base body", priority: "Low" })
+    });
+    await documents.update({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      patch: { count: 7 },
+      expectedVersion: 1
+    });
+
+    const result = await documents.merge({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      baseVersion: 1,
+      patch: {},
+      unset: ["body"]
+    });
+
+    expect(result).toMatchObject({
+      status: "applied",
+      plan: {
+        status: "clean",
+        baseVersion: 1,
+        remoteVersion: 2,
+        localChangedFields: ["body"],
+        remoteChangedFields: ["count"],
+        patch: {},
+        unset: ["body"]
+      },
+      document: {
+        version: 3,
+        data: {
+          count: 7
+        }
+      }
+    });
+    expect(result.document.data).not.toHaveProperty("body");
+    const stream = await events.readStream(documentStream("acme", "Note", "My Note"));
+    expect(stream.at(-1)).toMatchObject({
+      payload: {
+        kind: "DocumentUpdated",
+        patch: {},
+        unset: ["body"]
+      }
+    });
+  });
+
+  it("plans hook-normalized merge fields before writing stale changes", async () => {
+    const registry = createRegistry({
+      doctypes: [noteDocType],
+      hooks: {
+        Note: [
+          {
+            beforeValidate: ({ data, existing }) =>
+              existing && typeof data.title === "string" ? { count: 1 } : undefined
+          }
+        ]
+      }
+    });
+    const events = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry,
+      store: events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["e1", "e2", "e3"])
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ count: 0 })
+    });
+    await documents.update({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      patch: { count: 2 },
+      expectedVersion: 1
+    });
+
+    const result = await documents.merge({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      baseVersion: 1,
+      patch: { title: "Local Note" }
+    });
+
+    expect(result).toMatchObject({
+      status: "conflict",
+      plan: {
+        status: "conflict",
+        localChangedFields: ["title", "count"],
+        remoteChangedFields: ["count"],
+        conflicts: [
+          {
+            field: "count",
+            reason: "remote_changed",
+            baseValue: 0,
+            localValue: 1,
+            remoteValue: 2
+          }
+        ]
+      },
+      document: {
+        version: 2,
+        data: { count: 2 }
+      }
+    });
+    await expect(events.currentVersion(documentStream("acme", "Note", "My Note"))).resolves.toBe(2);
+  });
+
+  it("returns stale merge conflicts without appending document events", async () => {
+    const { documents, events } = createServices(["e1", "e2", "e3"]);
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ body: "Base body" })
+    });
+    await documents.update({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      patch: { body: "Remote body" },
+      expectedVersion: 1
+    });
+
+    const result = await documents.merge({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      baseVersion: 1,
+      patch: { body: "Local body" }
+    });
+
+    expect(result).toMatchObject({
+      status: "conflict",
+      plan: {
+        status: "conflict",
+        baseVersion: 1,
+        remoteVersion: 2,
+        localChangedFields: ["body"],
+        remoteChangedFields: ["body"],
+        conflicts: [
+          {
+            field: "body",
+            reason: "remote_changed",
+            baseValue: "Base body",
+            localValue: "Local body",
+            remoteValue: "Remote body"
+          }
+        ]
+      },
+      document: {
+        version: 2,
+        data: { body: "Remote body" }
+      }
+    });
+    await expect(events.currentVersion(documentStream("acme", "Note", "My Note"))).resolves.toBe(2);
+  });
+
+  it("treats same-value stale merges as no-ops", async () => {
+    const { documents, events } = createServices(["e1", "e2", "e3"]);
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ body: "Base body" })
+    });
+    await documents.update({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      patch: { body: "Shared body" },
+      expectedVersion: 1
+    });
+
+    const result = await documents.merge({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      baseVersion: 1,
+      patch: { body: "Shared body" }
+    });
+
+    expect(result).toMatchObject({
+      status: "noop",
+      plan: {
+        status: "clean",
+        localChangedFields: ["body"],
+        remoteChangedFields: ["body"],
+        mergedFields: ["body"],
+        patch: {},
+        unset: []
+      },
+      document: { version: 2 }
+    });
+    await expect(events.currentVersion(documentStream("acme", "Note", "My Note"))).resolves.toBe(2);
+  });
+
+  it("returns document status merge conflicts before validation or writes", async () => {
+    const { documents, events } = createServices(["e1", "e2", "e3"]);
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ body: "Base body" })
+    });
+    await documents.submit({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      expectedVersion: 1
+    });
+
+    const result = await documents.merge({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      baseVersion: 1,
+      patch: { body: "Local body" }
+    });
+
+    expect(result).toMatchObject({
+      status: "conflict",
+      plan: {
+        status: "conflict",
+        conflicts: [
+          {
+            field: "docstatus",
+            reason: "remote_status_changed",
+            baseValue: "draft",
+            localValue: "draft",
+            remoteValue: "submitted"
+          }
+        ]
+      },
+      document: {
+        version: 2,
+        docstatus: "submitted"
+      }
+    });
+    await expect(events.currentVersion(documentStream("acme", "Note", "My Note"))).resolves.toBe(2);
+  });
+
   it("prevents updates to read-only fields", async () => {
     const { documents } = createServices(["e1", "e2"]);
     await documents.create({ actor: owner, doctype: "Note", data: data() });

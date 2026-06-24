@@ -6,6 +6,7 @@ import {
   defineDashboard,
   defineWorkspace,
   deterministicIds,
+  documentStream,
   DocumentService,
   fixedClock,
   InMemoryDocumentStore,
@@ -511,6 +512,108 @@ describe("resource api", () => {
     });
     expect(deleted.status).toBe(200);
     await expect(deleted.json()).resolves.toMatchObject({ data: { docstatus: "deleted" } });
+  });
+
+  it("applies clean stale resource merge requests through normal document updates", async () => {
+    const services = createServices(["e1", "e2", "e3"]);
+    const app = createResourceApi({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: unsafeHeaderActorResolver
+    });
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Merge", body: "Base body", priority: "Low" })
+    });
+    await app.request("/api/resource/Note/HTTP%20Merge", {
+      method: "PUT",
+      headers: userHeaders,
+      body: JSON.stringify({ body: "Remote body", expectedVersion: 1 })
+    });
+
+    const response = await app.request("/api/resource/Note/HTTP%20Merge/merge", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({
+        baseVersion: 1,
+        patch: { priority: "High" }
+      })
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        status: "applied",
+        plan: {
+          status: "clean",
+          baseVersion: 1,
+          remoteVersion: 2,
+          patch: { priority: "High" }
+        },
+        document: {
+          version: 3,
+          data: {
+            body: "Remote body",
+            priority: "High"
+          }
+        }
+      }
+    });
+  });
+
+  it("returns structured resource merge conflicts without appending updates", async () => {
+    const services = createServices(["e1", "e2", "e3"]);
+    const app = createResourceApi({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: unsafeHeaderActorResolver
+    });
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Merge Conflict", body: "Base body" })
+    });
+    await app.request("/api/resource/Note/HTTP%20Merge%20Conflict", {
+      method: "PUT",
+      headers: userHeaders,
+      body: JSON.stringify({ body: "Remote body", expectedVersion: 1 })
+    });
+
+    const response = await app.request("/api/resource/Note/HTTP%20Merge%20Conflict/merge", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({
+        baseVersion: 1,
+        patch: { body: "Local body" }
+      })
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        status: "conflict",
+        plan: {
+          status: "conflict",
+          conflicts: [
+            {
+              field: "body",
+              reason: "remote_changed",
+              baseValue: "Base body",
+              localValue: "Local body",
+              remoteValue: "Remote body"
+            }
+          ]
+        },
+        document: {
+          version: 2,
+          data: { body: "Remote body" }
+        }
+      }
+    });
+    await expect(services.store.currentVersion(documentStream("acme", "Note", "HTTP Merge Conflict"))).resolves.toBe(2);
   });
 
   it("bulk deletes resources with per-document outcomes", async () => {

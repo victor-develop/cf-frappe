@@ -2045,7 +2045,7 @@ export function renderDeskClientScript(): string {
       var baseValue = baseSnapshot.data[field];
       var localValue = draftData[field];
       var remoteValue = remoteSnapshot.data[field];
-      var localChanged = localPresent && !mergeJsonEqual(localValue, baseValue);
+      var localChanged = localPresent ? !mergeJsonEqual(localValue, baseValue) : basePresent;
       var remoteChanged = !mergeJsonEqual(remoteValue, baseValue);
       if (localChanged) {
         localChangedFields.push(field);
@@ -2937,6 +2937,9 @@ export function renderDeskClientScript(): string {
       },
       timeline: function (doctype, name, options) {
         return request(withQuery(resourceActionPath(doctype, name, "timeline"), timelineParams(options || {}))).then(unwrapData);
+      },
+      merge: function (doctype, name, input) {
+        return request(resourcePath(doctype, name) + "/merge", { method: "POST", body: input || {} }).then(unwrapData);
       },
       transition: function (doctype, name, action, options) {
         return request(resourcePath(doctype, name) + "/transition/" + encodePart(action), { method: "POST", body: versionBody(options) }).then(unwrapData);
