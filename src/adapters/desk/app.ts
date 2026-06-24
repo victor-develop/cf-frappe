@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { CustomFieldService } from "../../application/custom-field-service.js";
+import type { DashboardService } from "../../application/dashboard-service.js";
 import type {
   DataPatchQueueOptions,
   DataPatchQueuePort,
@@ -107,6 +108,8 @@ import {
 import {
   renderDeskHome,
   renderDeskLayout,
+  renderDashboardList,
+  renderDashboardView,
   renderErrorPanel,
   renderFileAttachmentPanel,
   renderFileManager,
@@ -194,6 +197,7 @@ export interface DeskAppOptions {
   readonly userProfiles?: UserProfileService;
   readonly userPermissions?: UserPermissionService;
   readonly reports?: ReportService;
+  readonly dashboards?: DashboardService;
   readonly dataPatches?: DataPatchAdminPort;
   readonly dataPatchQueue?: DataPatchQueuePort;
   readonly dataPatchRollbackQueue?: DataPatchRollbackQueuePort;
@@ -224,6 +228,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
+    const dashboards = await listDashboards(options, actor);
     const workspaces = listWorkspaces(options, actor);
     return html(
       renderDeskLayoutFor(options, {
@@ -231,10 +236,11 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         adminLinks: adminLinksFor(options, actor),
         doctypes,
         reports,
+        dashboards,
         workspaces,
         showNotifications: options.notifications !== undefined,
         showFiles: options.files !== undefined,
-        body: renderDeskHome(doctypes, reports, workspaces)
+        body: renderDeskHome(doctypes, reports, workspaces, dashboards)
       })
     );
   });
@@ -282,6 +288,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
+    const dashboards = await listDashboards(options, actor);
     const workspaces = listWorkspaces(options, actor);
     return html(
       renderDeskLayoutFor(options, {
@@ -289,11 +296,55 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         adminLinks: adminLinksFor(options, actor),
         doctypes,
         reports,
+        dashboards,
         workspaces,
         showFiles: options.files !== undefined,
         body: renderReportList(reports, {
           ...(options.savedReports === undefined ? {} : { builderDoctypes: doctypes })
         })
+      })
+    );
+  });
+
+  app.get("/desk/dashboards", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const doctypes = options.queries.listDoctypes(actor);
+    const reports = listReports(options, actor);
+    const dashboards = await listDashboards(options, actor);
+    const workspaces = listWorkspaces(options, actor);
+    return html(
+      renderDeskLayoutFor(options, {
+        title: "Dashboards",
+        adminLinks: adminLinksFor(options, actor),
+        doctypes,
+        reports,
+        dashboards,
+        workspaces,
+        showFiles: options.files !== undefined,
+        body: renderDashboardList(dashboards)
+      })
+    );
+  });
+
+  app.get("/desk/dashboards/:dashboard", async (c) => {
+    const dashboardsService = requireDashboards(options);
+    const actor = await options.actor(c.req.raw);
+    const result = await dashboardsService.runDashboard(actor, c.req.param("dashboard"));
+    const doctypes = options.queries.listDoctypes(actor);
+    const reports = listReports(options, actor);
+    const dashboards = await listDashboards(options, actor);
+    const workspaces = listWorkspaces(options, actor);
+    return html(
+      renderDeskLayoutFor(options, {
+        title: result.dashboard.label ?? result.dashboard.name,
+        activeDashboard: result.dashboard.name,
+        adminLinks: adminLinksFor(options, actor),
+        doctypes,
+        reports,
+        dashboards,
+        workspaces,
+        showFiles: options.files !== undefined,
+        body: renderDashboardView(result)
       })
     );
   });
@@ -308,6 +359,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     }
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
+    const dashboards = await listDashboards(options, actor);
     const workspaces = listWorkspaces(options, actor);
     const page = workspacePageFor(options, actor, workspace, doctypes, reports);
     return html(
@@ -317,6 +369,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         adminLinks: adminLinksFor(options, actor),
         doctypes,
         reports,
+        dashboards,
         workspaces,
         showFiles: options.files !== undefined,
         body: renderWorkspacePage(page)
@@ -1355,6 +1408,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const url = new URL(c.req.url);
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
+    const dashboards = await listDashboards(options, actor);
     const result = await options.reports.runReport(actor, c.req.param("report"), {
       filters: reportFiltersFromUrl(url),
       ...reportOrderingFromUrl(url),
@@ -1373,6 +1427,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         activeReport: result.report.name,
         doctypes,
         reports,
+        dashboards,
         body: renderReportView(result, {
           exportHref,
           printHref,
@@ -2110,6 +2165,10 @@ function listReports(options: DeskAppOptions, actor: Actor) {
   return options.reports?.listReports(actor) ?? [];
 }
 
+async function listDashboards(options: DeskAppOptions, actor: Actor) {
+  return options.dashboards?.listDashboards(actor) ?? [];
+}
+
 function listDeskDoctypes(options: DeskAppOptions, actor: Actor): Promise<readonly DocTypeDefinition[]> {
   return options.queries.listEffectiveDoctypes(actor);
 }
@@ -2355,6 +2414,13 @@ function requireSavedReports(options: DeskAppOptions): SavedReportService {
     throw new FrameworkError("REPORT_NOT_FOUND", "Saved reports are not enabled", { status: 404 });
   }
   return options.savedReports;
+}
+
+function requireDashboards(options: DeskAppOptions): DashboardService {
+  if (!options.dashboards) {
+    throw new FrameworkError("DASHBOARD_NOT_FOUND", "Dashboards are not enabled", { status: 404 });
+  }
+  return options.dashboards;
 }
 
 function requireFiles(options: DeskAppOptions): FileService {

@@ -16,6 +16,7 @@ import {
   type ResolvedListView
 } from "../../core/types.js";
 import { isReportChartColor, type ReportDefinition, type ReportFilterOperator } from "../../core/reports.js";
+import type { DashboardDefinition } from "../../core/dashboard.js";
 import type { ClientScriptDefinition, ClientScriptScope } from "../../core/client-script.js";
 import type { WorkspaceDefinition, WorkspaceShortcutKind } from "../../core/workspace.js";
 import type {
@@ -36,6 +37,7 @@ import type {
 import type { JobExecutionDashboard } from "../../application/job-history-service.js";
 import type { JobScheduleDashboard } from "../../application/job-schedule-service.js";
 import type { ReportRunResult } from "../../application/report-service.js";
+import type { DashboardRunResult } from "../../application/dashboard-service.js";
 import type { RoleCatalogState } from "../../core/roles.js";
 import type { SavedListFilter } from "../../application/saved-list-filter-service.js";
 import type { SavedReport } from "../../application/saved-report-service.js";
@@ -86,6 +88,7 @@ export interface DeskLayoutOptions {
   readonly body: string;
   readonly active?: string;
   readonly activeReport?: string;
+  readonly activeDashboard?: string;
   readonly activeAdmin?: string;
   readonly activeWorkspace?: string;
   readonly showFiles?: boolean;
@@ -93,6 +96,7 @@ export interface DeskLayoutOptions {
   readonly adminLinks?: readonly DeskNavLink[];
   readonly doctypes: readonly DocTypeDefinition[];
   readonly reports?: readonly ReportDefinition[];
+  readonly dashboards?: readonly DashboardDefinition[];
   readonly workspaces?: readonly WorkspaceDefinition[];
   readonly message?: string;
 }
@@ -151,6 +155,12 @@ export function renderDeskLayout(options: DeskLayoutOptions): string {
         `<a class="nav-link${report.name === options.activeReport ? " is-active" : ""}" href="/desk/reports/${encodeURIComponent(report.name)}">${escapeHtml(report.label ?? report.name)}</a>`
     )
     .join("");
+  const dashboardNav = (options.dashboards ?? [])
+    .map(
+      (dashboard) =>
+        `<a class="nav-link${dashboard.name === options.activeDashboard ? " is-active" : ""}" href="/desk/dashboards/${encodeURIComponent(dashboard.name)}">${escapeHtml(dashboard.label ?? dashboard.name)}</a>`
+    )
+    .join("");
   const adminNav = (options.adminLinks ?? [])
     .map(
       (link) =>
@@ -173,6 +183,7 @@ export function renderDeskLayout(options: DeskLayoutOptions): string {
       ${workspaceNav ? `<p class="nav-heading">Workspaces</p>${workspaceNav}` : ""}
       ${nav ? `<p class="nav-heading">DocTypes</p>${nav}` : ""}
       ${reportNav ? `<p class="nav-heading">Reports</p>${reportNav}` : ""}
+      ${dashboardNav ? `<p class="nav-heading">Dashboards</p>${dashboardNav}` : ""}
       ${options.showNotifications ? `<p class="nav-heading">Notifications</p><a class="nav-link" href="/desk/notifications">Inbox</a>` : ""}
       ${options.showFiles ? `<p class="nav-heading">Files</p><a class="nav-link" href="/desk/files">Files</a>` : ""}
       ${adminNav ? `<p class="nav-heading">Admin</p>${adminNav}` : ""}
@@ -195,7 +206,8 @@ export function renderDeskLayout(options: DeskLayoutOptions): string {
 export function renderDeskHome(
   doctypes: readonly DocTypeDefinition[],
   reports: readonly ReportDefinition[] = [],
-  workspaces: readonly WorkspaceDefinition[] = []
+  workspaces: readonly WorkspaceDefinition[] = [],
+  dashboards: readonly DashboardDefinition[] = []
 ): string {
   const workspaceCards = workspaces
     .map(
@@ -216,6 +228,7 @@ export function renderDeskHome(
     )
     .join("");
   return `${workspaceCards ? `<section class="workspace-grid">${workspaceCards}</section>` : ""}
+  ${dashboards.length > 0 ? renderDashboardList(dashboards) : ""}
   <section class="panel">
     <div class="table-wrap">
       <table>
@@ -585,6 +598,52 @@ export function renderReportList(
       </table>
     </div>
   </section>${builder}`;
+}
+
+export function renderDashboardList(dashboards: readonly DashboardDefinition[]): string {
+  const rows = dashboards
+    .map(
+      (dashboard) => `<tr>
+        <td><a href="/desk/dashboards/${encodeURIComponent(dashboard.name)}">${escapeHtml(dashboard.label ?? dashboard.name)}</a></td>
+        <td>${escapeHtml(dashboard.module ?? "")}</td>
+        <td>${String(dashboard.cards.length)}</td>
+        <td>${escapeHtml(dashboard.description ?? "")}</td>
+      </tr>`
+    )
+    .join("");
+  return `<section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Dashboard</th><th>Module</th><th>Cards</th><th>Description</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="4" class="empty">No readable dashboards.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+export function renderDashboardView(result: DashboardRunResult): string {
+  const description = result.dashboard.description
+    ? `<p class="muted">${escapeHtml(result.dashboard.description)}</p>`
+    : "";
+  const cards = result.cards
+    .map(
+      (card) => `<section class="dashboard-card">
+        <span>${escapeHtml(card.label)}</span>
+        <strong>${escapeHtml(formatValue(card.value))}</strong>
+        ${card.indicator === undefined ? "" : `<em>${escapeHtml(card.indicator)}</em>`}
+        ${card.description === undefined ? "" : `<p>${escapeHtml(card.description)}</p>`}
+        <small>${escapeHtml(dashboardCardSourceLabel(card.source))}</small>
+      </section>`
+    )
+    .join("");
+  return `${description}<section class="dashboard-grid">${cards || `<p class="empty">No dashboard cards.</p>`}</section>`;
+}
+
+function dashboardCardSourceLabel(source: DashboardRunResult["cards"][number]["source"]): string {
+  if (source.kind === "documentCount") {
+    return `${source.doctype} count`;
+  }
+  return `${source.report} / ${source.summary}`;
 }
 
 export function renderSavedReportBuilder(
@@ -2937,6 +2996,34 @@ h3 { margin: 0 0 12px; font-size: 16px; line-height: 1.35; letter-spacing: 0; }
 }
 .workspace-card:hover { border-color: var(--primary); }
 .workspace-card span { color: var(--muted); }
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+.dashboard-card {
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.dashboard-card span,
+.dashboard-card small {
+  color: var(--muted);
+  font-size: 13px;
+}
+.dashboard-card strong {
+  font-size: 28px;
+  line-height: 1.15;
+}
+.dashboard-card em {
+  font-style: normal;
+  color: var(--primary);
+  font-weight: 700;
+}
+.dashboard-card p { margin: 0; color: var(--muted); }
 .panel {
   background: var(--surface);
   border: 1px solid var(--border);

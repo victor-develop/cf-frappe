@@ -6,6 +6,7 @@ import {
   createRegistry,
   createInMemoryAccountRecoveryNotifier,
   createSignedSessionCookie,
+  defineDashboard,
   defineDataPatch,
   deterministicIds,
   fixedClock,
@@ -24,7 +25,7 @@ import {
   type RealtimeHubNamespace,
   type RpcDurableObjectNamespace
 } from "../../src/cloudflare";
-import { createTestRegistry, now, owner } from "../helpers";
+import { createTestRegistry, noteDocType, now, owner } from "../helpers";
 
 describe("CloudFrappe Worker routing", () => {
   it("routes only /desk and /desk/* to the Desk app", async () => {
@@ -62,6 +63,47 @@ describe("CloudFrappe Worker routing", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("application/javascript");
     await expect(response.text()).resolves.toContain("root.cfFrappe");
+  });
+
+  it("mounts metadata dashboard Desk routes through Worker routing", async () => {
+    const registry = createRegistry({
+      doctypes: [noteDocType],
+      dashboards: [
+        defineDashboard({
+          name: "Operations",
+          label: "Operations",
+          description: "Operational KPIs",
+          roles: ["User"],
+          cards: [
+            {
+              name: "open_notes",
+              label: "Open Notes",
+              source: { kind: "documentCount", doctype: "Note", filters: [{ field: "workflow_state", value: "Open" }] }
+            }
+          ]
+        })
+      ]
+    });
+    const worker = createCloudFrappeWorker({
+      registry,
+      actor: () => owner
+    });
+    const env = {
+      DB: fakeD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/desk/dashboards/Operations"),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Operational KPIs");
+    expect(html).toContain("Open Notes");
+    expect(html).toContain("<strong>0</strong>");
   });
 
   it("enables generated Desk document presence panels when realtime is configured", async () => {

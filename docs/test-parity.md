@@ -23,7 +23,7 @@ Observed counts:
 As of the metadata dashboard slice:
 
 - Vitest files: `79`
-- Vitest cases: `860`
+- Vitest cases: `862`
 
 ## Implication
 

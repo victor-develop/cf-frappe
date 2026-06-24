@@ -6,10 +6,12 @@ import {
   createDataPatchRollbackJob,
   createDataPatchRollbackRetryJob,
   createRegistry,
+  DashboardService,
   DataPatchService,
   DataPatchQueueService,
   defineClientScript,
   defineDataPatch,
+  defineDashboard,
   defineDocType,
   defineWorkspace,
   deterministicIds,
@@ -377,6 +379,92 @@ describe("Desk app", () => {
     expect(html).toContain('href="/desk/Note"');
     expect(html).toContain('href="/desk/reports/Open%20Notes"');
     expect(html).not.toContain("Manager Only");
+  });
+
+  it("renders metadata-defined dashboards in Desk", async () => {
+    const registry = createRegistry({
+      doctypes: [noteDocType],
+      reports: [openNotesReport],
+      dashboards: [
+        defineDashboard({
+          name: "Operations",
+          label: "Operations",
+          description: "Operational KPIs",
+          roles: ["User"],
+          cards: [
+            {
+              name: "open_notes",
+              label: "Open Notes",
+              description: "Readable open notes",
+              indicator: "blue",
+              source: { kind: "documentCount", doctype: "Note", filters: [{ field: "workflow_state", value: "Open" }] }
+            },
+            {
+              name: "high_total",
+              label: "High Count",
+              source: {
+                kind: "reportSummary",
+                report: "Open Notes",
+                summary: "total_count",
+                filters: { priority: "High" }
+              }
+            }
+          ]
+        })
+      ]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry,
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["dash-1", "dash-2", "dash-3"])
+    });
+    const queries = new QueryService({ registry, projections: store });
+    const reports = new ReportService({ registry, queries });
+    const dashboards = new DashboardService({ registry, queries, reports });
+    const app = createDeskApp({
+      registry,
+      documents,
+      queries,
+      reports,
+      dashboards,
+      actor: () => owner
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "High Open", priority: "High", workflow_state: "Open", count: 7 })
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Low Open", priority: "Low", workflow_state: "Open", count: 3 })
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "High Closed", priority: "High", workflow_state: "Closed", count: 5 })
+    });
+
+    const home = await app.request("/desk");
+    expect(home.status).toBe(200);
+    await expect(home.text()).resolves.toContain('href="/desk/dashboards/Operations"');
+
+    const list = await app.request("/desk/dashboards");
+    expect(list.status).toBe(200);
+    const listHtml = await list.text();
+    expect(listHtml).toContain("Operational KPIs");
+    expect(listHtml).toContain("<td>2</td>");
+
+    const page = await app.request("/desk/dashboards/Operations");
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain("Readable open notes");
+    expect(html).toContain("<strong>2</strong>");
+    expect(html).toContain("High Count");
+    expect(html).toContain("<strong>12</strong>");
+    expect(html).toContain("Open Notes / total_count");
   });
 
   it("renders and updates a durable notification inbox in Desk", async () => {
