@@ -1,4 +1,4 @@
-import { QueryService, ReportService, defineReport } from "../../src";
+import { QueryService, REPORT_FILTER_EXPRESSION_MAX_NODES, ReportService, defineReport } from "../../src";
 import { createChildTableServices, createServices, data, guest, owner } from "../helpers";
 
 describe("ReportService", () => {
@@ -90,6 +90,92 @@ describe("ReportService", () => {
       ],
       total: 1
     });
+  });
+
+  it("applies compound report filter expressions through shared report semantics", async () => {
+    const { documents, registry, reports } = createServices(["e1", "e2", "e3"]);
+    registry.registerReport(
+      defineReport({
+        name: "Compound Notes",
+        doctype: "Note",
+        columns: [
+          { name: "title" },
+          { name: "priority" },
+          { name: "count" }
+        ],
+        filters: [
+          { name: "priority", label: "Priority", field: "priority", required: true },
+          { name: "title", label: "Title", field: "title", operator: "contains" },
+          { name: "count_range", label: "Count Range", field: "count", operator: "between" }
+        ],
+        roles: ["User"]
+      })
+    );
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Low Routine", priority: "Low", count: 2 }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "High Routine", priority: "High", count: 7 }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Medium Urgent", priority: "Medium", count: 5 }) });
+
+    const result = await reports.runReport(owner, "Compound Notes", {
+      filterExpression: {
+        kind: "group",
+        match: "any",
+        filters: [
+          { filter: "priority", value: "High" },
+          { filter: "title", value: "Urgent" }
+        ]
+      }
+    });
+
+    expect(result.total).toBe(2);
+    expect(result.rows).toEqual([
+      { title: "High Routine", priority: "High", count: 7 },
+      { title: "Medium Urgent", priority: "Medium", count: 5 }
+    ]);
+
+    const narrowed = await reports.runReport(owner, "Compound Notes", {
+      filters: { count_range: ["6", "8"] },
+      filterExpression: {
+        kind: "group",
+        match: "any",
+        filters: [
+          { filter: "priority", value: "High" },
+          { filter: "title", value: "Urgent" }
+        ]
+      }
+    });
+    expect(narrowed.rows).toEqual([{ title: "High Routine", priority: "High", count: 7 }]);
+
+    const csv = await reports.exportReportCsv(owner, "Compound Notes", {
+      filterExpression: {
+        kind: "group",
+        match: "all",
+        filters: [
+          { filter: "priority", value: "High" },
+          { filter: "count_range", value: [6, 8] }
+        ]
+      }
+    });
+    expect(csv.body).toBe("title,priority,count\nHigh Routine,High,7");
+  });
+
+  it("bounds effective report filter expressions after default and runtime composition", async () => {
+    const { registry, reports } = createServices();
+    registry.registerReport(
+      defineReport({
+        name: "Bounded Compound Notes",
+        doctype: "Note",
+        columns: [{ name: "title" }],
+        filters: [{ name: "priority", field: "priority" }],
+        filterExpression: wideReportFilterExpression(REPORT_FILTER_EXPRESSION_MAX_NODES - 1),
+        roles: ["User"]
+      })
+    );
+
+    await expect(
+      reports.runReport(owner, "Bounded Compound Notes", {
+        filterExpression: { filter: "priority", value: "Low" }
+      })
+    ).rejects.toThrow(`Report filter expression cannot exceed 5 levels or ${REPORT_FILTER_EXPRESSION_MAX_NODES} nodes`);
   });
 
   it("runs custom row-provider reports through shared report semantics", async () => {
@@ -186,6 +272,73 @@ describe("ReportService", () => {
     expect(csv.body).toBe("Priority,Open Count\nHigh,7\nMedium,3");
     expect(csv.total).toBe(2);
     expect(csv.truncated).toBe(false);
+  });
+
+  it("applies compound report filter expressions to custom row-provider reports", async () => {
+    const { queries, registry } = createServices();
+    registry.registerReport(
+      defineReport({
+        name: "Compound Priority Metrics",
+        doctype: "Note",
+        source: { kind: "custom", provider: "priority-metrics" },
+        columns: [
+          { name: "priority", label: "Priority", type: "select" },
+          { name: "open_count", label: "Open Count", type: "integer" }
+        ],
+        filters: [
+          { name: "priority", field: "priority", type: "select" },
+          { name: "minimum", field: "open_count", type: "integer", operator: "gte" }
+        ],
+        roles: ["User"]
+      })
+    );
+    const calls: unknown[] = [];
+    const reports = new ReportService({
+      registry,
+      queries,
+      rowProviders: {
+        "priority-metrics": {
+          async rows(context) {
+            calls.push(context);
+            return [
+              { priority: "Low", open_count: 1 },
+              { priority: "High", open_count: 7 },
+              { priority: "Medium", open_count: 3 }
+            ];
+          }
+        }
+      }
+    });
+
+    const filterExpression = {
+      kind: "group" as const,
+      match: "any" as const,
+      filters: [
+        { filter: "priority", value: "Low" },
+        { filter: "minimum", value: "3" }
+      ]
+    };
+    const result = await reports.runReport(owner, "Compound Priority Metrics", { filterExpression });
+
+    expect(calls[0]).toMatchObject({
+      filterExpression: {
+        filters: [
+          { filter: "priority", value: "Low" },
+          { filter: "minimum", value: 3 }
+        ]
+      }
+    });
+    expect(result.rows).toEqual([
+      { priority: "Low", open_count: 1 },
+      { priority: "High", open_count: 7 },
+      { priority: "Medium", open_count: 3 }
+    ]);
+
+    const narrowed = await reports.runReport(owner, "Compound Priority Metrics", {
+      filters: { priority: "High" },
+      filterExpression
+    });
+    expect(narrowed.rows).toEqual([{ priority: "High", open_count: 7 }]);
   });
 
   it("rejects custom reports when their row provider is not configured", async () => {
@@ -1034,3 +1187,11 @@ describe("ReportService", () => {
     );
   });
 });
+
+function wideReportFilterExpression(filterCount: number) {
+  return {
+    kind: "group" as const,
+    match: "all" as const,
+    filters: Array.from({ length: filterCount }, () => ({ filter: "priority", value: "High" }))
+  };
+}

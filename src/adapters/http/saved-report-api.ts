@@ -6,6 +6,7 @@ import type {
   ReportChartDefinition,
   ReportChartOrderBy,
   ReportColumnDefinition,
+  ReportFilterExpression,
   ReportFilterDefinition,
   ReportFormulaOperand,
   ReportGroupDefinition,
@@ -16,7 +17,7 @@ import { REPORT_FORMULA_MAX_DEPTH } from "../../core/reports.js";
 import type { FieldType, JsonPrimitive } from "../../core/types.js";
 import type { PrintPdfRenderer } from "../../ports/print-pdf-renderer.js";
 import { defaultPrintLayoutFor, printPdfResponseBody, printPdfResponseHeaders, renderPrintPdfReport } from "../print/index.js";
-import { reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request.js";
+import { reportFilterExpressionFromUrl, reportFilterExpressionFromValue, reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request.js";
 import type { ActorResolver } from "./actor.js";
 import { parseOptionalInteger, readJsonObject } from "./request.js";
 import { writeReportCsvHeaders } from "./report-export.js";
@@ -90,12 +91,14 @@ export function createSavedReportApi(options: SavedReportApiOptions): Hono {
     const url = new URL(c.req.url);
     const limit = parseOptionalInteger(c.req.query("limit"));
     const offset = parseOptionalInteger(c.req.query("offset"));
+    const filterExpression = reportFilterExpressionFromUrl(url);
     const result = await options.savedReports.run({
       actor,
       doctype: c.req.param("doctype"),
       id: c.req.param("id"),
       options: {
         filters: reportFiltersFromUrl(url),
+        ...(filterExpression === undefined ? {} : { filterExpression }),
         ...reportOrderingFromUrl(url),
         ...(limit !== undefined ? { limit } : {}),
         ...(offset !== undefined ? { offset } : {})
@@ -108,12 +111,14 @@ export function createSavedReportApi(options: SavedReportApiOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const url = new URL(c.req.url);
     const limit = parseOptionalInteger(c.req.query("limit"));
+    const filterExpression = reportFilterExpressionFromUrl(url);
     const csv = await options.savedReports.exportCsv({
       actor,
       doctype: c.req.param("doctype"),
       id: c.req.param("id"),
       options: {
         filters: reportFiltersFromUrl(url),
+        ...(filterExpression === undefined ? {} : { filterExpression }),
         ...reportOrderingFromUrl(url),
         ...(limit !== undefined ? { limit } : {})
       }
@@ -130,12 +135,14 @@ export function createSavedReportApi(options: SavedReportApiOptions): Hono {
     const url = new URL(c.req.url);
     const limit = parseOptionalInteger(c.req.query("limit"));
     const offset = parseOptionalInteger(c.req.query("offset"));
+    const filterExpression = reportFilterExpressionFromUrl(url);
     const result = await options.savedReports.run({
       actor,
       doctype: c.req.param("doctype"),
       id: c.req.param("id"),
       options: {
         filters: reportFiltersFromUrl(url),
+        ...(filterExpression === undefined ? {} : { filterExpression }),
         ...reportOrderingFromUrl(url),
         ...(limit !== undefined ? { limit } : {}),
         ...(offset !== undefined ? { offset } : {})
@@ -171,6 +178,7 @@ function savedReportDefinitionValue(value: unknown): SavedReportDefinition {
   return {
     columns: objectArray(definition.columns, "columns").map(columnValue),
     ...(definition.filters === undefined ? {} : { filters: objectArray(definition.filters, "filters").map(filterValue) }),
+    ...(definition.filterExpression === undefined ? {} : { filterExpression: reportFilterExpressionFromValue(definition.filterExpression, "Saved report filter expression") }),
     ...(definition.summaries === undefined ? {} : { summaries: objectArray(definition.summaries, "summaries").map(summaryValue) }),
     ...(definition.groups === undefined ? {} : { groups: objectArray(definition.groups, "groups").map(groupValue) }),
     ...(definition.charts === undefined ? {} : { charts: objectArray(definition.charts, "charts").map(chartValue) }),

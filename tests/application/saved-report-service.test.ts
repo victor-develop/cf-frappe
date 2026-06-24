@@ -1,4 +1,9 @@
-import { REPORT_FORMULA_MAX_DEPTH, savedReportsStream, type JsonObject } from "../../src";
+import {
+  REPORT_FILTER_EXPRESSION_MAX_NODES,
+  REPORT_FORMULA_MAX_DEPTH,
+  savedReportsStream,
+  type JsonObject
+} from "../../src";
 import { createServices, data, manager, now, owner } from "../helpers";
 
 describe("SavedReportService", () => {
@@ -17,6 +22,11 @@ describe("SavedReportService", () => {
           { name: "priority", label: "Priority" }
         ],
         filters: [{ name: "priority", field: "priority", type: "select", defaultValue: "High" }],
+        filterExpression: {
+          kind: "group",
+          match: "all",
+          filters: [{ filter: "priority", value: "High" }]
+        },
         orderBy: "title",
         order: "asc"
       }
@@ -36,6 +46,11 @@ describe("SavedReportService", () => {
       definition: {
         columns: [{ name: "title", label: "Title" }, { name: "priority", label: "Priority" }],
         filters: [{ name: "priority", field: "priority", type: "select", defaultValue: "High" }],
+        filterExpression: {
+          kind: "group",
+          match: "all",
+          filters: [{ filter: "priority", value: "High" }]
+        },
         orderBy: "title",
         order: "asc"
       }
@@ -54,7 +69,12 @@ describe("SavedReportService", () => {
           label: "High note report",
           definition: {
             columns: [{ name: "title", label: "Title" }, { name: "priority", label: "Priority" }],
-            filters: [{ name: "priority", field: "priority", type: "select", defaultValue: "High" }]
+            filters: [{ name: "priority", field: "priority", type: "select", defaultValue: "High" }],
+            filterExpression: {
+              kind: "group",
+              match: "all",
+              filters: [{ filter: "priority", value: "High" }]
+            }
           }
         }
       }
@@ -90,7 +110,18 @@ describe("SavedReportService", () => {
             }
           }
         ],
-        filters: [{ name: "priority", field: "priority", type: "select", defaultValue: "High" }],
+        filters: [
+          { name: "priority", field: "priority", type: "select" },
+          { name: "count_range", field: "count", type: "integer", operator: "between" }
+        ],
+        filterExpression: {
+          kind: "group",
+          match: "all",
+          filters: [
+            { filter: "priority", value: "High" },
+            { filter: "count_range", value: [3, 8] }
+          ]
+        },
         summaries: [{ name: "total_count", label: "Total Count", aggregate: "sum", field: "count" }],
         orderBy: "count",
         order: "desc"
@@ -343,6 +374,74 @@ describe("SavedReportService", () => {
       message: expect.stringContaining(`exceeds maximum formula depth of ${REPORT_FORMULA_MAX_DEPTH}`)
     });
   });
+
+  it("rejects oversized filter expressions while replaying saved report events", async () => {
+    const { events, savedReports } = createServices();
+    const stream = savedReportsStream("acme", "Note", owner.id);
+    await events.append(stream, 0, [
+      {
+        id: "event-wide-expression-report",
+        tenantId: "acme",
+        stream,
+        type: "NoteSavedReportSaved",
+        doctype: "Note",
+        documentName: "report_wide",
+        actorId: owner.id,
+        occurredAt: now,
+        payload: {
+          kind: "SavedReportSaved",
+          reportId: "report_wide",
+          label: "Wide expression",
+          ownerId: owner.id,
+          definition: {
+            columns: [{ name: "title" }],
+            filters: [{ name: "priority", field: "priority" }],
+            filterExpression: wideFilterExpressionPayload(REPORT_FILTER_EXPRESSION_MAX_NODES)
+          }
+        },
+        metadata: {}
+      }
+    ]);
+
+    await expect(savedReports.list(owner, "Note")).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: expect.stringContaining(`or ${REPORT_FILTER_EXPRESSION_MAX_NODES} nodes`)
+    });
+  });
+
+  it("rejects semantically invalid filter expressions while replaying saved report events", async () => {
+    const { events, savedReports } = createServices();
+    const stream = savedReportsStream("acme", "Note", owner.id);
+    await events.append(stream, 0, [
+      {
+        id: "event-invalid-expression-report",
+        tenantId: "acme",
+        stream,
+        type: "NoteSavedReportSaved",
+        doctype: "Note",
+        documentName: "report_invalid_expression",
+        actorId: owner.id,
+        occurredAt: now,
+        payload: {
+          kind: "SavedReportSaved",
+          reportId: "report_invalid_expression",
+          label: "Invalid expression",
+          ownerId: owner.id,
+          definition: {
+            columns: [{ name: "title" }],
+            filters: [{ name: "priority", field: "priority" }],
+            filterExpression: { filter: "missing", value: "High" }
+          }
+        },
+        metadata: {}
+      }
+    ]);
+
+    await expect(savedReports.list(owner, "Note")).rejects.toMatchObject({
+      code: "REPORT_INVALID",
+      message: "Report 'Saved Report Draft' filter expression references unknown filter 'missing'"
+    });
+  });
 });
 
 function nestedFormulaPayload(depth: number): JsonObject {
@@ -351,4 +450,12 @@ function nestedFormulaPayload(depth: number): JsonObject {
     formula = { operator: "add", left: formula, right: 1 };
   }
   return formula;
+}
+
+function wideFilterExpressionPayload(filterCount: number): JsonObject {
+  return {
+    kind: "group",
+    match: "all",
+    filters: Array.from({ length: filterCount }, () => ({ filter: "priority", value: "High" }))
+  };
 }

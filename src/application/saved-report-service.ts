@@ -3,12 +3,16 @@ import { can } from "../core/permissions.js";
 import {
   assertReportMatchesDocType,
   defineReport,
+  REPORT_FILTER_EXPRESSION_MAX_DEPTH,
+  REPORT_FILTER_EXPRESSION_MAX_NODES,
   REPORT_FORMULA_MAX_DEPTH,
   type ReportChartDefinition,
   type ReportChartOrderBy,
   type ReportColumnDefinition,
   type ReportDefinition,
+  type ReportFilterExpression,
   type ReportFilterDefinition,
+  type ReportFilterValue,
   type ReportFormulaOperand,
   type ReportGroupDefinition,
   type ReportOrder,
@@ -45,6 +49,7 @@ const MAX_REPORT_LABEL_LENGTH = 140;
 export interface SavedReportDefinition {
   readonly columns: readonly ReportColumnDefinition[];
   readonly filters?: readonly ReportFilterDefinition[];
+  readonly filterExpression?: ReportFilterExpression;
   readonly summaries?: readonly ReportSummaryDefinition[];
   readonly groups?: readonly ReportGroupDefinition[];
   readonly charts?: readonly ReportChartDefinition[];
@@ -257,13 +262,15 @@ function foldSavedReports(
     switch (event.payload.kind) {
       case "SavedReportSaved": {
         const existing = reports.get(event.payload.reportId);
+        const label = normalizeLabel(event.payload.label);
+        const definition = normalizeDefinition(doctype, label, definitionFromPayload(event.payload.definition));
         reports.set(event.payload.reportId, {
           tenantId,
           doctype: doctype.name,
           id: event.payload.reportId,
-          label: event.payload.label,
+          label,
           ownerId: event.payload.ownerId,
-          definition: definitionFromPayload(event.payload.definition),
+          definition,
           createdAt: existing?.createdAt ?? event.occurredAt,
           updatedAt: event.occurredAt
         });
@@ -299,6 +306,7 @@ function normalizeDefinition(
     doctype: doctype.name,
     columns: definition.columns,
     ...(definition.filters ? { filters: definition.filters } : {}),
+    ...(definition.filterExpression === undefined ? {} : { filterExpression: definition.filterExpression }),
     ...(definition.summaries ? { summaries: definition.summaries } : {}),
     ...(definition.groups ? { groups: definition.groups } : {}),
     ...(definition.charts ? { charts: definition.charts } : {}),
@@ -313,6 +321,7 @@ function reportDefinitionToSavedDefinition(report: ReportDefinition): SavedRepor
   return {
     columns: report.columns,
     ...(report.filters ? { filters: report.filters } : {}),
+    ...(report.filterExpression === undefined ? {} : { filterExpression: report.filterExpression }),
     ...(report.summaries ? { summaries: report.summaries } : {}),
     ...(report.groups ? { groups: report.groups } : {}),
     ...(report.charts ? { charts: report.charts } : {}),
@@ -328,6 +337,7 @@ function toReportDefinition(saved: SavedReport): ReportDefinition {
     doctype: saved.doctype,
     columns: saved.definition.columns,
     ...(saved.definition.filters ? { filters: saved.definition.filters } : {}),
+    ...(saved.definition.filterExpression === undefined ? {} : { filterExpression: saved.definition.filterExpression }),
     ...(saved.definition.summaries ? { summaries: saved.definition.summaries } : {}),
     ...(saved.definition.groups ? { groups: saved.definition.groups } : {}),
     ...(saved.definition.charts ? { charts: saved.definition.charts } : {}),
@@ -340,6 +350,9 @@ function definitionToPayload(definition: SavedReportDefinition): JsonObject {
   return compactObject({
     columns: definition.columns.map(columnToPayload),
     filters: definition.filters?.map(filterToPayload),
+    filterExpression: definition.filterExpression === undefined
+      ? undefined
+      : filterExpressionToPayload(definition.filterExpression),
     summaries: definition.summaries?.map(summaryToPayload),
     groups: definition.groups?.map(groupToPayload),
     charts: definition.charts?.map(chartToPayload),
@@ -352,6 +365,9 @@ function definitionFromPayload(payload: JsonObject): SavedReportDefinition {
   return {
     columns: objectArray(payload.columns, "columns").map(columnFromPayload),
     ...(payload.filters === undefined ? {} : { filters: objectArray(payload.filters, "filters").map(filterFromPayload) }),
+    ...(payload.filterExpression === undefined
+      ? {}
+      : { filterExpression: filterExpressionFromPayload(payload.filterExpression, "filterExpression") }),
     ...(payload.summaries === undefined ? {} : { summaries: objectArray(payload.summaries, "summaries").map(summaryFromPayload) }),
     ...(payload.groups === undefined ? {} : { groups: objectArray(payload.groups, "groups").map(groupFromPayload) }),
     ...(payload.charts === undefined ? {} : { charts: objectArray(payload.charts, "charts").map(chartFromPayload) }),
@@ -430,6 +446,20 @@ function formulaToPayload(formula: NonNullable<ReportColumnDefinition["formula"]
 
 function formulaOperandToPayload(operand: ReportFormulaOperand): JsonValue {
   return typeof operand === "object" ? formulaToPayload(operand) : operand;
+}
+
+function filterExpressionToPayload(expression: ReportFilterExpression): JsonObject {
+  if (isReportFilterExpressionGroup(expression)) {
+    return {
+      kind: "group",
+      match: expression.match,
+      filters: expression.filters.map(filterExpressionToPayload)
+    };
+  }
+  return {
+    filter: expression.filter,
+    value: Array.isArray(expression.value) ? [...expression.value] : expression.value
+  };
 }
 
 function columnFromPayload(payload: JsonObject): ReportColumnDefinition {
@@ -516,6 +546,65 @@ function formulaFromPayload(
   };
 }
 
+function filterExpressionFromPayload(value: JsonValue | undefined, field: string): ReportFilterExpression {
+  return filterExpressionNodeFromPayload(value, field, 1, { remaining: REPORT_FILTER_EXPRESSION_MAX_NODES });
+}
+
+function filterExpressionNodeFromPayload(
+  value: JsonValue | undefined,
+  field: string,
+  depth: number,
+  budget: ReportFilterExpressionPayloadBudget
+): ReportFilterExpression {
+  budget.remaining -= 1;
+  if (budget.remaining < 0) {
+    throw badRequest(
+      `Saved report definition '${field}' exceeds maximum filter expression depth of ${REPORT_FILTER_EXPRESSION_MAX_DEPTH} levels or ${REPORT_FILTER_EXPRESSION_MAX_NODES} nodes`
+    );
+  }
+  const payload = jsonObjectValue(value, field);
+  if ("filter" in payload) {
+    return {
+      filter: requiredString(payload.filter, `${field}.filter`),
+      value: reportFilterValueFromPayload(payload.value, `${field}.value`)
+    };
+  }
+  if (depth > REPORT_FILTER_EXPRESSION_MAX_DEPTH) {
+    throw badRequest(`Saved report definition '${field}' exceeds maximum filter expression depth of ${REPORT_FILTER_EXPRESSION_MAX_DEPTH}`);
+  }
+  if (payload.kind !== undefined && payload.kind !== "group") {
+    throw badRequest(`Saved report definition '${field}.kind' is invalid`);
+  }
+  const filters = objectArray(payload.filters, `${field}.filters`);
+  if (filters.length === 0) {
+    throw badRequest(`Saved report definition '${field}.filters' is invalid`);
+  }
+  if (payload.match !== "all" && payload.match !== "any") {
+    throw badRequest(`Saved report definition '${field}.match' is invalid`);
+  }
+  return {
+    kind: "group",
+    match: payload.match,
+    filters: filters.map((item, index) =>
+      filterExpressionNodeFromPayload(item, `${field}.filters.${index}`, depth + 1, budget)
+    )
+  };
+}
+
+interface ReportFilterExpressionPayloadBudget {
+  remaining: number;
+}
+
+function reportFilterValueFromPayload(value: JsonValue | undefined, field: string): ReportFilterValue {
+  if (isJsonPrimitive(value)) {
+    return value;
+  }
+  if (Array.isArray(value) && value.every(isJsonPrimitive)) {
+    return value;
+  }
+  throw badRequest(`Saved report definition '${field}' is invalid`);
+}
+
 function formulaOperandFromPayload(value: JsonValue | undefined, field: string, depth: number): ReportFormulaOperand {
   if (typeof value === "string") {
     return value;
@@ -546,6 +635,13 @@ function objectArray(value: JsonValue | undefined, field: string): readonly Json
   return value;
 }
 
+function jsonObjectValue(value: JsonValue | undefined, field: string): JsonObject {
+  if (!isJsonObject(value)) {
+    throw badRequest(`Saved report definition '${field}' is invalid`);
+  }
+  return value;
+}
+
 function stringArray(value: JsonValue | undefined): readonly string[] | null {
   return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : null;
 }
@@ -557,8 +653,14 @@ function requiredString(value: JsonValue | undefined, field: string): string {
   return value;
 }
 
-function isJsonObject(value: JsonValue): value is JsonObject {
+function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isReportFilterExpressionGroup(
+  expression: ReportFilterExpression
+): expression is Extract<ReportFilterExpression, { readonly kind: "group" }> {
+  return "kind" in expression && expression.kind === "group";
 }
 
 function isJsonPrimitive(value: JsonValue | undefined): value is string | number | boolean | null {

@@ -123,6 +123,54 @@ describe("report api", () => {
     });
   });
 
+  it("runs and exports reports with compound filter expressions", async () => {
+    const { app, services } = makeApp();
+    services.registry.registerReport(
+      defineReport({
+        name: "HTTP Compound Notes",
+        doctype: "Note",
+        columns: [{ name: "title" }, { name: "priority" }, { name: "count" }],
+        filters: [
+          { name: "priority", field: "priority" },
+          { name: "title", field: "title", operator: "contains" },
+          { name: "count_range", field: "count", operator: "between" }
+        ],
+        roles: ["User"]
+      })
+    );
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Low Routine", priority: "Low", count: 2 }) });
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "High Routine", priority: "High", count: 7 }) });
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Medium Urgent", priority: "Medium", count: 5 }) });
+    const expression = encodeURIComponent(JSON.stringify({
+      kind: "group",
+      match: "any",
+      filters: [
+        { filter: "priority", value: "High" },
+        { filter: "title", value: "Urgent" }
+      ]
+    }));
+
+    const response = await app.request(`/api/report/HTTP%20Compound%20Notes/run?filter_expression=${expression}`, {
+      headers: userHeaders
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      total: 2,
+      rows: [
+        { title: "High Routine", priority: "High", count: 7 },
+        { title: "Medium Urgent", priority: "Medium", count: 5 }
+      ]
+    });
+
+    const csv = await app.request(
+      `/api/report/HTTP%20Compound%20Notes/export.csv?filter_expression=${expression}&filter_count_range=6&filter_count_range=8`,
+      { headers: userHeaders }
+    );
+    expect(csv.status).toBe(200);
+    await expect(csv.text()).resolves.toBe("title,priority,count\nHigh Routine,High,7");
+  });
+
   it("rejects malformed repeated range query-string filters", async () => {
     const { app, services } = makeApp();
     services.registry.registerReport(

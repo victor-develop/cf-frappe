@@ -116,6 +116,15 @@ describe("reports", () => {
     ).not.toThrow();
 
     expect(() =>
+      defineReport({
+        name: "Reserved Filter Name",
+        doctype: "Note",
+        columns: [{ name: "title" }],
+        filters: [{ name: "expression", field: "status" }]
+      })
+    ).toThrow("Report 'Reserved Filter Name' filter name 'expression' is reserved for filter_expression query parameters");
+
+    expect(() =>
       createRegistry({
         doctypes: [Note],
         reports: [

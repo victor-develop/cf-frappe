@@ -2116,6 +2116,37 @@ describe("Desk client runtime", () => {
     expect(calls.map((call) => call.init.body)).toEqual([undefined, undefined, undefined, undefined]);
   });
 
+  it("maps report compound filter expressions to query parameters", () => {
+    const runtime = evaluateDeskClient(async () =>
+      new Response(JSON.stringify({ data: { ok: true } }), {
+        headers: { "content-type": "application/json" }
+      })
+    );
+    const filterExpression = {
+      kind: "group",
+      match: "any",
+      filters: [
+        { filter: "priority", value: "High" },
+        { filter: "title", value: "Urgent" }
+      ]
+    };
+    const encoded = encodeURIComponent(JSON.stringify(filterExpression));
+
+    expect(runtime.report.csvUrl("Open Notes", { filterExpression })).toBe(
+      `/api/report/Open%20Notes/export.csv?filter_expression=${encoded}`
+    );
+    expect(runtime.report.pdfUrl("Open Notes", {
+      filterExpression,
+      filters: { count_range: [6, 8] },
+      orderBy: "count"
+    })).toBe(
+      `/api/report/Open%20Notes/pdf?filter_count_range=6&filter_count_range=8&filter_expression=${encoded}&order_by=count`
+    );
+    expect(runtime.reportBuilder.csvUrl("Task Type", "report/high-counts", { filterExpression })).toBe(
+      `/api/report-builder/Task%20Type/report%2Fhigh-counts/export.csv?filter_expression=${encoded}`
+    );
+  });
+
   it("wraps saved report-builder APIs without browser-side definition validation", async () => {
     const pdf = new Uint8Array([37, 80, 68, 70]);
     const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];

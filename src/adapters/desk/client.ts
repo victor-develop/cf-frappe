@@ -617,6 +617,10 @@ export function renderDeskClientScript(): string {
     Object.entries((options && options.filters) || {}).forEach(function (entry) {
       appendFilterParams(params, entry[0], entry[1]);
     });
+    setFilterExpressionParam(
+      params,
+      options && (options.filterExpression !== undefined ? options.filterExpression : options.filter_expression)
+    );
     setParam(params, "order_by", options && (options.orderBy !== undefined ? options.orderBy : options.order_by));
     setParam(params, "order", options && options.order);
     setParam(params, "limit", options && options.limit);

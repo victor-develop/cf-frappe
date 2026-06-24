@@ -189,6 +189,75 @@ describe("saved report api", () => {
     });
   });
 
+  it("round-trips saved report compound filter expressions through JSON APIs", async () => {
+    const { app, services } = makeApp();
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Low Routine", priority: "Low", count: 2 }) });
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "High Routine", priority: "High", count: 7 }) });
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Medium Urgent", priority: "Medium", count: 5 }) });
+
+    const created = await app.request("/api/report-builder/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({
+        label: "Compound notes",
+        definition: {
+          columns: [{ name: "title" }, { name: "priority" }, { name: "count" }],
+          filters: [
+            { name: "priority", field: "priority" },
+            { name: "title", field: "title", operator: "contains" },
+            { name: "count_range", field: "count", operator: "between" }
+          ],
+          filterExpression: {
+            kind: "group",
+            match: "any",
+            filters: [
+              { filter: "priority", value: "High" },
+              { filter: "title", value: "Urgent" }
+            ]
+          }
+        }
+      })
+    });
+
+    expect(created.status).toBe(201);
+    await expect(created.json()).resolves.toMatchObject({
+      data: {
+        definition: {
+          filterExpression: {
+            match: "any",
+            filters: [
+              { filter: "priority", value: "High" },
+              { filter: "title", value: "Urgent" }
+            ]
+          }
+        }
+      }
+    });
+
+    const run = await app.request("/api/report-builder/Note/report_high-counts/run", { headers: userHeaders });
+    expect(run.status).toBe(200);
+    await expect(run.json()).resolves.toMatchObject({
+      rows: [
+        { title: "High Routine", priority: "High", count: 7 },
+        { title: "Medium Urgent", priority: "Medium", count: 5 }
+      ],
+      total: 2
+    });
+
+    const expression = encodeURIComponent(JSON.stringify({
+      kind: "group",
+      match: "all",
+      filters: [{ filter: "count_range", value: [6, 8] }]
+    }));
+    const narrowed = await app.request(`/api/report-builder/Note/report_high-counts/run?filter_expression=${expression}`, {
+      headers: userHeaders
+    });
+    await expect(narrowed.json()).resolves.toMatchObject({
+      rows: [{ title: "High Routine", priority: "High", count: 7 }],
+      total: 1
+    });
+  });
+
   it("renders a saved report as PDF through the configured renderer", async () => {
     const pdf = new Uint8Array([37, 80, 68, 70, 45, 49, 46, 55]);
     const renderer = new RecordingPrintPdfRenderer({ body: pdf, contentLength: pdf.byteLength });

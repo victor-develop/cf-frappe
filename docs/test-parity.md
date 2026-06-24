@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Cloudflare Browser Rendering PDF adapter slice:
+As of the report compound filter expression slice:
 
 - Vitest files: `89`
-- Vitest cases: `966`
+- Vitest cases: `974`
 
 ## Implication
 

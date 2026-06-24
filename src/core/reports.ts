@@ -11,6 +11,8 @@ export type ReportOrder = "asc" | "desc";
 export type ReportChartOrder = ReportOrder;
 export type ReportFormulaOperator = "add" | "subtract" | "multiply" | "divide";
 export type ReportFormulaOperand = string | number | ReportFormulaDefinition;
+export type ReportFilterGroupMatch = "all" | "any";
+export type ReportFilterExpression = ReportFilterPredicate | ReportFilterGroup;
 export type ReportSourceDefinition =
   | { readonly kind: "documents" }
   | { readonly kind: "custom"; readonly provider: string };
@@ -21,8 +23,23 @@ const REPORT_FIELD_TYPES = ["text", "longText", "integer", "number", "boolean", 
 const REPORT_ORDERS = ["asc", "desc"] as const;
 const REPORT_SUMMARY_AGGREGATES = ["count", "sum", "avg", "min", "max"] as const;
 const REPORT_FORMULA_OPERATORS = ["add", "subtract", "multiply", "divide"] as const;
+const REPORT_FILTER_GROUP_MATCHES = ["all", "any"] as const;
 const REPORT_CHART_COLOR_PATTERN = /^#[0-9A-Fa-f]{3}(?:[0-9A-Fa-f]{3})?$/;
+const REPORT_FILTER_EXPRESSION_RESERVED_FILTER_NAME = "expression";
 export const REPORT_FORMULA_MAX_DEPTH = 16;
+export const REPORT_FILTER_EXPRESSION_MAX_DEPTH = 5;
+export const REPORT_FILTER_EXPRESSION_MAX_NODES = 64;
+
+export interface ReportFilterPredicate {
+  readonly filter: string;
+  readonly value: ReportFilterValue;
+}
+
+export interface ReportFilterGroup {
+  readonly kind: "group";
+  readonly match: ReportFilterGroupMatch;
+  readonly filters: readonly ReportFilterExpression[];
+}
 
 export interface ReportFormulaDefinition {
   readonly operator: ReportFormulaOperator;
@@ -90,6 +107,7 @@ export interface ReportDefinition {
   readonly source?: ReportSourceDefinition;
   readonly columns: readonly ReportColumnDefinition[];
   readonly filters?: readonly ReportFilterDefinition[];
+  readonly filterExpression?: ReportFilterExpression;
   readonly summaries?: readonly ReportSummaryDefinition[];
   readonly groups?: readonly ReportGroupDefinition[];
   readonly charts?: readonly ReportChartDefinition[];
@@ -114,6 +132,9 @@ export function defineReport(definition: ReportDefinition): ReportDefinition {
         )
       )
     : undefined;
+  const filterExpression = definition.filterExpression === undefined
+    ? undefined
+    : freezeReportFilterExpression(definition.filterExpression);
   const columns = Object.freeze(
     definition.columns.map((column) =>
       Object.freeze({
@@ -148,6 +169,7 @@ export function defineReport(definition: ReportDefinition): ReportDefinition {
     ...(definition.source ? { source: Object.freeze({ ...definition.source }) } : {}),
     columns,
     ...(filters ? { filters } : {}),
+    ...(filterExpression === undefined ? {} : { filterExpression }),
     ...(summaries ? { summaries } : {}),
     ...(groups ? { groups } : {}),
     ...(charts ? { charts } : {})
@@ -183,6 +205,7 @@ export function assertReportDefinition(definition: ReportDefinition): void {
     assertUnique(group.summaries.map((summary) => summary.name), `summary on group '${group.name}'`, definition.name);
   }
   assertFiltersValid(definition);
+  assertFilterExpressionSyntax(definition);
   assertSummariesValid(definition);
   assertFormulaColumnsValid(definition);
   assertDisplayTypesValid(definition);
@@ -195,6 +218,30 @@ export function canReadReport(actor: Actor, report: ReportDefinition): boolean {
     return true;
   }
   return report.roles === undefined || report.roles.some((role) => actor.roles.includes(role));
+}
+
+export function isReportFilterGroup(expression: ReportFilterExpression): expression is ReportFilterGroup {
+  return "kind" in expression && expression.kind === "group";
+}
+
+export function assertReportFilterExpressionBounds(
+  expression: ReportFilterExpression | undefined,
+  label = "Report filter expression",
+  options: ReportFilterExpressionValidationOptions = {}
+): void {
+  if (expression === undefined) {
+    return;
+  }
+  const maxDepth = options.maxDepth ?? REPORT_FILTER_EXPRESSION_MAX_DEPTH;
+  const maxNodes = options.maxNodes ?? REPORT_FILTER_EXPRESSION_MAX_NODES;
+  assertFilterExpressionSyntaxNode(expression, {
+    budget: { remaining: maxNodes },
+    depth: 1,
+    errorCode: options.errorCode ?? "BAD_REQUEST",
+    label,
+    maxDepth,
+    maxNodes
+  });
 }
 
 export function assertReportFilterValues(
@@ -369,6 +416,10 @@ function isJsonPrimitive(value: unknown): value is JsonPrimitive {
   return value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean";
 }
 
+function isReportFilterValue(value: unknown): value is ReportFilterValue {
+  return isJsonPrimitive(value) || (Array.isArray(value) && value.every(isJsonPrimitive));
+}
+
 export function isReportChartColor(value: string): boolean {
   return REPORT_CHART_COLOR_PATTERN.test(value);
 }
@@ -377,6 +428,7 @@ export function assertReportMatchesDocType(report: ReportDefinition, doctype: Do
   const fields = new Map(doctype.fields.map((field) => [field.name, field]));
   if (isCustomReport(report)) {
     assertCustomReportReferences(report, fields);
+    assertFilterExpressionMatchesReport(report, fields);
     return;
   }
   for (const column of report.columns) {
@@ -413,6 +465,7 @@ export function assertReportMatchesDocType(report: ReportDefinition, doctype: Do
     }
     assertReportFilterOperatorMatchesType(report, filter, field.type);
   }
+  assertFilterExpressionMatchesReport(report, fields);
   for (const summary of report.summaries ?? []) {
     assertSummaryMatchesDocType(report.name, summary, fields);
   }
@@ -464,6 +517,48 @@ function assertCustomReportReferences(
     }
     assertReportFilterOperatorMatchesType(report, filter, filter.type ?? field?.type);
   }
+}
+
+function assertFilterExpressionMatchesReport(
+  report: ReportDefinition,
+  fields: ReadonlyMap<string, FieldDefinition>
+): void {
+  const expression = report.filterExpression;
+  if (expression === undefined) {
+    return;
+  }
+  const filters = new Map((report.filters ?? []).map((filter) => [filter.name, filter]));
+  assertFilterExpressionNodeMatchesReport(report, filters, fields, expression);
+}
+
+function assertFilterExpressionNodeMatchesReport(
+  report: ReportDefinition,
+  filters: ReadonlyMap<string, ReportFilterDefinition>,
+  fields: ReadonlyMap<string, FieldDefinition>,
+  expression: ReportFilterExpression
+): void {
+  if (isReportFilterGroup(expression)) {
+    for (const child of expression.filters) {
+      assertFilterExpressionNodeMatchesReport(report, filters, fields, child);
+    }
+    return;
+  }
+  const filter = filters.get(expression.filter);
+  if (filter === undefined) {
+    throw new FrameworkError(
+      "REPORT_INVALID",
+      `Report '${report.name}' filter expression references unknown filter '${expression.filter}'`,
+      { status: 400 }
+    );
+  }
+  assertReportFilterValue(
+    report,
+    filter,
+    expression.value,
+    filter.type ?? fields.get(filter.field)?.type,
+    `Report '${report.name}' filter expression`,
+    "REPORT_INVALID"
+  );
 }
 
 function assertReportFilterOperatorMatchesType(
@@ -617,6 +712,13 @@ function assertFormulaOperandSyntax(
 
 function assertFiltersValid(report: ReportDefinition): void {
   for (const filter of report.filters ?? []) {
+    if (filter.name === REPORT_FILTER_EXPRESSION_RESERVED_FILTER_NAME) {
+      throw new FrameworkError(
+        "REPORT_INVALID",
+        `Report '${report.name}' filter name '${filter.name}' is reserved for filter_expression query parameters`,
+        { status: 400 }
+      );
+    }
     if (filter.operator !== undefined && !REPORT_FILTER_OPERATORS.includes(filter.operator)) {
       throw new FrameworkError(
         "REPORT_INVALID",
@@ -648,6 +750,75 @@ function assertFiltersValid(report: ReportDefinition): void {
       }
     }
   }
+}
+
+function assertFilterExpressionSyntax(report: ReportDefinition): void {
+  assertReportFilterExpressionBounds(report.filterExpression, `Report '${report.name}' filter expression`, {
+    errorCode: "REPORT_INVALID"
+  });
+}
+
+function assertFilterExpressionSyntaxNode(
+  expression: ReportFilterExpression,
+  options: {
+    readonly budget: { remaining: number };
+    readonly depth: number;
+    readonly errorCode: FrameworkErrorCode;
+    readonly label: string;
+    readonly maxDepth: number;
+    readonly maxNodes: number;
+  }
+): void {
+  options.budget.remaining -= 1;
+  if (options.budget.remaining < 0) {
+    throw new FrameworkError(
+      options.errorCode,
+      `${options.label} cannot exceed ${options.maxDepth} levels or ${options.maxNodes} nodes`,
+      { status: 400 }
+    );
+  }
+  if (isReportFilterGroup(expression)) {
+    if (options.depth > options.maxDepth) {
+      throw new FrameworkError(
+        options.errorCode,
+        `${options.label} cannot exceed ${options.maxDepth} levels`,
+        { status: 400 }
+      );
+    }
+    if (!REPORT_FILTER_GROUP_MATCHES.includes(expression.match)) {
+      throw new FrameworkError(options.errorCode, `${options.label} match must be all or any`, {
+        status: 400
+      });
+    }
+    if (!Array.isArray(expression.filters) || expression.filters.length === 0) {
+      throw new FrameworkError(options.errorCode, `${options.label} group must include at least one filter`, {
+        status: 400
+      });
+    }
+    for (const child of expression.filters) {
+      assertFilterExpressionSyntaxNode(child, {
+        ...options,
+        depth: options.depth + 1
+      });
+    }
+    return;
+  }
+  if (typeof expression.filter !== "string" || expression.filter.trim() === "") {
+    throw new FrameworkError(options.errorCode, `${options.label} filter must be a string`, {
+      status: 400
+    });
+  }
+  if (!isReportFilterValue(expression.value)) {
+    throw new FrameworkError(options.errorCode, `${options.label} value must be scalar or scalar array`, {
+      status: 400
+    });
+  }
+}
+
+export interface ReportFilterExpressionValidationOptions {
+  readonly errorCode?: FrameworkErrorCode;
+  readonly maxDepth?: number;
+  readonly maxNodes?: number;
 }
 
 function assertSummariesValid(report: ReportDefinition): void {
@@ -862,6 +1033,20 @@ function freezeReportFormulaOperand(
 
 function isReportFormulaDefinition(operand: ReportFormulaOperand): operand is ReportFormulaDefinition {
   return typeof operand === "object" && operand !== null && !Array.isArray(operand);
+}
+
+function freezeReportFilterExpression(expression: ReportFilterExpression): ReportFilterExpression {
+  if (isReportFilterGroup(expression)) {
+    return Object.freeze({
+      kind: "group",
+      match: expression.match,
+      filters: Object.freeze(expression.filters.map(freezeReportFilterExpression))
+    });
+  }
+  return Object.freeze({
+    filter: expression.filter,
+    value: Array.isArray(expression.value) ? Object.freeze([...expression.value]) : expression.value
+  });
 }
 
 function formulaPath(path: string): string {

@@ -7,7 +7,7 @@ import { defaultPrintLayoutFor, printPdfResponseBody, printPdfResponseHeaders, r
 import type { ActorResolver } from "./actor.js";
 import { parseOptionalInteger } from "./request.js";
 import { writeReportCsvHeaders } from "./report-export.js";
-import { reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request.js";
+import { reportFilterExpressionFromUrl, reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request.js";
 
 export interface ReportApiOptions {
   readonly reports: ReportService;
@@ -33,8 +33,10 @@ export function createReportApi(options: ReportApiOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const url = new URL(c.req.url);
     const limit = parseOptionalInteger(c.req.query("limit"));
+    const filterExpression = reportFilterExpressionFromUrl(url);
     const csv = await options.reports.exportReportCsv(actor, c.req.param("report"), {
       filters: reportFiltersFromUrl(url),
+      ...(filterExpression === undefined ? {} : { filterExpression }),
       ...reportOrderingFromUrl(url),
       ...(limit !== undefined ? { limit } : {})
     });
@@ -50,8 +52,10 @@ export function createReportApi(options: ReportApiOptions): Hono {
     const url = new URL(c.req.url);
     const limit = parseOptionalInteger(c.req.query("limit"));
     const offset = parseOptionalInteger(c.req.query("offset"));
+    const filterExpression = reportFilterExpressionFromUrl(url);
     const result = await options.reports.runReport(actor, c.req.param("report"), {
       filters: reportFiltersFromUrl(url),
+      ...(filterExpression === undefined ? {} : { filterExpression }),
       ...reportOrderingFromUrl(url),
       ...(limit !== undefined ? { limit } : {}),
       ...(offset !== undefined ? { offset } : {})
@@ -71,8 +75,10 @@ export function createReportApi(options: ReportApiOptions): Hono {
     const url = new URL(c.req.url);
     const limit = parseOptionalInteger(c.req.query("limit"));
     const offset = parseOptionalInteger(c.req.query("offset"));
+    const filterExpression = reportFilterExpressionFromUrl(url);
     const result = await options.reports.runReport(actor, c.req.param("report"), {
       filters: reportFiltersFromUrl(url),
+      ...(filterExpression === undefined ? {} : { filterExpression }),
       ...reportOrderingFromUrl(url),
       ...(limit !== undefined ? { limit } : {}),
       ...(offset !== undefined ? { offset } : {})
