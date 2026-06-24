@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the dashboard report-chart card slice:
+As of the dashboard document aggregate card slice:
 
 - Vitest files: `79`
-- Vitest cases: `863`
+- Vitest cases: `864`
 
 ## Implication
 

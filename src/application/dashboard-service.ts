@@ -2,11 +2,12 @@ import { permissionDenied } from "../core/errors.js";
 import {
   canReadDashboard,
   type DashboardCardDefinition,
+  type DashboardDocumentAggregate,
   type DashboardCardSourceDefinition,
   type DashboardDefinition
 } from "../core/dashboard.js";
 import type { ModelRegistry } from "../core/registry.js";
-import type { Actor, JsonPrimitive } from "../core/types.js";
+import type { Actor, DocumentSnapshot, JsonPrimitive, ListDocumentsFilter } from "../core/types.js";
 import type { QueryService } from "./query-service.js";
 import type { ReportChartResult, ReportFilters, ReportService } from "./report-service.js";
 
@@ -79,6 +80,9 @@ export class DashboardService {
     if (source.kind === "documentCount") {
       return this.countReadableDocuments(actor, source);
     }
+    if (source.kind === "documentAggregate") {
+      return this.aggregateReadableDocuments(actor, source);
+    }
     const result = await this.reports.runReport(actor, source.report, {
       filters: (source.filters ?? {}) as ReportFilters,
       limit: 1
@@ -93,17 +97,50 @@ export class DashboardService {
     actor: Actor,
     source: Extract<DashboardCardSourceDefinition, { readonly kind: "documentCount" }>
   ): Promise<number> {
+    return this.foldReadableDocuments(actor, source.doctype, source.filters ?? [], 0, (count) => count + 1);
+  }
+
+  private async aggregateReadableDocuments(
+    actor: Actor,
+    source: Extract<DashboardCardSourceDefinition, { readonly kind: "documentAggregate" }>
+  ): Promise<JsonPrimitive> {
+    if (source.aggregate === "count") {
+      return this.foldReadableDocuments(actor, source.doctype, source.filters ?? [], 0, (count) => count + 1);
+    }
+    const field = source.field;
+    if (field === undefined) {
+      return null;
+    }
+    const result = await this.foldReadableDocuments(
+      actor,
+      source.doctype,
+      source.filters ?? [],
+      emptyDocumentAggregate(),
+      (aggregate, document) => updateDocumentAggregate(aggregate, document.data[field])
+    );
+    return finishDocumentAggregate(result, source.aggregate);
+  }
+
+  private async foldReadableDocuments<T>(
+    actor: Actor,
+    doctype: string,
+    filters: readonly ListDocumentsFilter[],
+    initial: T,
+    reducer: (accumulator: T, document: DocumentSnapshot) => T
+  ): Promise<T> {
     const pageSize = 200;
-    let count = 0;
+    let accumulator = initial;
     for (let offset = 0; ; offset += pageSize) {
-      const page = await this.queries.listDocuments(actor, source.doctype, {
-        filters: source.filters ?? [],
+      const page = await this.queries.listDocuments(actor, doctype, {
+        filters,
         limit: pageSize,
         offset
       });
-      count += page.data.length;
+      for (const document of page.data) {
+        accumulator = reducer(accumulator, document);
+      }
       if (offset + page.limit >= page.total) {
-        return count;
+        return accumulator;
       }
     }
   }
@@ -114,7 +151,7 @@ export class DashboardService {
 
   private canAccessCard(actor: Actor, source: DashboardCardSourceDefinition): boolean {
     try {
-      if (source.kind === "documentCount") {
+      if (source.kind === "documentCount" || source.kind === "documentAggregate") {
         this.queries.getMeta(actor, source.doctype);
         return true;
       }
@@ -131,4 +168,51 @@ export class DashboardService {
 
 function isPermissionDenied(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "PERMISSION_DENIED";
+}
+
+interface DocumentAggregateState {
+  readonly count: number;
+  readonly sum: number;
+  readonly min: number | null;
+  readonly max: number | null;
+}
+
+function emptyDocumentAggregate(): DocumentAggregateState {
+  return {
+    count: 0,
+    sum: 0,
+    min: null,
+    max: null
+  };
+}
+
+function updateDocumentAggregate(
+  state: DocumentAggregateState,
+  value: unknown
+): DocumentAggregateState {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return state;
+  }
+  return {
+    count: state.count + 1,
+    sum: state.sum + value,
+    min: state.min === null ? value : Math.min(state.min, value),
+    max: state.max === null ? value : Math.max(state.max, value)
+  };
+}
+
+function finishDocumentAggregate(state: DocumentAggregateState, aggregate: DashboardDocumentAggregate): JsonPrimitive {
+  if (aggregate === "sum") {
+    return state.sum;
+  }
+  if (aggregate === "avg") {
+    return state.count === 0 ? null : state.sum / state.count;
+  }
+  if (aggregate === "min") {
+    return state.min;
+  }
+  if (aggregate === "max") {
+    return state.max;
+  }
+  return state.count;
 }

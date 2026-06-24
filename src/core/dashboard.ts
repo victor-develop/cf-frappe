@@ -2,11 +2,21 @@ import { FrameworkError } from "./errors.js";
 import { SYSTEM_MANAGER_ROLE, type Actor, type JsonPrimitive, type ListDocumentsFilter } from "./types.js";
 
 export type DashboardReportFilters = Readonly<Record<string, JsonPrimitive | undefined>>;
+export type DashboardDocumentAggregate = "count" | "sum" | "avg" | "min" | "max";
+
+export const DASHBOARD_DOCUMENT_AGGREGATES = ["count", "sum", "avg", "min", "max"] as const satisfies readonly DashboardDocumentAggregate[];
 
 export type DashboardCardSourceDefinition =
   | {
       readonly kind: "documentCount";
       readonly doctype: string;
+      readonly filters?: readonly ListDocumentsFilter[];
+    }
+  | {
+      readonly kind: "documentAggregate";
+      readonly doctype: string;
+      readonly aggregate: DashboardDocumentAggregate;
+      readonly field?: string;
       readonly filters?: readonly ListDocumentsFilter[];
     }
   | {
@@ -79,7 +89,7 @@ export function canReadDashboard(actor: Actor, dashboard: DashboardDefinition): 
 }
 
 function freezeDashboardCardSource(source: DashboardCardSourceDefinition): DashboardCardSourceDefinition {
-  if (source.kind === "documentCount") {
+  if (source.kind === "documentCount" || source.kind === "documentAggregate") {
     return Object.freeze({
       ...source,
       ...(source.filters
@@ -101,6 +111,28 @@ function assertDashboardCardSource(dashboardName: string, card: DashboardCardDef
   const source = card.source;
   if (source.kind === "documentCount") {
     assertDashboardIdentifier(source.doctype, `dashboard '${dashboardName}' card '${card.name}' DocType`);
+    return;
+  }
+  if (source.kind === "documentAggregate") {
+    assertDashboardIdentifier(source.doctype, `dashboard '${dashboardName}' card '${card.name}' DocType`);
+    if (!DASHBOARD_DOCUMENT_AGGREGATES.includes(source.aggregate)) {
+      throw new FrameworkError(
+        "DASHBOARD_INVALID",
+        `Dashboard '${dashboardName}' card '${card.name}' has invalid document aggregate '${String(source.aggregate)}'`,
+        { status: 400 }
+      );
+    }
+    if (source.aggregate === "count") {
+      if (source.field !== undefined) {
+        throw new FrameworkError(
+          "DASHBOARD_INVALID",
+          `Dashboard '${dashboardName}' card '${card.name}' count aggregate must not define a field`,
+          { status: 400 }
+        );
+      }
+      return;
+    }
+    assertDashboardIdentifier(source.field ?? "", `dashboard '${dashboardName}' card '${card.name}' aggregate field`);
     return;
   }
   if (source.kind === "reportSummary") {

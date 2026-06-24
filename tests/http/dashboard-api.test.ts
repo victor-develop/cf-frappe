@@ -32,6 +32,16 @@ describe("dashboard api", () => {
             }
           },
           {
+            name: "open_count_sum",
+            source: {
+              kind: "documentAggregate",
+              doctype: "Note",
+              aggregate: "sum",
+              field: "count",
+              filters: [{ field: "workflow_state", value: "Open" }]
+            }
+          },
+          {
             name: "total_count",
             source: {
               kind: "reportSummary",
@@ -76,7 +86,12 @@ describe("dashboard api", () => {
     const listed = await app.request("/api/meta/dashboards", { headers: userHeaders });
     expect(listed.status).toBe(200);
     await expect(listed.json()).resolves.toMatchObject({
-      data: [{ name: "Operations", cards: [{ name: "open_notes" }, { name: "total_count" }, { name: "priority_chart" }] }]
+      data: [
+        {
+          name: "Operations",
+          cards: [{ name: "open_notes" }, { name: "open_count_sum" }, { name: "total_count" }, { name: "priority_chart" }]
+        }
+      ]
     });
 
     const run = await app.request("/api/dashboard/Operations/run", { headers: userHeaders });
@@ -86,6 +101,7 @@ describe("dashboard api", () => {
         dashboard: { name: "Operations" },
         cards: [
           { name: "open_notes", value: 2 },
+          { name: "open_count_sum", value: 8 },
           { name: "total_count", value: 5 },
           {
             name: "priority_chart",

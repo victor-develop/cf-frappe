@@ -16,6 +16,16 @@ describe("dashboards", () => {
           }
         },
         {
+          name: "total_open_count",
+          source: {
+            kind: "documentAggregate",
+            doctype: "Note",
+            aggregate: "sum",
+            field: "count",
+            filters: [{ field: "workflow_state", value: "Open" }]
+          }
+        },
+        {
           name: "total_count",
           source: {
             kind: "reportSummary",
@@ -40,8 +50,9 @@ describe("dashboards", () => {
     expect(Object.isFrozen(dashboard.cards)).toBe(true);
     expect(Object.isFrozen(dashboard.cards[0]?.source)).toBe(true);
     expect(Object.isFrozen(dashboard.cards[0]?.source.kind === "documentCount" ? dashboard.cards[0].source.filters : [])).toBe(true);
-    expect(Object.isFrozen(dashboard.cards[1]?.source.kind === "reportSummary" ? dashboard.cards[1].source.filters : {})).toBe(true);
-    expect(Object.isFrozen(dashboard.cards[2]?.source.kind === "reportChart" ? dashboard.cards[2].source.filters : {})).toBe(true);
+    expect(Object.isFrozen(dashboard.cards[1]?.source.kind === "documentAggregate" ? dashboard.cards[1].source.filters : [])).toBe(true);
+    expect(Object.isFrozen(dashboard.cards[2]?.source.kind === "reportSummary" ? dashboard.cards[2].source.filters : {})).toBe(true);
+    expect(Object.isFrozen(dashboard.cards[3]?.source.kind === "reportChart" ? dashboard.cards[3].source.filters : {})).toBe(true);
   });
 
   it("validates dashboard card sources against registered DocTypes and reports", () => {
@@ -84,6 +95,16 @@ describe("dashboards", () => {
               }
             },
             {
+              name: "total_open_count",
+              source: {
+                kind: "documentAggregate",
+                doctype: "Note",
+                aggregate: "sum",
+                field: "count",
+                filters: [{ field: "workflow_state", value: "Open" }]
+              }
+            },
+            {
               name: "total_count",
               source: { kind: "reportSummary", report: "Open Notes", summary: "total_count" }
             },
@@ -99,6 +120,7 @@ describe("dashboards", () => {
     expect(registry.getDashboard("Operations")).toMatchObject({
       cards: [
         { name: "open_notes", source: { kind: "documentCount", doctype: "Note" } },
+        { name: "total_open_count", source: { kind: "documentAggregate", doctype: "Note", aggregate: "sum", field: "count" } },
         { name: "total_count", source: { kind: "reportSummary", report: "Open Notes" } },
         { name: "notes_by_state", source: { kind: "reportChart", report: "Open Notes", chart: "notes_by_state" } }
       ]
@@ -114,6 +136,44 @@ describe("dashboards", () => {
         ]
       })
     ).toThrow(FrameworkError);
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        dashboards: [
+          defineDashboard({
+            name: "Broken",
+            cards: [
+              {
+                name: "missing",
+                source: { kind: "documentAggregate", doctype: "Note", aggregate: "sum", field: "missing" }
+              }
+            ]
+          })
+        ]
+      })
+    ).toThrow("references unknown aggregate field");
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        dashboards: [
+          defineDashboard({
+            name: "Broken",
+            cards: [
+              {
+                name: "text_sum",
+                source: { kind: "documentAggregate", doctype: "Note", aggregate: "sum", field: "title" }
+              }
+            ]
+          })
+        ]
+      })
+    ).toThrow("must be an integer or number field");
+    expect(() =>
+      defineDashboard({
+        name: "Broken",
+        cards: [{ name: "count", source: { kind: "documentAggregate", doctype: "Note", aggregate: "count", field: "count" } }]
+      })
+    ).toThrow("count aggregate must not define a field");
     expect(() =>
       createRegistry({
         doctypes: [Note],

@@ -439,6 +439,17 @@ describe("Desk app", () => {
               source: { kind: "documentCount", doctype: "Note", filters: [{ field: "workflow_state", value: "Open" }] }
             },
             {
+              name: "open_count_sum",
+              label: "Open Count Sum",
+              source: {
+                kind: "documentAggregate",
+                doctype: "Note",
+                aggregate: "sum",
+                field: "count",
+                filters: [{ field: "workflow_state", value: "Open" }]
+              }
+            },
+            {
               name: "high_total",
               label: "High Count",
               source: {
@@ -505,13 +516,16 @@ describe("Desk app", () => {
     expect(list.status).toBe(200);
     const listHtml = await list.text();
     expect(listHtml).toContain("Operational KPIs");
-    expect(listHtml).toContain("<td>3</td>");
+    expect(listHtml).toContain("<td>4</td>");
 
     const page = await app.request("/desk/dashboards/Operations");
     expect(page.status).toBe(200);
     const html = await page.text();
     expect(html).toContain("Readable open notes");
     expect(html).toContain("<strong>2</strong>");
+    expect(html).toContain("Open Count Sum");
+    expect(html).toContain("<strong>10</strong>");
+    expect(html).toContain("Note sum(count)");
     expect(html).toContain("High Count");
     expect(html).toContain("<strong>12</strong>");
     expect(html).toContain("Open Notes / total_count");

@@ -680,6 +680,11 @@ function dashboardCardSourceLabel(source: DashboardRunResult["cards"][number]["s
   if (source.kind === "documentCount") {
     return `${source.doctype} count`;
   }
+  if (source.kind === "documentAggregate") {
+    return source.aggregate === "count"
+      ? `${source.doctype} count`
+      : `${source.doctype} ${source.aggregate}(${source.field ?? ""})`;
+  }
   if (source.kind === "reportChart") {
     return `${source.report} / ${source.chart}`;
   }

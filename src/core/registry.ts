@@ -3,7 +3,12 @@ import { resolveAppDependencyOrder } from "./app-graph.js";
 import { clientScriptAppliesTo, defineClientScript } from "./client-script.js";
 import type { ClientScriptDefinition, ClientScriptScope } from "./client-script.js";
 import { assertDataPatchId, defineDataPatch, type DataPatchDefinition } from "./data-patch.js";
-import { assertDashboardDefinition, defineDashboard, type DashboardDefinition } from "./dashboard.js";
+import {
+  assertDashboardDefinition,
+  defineDashboard,
+  type DashboardCardSourceDefinition,
+  type DashboardDefinition
+} from "./dashboard.js";
 import { FrameworkError } from "./errors.js";
 import { normalizeListFilters } from "./list-view.js";
 import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-format.js";
@@ -17,6 +22,7 @@ import type {
   DocumentData,
   DocumentSnapshot,
   DomainEvent,
+  FieldDefinition,
   MutableDocumentData,
   ValidationIssue
 } from "./types.js";
@@ -419,7 +425,7 @@ export class ModelRegistry {
   private assertDashboardReferencesResolve(dashboard: DashboardDefinition): void {
     for (const card of dashboard.cards) {
       const source = card.source;
-      if (source.kind === "documentCount") {
+      if (source.kind === "documentCount" || source.kind === "documentAggregate") {
         const doctype = this.doctypes.get(source.doctype);
         if (!doctype) {
           throw new FrameworkError(
@@ -429,6 +435,9 @@ export class ModelRegistry {
           );
         }
         normalizeListFilters(doctype, source.filters ?? []);
+        if (source.kind === "documentAggregate") {
+          this.assertDashboardDocumentAggregateReferencesResolve(dashboard, card.name, source, doctype);
+        }
         continue;
       }
       const report = this.reports.get(source.report);
@@ -462,10 +471,40 @@ export class ModelRegistry {
       });
     }
   }
+
+  private assertDashboardDocumentAggregateReferencesResolve(
+    dashboard: DashboardDefinition,
+    cardName: string,
+    source: Extract<DashboardCardSourceDefinition, { readonly kind: "documentAggregate" }>,
+    doctype: DocTypeDefinition
+  ): void {
+    if (source.aggregate === "count") {
+      return;
+    }
+    const field = doctype.fields.find((candidate) => candidate.name === source.field);
+    if (!field) {
+      throw new FrameworkError(
+        "DASHBOARD_INVALID",
+        `Dashboard '${dashboard.name}' card '${cardName}' references unknown aggregate field '${source.field}' on DocType '${source.doctype}'`,
+        { status: 400 }
+      );
+    }
+    if (!isNumericDashboardAggregateField(field)) {
+      throw new FrameworkError(
+        "DASHBOARD_INVALID",
+        `Dashboard '${dashboard.name}' card '${cardName}' aggregate field '${source.field}' must be an integer or number field`,
+        { status: 400 }
+      );
+    }
+  }
 }
 
 export function createRegistry(options: RegistryOptions = {}): ModelRegistry {
   return new ModelRegistry(options);
+}
+
+function isNumericDashboardAggregateField(field: FieldDefinition): boolean {
+  return field.type === "integer" || field.type === "number";
 }
 
 const emptyHooks: readonly DocumentHooks[] = Object.freeze([]);
