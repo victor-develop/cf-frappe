@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the job schedule pause override slice:
+As of the Cloudflare Access account sync slice:
 
 - Vitest files: `80`
-- Vitest cases: `896`
+- Vitest cases: `907`
 
 ## Implication
 

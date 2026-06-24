@@ -1,9 +1,18 @@
 import {
+  cloudflareAccessAccountSyncActorResolver,
   cloudflareAccessActorResolver,
   DEFAULT_TENANT_ID,
+  deterministicIds,
+  fixedClock,
+  InMemoryEventStore,
+  SYSTEM_MANAGER_ROLE,
+  UserAccountService,
+  userAccountsStream,
   type CloudflareAccessJwtClaims,
-  type CloudflareAccessJwks
+  type CloudflareAccessJwks,
+  type PasswordHasher
 } from "../../src";
+import { now } from "../helpers";
 
 describe("Cloudflare Access actor resolver", () => {
   it("verifies Access JWT headers and resolves a default actor", async () => {
@@ -63,6 +72,101 @@ describe("Cloudflare Access actor resolver", () => {
       tenantId: "acme",
       email: "manager@example.com"
     });
+  });
+
+  it("syncs Access JWT claims into event-sourced provider accounts", async () => {
+    const signing = await createJwtSigner();
+    const events = new InMemoryEventStore();
+    const userAccounts = new UserAccountService({
+      events,
+      passwords: deterministicPasswords(),
+      ids: deterministicIds(["account-created", "provider-linked"]),
+      clock: fixedClock(now)
+    });
+    const resolver = cloudflareAccessAccountSyncActorResolver({
+      teamDomain: "team.cloudflareaccess.com",
+      audience: "desk",
+      now: () => 1_000,
+      fetchJwks: async () => signing.jwks,
+      userAccounts,
+      tenantId: () => "acme",
+      roles: (claims) => ["User", ...(claims.groups ?? []).map((group) => `Access:${group}`)]
+    });
+    const token = await signing.sign(defaultClaims({
+      sub: "access-subject-1",
+      email: "OWNER@EXAMPLE.COM",
+      groups: ["Support"]
+    }));
+    const request = new Request("https://app.test", { headers: { "cf-access-jwt-assertion": token } });
+
+    await expect(resolver(request)).resolves.toEqual({
+      id: "owner@example.com",
+      roles: ["Access:Support", "User"],
+      tenantId: "acme",
+      email: "owner@example.com"
+    });
+    await expect(events.readStream(userAccountsStream("acme", "owner@example.com"))).resolves.toMatchObject([
+      {
+        actorId: "cloudflare-access:sync",
+        payload: {
+          kind: "UserAccountCreated",
+          userId: "owner@example.com",
+          emailVerifiedAt: now,
+          roles: ["Access:Support", "User"]
+        }
+      },
+      {
+        actorId: "cloudflare-access:sync",
+        payload: {
+          kind: "UserAuthProviderLinked",
+          provider: "cloudflare-access",
+          subject: "access-subject-1"
+        }
+      }
+    ]);
+
+    await expect(resolver(request)).resolves.toMatchObject({ id: "owner@example.com" });
+    await expect(events.readStream(userAccountsStream("acme", "owner@example.com"))).resolves.toHaveLength(2);
+  });
+
+  it("uses normalized email as the provider subject fallback", async () => {
+    const signing = await createJwtSigner();
+    const events = new InMemoryEventStore();
+    const userAccounts = new UserAccountService({
+      events,
+      passwords: deterministicPasswords(),
+      ids: deterministicIds(["account-created", "provider-linked"]),
+      clock: fixedClock(now)
+    });
+    const resolver = cloudflareAccessAccountSyncActorResolver({
+      teamDomain: "team.cloudflareaccess.com",
+      audience: "desk",
+      now: () => 1_000,
+      fetchJwks: async () => signing.jwks,
+      userAccounts,
+      tenantId: () => "acme"
+    });
+    const first = await signing.sign(defaultClaimsWithoutSubject("OWNER@EXAMPLE.COM"));
+    const second = await signing.sign(defaultClaimsWithoutSubject("owner@example.com"));
+
+    await expect(
+      resolver(new Request("https://app.test", { headers: { "cf-access-jwt-assertion": first } }))
+    ).resolves.toMatchObject({ id: "owner@example.com" });
+    await expect(
+      resolver(new Request("https://app.test", { headers: { "cf-access-jwt-assertion": second } }))
+    ).resolves.toMatchObject({ id: "owner@example.com" });
+
+    await expect(events.readStream(userAccountsStream("acme", "owner@example.com"))).resolves.toMatchObject([
+      { payload: { kind: "UserAccountCreated" } },
+      {
+        payload: {
+          kind: "UserAuthProviderLinked",
+          provider: "cloudflare-access",
+          subject: "owner@example.com"
+        }
+      }
+    ]);
+    await expect(events.readStream(userAccountsStream("acme", "owner@example.com"))).resolves.toHaveLength(2);
   });
 
   it("uses a fallback actor when no Access JWT exists", async () => {
@@ -185,6 +289,16 @@ function defaultClaims(overrides: Partial<CloudflareAccessJwtClaims> = {}): Clou
   };
 }
 
+function defaultClaimsWithoutSubject(email: string): CloudflareAccessJwtClaims {
+  return {
+    iss: "https://team.cloudflareaccess.com",
+    aud: "desk",
+    exp: 2_000,
+    nbf: 900,
+    email
+  };
+}
+
 interface JwtSigner {
   readonly jwks: CloudflareAccessJwks;
   sign(claims: CloudflareAccessJwtClaims): Promise<string>;
@@ -233,4 +347,15 @@ function base64UrlEncode(bytes: Uint8Array): string {
     binary += String.fromCharCode(bytes[index]!);
   }
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+}
+
+function deterministicPasswords(): PasswordHasher {
+  return {
+    async hash(password) {
+      return `hash:${password}`;
+    },
+    async verify(password, encodedHash) {
+      return encodedHash === `hash:${password}`;
+    }
+  };
 }

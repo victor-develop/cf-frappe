@@ -15,6 +15,8 @@ import {
   signedSessionActorResolver,
   SYSTEM_MANAGER_ROLE,
   unsafeHeaderActorResolver,
+  type CloudflareAccessJwtClaims,
+  type CloudflareAccessJwks,
   type JobMessage,
   type PasswordHasher,
 } from "../../src";
@@ -1197,6 +1199,147 @@ describe("CloudFrappe Worker routing", () => {
     await expect(valid.json()).resolves.toMatchObject({ data: { roles: ["User"] } });
   });
 
+  it("can sync Cloudflare Access accounts through Worker auth composition", async () => {
+    const signing = await createJwtSigner();
+    const worker = createCloudFrappeWorker<CloudFrappeAccessAuthTestEnv>({
+      registry: createTestRegistry(),
+      actor: () => ({ id: "guest", roles: ["Guest"], tenantId: "acme" }),
+      auth: {
+        sessionSecret: (env) => env.SESSION_SECRET,
+        sessionMaxAgeSeconds: 60,
+        secure: false,
+        passwords: deterministicPasswords(),
+        ids: deterministicIds(["account-created", "provider-linked"]),
+        clock: fixedClock(now),
+        cloudflareAccess: {
+          teamDomain: (env) => env.CF_ACCESS_TEAM_DOMAIN,
+          audience: (env) => env.CF_ACCESS_AUD,
+          now: () => 1_000,
+          fetchJwks: async () => signing.jwks,
+          tenantId: () => "acme",
+          roles: () => [SYSTEM_MANAGER_ROLE]
+        }
+      }
+    });
+    const env = {
+      DB: fakeEventD1(),
+      AGGREGATES: fakeNamespace(),
+      SESSION_SECRET: "edge-secret",
+      CF_ACCESS_TEAM_DOMAIN: "team.cloudflareaccess.com",
+      CF_ACCESS_AUD: "desk"
+    };
+    const token = await signing.sign({
+      iss: "https://team.cloudflareaccess.com",
+      aud: "desk",
+      exp: 2_000,
+      nbf: 900,
+      sub: "access-subject-1",
+      email: "OWNER@EXAMPLE.COM"
+    });
+    const headers = { "cf-access-jwt-assertion": token };
+
+    const me = await worker.fetch!(cfRequest("http://localhost/api/auth/me", { headers }), env, fakeExecutionContext());
+    expect(me.status).toBe(200);
+    await expect(me.json()).resolves.toMatchObject({
+      data: {
+        id: "owner@example.com",
+        email: "owner@example.com",
+        roles: [SYSTEM_MANAGER_ROLE],
+        tenantId: "acme"
+      }
+    });
+
+    const account = await worker.fetch!(
+      cfRequest("http://localhost/api/users/owner%40example.com", { headers }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(account.status).toBe(200);
+    await expect(account.json()).resolves.toMatchObject({
+      data: {
+        userId: "owner@example.com",
+        version: 2,
+        email: "owner@example.com",
+        emailVerifiedAt: now,
+        providers: [
+          {
+            provider: "cloudflare-access",
+            subject: "access-subject-1"
+          }
+        ]
+      }
+    });
+  });
+
+  it("prefers Cloudflare Access identity over a conflicting signed session", async () => {
+    const signing = await createJwtSigner();
+    const staleCookie = await createSignedSessionCookie(
+      { id: "stale@example.com", roles: ["User"], tenantId: "acme", email: "stale@example.com" },
+      {
+        secret: "edge-secret",
+        maxAgeSeconds: 60,
+        accountVersion: 0,
+        secure: false
+      }
+    );
+    const worker = createCloudFrappeWorker<CloudFrappeAccessAuthTestEnv>({
+      registry: createTestRegistry(),
+      actor: () => ({ id: "guest", roles: ["Guest"], tenantId: "acme" }),
+      auth: {
+        sessionSecret: (env) => env.SESSION_SECRET,
+        sessionMaxAgeSeconds: 60,
+        secure: false,
+        revalidateSignedSessions: true,
+        passwords: deterministicPasswords(),
+        ids: deterministicIds(["account-created", "provider-linked"]),
+        clock: fixedClock(now),
+        cloudflareAccess: {
+          teamDomain: (env) => env.CF_ACCESS_TEAM_DOMAIN,
+          audience: (env) => env.CF_ACCESS_AUD,
+          now: () => 1_000,
+          fetchJwks: async () => signing.jwks,
+          tenantId: () => "acme",
+          roles: () => [SYSTEM_MANAGER_ROLE]
+        }
+      }
+    });
+    const env = {
+      DB: fakeEventD1(),
+      AGGREGATES: fakeNamespace(),
+      SESSION_SECRET: "edge-secret",
+      CF_ACCESS_TEAM_DOMAIN: "team.cloudflareaccess.com",
+      CF_ACCESS_AUD: "desk"
+    };
+    const token = await signing.sign({
+      iss: "https://team.cloudflareaccess.com",
+      aud: "desk",
+      exp: 2_000,
+      nbf: 900,
+      sub: "access-subject-1",
+      email: "OWNER@EXAMPLE.COM"
+    });
+
+    const me = await worker.fetch!(
+      cfRequest("http://localhost/api/auth/me", {
+        headers: {
+          cookie: staleCookie,
+          "cf-access-jwt-assertion": token
+        }
+      }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(me.status).toBe(200);
+    await expect(me.json()).resolves.toMatchObject({
+      data: {
+        id: "owner@example.com",
+        roles: [SYSTEM_MANAGER_ROLE],
+        tenantId: "acme"
+      }
+    });
+  });
+
   it("supports env-backed signed-session actor resolvers in the Worker factory", async () => {
     const cookie = await createSignedSessionCookie(owner, {
       secret: "edge-secret",
@@ -1618,6 +1761,11 @@ interface CloudFrappeAuthTestEnv {
   readonly SESSION_SECRET: string;
 }
 
+interface CloudFrappeAccessAuthTestEnv extends CloudFrappeAuthTestEnv {
+  readonly CF_ACCESS_TEAM_DOMAIN: string;
+  readonly CF_ACCESS_AUD: string;
+}
+
 function fakeNamespace(): RpcDurableObjectNamespace<AggregateCoordinatorRpc> {
   return {
     idFromName(name: string) {
@@ -1993,6 +2141,56 @@ function fakeEventD1(): D1Database {
       throw new Error("Not implemented");
     }
   } as unknown as D1Database;
+}
+
+interface JwtSigner {
+  readonly jwks: CloudflareAccessJwks;
+  sign(claims: CloudflareAccessJwtClaims): Promise<string>;
+}
+
+async function createJwtSigner(kid = "test-key"): Promise<JwtSigner> {
+  const keyPair = await crypto.subtle.generateKey(
+    {
+      name: "RSASSA-PKCS1-v1_5",
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: "SHA-256"
+    },
+    true,
+    ["sign", "verify"]
+  );
+  const publicJwk = {
+    ...(await crypto.subtle.exportKey("jwk", keyPair.publicKey)),
+    kid,
+    alg: "RS256",
+    use: "sig"
+  };
+  return {
+    jwks: { keys: [publicJwk] },
+    async sign(claims) {
+      const header = { alg: "RS256", typ: "JWT", kid };
+      const headerPart = base64UrlJson(header);
+      const payloadPart = base64UrlJson(claims);
+      const signature = await crypto.subtle.sign(
+        { name: "RSASSA-PKCS1-v1_5" },
+        keyPair.privateKey,
+        new TextEncoder().encode(`${headerPart}.${payloadPart}`)
+      );
+      return `${headerPart}.${payloadPart}.${base64UrlEncode(new Uint8Array(signature))}`;
+    }
+  };
+}
+
+function base64UrlJson(value: unknown): string {
+  return base64UrlEncode(new TextEncoder().encode(JSON.stringify(value)));
+}
+
+function base64UrlEncode(bytes: Uint8Array): string {
+  let binary = "";
+  for (let index = 0; index < bytes.byteLength; index += 1) {
+    binary += String.fromCharCode(bytes[index]!);
+  }
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
 function deterministicPasswords(): PasswordHasher {

@@ -1,5 +1,12 @@
 import { badRequest, permissionDenied } from "../../core/errors.js";
-import { DEFAULT_TENANT_ID, type Actor } from "../../core/types.js";
+import {
+  DEFAULT_TENANT_ID,
+  SYSTEM_MANAGER_ROLE,
+  type Actor,
+  type DocumentData,
+  type TenantId
+} from "../../core/types.js";
+import type { UserAccountService } from "../../application/user-account-service.js";
 import type { ActorResolver } from "./actor.js";
 
 export interface CloudflareAccessActorResolverOptions {
@@ -12,6 +19,17 @@ export interface CloudflareAccessActorResolverOptions {
   readonly mapClaims?: (claims: CloudflareAccessJwtClaims) => Actor | Promise<Actor>;
   readonly fetchJwks?: (url: string) => Promise<CloudflareAccessJwks>;
   readonly now?: () => number;
+}
+
+export interface CloudflareAccessAccountSyncActorResolverOptions extends Omit<CloudflareAccessActorResolverOptions, "mapClaims"> {
+  readonly userAccounts: UserAccountService;
+  readonly provider?: string;
+  readonly subject?: (claims: CloudflareAccessJwtClaims) => string | undefined;
+  readonly enabled?: boolean | ((claims: CloudflareAccessJwtClaims) => boolean | undefined);
+  readonly emailVerified?: boolean | ((claims: CloudflareAccessJwtClaims) => boolean | undefined);
+  readonly syncActorId?: string | ((claims: CloudflareAccessJwtClaims) => string | undefined);
+  readonly syncActorRoles?: readonly string[];
+  readonly metadata?: DocumentData | ((claims: CloudflareAccessJwtClaims) => DocumentData | undefined);
 }
 
 export interface CloudflareAccessJwtClaims {
@@ -50,6 +68,10 @@ const ACCESS_JWT_HEADER = "cf-access-jwt-assertion";
 const ACCESS_JWT_COOKIE = "CF_Authorization";
 const DEFAULT_JWKS_CACHE_TTL_SECONDS = 300;
 
+export function hasCloudflareAccessToken(request: Request): boolean {
+  return accessTokenFromRequest(request) !== undefined;
+}
+
 export function cloudflareAccessActorResolver(options: CloudflareAccessActorResolverOptions): ActorResolver {
   const teamDomain = normalizeTeamDomain(options.teamDomain);
   const issuer = `https://${teamDomain}`;
@@ -87,6 +109,54 @@ export function cloudflareAccessActorResolver(options: CloudflareAccessActorReso
     }
     return actorFromClaims(claims, options);
   };
+}
+
+export function cloudflareAccessAccountSyncActorResolver(
+  options: CloudflareAccessAccountSyncActorResolverOptions
+): ActorResolver {
+  return cloudflareAccessActorResolver({
+    ...options,
+    mapClaims: async (claims) => {
+      const provider = firstNonBlank(options.provider) ?? "cloudflare-access";
+      const email = emailFromClaims(claims);
+      const subject = firstNonBlank(options.subject?.(claims), claims.sub, email);
+      if (subject === undefined) {
+        throw permissionDenied("Cloudflare Access JWT subject is missing");
+      }
+      const tenantId = tenantIdFromClaims(claims, options.tenantId);
+      const roles = rolesFromClaims(claims, options.roles);
+      const enabled = booleanOptionFromClaims(claims, options.enabled);
+      const emailVerified = booleanOptionFromClaims(claims, options.emailVerified) ?? (email === undefined ? undefined : true);
+      const metadata = metadataFromClaims(claims, options.metadata);
+      const userId = firstNonBlank(options.actorId?.(claims), email, claims.sub) ?? `${provider}:${subject}`;
+      const account = await options.userAccounts.syncProvider({
+        actor: syncActorForClaims(claims, {
+          tenantId,
+          provider,
+          ...(options.syncActorId === undefined ? {} : { syncActorId: options.syncActorId }),
+          ...(options.syncActorRoles === undefined ? {} : { syncActorRoles: options.syncActorRoles })
+        }),
+        provider,
+        subject,
+        userId,
+        ...(email === undefined ? {} : { email }),
+        ...(roles === undefined ? {} : { roles }),
+        ...(enabled === undefined ? {} : { enabled }),
+        ...(emailVerified === undefined ? {} : { emailVerified }),
+        tenantId,
+        ...(metadata === undefined ? {} : { metadata })
+      });
+      if (!account.enabled) {
+        throw permissionDenied("Cloudflare Access account is disabled");
+      }
+      return {
+        id: account.userId,
+        roles: account.roles,
+        tenantId: account.tenantId,
+        ...(account.email === undefined ? {} : { email: account.email })
+      };
+    }
+  });
 }
 
 async function verifyCloudflareAccessJwt(
@@ -169,6 +239,58 @@ function actorFromClaims(
     roles: normalizedRoles,
     tenantId: tenantId && tenantId.trim().length > 0 ? tenantId : DEFAULT_TENANT_ID,
     ...(email === undefined ? {} : { email })
+  };
+}
+
+function tenantIdFromClaims(
+  claims: CloudflareAccessJwtClaims,
+  tenant: CloudflareAccessActorResolverOptions["tenantId"]
+): TenantId {
+  const value = typeof tenant === "function" ? tenant(claims) : tenant ?? DEFAULT_TENANT_ID;
+  return value && value.trim().length > 0 ? value : DEFAULT_TENANT_ID;
+}
+
+function rolesFromClaims(
+  claims: CloudflareAccessJwtClaims,
+  roles: CloudflareAccessActorResolverOptions["roles"]
+): readonly string[] | undefined {
+  return typeof roles === "function" ? roles(claims) : roles;
+}
+
+function emailFromClaims(claims: CloudflareAccessJwtClaims): string | undefined {
+  return firstNonBlank(claims.email)?.trim().toLowerCase();
+}
+
+function booleanOptionFromClaims(
+  claims: CloudflareAccessJwtClaims,
+  value: boolean | ((claims: CloudflareAccessJwtClaims) => boolean | undefined) | undefined
+): boolean | undefined {
+  return typeof value === "function" ? value(claims) : value;
+}
+
+function metadataFromClaims(
+  claims: CloudflareAccessJwtClaims,
+  value: DocumentData | ((claims: CloudflareAccessJwtClaims) => DocumentData | undefined) | undefined
+): DocumentData | undefined {
+  return typeof value === "function" ? value(claims) : value;
+}
+
+function syncActorForClaims(
+  claims: CloudflareAccessJwtClaims,
+  options: {
+    readonly tenantId: TenantId;
+    readonly provider: string;
+    readonly syncActorId?: string | ((claims: CloudflareAccessJwtClaims) => string | undefined);
+    readonly syncActorRoles?: readonly string[];
+  }
+): Actor {
+  return {
+    id: firstNonBlank(
+      typeof options.syncActorId === "function" ? options.syncActorId(claims) : options.syncActorId,
+      `${options.provider}:sync`
+    )!,
+    roles: options.syncActorRoles ?? [SYSTEM_MANAGER_ROLE],
+    tenantId: options.tenantId
   };
 }
 

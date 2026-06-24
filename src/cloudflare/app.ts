@@ -37,9 +37,18 @@ import { FileService } from "../application/file-service.js";
 import { webCryptoPbkdf2PasswordHasher } from "../adapters/crypto/index.js";
 import { D1DataPatchLog, D1EventStore, D1ProjectionStore } from "../adapters/d1/index.js";
 import { createDeskApp } from "../adapters/desk/index.js";
-import { createResourceApi, userAccountSessionActorResolver } from "../adapters/http/index.js";
-import type { ActorResolver, AuthSessionOptions } from "../adapters/http/index.js";
-import { DEFAULT_TENANT_ID, type Actor } from "../core/types.js";
+import {
+  cloudflareAccessAccountSyncActorResolver,
+  createResourceApi,
+  hasCloudflareAccessToken,
+  userAccountSessionActorResolver
+} from "../adapters/http/index.js";
+import type {
+  ActorResolver,
+  AuthSessionOptions,
+  CloudflareAccessAccountSyncActorResolverOptions
+} from "../adapters/http/index.js";
+import { DEFAULT_TENANT_ID, SYSTEM_MANAGER_ROLE, type Actor } from "../core/types.js";
 import { FrameworkError } from "../core/errors.js";
 import type { JobRegistry, JobRetryPolicy } from "../core/jobs.js";
 import type { DataPatchDefinition } from "../core/data-patch.js";
@@ -132,6 +141,17 @@ export interface CloudFrappeAuthOptions<TEnv extends CloudFrappeEnv = CloudFrapp
   readonly ids?: IdGenerator;
   readonly adminRoles?: readonly string[];
   readonly validateRolesWithCatalog?: boolean;
+  readonly cloudflareAccess?: CloudFrappeAccessAccountSyncOptions<TEnv>;
+}
+
+export interface CloudFrappeAccessAccountSyncOptions<TEnv extends CloudFrappeEnv = CloudFrappeEnv>
+  extends Omit<
+    CloudflareAccessAccountSyncActorResolverOptions,
+    "teamDomain" | "audience" | "fallback" | "userAccounts" | "syncActorRoles"
+  > {
+  readonly teamDomain: string | ((env: TEnv) => string);
+  readonly audience: string | readonly string[] | ((env: TEnv) => string | readonly string[]);
+  readonly syncActorRoles?: readonly string[];
 }
 
 export interface CloudFrappeJobOptions<
@@ -631,16 +651,41 @@ function actorResolverForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPa
   env: TEnv,
   userAccounts: UserAccountService | undefined
 ): ActorResolver {
-  const fallbackActor = (request: Request) => options.actor(request, env);
-  if (!userAccounts || !options.auth?.revalidateSignedSessions) {
-    return fallbackActor;
+  const appActor = (request: Request) => options.actor(request, env);
+  const sessionOrAppActor = userAccounts && options.auth?.revalidateSignedSessions
+    ? userAccountSessionActorResolver({
+        userAccounts,
+        secret: options.auth.sessionSecret(env),
+        ...(options.auth.cookieName === undefined ? {} : { cookieName: options.auth.cookieName }),
+        fallback: appActor
+      })
+    : appActor;
+  if (!userAccounts || !options.auth?.cloudflareAccess) {
+    return sessionOrAppActor;
   }
-  return userAccountSessionActorResolver({
+  const accessActor = accessAccountSyncActorResolverForEnv(options.auth, env, userAccounts, sessionOrAppActor);
+  return (request) => hasCloudflareAccessToken(request) ? accessActor(request) : sessionOrAppActor(request);
+}
+
+function accessAccountSyncActorResolverForEnv<TEnv extends CloudFrappeEnv>(
+  auth: CloudFrappeAuthOptions<TEnv>,
+  env: TEnv,
+  userAccounts: UserAccountService,
+  fallback: ActorResolver
+): ActorResolver {
+  const access = auth.cloudflareAccess!;
+  return cloudflareAccessAccountSyncActorResolver({
+    ...access,
+    teamDomain: valueForEnv(access.teamDomain, env),
+    audience: valueForEnv(access.audience, env),
     userAccounts,
-    secret: options.auth.sessionSecret(env),
-    ...(options.auth.cookieName === undefined ? {} : { cookieName: options.auth.cookieName }),
-    fallback: fallbackActor
+    syncActorRoles: access.syncActorRoles ?? auth.adminRoles ?? [SYSTEM_MANAGER_ROLE],
+    fallback
   });
+}
+
+function valueForEnv<TEnv, TValue>(value: TValue | ((env: TEnv) => TValue), env: TEnv): TValue {
+  return typeof value === "function" ? (value as (env: TEnv) => TValue)(env) : value;
 }
 
 function isDeskPath(pathname: string): boolean {
