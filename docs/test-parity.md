@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk report range filter controls slice:
+As of the Desk date/datetime report range coverage slice:
 
 - Vitest files: `75`
-- Vitest cases: `819`
+- Vitest cases: `820`
 
 ## Implication
 

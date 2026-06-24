@@ -1004,6 +1004,166 @@ describe("Desk app", () => {
     expect(expandedHtml).toContain("High Range Count");
   });
 
+  it("builds saved report date and datetime range filters from visual Desk report-builder controls", async () => {
+    const Event = defineDocType({
+      name: "Event",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "event_date", label: "Event Date", type: "date" },
+        { name: "starts_at", label: "Starts At", type: "datetime" }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }]
+    });
+    const registry = createRegistry({ doctypes: [Event] });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry,
+      store,
+      ids: deterministicIds(["event-1", "event-2", "event-3", "event-4"]),
+      clock: fixedClock(now)
+    });
+    const queries = new QueryService({ registry, projections: store });
+    const reports = new ReportService({ registry, queries });
+    const savedReports = new SavedReportService({
+      registry,
+      events: store,
+      reports,
+      ids: deterministicIds(["event-report-1", "event-report-event-1"]),
+      clock: fixedClock(now)
+    });
+    const app = createDeskApp({
+      registry,
+      documents,
+      queries,
+      reports,
+      savedReports,
+      actor: () => owner
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Event",
+      data: { title: "Too Early", event_date: "2026-01-01", starts_at: "2026-01-03T08:30" }
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Event",
+      data: { title: "Inside Morning", event_date: "2026-01-03", starts_at: "2026-01-03T09:30" }
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Event",
+      data: { title: "Inside Evening", event_date: "2026-01-05", starts_at: "2026-01-05T17:45" }
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Event",
+      data: { title: "Too Late", event_date: "2026-01-07", starts_at: "2026-01-05T18:30" }
+    });
+
+    const builder = await app.request("/desk/report-builder/Event");
+    expect(builder.status).toBe(200);
+    const builderHtml = await builder.text();
+    expect(builderHtml).toContain('name="filterRangeMin" value="event_date"');
+    expect(builderHtml).toContain('name="filterRangeMinDefault:event_date" type="date"');
+    expect(builderHtml).toContain('name="filterRangeMax" value="event_date"');
+    expect(builderHtml).toContain('name="filterRangeMaxDefault:event_date" type="date"');
+    expect(builderHtml).toContain('name="filterRangeMin" value="starts_at"');
+    expect(builderHtml).toContain('name="filterRangeMinDefault:starts_at" type="datetime-local"');
+    expect(builderHtml).toContain('name="filterRangeMax" value="starts_at"');
+    expect(builderHtml).toContain('name="filterRangeMaxDefault:starts_at" type="datetime-local"');
+
+    const body = new URLSearchParams();
+    body.set("label", "Event schedule report");
+    body.append("column", "title");
+    body.append("column", "event_date");
+    body.append("column", "starts_at");
+    body.append("filterRangeMin", "event_date");
+    body.set("filterRangeMinDefault:event_date", "2026-01-02");
+    body.append("filterRangeMax", "event_date");
+    body.set("filterRangeMaxDefault:event_date", "2026-01-06");
+    body.append("filterRangeMin", "starts_at");
+    body.set("filterRangeMinDefault:starts_at", "2026-01-03T09:00");
+    body.append("filterRangeMax", "starts_at");
+    body.set("filterRangeMaxDefault:starts_at", "2026-01-05T18:00");
+
+    const saved = await app.request("/desk/report-builder/Event", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body
+    });
+
+    expect(saved.status).toBe(303);
+    await expect(savedReports.get(owner, "Event", "report_event-report-1")).resolves.toMatchObject({
+      definition: {
+        filters: [
+          {
+            name: "event_date_min",
+            label: "Event Date from",
+            field: "event_date",
+            type: "date",
+            operator: "gte",
+            defaultValue: "2026-01-02"
+          },
+          {
+            name: "starts_at_min",
+            label: "Starts At from",
+            field: "starts_at",
+            type: "datetime",
+            operator: "gte",
+            defaultValue: "2026-01-03T09:00"
+          },
+          {
+            name: "event_date_max",
+            label: "Event Date to",
+            field: "event_date",
+            type: "date",
+            operator: "lte",
+            defaultValue: "2026-01-06"
+          },
+          {
+            name: "starts_at_max",
+            label: "Starts At to",
+            field: "starts_at",
+            type: "datetime",
+            operator: "lte",
+            defaultValue: "2026-01-05T18:00"
+          }
+        ]
+      }
+    });
+
+    const run = await app.request("/desk/report-builder/Event/report_event-report-1");
+    expect(run.status).toBe(200);
+    const html = await run.text();
+    expect(html).toContain(
+      '<input id="filter-event-date-min" name="filter_event_date_min" type="date" value="2026-01-02">'
+    );
+    expect(html).toContain(
+      '<input id="filter-event-date-max" name="filter_event_date_max" type="date" value="2026-01-06">'
+    );
+    expect(html).toContain(
+      '<input id="filter-starts-at-min" name="filter_starts_at_min" type="datetime-local" value="2026-01-03T09:00">'
+    );
+    expect(html).toContain(
+      '<input id="filter-starts-at-max" name="filter_starts_at_max" type="datetime-local" value="2026-01-05T18:00">'
+    );
+    expect(html).toContain("Inside Morning");
+    expect(html).toContain("Inside Evening");
+    expect(html).not.toContain("Too Early");
+    expect(html).not.toContain("Too Late");
+
+    const expanded = await app.request(
+      "/desk/report-builder/Event/report_event-report-1?filter_event_date_min=2026-01-01&filter_starts_at_min=2026-01-03T08:00&filter_event_date_max=2026-01-07&filter_starts_at_max=2026-01-05T19:00"
+    );
+    expect(expanded.status).toBe(200);
+    const expandedHtml = await expanded.text();
+    expect(expandedHtml).toContain("Too Early");
+    expect(expandedHtml).toContain("Inside Morning");
+    expect(expandedHtml).toContain("Inside Evening");
+    expect(expandedHtml).toContain("Too Late");
+  });
+
   it("allocates collision-free saved report range filter names", async () => {
     const Metric = defineDocType({
       name: "Metric",
