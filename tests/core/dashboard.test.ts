@@ -23,6 +23,15 @@ describe("dashboards", () => {
             summary: "total_count",
             filters: { priority: "High" }
           }
+        },
+        {
+          name: "priority_chart",
+          source: {
+            kind: "reportChart",
+            report: "Open Notes",
+            chart: "notes_by_priority",
+            filters: { priority: "High" }
+          }
         }
       ]
     });
@@ -32,6 +41,7 @@ describe("dashboards", () => {
     expect(Object.isFrozen(dashboard.cards[0]?.source)).toBe(true);
     expect(Object.isFrozen(dashboard.cards[0]?.source.kind === "documentCount" ? dashboard.cards[0].source.filters : [])).toBe(true);
     expect(Object.isFrozen(dashboard.cards[1]?.source.kind === "reportSummary" ? dashboard.cards[1].source.filters : {})).toBe(true);
+    expect(Object.isFrozen(dashboard.cards[2]?.source.kind === "reportChart" ? dashboard.cards[2].source.filters : {})).toBe(true);
   });
 
   it("validates dashboard card sources against registered DocTypes and reports", () => {
@@ -47,7 +57,15 @@ describe("dashboards", () => {
       name: "Open Notes",
       doctype: "Note",
       columns: [{ name: "title" }],
-      summaries: [{ name: "total_count", aggregate: "sum", field: "count" }]
+      summaries: [{ name: "total_count", aggregate: "sum", field: "count" }],
+      groups: [
+        {
+          name: "by_state",
+          field: "workflow_state",
+          summaries: [{ name: "state_count", aggregate: "count" }]
+        }
+      ],
+      charts: [{ name: "notes_by_state", type: "bar", group: "by_state", summary: "state_count" }]
     });
 
     const registry = createRegistry({
@@ -68,6 +86,10 @@ describe("dashboards", () => {
             {
               name: "total_count",
               source: { kind: "reportSummary", report: "Open Notes", summary: "total_count" }
+            },
+            {
+              name: "notes_by_state",
+              source: { kind: "reportChart", report: "Open Notes", chart: "notes_by_state" }
             }
           ]
         })
@@ -77,7 +99,8 @@ describe("dashboards", () => {
     expect(registry.getDashboard("Operations")).toMatchObject({
       cards: [
         { name: "open_notes", source: { kind: "documentCount", doctype: "Note" } },
-        { name: "total_count", source: { kind: "reportSummary", report: "Open Notes" } }
+        { name: "total_count", source: { kind: "reportSummary", report: "Open Notes" } },
+        { name: "notes_by_state", source: { kind: "reportChart", report: "Open Notes", chart: "notes_by_state" } }
       ]
     });
     expect(() =>
@@ -103,6 +126,18 @@ describe("dashboards", () => {
         ]
       })
     ).toThrow("references unknown summary");
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        reports: [report],
+        dashboards: [
+          defineDashboard({
+            name: "Broken",
+            cards: [{ name: "missing", source: { kind: "reportChart", report: "Open Notes", chart: "missing" } }]
+          })
+        ]
+      })
+    ).toThrow("references unknown chart");
   });
 
   it("validates dashboard report-summary filter presets at registration", () => {
@@ -160,6 +195,29 @@ describe("dashboards", () => {
               {
                 name: "notes",
                 source: { kind: "reportSummary", report: "Filtered Notes", summary: "note_count", filters: { count: "many" } }
+              }
+            ]
+          })
+        ]
+      })
+    ).toThrow("must be an integer");
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        reports: [
+          defineReport({
+            ...filteredReport,
+            groups: [{ name: "by_priority", field: "priority", summaries: [{ name: "rows", aggregate: "count" }] }],
+            charts: [{ name: "priority_rows", type: "bar", group: "by_priority", summary: "rows" }]
+          })
+        ],
+        dashboards: [
+          defineDashboard({
+            name: "Bad Chart Filter",
+            cards: [
+              {
+                name: "notes",
+                source: { kind: "reportChart", report: "Filtered Notes", chart: "priority_rows", filters: { count: "many" } }
               }
             ]
           })

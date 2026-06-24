@@ -439,10 +439,20 @@ export class ModelRegistry {
           { status: 400 }
         );
       }
-      if (!(report.summaries ?? []).some((summary) => summary.name === source.summary)) {
+      if (
+        source.kind === "reportSummary" &&
+        !(report.summaries ?? []).some((summary) => summary.name === source.summary)
+      ) {
         throw new FrameworkError(
           "DASHBOARD_INVALID",
           `Dashboard '${dashboard.name}' card '${card.name}' references unknown summary '${source.summary}' on report '${source.report}'`,
+          { status: 400 }
+        );
+      }
+      if (source.kind === "reportChart" && !(report.charts ?? []).some((chart) => chart.name === source.chart)) {
+        throw new FrameworkError(
+          "DASHBOARD_INVALID",
+          `Dashboard '${dashboard.name}' card '${card.name}' references unknown chart '${source.chart}' on report '${source.report}'`,
           { status: 400 }
         );
       }

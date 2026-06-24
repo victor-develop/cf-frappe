@@ -628,23 +628,60 @@ export function renderDashboardView(result: DashboardRunResult): string {
   const description = result.dashboard.description
     ? `<p class="muted">${escapeHtml(result.dashboard.description)}</p>`
     : "";
-  const cards = result.cards
-    .map(
-      (card) => `<section class="dashboard-card">
-        <span>${escapeHtml(card.label)}</span>
-        <strong>${escapeHtml(formatValue(card.value))}</strong>
-        ${card.indicator === undefined ? "" : `<em>${escapeHtml(card.indicator)}</em>`}
-        ${card.description === undefined ? "" : `<p>${escapeHtml(card.description)}</p>`}
-        <small>${escapeHtml(dashboardCardSourceLabel(card.source))}</small>
-      </section>`
-    )
-    .join("");
+  const cards = result.cards.map(renderDashboardCard).join("");
   return `${description}<section class="dashboard-grid">${cards || `<p class="empty">No dashboard cards.</p>`}</section>`;
+}
+
+function renderDashboardCard(card: DashboardRunResult["cards"][number]): string {
+  if (card.source.kind === "reportChart") {
+    const chart = dashboardChartValue(card.value);
+    return `<section class="dashboard-card dashboard-chart-card">
+      ${card.description === undefined ? "" : `<p>${escapeHtml(card.description)}</p>`}
+      ${chart === undefined
+        ? `<h2>${escapeHtml(card.label)}</h2><p class="empty">No chart data.</p>`
+        : renderReportChartBody(chart, dashboardReportChartHref(card.source), card.label)}
+      <small>${escapeHtml(dashboardCardSourceLabel(card.source))}</small>
+    </section>`;
+  }
+  return `<section class="dashboard-card">
+    <span>${escapeHtml(card.label)}</span>
+    <strong>${escapeHtml(formatValue(dashboardMetricValue(card.value)))}</strong>
+    ${card.indicator === undefined ? "" : `<em>${escapeHtml(card.indicator)}</em>`}
+    ${card.description === undefined ? "" : `<p>${escapeHtml(card.description)}</p>`}
+    <small>${escapeHtml(dashboardCardSourceLabel(card.source))}</small>
+  </section>`;
+}
+
+function dashboardMetricValue(value: DashboardRunResult["cards"][number]["value"]): JsonValue | undefined {
+  return dashboardChartValue(value) === undefined ? value as JsonValue : undefined;
+}
+
+function dashboardChartValue(
+  value: DashboardRunResult["cards"][number]["value"]
+): ReportRunResult["charts"][number] | undefined {
+  if (typeof value === "object" && value !== null && "points" in value) {
+    return value as ReportRunResult["charts"][number];
+  }
+  return undefined;
+}
+
+function dashboardReportChartHref(source: Extract<DashboardRunResult["cards"][number]["source"], { readonly kind: "reportChart" }>): string {
+  const params = new URLSearchParams();
+  for (const [name, value] of Object.entries(source.filters ?? {})) {
+    if (value !== undefined && value !== null && value !== "") {
+      params.set(`filter_${name}`, String(value));
+    }
+  }
+  const query = params.toString();
+  return `/desk/reports/${encodeURIComponent(source.report)}${query ? `?${query}` : ""}`;
 }
 
 function dashboardCardSourceLabel(source: DashboardRunResult["cards"][number]["source"]): string {
   if (source.kind === "documentCount") {
     return `${source.doctype} count`;
+  }
+  if (source.kind === "reportChart") {
+    return `${source.report} / ${source.chart}`;
   }
   return `${source.report} / ${source.summary}`;
 }
@@ -1835,6 +1872,14 @@ function renderReportCharts(charts: ReportRunResult["charts"], drilldownBaseHref
 }
 
 function renderReportChart(chart: ReportRunResult["charts"][number], drilldownBaseHref: string | undefined): string {
+  return `<section class="panel report-chart">${renderReportChartBody(chart, drilldownBaseHref, chart.label)}</section>`;
+}
+
+function renderReportChartBody(
+  chart: ReportRunResult["charts"][number],
+  drilldownBaseHref: string | undefined,
+  title: string
+): string {
   const points = chart.points.filter((point) => point.value !== null);
   const svg = points.length === 0
     ? `<p class="empty">No chart data.</p>`
@@ -1843,10 +1888,10 @@ function renderReportChart(chart: ReportRunResult["charts"][number], drilldownBa
       : chart.type === "pie"
         ? renderPieChart(chart, points, drilldownBaseHref)
         : renderBarChart(chart, points, drilldownBaseHref);
-  return `<section class="panel report-chart">
-    <h2>${escapeHtml(chart.label)}</h2>
+  return `<div class="report-chart-body">
+    <h2>${escapeHtml(title)}</h2>
     ${svg}
-  </section>`;
+  </div>`;
 }
 
 function renderBarChart(
@@ -3027,6 +3072,10 @@ h3 { margin: 0 0 12px; font-size: 16px; line-height: 1.35; letter-spacing: 0; }
   font-weight: 700;
 }
 .dashboard-card p { margin: 0; color: var(--muted); }
+.dashboard-chart-card { min-width: 0; }
+@media (min-width: 720px) {
+  .dashboard-chart-card { grid-column: span 2; }
+}
 .panel {
   background: var(--surface);
   border: 1px solid var(--border);

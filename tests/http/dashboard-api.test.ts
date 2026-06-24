@@ -39,6 +39,15 @@ describe("dashboard api", () => {
               summary: "total_count",
               filters: { priority: "High" }
             }
+          },
+          {
+            name: "priority_chart",
+            source: {
+              kind: "reportChart",
+              report: "Open Notes",
+              chart: "notes_by_priority",
+              filters: { priority: "High" }
+            }
           }
         ]
       })
@@ -67,7 +76,7 @@ describe("dashboard api", () => {
     const listed = await app.request("/api/meta/dashboards", { headers: userHeaders });
     expect(listed.status).toBe(200);
     await expect(listed.json()).resolves.toMatchObject({
-      data: [{ name: "Operations", cards: [{ name: "open_notes" }, { name: "total_count" }] }]
+      data: [{ name: "Operations", cards: [{ name: "open_notes" }, { name: "total_count" }, { name: "priority_chart" }] }]
     });
 
     const run = await app.request("/api/dashboard/Operations/run", { headers: userHeaders });
@@ -77,7 +86,14 @@ describe("dashboard api", () => {
         dashboard: { name: "Operations" },
         cards: [
           { name: "open_notes", value: 2 },
-          { name: "total_count", value: 5 }
+          { name: "total_count", value: 5 },
+          {
+            name: "priority_chart",
+            value: {
+              name: "notes_by_priority",
+              points: [{ key: "High", label: "High", value: 1 }]
+            }
+          }
         ]
       }
     });

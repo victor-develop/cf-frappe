@@ -14,6 +14,12 @@ export type DashboardCardSourceDefinition =
       readonly report: string;
       readonly summary: string;
       readonly filters?: DashboardReportFilters;
+    }
+  | {
+      readonly kind: "reportChart";
+      readonly report: string;
+      readonly chart: string;
+      readonly filters?: DashboardReportFilters;
     };
 
 export interface DashboardCardDefinition {
@@ -100,6 +106,11 @@ function assertDashboardCardSource(dashboardName: string, card: DashboardCardDef
   if (source.kind === "reportSummary") {
     assertDashboardIdentifier(source.report, `dashboard '${dashboardName}' card '${card.name}' report`);
     assertDashboardIdentifier(source.summary, `dashboard '${dashboardName}' card '${card.name}' summary`);
+    return;
+  }
+  if (source.kind === "reportChart") {
+    assertDashboardIdentifier(source.report, `dashboard '${dashboardName}' card '${card.name}' report`);
+    assertDashboardIdentifier(source.chart, `dashboard '${dashboardName}' card '${card.name}' chart`);
     return;
   }
   throw new FrameworkError(

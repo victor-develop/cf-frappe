@@ -13,6 +13,7 @@ import {
   defineDataPatch,
   defineDashboard,
   defineDocType,
+  defineReport,
   defineWorkspace,
   deterministicIds,
   DocumentService,
@@ -403,9 +404,26 @@ describe("Desk app", () => {
   });
 
   it("renders metadata-defined dashboards in Desk", async () => {
+    const noteStateReport = defineReport({
+      ...openNotesReport,
+      name: "Note States",
+      filters: [
+        ...(openNotesReport.filters ?? []),
+        { name: "workflow_state", label: "Workflow State", field: "workflow_state", type: "select" }
+      ],
+      groups: [
+        {
+          name: "by_state",
+          label: "By State",
+          field: "workflow_state",
+          summaries: [{ name: "note_count", label: "Notes", aggregate: "count" }]
+        }
+      ],
+      charts: [{ name: "notes_by_state", label: "Notes by State", type: "bar", group: "by_state", summary: "note_count" }]
+    });
     const registry = createRegistry({
       doctypes: [noteDocType],
-      reports: [openNotesReport],
+      reports: [openNotesReport, noteStateReport],
       dashboards: [
         defineDashboard({
           name: "Operations",
@@ -427,6 +445,17 @@ describe("Desk app", () => {
                 kind: "reportSummary",
                 report: "Open Notes",
                 summary: "total_count",
+                filters: { priority: "High" }
+              }
+            },
+            {
+              name: "priority_chart",
+              label: "Priority Mix",
+              description: "Readable notes by priority",
+              source: {
+                kind: "reportChart",
+                report: "Note States",
+                chart: "notes_by_state",
                 filters: { priority: "High" }
               }
             }
@@ -476,7 +505,7 @@ describe("Desk app", () => {
     expect(list.status).toBe(200);
     const listHtml = await list.text();
     expect(listHtml).toContain("Operational KPIs");
-    expect(listHtml).toContain("<td>2</td>");
+    expect(listHtml).toContain("<td>3</td>");
 
     const page = await app.request("/desk/dashboards/Operations");
     expect(page.status).toBe(200);
@@ -486,6 +515,13 @@ describe("Desk app", () => {
     expect(html).toContain("High Count");
     expect(html).toContain("<strong>12</strong>");
     expect(html).toContain("Open Notes / total_count");
+    expect(html).toContain("Priority Mix");
+    expect(html).toContain("Readable notes by priority");
+    expect(html).toContain("chart-svg chart-bar");
+    expect(html).toContain("Note States / notes_by_state");
+    expect(html).toContain(
+      '<a class="chart-drilldown" href="/desk/reports/Note%20States?filter_priority=High&amp;filter_workflow_state=Open"><g>'
+    );
   });
 
   it("renders and updates a durable notification inbox in Desk", async () => {

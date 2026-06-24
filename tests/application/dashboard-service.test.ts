@@ -41,6 +41,16 @@ describe("DashboardService", () => {
                 summary: "total_count",
                 filters: { priority: "High" }
               }
+            },
+            {
+              name: "priority_chart",
+              label: "Priority Chart",
+              source: {
+                kind: "reportChart",
+                report: "Open Notes",
+                chart: "notes_by_priority",
+                filters: { priority: "High" }
+              }
             }
           ]
         })
@@ -86,6 +96,15 @@ describe("DashboardService", () => {
           label: "Total Count",
           value: 10,
           source: { kind: "reportSummary", report: "Open Notes", summary: "total_count" }
+        },
+        {
+          name: "priority_chart",
+          label: "Priority Chart",
+          value: {
+            name: "notes_by_priority",
+            points: [{ key: "High", label: "High", value: 2 }]
+          },
+          source: { kind: "reportChart", report: "Open Notes", chart: "notes_by_priority" }
         }
       ]
     });
@@ -124,6 +143,8 @@ describe("DashboardService", () => {
       doctype: "Note",
       columns: [{ name: "title" }],
       summaries: [{ name: "note_count", aggregate: "count" }],
+      groups: [{ name: "by_title", field: "title", summaries: [{ name: "note_count", aggregate: "count" }] }],
+      charts: [{ name: "notes_by_title", type: "bar", group: "by_title", summary: "note_count" }],
       roles: ["Task Manager"]
     });
     const registry = createRegistry({
@@ -144,6 +165,11 @@ describe("DashboardService", () => {
           name: "Manager Report",
           roles: ["User"],
           cards: [{ name: "notes", source: { kind: "reportSummary", report: "Manager Notes", summary: "note_count" } }]
+        }),
+        defineDashboard({
+          name: "Manager Chart",
+          roles: ["User"],
+          cards: [{ name: "notes", source: { kind: "reportChart", report: "Manager Notes", chart: "notes_by_title" } }]
         })
       ]
     });
@@ -157,6 +183,9 @@ describe("DashboardService", () => {
       code: "PERMISSION_DENIED"
     });
     await expect(dashboards.runDashboard(owner, "Manager Report")).rejects.toMatchObject({
+      code: "PERMISSION_DENIED"
+    });
+    await expect(dashboards.runDashboard(owner, "Manager Chart")).rejects.toMatchObject({
       code: "PERMISSION_DENIED"
     });
   });

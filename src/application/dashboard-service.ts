@@ -8,12 +8,14 @@ import {
 import type { ModelRegistry } from "../core/registry.js";
 import type { Actor, JsonPrimitive } from "../core/types.js";
 import type { QueryService } from "./query-service.js";
-import type { ReportFilters, ReportService } from "./report-service.js";
+import type { ReportChartResult, ReportFilters, ReportService } from "./report-service.js";
+
+export type DashboardCardValue = JsonPrimitive | ReportChartResult;
 
 export interface DashboardCardResult {
   readonly name: string;
   readonly label: string;
-  readonly value: JsonPrimitive;
+  readonly value: DashboardCardValue;
   readonly source: DashboardCardSourceDefinition;
   readonly description?: string;
   readonly indicator?: string;
@@ -73,7 +75,7 @@ export class DashboardService {
     };
   }
 
-  private async cardValue(actor: Actor, source: DashboardCardSourceDefinition): Promise<JsonPrimitive> {
+  private async cardValue(actor: Actor, source: DashboardCardSourceDefinition): Promise<DashboardCardValue> {
     if (source.kind === "documentCount") {
       return this.countReadableDocuments(actor, source);
     }
@@ -81,6 +83,9 @@ export class DashboardService {
       filters: (source.filters ?? {}) as ReportFilters,
       limit: 1
     });
+    if (source.kind === "reportChart") {
+      return result.charts.find((chart) => chart.name === source.chart) ?? null;
+    }
     return result.summary.find((summary) => summary.name === source.summary)?.value ?? null;
   }
 

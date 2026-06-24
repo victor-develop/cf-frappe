@@ -20,7 +20,7 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the dashboard workspace shortcut slice:
+As of the dashboard report-chart card slice:
 
 - Vitest files: `79`
 - Vitest cases: `863`
