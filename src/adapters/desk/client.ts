@@ -1112,6 +1112,7 @@ export function renderDeskClientScript(): string {
     }
     var realtimeOptions = Object.assign({ tenantId: tenantId }, realtimeRoute ? { realtimeRoute: realtimeRoute } : {});
     setPresencePanelState(panel, "loading", "Checking active collaborators.", "Checking active collaborators.");
+    setPanelText(panel, "[data-cf-frappe-document-update]", "Viewing latest saved version.");
     realtimePresenceDocument(doctype, documentName, realtimeOptions)
       .then(function (snapshot) {
         setPresencePanelConnections(panel, "ready", snapshot && snapshot.connections);
@@ -1135,6 +1136,9 @@ export function renderDeskClientScript(): string {
       panel.__cfFrappePresenceSubscription = realtimeSubscribe(
         documentTopicFromOptions(doctype, documentName, options),
         {
+          event: function (event) {
+            markPresencePanelDocumentEvent(panel, event, doctype, documentName);
+          },
           presence: function (presence) {
             setPresencePanelConnections(panel, "live", presence && presence.connections);
           }
@@ -1144,6 +1148,34 @@ export function renderDeskClientScript(): string {
     } catch (_error) {
       panel.__cfFrappePresenceSubscription = undefined;
     }
+  }
+
+  function markPresencePanelDocumentEvent(panel, event, doctype, documentName) {
+    var payload = event && event.payload;
+    var snapshot = payload && payload.snapshot;
+    var remoteVersion = snapshot && snapshot.version;
+    var localVersion = panel.dataset && panel.dataset.documentVersion ? Number(panel.dataset.documentVersion) : NaN;
+    if (typeof remoteVersion !== "number" || Number.isNaN(localVersion) || remoteVersion <= localVersion) {
+      return;
+    }
+    if (panel.dataset) {
+      panel.dataset.documentState = "stale";
+      panel.dataset.remoteVersion = String(remoteVersion);
+    }
+    setPanelText(
+      panel,
+      "[data-cf-frappe-document-update]",
+      "Document updated to v" + String(remoteVersion) + ". Refresh to review latest changes."
+    );
+    markCurrentFormRemoteUpdate(doctype, documentName);
+  }
+
+  function markCurrentFormRemoteUpdate(doctype, documentName) {
+    var binding = currentFormBinding();
+    if (!binding || binding.context.doctype !== doctype || binding.context.documentName !== documentName) {
+      return;
+    }
+    binding.form.dataset.remoteUpdate = "1";
   }
 
   function setPresencePanelConnections(panel, state, connections) {

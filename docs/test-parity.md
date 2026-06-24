@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the realtime-updated Desk presence panel slice:
+As of the Desk realtime stale-update warning slice:
 
 - Vitest files: `75`
-- Vitest cases: `821`
+- Vitest cases: `822`
 
 ## Implication
 

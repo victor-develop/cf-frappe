@@ -1639,6 +1639,64 @@ describe("Desk client runtime", () => {
     expect(panel.list.textContent).toBe("owner@example.com, support@example.com");
   });
 
+  it("marks generated document presence panels stale when document realtime events advance the version", async () => {
+    const sockets: FakeWebSocket[] = [];
+    const form = new FakeForm([new FakeField("title", "Queued")]);
+    const panel = new FakePresencePanel({
+      doctype: "Task",
+      documentName: "TASK-1",
+      documentVersion: "3",
+      realtimeRoute: "/rt",
+      tenantId: "acme"
+    });
+
+    evaluateDeskClient(
+      async () =>
+        new Response(JSON.stringify({
+          data: {
+            topic: "document:acme:Task:TASK-1",
+            connections: []
+          }
+        }), {
+          headers: { "content-type": "application/json" }
+        }),
+      new FakeDocument({
+        form,
+        presencePanels: [panel],
+        runtimeDataset: {
+          doctype: "Task",
+          documentName: "TASK-1",
+          scope: "form",
+          tenantId: "acme"
+        }
+      }),
+      sockets
+    );
+    await flushPromises();
+
+    expect(panel.update.textContent).toBe("Viewing latest saved version.");
+    expect(form.dataset.remoteUpdate).toBeUndefined();
+
+    sockets[0]?.emitMessage(JSON.stringify({
+      type: "cf-frappe.realtime.event",
+      cursor: 9,
+      event: {
+        id: "event-9",
+        type: "TaskUpdated",
+        payload: {
+          snapshot: {
+            version: 4
+          }
+        }
+      }
+    }));
+
+    expect(panel.dataset.documentState).toBe("stale");
+    expect(panel.dataset.remoteVersion).toBe("4");
+    expect(panel.update.textContent).toBe("Document updated to v4. Refresh to review latest changes.");
+    expect(form.dataset.remoteUpdate).toBe("1");
+  });
+
   it("parses realtime subscriptions into events and redacted user notifications", () => {
     const sockets: FakeWebSocket[] = [];
     const runtime = evaluateDeskClient(fetch, new FakeDocument(), sockets);
@@ -2092,6 +2150,7 @@ class FakePresenceText {
 class FakePresencePanel {
   readonly count = new FakePresenceText();
   readonly list = new FakePresenceText();
+  readonly update = new FakePresenceText();
 
   constructor(readonly dataset: Record<string, string>) {}
 
@@ -2101,6 +2160,9 @@ class FakePresencePanel {
     }
     if (selector === "[data-cf-frappe-presence-list]") {
       return this.list;
+    }
+    if (selector === "[data-cf-frappe-document-update]") {
+      return this.update;
     }
     return null;
   }

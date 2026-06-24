@@ -435,12 +435,13 @@ export function renderDocumentPresencePanel(
   const realtimeAttribute = options.realtimeRoute === undefined
     ? ""
     : ` data-realtime-route="${escapeHtml(options.realtimeRoute)}"`;
-  return `<section class="panel presence" aria-labelledby="document-presence" data-cf-frappe-presence="document" data-doctype="${escapeHtml(document.doctype)}" data-document-name="${escapeHtml(document.name)}" data-tenant-id="${escapeHtml(document.tenantId)}"${realtimeAttribute}>
+  return `<section class="panel presence" aria-labelledby="document-presence" data-cf-frappe-presence="document" data-doctype="${escapeHtml(document.doctype)}" data-document-name="${escapeHtml(document.name)}" data-document-version="${String(document.version)}" data-tenant-id="${escapeHtml(document.tenantId)}"${realtimeAttribute}>
     <div class="presence-head">
       <h2 id="document-presence">Presence</h2>
       <p data-cf-frappe-presence-count>Checking active collaborators.</p>
     </div>
     <p class="presence-list" data-cf-frappe-presence-list>Checking active collaborators.</p>
+    <p class="presence-list" data-cf-frappe-document-update>Viewing latest saved version.</p>
   </section>`;
 }
 

@@ -1895,9 +1895,11 @@ describe("Desk app", () => {
     expect(html).toContain('data-cf-frappe-presence="document"');
     expect(html).toContain('data-doctype="Note"');
     expect(html).toContain('data-document-name="Collaborative Note"');
+    expect(html).toContain('data-document-version="1"');
     expect(html).toContain('data-realtime-route="/api/realtime"');
     expect(html).toContain('data-tenant-id="acme"');
     expect(html).toContain("Checking active collaborators.");
+    expect(html).toContain("Viewing latest saved version.");
 
     const create = await app.request("/desk/Note/new");
     await expect(create.text()).resolves.not.toContain('data-cf-frappe-presence="document"');
