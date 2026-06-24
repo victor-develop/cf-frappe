@@ -20,7 +20,7 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the resource pattern filter slice:
+As of the resource not-between filter slice:
 
 - Vitest files: `80`
 - Vitest cases: `889`

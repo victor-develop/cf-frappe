@@ -503,13 +503,13 @@ describe("Desk client runtime", () => {
       offset: 10,
       filters: {
         priority: { ne: "Low" },
-        count: { gt: 2, lt: 9 },
+        count: { gt: 2, lt: 9, not_between: [3, 8] },
         title: "Launch"
       }
     });
 
     expect(calls[0]?.url).toBe(
-      "/api/resource/Task?order=desc&limit=5&offset=10&order_by=count&filter_priority__ne=Low&filter_count__gt=2&filter_count__lt=9&filter_title=Launch"
+      "/api/resource/Task?order=desc&limit=5&offset=10&order_by=count&filter_priority__ne=Low&filter_count__gt=2&filter_count__lt=9&filter_count__not_between=3&filter_count__not_between=8&filter_title=Launch"
     );
     expect(
       runtime.resource.csvUrl("Task", {
@@ -519,12 +519,12 @@ describe("Desk client runtime", () => {
         offset: 10,
         filters: {
           priority: { ne: "Low" },
-          count: { gt: 2, lt: 9 },
+          count: { gt: 2, lt: 9, not_between: [3, 8] },
           title: "Launch"
         }
       })
     ).toBe(
-      "/api/resource/Task/export.csv?order=desc&limit=5&order_by=count&filter_priority__ne=Low&filter_count__gt=2&filter_count__lt=9&filter_title=Launch"
+      "/api/resource/Task/export.csv?order=desc&limit=5&order_by=count&filter_priority__ne=Low&filter_count__gt=2&filter_count__lt=9&filter_count__not_between=3&filter_count__not_between=8&filter_title=Launch"
     );
   });
 

@@ -160,6 +160,12 @@ function listFilterWhere(filters: readonly ListDocumentsFilter[]): ListFilterWhe
         params.push(sqliteJsonValue(minimum), sqliteJsonValue(maximum));
         break;
       }
+      case "not_between": {
+        const [minimum, maximum] = rangeFilterValues(filter);
+        conditions.push(`${expression} IS NOT NULL AND (${expression} < ? OR ${expression} > ?)`);
+        params.push(sqliteJsonValue(minimum), sqliteJsonValue(maximum));
+        break;
+      }
       default:
         throw new Error(`Unsupported list filter operator '${String(operator)}'`);
     }

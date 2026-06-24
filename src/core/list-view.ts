@@ -32,7 +32,8 @@ export const LIST_FILTER_OPERATORS = [
   "gte",
   "lt",
   "lte",
-  "between"
+  "between",
+  "not_between"
 ] as const;
 export const LIST_ORDER_DIRECTIONS = ["asc", "desc"] as const;
 const SYSTEM_LIST_ORDER_OPTIONS = [
@@ -61,7 +62,8 @@ const LIST_FILTER_OPERATOR_LABELS: Record<ListFilterOperator, string> = {
   gte: "greater than or equal",
   lt: "less than",
   lte: "less than or equal",
-  between: "between"
+  between: "between",
+  not_between: "not between"
 };
 
 export function isListFilterOperator(operator: unknown): operator is ListFilterOperator {
@@ -72,8 +74,8 @@ export function isListMembershipOperator(operator: ListFilterOperator): operator
   return operator === "in" || operator === "not_in";
 }
 
-export function isListRangeOperator(operator: ListFilterOperator): operator is "between" {
-  return operator === "between";
+export function isListRangeOperator(operator: ListFilterOperator): operator is "between" | "not_between" {
+  return operator === "between" || operator === "not_between";
 }
 
 export function isListPresenceOperator(operator: ListFilterOperator): operator is "is" {
@@ -346,7 +348,7 @@ function supportedListFilterOperatorsForField(field: FieldDefinition): readonly 
     operators.push("contains", "like", "not_like");
   }
   if (field.type === "integer" || field.type === "number" || field.type === "date" || field.type === "datetime") {
-    operators.push("gt", "gte", "lt", "lte", "between");
+    operators.push("gt", "gte", "lt", "lte", "between", "not_between");
   }
   return operators;
 }

@@ -108,6 +108,7 @@ describe("Desk app", () => {
       fields: [
         { name: "title", type: "text", required: true },
         { name: "count__between", type: "integer" },
+        { name: "count__not_between", type: "integer" },
         { name: "body__is", type: "text" },
         { name: "title__like", type: "text" }
       ],
@@ -2432,6 +2433,14 @@ describe("Desk app", () => {
     expect(betweenHtml).not.toContain("Desk Low");
     expect(betweenHtml).not.toContain("Desk Closed High");
 
+    const notBetween = await app.request("/desk/Note?filter_count__not_between=2&filter_count__not_between=6");
+    expect(notBetween.status).toBe(200);
+    const notBetweenHtml = await notBetween.text();
+    expect(notBetweenHtml).toContain("Desk High");
+    expect(notBetweenHtml).toContain("Desk Low");
+    expect(notBetweenHtml).not.toContain("Desk Empty Body");
+    expect(notBetweenHtml).not.toContain("Desk Closed High");
+
     const like = await app.request("/desk/Note?filter_body__like=Hidden%25");
     expect(like.status).toBe(200);
     const likeHtml = await like.text();
@@ -2527,12 +2536,24 @@ describe("Desk app", () => {
     await documents.create({
       actor: owner,
       doctype: "FilterCollision",
-      data: { title: "Desk Collision Match", count__between: 7, body__is: "literal", title__like: "literal" }
+      data: {
+        title: "Desk Collision Match",
+        count__between: 7,
+        count__not_between: 7,
+        body__is: "literal",
+        title__like: "literal"
+      }
     });
     await documents.create({
       actor: owner,
       doctype: "FilterCollision",
-      data: { title: "Desk Collision Miss", count__between: 3, body__is: "other", title__like: "other" }
+      data: {
+        title: "Desk Collision Miss",
+        count__between: 3,
+        count__not_between: 3,
+        body__is: "other",
+        title__like: "other"
+      }
     });
 
     const response = await app.request("/desk/FilterCollision?filter_count__between=7");
@@ -2541,6 +2562,12 @@ describe("Desk app", () => {
     const html = await response.text();
     expect(html).toContain("Desk Collision Match");
     expect(html).not.toContain("Desk Collision Miss");
+
+    const notBetweenCollision = await app.request("/desk/FilterCollision?filter_count__not_between=7");
+    expect(notBetweenCollision.status).toBe(200);
+    const notBetweenCollisionHtml = await notBetweenCollision.text();
+    expect(notBetweenCollisionHtml).toContain("Desk Collision Match");
+    expect(notBetweenCollisionHtml).not.toContain("Desk Collision Miss");
 
     const presenceCollision = await app.request("/desk/FilterCollision?filter_body__is=literal");
     expect(presenceCollision.status).toBe(200);

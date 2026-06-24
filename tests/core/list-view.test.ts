@@ -114,7 +114,8 @@ describe("list views", () => {
       "gte",
       "lt",
       "lte",
-      "between"
+      "between",
+      "not_between"
     ]);
     expect(listFilterOperatorsForField(Task.fields[2] ?? failField()).map((item) => item.operator)).toEqual([
       "eq",
@@ -195,6 +196,14 @@ describe("list views", () => {
         name: "Task",
         fields: [{ name: "count", type: "integer" }],
         listView: { filters: [{ field: "count", operator: "like", value: "1%" }] }
+      })
+    ).toThrow(expect.objectContaining({ code: "LIST_VIEW_INVALID" }));
+
+    expect(() =>
+      defineDocType({
+        name: "Task",
+        fields: [{ name: "count", type: "integer" }],
+        listView: { filters: [{ field: "count", operator: "not_between", value: ["1"] }] }
       })
     ).toThrow(expect.objectContaining({ code: "LIST_VIEW_INVALID" }));
   });

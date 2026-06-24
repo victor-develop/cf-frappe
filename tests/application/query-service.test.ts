@@ -110,10 +110,21 @@ describe("QueryService", () => {
       doctype: "Note",
       data: data({ title: "Too Low", priority: "Low", body: "Maintenance note", count: 1 })
     });
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Too High", priority: "Medium", body: "Escalated note", count: 9 })
+    });
 
     await expect(
       queries.listDocuments(owner, "Note", { filters: [{ field: "count", operator: "between", value: ["2", "7"] }] })
     ).resolves.toMatchObject({ data: [{ name: "In Range" }], total: 1 });
+
+    const notBetween = await queries.listDocuments(owner, "Note", {
+      filters: [{ field: "count", operator: "not_between", value: ["2", "7"] }]
+    });
+    expect(notBetween.total).toBe(2);
+    expect(notBetween.data.map((document) => document.name).sort()).toEqual(["Too High", "Too Low"]);
   });
 
   it("filters list results through presence checks", async () => {
@@ -210,6 +221,18 @@ describe("QueryService", () => {
         ]
       })
     ).resolves.toMatchObject({ data: [{ name: "New Submitted" }], total: 1 });
+
+    await expect(
+      queries.listDocuments(owner, "Note", {
+        filters: [
+          {
+            field: "system.updatedAt",
+            operator: "not_between",
+            value: ["2026-01-03T00:00:00.000Z", "2026-01-06T00:00:00.000Z"]
+          }
+        ]
+      })
+    ).resolves.toMatchObject({ data: [{ name: "Old Draft" }], total: 1 });
   });
 
   it("keeps system filters namespaced from DocType fields with the same names", async () => {
@@ -302,6 +325,13 @@ describe("QueryService", () => {
     ).rejects.toMatchObject({
       code: "BAD_REQUEST",
       message: "Filter 'count' must include exactly two values for between"
+    });
+
+    await expect(
+      queries.listDocuments(owner, "Note", { filters: [{ field: "count", operator: "not_between", value: ["1"] }] })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Filter 'count' must include exactly two values for not_between"
     });
 
     await expect(
@@ -830,7 +860,8 @@ describe("QueryService", () => {
           { operator: "gte", label: "greater than or equal" },
           { operator: "lt", label: "less than" },
           { operator: "lte", label: "less than or equal" },
-          { operator: "between", label: "between" }
+          { operator: "between", label: "between" },
+          { operator: "not_between", label: "not between" }
         ]
       }),
       expect.objectContaining({
@@ -857,7 +888,8 @@ describe("QueryService", () => {
           { operator: "gte", label: "greater than or equal" },
           { operator: "lt", label: "less than" },
           { operator: "lte", label: "less than or equal" },
-          { operator: "between", label: "between" }
+          { operator: "between", label: "between" },
+          { operator: "not_between", label: "not between" }
         ]
       })
     ]));

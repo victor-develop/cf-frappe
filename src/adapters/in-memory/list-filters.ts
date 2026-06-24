@@ -62,6 +62,13 @@ export function matchesListFilters(
         const [minimum, maximum] = rangeFilterValues(filter);
         return compareValues(actual, minimum) >= 0 && compareValues(actual, maximum) <= 0;
       }
+      case "not_between": {
+        if (actual === undefined || actual === null) {
+          return false;
+        }
+        const [minimum, maximum] = rangeFilterValues(filter);
+        return compareValues(actual, minimum) < 0 || compareValues(actual, maximum) > 0;
+      }
     }
   });
 }

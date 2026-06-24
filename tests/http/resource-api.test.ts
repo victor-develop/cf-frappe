@@ -150,6 +150,7 @@ describe("resource api", () => {
       fields: [
         { name: "title", type: "text", required: true },
         { name: "count__between", type: "integer" },
+        { name: "count__not_between", type: "integer" },
         { name: "body__is", type: "text" },
         { name: "title__like", type: "text" }
       ],
@@ -272,7 +273,8 @@ describe("resource api", () => {
               { operator: "gte", label: "greater than or equal" },
               { operator: "lt", label: "less than" },
               { operator: "lte", label: "less than or equal" },
-              { operator: "between", label: "between" }
+              { operator: "between", label: "between" },
+              { operator: "not_between", label: "not between" }
             ]
           },
           {
@@ -299,7 +301,8 @@ describe("resource api", () => {
               { operator: "gte", label: "greater than or equal" },
               { operator: "lt", label: "less than" },
               { operator: "lte", label: "less than or equal" },
-              { operator: "between", label: "between" }
+              { operator: "between", label: "between" },
+              { operator: "not_between", label: "not between" }
             ]
           }
         ]),
@@ -1326,6 +1329,17 @@ describe("resource api", () => {
       total: 1
     });
 
+    const notBetween = await app.request("/api/resource/Note?filter_count__not_between=2&filter_count__not_between=6", {
+      headers: userHeaders
+    });
+    expect(notBetween.status).toBe(200);
+    const notBetweenJson = (await notBetween.json()) as {
+      readonly total: number;
+      readonly data: readonly { readonly name: string }[];
+    };
+    expect(notBetweenJson.total).toBe(2);
+    expect(notBetweenJson.data.map((document) => document.name).sort()).toEqual(["HTTP High", "HTTP Low"]);
+
     const like = await app.request("/api/resource/Note?filter_body__like=Escal%25", {
       headers: userHeaders
     });
@@ -1432,12 +1446,24 @@ describe("resource api", () => {
     await app.request("/api/resource/FilterCollision", {
       method: "POST",
       headers: userHeaders,
-      body: JSON.stringify({ title: "Collision Match", count__between: 7, body__is: "literal", title__like: "literal" })
+      body: JSON.stringify({
+        title: "Collision Match",
+        count__between: 7,
+        count__not_between: 7,
+        body__is: "literal",
+        title__like: "literal"
+      })
     });
     await app.request("/api/resource/FilterCollision", {
       method: "POST",
       headers: userHeaders,
-      body: JSON.stringify({ title: "Collision Miss", count__between: 3, body__is: "other", title__like: "other" })
+      body: JSON.stringify({
+        title: "Collision Miss",
+        count__between: 3,
+        count__not_between: 3,
+        body__is: "other",
+        title__like: "other"
+      })
     });
 
     const response = await app.request("/api/resource/FilterCollision?filter_count__between=7", {
@@ -1446,6 +1472,15 @@ describe("resource api", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
+      data: [{ name: "Collision Match" }],
+      total: 1
+    });
+
+    const notBetweenCollision = await app.request("/api/resource/FilterCollision?filter_count__not_between=7", {
+      headers: userHeaders
+    });
+    expect(notBetweenCollision.status).toBe(200);
+    await expect(notBetweenCollision.json()).resolves.toMatchObject({
       data: [{ name: "Collision Match" }],
       total: 1
     });
@@ -1490,6 +1525,7 @@ describe("resource api", () => {
         filters: [
           { field: "priority", operator: "in", value: ["High", "Low"] },
           { field: "count", operator: "between", value: [1, 7] },
+          { field: "count", operator: "not_between", value: [3, 6] },
           { field: "body", operator: "is", value: "set" },
           { field: "body", operator: "like", value: "%High%" }
         ]

@@ -172,7 +172,7 @@ function parseFilterKey(
 
 interface PendingArrayFilter {
   readonly field: string;
-  readonly operator: "in" | "not_in" | "between";
+  readonly operator: "in" | "not_in" | "between" | "not_between";
   readonly values: string[];
 }
 

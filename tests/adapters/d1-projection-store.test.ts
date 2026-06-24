@@ -158,7 +158,9 @@ describe("D1ProjectionStore", () => {
     const db = new FakeD1Database([
       documentRow({ name: "D1 Low", data: { title: "low", count: 1 } }),
       documentRow({ name: "D1 Mid", data: { title: "mid", count: 5 } }),
-      documentRow({ name: "D1 High", data: { title: "high", count: 9 } })
+      documentRow({ name: "D1 High", data: { title: "high", count: 9 } }),
+      documentRow({ name: "D1 Missing", data: { title: "missing" } }),
+      documentRow({ name: "D1 Null", data: { title: "null", count: null } })
     ]);
     const store = new D1ProjectionStore(db as unknown as D1Database);
 
@@ -175,6 +177,23 @@ describe("D1ProjectionStore", () => {
     expect(rows?.sql).not.toContain("8");
     expect(rows?.params).toEqual(["acme", "Note", 2, 8, 50, 0]);
     expect(count?.params).toEqual(["acme", "Note", 2, 8]);
+
+    const notBetweenDb = new FakeD1Database(db.rows);
+    const notBetweenStore = new D1ProjectionStore(notBetweenDb as unknown as D1Database);
+    const notBetween = await notBetweenStore.list({
+      tenantId: "acme",
+      doctype: "Note",
+      filters: [{ field: "count", operator: "not_between", value: [2, 8] }]
+    });
+
+    expect(notBetween.data.map((document) => document.name)).toEqual(["D1 Low", "D1 High"]);
+    expect(notBetween.total).toBe(2);
+    expect(notBetweenDb.statements[0]?.sql).toContain(
+      "json_extract(data_json, '$.count') IS NOT NULL AND (json_extract(data_json, '$.count') < ? OR json_extract(data_json, '$.count') > ?)"
+    );
+    expect(notBetweenDb.statements[0]?.sql).not.toContain("D1 Missing");
+    expect(notBetweenDb.statements[0]?.params).toEqual(["acme", "Note", 2, 8, 50, 0]);
+    expect(notBetweenDb.statements[1]?.params).toEqual(["acme", "Note", 2, 8]);
   });
 
   it("renders presence operators without binding filter values", async () => {
@@ -514,7 +533,19 @@ class FakeD1PreparedStatement {
         }
         paramIndex += 1;
       }
-      if (this.sql.includes("json_extract(data_json, '$.count') > ?")) {
+      const hasCountNotBetween = this.sql.includes(
+        "json_extract(data_json, '$.count') IS NOT NULL AND (json_extract(data_json, '$.count') < ? OR json_extract(data_json, '$.count') > ?)"
+      );
+      if (hasCountNotBetween) {
+        if (
+          !compares(data.count, filterParams[paramIndex], (actual, expected) => actual < expected) &&
+          !compares(data.count, filterParams[paramIndex + 1], (actual, expected) => actual > expected)
+        ) {
+          return false;
+        }
+        paramIndex += 2;
+      }
+      if (!hasCountNotBetween && this.sql.includes("json_extract(data_json, '$.count') > ?")) {
         if (!compares(data.count, filterParams[paramIndex], (actual, expected) => actual > expected)) {
           return false;
         }
@@ -526,7 +557,7 @@ class FakeD1PreparedStatement {
         }
         paramIndex += 1;
       }
-      if (this.sql.includes("json_extract(data_json, '$.count') < ?")) {
+      if (!hasCountNotBetween && this.sql.includes("json_extract(data_json, '$.count') < ?")) {
         if (!compares(data.count, filterParams[paramIndex], (actual, expected) => actual < expected)) {
           return false;
         }

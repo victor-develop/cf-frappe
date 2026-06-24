@@ -482,7 +482,8 @@ export type ListFilterOperator =
   | "gte"
   | "lt"
   | "lte"
-  | "between";
+  | "between"
+  | "not_between";
 export type ListFilterInputType = "text" | "number" | "date" | "datetime-local" | "select" | "boolean";
 export type ListOrderDirection = "asc" | "desc";
 export type ListFilterValue = JsonPrimitive | readonly JsonPrimitive[];
