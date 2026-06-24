@@ -46,6 +46,18 @@ describe("CloudflareImagesFileTransformer", () => {
     expect(calls).toEqual([]);
   });
 
+  it("rejects image overlays instead of silently dropping unsupported options", async () => {
+    const calls: unknown[] = [];
+    const transformer = new CloudflareImagesFileTransformer(fakeImages(calls));
+
+    await expect(transformer.transform(command({ width: 120, overlay: { file: "file_badge" } }))).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      status: 400,
+      message: "Cloudflare Images binding does not support image overlays"
+    });
+    expect(calls).toEqual([]);
+  });
+
   it("maps Images binding failures to framework storage errors", async () => {
     const transformer = new CloudflareImagesFileTransformer({
       input() {

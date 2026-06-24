@@ -1,6 +1,7 @@
 import { badRequest } from "../core/errors.js";
 
 export const MAX_FILE_TRANSFORM_DIMENSION = 4096;
+export const MAX_FILE_TRANSFORM_OVERLAY_FILE_LENGTH = 255;
 export const MAX_FILE_TRANSFORM_WATERMARK_TEXT_LENGTH = 120;
 export const MIN_FILE_TRANSFORM_WATERMARK_FONT_SIZE = 8;
 export const MAX_FILE_TRANSFORM_WATERMARK_FONT_SIZE = 256;
@@ -11,6 +12,7 @@ export const FILE_TRANSFORM_WATERMARK_PLACEMENTS = ["center", "top-left", "top-r
 export type FileTransformFit = typeof FILE_TRANSFORM_FITS[number];
 export type FileTransformFormat = typeof FILE_TRANSFORM_FORMATS[number];
 export type FileTransformWatermarkPlacement = typeof FILE_TRANSFORM_WATERMARK_PLACEMENTS[number];
+export type FileTransformOverlayPlacement = FileTransformWatermarkPlacement;
 
 export interface FileTransformWatermark {
   readonly text: string;
@@ -20,6 +22,14 @@ export interface FileTransformWatermark {
   readonly fontSize?: number;
 }
 
+export interface FileTransformOverlay {
+  readonly file: string;
+  readonly placement?: FileTransformOverlayPlacement;
+  readonly opacity?: number;
+  readonly width?: number;
+  readonly height?: number;
+}
+
 export interface FileTransformOptions {
   readonly width?: number;
   readonly height?: number;
@@ -27,6 +37,7 @@ export interface FileTransformOptions {
   readonly format?: FileTransformFormat;
   readonly quality?: number;
   readonly watermark?: FileTransformWatermark;
+  readonly overlay?: FileTransformOverlay;
 }
 
 export interface FileTransformSource {
@@ -39,11 +50,20 @@ export interface FileTransformSource {
   readonly httpEtag?: string;
 }
 
+export interface FileTransformOverlaySource extends FileTransformSource {
+  readonly file: string;
+  readonly placement?: FileTransformOverlayPlacement;
+  readonly opacity?: number;
+  readonly width?: number;
+  readonly height?: number;
+}
+
 export interface TransformFileObjectCommand {
   readonly actorId: string;
   readonly tenantId: string;
   readonly source: FileTransformSource;
   readonly options: FileTransformOptions;
+  readonly overlay?: FileTransformOverlaySource;
 }
 
 export interface TransformedFileObject {
@@ -76,7 +96,8 @@ export function normalizeFileTransformOptions(options: FileTransformOptions): Fi
     ...(options.fit === undefined ? {} : { fit: normalizeFit(options.fit) }),
     ...(options.format === undefined ? {} : { format: normalizeFormat(options.format) }),
     ...(options.quality === undefined ? {} : { quality: normalizeQuality(options.quality) }),
-    ...(options.watermark === undefined ? {} : { watermark: normalizeWatermark(options.watermark) })
+    ...(options.watermark === undefined ? {} : { watermark: normalizeWatermark(options.watermark) }),
+    ...(options.overlay === undefined ? {} : { overlay: normalizeOverlay(options.overlay) })
   };
   if (Object.keys(normalized).length === 0) {
     throw badRequest("At least one file transform option must be provided");
@@ -88,6 +109,27 @@ export function normalizeFileTransformOptions(options: FileTransformOptions): Fi
     throw badRequest(`File transform fit '${normalized.fit}' requires width and height`);
   }
   return normalized;
+}
+
+function normalizeOverlay(value: FileTransformOverlay): FileTransformOverlay {
+  if (typeof value !== "object" || value === null || typeof value.file !== "string") {
+    throw badRequest(overlayFileMessage());
+  }
+  const file = value.file.trim();
+  if (file.length === 0 || [...file].length > MAX_FILE_TRANSFORM_OVERLAY_FILE_LENGTH) {
+    throw badRequest(overlayFileMessage());
+  }
+  return {
+    file,
+    ...(value.placement === undefined ? {} : { placement: normalizeOverlayPlacement(value.placement) }),
+    ...(value.opacity === undefined ? {} : { opacity: normalizeOverlayOpacity(value.opacity) }),
+    ...(value.width === undefined ? {} : { width: normalizeDimension(value.width, "overlay.width") }),
+    ...(value.height === undefined ? {} : { height: normalizeDimension(value.height, "overlay.height") })
+  };
+}
+
+function overlayFileMessage(): string {
+  return `overlay.file must be a non-empty string up to ${String(MAX_FILE_TRANSFORM_OVERLAY_FILE_LENGTH)} characters`;
 }
 
 export function normalizeFileTransformContentType(contentType: string): string {
@@ -150,9 +192,23 @@ function normalizeWatermarkPlacement(value: string): FileTransformWatermarkPlace
   return value as FileTransformWatermarkPlacement;
 }
 
+function normalizeOverlayPlacement(value: string): FileTransformOverlayPlacement {
+  if (!FILE_TRANSFORM_WATERMARK_PLACEMENTS.includes(value as FileTransformOverlayPlacement)) {
+    throw badRequest(`overlay.placement must be one of ${FILE_TRANSFORM_WATERMARK_PLACEMENTS.join(", ")}`);
+  }
+  return value as FileTransformOverlayPlacement;
+}
+
 function normalizeWatermarkOpacity(value: number): number {
   if (!Number.isInteger(value) || value < 1 || value > 100) {
     throw badRequest("watermark.opacity must be an integer from 1 to 100");
+  }
+  return value;
+}
+
+function normalizeOverlayOpacity(value: number): number {
+  if (!Number.isInteger(value) || value < 1 || value > 100) {
+    throw badRequest("overlay.opacity must be an integer from 1 to 100");
   }
   return value;
 }

@@ -1464,6 +1464,92 @@ describe("FileService", () => {
     ]);
   });
 
+  it("passes permissioned image overlay sources into injected transformers", async () => {
+    const transformer = new RecordingTransformer();
+    const services = createFileServices(["source", "overlay"], ["source", "overlay"], { transformer });
+    const uploaded = await services.files.upload({
+      actor: owner,
+      filename: "avatar.png",
+      body: "image-bytes",
+      contentType: "image/png",
+      isPrivate: false
+    });
+    const overlay = await services.files.upload({
+      actor: owner,
+      filename: "badge.png",
+      body: "badge-bytes",
+      contentType: "image/png",
+      isPrivate: false
+    });
+
+    await services.files.transform({
+      actor: guest,
+      name: uploaded.snapshot.name,
+      options: {
+        width: 128,
+        overlay: {
+          file: overlay.snapshot.name,
+          placement: "top-left",
+          opacity: 60,
+          width: 32,
+          height: 24
+        }
+      }
+    });
+
+    const overlayCommand = transformer.commands[0]?.overlay;
+    expect(transformer.commands[0]?.options).toEqual({
+      width: 128,
+      overlay: {
+        file: overlay.snapshot.name,
+        placement: "top-left",
+        opacity: 60,
+        width: 32,
+        height: 24
+      }
+    });
+    expect(overlayCommand).toEqual(expect.objectContaining({
+      file: overlay.snapshot.name,
+      key: "acme/files/file_overlay-badge.png",
+      filename: "badge.png",
+      contentType: "image/png",
+      size: 11,
+      placement: "top-left",
+      opacity: 60,
+      width: 32,
+      height: 24
+    }));
+    await expect(new Response(overlayCommand?.body).text()).resolves.toBe("badge-bytes");
+  });
+
+  it("requires read access to transform overlay files before invoking transformers", async () => {
+    const transformer = new RecordingTransformer();
+    const services = createFileServices(["source", "overlay"], ["source", "overlay"], { transformer });
+    const uploaded = await services.files.upload({
+      actor: owner,
+      filename: "avatar.png",
+      body: "image-bytes",
+      contentType: "image/png",
+      isPrivate: false
+    });
+    const overlay = await services.files.upload({
+      actor: owner,
+      filename: "private-badge.png",
+      body: "badge-bytes",
+      contentType: "image/png",
+      isPrivate: true
+    });
+
+    await expect(
+      services.files.transform({
+        actor: guest,
+        name: uploaded.snapshot.name,
+        options: { width: 128, overlay: { file: overlay.snapshot.name } }
+      })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+    expect(transformer.commands).toEqual([]);
+  });
+
   it("records generated image renditions as event-sourced file metadata", async () => {
     const transformer = new RecordingTransformer({ includeContentLength: false });
     const services = createFileServices(["create", "reserve-rendition", "complete-rendition"], ["object", "attempt"], {
@@ -1587,6 +1673,186 @@ describe("FileService", () => {
           }
         }
       }
+    ]);
+  });
+
+  it("records image overlay rendition intent as event-sourced file metadata", async () => {
+    const transformer = new RecordingTransformer();
+    const services = createFileServices(
+      ["source-create", "overlay-create", "reserve-rendition", "complete-rendition"],
+      ["source", "overlay", "attempt"],
+      { transformer }
+    );
+    const uploaded = await services.files.upload({
+      actor: owner,
+      filename: "avatar.png",
+      body: "image-bytes",
+      contentType: "image/png",
+      isPrivate: false
+    });
+    const overlay = await services.files.upload({
+      actor: owner,
+      filename: "badge.png",
+      body: "badge-bytes",
+      contentType: "image/png",
+      isPrivate: false
+    });
+
+    const generated = await services.files.generateRendition({
+      actor: owner,
+      name: uploaded.snapshot.name,
+      options: {
+        width: 96,
+        format: "png",
+        overlay: {
+          file: overlay.snapshot.name,
+          placement: "center",
+          opacity: 80,
+          width: 24,
+          height: 24
+        }
+      }
+    });
+    const overlayRenditionId = expect.stringMatching(/^w96-f-png-ov-file-overlay-[0-9a-f]{64}$/);
+
+    expect(generated).toMatchObject({
+      snapshot: {
+        name: uploaded.snapshot.name,
+        version: 3,
+        data: {
+          renditions: [
+            {
+              id: overlayRenditionId,
+              key: expect.stringMatching(
+                /^acme\/file-renditions\/file_source\/w96-f-png-ov-file-overlay-[0-9a-f]{64}-rendition_attempt\.png$/
+              ),
+              status: "available",
+              overlay_file: overlay.snapshot.name,
+              overlay_key: "acme/files/file_overlay-badge.png",
+              overlay_etag: '"memory-acme/files/file_overlay-badge.png-11"',
+              overlay_http_etag: '"memory-acme/files/file_overlay-badge.png-11"',
+              options: {
+                width: 96,
+                format: "png",
+                overlay: {
+                  file: overlay.snapshot.name,
+                  placement: "center",
+                  opacity: 80,
+                  width: 24,
+                  height: 24
+                }
+              }
+            }
+          ]
+        }
+      },
+      rendition: {
+        id: overlayRenditionId,
+        overlayFile: overlay.snapshot.name,
+        overlayKey: "acme/files/file_overlay-badge.png",
+        overlayEtag: '"memory-acme/files/file_overlay-badge.png-11"',
+        overlayHttpEtag: '"memory-acme/files/file_overlay-badge.png-11"',
+        options: {
+          width: 96,
+          format: "png",
+          overlay: {
+            file: overlay.snapshot.name,
+            placement: "center",
+            opacity: 80,
+            width: 24,
+            height: 24
+          }
+        }
+      },
+      created: true
+    });
+    expect(transformer.commands[0]?.overlay).toEqual(expect.objectContaining({
+      file: overlay.snapshot.name,
+      key: "acme/files/file_overlay-badge.png",
+      placement: "center",
+      opacity: 80,
+      width: 24,
+      height: 24
+    }));
+  });
+
+  it("regenerates persisted renditions when an overlay object changes under the same File", async () => {
+    const transformer = new RecordingTransformer();
+    const services = createFileServices(
+      ["source-create", "overlay-create", "reserve-1", "complete-1", "reserve-2", "complete-2"],
+      ["source", "overlay", "attempt-1", "attempt-2"],
+      { transformer }
+    );
+    const uploaded = await services.files.upload({
+      actor: owner,
+      filename: "avatar.png",
+      body: "image-bytes",
+      contentType: "image/png",
+      isPrivate: false
+    });
+    const overlay = await services.files.upload({
+      actor: owner,
+      filename: "badge.png",
+      body: "badge-bytes",
+      contentType: "image/png",
+      isPrivate: false
+    });
+    const options = { width: 96, overlay: { file: overlay.snapshot.name } };
+
+    const first = await services.files.generateRendition({
+      actor: owner,
+      name: uploaded.snapshot.name,
+      options
+    });
+    await services.storage.put({
+      key: "acme/files/file_overlay-badge.png",
+      body: "updated-badge-bytes",
+      contentType: "image/png",
+      filename: "badge.png"
+    });
+    const second = await services.files.generateRendition({
+      actor: owner,
+      name: uploaded.snapshot.name,
+      options
+    });
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(true);
+    expect(first.rendition.id).toBe(second.rendition.id);
+    expect(first.rendition.overlayEtag).toBe('"memory-acme/files/file_overlay-badge.png-11"');
+    expect(second.rendition.overlayEtag).toBe('"memory-acme/files/file_overlay-badge.png-19"');
+    expect(second.snapshot.version).toBe(5);
+    expect(transformer.commands).toHaveLength(2);
+  });
+
+  it("requires overlay read access before reserving persisted image renditions", async () => {
+    const transformer = new RecordingTransformer();
+    const services = createFileServices(["source", "overlay"], ["source", "overlay"], { transformer });
+    const uploaded = await services.files.upload({
+      actor: owner,
+      filename: "avatar.png",
+      body: "image-bytes",
+      contentType: "image/png",
+      isPrivate: false
+    });
+    const overlay = await services.files.upload({
+      actor: otherUser,
+      filename: "private-badge.png",
+      body: "badge-bytes",
+      contentType: "image/png",
+      isPrivate: true
+    });
+
+    await expect(
+      services.files.generateRendition({
+        actor: owner,
+        name: uploaded.snapshot.name,
+        options: { width: 128, overlay: { file: overlay.snapshot.name } }
+      })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+    expect(transformer.commands).toEqual([]);
+    await expect(services.store.readStream(documentStream("acme", "File", uploaded.snapshot.name))).resolves.toEqual([
+      expect.objectContaining({ type: "FileCreated" })
     ]);
   });
 

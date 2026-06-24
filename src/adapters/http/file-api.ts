@@ -7,6 +7,7 @@ import {
 import type {
   FileTransformFit,
   FileTransformFormat,
+  FileTransformOverlayPlacement,
   FileTransformOptions,
   FileTransformWatermarkPlacement
 } from "../../ports/file-transformer.js";
@@ -574,7 +575,12 @@ function fileTransformQuery(request: Request): FileTransformOptions {
     "watermarkPlacement",
     "watermarkOpacity",
     "watermarkColor",
-    "watermarkFontSize"
+    "watermarkFontSize",
+    "overlay",
+    "overlayPlacement",
+    "overlayOpacity",
+    "overlayWidth",
+    "overlayHeight"
   ]);
   const unknown = [...new Set([...params.keys()].filter((key) => !allowed.has(key)))];
   if (unknown.length > 0) {
@@ -586,12 +592,13 @@ function fileTransformQuery(request: Request): FileTransformOptions {
     ...optionalTransformFit(params),
     ...optionalTransformFormat(params),
     ...optionalTransformInteger(params, "quality"),
-    ...optionalTransformWatermark(params)
+    ...optionalTransformWatermark(params),
+    ...optionalTransformOverlay(params)
   };
 }
 
 function fileTransformBody(body: Record<string, unknown>, label: string): FileTransformOptions {
-  const allowed = new Set(["width", "height", "fit", "format", "quality", "watermark"]);
+  const allowed = new Set(["width", "height", "fit", "format", "quality", "watermark", "overlay"]);
   const unknown = Object.keys(body).filter((key) => !allowed.has(key));
   if (unknown.length > 0) {
     throw badRequest(`Unknown ${label} field '${unknown[0]}'`);
@@ -602,7 +609,8 @@ function fileTransformBody(body: Record<string, unknown>, label: string): FileTr
     ...optionalTransformBodyFit(body),
     ...optionalTransformBodyFormat(body),
     ...optionalTransformBodyInteger(body, "quality"),
-    ...optionalTransformBodyWatermark(body)
+    ...optionalTransformBodyWatermark(body),
+    ...optionalTransformBodyOverlay(body)
   };
 }
 
@@ -677,6 +685,41 @@ function optionalTransformBodyWatermark(body: Record<string, unknown>): Pick<Fil
   return { watermark: { text: value } };
 }
 
+function optionalTransformBodyOverlay(body: Record<string, unknown>): Pick<FileTransformOptions, "overlay"> {
+  const value = body.overlay;
+  if (value === undefined || value === null) {
+    return {};
+  }
+  if (typeof value === "string") {
+    return { overlay: { file: value } };
+  }
+  if (typeof value === "object" && !Array.isArray(value)) {
+    const overlay = value as Record<string, unknown>;
+    const unknown = Object.keys(overlay).filter(
+      (key) => !["file", "placement", "opacity", "width", "height"].includes(key)
+    );
+    if (unknown.length > 0) {
+      throw badRequest(`Unknown overlay field '${unknown[0]}'`);
+    }
+    const file = overlay.file;
+    if (typeof file !== "string") {
+      throw badRequest("overlay.file must be a string");
+    }
+    return {
+      overlay: {
+        file,
+        ...(overlay.placement === undefined
+          ? {}
+          : { placement: stringOverlayField(overlay.placement, "overlay.placement") as FileTransformOverlayPlacement }),
+        ...(overlay.opacity === undefined ? {} : { opacity: integerOverlayField(overlay.opacity, "overlay.opacity") }),
+        ...(overlay.width === undefined ? {} : { width: integerOverlayField(overlay.width, "overlay.width") }),
+        ...(overlay.height === undefined ? {} : { height: integerOverlayField(overlay.height, "overlay.height") })
+      }
+    };
+  }
+  throw badRequest("overlay must be a string or object with file");
+}
+
 function optionalTransformInteger<TKey extends "width" | "height" | "quality">(
   params: URLSearchParams,
   key: TKey
@@ -725,6 +768,23 @@ function optionalTransformWatermark(params: URLSearchParams): Pick<FileTransform
   };
 }
 
+function optionalTransformOverlay(params: URLSearchParams): Pick<FileTransformOptions, "overlay"> {
+  const overlayKeys = ["overlay", "overlayPlacement", "overlayOpacity", "overlayWidth", "overlayHeight"];
+  const hasOverlayValue = overlayKeys.some((key) => params.get(key) !== null && params.get(key) !== "");
+  if (!hasOverlayValue) {
+    return {};
+  }
+  return {
+    overlay: {
+      file: params.get("overlay") ?? "",
+      ...optionalTransformOverlayPlacement(params),
+      ...optionalTransformOverlayInteger(params, "overlayOpacity", "opacity"),
+      ...optionalTransformOverlayInteger(params, "overlayWidth", "width"),
+      ...optionalTransformOverlayInteger(params, "overlayHeight", "height")
+    }
+  };
+}
+
 function optionalTransformWatermarkPlacement(
   params: URLSearchParams
 ): Pick<NonNullable<FileTransformOptions["watermark"]>, "placement"> {
@@ -761,6 +821,32 @@ function optionalTransformWatermarkInteger<TKey extends "opacity" | "fontSize">(
   return { [targetKey]: parsed } as { readonly [K in TKey]: number };
 }
 
+function optionalTransformOverlayPlacement(
+  params: URLSearchParams
+): Pick<NonNullable<FileTransformOptions["overlay"]>, "placement"> {
+  const value = params.get("overlayPlacement");
+  if (value === null || value === "") {
+    return {};
+  }
+  return { placement: value as FileTransformOverlayPlacement };
+}
+
+function optionalTransformOverlayInteger<TKey extends "opacity" | "width" | "height">(
+  params: URLSearchParams,
+  sourceKey: string,
+  targetKey: TKey
+): { readonly [K in TKey]?: number } {
+  const value = params.get(sourceKey);
+  if (value === null || value === "") {
+    return {};
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) {
+    throw badRequest(`${sourceKey} must be an integer`);
+  }
+  return { [targetKey]: parsed } as { readonly [K in TKey]: number };
+}
+
 function stringWatermarkField(value: unknown, field: string): string {
   if (typeof value !== "string") {
     throw badRequest(`${field} must be a string`);
@@ -769,6 +855,20 @@ function stringWatermarkField(value: unknown, field: string): string {
 }
 
 function integerWatermarkField(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw badRequest(`${field} must be an integer`);
+  }
+  return value;
+}
+
+function stringOverlayField(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw badRequest(`${field} must be a string`);
+  }
+  return value;
+}
+
+function integerOverlayField(value: unknown, field: string): number {
   if (typeof value !== "number" || !Number.isInteger(value)) {
     throw badRequest(`${field} must be an integer`);
   }

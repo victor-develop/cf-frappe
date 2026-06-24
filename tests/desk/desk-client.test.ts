@@ -1147,6 +1147,13 @@ describe("Desk client runtime", () => {
         opacity: 75,
         color: "#123456",
         fontSize: 24
+      },
+      overlay: {
+        file: "file/badge",
+        placement: "top-left",
+        opacity: 60,
+        width: 32,
+        height: 24
       }
     });
 
@@ -1166,8 +1173,15 @@ describe("Desk client runtime", () => {
         opacity: 75,
         color: "#123456",
         fontSize: 24
+      },
+      overlay: {
+        file: "file/badge",
+        placement: "top-left",
+        opacity: 60,
+        width: 32,
+        height: 24
       }
-    })).toBe("/api/files/file%2F1/transform?width=320&height=240&fit=cover&format=webp&quality=82&watermark=Draft+Copy&watermarkPlacement=bottom-right&watermarkOpacity=75&watermarkColor=%23123456&watermarkFontSize=24");
+    })).toBe("/api/files/file%2F1/transform?width=320&height=240&fit=cover&format=webp&quality=82&watermark=Draft+Copy&watermarkPlacement=bottom-right&watermarkOpacity=75&watermarkColor=%23123456&watermarkFontSize=24&overlay=file%2Fbadge&overlayPlacement=top-left&overlayOpacity=60&overlayWidth=32&overlayHeight=24");
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
       "POST /api/files?attached_to_doctype=Task+Type&attached_to_name=TASK%2F1&filename=hello.txt&is_private=true",
       "POST /api/files/direct-upload",
@@ -1196,6 +1210,13 @@ describe("Desk client runtime", () => {
         opacity: 75,
         color: "#123456",
         fontSize: 24
+      },
+      overlay: {
+        file: "file/badge",
+        placement: "top-left",
+        opacity: 60,
+        width: 32,
+        height: 24
       }
     }));
   });

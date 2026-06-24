@@ -94,16 +94,22 @@ describe("file api", () => {
 
   it("transforms readable images through the file API", async () => {
     const transformer = new RecordingTransformer();
-    const { app } = makeAppFixture(1024, ["create"], ["object"], { transformer });
+    const { app } = makeAppFixture(1024, ["create", "overlay"], ["object", "overlay"], { transformer });
     const uploaded = await app.request("/api/files?filename=avatar.png&is_private=false", {
       method: "POST",
       headers: { ...userHeaders("owner@example.com", "User"), "content-type": "image/png" },
       body: "image-bytes"
     });
     expect(uploaded.status).toBe(201);
+    const overlay = await app.request("/api/files?filename=badge.png&is_private=false", {
+      method: "POST",
+      headers: { ...userHeaders("owner@example.com", "User"), "content-type": "image/png" },
+      body: "badge-bytes"
+    });
+    expect(overlay.status).toBe(201);
 
     const transformed = await app.request(
-      "/api/files/file_object/transform?width=320&height=240&fit=cover&format=webp&quality=82&watermark=Draft%20Copy&watermarkPlacement=bottom-right&watermarkOpacity=65&watermarkColor=%23123456&watermarkFontSize=24",
+      "/api/files/file_object/transform?width=320&height=240&fit=cover&format=webp&quality=82&watermark=Draft%20Copy&watermarkPlacement=bottom-right&watermarkOpacity=65&watermarkColor=%23123456&watermarkFontSize=24&overlay=file_overlay&overlayPlacement=top-left&overlayOpacity=60&overlayWidth=48&overlayHeight=32",
       {
         headers: userHeaders("guest", "Guest")
       }
@@ -131,12 +137,29 @@ describe("file api", () => {
             opacity: 65,
             color: "#123456",
             fontSize: 24
+          },
+          overlay: {
+            file: "file_overlay",
+            placement: "top-left",
+            opacity: 60,
+            width: 48,
+            height: 32
           }
         },
         source: expect.objectContaining({
           key: "acme/files/file_object-avatar.png",
           contentType: "image/png",
           size: 11
+        }),
+        overlay: expect.objectContaining({
+          file: "file_overlay",
+          key: "acme/files/file_overlay-badge.png",
+          contentType: "image/png",
+          size: 11,
+          placement: "top-left",
+          opacity: 60,
+          width: 48,
+          height: 32
         })
       })
     ]);
@@ -317,6 +340,85 @@ describe("file api", () => {
     ]);
   });
 
+  it("accepts object-shaped image overlay rendition bodies", async () => {
+    const transformer = new RecordingTransformer();
+    const { app } = makeAppFixture(
+      1024,
+      ["create", "overlay", "reserve-rendition", "complete-rendition"],
+      ["object", "overlay", "attempt"],
+      { transformer }
+    );
+    await app.request("/api/files?filename=avatar.png&is_private=false", {
+      method: "POST",
+      headers: { ...userHeaders("owner@example.com", "User"), "content-type": "image/png" },
+      body: "image-bytes"
+    });
+    await app.request("/api/files?filename=badge.png&is_private=false", {
+      method: "POST",
+      headers: { ...userHeaders("owner@example.com", "User"), "content-type": "image/png" },
+      body: "badge-bytes"
+    });
+
+    const generated = await app.request("/api/files/file_object/renditions", {
+      method: "POST",
+      headers: jsonHeaders("owner@example.com", "User"),
+      body: JSON.stringify({
+        width: 64,
+        overlay: {
+          file: " file_overlay ",
+          placement: "bottom-right",
+          opacity: 70,
+          width: 16,
+          height: 16
+        }
+      })
+    });
+
+    expect(generated.status).toBe(201);
+    await expect(generated.json()).resolves.toMatchObject({
+      data: {
+        data: {
+          renditions: [
+            {
+              id: expect.stringMatching(/^w64-ov-file-overlay-[0-9a-f]{64}$/),
+              options: {
+                width: 64,
+                overlay: {
+                  file: "file_overlay",
+                  placement: "bottom-right",
+                  opacity: 70,
+                  width: 16,
+                  height: 16
+                }
+              }
+            }
+          ]
+        }
+      },
+      rendition: {
+        id: expect.stringMatching(/^w64-ov-file-overlay-[0-9a-f]{64}$/),
+        options: {
+          width: 64,
+          overlay: {
+            file: "file_overlay",
+            placement: "bottom-right",
+            opacity: 70,
+            width: 16,
+            height: 16
+          }
+        }
+      }
+    });
+    expect(transformer.commands[0]?.overlay).toEqual(expect.objectContaining({
+      file: "file_overlay",
+      key: "acme/files/file_overlay-badge.png",
+      placement: "bottom-right",
+      opacity: 70,
+      width: 16,
+      height: 16
+    }));
+  });
+
   it("validates file rendition generation bodies", async () => {
     const transformer = new RecordingTransformer();
     const { app } = makeAppFixture(1024, ["create"], ["object"], { transformer });
@@ -363,6 +465,24 @@ describe("file api", () => {
     expect(unknownWatermarkField.status).toBe(400);
     await expect(unknownWatermarkField.json()).resolves.toMatchObject({
       error: { code: "BAD_REQUEST", message: "Unknown watermark field 'blendMode'" }
+    });
+    const invalidOverlay = await app.request("/api/files/file_object/renditions", {
+      method: "POST",
+      headers: jsonHeaders("guest", "Guest"),
+      body: JSON.stringify({ width: 64, overlay: { file: "   " } })
+    });
+    expect(invalidOverlay.status).toBe(400);
+    await expect(invalidOverlay.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "overlay.file must be a non-empty string up to 255 characters" }
+    });
+    const unknownOverlayField = await app.request("/api/files/file_object/renditions", {
+      method: "POST",
+      headers: jsonHeaders("guest", "Guest"),
+      body: JSON.stringify({ width: 64, overlay: { file: "file_overlay", blendMode: "multiply" } })
+    });
+    expect(unknownOverlayField.status).toBe(400);
+    await expect(unknownOverlayField.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Unknown overlay field 'blendMode'" }
     });
     expect(transformer.commands).toEqual([]);
   });
@@ -432,6 +552,26 @@ describe("file api", () => {
       {
         path: "/api/files/file_object/transform?watermarkColor=%23123456",
         message: "watermark must be a non-empty string up to 120 characters"
+      },
+      {
+        path: "/api/files/file_object/transform?overlay=%20%20",
+        message: "overlay.file must be a non-empty string up to 255 characters"
+      },
+      {
+        path: "/api/files/file_object/transform?overlay=file_overlay&overlayPlacement=middle",
+        message: "overlay.placement must be one of center, top-left, top-right, bottom-left, bottom-right"
+      },
+      {
+        path: "/api/files/file_object/transform?overlay=file_overlay&overlayOpacity=0",
+        message: "overlay.opacity must be an integer from 1 to 100"
+      },
+      {
+        path: "/api/files/file_object/transform?overlay=file_overlay&overlayWidth=0",
+        message: "overlay.width must be an integer from 1 to 4096"
+      },
+      {
+        path: "/api/files/file_object/transform?overlayHeight=32",
+        message: "overlay.file must be a non-empty string up to 255 characters"
       }
     ];
     for (const entry of cases) {

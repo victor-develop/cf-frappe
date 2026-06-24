@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the report compound filter expression slice:
+As of the image overlay transform source slice:
 
 - Vitest files: `89`
-- Vitest cases: `976`
+- Vitest cases: `983`
 
 ## Implication
 

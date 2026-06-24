@@ -15,6 +15,9 @@ export class CloudflareImagesFileTransformer implements FileTransformer {
     if (options.watermark !== undefined) {
       throw badRequest("Cloudflare Images binding does not support text watermarks");
     }
+    if (options.overlay !== undefined) {
+      throw badRequest("Cloudflare Images binding does not support image overlays");
+    }
   }
 
   async transform(command: TransformFileObjectCommand): Promise<TransformedFileObject> {

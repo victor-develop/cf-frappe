@@ -31,6 +31,8 @@ import type { FileScanner, FileScanResult, FileScanSource, FileScanTarget } from
 import {
   isTransformableFileContentType,
   normalizeFileTransformOptions,
+  type FileTransformOverlayPlacement,
+  type FileTransformOverlaySource,
   type FileTransformer,
   type FileTransformOptions,
   type FileTransformWatermarkPlacement,
@@ -248,6 +250,10 @@ export interface FileRendition {
   readonly requestedAt: string;
   readonly requestedBy: string;
   readonly sourceEtag?: string;
+  readonly overlayFile?: string;
+  readonly overlayKey?: string;
+  readonly overlayEtag?: string;
+  readonly overlayHttpEtag?: string;
   readonly contentType?: string;
   readonly size?: number;
   readonly etag?: string;
@@ -893,14 +899,20 @@ export class FileService {
         `Actor '${command.actor.id}' cannot generate renditions for ${this.fileDoctype}/${command.name}`
       );
     }
-    const sourceEtag = downloaded.object.metadata.httpEtag ?? downloaded.object.metadata.etag;
     this.validateTransformOptions(options);
+    const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
+    const overlay = await this.resolveTransformOverlay({
+      actor: command.actor,
+      tenantId,
+      options
+    });
+    const sourceEtag = downloaded.object.metadata.httpEtag ?? downloaded.object.metadata.etag;
     const renditionId = await fileRenditionId(options);
     const existing = fileRenditions(downloaded.snapshot).find(
       (rendition) =>
         rendition.id === renditionId &&
         rendition.status === "available" &&
-        optionalString(rendition.source_etag) === sourceEtag
+        renditionSourcesMatch(rendition, sourceEtag, overlay)
     );
     if (existing && await this.storage.head(existing.key)) {
       return {
@@ -910,13 +922,12 @@ export class FileService {
       };
     }
 
-    const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
     const currentRenditions = fileRenditions(downloaded.snapshot);
     const pendingExisting = currentRenditions.find(
       (rendition) =>
         rendition.id === renditionId &&
         rendition.status === "pending" &&
-        optionalString(rendition.source_etag) === sourceEtag
+        renditionSourcesMatch(rendition, sourceEtag, overlay)
     );
     if (pendingExisting) {
       throw conflict(`File rendition '${renditionId}' is already being generated`);
@@ -927,6 +938,7 @@ export class FileService {
       id: renditionId,
       attemptId: this.ids.next("rendition_"),
       sourceEtag,
+      ...(overlay === undefined ? {} : { overlay }),
       options,
       requestedAt: this.clock.now(),
       requestedBy: command.actor.id
@@ -950,7 +962,8 @@ export class FileService {
         actor: command.actor,
         tenantId,
         downloaded,
-        options
+        options,
+        ...(overlay === undefined ? {} : { overlay })
       });
       const filename = fileRenditionFilename(stringField(downloaded.snapshot, "filename"), renditionId, transform.contentType);
       object = await this.storage.put({
@@ -1027,11 +1040,17 @@ export class FileService {
     }
     const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
     this.validateTransformOptions(options);
+    const overlay = await this.resolveTransformOverlay({
+      actor: command.actor,
+      tenantId,
+      options
+    });
     const transform = await this.transformDownloadedFile({
       actor: command.actor,
       tenantId,
       downloaded,
-      options
+      options,
+      ...(overlay === undefined ? {} : { overlay })
     });
     return {
       snapshot: downloaded.snapshot,
@@ -1161,6 +1180,7 @@ export class FileService {
     readonly tenantId: string;
     readonly downloaded: DownloadedFile;
     readonly options: FileTransformOptions;
+    readonly overlay?: FileTransformOverlaySource;
   }): Promise<TransformedFileObject> {
     if (!this.transformer) {
       throw badRequest("File transforms are not configured");
@@ -1182,12 +1202,53 @@ export class FileService {
           ? {}
           : { httpEtag: command.downloaded.object.metadata.httpEtag })
       },
-      options: command.options
+      options: command.options,
+      ...(command.overlay === undefined ? {} : { overlay: command.overlay })
     });
   }
 
   private validateTransformOptions(options: FileTransformOptions): void {
     this.transformer?.validateOptions?.(options);
+  }
+
+  private async resolveTransformOverlay(command: {
+    readonly actor: Actor;
+    readonly tenantId: string;
+    readonly options: FileTransformOptions;
+  }): Promise<FileTransformOverlaySource | undefined> {
+    const overlay = command.options.overlay;
+    if (overlay === undefined) {
+      return undefined;
+    }
+    const snapshot = await this.availableFileSnapshot({
+      actor: command.actor,
+      name: overlay.file,
+      tenantId: command.tenantId
+    });
+    const key = stringField(snapshot, "key");
+    const object = await this.storage.get(key);
+    if (!object) {
+      throw notFound(`${this.fileDoctype}/${overlay.file} content was not found`);
+    }
+    const contentType = object.metadata.contentType ?? stringField(snapshot, "content_type");
+    if (!isTransformableFileContentType(contentType)) {
+      throw badRequest(`File overlay '${overlay.file}' cannot be transformed`);
+    }
+    const filename = stringField(snapshot, "filename") || snapshot.name;
+    return {
+      file: overlay.file,
+      key: object.metadata.key,
+      filename,
+      contentType,
+      size: object.metadata.size,
+      body: object.body,
+      etag: object.metadata.etag,
+      ...(object.metadata.httpEtag === undefined ? {} : { httpEtag: object.metadata.httpEtag }),
+      ...(overlay.placement === undefined ? {} : { placement: overlay.placement }),
+      ...(overlay.opacity === undefined ? {} : { opacity: overlay.opacity }),
+      ...(overlay.width === undefined ? {} : { width: overlay.width }),
+      ...(overlay.height === undefined ? {} : { height: overlay.height })
+    };
   }
 
   private async recordRenditionManifest(command: {
@@ -1405,6 +1466,10 @@ interface FileRenditionManifestEntry {
   readonly requested_at: string;
   readonly requested_by: string;
   readonly source_etag?: string;
+  readonly overlay_file?: string;
+  readonly overlay_key?: string;
+  readonly overlay_etag?: string;
+  readonly overlay_http_etag?: string;
   readonly content_type?: string;
   readonly size?: number;
   readonly etag?: string;
@@ -1440,6 +1505,10 @@ function isRenditionManifestEntry(value: JsonValue): value is FileRenditionManif
     typeof entry.requested_at === "string" &&
     typeof entry.requested_by === "string" &&
     optionalJsonString(entry.source_etag) &&
+    optionalJsonString(entry.overlay_file) &&
+    optionalJsonString(entry.overlay_key) &&
+    optionalJsonString(entry.overlay_etag) &&
+    optionalJsonString(entry.overlay_http_etag) &&
     optionalJsonString(entry.content_type) &&
     optionalJsonInteger(entry.size) &&
     optionalJsonString(entry.etag) &&
@@ -1471,6 +1540,10 @@ function fileRenditionView(entry: FileRenditionManifestEntry): FileRendition {
     requestedAt: entry.requested_at,
     requestedBy: entry.requested_by,
     ...(entry.source_etag === undefined ? {} : { sourceEtag: entry.source_etag }),
+    ...(entry.overlay_file === undefined ? {} : { overlayFile: entry.overlay_file }),
+    ...(entry.overlay_key === undefined ? {} : { overlayKey: entry.overlay_key }),
+    ...(entry.overlay_etag === undefined ? {} : { overlayEtag: entry.overlay_etag }),
+    ...(entry.overlay_http_etag === undefined ? {} : { overlayHttpEtag: entry.overlay_http_etag }),
     ...(entry.content_type === undefined ? {} : { contentType: entry.content_type }),
     ...(entry.size === undefined ? {} : { size: entry.size }),
     ...(entry.etag === undefined ? {} : { etag: entry.etag }),
@@ -1485,13 +1558,15 @@ function fileTransformOptionsFromData(data: DocumentData): FileTransformOptions 
   const fit = typeof data.fit === "string" ? data.fit as NonNullable<FileTransformOptions["fit"]> : undefined;
   const format = typeof data.format === "string" ? data.format as NonNullable<FileTransformOptions["format"]> : undefined;
   const watermark = fileTransformWatermarkFromData(data.watermark);
+  const overlay = fileTransformOverlayFromData(data.overlay);
   return {
     ...(typeof data.width === "number" ? { width: data.width } : {}),
     ...(typeof data.height === "number" ? { height: data.height } : {}),
     ...(fit === undefined ? {} : { fit }),
     ...(format === undefined ? {} : { format }),
     ...(typeof data.quality === "number" ? { quality: data.quality } : {}),
-    ...(watermark === undefined ? {} : { watermark })
+    ...(watermark === undefined ? {} : { watermark }),
+    ...(overlay === undefined ? {} : { overlay })
   };
 }
 
@@ -1513,12 +1588,31 @@ function fileTransformWatermarkFromData(value: JsonValue | undefined): FileTrans
   };
 }
 
+function fileTransformOverlayFromData(value: JsonValue | undefined): FileTransformOptions["overlay"] | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const data = value as Record<string, JsonValue>;
+  const file = data.file;
+  if (typeof file !== "string") {
+    return undefined;
+  }
+  return {
+    file,
+    ...(typeof data.placement === "string" ? { placement: data.placement as FileTransformOverlayPlacement } : {}),
+    ...(typeof data.opacity === "number" ? { opacity: data.opacity } : {}),
+    ...(typeof data.width === "number" ? { width: data.width } : {}),
+    ...(typeof data.height === "number" ? { height: data.height } : {})
+  };
+}
+
 function pendingFileRendition(command: {
   readonly snapshot: DocumentSnapshot;
   readonly tenantId: string;
   readonly id: string;
   readonly attemptId: string;
   readonly sourceEtag: string;
+  readonly overlay?: FileTransformOverlaySource;
   readonly options: FileTransformOptions;
   readonly requestedAt: string;
   readonly requestedBy: string;
@@ -1531,7 +1625,8 @@ function pendingFileRendition(command: {
     options: fileTransformOptionsData(command.options),
     requested_at: command.requestedAt,
     requested_by: command.requestedBy,
-    source_etag: command.sourceEtag
+    source_etag: command.sourceEtag,
+    ...overlayRenditionSourceData(command.overlay)
   };
 }
 
@@ -1571,7 +1666,8 @@ function fileTransformOptionsData(options: FileTransformOptions): DocumentData {
     ...(options.fit === undefined ? {} : { fit: options.fit }),
     ...(options.format === undefined ? {} : { format: options.format }),
     ...(options.quality === undefined ? {} : { quality: options.quality }),
-    ...(options.watermark === undefined ? {} : { watermark: fileTransformWatermarkData(options.watermark) })
+    ...(options.watermark === undefined ? {} : { watermark: fileTransformWatermarkData(options.watermark) }),
+    ...(options.overlay === undefined ? {} : { overlay: fileTransformOverlayData(options.overlay) })
   };
 }
 
@@ -1585,6 +1681,52 @@ function fileTransformWatermarkData(watermark: NonNullable<FileTransformOptions[
   };
 }
 
+function fileTransformOverlayData(overlay: NonNullable<FileTransformOptions["overlay"]>): DocumentData {
+  return {
+    file: overlay.file,
+    ...(overlay.placement === undefined ? {} : { placement: overlay.placement }),
+    ...(overlay.opacity === undefined ? {} : { opacity: overlay.opacity }),
+    ...(overlay.width === undefined ? {} : { width: overlay.width }),
+    ...(overlay.height === undefined ? {} : { height: overlay.height })
+  };
+}
+
+function overlayRenditionSourceData(overlay: FileTransformOverlaySource | undefined): DocumentData {
+  if (overlay === undefined) {
+    return {};
+  }
+  return {
+    overlay_file: overlay.file,
+    overlay_key: overlay.key,
+    ...(overlay.etag === undefined ? {} : { overlay_etag: overlay.etag }),
+    ...(overlay.httpEtag === undefined ? {} : { overlay_http_etag: overlay.httpEtag })
+  };
+}
+
+function renditionSourcesMatch(
+  rendition: FileRenditionManifestEntry,
+  sourceEtag: string,
+  overlay: FileTransformOverlaySource | undefined
+): boolean {
+  if (optionalString(rendition.source_etag) !== sourceEtag) {
+    return false;
+  }
+  if (overlay === undefined) {
+    return (
+      rendition.overlay_file === undefined &&
+      rendition.overlay_key === undefined &&
+      rendition.overlay_etag === undefined &&
+      rendition.overlay_http_etag === undefined
+    );
+  }
+  return (
+    optionalString(rendition.overlay_file) === overlay.file &&
+    optionalString(rendition.overlay_key) === overlay.key &&
+    optionalString(rendition.overlay_etag) === overlay.etag &&
+    optionalString(rendition.overlay_http_etag) === overlay.httpEtag
+  );
+}
+
 async function fileRenditionId(options: FileTransformOptions): Promise<string> {
   return (await Promise.all([
     ...(options.width === undefined ? [] : [`w${String(options.width)}`]),
@@ -1592,7 +1734,8 @@ async function fileRenditionId(options: FileTransformOptions): Promise<string> {
     ...(options.fit === undefined ? [] : [`fit-${options.fit}`]),
     ...(options.format === undefined ? [] : [`f-${options.format}`]),
     ...(options.quality === undefined ? [] : [`q${String(options.quality)}`]),
-    ...(options.watermark === undefined ? [] : [watermarkOptionsToken(options)])
+    ...(options.watermark === undefined ? [] : [watermarkOptionsToken(options)]),
+    ...(options.overlay === undefined ? [] : [overlayOptionsToken(options)])
   ])).join("-");
 }
 
@@ -1605,6 +1748,17 @@ async function watermarkOptionsToken(options: FileTransformOptions): Promise<str
     .slice(0, 32)
     .replace(/-+$/g, "") || "text";
   return `wm-${slug}-${await sha256Hex(canonicalFileTransformOptions(options))}`;
+}
+
+async function overlayOptionsToken(options: FileTransformOptions): Promise<string> {
+  const file = options.overlay?.file ?? "";
+  const slug = file
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32)
+    .replace(/-+$/g, "") || "file";
+  return `ov-${slug}-${await sha256Hex(canonicalFileTransformOptions(options))}`;
 }
 
 function canonicalFileTransformOptions(options: FileTransformOptions): string {

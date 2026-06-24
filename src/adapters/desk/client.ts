@@ -418,6 +418,11 @@ export function renderDeskClientScript(): string {
     setParam(params, "watermarkOpacity", fileWatermarkField(options && options.watermark, "opacity"));
     setParam(params, "watermarkColor", fileWatermarkField(options && options.watermark, "color"));
     setParam(params, "watermarkFontSize", fileWatermarkField(options && options.watermark, "fontSize"));
+    setParam(params, "overlay", fileOverlayFile(options && options.overlay));
+    setParam(params, "overlayPlacement", fileOverlayField(options && options.overlay, "placement"));
+    setParam(params, "overlayOpacity", fileOverlayField(options && options.overlay, "opacity"));
+    setParam(params, "overlayWidth", fileOverlayField(options && options.overlay, "width"));
+    setParam(params, "overlayHeight", fileOverlayField(options && options.overlay, "height"));
     return params;
   }
 
@@ -429,6 +434,20 @@ export function renderDeskClientScript(): string {
   }
 
   function fileWatermarkField(value, field) {
+    if (value && typeof value === "object") {
+      return value[field];
+    }
+    return undefined;
+  }
+
+  function fileOverlayFile(value) {
+    if (value && typeof value === "object") {
+      return value.file;
+    }
+    return value;
+  }
+
+  function fileOverlayField(value, field) {
     if (value && typeof value === "object") {
       return value[field];
     }
