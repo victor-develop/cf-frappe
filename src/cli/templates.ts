@@ -34,7 +34,7 @@ export interface StarterProjectTemplateInput {
   readonly auth: StarterAuthMode;
 }
 
-export type StarterAuthMode = "signed-session" | "cloudflare-access";
+export type StarterAuthMode = "signed-session" | "cloudflare-access" | "oidc";
 
 export interface StarterProjectFile {
   readonly path: string;
@@ -131,7 +131,7 @@ function wranglerJsonc(input: StarterProjectTemplateInput): string {
       "new_sqlite_classes": ["AggregateCoordinator"]
     }
   ],
-${cloudflareAccessVarsJsonc(input)}  "secrets": {
+${authVarsJsonc(input)}  "secrets": {
     "required": ["SESSION_SECRET"]
   },
   "observability": {
@@ -173,15 +173,23 @@ function gitignore(): string {
   return ["node_modules", ".wrangler", "dist", ".dev.vars", ""].join("\n");
 }
 
-function cloudflareAccessVarsJsonc(input: StarterProjectTemplateInput): string {
-  if (input.auth !== "cloudflare-access") {
-    return "";
-  }
-  return `  "vars": {
+function authVarsJsonc(input: StarterProjectTemplateInput): string {
+  if (input.auth === "cloudflare-access") {
+    return `  "vars": {
     "CF_ACCESS_TEAM_DOMAIN": "your-team.cloudflareaccess.com",
     "CF_ACCESS_AUD": "replace-with-access-application-aud"
   },
 `;
+  }
+  if (input.auth === "oidc") {
+    return `  "vars": {
+    "OIDC_ISSUER": "https://login.example.com",
+    "OIDC_AUD": "replace-with-oidc-audience",
+    "OIDC_JWKS_URL": "https://login.example.com/.well-known/jwks.json"
+  },
+`;
+  }
+  return "";
 }
 
 function devVarsExample(input: StarterProjectTemplateInput): string {
@@ -192,6 +200,12 @@ function devVarsExample(input: StarterProjectTemplateInput): string {
           "CF_ACCESS_TEAM_DOMAIN=your-team.cloudflareaccess.com",
           "CF_ACCESS_AUD=replace-with-access-application-aud"
         ]
+      : input.auth === "oidc"
+        ? [
+            "OIDC_ISSUER=https://login.example.com",
+            "OIDC_AUD=replace-with-oidc-audience",
+            "OIDC_JWKS_URL=https://login.example.com/.well-known/jwks.json"
+          ]
       : []),
     ""
   ].join("\n");
@@ -215,7 +229,7 @@ npm run dev
 
 Open \`/desk\` for the generated Desk UI or \`/api/meta/doctypes/Task\` for the metadata API. ${authLocalReadme(input.auth)}
 Client scripts live under \`public/assets\`; add them with \`defineClientScript(...)\` in files under \`src/apps\`.
-${cloudflareAccessReadme(input.auth)}
+${authProviderReadme(input.auth)}
 
 ## Apps
 
@@ -266,29 +280,35 @@ wrangler secret put SESSION_SECRET
 npm run d1:migrate:remote
 npm run deploy
 \`\`\`
-${cloudflareAccessDeployReadme(input.auth)}
+${authProviderDeployReadme(input.auth)}
 
 Run \`npm run cf:types\` after changing bindings so \`worker-configuration.d.ts\` stays aligned with \`wrangler.jsonc\`.
 `;
 }
 
 function authReadmeSummary(auth: StarterAuthMode): string {
-  return auth === "cloudflare-access"
-    ? "Cloudflare Access account auto-sync"
-    : "signed-session actor resolution";
+  if (auth === "cloudflare-access") {
+    return "Cloudflare Access account auto-sync";
+  }
+  if (auth === "oidc") {
+    return "OIDC account auto-sync";
+  }
+  return "signed-session actor resolution";
 }
 
 function authLocalReadme(auth: StarterAuthMode): string {
-  return auth === "cloudflare-access"
-    ? "The starter syncs verified Cloudflare Access JWTs into event-sourced provider accounts, and denies requests that do not carry a valid Access token."
-    : "The starter falls back to a read-only guest actor when no signed session cookie is present.";
+  if (auth === "cloudflare-access") {
+    return "The starter syncs verified Cloudflare Access JWTs into event-sourced provider accounts, and denies requests that do not carry a valid Access token.";
+  }
+  if (auth === "oidc") {
+    return "The starter syncs verified OIDC Bearer tokens into event-sourced provider accounts, and denies requests that do not carry a valid OIDC token or signed session.";
+  }
+  return "The starter falls back to a read-only guest actor when no signed session cookie is present.";
 }
 
-function cloudflareAccessReadme(auth: StarterAuthMode): string {
-  if (auth !== "cloudflare-access") {
-    return "";
-  }
-  return `
+function authProviderReadme(auth: StarterAuthMode): string {
+  if (auth === "cloudflare-access") {
+    return `
 ## Cloudflare Access Auth
 
 This starter expects Cloudflare Access to protect the deployed Worker hostname. Set \`CF_ACCESS_TEAM_DOMAIN\` to your Access team domain, such as \`your-team.cloudflareaccess.com\`, and \`CF_ACCESS_AUD\` to the Access application audience tag. Requests with a valid Access JWT are verified, synced into cf-frappe user-account provider events, and then authorized as the folded account actor. You can review or create the matching Access application and policy with:
@@ -300,15 +320,31 @@ npx cf-frappe access apply --account-id <account-id> --team-domain your-team.clo
 
 Use \`access plan\` first so rollout, allowed groups, and posture assumptions stay reviewable before mutating Cloudflare Zero Trust resources. The API token used for \`access apply\` should have Access application and policy write permissions.
 `;
+  }
+  if (auth === "oidc") {
+    return `
+## OIDC Auth
+
+This starter expects an OpenID Connect provider to issue RS256 JWTs for the deployed Worker hostname. Set \`OIDC_ISSUER\` to the exact token issuer, \`OIDC_AUD\` to the accepted audience/client id, and \`OIDC_JWKS_URL\` to the provider's HTTPS JWKS endpoint. Requests with a valid \`Authorization: Bearer <token>\` JWT are verified, synced into cf-frappe user-account provider events, and then authorized as the folded account actor. The default mapping grants \`User\` plus \`OIDC:<group>\` roles from the optional \`groups\` claim; adjust \`src/worker.ts\` when your provider stores roles in a different claim.
+
+The OIDC adapter requires the standard \`sub\` claim for account sync. If your provider needs a different stable subject, configure the generated \`subject\` mapper explicitly rather than falling back to mutable email claims.
+`;
+  }
+  return "";
 }
 
-function cloudflareAccessDeployReadme(auth: StarterAuthMode): string {
-  if (auth !== "cloudflare-access") {
-    return "";
-  }
-  return `
+function authProviderDeployReadme(auth: StarterAuthMode): string {
+  if (auth === "cloudflare-access") {
+    return `
 For Cloudflare Access deployments, run \`npx cf-frappe access plan --account-id <account-id> --team-domain your-team.cloudflareaccess.com --name "My App" --domain app.example.com --email-domain example.com\` to review the Access application/policy payloads, then run the same command as \`access apply\` with \`--api-token-env CF_API_TOKEN\` when you are ready to create them. Copy the returned \`CF_ACCESS_TEAM_DOMAIN\` and \`CF_ACCESS_AUD\` into the \`vars\` block in \`wrangler.jsonc\` before deploy. The checked-in placeholders are safe for local scaffolding only.
 `;
+  }
+  if (auth === "oidc") {
+    return `
+For OIDC deployments, replace the placeholder \`OIDC_ISSUER\`, \`OIDC_AUD\`, and \`OIDC_JWKS_URL\` values in the \`vars\` block in \`wrangler.jsonc\` before deploy. The issuer and JWKS URL must be HTTPS URLs, and \`OIDC_ISSUER\` must match the JWT \`iss\` claim exactly.
+`;
+  }
+  return "";
 }
 
 function taskAppTs(): string {
@@ -469,7 +505,13 @@ export const registry = createRegistryFromApps(installedApps);
 }
 
 function workerTs(input: StarterProjectTemplateInput): string {
-  return input.auth === "cloudflare-access" ? cloudflareAccessWorkerTs() : signedSessionWorkerTs();
+  if (input.auth === "cloudflare-access") {
+    return cloudflareAccessWorkerTs();
+  }
+  if (input.auth === "oidc") {
+    return oidcWorkerTs();
+  }
+  return signedSessionWorkerTs();
 }
 
 function signedSessionWorkerTs(): string {
@@ -536,6 +578,43 @@ export default createCloudFrappeWorker<Env>({
       tenantId: () => "default",
       roles: (claims) =>
         ["User", ...(claims.groups ?? []).map((group) => \`Access:\${group}\`)]
+    }
+  }
+});
+`;
+}
+
+function oidcWorkerTs(): string {
+  return `import { permissionDenied } from "cf-frappe";
+import {
+  createAggregateCoordinatorClass,
+  createCloudFrappeWorker,
+  type CloudFrappeEnv
+} from "cf-frappe/cloudflare";
+import { registry } from "./apps";
+
+type Env = Cloudflare.Env & CloudFrappeEnv;
+
+export class AggregateCoordinator extends createAggregateCoordinatorClass<Env>({
+  registry
+}) {}
+
+export default createCloudFrappeWorker<Env>({
+  registry,
+  actor: () => {
+    throw permissionDenied("OIDC token is required");
+  },
+  auth: {
+    sessionSecret: (env) => env.SESSION_SECRET,
+    revalidateSignedSessions: true,
+    oidc: {
+      issuer: (env) => env.OIDC_ISSUER,
+      audience: (env) => env.OIDC_AUD,
+      jwksUrl: (env) => env.OIDC_JWKS_URL,
+      provider: "oidc",
+      tenantId: () => "default",
+      roles: (claims) =>
+        ["User", ...(claims.groups ?? []).map((group) => \`OIDC:\${group}\`)]
     }
   }
 });

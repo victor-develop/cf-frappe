@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the provider-neutral OIDC/JWKS auth adapter slice:
+As of the OIDC starter scaffold slice:
 
 - Vitest files: `92`
-- Vitest cases: `1008`
+- Vitest cases: `1010`
 
 ## Implication
 

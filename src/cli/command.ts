@@ -1222,7 +1222,7 @@ function helpText(): string {
     "cf-frappe",
     "",
     "Usage:",
-    "  cf-frappe init <directory> [--force] [--auth <signed-session|cloudflare-access>]",
+    "  cf-frappe init <directory> [--force] [--auth <signed-session|cloudflare-access|oidc>]",
     "  cf-frappe install <module> [--version <range>] [--export <name>] [--as <localName>] [--registry <path>] [--package-manager <npm|pnpm|yarn|bun>] [--no-install] [--no-save]",
     "  cf-frappe migrate generate [--registry <path>] [--migrations <dir>] [--no-core]",
     "  cf-frappe access plan (--account-id <id>|--zone-id <id>) --team-domain <team.cloudflareaccess.com> --name <appName> --domain <host[/path]> (--email <user>|--email-domain <domain>|--group <id>|--everyone) [--policy-name <name>] [--allowed-idp <id>] [--session-duration <duration>]",
@@ -1302,7 +1302,7 @@ function packageManagerName(value: string): PackageManagerName | undefined {
 }
 
 function starterAuthMode(value: string): StarterAuthMode | undefined {
-  return value === "signed-session" || value === "cloudflare-access" ? value : undefined;
+  return value === "signed-session" || value === "cloudflare-access" || value === "oidc" ? value : undefined;
 }
 
 function displayPath(cwd: string, projectDirectory: string): string {

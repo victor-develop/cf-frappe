@@ -1,12 +1,17 @@
 /// <reference types="node" />
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { parseCliArgs, runCli, type WritableText } from "../../src/cli/command";
 import { createRegistry, defineDocType } from "../../src";
 import type { ModelRegistry } from "../../src";
 import { detectPackageManager, PackageManagerError, type PackageManagerRunner } from "../../src/cli/package-manager";
 import { scaffoldProject, ScaffoldError } from "../../src/cli/scaffold";
+
+const execFileAsync = promisify(execFile);
+const repoRoot = process.cwd();
 
 describe("cf-frappe CLI scaffold", () => {
   let tempRoot: string;
@@ -171,6 +176,87 @@ describe("cf-frappe CLI scaffold", () => {
     expect(readme).toContain("then run the same command as `access apply`");
     expect(readme).toContain("denies requests that do not carry a valid Access token");
   });
+
+  it("creates an OIDC-backed starter app", async () => {
+    const target = join(tempRoot, "OIDC App");
+
+    const result = await scaffoldProject({
+      targetDirectory: target,
+      authMode: "oidc",
+      compatibilityDate: "2026-06-22",
+      cfFrappeVersion: "0.1.0",
+      nodeTypesVersion: "^26.0.0",
+      typescriptVersion: "^5.7.2",
+      wranglerVersion: "^4.103.0"
+    });
+
+    expect(result.projectName).toBe("oidc-app");
+    const wrangler = await readFile(join(target, "wrangler.jsonc"), "utf8");
+    const wranglerConfig = JSON.parse(wrangler) as { readonly vars: Record<string, string> };
+    expect(wranglerConfig.vars).toEqual({
+      OIDC_ISSUER: "https://login.example.com",
+      OIDC_AUD: "replace-with-oidc-audience",
+      OIDC_JWKS_URL: "https://login.example.com/.well-known/jwks.json"
+    });
+    await expect(readFile(join(target, ".dev.vars.example"), "utf8")).resolves.toContain(
+      "OIDC_ISSUER=https://login.example.com"
+    );
+    const worker = await readFile(join(target, "src/worker.ts"), "utf8");
+    expect(worker).toContain("auth: {");
+    expect(worker).toContain("oidc: {");
+    expect(worker).toContain("throw permissionDenied(\"OIDC token is required\")");
+    expect(worker).toContain("issuer: (env) => env.OIDC_ISSUER");
+    expect(worker).toContain("audience: (env) => env.OIDC_AUD");
+    expect(worker).toContain("jwksUrl: (env) => env.OIDC_JWKS_URL");
+    expect(worker).toContain("provider: \"oidc\"");
+    expect(worker).toContain("revalidateSignedSessions: true");
+    expect(worker).toContain("[\"User\", ...(claims.groups ?? []).map((group) => `OIDC:${group}`)]");
+    expect(worker).not.toContain("guestActor");
+    expect(worker).not.toContain("signedSessionActorResolver");
+    expect(worker).not.toContain("cloudflareAccess");
+    const readme = await readFile(join(target, "README.md"), "utf8");
+    expect(readme).toContain("OIDC account auto-sync");
+    expect(readme).toContain("Authorization: Bearer <token>");
+    expect(readme).toContain("The OIDC adapter requires the standard `sub` claim");
+    expect(readme).toContain("OIDC_ISSUER` must match the JWT `iss` claim exactly");
+    expect(readme).toContain("denies requests that do not carry a valid OIDC token or signed session");
+  });
+
+  it("generates an OIDC starter that typechecks after Wrangler types", async () => {
+    const target = join(tempRoot, "oidc-compile");
+    await scaffoldProject({
+      targetDirectory: target,
+      authMode: "oidc",
+      compatibilityDate: "2026-06-22",
+      cfFrappeVersion: "0.1.0",
+      nodeTypesVersion: "^26.0.0",
+      typescriptVersion: "^5.7.2",
+      wranglerVersion: "^4.103.0"
+    });
+    await runTool(binPath("wrangler"), ["types"], target);
+    await writeFile(
+      join(target, "tsconfig.smoke.json"),
+      `${JSON.stringify(
+        {
+          extends: "./tsconfig.json",
+          compilerOptions: {
+            baseUrl: ".",
+            paths: {
+              "cf-frappe": [join(repoRoot, "src/index.ts")],
+              "cf-frappe/cloudflare": [join(repoRoot, "src/cloudflare/index.ts")]
+            },
+            lib: ["ES2022", "DOM", "DOM.Iterable"],
+            typeRoots: [join(repoRoot, "node_modules")],
+            types: ["@cloudflare/workers-types"]
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    await runTool(binPath("tsc"), ["--noEmit", "-p", "tsconfig.smoke.json"], target);
+  }, 60_000);
 
   it("refuses to write into a non-empty target unless forced", async () => {
     const target = join(tempRoot, "existing");
@@ -476,6 +562,12 @@ describe("cf-frappe CLI scaffold", () => {
       targetDirectory: "access-demo",
       force: false,
       authMode: "cloudflare-access"
+    });
+    expect(parseCliArgs(["init", "oidc-demo", "--auth", "oidc"])).toEqual({
+      kind: "init",
+      targetDirectory: "oidc-demo",
+      force: false,
+      authMode: "oidc"
     });
     expect(parseCliArgs(["init", "bad-auth", "--auth", "oauth"])).toEqual({
       kind: "invalid",
@@ -831,4 +923,37 @@ function registryLoader(registry: ModelRegistry) {
       return registry;
     }
   };
+}
+
+function binPath(command: "tsc" | "wrangler"): string {
+  return join(repoRoot, "node_modules", ".bin", process.platform === "win32" ? `${command}.cmd` : command);
+}
+
+async function runTool(command: string, args: readonly string[], cwd: string): Promise<void> {
+  try {
+    await execFileAsync(command, args, {
+      cwd,
+      env: {
+        ...process.env,
+        CI: "1",
+        NO_COLOR: "1",
+        WRANGLER_SEND_METRICS: "false"
+      },
+      maxBuffer: 10_000_000
+    });
+  } catch (error) {
+    throw new Error([
+      `Command failed: ${command} ${args.join(" ")}`,
+      commandOutput(error, "stdout"),
+      commandOutput(error, "stderr")
+    ].filter(Boolean).join("\n"));
+  }
+}
+
+function commandOutput(error: unknown, key: "stdout" | "stderr"): string {
+  if (error && typeof error === "object" && key in error) {
+    const value = (error as Record<typeof key, unknown>)[key];
+    return typeof value === "string" && value.trim().length > 0 ? `${key}:\n${value}` : "";
+  }
+  return "";
 }
