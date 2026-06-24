@@ -186,6 +186,7 @@ interface DeskClientRuntime {
     readonly disableSchedule: (scheduleId: string) => Promise<unknown>;
     readonly enableSchedule: (scheduleId: string) => Promise<unknown>;
     readonly execution: (idempotencyKey: string) => Promise<unknown>;
+    readonly pauseSchedule: (scheduleId: string, pausedUntil: string) => Promise<unknown>;
     readonly resetSchedule: (scheduleId: string) => Promise<unknown>;
     readonly retry: (idempotencyKey: string) => Promise<unknown>;
     readonly runSchedule: (scheduleId: string) => Promise<unknown>;
@@ -1403,6 +1404,7 @@ describe("Desk client runtime", () => {
     await runtime.jobs.runSchedule("runtime/daily");
     await runtime.jobs.enableSchedule("runtime/daily");
     await runtime.jobs.disableSchedule("runtime/daily");
+    await runtime.jobs.pauseSchedule("runtime/daily", "2026-01-02T00:00:00.000Z");
     await runtime.jobs.resetSchedule("runtime/daily");
 
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
@@ -1416,9 +1418,11 @@ describe("Desk client runtime", () => {
       "POST /api/jobs/schedules/runtime%2Fdaily/run",
       "POST /api/jobs/schedules/runtime%2Fdaily/enable",
       "POST /api/jobs/schedules/runtime%2Fdaily/disable",
+      "POST /api/jobs/schedules/runtime%2Fdaily/pause",
       "POST /api/jobs/schedules/runtime%2Fdaily/reset"
     ]);
     expect(calls.map((call) => call.init.credentials)).toEqual([
+      "same-origin",
       "same-origin",
       "same-origin",
       "same-origin",
@@ -1442,6 +1446,7 @@ describe("Desk client runtime", () => {
       undefined,
       undefined,
       undefined,
+      JSON.stringify({ pauseUntil: "2026-01-02T00:00:00.000Z" }),
       undefined
     ]);
   });

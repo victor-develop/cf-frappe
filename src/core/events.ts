@@ -125,6 +125,7 @@ export function foldDocumentFrom(
       case "SavedReportSaved":
       case "SavedReportDeleted":
       case "JobScheduleOverrideSet":
+      case "JobSchedulePaused":
       case "JobScheduleOverrideCleared":
       case "JobScheduleSaved":
       case "JobScheduleDeleted":

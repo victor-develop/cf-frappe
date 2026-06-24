@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the report range filter slice:
+As of the job schedule pause override slice:
 
 - Vitest files: `80`
-- Vitest cases: `895`
+- Vitest cases: `896`
 
 ## Implication
 

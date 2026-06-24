@@ -14,6 +14,7 @@ import {
   JobScheduleService,
   DEFAULT_TENANT_ID,
   jobScheduleDefinitionsStream,
+  jobScheduleOverridesStream,
   permanentJobError,
   retryableJobError,
   SYSTEM_MANAGER_ROLE
@@ -556,6 +557,86 @@ describe("JobScheduleService", () => {
         overridden: false
       }
     });
+  });
+
+  it("pauses static schedules through event-sourced overrides for manual and cron dispatch", async () => {
+    const registry = createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] });
+    const events = new InMemoryEventStore();
+    const runner = vi.fn(async () => jobMessage("reports.daily", "job_manual", "acme"));
+    const service = new JobScheduleService({
+      registry,
+      schedules: [{ id: "daily", cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" }],
+      runner: { run: runner },
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["pause-daily", "clear-daily"])
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const pausedUntil = "2026-01-02T00:00:00.000Z";
+
+    await expect(service.pause(admin, "daily", { pausedUntil })).resolves.toMatchObject({
+      schedule: {
+        id: "daily",
+        enabled: false,
+        configuredEnabled: true,
+        overridden: true,
+        pausedUntil,
+        overrideUpdatedAt: now,
+        overrideUpdatedBy: "admin@example.com",
+        dispatchable: false
+      }
+    });
+    await expect(service.dispatch(admin, "daily")).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Disabled job schedules cannot be manually dispatched"
+    });
+    await expect(service.schedulesForCron("0 2 * * *")).resolves.toMatchObject([{ id: "daily", enabled: false }]);
+    await expect(events.readStream(jobScheduleOverridesStream("acme"))).resolves.toMatchObject([
+      { type: "JobSchedulePaused", payload: { kind: "JobSchedulePaused", scheduleId: "daily", pausedUntil } }
+    ]);
+
+    const afterPause = new JobScheduleService({
+      registry,
+      schedules: [{ id: "daily", cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" }],
+      runner: { run: runner },
+      events,
+      clock: fixedClock("2026-01-03T00:00:00.000Z")
+    });
+    await expect(afterPause.dashboard(admin)).resolves.toMatchObject({
+      schedules: [{ id: "daily", enabled: true, overridden: false, dispatchable: true }]
+    });
+    const expiredCronSchedules = await afterPause.schedulesForCron("0 2 * * *");
+    expect(expiredCronSchedules).toHaveLength(1);
+    expect(expiredCronSchedules[0]).toMatchObject({ id: "daily" });
+    expect(Object.prototype.hasOwnProperty.call(expiredCronSchedules[0], "enabled")).toBe(false);
+
+    await expect(service.clearOverride(admin, "daily")).resolves.toMatchObject({
+      schedule: { id: "daily", enabled: true, overridden: false, dispatchable: true }
+    });
+
+    const disabledEvents = new InMemoryEventStore();
+    const disabledThenPaused = new JobScheduleService({
+      registry,
+      schedules: [{ id: "daily", cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" }],
+      events: disabledEvents,
+      clock: fixedClock(now),
+      ids: deterministicIds(["disable-daily", "pause-disabled-daily"])
+    });
+    await disabledThenPaused.disable(admin, "daily");
+    await disabledThenPaused.pause(admin, "daily", { pausedUntil });
+
+    const afterDisabledPauseExpires = new JobScheduleService({
+      registry,
+      schedules: [{ id: "daily", cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" }],
+      events: disabledEvents,
+      clock: fixedClock("2026-01-03T00:00:00.000Z")
+    });
+    await expect(afterDisabledPauseExpires.dashboard(admin)).resolves.toMatchObject({
+      schedules: [{ id: "daily", enabled: false, overridden: true, overrideEnabled: false, dispatchable: false }]
+    });
+    await expect(afterDisabledPauseExpires.schedulesForCron("0 2 * * *")).resolves.toMatchObject([
+      { id: "daily", enabled: false }
+    ]);
   });
 
   it("saves, dispatches, updates, and deletes tenant-owned runtime schedule definitions from events", async () => {

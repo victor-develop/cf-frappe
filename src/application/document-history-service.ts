@@ -308,6 +308,7 @@ function diffEvent(
     case "RoleEnabled":
     case "RoleDisabled":
     case "JobScheduleOverrideSet":
+    case "JobSchedulePaused":
     case "JobScheduleOverrideCleared":
     case "JobScheduleSaved":
     case "JobScheduleDeleted":
@@ -435,6 +436,8 @@ function summarize(payload: DocumentEventPayload): string {
       return `Disabled role ${payload.role}`;
     case "JobScheduleOverrideSet":
       return `${payload.enabled ? "Enabled" : "Disabled"} job schedule ${payload.scheduleId}`;
+    case "JobSchedulePaused":
+      return `Paused job schedule ${payload.scheduleId} until ${payload.pausedUntil}`;
     case "JobScheduleOverrideCleared":
       return `Cleared override for job schedule ${payload.scheduleId}`;
     case "JobScheduleSaved":

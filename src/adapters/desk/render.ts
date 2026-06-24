@@ -1691,7 +1691,7 @@ export function renderJobScheduleAdmin(
         <td>${escapeHtml(schedule.jobName)}</td>
         <td>${escapeHtml(schedule.tenantId ?? (schedule.dynamic.tenantId ? "dynamic" : ""))}</td>
         <td>${schedule.enabled ? "yes" : "no"}</td>
-        <td>${schedule.overridden ? escapeHtml(schedule.overrideEnabled ? "enabled" : "disabled") : ""}</td>
+        <td>${escapeHtml(scheduleOverrideState(schedule))}</td>
         <td>${schedule.registered ? "yes" : "no"}</td>
         <td>${escapeHtml(schedule.delaySeconds === undefined ? "" : String(schedule.delaySeconds))}</td>
         <td>${escapeHtml(dynamicScheduleFields(schedule))}</td>
@@ -1754,16 +1754,27 @@ function renderScheduleOverrideAction(
   if (!schedule.overrideable) {
     return "";
   }
-  const action = schedule.enabled ? "disable" : "enable";
-  const label = schedule.enabled ? "Disable" : "Enable";
+  const baseEnabled = schedule.overrideEnabled ?? schedule.configuredEnabled;
+  const action = baseEnabled ? "disable" : "enable";
+  const label = baseEnabled ? "Disable" : "Enable";
   const reset = schedule.overridden
     ? `<button class="button" type="submit" formaction="/desk/admin/jobs/schedules/${encodeURIComponent(schedule.id)}/reset">Reset</button>`
     : "";
   return `<form class="inline-action" method="post">
     ${renderJobScheduleReturnFields(filters)}
     <button class="button" type="submit" formaction="/desk/admin/jobs/schedules/${encodeURIComponent(schedule.id)}/${action}">${label}</button>
+    <input name="pauseUntil" placeholder="Pause until ISO time" value="${escapeHtml(schedule.pausedUntil ?? "")}">
+    <button class="button" type="submit" formaction="/desk/admin/jobs/schedules/${encodeURIComponent(schedule.id)}/pause">Pause</button>
     ${reset}
   </form>`;
+}
+
+function scheduleOverrideState(schedule: JobScheduleDashboard["schedules"][number]): string {
+  const parts = [
+    schedule.overrideEnabled === undefined ? "" : schedule.overrideEnabled ? "enabled" : "disabled",
+    schedule.pausedUntil === undefined ? "" : `paused until ${schedule.pausedUntil}`
+  ].filter(Boolean);
+  return parts.join(", ");
 }
 
 function renderScheduleDefinitionAction(

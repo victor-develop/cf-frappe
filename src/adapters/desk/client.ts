@@ -1471,6 +1471,12 @@ export function renderDeskClientScript(): string {
       execution: function (idempotencyKey) {
         return request(jobExecutionPath(idempotencyKey)).then(unwrapData);
       },
+      pauseSchedule: function (scheduleId, pausedUntil) {
+        return request(jobSchedulePath(scheduleId, "pause"), {
+          method: "POST",
+          body: { pauseUntil: pausedUntil }
+        }).then(unwrapData);
+      },
       resetSchedule: function (scheduleId) {
         return request(jobSchedulePath(scheduleId, "reset"), { method: "POST" }).then(unwrapData);
       },

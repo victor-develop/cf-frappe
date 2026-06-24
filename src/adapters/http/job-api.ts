@@ -128,6 +128,19 @@ export function createJobApi(options: JobApiOptions): Hono {
     return c.json({ data });
   });
 
+  app.post("/api/jobs/schedules/:scheduleId/pause", async (c) => {
+    if (!options.schedules) {
+      return c.json({ error: { code: "JOB_SCHEDULE_NOT_FOUND", message: "Job schedules are not enabled" } }, 404);
+    }
+    const actor = await options.actor(c.req.raw);
+    const body = await readJsonObject(c.req.raw, { maxJsonBytes });
+    const data = await options.schedules.pause(actor, c.req.param("scheduleId"), {
+      pausedUntil: requiredString(body, "pauseUntil"),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data });
+  });
+
   app.post("/api/jobs/schedules/:scheduleId/reset", async (c) => {
     if (!options.schedules) {
       return c.json({ error: { code: "JOB_SCHEDULE_NOT_FOUND", message: "Job schedules are not enabled" } }, 404);

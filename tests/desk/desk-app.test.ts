@@ -4486,7 +4486,7 @@ describe("Desk app", () => {
         ],
         events: new InMemoryEventStore(),
         clock: fixedClock(now),
-        ids: deterministicIds(["disable-1", "reset-2", "enable-3", "reset-4"])
+        ids: deterministicIds(["disable-1", "reset-2", "pause-3", "reset-4", "enable-5", "reset-6"])
       }),
       actor: () => admin
     });
@@ -4497,9 +4497,12 @@ describe("Desk app", () => {
     const html = await response.text();
     expect(html).toContain("<th>Override</th>");
     expect(html).toContain('formaction="/desk/admin/jobs/schedules/daily/disable"');
+    expect(html).toContain('formaction="/desk/admin/jobs/schedules/daily/pause"');
+    expect(html).toContain('placeholder="Pause until ISO time"');
     expect(html).toContain('formaction="/desk/admin/jobs/schedules/digest/enable"');
     expect(html).not.toContain('formaction="/desk/admin/jobs/schedules/dynamic/disable"');
     expect(html).not.toContain('formaction="/desk/admin/jobs/schedules/dynamic/enable"');
+    expect(html).not.toContain('formaction="/desk/admin/jobs/schedules/dynamic/pause"');
 
     const disabled = await app.request("/desk/admin/jobs/schedules/daily/disable", { method: "POST" });
     expect(disabled.status).toBe(303);
@@ -4518,6 +4521,26 @@ describe("Desk app", () => {
     const afterResetDaily = await app.request("/desk/admin/jobs/schedules");
     const resetDailyHtml = await afterResetDaily.text();
     expect(resetDailyHtml).not.toContain('formaction="/desk/admin/jobs/schedules/daily/reset"');
+
+    const pausedUntil = "2026-01-02T00:00:00.000Z";
+    const pauseBody = new URLSearchParams({ pauseUntil: pausedUntil }).toString();
+    const paused = await app.request("/desk/admin/jobs/schedules/daily/pause", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: pauseBody
+    });
+    expect(paused.status).toBe(303);
+    expect(paused.headers.get("location")).toBe("/desk/admin/jobs/schedules");
+
+    const afterPause = await app.request("/desk/admin/jobs/schedules");
+    const pausedHtml = await afterPause.text();
+    expect(pausedHtml).toContain(`paused until ${pausedUntil}`);
+    expect(pausedHtml).toContain('value="2026-01-02T00:00:00.000Z"');
+    expect(pausedHtml).toContain('formaction="/desk/admin/jobs/schedules/daily/reset"');
+
+    const resetPaused = await app.request("/desk/admin/jobs/schedules/daily/reset", { method: "POST" });
+    expect(resetPaused.status).toBe(303);
+    expect(resetPaused.headers.get("location")).toBe("/desk/admin/jobs/schedules");
 
     const enabled = await app.request("/desk/admin/jobs/schedules/digest/enable", { method: "POST" });
     expect(enabled.status).toBe(303);

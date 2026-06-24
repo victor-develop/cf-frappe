@@ -166,7 +166,7 @@ describe("job api", () => {
         runner: { run: runner },
         events: scheduleEvents,
         clock: fixedClock(now),
-        ids: deterministicIds(["disable-1", "reset-2", "enable-3", "reset-4"])
+        ids: deterministicIds(["disable-1", "reset-2", "pause-3", "reset-4", "enable-5", "reset-6"])
       }),
       actor: unsafeHeaderActorResolver
     });
@@ -267,6 +267,64 @@ describe("job api", () => {
           dispatchable: true
         }
       }
+    });
+
+    const invalidPause = await app.request("/api/jobs/schedules/daily/pause", {
+      method: "POST",
+      headers: { ...adminHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ pauseUntil: "not-a-date" })
+    });
+    expect(invalidPause.status).toBe(400);
+    await expect(invalidPause.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Job schedule pauseUntil must be a valid timestamp" }
+    });
+
+    const pastPause = await app.request("/api/jobs/schedules/daily/pause", {
+      method: "POST",
+      headers: { ...adminHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ pauseUntil: "2025-12-31T00:00:00.000Z" })
+    });
+    expect(pastPause.status).toBe(400);
+    await expect(pastPause.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Job schedule pauseUntil must be in the future" }
+    });
+
+    const pausedUntil = "2026-01-02T00:00:00.000Z";
+    const pause = await app.request("/api/jobs/schedules/daily/pause", {
+      method: "POST",
+      headers: { ...adminHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ pauseUntil: pausedUntil })
+    });
+    expect(pause.status).toBe(200);
+    await expect(pause.json()).resolves.toMatchObject({
+      data: {
+        schedule: {
+          id: "daily",
+          enabled: false,
+          configuredEnabled: true,
+          overridden: true,
+          pausedUntil,
+          dispatchable: false
+        }
+      }
+    });
+
+    const pausedRun = await app.request("/api/jobs/schedules/daily/run", {
+      method: "POST",
+      headers: adminHeaders
+    });
+    expect(pausedRun.status).toBe(400);
+    await expect(pausedRun.json()).resolves.toMatchObject({
+      error: { message: "Disabled job schedules cannot be manually dispatched" }
+    });
+
+    const resetPausedDaily = await app.request("/api/jobs/schedules/daily/reset", {
+      method: "POST",
+      headers: adminHeaders
+    });
+    expect(resetPausedDaily.status).toBe(200);
+    await expect(resetPausedDaily.json()).resolves.toMatchObject({
+      data: { schedule: { id: "daily", enabled: true, overridden: false, dispatchable: true } }
     });
 
     const enable = await app.request("/api/jobs/schedules/digest/enable", {

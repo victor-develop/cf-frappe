@@ -408,6 +408,11 @@ export type DocumentEventPayload =
       readonly enabled: boolean;
     }
   | {
+      readonly kind: "JobSchedulePaused";
+      readonly scheduleId: string;
+      readonly pausedUntil: string;
+    }
+  | {
       readonly kind: "JobScheduleOverrideCleared";
       readonly scheduleId: string;
     }

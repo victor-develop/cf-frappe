@@ -75,6 +75,7 @@ export interface JobScheduleSummary {
   readonly configuredEnabled: boolean;
   readonly overridden: boolean;
   readonly overrideEnabled?: boolean;
+  readonly pausedUntil?: string;
   readonly overrideUpdatedAt?: string;
   readonly overrideUpdatedBy?: string;
   readonly overrideable: boolean;
@@ -122,6 +123,14 @@ export interface SetJobScheduleEnabledCommand {
   readonly metadata?: DocumentData;
 }
 
+export interface PauseJobScheduleCommand {
+  readonly actor: Actor;
+  readonly scheduleId: string;
+  readonly pausedUntil: string;
+  readonly tenantId?: TenantId;
+  readonly metadata?: DocumentData;
+}
+
 export interface SaveJobScheduleDefinitionCommand {
   readonly id?: string;
   readonly cron: string;
@@ -143,7 +152,8 @@ export interface DeleteJobScheduleDefinitionCommand {
 
 interface JobScheduleOverrideRecord {
   readonly scheduleId: string;
-  readonly enabled: boolean;
+  readonly enabled?: boolean;
+  readonly pausedUntil?: string;
   readonly updatedAt: string;
   readonly updatedBy: string;
 }
@@ -400,6 +410,44 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
     };
   }
 
+  async pause(
+    actor: Actor,
+    scheduleId: string,
+    command: Omit<PauseJobScheduleCommand, "actor" | "scheduleId">
+  ): Promise<JobScheduleOverrideResult> {
+    const { tenantId, events, schedule, index, summary, state } = await this.requireOverrideableSchedule(
+      actor,
+      scheduleId,
+      command.tenantId
+    );
+    const pausedUntil = normalizePauseUntil(command.pausedUntil, this.clock.now());
+    const current = state.overrides.get(summary.id);
+    if (current?.pausedUntil === pausedUntil && pauseIsActive(pausedUntil, this.clock.now())) {
+      return { schedule: this.summaryFor(schedule, index, state) };
+    }
+    const stream = jobScheduleOverridesStream(tenantId);
+    const event: NewDomainEvent = {
+      id: this.ids.next("evt_"),
+      tenantId,
+      stream,
+      type: "JobSchedulePaused",
+      doctype: "__JobSchedules",
+      documentName: "overrides",
+      actorId: actor.id,
+      occurredAt: this.clock.now(),
+      payload: {
+        kind: "JobSchedulePaused",
+        scheduleId: summary.id,
+        pausedUntil
+      },
+      metadata: command.metadata ?? {}
+    };
+    await events.append(stream, state.version, [event]);
+    return {
+      schedule: this.summaryFor(schedule, index, await this.overrideState(tenantId))
+    };
+  }
+
   async schedulesForCron(cron: string): Promise<readonly TSchedule[]> {
     const states = new Map<TenantId, JobScheduleOverrideState>();
     const resolved: TSchedule[] = [];
@@ -578,8 +626,13 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       !dynamic.tenantId &&
       !dynamic.enabled;
     const override = overrideable && tenantId === overrides.tenantId ? overrides.overrides.get(id) : undefined;
+    const pausedUntil = override?.pausedUntil;
+    const paused = pausedUntil !== undefined && pauseIsActive(pausedUntil, this.clock.now());
     const configuredEnabled = schedule.enabled !== false;
-    const enabled = override?.enabled ?? configuredEnabled;
+    const overrideEnabled = override?.enabled;
+    const baseEnabled = overrideEnabled ?? configuredEnabled;
+    const enabled = baseEnabled && !paused;
+    const overridden = overrideEnabled !== undefined || paused;
     return {
       id,
       cron: schedule.cron,
@@ -588,11 +641,12 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       editable: source === "runtime",
       enabled,
       configuredEnabled,
-      overridden: override !== undefined,
-      ...(override === undefined
+      overridden,
+      ...(overrideEnabled === undefined ? {} : { overrideEnabled }),
+      ...(paused ? { pausedUntil } : {}),
+      ...(override === undefined || !overridden
         ? {}
         : {
-            overrideEnabled: override.enabled,
             overrideUpdatedAt: override.updatedAt,
             overrideUpdatedBy: override.updatedBy
           }),
@@ -803,6 +857,22 @@ function normalizeDelaySeconds(value: number): number {
   return value;
 }
 
+function normalizePauseUntil(value: string, now: string): string {
+  const normalized = normalizeScheduleText(value, "pauseUntil");
+  const timestamp = Date.parse(normalized);
+  if (!Number.isFinite(timestamp)) {
+    throw badRequest("Job schedule pauseUntil must be a valid timestamp");
+  }
+  if (timestamp <= Date.parse(now)) {
+    throw badRequest("Job schedule pauseUntil must be in the future");
+  }
+  return new Date(timestamp).toISOString();
+}
+
+function pauseIsActive(pausedUntil: string, now: string): boolean {
+  return Date.parse(pausedUntil) > Date.parse(now);
+}
+
 function normalizeDocumentData(value: DocumentData, field: string): DocumentData {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw badRequest(`Job schedule ${field} must be an object`);
@@ -817,9 +887,22 @@ function foldJobScheduleOverrides(
   const overrides = new Map<string, JobScheduleOverrideRecord>();
   for (const event of events) {
     if (event.payload.kind === "JobScheduleOverrideSet") {
+      const current = overrides.get(event.payload.scheduleId);
       overrides.set(event.payload.scheduleId, {
+        ...current,
         scheduleId: event.payload.scheduleId,
         enabled: event.payload.enabled,
+        updatedAt: event.occurredAt,
+        updatedBy: event.actorId
+      });
+      continue;
+    }
+    if (event.payload.kind === "JobSchedulePaused") {
+      const current = overrides.get(event.payload.scheduleId);
+      overrides.set(event.payload.scheduleId, {
+        ...current,
+        scheduleId: event.payload.scheduleId,
+        pausedUntil: event.payload.pausedUntil,
         updatedAt: event.occurredAt,
         updatedBy: event.actorId
       });

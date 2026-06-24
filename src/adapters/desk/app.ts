@@ -915,6 +915,17 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     return c.redirect(jobScheduleAdminLocation(returnFilters), 303);
   });
 
+  app.post("/desk/admin/jobs/schedules/:scheduleId/pause", async (c) => {
+    const schedules = requireJobSchedules(options);
+    const actor = await options.actor(c.req.raw);
+    const form = await parseDeskJobSchedulePauseForm(c.req.raw);
+    await schedules.pause(actor, c.req.param("scheduleId"), {
+      pausedUntil: form.pausedUntil,
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.redirect(jobScheduleAdminLocation(form.returnFilters), 303);
+  });
+
   app.post("/desk/admin/jobs/schedules/:scheduleId/reset", async (c) => {
     const schedules = requireJobSchedules(options);
     const actor = await options.actor(c.req.raw);
@@ -3388,10 +3399,27 @@ interface ParsedDeskJobScheduleForm {
   readonly returnFilters: DeskJobScheduleReturnFilters;
 }
 
+interface ParsedDeskJobSchedulePauseForm {
+  readonly pausedUntil: string;
+  readonly returnFilters: DeskJobScheduleReturnFilters;
+}
+
 async function parseDeskJobScheduleForm(request: Request): Promise<ParsedDeskJobScheduleForm> {
   const form = await readUrlEncodedDeskForm(request);
   return {
     definition: parseDeskJobScheduleDefinition(form),
+    returnFilters: deskJobScheduleReturnFilters(form)
+  };
+}
+
+async function parseDeskJobSchedulePauseForm(request: Request): Promise<ParsedDeskJobSchedulePauseForm> {
+  const form = await readUrlEncodedDeskForm(request);
+  const pausedUntil = stringSearchParamValue(form, "pauseUntil");
+  if (pausedUntil === undefined) {
+    throw new FrameworkError("BAD_REQUEST", "pauseUntil is required", { status: 400 });
+  }
+  return {
+    pausedUntil,
     returnFilters: deskJobScheduleReturnFilters(form)
   };
 }
