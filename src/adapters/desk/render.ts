@@ -781,6 +781,7 @@ function renderReportBuilderValueCheckbox(name: string, value: string, label: st
 
 function renderReportBuilderFilterControls(field: FieldDefinition): string {
   const name = escapeHtml(field.name);
+  const rangeControls = isReportBuilderRangeFilterField(field) ? renderReportBuilderRangeFilterControls(field) : "";
   return `<div class="report-builder-filter">
     ${renderReportBuilderCheckbox("filter", field, false)}
     <label class="field"><span>Operator</span><select name="filterOperator:${name}">
@@ -791,6 +792,23 @@ function renderReportBuilderFilterControls(field: FieldDefinition): string {
       <input type="checkbox" name="filterRequired:${name}" value="1">
       <span>Required</span>
     </label>
+    ${rangeControls}
+  </div>`;
+}
+
+function isReportBuilderRangeFilterField(field: FieldDefinition): boolean {
+  return field.type === "integer" || field.type === "number" || field.type === "date" || field.type === "datetime";
+}
+
+function renderReportBuilderRangeFilterControls(field: FieldDefinition): string {
+  const name = escapeHtml(field.name);
+  const label = deskReportFieldLabel(field);
+  const inputType = inputTypeForFieldType(field.type);
+  return `<div class="report-builder-range-filter">
+    ${renderReportBuilderValueCheckbox("filterRangeMin", field.name, `${label} from`, false)}
+    <label class="field"><span>From Default</span><input name="filterRangeMinDefault:${name}" type="${inputType}"></label>
+    ${renderReportBuilderValueCheckbox("filterRangeMax", field.name, `${label} to`, false)}
+    <label class="field"><span>To Default</span><input name="filterRangeMaxDefault:${name}" type="${inputType}"></label>
   </div>`;
 }
 
@@ -3136,6 +3154,12 @@ tr:last-child td { border-bottom: 0; }
 .report-builder-filter .field span {
   color: var(--muted);
   font-size: 13px;
+}
+.report-builder-range-filter {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
 }
 .choice input {
   width: auto;

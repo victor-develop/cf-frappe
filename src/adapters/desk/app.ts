@@ -3389,13 +3389,31 @@ async function parseDeskSavedReport(
   const fields = new Map(doctype.fields.map((field) => [field.name, field]));
   const columnNames = uniqueFormValues(form, "column");
   const filterNames = uniqueFormValues(form, "filter");
+  const filterRangeMinNames = uniqueFormValues(form, "filterRangeMin");
+  const filterRangeMaxNames = uniqueFormValues(form, "filterRangeMax");
   const summaryNames = uniqueFormValues(form, "summary");
   const formulaColumn = reportFormulaColumnFor(fields, form);
   const columns = [
     ...columnNames.map((name) => reportColumnFor(fields, name)),
     ...(formulaColumn === undefined ? [] : [formulaColumn])
   ];
-  const filters = filterNames.map((name) => reportFilterFor(fields, form, name));
+  const filters: NonNullable<SavedReportDefinition["filters"]>[number][] = [];
+  const usedFilterNames = new Set<string>();
+  for (const name of filterNames) {
+    const filter = reportFilterFor(fields, form, name);
+    filters.push(filter);
+    usedFilterNames.add(filter.name);
+  }
+  for (const name of filterRangeMinNames) {
+    const filter = reportRangeFilterFor(fields, form, name, "min", usedFilterNames);
+    filters.push(filter);
+    usedFilterNames.add(filter.name);
+  }
+  for (const name of filterRangeMaxNames) {
+    const filter = reportRangeFilterFor(fields, form, name, "max", usedFilterNames);
+    filters.push(filter);
+    usedFilterNames.add(filter.name);
+  }
   const sumSummaries = summaryNames.map((name) => reportSumSummaryFor(fields, name));
   const summaries = [
     ...(form.get("summaryCount") === "1" ? [reportRecordCountSummary()] : []),
@@ -3905,6 +3923,48 @@ function reportFilterFor(
   };
 }
 
+function reportRangeFilterFor(
+  fields: ReadonlyMap<string, FieldDefinition>,
+  form: URLSearchParams,
+  name: string,
+  bound: "min" | "max",
+  usedNames: ReadonlySet<string>
+): NonNullable<SavedReportDefinition["filters"]>[number] {
+  const field = fields.get(name);
+  if (!field || field.hidden || !isDeskRangeReportField(field)) {
+    throw new FrameworkError("BAD_REQUEST", `Unknown report range filter '${name}'`, { status: 400 });
+  }
+  const suffix = bound === "min" ? "Min" : "Max";
+  const operator: ReportFilterOperator = bound === "min" ? "gte" : "lte";
+  const defaultValue = reportFilterDefaultValueAt(
+    field,
+    form,
+    `filterRange${suffix}Default:${field.name}`,
+    `Report filter ${field.name} ${bound === "min" ? "from" : "to"} default`
+  );
+  return {
+    name: uniqueReportRangeFilterName(field.name, bound, usedNames),
+    label: `${deskReportFieldLabel(field)} ${bound === "min" ? "from" : "to"}`,
+    field: field.name,
+    type: field.type as Exclude<FieldType, "json" | "table">,
+    operator,
+    ...(defaultValue === undefined ? {} : { defaultValue })
+  };
+}
+
+function uniqueReportRangeFilterName(fieldName: string, bound: "min" | "max", usedNames: ReadonlySet<string>): string {
+  const base = `${fieldName}_${bound}`;
+  if (!usedNames.has(base)) {
+    return base;
+  }
+  for (let index = 2; ; index += 1) {
+    const candidate = `${base}_${String(index)}`;
+    if (!usedNames.has(candidate)) {
+      return candidate;
+    }
+  }
+}
+
 function reportFilterOperatorFor(field: FieldDefinition, form: URLSearchParams): ReportFilterOperator {
   return optionalEnumSearchParamValue(
     form,
@@ -3928,22 +3988,35 @@ function defaultReportFilterOperatorFor(field: FieldDefinition): ReportFilterOpe
   return field.type === "text" || field.type === "longText" ? "contains" : "eq";
 }
 
+function isDeskRangeReportField(field: FieldDefinition): boolean {
+  return field.type === "integer" || field.type === "number" || field.type === "date" || field.type === "datetime";
+}
+
 function reportFilterDefaultValueFor(field: FieldDefinition, form: URLSearchParams): JsonPrimitive | undefined {
-  const value = stringSearchParamValue(form, `filterDefault:${field.name}`);
+  return reportFilterDefaultValueAt(field, form, `filterDefault:${field.name}`, `Report filter ${field.name} default`);
+}
+
+function reportFilterDefaultValueAt(
+  field: FieldDefinition,
+  form: URLSearchParams,
+  key: string,
+  label: string
+): JsonPrimitive | undefined {
+  const value = stringSearchParamValue(form, key);
   if (value === undefined) {
     return undefined;
   }
   if (field.type === "integer") {
     const parsed = Number(value);
     if (!Number.isInteger(parsed)) {
-      throw new FrameworkError("BAD_REQUEST", `Report filter ${field.name} default must be an integer`, { status: 400 });
+      throw new FrameworkError("BAD_REQUEST", `${label} must be an integer`, { status: 400 });
     }
     return parsed;
   }
   if (field.type === "number") {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) {
-      throw new FrameworkError("BAD_REQUEST", `Report filter ${field.name} default must be a number`, { status: 400 });
+      throw new FrameworkError("BAD_REQUEST", `${label} must be a number`, { status: 400 });
     }
     return parsed;
   }
@@ -3954,7 +4027,7 @@ function reportFilterDefaultValueFor(field: FieldDefinition, form: URLSearchPara
     if (value === "false" || value === "0" || value === "off") {
       return false;
     }
-    throw new FrameworkError("BAD_REQUEST", `Report filter ${field.name} default must be a boolean`, { status: 400 });
+    throw new FrameworkError("BAD_REQUEST", `${label} must be a boolean`, { status: 400 });
   }
   return value;
 }

@@ -920,6 +920,157 @@ describe("Desk app", () => {
     await expect(builder.text()).resolves.toContain("No saved reports.");
   });
 
+  it("builds saved report numeric range filters from visual Desk report-builder controls", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Low Range Count", priority: "Low", count: 2 })
+    });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Middle Range Count", priority: "Medium", count: 5 })
+    });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "High Range Count", priority: "High", count: 9 })
+    });
+
+    const builder = await app.request("/desk/report-builder/Note");
+    expect(builder.status).toBe(200);
+    const builderHtml = await builder.text();
+    expect(builderHtml).toContain('name="filterRangeMin" value="count"');
+    expect(builderHtml).toContain('name="filterRangeMinDefault:count" type="number"');
+    expect(builderHtml).toContain('name="filterRangeMax" value="count"');
+    expect(builderHtml).toContain('name="filterRangeMaxDefault:count" type="number"');
+
+    const body = new URLSearchParams();
+    body.set("label", "Count range report");
+    body.append("column", "title");
+    body.append("column", "count");
+    body.append("filterRangeMin", "count");
+    body.set("filterRangeMinDefault:count", "3");
+    body.append("filterRangeMax", "count");
+    body.set("filterRangeMaxDefault:count", "7");
+
+    const saved = await app.request("/desk/report-builder/Note", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body
+    });
+
+    expect(saved.status).toBe(303);
+    await expect(services.savedReports.get(owner, "Note", "report_saved-report-1")).resolves.toMatchObject({
+      definition: {
+        filters: [
+          {
+            name: "count_min",
+            label: "count from",
+            field: "count",
+            type: "integer",
+            operator: "gte",
+            defaultValue: 3
+          },
+          {
+            name: "count_max",
+            label: "count to",
+            field: "count",
+            type: "integer",
+            operator: "lte",
+            defaultValue: 7
+          }
+        ]
+      }
+    });
+
+    const run = await app.request("/desk/report-builder/Note/report_saved-report-1");
+    expect(run.status).toBe(200);
+    const html = await run.text();
+    expect(html).toContain('<input id="filter-count-min" name="filter_count_min" type="number" value="3">');
+    expect(html).toContain('<input id="filter-count-max" name="filter_count_max" type="number" value="7">');
+    expect(html).toContain("Middle Range Count");
+    expect(html).not.toContain("Low Range Count");
+    expect(html).not.toContain("High Range Count");
+
+    const expanded = await app.request(
+      "/desk/report-builder/Note/report_saved-report-1?filter_count_min=1&filter_count_max=10"
+    );
+    expect(expanded.status).toBe(200);
+    const expandedHtml = await expanded.text();
+    expect(expandedHtml).toContain("Low Range Count");
+    expect(expandedHtml).toContain("Middle Range Count");
+    expect(expandedHtml).toContain("High Range Count");
+  });
+
+  it("allocates collision-free saved report range filter names", async () => {
+    const Metric = defineDocType({
+      name: "Metric",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "count", type: "integer" },
+        { name: "count_min", type: "integer" }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }]
+    });
+    const registry = createRegistry({ doctypes: [Metric] });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry,
+      store,
+      ids: deterministicIds(["metric-1"]),
+      clock: fixedClock(now)
+    });
+    const queries = new QueryService({ registry, projections: store });
+    const reports = new ReportService({ registry, queries });
+    const savedReports = new SavedReportService({
+      registry,
+      events: store,
+      reports,
+      ids: deterministicIds(["metric-report-1", "metric-report-event-1"]),
+      clock: fixedClock(now)
+    });
+    const app = createDeskApp({
+      registry,
+      documents,
+      queries,
+      reports,
+      savedReports,
+      actor: () => owner
+    });
+
+    const body = new URLSearchParams();
+    body.set("label", "Metric collision report");
+    body.append("column", "title");
+    body.append("filter", "count_min");
+    body.append("filterRangeMin", "count");
+    body.set("filterRangeMinDefault:count", "3");
+
+    const saved = await app.request("/desk/report-builder/Metric", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body
+    });
+
+    expect(saved.status).toBe(303);
+    await expect(savedReports.get(owner, "Metric", "report_metric-report-1")).resolves.toMatchObject({
+      definition: {
+        filters: [
+          expect.objectContaining({ name: "count_min", field: "count_min" }),
+          expect.objectContaining({ name: "count_min_2", field: "count", operator: "gte", defaultValue: 3 })
+        ]
+      }
+    });
+
+    const run = await app.request("/desk/report-builder/Metric/report_metric-report-1");
+    expect(run.status).toBe(200);
+    const html = await run.text();
+    expect(html).toContain('name="filter_count_min"');
+    expect(html).toContain('name="filter_count_min_2"');
+  });
+
   it("builds saved report charts without requiring a matching top-level summary", async () => {
     const { app, services } = makeDesk();
     await services.documents.create({
