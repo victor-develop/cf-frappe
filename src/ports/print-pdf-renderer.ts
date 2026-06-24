@@ -1,3 +1,5 @@
+import type { PrintLayoutDefinition } from "../core/print-format.js";
+
 export type RenderedPrintPdfBody = ArrayBuffer | ReadableStream<Uint8Array> | Uint8Array;
 
 export interface RenderPrintPdfCommand {
@@ -7,6 +9,7 @@ export interface RenderPrintPdfCommand {
   readonly documentName: string;
   readonly documentDoctype: string;
   readonly title: string;
+  readonly layout?: PrintLayoutDefinition;
   readonly html: string;
 }
 

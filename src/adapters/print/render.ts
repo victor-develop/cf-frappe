@@ -3,6 +3,7 @@ import type { ReportRunResult } from "../../application/report-service.js";
 import {
   parsePrintTemplatePath,
   substitutePrintTemplate,
+  type PrintLayoutDefinition,
   type PrintTemplateReference
 } from "../../core/print-format.js";
 import type { JsonValue } from "../../core/types.js";
@@ -32,7 +33,7 @@ export function renderPrintDocument(view: PrintDocumentView): string {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHtml(title)}</title>
-  <style>${printCss()}</style>
+  <style>${printCss(view.format.layout)}</style>
 </head>
 <body>
   <main class="print-page">
@@ -239,28 +240,33 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
-function printCss(): string {
+function printCss(layout?: PrintLayoutDefinition): string {
+  const pageRule = printPageRule(layout);
   return `
 :root {
   color-scheme: light;
   --text: #111827;
   --muted: #5b6472;
   --border: #d9dee7;
+  --print-font-family: ${printFontFamily(layout)};
+  --print-font-size: ${printFontSize(layout)};
+  --print-page-padding: ${printPagePadding(layout)};
 }
+${pageRule}
 * { box-sizing: border-box; }
 body {
   margin: 0;
   color: var(--text);
   background: #f5f6f8;
-  font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
-  font-size: 14px;
+  font-family: var(--print-font-family);
+  font-size: var(--print-font-size);
   line-height: 1.55;
 }
 .print-page {
   width: min(840px, calc(100vw - 32px));
   min-height: calc(100vh - 32px);
   margin: 16px auto;
-  padding: 40px;
+  padding: var(--print-page-padding);
   background: #fff;
   border: 1px solid var(--border);
 }
@@ -330,4 +336,55 @@ th {
   .print-page { padding: 24px; }
   dl { grid-template-columns: 1fr; }
 }`;
+}
+
+function printPageRule(layout: PrintLayoutDefinition | undefined): string {
+  if (!layout) {
+    return "";
+  }
+  const size = printPageSize(layout);
+  const margin = layout.margins ? printPageMargin(layout.margins) : undefined;
+  if (!size && !margin) {
+    return "";
+  }
+  const declarations = [size ? `size: ${size};` : "", margin ? `margin: ${margin};` : ""].filter(Boolean);
+  return `@page { ${declarations.join(" ")} }`;
+}
+
+function printPageSize(layout: PrintLayoutDefinition): string | undefined {
+  if (layout.pageSize === undefined) {
+    return layout.orientation;
+  }
+  const size = typeof layout.pageSize === "string"
+    ? layout.pageSize
+    : `${formatCssNumber(layout.pageSize.widthMm)}mm ${formatCssNumber(layout.pageSize.heightMm)}mm`;
+  return typeof layout.pageSize === "string" && layout.orientation !== undefined ? `${size} ${layout.orientation}` : size;
+}
+
+function printPageMargin(margins: NonNullable<PrintLayoutDefinition["margins"]>): string {
+  return [
+    margins.topMm ?? 10,
+    margins.rightMm ?? 10,
+    margins.bottomMm ?? 10,
+    margins.leftMm ?? 10
+  ]
+    .map((value) => `${formatCssNumber(value)}mm`)
+    .join(" ");
+}
+
+function printFontFamily(layout: PrintLayoutDefinition | undefined): string {
+  const fallback = 'ui-serif, Georgia, Cambria, "Times New Roman", serif';
+  return layout?.font?.family ? `"${layout.font.family}", ${fallback}` : fallback;
+}
+
+function printFontSize(layout: PrintLayoutDefinition | undefined): string {
+  return layout?.font?.sizePt === undefined ? "14px" : `${formatCssNumber(layout.font.sizePt)}pt`;
+}
+
+function printPagePadding(layout: PrintLayoutDefinition | undefined): string {
+  return layout?.margins === undefined ? "40px" : printPageMargin(layout.margins);
+}
+
+function formatCssNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)));
 }

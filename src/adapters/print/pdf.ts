@@ -25,6 +25,7 @@ export async function renderPrintPdfDocument(options: RenderPrintPdfDocumentOpti
     documentName: options.view.document.name,
     documentDoctype: options.view.document.doctype,
     title,
+    ...(options.view.format.layout === undefined ? {} : { layout: options.view.format.layout }),
     html: renderPrintDocument(options.view)
   });
   return printPdfDocumentResult(options.view, rendered);

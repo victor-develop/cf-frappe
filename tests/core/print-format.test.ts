@@ -84,6 +84,73 @@ describe("print formats", () => {
     });
   });
 
+  it("registers frozen print layout metadata", () => {
+    const format = definePrintFormat({
+      name: "Layout Print",
+      doctype: "Note",
+      sections: [{ fields: [{ field: "title" }] }],
+      layout: {
+        pageSize: "A4",
+        orientation: "landscape",
+        margins: { topMm: 12, rightMm: 10, bottomMm: 14, leftMm: 10 },
+        font: { family: "Inter", sizePt: 10 }
+      }
+    });
+
+    expect(format.layout).toEqual({
+      pageSize: "A4",
+      orientation: "landscape",
+      margins: { topMm: 12, rightMm: 10, bottomMm: 14, leftMm: 10 },
+      font: { family: "Inter", sizePt: 10 }
+    });
+    expect(Object.isFrozen(format.layout)).toBe(true);
+    expect(Object.isFrozen(format.layout?.margins)).toBe(true);
+    expect(Object.isFrozen(format.layout?.font)).toBe(true);
+  });
+
+  it("rejects invalid print layout metadata", () => {
+    expect(() =>
+      definePrintFormat({
+        name: "Negative Margin Print",
+        doctype: "Note",
+        sections: [{ fields: [{ field: "title" }] }],
+        layout: { margins: { topMm: -1 } }
+      })
+    ).toThrow("Print format 'Negative Margin Print' layout margin topMm must be between 0 and 100 millimeters");
+
+    expect(() =>
+      definePrintFormat({
+        name: "Unsafe Font Print",
+        doctype: "Note",
+        sections: [{ fields: [{ field: "title" }] }],
+        layout: { font: { family: "Inter; color:red" } }
+      })
+    ).toThrow("Print format 'Unsafe Font Print' layout font family contains unsupported characters");
+
+    expect(() =>
+      createRegistry({
+        doctypes: [defineDocType({ name: "Note", fields: [{ name: "title", type: "text" }] })],
+        printFormats: [
+          {
+            name: "Tiny Page Print",
+            doctype: "Note",
+            sections: [{ fields: [{ field: "title" }] }],
+            layout: { pageSize: { widthMm: 0, heightMm: 297 } }
+          }
+        ]
+      })
+    ).toThrow("Print format 'Tiny Page Print' layout custom page widthMm must be between 1 and 2000 millimeters");
+
+    expect(() =>
+      definePrintFormat({
+        name: "Ambiguous Page Print",
+        doctype: "Note",
+        sections: [{ fields: [{ field: "title" }] }],
+        layout: { pageSize: { widthMm: 210, heightMm: 297 }, orientation: "landscape" }
+      })
+    ).toThrow("Print format 'Ambiguous Page Print' layout orientation cannot be combined with custom page size");
+  });
+
   it("rejects print formats that reference unknown letterheads", () => {
     const Note = defineDocType({ name: "Note", fields: [{ name: "title", type: "text" }] });
 

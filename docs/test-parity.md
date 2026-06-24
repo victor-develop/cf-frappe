@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the PDF print renderer port slice:
+As of the print layout metadata slice:
 
 - Vitest files: `75`
-- Vitest cases: `832`
+- Vitest cases: `835`
 
 ## Implication
 

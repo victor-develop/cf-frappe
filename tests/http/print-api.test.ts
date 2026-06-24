@@ -70,33 +70,97 @@ describe("print api", () => {
     expect(html).toContain("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;");
   });
 
+  it("exposes print layout metadata and renders it into printable HTML", async () => {
+    const { app, services } = makeApp();
+    services.registry.registerPrintFormat(
+      definePrintFormat({
+        name: "Note Layout",
+        doctype: "Note",
+        sections: [{ fields: [{ field: "title", label: "Title" }, { field: "body", label: "Body" }] }],
+        layout: {
+          pageSize: "A4",
+          orientation: "landscape",
+          margins: { topMm: 12, rightMm: 10, bottomMm: 14, leftMm: 10 },
+          font: { family: "Inter", sizePt: 10 }
+        }
+      })
+    );
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Layout Note", priority: "High", body: "Layout body" })
+    });
+
+    const metadata = await app.request("/api/meta/print-formats/Note%20Layout", { headers: userHeaders });
+    await expect(metadata.json()).resolves.toMatchObject({
+      data: {
+        name: "Note Layout",
+        layout: {
+          pageSize: "A4",
+          orientation: "landscape",
+          margins: { topMm: 12, rightMm: 10, bottomMm: 14, leftMm: 10 },
+          font: { family: "Inter", sizePt: 10 }
+        }
+      }
+    });
+
+    const response = await app.request("/api/print/Note%20Layout/Layout%20Note", { headers: userHeaders });
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("@page { size: A4 landscape; margin: 12mm 10mm 14mm 10mm; }");
+    expect(html).toContain('--print-page-padding: 12mm 10mm 14mm 10mm;');
+    expect(html).toContain('--print-font-family: "Inter", ui-serif, Georgia, Cambria, "Times New Roman", serif;');
+    expect(html).toContain("--print-font-size: 10pt;");
+  });
+
   it("renders a printable document as PDF through the configured renderer", async () => {
     const pdf = new Uint8Array([37, 80, 68, 70, 45, 49, 46, 55]);
     const renderer = new RecordingPrintPdfRenderer({ body: pdf, contentLength: pdf.byteLength });
     const { app, services } = makeApp({ printPdfRenderer: renderer });
+    services.registry.registerPrintFormat(
+      definePrintFormat({
+        name: "Note Layout",
+        doctype: "Note",
+        sections: [{ fields: [{ field: "title", label: "Title" }, { field: "body", label: "Body" }] }],
+        layout: {
+          pageSize: "A4",
+          orientation: "portrait",
+          margins: { topMm: 8, rightMm: 8, bottomMm: 12, leftMm: 8 },
+          font: { family: "Inter", sizePt: 11 }
+        }
+      })
+    );
     await services.documents.create({
       actor: owner,
       doctype: "Note",
       data: data({ title: "Printable", priority: "High", body: "<script>alert('x')</script>" })
     });
 
-    const response = await app.request("/api/print/Note%20Standard/Printable/pdf", { headers: userHeaders });
+    const response = await app.request("/api/print/Note%20Layout/Printable/pdf", { headers: userHeaders });
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("application/pdf");
-    expect(response.headers.get("content-disposition")).toBe('inline; filename="Printable.Note-Standard.pdf"');
+    expect(response.headers.get("content-disposition")).toBe('inline; filename="Printable.Note-Layout.pdf"');
     expect(response.headers.get("content-length")).toBe(String(pdf.byteLength));
     await expect(response.arrayBuffer()).resolves.toEqual(pdf.buffer);
     expect(renderer.calls).toHaveLength(1);
     expect(renderer.calls[0]).toMatchObject({
       actorId: owner.id,
       tenantId: owner.tenantId,
-      formatName: "Note Standard",
+      formatName: "Note Layout",
       documentName: "Printable",
       documentDoctype: "Note",
-      title: "Standard - Printable"
+      title: "Note Layout - Printable",
+      layout: {
+        pageSize: "A4",
+        orientation: "portrait",
+        margins: { topMm: 8, rightMm: 8, bottomMm: 12, leftMm: 8 },
+        font: { family: "Inter", sizePt: 11 }
+      }
     });
     expect(renderer.calls[0]?.html).toContain("Printable");
+    expect(renderer.calls[0]?.html).toContain("@page { size: A4 portrait; margin: 8mm 8mm 12mm 8mm; }");
     expect(renderer.calls[0]?.html).toContain("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;");
   });
 
