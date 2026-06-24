@@ -605,6 +605,31 @@ describe("Desk client runtime", () => {
     });
   });
 
+  it("hydrates report compound filter builders into report predicate JSON", () => {
+    const form = new FakeForm();
+    const builder = new FakeCompoundFilterBuilder(form, {
+      filterExpressionKind: "report",
+      match: "any",
+      rows: [
+        new FakeCompoundFilterRow("priority", "eq", "High"),
+        new FakeCompoundFilterRow("count", "eq", "3")
+      ]
+    });
+    evaluateDeskClient(fetch, new FakeDocument({ form, compoundFilterBuilders: [builder] }));
+
+    builder.rows[1]?.value.emit("input");
+    form.emitSubmit();
+
+    expect(JSON.parse(builder.expression.value)).toEqual({
+      kind: "group",
+      match: "any",
+      filters: [
+        { filter: "priority", value: "High" },
+        { filter: "count", value: "3" }
+      ]
+    });
+  });
+
   it("preserves advanced nested filter JSON until visual rows change", () => {
     const nestedExpression = JSON.stringify({
       kind: "group",
@@ -3135,7 +3160,7 @@ class FakeCompoundTemplate<T extends FakeCompoundFilterGroup | FakeCompoundFilte
 }
 
 class FakeCompoundFilterBuilder {
-  readonly dataset = {
+  readonly dataset: Record<string, string> = {
     filterFields: JSON.stringify([
       {
         field: "priority",
@@ -3167,11 +3192,15 @@ class FakeCompoundFilterBuilder {
     private readonly form: FakeForm,
     options: {
       readonly expression?: string;
+      readonly filterExpressionKind?: string;
       readonly items?: readonly FakeCompoundFilterItem[];
       readonly match?: string;
       readonly rows?: readonly FakeCompoundFilterRow[];
     } = {}
   ) {
+    if (options.filterExpressionKind !== undefined) {
+      this.dataset.filterExpressionKind = options.filterExpressionKind;
+    }
     this.expression = new FakeCompoundControl(options.expression ?? "");
     this.root = new FakeCompoundFilterGroup({
       match: options.match ?? "all",

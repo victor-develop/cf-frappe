@@ -23,7 +23,7 @@ Observed counts:
 As of the report compound filter expression slice:
 
 - Vitest files: `89`
-- Vitest cases: `974`
+- Vitest cases: `976`
 
 ## Implication
 

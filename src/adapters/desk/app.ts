@@ -46,7 +46,9 @@ import { can } from "../../core/permissions.js";
 import type { ModelRegistry } from "../../core/registry.js";
 import {
   isReportChartColor,
+  isReportFilterGroup,
   REPORT_FORMULA_MAX_DEPTH,
+  type ReportFilterExpression,
   type ReportFilterOperator,
   type ReportFormulaOperand
 } from "../../core/reports.js";
@@ -99,7 +101,7 @@ import {
   readBoundedText
 } from "../http/request.js";
 import { writeCsvExportHeaders, writeReportCsvHeaders } from "../http/report-export.js";
-import { reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request.js";
+import { reportFilterExpressionFromValue, reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request.js";
 import {
   defaultPrintLayoutFor,
   printPdfResponseBody,
@@ -4086,6 +4088,15 @@ async function parseDeskSavedReport(
     filters.push(filter);
     usedFilterNames.add(filter.name);
   }
+  const filterExpression = reportFilterExpressionFor(form);
+  for (const name of reportFilterExpressionFilterNames(filterExpression)) {
+    if (usedFilterNames.has(name)) {
+      continue;
+    }
+    const filter = reportFilterFor(fields, form, name);
+    filters.push(filter);
+    usedFilterNames.add(filter.name);
+  }
   const sumSummaries = summaryNames.map((name) => reportSumSummaryFor(fields, name));
   const summaries = [
     ...(form.get("summaryCount") === "1" ? [reportRecordCountSummary()] : []),
@@ -4105,6 +4116,7 @@ async function parseDeskSavedReport(
     definition: {
       columns,
       ...(filters.length === 0 ? {} : { filters }),
+      ...(filterExpression === undefined ? {} : { filterExpression }),
       ...(summaries.length === 0 ? {} : { summaries }),
       ...(group === undefined ? {} : { groups: [group] }),
       ...(chart === undefined ? {} : { charts: [chart] }),
@@ -4112,6 +4124,21 @@ async function parseDeskSavedReport(
       ...(order === "asc" || order === "desc" ? { order } : {})
     }
   };
+}
+
+function reportFilterExpressionFor(form: URLSearchParams): ReportFilterExpression | undefined {
+  const value = optionalJsonSearchParamValue(form, "filter_expression", "Report filter expression");
+  return value === undefined ? undefined : reportFilterExpressionFromValue(value, "Report filter expression");
+}
+
+function reportFilterExpressionFilterNames(expression: ReportFilterExpression | undefined): readonly string[] {
+  if (expression === undefined) {
+    return [];
+  }
+  if (isReportFilterGroup(expression)) {
+    return expression.filters.flatMap(reportFilterExpressionFilterNames);
+  }
+  return [expression.filter];
 }
 
 async function parseDeskAssignment(request: Request): Promise<ParsedDeskAssignment> {

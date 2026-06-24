@@ -1150,6 +1150,78 @@ describe("Desk app", () => {
     expect(overrideHtml).not.toContain("High Filter Preset");
   });
 
+  it("builds saved report filter expressions from visual Desk report-builder controls", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Low Expression", priority: "Low", count: 1 })
+    });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "High Expression", priority: "High", count: 5 })
+    });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Count Expression", priority: "Medium", count: 7 })
+    });
+
+    const builder = await app.request("/desk/report-builder/Note");
+    expect(builder.status).toBe(200);
+    const builderHtml = await builder.text();
+    expect(builderHtml).toContain('src="/desk/client.js" data-cf-frappe-runtime="desk"');
+    expect(builderHtml).toContain('data-scope="report-builder"');
+    expect(builderHtml).toContain('data-filter-expression-kind="report"');
+    expect(builderHtml).toContain('name="filter_expression"');
+
+    const body = new URLSearchParams();
+    body.set("label", "Expression report");
+    body.append("column", "title");
+    body.append("column", "priority");
+    body.append("column", "count");
+    body.set("filter_expression", JSON.stringify({
+      kind: "group",
+      match: "any",
+      filters: [
+        { filter: "priority", value: "High" },
+        { filter: "count", value: 7 }
+      ]
+    }));
+
+    const saved = await app.request("/desk/report-builder/Note", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body
+    });
+
+    expect(saved.status).toBe(303);
+    expect(saved.headers.get("location")).toBe("/desk/report-builder/Note/report_saved-report-1");
+    await expect(services.savedReports.get(owner, "Note", "report_saved-report-1")).resolves.toMatchObject({
+      definition: {
+        filters: [
+          expect.objectContaining({ name: "priority" }),
+          expect.objectContaining({ name: "count" })
+        ],
+        filterExpression: {
+          match: "any",
+          filters: [
+            { filter: "priority", value: "High" },
+            { filter: "count", value: 7 }
+          ]
+        }
+      }
+    });
+
+    const run = await app.request("/desk/report-builder/Note/report_saved-report-1");
+    expect(run.status).toBe(200);
+    const html = await run.text();
+    expect(html).toContain("High Expression");
+    expect(html).toContain("Count Expression");
+    expect(html).not.toContain("Low Expression");
+  });
+
   it("keeps link filter presets as exact-match controls by default", async () => {
     const services = createLinkedServices(["project-1", "task-1"]);
     const reports = new ReportService({ registry: services.registry, queries: services.queries });

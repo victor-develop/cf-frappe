@@ -14,6 +14,7 @@ import {
   type ListFilterExpression,
   type ListFilterGroup,
   type ListFilterGroupMatch,
+  type ListFilterInputType,
   type ListFilterOperator,
   type ResolvedFormSection,
   type ResolvedFormView,
@@ -22,8 +23,10 @@ import {
 import { isListFilterGroup } from "../../core/list-view.js";
 import {
   isReportChartColor,
+  isReportFilterGroup,
   REPORT_FORMULA_MAX_DEPTH,
   type ReportDefinition,
+  type ReportFilterExpression,
   type ReportFilterOperator
 } from "../../core/reports.js";
 import type { DashboardDefinition } from "../../core/dashboard.js";
@@ -771,6 +774,9 @@ export function renderSavedReportBuilder(
     .filter(isDeskGroupableReportField)
     .map(renderReportBuilderFilterControls)
     .join("");
+  const reportFilterExpressionBuilder = renderReportFilterExpressionBuilder(
+    visibleFields.filter(isDeskGroupableReportField)
+  );
   const numericFields = visibleFields.filter(isDeskNumericReportField);
   const summaryOptions = [
     renderReportBuilderValueCheckbox("summaryCount", "1", "Records", false),
@@ -816,6 +822,7 @@ export function renderSavedReportBuilder(
       <legend>Filters</legend>
       ${filterOptions}
     </fieldset>
+    ${reportFilterExpressionBuilder}
     <fieldset class="choice-grid">
       <legend>Summaries</legend>
       ${summaryOptions}
@@ -872,7 +879,8 @@ export function renderSavedReportBuilder(
         <tbody>${rows || `<tr><td colspan="4" class="empty">No saved reports.</td></tr>`}</tbody>
       </table>
     </div>
-  </section>`;
+  </section>
+  ${renderClientScripts(doctype.name, "report-builder", [])}`;
 }
 
 export function renderSavedReportView(
@@ -1023,6 +1031,76 @@ function renderReportBuilderFilterDefaultControl(field: FieldDefinition): string
   }
   const type = inputTypeForFieldType(field.type);
   return `<label class="field"><span>Default</span><input name="${name}" type="${type}"></label>`;
+}
+
+function renderReportFilterExpressionBuilder(fields: readonly FieldDefinition[]): string {
+  const builderFields: readonly ReportFilterExpressionBuilderField[] = fields.map((field) => ({
+    field: field.name,
+    label: deskReportFieldLabel(field),
+    inputType: reportFilterExpressionInputType(field),
+    operators: []
+  }));
+  if (builderFields.length === 0) {
+    return "";
+  }
+  return `<fieldset class="compound-filter-builder report-filter-expression-builder" data-cf-frappe-compound-filter-builder data-filter-expression-kind="report" data-filter-fields="${escapeHtml(JSON.stringify(builderFields))}">
+    <legend>Filter Expression</legend>
+    <div class="compound-filter-visual">
+      ${renderReportFilterExpressionGroup(builderFields, { kind: "group", match: "all", filters: [] }, true)}
+    </div>
+    <template data-cf-frappe-filter-row-template>${renderReportFilterExpressionRow(builderFields, undefined)}</template>
+    <template data-cf-frappe-filter-group-template>${renderReportFilterExpressionGroup(builderFields, { kind: "group", match: "all", filters: [] }, false)}</template>
+    <label class="field wide" for="report-filter-expression"><span>Advanced JSON</span><textarea id="report-filter-expression" name="filter_expression" rows="5"></textarea></label>
+  </fieldset>`;
+}
+
+function renderReportFilterExpressionGroup(
+  fields: readonly ReportFilterExpressionBuilderField[],
+  group: Extract<ReportFilterExpression, { readonly kind: "group" }>,
+  root: boolean
+): string {
+  const items = group.filters.length > 0 ? group.filters : [undefined];
+  return `<div class="compound-filter-group${root ? " compound-filter-root" : ""}" data-cf-frappe-filter-group>
+    <div class="compound-filter-group-head">
+      <label class="field compact"><span>Match</span><select data-cf-frappe-filter-match>${renderCompoundFilterMatchOptions(group.match)}</select></label>
+      <div class="compound-filter-group-actions">
+        <button class="button" type="button" data-cf-frappe-add-filter>Add condition</button>
+        <button class="button" type="button" data-cf-frappe-add-filter-group>Add group</button>
+        ${root ? "" : `<button class="button" type="button" data-cf-frappe-remove-filter-group>Remove group</button>`}
+      </div>
+    </div>
+    <div class="compound-filter-items compound-filter-rows" data-cf-frappe-filter-items data-cf-frappe-filter-rows>${items
+      .map((item) =>
+        item === undefined
+          ? renderReportFilterExpressionRow(fields, undefined)
+          : isReportFilterGroup(item)
+            ? renderReportFilterExpressionGroup(fields, item, false)
+            : renderReportFilterExpressionRow(fields, item)
+      )
+      .join("")}</div>
+  </div>`;
+}
+
+function renderReportFilterExpressionRow(
+  fields: readonly ReportFilterExpressionBuilderField[],
+  filter: Exclude<ReportFilterExpression, { readonly kind: "group" }> | undefined
+): string {
+  const filterName = filter?.filter ?? "";
+  const builderField = fields.find((field) => field.field === filterName);
+  const inputType = builderField?.inputType ?? "text";
+  return `<div class="compound-filter-row" data-cf-frappe-filter-row>
+    <label class="field compact"><span>Filter</span><select data-cf-frappe-filter-field>${renderCompoundFilterFieldOptions(fields, filterName)}</select></label>
+    <label class="field grow"><span>Value</span><input data-cf-frappe-filter-value type="${escapeHtml(inputType)}" value="${escapeHtml(filter === undefined ? "" : formatCompoundFilterVisualValue(filter.value))}"></label>
+    <button class="button" type="button" data-cf-frappe-remove-filter>Remove</button>
+  </div>`;
+}
+
+interface ReportFilterExpressionBuilderField extends ListFilterBuilderField {
+  readonly label: string;
+}
+
+function reportFilterExpressionInputType(field: FieldDefinition): ListFilterInputType {
+  return field.type === "boolean" ? "boolean" : inputTypeForFieldType(field.type) as ListFilterInputType;
 }
 
 function renderReportBuilderFieldOptions(fields: readonly FieldDefinition[]): string {
@@ -2741,7 +2819,7 @@ function renderPrintFormatLinks(format: PrintFormatDefinition, document: Documen
 
 function renderClientScripts(
   doctype: string,
-  scope: Exclude<ClientScriptScope, "both">,
+  scope: Exclude<ClientScriptScope, "both"> | "report-builder",
   scripts: readonly ClientScriptDefinition[],
   documentName?: string,
   documentTenantId?: string,

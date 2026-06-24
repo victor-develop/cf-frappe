@@ -971,11 +971,11 @@ export function renderDeskClientScript(): string {
   function compoundFilterExpressionFromBuilder(builder) {
     var root = builder.querySelector("[data-cf-frappe-filter-group]");
     if (root) {
-      return compoundFilterExpressionFromGroup(root, true);
+      return compoundFilterExpressionFromGroup(builder, root, true);
     }
     var filters = [];
     Array.prototype.forEach.call(builder.querySelectorAll("[data-cf-frappe-filter-row]"), function (row) {
-      var filter = compoundFilterExpressionFromRow(row);
+      var filter = compoundFilterExpressionFromRow(builder, row);
       if (filter) {
         filters.push(filter);
       }
@@ -994,15 +994,15 @@ export function renderDeskClientScript(): string {
     };
   }
 
-  function compoundFilterExpressionFromGroup(group, root) {
+  function compoundFilterExpressionFromGroup(builder, group, root) {
     var filters = [];
     var container = compoundFilterItemsContainer(group);
     compoundFilterContainerChildren(container).forEach(function (item) {
       var filter = undefined;
       if (compoundFilterElementMatches(item, "[data-cf-frappe-filter-row]")) {
-        filter = compoundFilterExpressionFromRow(item);
+        filter = compoundFilterExpressionFromRow(builder, item);
       } else if (compoundFilterElementMatches(item, "[data-cf-frappe-filter-group]")) {
-        filter = compoundFilterExpressionFromGroup(item, false);
+        filter = compoundFilterExpressionFromGroup(builder, item, false);
       }
       if (filter) {
         filters.push(filter);
@@ -1045,13 +1045,19 @@ export function renderDeskClientScript(): string {
     return element && typeof element.matches === "function" ? element.matches(selector) : false;
   }
 
-  function compoundFilterExpressionFromRow(row) {
+  function compoundFilterExpressionFromRow(builder, row) {
     var field = controlValue(row.querySelector("[data-cf-frappe-filter-field]"));
-    var operator = controlValue(row.querySelector("[data-cf-frappe-filter-operator]")) || "eq";
     var value = controlValue(row.querySelector("[data-cf-frappe-filter-value]"));
     if (!field || value === "") {
       return undefined;
     }
+    if (compoundFilterExpressionKind(builder) === "report") {
+      return {
+        filter: field,
+        value: value
+      };
+    }
+    var operator = controlValue(row.querySelector("[data-cf-frappe-filter-operator]")) || "eq";
     return Object.assign(
       {
         field: field,
@@ -1146,6 +1152,10 @@ export function renderDeskClientScript(): string {
       builder.__cfFrappeFilterFields = [];
     }
     return builder.__cfFrappeFilterFields;
+  }
+
+  function compoundFilterExpressionKind(builder) {
+    return builder && builder.dataset && builder.dataset.filterExpressionKind === "report" ? "report" : "list";
   }
 
   function controlValue(control) {
