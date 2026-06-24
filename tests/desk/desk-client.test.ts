@@ -1589,6 +1589,56 @@ describe("Desk client runtime", () => {
     expect(panel.list.textContent).toBe("owner@example.com, support@example.com");
   });
 
+  it("keeps generated document presence panels live with realtime presence messages", async () => {
+    const sockets: FakeWebSocket[] = [];
+    const panel = new FakePresencePanel({
+      doctype: "Task Type",
+      documentName: "TASK/1",
+      realtimeRoute: "/rt",
+      tenantId: "acme:west"
+    });
+
+    evaluateDeskClient(
+      async () =>
+        new Response(JSON.stringify({
+          data: {
+            topic: "document:acme%3Awest:Task%20Type:TASK%2F1",
+            connections: [{ connectionId: "conn-1", userId: "owner@example.com" }]
+          }
+        }), {
+          headers: { "content-type": "application/json" }
+        }),
+      new FakeDocument({ presencePanels: [panel] }),
+      sockets
+    );
+    await flushPromises();
+
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]?.url).toBe(
+      "wss://app.example/rt?topic=document%3Aacme%253Awest%3ATask%2520Type%3ATASK%252F1"
+    );
+    expect(panel.dataset.presenceState).toBe("ready");
+    expect(panel.count.textContent).toBe("1 active collaborator");
+    expect(panel.list.textContent).toBe("owner@example.com");
+
+    sockets[0]?.emitMessage(JSON.stringify({
+      type: "cf-frappe.realtime.presence",
+      presence: {
+        action: "join",
+        topic: "document:acme%3Awest:Task%20Type:TASK%2F1",
+        connections: [
+          { connectionId: "conn-1", userId: "owner@example.com" },
+          { connectionId: "conn-2", userId: "support@example.com" },
+          { connectionId: "conn-3", userId: "support@example.com" }
+        ]
+      }
+    }));
+
+    expect(panel.dataset.presenceState).toBe("live");
+    expect(panel.count.textContent).toBe("2 active collaborators");
+    expect(panel.list.textContent).toBe("owner@example.com, support@example.com");
+  });
+
   it("parses realtime subscriptions into events and redacted user notifications", () => {
     const sockets: FakeWebSocket[] = [];
     const runtime = evaluateDeskClient(fetch, new FakeDocument(), sockets);

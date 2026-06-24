@@ -1110,17 +1110,12 @@ export function renderDeskClientScript(): string {
     if (!doctype || !documentName || !tenantId) {
       return;
     }
+    var realtimeOptions = Object.assign({ tenantId: tenantId }, realtimeRoute ? { realtimeRoute: realtimeRoute } : {});
     setPresencePanelState(panel, "loading", "Checking active collaborators.", "Checking active collaborators.");
-    realtimePresenceDocument(doctype, documentName, Object.assign({ tenantId: tenantId }, realtimeRoute ? { realtimeRoute: realtimeRoute } : {}))
+    realtimePresenceDocument(doctype, documentName, realtimeOptions)
       .then(function (snapshot) {
-        var labels = presenceConnectionLabels(snapshot && snapshot.connections);
-        var count = labels.length;
-        setPresencePanelState(
-          panel,
-          "ready",
-          count === 1 ? "1 active collaborator" : String(count) + " active collaborators",
-          count === 0 ? "No active collaborators are viewing this document." : labels.join(", ")
-        );
+        setPresencePanelConnections(panel, "ready", snapshot && snapshot.connections);
+        subscribePresencePanel(panel, doctype, documentName, realtimeOptions);
       })
       .catch(function (error) {
         setPresencePanelState(
@@ -1130,6 +1125,36 @@ export function renderDeskClientScript(): string {
           error && error.message ? error.message : "Unable to load document presence."
         );
       });
+  }
+
+  function subscribePresencePanel(panel, doctype, documentName, options) {
+    if (panel.__cfFrappePresenceSubscription) {
+      return;
+    }
+    try {
+      panel.__cfFrappePresenceSubscription = realtimeSubscribe(
+        documentTopicFromOptions(doctype, documentName, options),
+        {
+          presence: function (presence) {
+            setPresencePanelConnections(panel, "live", presence && presence.connections);
+          }
+        },
+        options
+      );
+    } catch (_error) {
+      panel.__cfFrappePresenceSubscription = undefined;
+    }
+  }
+
+  function setPresencePanelConnections(panel, state, connections) {
+    var labels = presenceConnectionLabels(connections);
+    var count = labels.length;
+    setPresencePanelState(
+      panel,
+      state,
+      count === 1 ? "1 active collaborator" : String(count) + " active collaborators",
+      count === 0 ? "No active collaborators are viewing this document." : labels.join(", ")
+    );
   }
 
   function presenceConnectionLabels(connections) {
