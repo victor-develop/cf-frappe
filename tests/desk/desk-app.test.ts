@@ -83,6 +83,7 @@ describe("Desk app", () => {
       registry: services.registry,
       documents: services.documents,
       prints: services.prints,
+      printSettings: services.printSettings,
       ...(options.printPdfRenderer === undefined ? {} : { printPdfRenderer: options.printPdfRenderer }),
       queries: services.queries,
       ...(options.documentShares === false ? {} : { documentShares: services.documentShares }),
@@ -478,9 +479,24 @@ describe("Desk app", () => {
     expect(csv.headers.get("x-cf-frappe-export-truncated")).toBe("false");
     await expect(csv.text()).resolves.toBe("Title,Priority,Body\nReport Note,High,For reporting\nAlpha Report,High,Earlier title");
 
+    await services.printSettings.change({
+      actor: { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] },
+      settings: {
+        defaultLayout: {
+          pageSize: "A4",
+          orientation: "landscape",
+          margins: { topMm: 12, rightMm: 10, bottomMm: 14, leftMm: 10 },
+          font: { family: "Inter", sizePt: 10 }
+        }
+      }
+    });
+
     const printable = await app.request("/desk/reports/Open%20Notes/print?filter_priority=High&order_by=title&order=desc");
     expect(printable.status).toBe(200);
     const printHtml = await printable.text();
+    expect(printHtml).toContain("@page { size: A4 landscape; margin: 12mm 10mm 14mm 10mm; }");
+    expect(printHtml).toContain('--print-font-family: "Inter", ui-serif, Georgia, Cambria, "Times New Roman", serif;');
+    expect(printHtml).toContain("--print-font-size: 10pt;");
     expect(printHtml).toContain('<main class="print-page report-print-page">');
     expect(printHtml).toContain("<h1>Open Notes</h1>");
     expect(printHtml).toContain("<dt>Priority</dt><dd>High</dd>");
@@ -630,11 +646,22 @@ describe("Desk app", () => {
     expect(csv.headers.get("content-disposition")).toBe('attachment; filename="Saved-Report-report_saved-report-1.csv"');
     await expect(csv.text()).resolves.toBe("title,count,Double Count\nHigh Count B,7,14\nHigh Count A,3,6");
 
+    await services.printSettings.change({
+      actor: { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] },
+      settings: {
+        defaultLayout: {
+          pageSize: { widthMm: 210, heightMm: 297 },
+          margins: { topMm: 8, rightMm: 8, bottomMm: 12, leftMm: 8 }
+        }
+      }
+    });
+
     const printable = await app.request(
       "/desk/report-builder/Note/report_saved-report-1/print?filter_priority=High&order_by=count&order=desc"
     );
     expect(printable.status).toBe(200);
     const printHtml = await printable.text();
+    expect(printHtml).toContain("@page { size: 210mm 297mm; margin: 8mm 8mm 12mm 8mm; }");
     expect(printHtml).toContain("<h1>High count desk report</h1>");
     expect(printHtml).toContain("<dt>Priority</dt><dd>High</dd>");
     expect(printHtml).toContain("<th>title</th><th>count</th><th>Double Count</th>");

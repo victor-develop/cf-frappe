@@ -55,7 +55,10 @@ export function printDocumentTitle(view: PrintDocumentView): string {
   return `${view.format.label ?? view.format.name} - ${view.document.name}`;
 }
 
-export function renderPrintReport(result: ReportRunResult, options: { readonly title?: string } = {}): string {
+export function renderPrintReport(
+  result: ReportRunResult,
+  options: { readonly title?: string; readonly layout?: PrintLayoutDefinition } = {}
+): string {
   const title = options.title ?? result.report.label ?? result.report.name;
   const filters = result.filters.filter((filter) => filter.value !== undefined && filter.value !== "");
   const filterSection = filters.length > 0
@@ -86,7 +89,7 @@ export function renderPrintReport(result: ReportRunResult, options: { readonly t
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHtml(title)} - Report</title>
-  <style>${printCss()}</style>
+  <style>${printCss(options.layout)}</style>
 </head>
 <body>
   <main class="print-page report-print-page">

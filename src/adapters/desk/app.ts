@@ -1219,7 +1219,8 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         limit: 100
       }
     });
-    return html(renderPrintReport(result, { title: saved.label }));
+    const layout = await reportPrintLayoutFor(options, actor);
+    return html(renderPrintReport(result, { title: saved.label, ...(layout === undefined ? {} : { layout }) }));
   });
 
   app.post("/desk/report-builder/:doctype/:id/delete", async (c) => {
@@ -1284,7 +1285,8 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       ...reportOrderingFromUrl(url),
       limit: 100
     });
-    return html(renderPrintReport(result));
+    const layout = await reportPrintLayoutFor(options, actor);
+    return html(renderPrintReport(result, layout === undefined ? {} : { layout }));
   });
 
   app.get("/desk/reports/:report", async (c) => {
@@ -2172,6 +2174,13 @@ function workspaceShortcutView(
 
 function listPrintFormats(options: DeskAppOptions, actor: Actor, doctype?: string) {
   return options.prints?.listPrintFormats(actor, doctype) ?? [];
+}
+
+async function reportPrintLayoutFor(
+  options: DeskAppOptions,
+  actor: Actor
+): Promise<PrintLayoutDefinition | undefined> {
+  return (await options.printSettings?.defaultsFor(actor))?.settings.defaultLayout;
 }
 
 function requireUserPermissions(options: DeskAppOptions): UserPermissionService {

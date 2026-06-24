@@ -809,6 +809,7 @@ function workspaceAdminTargets(options: ResourceApiOptions, actor: Actor): Reado
     ...(options.userAccounts === undefined ? [] : ["users"]),
     ...(options.roles === undefined ? [] : ["roles"]),
     ...(options.userPermissions === undefined ? [] : ["user-permissions"]),
+    ...(options.printSettings === undefined ? [] : ["print-settings"]),
     ...(options.dataPatches === undefined ? [] : ["data-patches"]),
     ...(options.jobs === undefined ? [] : ["jobs"]),
     ...(options.jobSchedules === undefined ? [] : ["job-schedules"])

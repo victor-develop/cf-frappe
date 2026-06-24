@@ -7,6 +7,7 @@ import {
   fixedClock,
   InMemoryDocumentStore,
   QueryService,
+  PrintSettingsService,
   SYSTEM_MANAGER_ROLE,
   unsafeHeaderActorResolver
 } from "../../src";
@@ -89,7 +90,8 @@ describe("resource api", () => {
                 { name: "manager-only", kind: "doctype", target: "Note", roles: ["Task Manager"] },
                 { name: "files", kind: "file" },
                 { name: "inbox", kind: "notifications" },
-                { name: "users-admin", kind: "admin", target: "users" }
+                { name: "users-admin", kind: "admin", target: "users" },
+                { name: "print-settings-admin", kind: "admin", target: "print-settings" }
               ]
             }
           ]
@@ -113,6 +115,7 @@ describe("resource api", () => {
       registry,
       documents,
       queries,
+      printSettings: new PrintSettingsService({ events: store }),
       actor: unsafeHeaderActorResolver
     });
   }
@@ -274,6 +277,7 @@ describe("resource api", () => {
     expect(adminList.status).toBe(200);
     const adminBody = JSON.stringify(await adminList.json());
     expect(adminBody).toContain("manager-only");
+    expect(adminBody).toContain("print-settings-admin");
     expect(adminBody).not.toContain("files");
     expect(adminBody).not.toContain("inbox");
     expect(adminBody).not.toContain("users-admin");
