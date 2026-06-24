@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the metadata-aware list ordering slice:
+As of the resource list CSV export slice:
 
 - Vitest files: `80`
-- Vitest cases: `870`
+- Vitest cases: `873`
 
 ## Implication
 

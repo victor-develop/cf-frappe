@@ -31,7 +31,13 @@ export function renderDeskClientScript(): string {
     var query = new URLSearchParams();
     Object.entries(params || {}).forEach(function (entry) {
       var value = entry[1];
-      if (value !== undefined && value !== null) {
+      if (Array.isArray(value)) {
+        value.forEach(function (item) {
+          if (item !== undefined && item !== null) {
+            query.append(entry[0], String(item));
+          }
+        });
+      } else if (value !== undefined && value !== null) {
         query.set(entry[0], String(value));
       }
     });
@@ -48,13 +54,21 @@ export function renderDeskClientScript(): string {
     Object.entries(options || {}).forEach(function (entry) {
       var key = entry[0];
       var value = entry[1];
-      if (key !== "filters" && value !== undefined && value !== null) {
+      if (key !== "filters" && key !== "orderBy" && key !== "order_by" && value !== undefined && value !== null) {
         params[key] = value;
       }
     });
+    setParam(params, "order_by", options && (options.orderBy !== undefined ? options.orderBy : options.order_by));
+    setParam(params, "order", options && options.order);
     Object.entries((options && options.filters) || {}).forEach(function (entry) {
       appendFilterParams(params, entry[0], entry[1]);
     });
+    return params;
+  }
+
+  function resourceExportParams(options) {
+    var params = resourceListParams(options || {});
+    delete params.offset;
     return params;
   }
 
@@ -65,12 +79,30 @@ export function renderDeskClientScript(): string {
     if (isPlainObject(value)) {
       Object.entries(value).forEach(function (entry) {
         if (entry[1] !== undefined && entry[1] !== null) {
-          params["filter_" + field + (entry[0] === "eq" ? "" : "__" + entry[0])] = entry[1];
+          setFilterParam(params, "filter_" + field + (entry[0] === "eq" ? "" : "__" + entry[0]), entry[1]);
         }
       });
       return;
     }
-    params["filter_" + field] = value;
+    setFilterParam(params, "filter_" + field, value);
+  }
+
+  function setFilterParam(params, key, value) {
+    params[key] = value;
+    if (value === "") {
+      appendParam(params, "empty_filter", key);
+    }
+  }
+
+  function appendParam(params, key, value) {
+    var current = params[key];
+    if (current === undefined) {
+      params[key] = value;
+    } else if (Array.isArray(current)) {
+      current.push(value);
+    } else {
+      params[key] = [current, value];
+    }
   }
 
   function isPlainObject(value) {
@@ -1748,6 +1780,9 @@ export function renderDeskClientScript(): string {
       },
       create: function (doctype, data) {
         return request(resourcePath(doctype), { method: "POST", body: data || {} }).then(unwrapData);
+      },
+      csvUrl: function (doctype, options) {
+        return withQuery(resourcePath(doctype) + "/export.csv", resourceExportParams(options || {}));
       },
       delete: function (doctype, name, options) {
         return request(resourcePath(doctype, name), { method: "DELETE", body: versionBody(options) }).then(unwrapData);

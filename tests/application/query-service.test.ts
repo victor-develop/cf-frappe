@@ -163,6 +163,82 @@ describe("QueryService", () => {
     });
   });
 
+  it("exports metadata list views as bounded escaped CSV", async () => {
+    const { documents, queries } = createServices(["csv1", "csv2", "csv3"]);
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "CSV Low", priority: "Low", body: "Routine", count: 1 })
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "=CSV High", priority: "High", body: "Escaped", count: 7 })
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "CSV Closed", priority: "High", workflow_state: "Closed", body: "Hidden", count: 2 })
+    });
+
+    const csv = await queries.exportDocumentsCsv(owner, "Note", {
+      filters: [{ field: "priority", value: "High" }],
+      orderBy: "count",
+      order: "desc",
+      limit: 1
+    });
+
+    expect(csv).toMatchObject({
+      filename: "Note.csv",
+      contentType: "text/csv; charset=utf-8",
+      exported: 1,
+      total: 1,
+      truncated: false,
+      limit: 1
+    });
+    expect(csv.body).toBe("Name,title,priority,workflow_state,Version,Updated\n'=CSV High,'=CSV High,High,Open,1,2026-01-01T00:00:00.000Z");
+
+    const allCsv = await queries.exportDocumentsCsv(owner, "Note", {
+      useDefaultFilters: false,
+      filters: [{ field: "priority", value: "High" }],
+      orderBy: "count",
+      order: "asc",
+      limit: 1
+    });
+    expect(allCsv).toMatchObject({ exported: 1, total: 2, truncated: true });
+    expect(allCsv.body).toBe("Name,title,priority,workflow_state,Version,Updated\nCSV Closed,CSV Closed,High,Closed,1,2026-01-01T00:00:00.000Z");
+  });
+
+  it("lets CSV exports use the export limit without raising the list-page cap", async () => {
+    const { projections, queries } = createServices();
+    for (let index = 1; index <= 201; index += 1) {
+      const name = `Bulk Note ${String(index).padStart(3, "0")}`;
+      await projections.save({
+        tenantId: "acme",
+        doctype: "Note",
+        name,
+        version: 1,
+        docstatus: "draft",
+        data: data({ title: name, workflow_state: "Open", created_by: owner.id }),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z"
+      });
+    }
+
+    const list = await queries.listDocuments(owner, "Note", { limit: 10_000 });
+    expect(list.limit).toBe(200);
+    expect(list.data).toHaveLength(200);
+
+    const csv = await queries.exportDocumentsCsv(owner, "Note");
+    expect(csv).toMatchObject({
+      exported: 201,
+      total: 201,
+      truncated: false,
+      limit: 10_000
+    });
+    expect(csv.body.split("\n")).toHaveLength(202);
+  });
+
   it("lists readable link options for link fields", async () => {
     const { documents, queries } = createLinkedServices(["p1", "p2"]);
     await documents.create({ actor: owner, doctype: "Project", data: { title: "Apollo" } });

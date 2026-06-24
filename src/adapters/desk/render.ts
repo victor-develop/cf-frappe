@@ -2129,6 +2129,7 @@ export function renderListView(
   options: {
     readonly savedFilters?: readonly SavedListFilter[];
     readonly selectedSavedFilterId?: string;
+    readonly exportHref?: string;
     readonly clientScripts?: readonly ClientScriptDefinition[];
     readonly realtimeRoute?: string;
     readonly bulkActions?: readonly ListBulkAction[];
@@ -2173,6 +2174,7 @@ export function renderListView(
     .join("");
   return `<section class="toolbar">
     <a class="button primary" href="/desk/${encodeURIComponent(doctype.name)}/new">New ${escapeHtml(labelFor(doctype))}</a>
+    ${options.exportHref ? `<a class="button" href="${escapeHtml(options.exportHref)}">Export CSV</a>` : ""}
     ${hasBulkActions ? `<form id="${bulkActionFormId}" method="post" action="${escapeHtml(bulkActions[0]?.action ?? "")}"></form>${bulkActions.map((action) => renderListBulkActionButton(action, bulkActionFormId)).join("")}` : ""}
   </section>
   ${savedFilterPanel}

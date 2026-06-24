@@ -295,6 +295,7 @@ interface DeskClientRuntime {
       options?: { readonly follower?: string; readonly expectedVersion?: number }
     ) => Promise<unknown>;
     readonly followers: (doctype: string, name: string) => Promise<unknown>;
+    readonly csvUrl: (doctype: string, options?: Record<string, unknown>) => string;
     readonly listSavedFilters: (doctype: string) => Promise<unknown>;
     readonly saveFilter: (doctype: string, input: Record<string, unknown>) => Promise<unknown>;
     readonly share: (
@@ -347,7 +348,7 @@ interface DeskClientRuntime {
       tag: string,
       options?: { readonly expectedVersion?: number }
     ) => Promise<unknown>;
-    readonly list: (doctype: string, options: { readonly filters: Record<string, unknown> }) => Promise<unknown>;
+    readonly list: (doctype: string, options: Record<string, unknown>) => Promise<unknown>;
     readonly update: (
       doctype: string,
       name: string,
@@ -496,6 +497,10 @@ describe("Desk client runtime", () => {
     });
 
     await runtime.resource.list("Task", {
+      orderBy: "count",
+      order: "desc",
+      limit: 5,
+      offset: 10,
       filters: {
         priority: { ne: "Low" },
         count: { gt: 2, lt: 9 },
@@ -504,7 +509,53 @@ describe("Desk client runtime", () => {
     });
 
     expect(calls[0]?.url).toBe(
-      "/api/resource/Task?filter_priority__ne=Low&filter_count__gt=2&filter_count__lt=9&filter_title=Launch"
+      "/api/resource/Task?order=desc&limit=5&offset=10&order_by=count&filter_priority__ne=Low&filter_count__gt=2&filter_count__lt=9&filter_title=Launch"
+    );
+    expect(
+      runtime.resource.csvUrl("Task", {
+        orderBy: "count",
+        order: "desc",
+        limit: 5,
+        offset: 10,
+        filters: {
+          priority: { ne: "Low" },
+          count: { gt: 2, lt: 9 },
+          title: "Launch"
+        }
+      })
+    ).toBe(
+      "/api/resource/Task/export.csv?order=desc&limit=5&order_by=count&filter_priority__ne=Low&filter_count__gt=2&filter_count__lt=9&filter_title=Launch"
+    );
+  });
+
+  it("marks intentional empty resource filters in query parameters", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: [] }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await runtime.resource.list("Task", {
+      filters: {
+        body: "",
+        title: { eq: "", ne: "Draft" }
+      }
+    });
+
+    expect(calls[0]?.url).toBe(
+      "/api/resource/Task?filter_body=&empty_filter=filter_body&empty_filter=filter_title&filter_title=&filter_title__ne=Draft"
+    );
+    expect(
+      runtime.resource.csvUrl("Task", {
+        filters: {
+          body: "",
+          title: { eq: "", ne: "Draft" }
+        }
+      })
+    ).toBe(
+      "/api/resource/Task/export.csv?filter_body=&empty_filter=filter_body&empty_filter=filter_title&filter_title=&filter_title__ne=Draft"
     );
   });
 

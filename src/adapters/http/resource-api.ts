@@ -53,6 +53,7 @@ import { createNotificationApi } from "./notification-api.js";
 import { createPrintApi } from "./print-api.js";
 import { createReportApi } from "./report-api.js";
 import { listFiltersFromUrl, listOrderFromUrl, parseOptionalInteger, readJsonObject, requestMetadata } from "./request.js";
+import { writeCsvExportHeaders } from "./report-export.js";
 import { createRoleApi } from "./role-api.js";
 import { createSavedReportApi } from "./saved-report-api.js";
 import { createUserAccountApi } from "./user-account-api.js";
@@ -348,6 +349,24 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       })
     );
   }
+
+  app.get("/api/resource/:doctype/export.csv", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    const url = new URL(c.req.url);
+    const limit = parseOptionalInteger(c.req.query("limit"));
+    const savedFilter = await savedFilterFromUrl(options, actor, c.req.param("doctype"), url);
+    const urlFilters = listFiltersFromUrl(url);
+    const filters = options.savedFilters?.mergeSavedFilter(savedFilter, urlFilters) ?? urlFilters;
+    const order = listOrderFromUrl(url);
+    const csv = await options.queries.exportDocumentsCsv(actor, c.req.param("doctype"), {
+      filters,
+      ...order,
+      useDefaultFilters: savedFilter ? false : url.searchParams.get("default_filters") !== "0",
+      ...(limit !== undefined ? { limit } : {})
+    });
+    writeCsvExportHeaders(c, csv);
+    return c.body(csv.body);
+  });
 
   app.get("/api/resource/:doctype", async (c) => {
     const actor = await resolveActor(c.req.raw);

@@ -22,6 +22,7 @@ import {
 import type { ModelRegistry } from "../core/registry.js";
 import type { Actor, DocTypeDefinition, DocumentSnapshot, FieldDefinition, FieldType, JsonPrimitive, JsonValue } from "../core/types.js";
 import { QueryService } from "./query-service.js";
+import { CSV_CONTENT_TYPE, csvLine, filenamePart } from "./csv.js";
 
 export type ReportFilters = Readonly<Record<string, JsonPrimitive | undefined>>;
 export type ReportRow = Readonly<Record<string, JsonValue>>;
@@ -255,8 +256,8 @@ export class ReportService {
     ];
     const exported = Math.min(total, limit);
     return {
-      filename: `${filenamePart(report.name)}.csv`,
-      contentType: "text/csv; charset=utf-8",
+      filename: `${filenamePart(report.name, "report")}.csv`,
+      contentType: CSV_CONTENT_TYPE,
       body: lines.join("\n"),
       exported,
       total,
@@ -286,8 +287,8 @@ export class ReportService {
       exported += 1;
     });
     return {
-      filename: `${filenamePart(report.name)}.csv`,
-      contentType: "text/csv; charset=utf-8",
+      filename: `${filenamePart(report.name, "report")}.csv`,
+      contentType: CSV_CONTENT_TYPE,
       body: lines.join("\n"),
       exported,
       total,
@@ -343,8 +344,8 @@ export class ReportService {
     const sorted = sortReportRows(projected, report, order);
     const exportedRows = sorted.slice(0, limit);
     return {
-      filename: `${filenamePart(report.name)}.csv`,
-      contentType: "text/csv; charset=utf-8",
+      filename: `${filenamePart(report.name, "report")}.csv`,
+      contentType: CSV_CONTENT_TYPE,
       body: [reportCsvHeader(report.columns), ...exportedRows.map((row) => reportRowToCsv(report.columns, row))].join("\n"),
       exported: exportedRows.length,
       total: sorted.length,
@@ -790,36 +791,11 @@ function numericRowFormulaOperand(row: ReportRow, operand: ReportFormulaOperand)
 }
 
 function reportCsvHeader(columns: readonly ReportColumnDefinition[]): string {
-  return columns.map((column) => csvCell(column.label ?? column.name)).join(",");
+  return csvLine(columns.map((column) => column.label ?? column.name));
 }
 
 function reportRowToCsv(columns: readonly ReportColumnDefinition[], row: ReportRow): string {
-  return columns.map((column) => csvCell(row[column.name])).join(",");
-}
-
-function csvCell(value: JsonValue | undefined): string {
-  const text = typeof value === "string"
-    ? neutralizeSpreadsheetFormula(csvValue(value))
-    : csvValue(value);
-  return /[",\n\r]/.test(text) ? `"${text.replaceAll("\"", "\"\"")}"` : text;
-}
-
-function csvValue(value: JsonValue | undefined): string {
-  if (value === undefined || value === null) {
-    return "";
-  }
-  if (typeof value === "object") {
-    return JSON.stringify(value);
-  }
-  return String(value);
-}
-
-function filenamePart(value: string): string {
-  return value.trim().replaceAll(/[^A-Za-z0-9._-]+/g, "-").replaceAll(/^-+|-+$/g, "") || "report";
-}
-
-function neutralizeSpreadsheetFormula(text: string): string {
-  return /^(?:[=+\-@\t\r]|\s+[=+\-@])/u.test(text) ? `'${text}` : text;
+  return csvLine(columns.map((column) => row[column.name]));
 }
 
 function clampCsvExportLimit(limit: number | undefined): number {

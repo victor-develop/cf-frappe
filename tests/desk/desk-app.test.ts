@@ -2352,6 +2352,11 @@ describe("Desk app", () => {
       doctype: "Note",
       data: data({ title: "Desk Closed High", priority: "High", workflow_state: "Closed", body: "Closed", count: 3 })
     });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Desk Empty Body", priority: "Low", body: "", count: 4 })
+    });
 
     const response = await app.request("/desk/Note?filter_priority=High");
 
@@ -2371,6 +2376,7 @@ describe("Desk app", () => {
     expect(html).toContain('<option value="High" selected>High</option>');
     expect(html).toContain('<option value="Open" selected>Open</option>');
     expect(html).toContain("/desk/Note?default_filters=0");
+    expect(html).toContain("/desk/Note/export.csv?filter_priority=High");
 
     const closed = await app.request("/desk/Note?filter_priority=High&filter_workflow_state=Closed");
     expect(closed.status).toBe(200);
@@ -2396,8 +2402,29 @@ describe("Desk app", () => {
     expect(orderedHtml).toContain('<option value="count" selected>count</option>');
     expect(orderedHtml).toContain('<select id="list-order" name="order">');
     expect(orderedHtml).toContain('<option value="asc" selected>Ascending</option>');
+    expect(orderedHtml).toContain("/desk/Note/export.csv?default_filters=0&amp;order_by=count&amp;order=asc");
     expect(orderedHtml.indexOf("Desk Low")).toBeLessThan(orderedHtml.indexOf("Desk Closed High"));
     expect(orderedHtml.indexOf("Desk Closed High")).toBeLessThan(orderedHtml.indexOf("Desk High"));
+
+    const csv = await app.request("/desk/Note/export.csv?default_filters=0&order_by=count&order=asc");
+    expect(csv.status).toBe(200);
+    expect(csv.headers.get("content-disposition")).toBe('attachment; filename="Note.csv"');
+    expect(csv.headers.get("x-cf-frappe-export-total")).toBe("4");
+    await expect(csv.text()).resolves.toBe([
+      "Name,title,priority,workflow_state,Version,Updated",
+      "Desk Low,Desk Low,Low,Open,1,2026-01-01T00:00:00.000Z",
+      "Desk Closed High,Desk Closed High,High,Closed,1,2026-01-01T00:00:00.000Z",
+      "Desk Empty Body,Desk Empty Body,Low,Open,1,2026-01-01T00:00:00.000Z",
+      "Desk High,Desk High,High,Open,1,2026-01-01T00:00:00.000Z"
+    ].join("\n"));
+
+    const emptyCsv = await app.request("/desk/Note/export.csv?default_filters=0&filter_body=&empty_filter=filter_body");
+    expect(emptyCsv.status).toBe(200);
+    expect(emptyCsv.headers.get("x-cf-frappe-export-total")).toBe("1");
+    await expect(emptyCsv.text()).resolves.toBe([
+      "Name,title,priority,workflow_state,Version,Updated",
+      "Desk Empty Body,Desk Empty Body,Low,Open,1,2026-01-01T00:00:00.000Z"
+    ].join("\n"));
   });
 
   it("renders and submits generated list bulk document deletes", async () => {

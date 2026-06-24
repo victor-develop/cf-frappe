@@ -1224,6 +1224,17 @@ describe("resource api", () => {
       total: 1
     });
 
+    const explicitEmptyCsv = await app.request("/api/resource/Note/export.csv?default_filters=0&filter_body=&empty_filter=filter_body", {
+      headers: userHeaders
+    });
+    expect(explicitEmptyCsv.status).toBe(200);
+    expect(explicitEmptyCsv.headers.get("x-cf-frappe-export-total")).toBe("1");
+    expect(explicitEmptyCsv.headers.get("x-cf-frappe-exported")).toBe("1");
+    await expect(explicitEmptyCsv.text()).resolves.toBe([
+      "Name,title,priority,workflow_state,Version,Updated",
+      "HTTP Empty Body,HTTP Empty Body,Low,Open,1,2026-01-01T00:00:00.000Z"
+    ].join("\n"));
+
     const ordered = await app.request("/api/resource/Note?default_filters=0&order_by=count&order=asc", {
       headers: userHeaders
     });
@@ -1235,6 +1246,20 @@ describe("resource api", () => {
       "HTTP Empty Body",
       "HTTP High"
     ]);
+
+    const csv = await app.request("/api/resource/Note/export.csv?default_filters=0&filter_priority=High&order_by=count&order=asc", {
+      headers: userHeaders
+    });
+    expect(csv.status).toBe(200);
+    expect(csv.headers.get("content-disposition")).toBe('attachment; filename="Note.csv"');
+    expect(csv.headers.get("x-cf-frappe-export-total")).toBe("2");
+    expect(csv.headers.get("x-cf-frappe-exported")).toBe("2");
+    expect(csv.headers.get("x-cf-frappe-export-truncated")).toBe("false");
+    await expect(csv.text()).resolves.toBe([
+      "Name,title,priority,workflow_state,Version,Updated",
+      "HTTP Closed High,HTTP Closed High,High,Closed,1,2026-01-01T00:00:00.000Z",
+      "HTTP High,HTTP High,High,Open,1,2026-01-01T00:00:00.000Z"
+    ].join("\n"));
   });
 
   it("saves and applies resource list filters through the API", async () => {

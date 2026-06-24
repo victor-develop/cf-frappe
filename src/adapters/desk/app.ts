@@ -86,7 +86,7 @@ import {
 import { fileContentHeaders } from "../file-content.js";
 import type { ActorResolver } from "../http/actor.js";
 import { listFiltersFromUrl, listOrderFromUrl, parseOptionalInteger, readBoundedText } from "../http/request.js";
-import { writeReportCsvHeaders } from "../http/report-export.js";
+import { writeCsvExportHeaders, writeReportCsvHeaders } from "../http/report-export.js";
 import { reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request.js";
 import {
   defaultPrintLayoutFor,
@@ -1476,6 +1476,28 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     return html(renderPrintDocument(view));
   });
 
+  app.get("/desk/:doctype/export.csv", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const url = new URL(c.req.url);
+    const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
+    const filters = listFiltersFromUrl(url);
+    const order = listOrderFromUrl(url);
+    const savedFilterId = url.searchParams.get("saved_filter") ?? undefined;
+    const savedFilter = savedFilterId && options.savedFilters
+      ? await options.savedFilters.get(actor, doctype.name, savedFilterId)
+      : undefined;
+    const effectiveRequestedFilters = options.savedFilters?.mergeSavedFilter(savedFilter, filters) ?? filters;
+    const limit = parseOptionalInteger(url.searchParams.get("limit") ?? undefined);
+    const csv = await options.queries.exportDocumentsCsv(actor, doctype.name, {
+      filters: effectiveRequestedFilters,
+      ...order,
+      useDefaultFilters: savedFilter ? false : url.searchParams.get("default_filters") !== "0",
+      ...(limit !== undefined ? { limit } : {})
+    });
+    writeCsvExportHeaders(c, csv);
+    return c.body(csv.body);
+  });
+
   app.get("/desk/:doctype", async (c) => {
     const actor = await options.actor(c.req.raw);
     const url = new URL(c.req.url);
@@ -1500,6 +1522,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     });
     const savedFilters = await options.savedFilters?.list(actor, doctype.name);
     const bulkActions = listBulkActionsFor(actor, doctype, result.data);
+    const exportHref = `/desk/${encodeURIComponent(doctype.name)}/export.csv${url.search}`;
     return html(
       renderDeskLayoutFor(options, {
         title: doctype.label ?? doctype.name,
@@ -1510,6 +1533,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         body: renderListView(doctype, listView, result.data, effectiveFilters, {
           ...(savedFilters ? { savedFilters } : {}),
           ...(savedFilter ? { selectedSavedFilterId: savedFilter.id } : {}),
+          exportHref,
           clientScripts: options.registry.listClientScripts(doctype.name, "list"),
           bulkActions,
           ...deskRealtimeRouteOption(options)

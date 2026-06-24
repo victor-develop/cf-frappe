@@ -1,4 +1,4 @@
-import { FrameworkError, notFound, permissionDenied } from "../core/errors.js";
+import { badRequest, FrameworkError, notFound, permissionDenied } from "../core/errors.js";
 import { resolveFormView } from "../core/form-view.js";
 import { mergeListFilters, normalizeListFilters, normalizeListOrder, resolveListView } from "../core/list-view.js";
 import { documentShareAllows, type DocumentShareProvider } from "../core/document-shares.js";
@@ -18,6 +18,7 @@ import {
   type FieldDefinition,
   type GlobalSearchResult,
   type GlobalSearchResultItem,
+  type JsonPrimitive,
   type JsonValue,
   type ListDocumentsFilter,
   type ListDocumentsResult,
@@ -28,6 +29,9 @@ import {
   type ResolvedListView
 } from "../core/types.js";
 import type { ProjectionStore } from "../ports/projection-store.js";
+import { CSV_CONTENT_TYPE, csvLine, filenamePart } from "./csv.js";
+
+const DEFAULT_DOCUMENT_CSV_EXPORT_LIMIT = 10_000;
 
 export interface QueryServiceOptions {
   readonly registry: ModelRegistry;
@@ -41,6 +45,25 @@ export type QueryServiceDocTypeResolver = (
   base: DocTypeDefinition,
   context: { readonly actor: Actor; readonly tenantId: string }
 ) => DocTypeDefinition | Promise<DocTypeDefinition>;
+
+export interface DocumentCsvExportOptions {
+  readonly tenantId?: string;
+  readonly filters?: readonly ListDocumentsFilter[];
+  readonly useDefaultFilters?: boolean;
+  readonly orderBy?: string;
+  readonly order?: ListOrderDirection;
+  readonly limit?: number;
+}
+
+export interface DocumentCsvExport {
+  readonly filename: string;
+  readonly contentType: typeof CSV_CONTENT_TYPE;
+  readonly body: string;
+  readonly exported: number;
+  readonly total: number;
+  readonly truncated: boolean;
+  readonly limit: number;
+}
 
 export class QueryService {
   private readonly registry: ModelRegistry;
@@ -96,6 +119,7 @@ export class QueryService {
       readonly order?: ListOrderDirection;
       readonly limit?: number;
       readonly offset?: number;
+      readonly maxLimit?: number;
     } = {}
   ): Promise<ListDocumentsResult> {
     const tenantId = options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
@@ -103,7 +127,7 @@ export class QueryService {
     if (!can(actor, doctype, "read")) {
       throw permissionDenied(`Actor '${actor.id}' cannot read ${doctype.name}`);
     }
-    const limit = clampLimit(options.limit);
+    const limit = clampLimit(options.limit, options.maxLimit);
     const offset = Math.max(0, options.offset ?? 0);
     const order = normalizeListOrder(doctype, options.orderBy, options.order);
     const result = await this.projections.list({
@@ -251,6 +275,7 @@ export class QueryService {
       readonly order?: ListOrderDirection;
       readonly limit?: number;
       readonly offset?: number;
+      readonly maxLimit?: number;
     } = {}
   ): Promise<{
     readonly listView: ResolvedListView;
@@ -278,9 +303,42 @@ export class QueryService {
       orderBy: order.orderBy,
       order: order.order,
       limit: options.limit ?? listView.pageSize,
+      ...(options.maxLimit === undefined ? {} : { maxLimit: options.maxLimit }),
       ...(options.offset !== undefined ? { offset: options.offset } : {})
     });
     return { listView: { ...listView, orderBy: order.orderBy, order: order.order }, filters, result };
+  }
+
+  async exportDocumentsCsv(
+    actor: Actor,
+    doctypeName: string,
+    options: DocumentCsvExportOptions = {}
+  ): Promise<DocumentCsvExport> {
+    const limit = clampCsvExportLimit(options.limit);
+    const { listView, result } = await this.listDocumentsForView(actor, doctypeName, {
+      ...(options.tenantId === undefined ? {} : { tenantId: options.tenantId }),
+      filters: options.filters ?? [],
+      ...(options.useDefaultFilters === undefined ? {} : { useDefaultFilters: options.useDefaultFilters }),
+      ...(options.orderBy === undefined ? {} : { orderBy: options.orderBy }),
+      ...(options.order === undefined ? {} : { order: options.order }),
+      limit,
+      maxLimit: DEFAULT_DOCUMENT_CSV_EXPORT_LIMIT
+    });
+    const columns = documentCsvColumns(listView.columns);
+    const lines = [
+      csvLine(columns.map((column) => column.label)),
+      ...result.data.map((document) => csvLine(columns.map((column) => column.value(document))))
+    ];
+    const exported = result.data.length;
+    return {
+      filename: `${filenamePart(result.data[0]?.doctype ?? doctypeName, "documents")}.csv`,
+      contentType: CSV_CONTENT_TYPE,
+      body: lines.join("\n"),
+      exported,
+      total: result.total,
+      truncated: exported < result.total,
+      limit
+    };
   }
 
   private async doctypeFor(actor: Actor, doctypeName: string, tenantId: string): Promise<DocTypeDefinition> {
@@ -418,6 +476,30 @@ export class QueryService {
   }
 }
 
+interface DocumentCsvColumn {
+  readonly label: string;
+  value(document: DocumentSnapshot): JsonPrimitive | undefined;
+}
+
+function documentCsvColumns(fields: readonly FieldDefinition[]): readonly DocumentCsvColumn[] {
+  return [
+    { label: "Name", value: (document) => document.name },
+    ...fields.map((field) => ({
+      label: field.label ?? field.name,
+      value: (document: DocumentSnapshot) => primitiveCsvValue(document.data[field.name])
+    })),
+    { label: "Version", value: (document) => document.version },
+    { label: "Updated", value: (document) => document.updatedAt }
+  ];
+}
+
+function primitiveCsvValue(value: JsonValue | undefined): JsonPrimitive | undefined {
+  if (value === undefined || value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  return JSON.stringify(value);
+}
+
 function mergeDefaultFilters(
   defaults: readonly ListDocumentsFilter[],
   overrides: readonly ListDocumentsFilter[]
@@ -425,14 +507,24 @@ function mergeDefaultFilters(
   return mergeListFilters(defaults, overrides);
 }
 
-function clampLimit(limit?: number): number {
+function clampLimit(limit?: number, max = 200): number {
   if (limit === undefined) {
     return 50;
   }
   if (!Number.isInteger(limit) || limit < 1) {
     throw new FrameworkError("BAD_REQUEST", "limit must be a positive integer", { status: 400 });
   }
-  return Math.min(limit, 200);
+  return Math.min(limit, max);
+}
+
+function clampCsvExportLimit(limit?: number): number {
+  if (limit === undefined) {
+    return DEFAULT_DOCUMENT_CSV_EXPORT_LIMIT;
+  }
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw badRequest("CSV export limit must be a positive integer");
+  }
+  return Math.min(limit, DEFAULT_DOCUMENT_CSV_EXPORT_LIMIT);
 }
 
 function clampSearchLimit(limit?: number): number {
