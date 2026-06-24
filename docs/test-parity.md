@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the remote job operator CLI slice:
+As of the provider-neutral OIDC/JWKS auth adapter slice:
 
-- Vitest files: `91`
-- Vitest cases: `998`
+- Vitest files: `92`
+- Vitest cases: `1008`
 
 ## Implication
 

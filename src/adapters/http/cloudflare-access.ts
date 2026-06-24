@@ -8,6 +8,16 @@ import {
 } from "../../core/types.js";
 import type { UserAccountService } from "../../application/user-account-service.js";
 import type { ActorResolver } from "./actor.js";
+import { parseCookies } from "./cookies.js";
+import {
+  assertJwks,
+  currentSeconds,
+  verifyJwtWithJwks,
+  type JsonWebKeySet,
+  type JsonWebKeyWithKid,
+  type JwtClaims,
+  type JwksLookup
+} from "./jwt.js";
 
 export interface CloudflareAccessActorResolverOptions {
   readonly teamDomain: string;
@@ -32,7 +42,7 @@ export interface CloudflareAccessAccountSyncActorResolverOptions extends Omit<Cl
   readonly metadata?: DocumentData | ((claims: CloudflareAccessJwtClaims) => DocumentData | undefined);
 }
 
-export interface CloudflareAccessJwtClaims {
+export interface CloudflareAccessJwtClaims extends JwtClaims {
   readonly iss: string;
   readonly aud: string | readonly string[];
   readonly exp: number;
@@ -45,24 +55,9 @@ export interface CloudflareAccessJwtClaims {
   readonly [claim: string]: unknown;
 }
 
-export interface CloudflareAccessJwks {
-  readonly keys: readonly CloudflareAccessJsonWebKey[];
-}
+export interface CloudflareAccessJwks extends JsonWebKeySet<CloudflareAccessJsonWebKey> {}
 
-export interface CloudflareAccessJsonWebKey extends JsonWebKey {
-  readonly kid: string;
-}
-
-interface JwtHeader {
-  readonly alg: string;
-  readonly kid: string;
-  readonly typ?: string;
-}
-
-interface JwksLookup {
-  readonly jwks: CloudflareAccessJwks;
-  readonly fromCache: boolean;
-}
+export interface CloudflareAccessJsonWebKey extends JsonWebKeyWithKid {}
 
 const ACCESS_JWT_HEADER = "cf-access-jwt-assertion";
 const ACCESS_JWT_COOKIE = "CF_Authorization";
@@ -165,39 +160,22 @@ async function verifyCloudflareAccessJwt(
     readonly issuer: string;
     readonly audiences: ReadonlySet<string>;
     readonly now: number;
-    readonly jwks: () => Promise<JwksLookup>;
+    readonly jwks: () => Promise<JwksLookup<CloudflareAccessJwks>>;
     readonly refreshJwks: () => Promise<CloudflareAccessJwks>;
   }
 ): Promise<CloudflareAccessJwtClaims> {
-  const parts = token.split(".");
-  if (parts.length !== 3 || parts.some((part) => part.length === 0)) {
-    throw permissionDenied("Cloudflare Access JWT is malformed");
-  }
-  const [headerPart, payloadPart, signaturePart] = parts as [string, string, string];
-  const header = parseJwtHeader(headerPart);
-  if (header.alg !== "RS256") {
-    throw permissionDenied("Cloudflare Access JWT algorithm is unsupported");
-  }
-  const lookup = await options.jwks();
-  let jwk = lookup.jwks.keys.find((key) => key.kid === header.kid);
-  if (jwk === undefined && lookup.fromCache) {
-    jwk = (await options.refreshJwks()).keys.find((key) => key.kid === header.kid);
-  }
-  if (jwk === undefined) {
-    throw permissionDenied("Cloudflare Access JWT signing key is unknown");
-  }
-  const verified = await crypto.subtle.verify(
-    { name: "RSASSA-PKCS1-v1_5" },
-    await importRsaVerifyKey(jwk),
-    arrayBufferFromBytes(base64UrlDecode(signaturePart)),
-    new TextEncoder().encode(`${headerPart}.${payloadPart}`)
-  );
-  if (!verified) {
-    throw permissionDenied("Cloudflare Access JWT signature is invalid");
-  }
-  const claims = parseJwtClaims(payloadPart);
-  validateClaims(claims, options);
-  return claims;
+  return verifyJwtWithJwks<CloudflareAccessJwtClaims, CloudflareAccessJwks>(token, {
+    messages: {
+      token: "Cloudflare Access JWT",
+      signingKey: "Cloudflare Access signing key"
+    },
+    issuer: options.issuer,
+    audiences: options.audiences,
+    now: options.now,
+    jwks: options.jwks,
+    refreshJwks: options.refreshJwks,
+    validateClaims: isCloudflareAccessClaims
+  });
 }
 
 async function fetchCloudflareAccessJwks(
@@ -206,13 +184,13 @@ async function fetchCloudflareAccessJwks(
 ): Promise<CloudflareAccessJwks> {
   const url = `https://${teamDomain}/cdn-cgi/access/certs`;
   if (fetchJwks) {
-    return assertJwks(await fetchJwks(url));
+    return assertJwks(await fetchJwks(url), "Cloudflare Access signing keys");
   }
   const response = await fetch(url);
   if (!response.ok) {
     throw permissionDenied("Cloudflare Access signing keys are unavailable");
   }
-  return assertJwks(await response.json());
+  return assertJwks(await response.json(), "Cloudflare Access signing keys");
 }
 
 function actorFromClaims(
@@ -299,94 +277,7 @@ function accessTokenFromRequest(request: Request): string | undefined {
   if (header && header.trim().length > 0) {
     return header.trim();
   }
-  return parseCookies(request.headers.get("cookie")).get(ACCESS_JWT_COOKIE);
-}
-
-function validateClaims(
-  claims: CloudflareAccessJwtClaims,
-  options: {
-    readonly issuer: string;
-    readonly audiences: ReadonlySet<string>;
-    readonly now: number;
-  }
-): void {
-  if (claims.iss !== options.issuer) {
-    throw permissionDenied("Cloudflare Access JWT issuer is invalid");
-  }
-  const tokenAudiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
-  if (!tokenAudiences.some((audience) => options.audiences.has(audience))) {
-    throw permissionDenied("Cloudflare Access JWT audience is invalid");
-  }
-  if (claims.exp <= options.now) {
-    throw permissionDenied("Cloudflare Access JWT expired");
-  }
-  if (claims.nbf !== undefined && claims.nbf > options.now) {
-    throw permissionDenied("Cloudflare Access JWT is not active yet");
-  }
-}
-
-function parseJwtHeader(headerPart: string): JwtHeader {
-  const value = parseJwtJson(headerPart, "header");
-  if (!isRecord(value) || typeof value.alg !== "string" || typeof value.kid !== "string") {
-    throw permissionDenied("Cloudflare Access JWT header is invalid");
-  }
-  return {
-    alg: value.alg,
-    kid: value.kid,
-    ...(typeof value.typ === "string" ? { typ: value.typ } : {})
-  };
-}
-
-function parseJwtClaims(payloadPart: string): CloudflareAccessJwtClaims {
-  const value = parseJwtJson(payloadPart, "payload");
-  if (
-    !isRecord(value) ||
-    typeof value.iss !== "string" ||
-    !isAudience(value.aud) ||
-    typeof value.exp !== "number" ||
-    !Number.isInteger(value.exp) ||
-    (value.nbf !== undefined && (typeof value.nbf !== "number" || !Number.isInteger(value.nbf))) ||
-    (value.iat !== undefined && (typeof value.iat !== "number" || !Number.isInteger(value.iat))) ||
-    (value.email !== undefined && typeof value.email !== "string") ||
-    (value.sub !== undefined && typeof value.sub !== "string") ||
-    (value.name !== undefined && typeof value.name !== "string") ||
-    (value.groups !== undefined && !isStringArray(value.groups))
-  ) {
-    throw permissionDenied("Cloudflare Access JWT payload is invalid");
-  }
-  return value as unknown as CloudflareAccessJwtClaims;
-}
-
-function parseJwtJson(part: string, label: string): unknown {
-  try {
-    return JSON.parse(new TextDecoder().decode(base64UrlDecode(part))) as unknown;
-  } catch {
-    throw permissionDenied(`Cloudflare Access JWT ${label} is malformed`);
-  }
-}
-
-function assertJwks(value: unknown): CloudflareAccessJwks {
-  if (!isRecord(value) || !Array.isArray(value.keys)) {
-    throw permissionDenied("Cloudflare Access signing keys are invalid");
-  }
-  if (!value.keys.every(isJwkWithKid)) {
-    throw permissionDenied("Cloudflare Access signing keys are invalid");
-  }
-  return { keys: value.keys };
-}
-
-async function importRsaVerifyKey(jwk: JsonWebKey): Promise<CryptoKey> {
-  try {
-    return await crypto.subtle.importKey(
-      "jwk",
-      jwk,
-      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-      false,
-      ["verify"]
-    );
-  } catch {
-    throw permissionDenied("Cloudflare Access signing key is invalid");
-  }
+  return firstNonBlank(parseCookies(request.headers.get("cookie")).get(ACCESS_JWT_COOKIE));
 }
 
 function normalizeTeamDomain(teamDomain: string): string {
@@ -405,9 +296,8 @@ function normalizeAudiences(audience: string | readonly string[]): ReadonlySet<s
   return new Set(values);
 }
 
-function isAudience(value: unknown): value is string | readonly string[] {
-  return typeof value === "string" ||
-    (Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "string"));
+function isCloudflareAccessClaims(claims: JwtClaims): boolean {
+  return claims.groups === undefined || isStringArray(claims.groups);
 }
 
 function isStringArray(value: unknown): value is readonly string[] {
@@ -416,53 +306,4 @@ function isStringArray(value: unknown): value is readonly string[] {
 
 function firstNonBlank(...values: readonly (string | undefined)[]): string | undefined {
   return values.find((value) => value !== undefined && value.trim().length > 0);
-}
-
-function parseCookies(header: string | null): ReadonlyMap<string, string> {
-  const cookies = new Map<string, string>();
-  for (const part of (header ?? "").split(";")) {
-    const [rawName, ...rawValue] = part.trim().split("=");
-    if (!rawName) {
-      continue;
-    }
-    cookies.set(rawName, rawValue.join("="));
-  }
-  return cookies;
-}
-
-function base64UrlDecode(value: string): Uint8Array {
-  const normalized = value.replaceAll("-", "+").replaceAll("_", "/");
-  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
-  let binary: string;
-  try {
-    binary = atob(padded);
-  } catch {
-    throw permissionDenied("Cloudflare Access JWT is malformed");
-  }
-  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
-}
-
-function arrayBufferFromBytes(bytes: Uint8Array): ArrayBuffer {
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-}
-
-function currentSeconds(now: (() => number) | undefined): number {
-  return now ? now() : Math.floor(Date.now() / 1000);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isJwkWithKid(value: unknown): value is CloudflareAccessJsonWebKey {
-  return isRecord(value) &&
-    typeof value.kid === "string" &&
-    value.kid.trim().length > 0 &&
-    value.kty === "RSA" &&
-    typeof value.n === "string" &&
-    value.n.length > 0 &&
-    typeof value.e === "string" &&
-    value.e.length > 0 &&
-    (value.alg === undefined || value.alg === "RS256") &&
-    (value.use === undefined || value.use === "sig");
 }

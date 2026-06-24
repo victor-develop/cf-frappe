@@ -1,6 +1,7 @@
 import { badRequest, permissionDenied } from "../../core/errors.js";
 import { DEFAULT_TENANT_ID, type Actor } from "../../core/types.js";
 import type { ActorResolver } from "./actor.js";
+import { parseCookies } from "./cookies.js";
 
 export interface SignedSessionOptions {
   readonly secret: string;
@@ -210,18 +211,6 @@ function serializeCookie(
     attributes.push("Secure");
   }
   return attributes.join("; ");
-}
-
-function parseCookies(header: string | null): ReadonlyMap<string, string> {
-  const cookies = new Map<string, string>();
-  for (const part of (header ?? "").split(";")) {
-    const [rawName, ...rawValue] = part.trim().split("=");
-    if (!rawName) {
-      continue;
-    }
-    cookies.set(rawName, rawValue.join("="));
-  }
-  return cookies;
 }
 
 function currentSeconds(now: (() => number) | undefined): number {

@@ -9,14 +9,14 @@ import {
   UserAccountService,
   userAccountsStream,
   type CloudflareAccessJwtClaims,
-  type CloudflareAccessJwks,
   type PasswordHasher
 } from "../../src";
 import { now } from "../helpers";
+import { createJwtSigner, type JwtSigner } from "./jwt-test-helpers";
 
 describe("Cloudflare Access actor resolver", () => {
   it("verifies Access JWT headers and resolves a default actor", async () => {
-    const signing = await createJwtSigner();
+    const signing = await createJwtSigner<CloudflareAccessJwtClaims>();
     const token = await signing.sign({
       iss: "https://acme.cloudflareaccess.com",
       aud: "app-aud",
@@ -45,7 +45,7 @@ describe("Cloudflare Access actor resolver", () => {
   });
 
   it("accepts the browser authorization cookie and custom claim mapping", async () => {
-    const signing = await createJwtSigner();
+    const signing = await createJwtSigner<CloudflareAccessJwtClaims>();
     const token = await signing.sign({
       iss: "https://team.cloudflareaccess.com",
       aud: ["other", "desk"],
@@ -75,7 +75,7 @@ describe("Cloudflare Access actor resolver", () => {
   });
 
   it("syncs Access JWT claims into event-sourced provider accounts", async () => {
-    const signing = await createJwtSigner();
+    const signing = await createJwtSigner<CloudflareAccessJwtClaims>();
     const events = new InMemoryEventStore();
     const userAccounts = new UserAccountService({
       events,
@@ -130,7 +130,7 @@ describe("Cloudflare Access actor resolver", () => {
   });
 
   it("uses normalized email as the provider subject fallback", async () => {
-    const signing = await createJwtSigner();
+    const signing = await createJwtSigner<CloudflareAccessJwtClaims>();
     const events = new InMemoryEventStore();
     const userAccounts = new UserAccountService({
       events,
@@ -185,7 +185,7 @@ describe("Cloudflare Access actor resolver", () => {
   });
 
   it("rejects bad issuer, audience, validity windows, and signatures", async () => {
-    const signing = await createJwtSigner();
+    const signing = await createJwtSigner<CloudflareAccessJwtClaims>();
     const resolver = cloudflareAccessActorResolver({
       teamDomain: "team.cloudflareaccess.com",
       audience: "desk",
@@ -243,8 +243,8 @@ describe("Cloudflare Access actor resolver", () => {
   });
 
   it("caches Access signing keys between resolver calls", async () => {
-    const signing = await createJwtSigner();
-    const rotatedSigning = await createJwtSigner("rotated-key");
+    const signing = await createJwtSigner<CloudflareAccessJwtClaims>();
+    const rotatedSigning = await createJwtSigner<CloudflareAccessJwtClaims>("rotated-key");
     let jwks = signing.jwks;
     const fetchJwks = vi.fn(async () => jwks);
     const resolver = cloudflareAccessActorResolver({
@@ -270,7 +270,7 @@ describe("Cloudflare Access actor resolver", () => {
 
 async function jwtRequest(
   resolver: ReturnType<typeof cloudflareAccessActorResolver>,
-  signing: JwtSigner,
+  signing: JwtSigner<CloudflareAccessJwtClaims>,
   claims: Partial<CloudflareAccessJwtClaims>
 ): Promise<unknown> {
   const token = await signing.sign(defaultClaims(claims));
@@ -297,56 +297,6 @@ function defaultClaimsWithoutSubject(email: string): CloudflareAccessJwtClaims {
     nbf: 900,
     email
   };
-}
-
-interface JwtSigner {
-  readonly jwks: CloudflareAccessJwks;
-  sign(claims: CloudflareAccessJwtClaims): Promise<string>;
-}
-
-async function createJwtSigner(kid = "test-key"): Promise<JwtSigner> {
-  const keyPair = await crypto.subtle.generateKey(
-    {
-      name: "RSASSA-PKCS1-v1_5",
-      modulusLength: 2048,
-      publicExponent: new Uint8Array([1, 0, 1]),
-      hash: "SHA-256"
-    },
-    true,
-    ["sign", "verify"]
-  );
-  const publicJwk = {
-    ...(await crypto.subtle.exportKey("jwk", keyPair.publicKey)),
-    kid,
-    alg: "RS256",
-    use: "sig"
-  };
-  return {
-    jwks: { keys: [publicJwk] },
-    async sign(claims) {
-      const header = { alg: "RS256", typ: "JWT", kid };
-      const headerPart = base64UrlJson(header);
-      const payloadPart = base64UrlJson(claims);
-      const signature = await crypto.subtle.sign(
-        { name: "RSASSA-PKCS1-v1_5" },
-        keyPair.privateKey,
-        new TextEncoder().encode(`${headerPart}.${payloadPart}`)
-      );
-      return `${headerPart}.${payloadPart}.${base64UrlEncode(new Uint8Array(signature))}`;
-    }
-  };
-}
-
-function base64UrlJson(value: unknown): string {
-  return base64UrlEncode(new TextEncoder().encode(JSON.stringify(value)));
-}
-
-function base64UrlEncode(bytes: Uint8Array): string {
-  let binary = "";
-  for (let index = 0; index < bytes.byteLength; index += 1) {
-    binary += String.fromCharCode(bytes[index]!);
-  }
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
 function deterministicPasswords(): PasswordHasher {

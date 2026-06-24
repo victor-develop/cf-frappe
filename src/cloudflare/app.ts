@@ -44,12 +44,15 @@ import {
   cloudflareAccessAccountSyncActorResolver,
   createResourceApi,
   hasCloudflareAccessToken,
+  hasOidcToken,
+  oidcAccountSyncActorResolver,
   userAccountSessionActorResolver
 } from "../adapters/http/index.js";
 import type {
   ActorResolver,
   AuthSessionOptions,
-  CloudflareAccessAccountSyncActorResolverOptions
+  CloudflareAccessAccountSyncActorResolverOptions,
+  OidcAccountSyncActorResolverOptions
 } from "../adapters/http/index.js";
 import { DEFAULT_TENANT_ID, SYSTEM_MANAGER_ROLE, type Actor, type DocTypeDefinition } from "../core/types.js";
 import { FrameworkError } from "../core/errors.js";
@@ -149,6 +152,7 @@ export interface CloudFrappeAuthOptions<TEnv extends CloudFrappeEnv = CloudFrapp
   readonly adminRoles?: readonly string[];
   readonly validateRolesWithCatalog?: boolean;
   readonly cloudflareAccess?: CloudFrappeAccessAccountSyncOptions<TEnv>;
+  readonly oidc?: CloudFrappeOidcAccountSyncOptions<TEnv> | readonly CloudFrappeOidcAccountSyncOptions<TEnv>[];
 }
 
 export interface CloudFrappeAccessAccountSyncOptions<TEnv extends CloudFrappeEnv = CloudFrappeEnv>
@@ -158,6 +162,17 @@ export interface CloudFrappeAccessAccountSyncOptions<TEnv extends CloudFrappeEnv
   > {
   readonly teamDomain: string | ((env: TEnv) => string);
   readonly audience: string | readonly string[] | ((env: TEnv) => string | readonly string[]);
+  readonly syncActorRoles?: readonly string[];
+}
+
+export interface CloudFrappeOidcAccountSyncOptions<TEnv extends CloudFrappeEnv = CloudFrappeEnv>
+  extends Omit<
+    OidcAccountSyncActorResolverOptions,
+    "issuer" | "audience" | "jwksUrl" | "fallback" | "userAccounts" | "syncActorRoles"
+  > {
+  readonly issuer: string | ((env: TEnv) => string);
+  readonly audience: string | readonly string[] | ((env: TEnv) => string | readonly string[]);
+  readonly jwksUrl: string | ((env: TEnv) => string);
   readonly syncActorRoles?: readonly string[];
 }
 
@@ -704,11 +719,36 @@ function actorResolverForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPa
         fallback: appActor
       })
     : appActor;
-  if (!userAccounts || !options.auth?.cloudflareAccess) {
+  if (!userAccounts || (!options.auth?.cloudflareAccess && !options.auth?.oidc)) {
     return sessionOrAppActor;
   }
-  const accessActor = accessAccountSyncActorResolverForEnv(options.auth, env, userAccounts, sessionOrAppActor);
-  return (request) => hasCloudflareAccessToken(request) ? accessActor(request) : sessionOrAppActor(request);
+  const accessActor = options.auth.cloudflareAccess
+    ? accessAccountSyncActorResolverForEnv(options.auth, env, userAccounts, sessionOrAppActor)
+    : undefined;
+  const oidcActors = oidcOptions(options.auth.oidc).map((oidc) => ({
+    tokenSource: oidc.tokenSource,
+    actor: oidcAccountSyncActorResolverForEnv(options.auth!, env, userAccounts, sessionOrAppActor, oidc)
+  }));
+  return async (request) => {
+    if (accessActor && hasCloudflareAccessToken(request)) {
+      return accessActor(request);
+    }
+    let oidcError: unknown;
+    for (const oidc of oidcActors) {
+      if (!hasOidcToken(request, oidc.tokenSource)) {
+        continue;
+      }
+      try {
+        return await oidc.actor(request);
+      } catch (error) {
+        oidcError ??= error;
+      }
+    }
+    if (oidcError !== undefined) {
+      throw oidcError;
+    }
+    return sessionOrAppActor(request);
+  };
 }
 
 function accessAccountSyncActorResolverForEnv<TEnv extends CloudFrappeEnv>(
@@ -726,6 +766,39 @@ function accessAccountSyncActorResolverForEnv<TEnv extends CloudFrappeEnv>(
     syncActorRoles: access.syncActorRoles ?? auth.adminRoles ?? [SYSTEM_MANAGER_ROLE],
     fallback
   });
+}
+
+function oidcAccountSyncActorResolverForEnv<TEnv extends CloudFrappeEnv>(
+  auth: CloudFrappeAuthOptions<TEnv>,
+  env: TEnv,
+  userAccounts: UserAccountService,
+  fallback: ActorResolver,
+  oidc: CloudFrappeOidcAccountSyncOptions<TEnv>
+): ActorResolver {
+  return oidcAccountSyncActorResolver({
+    ...oidc,
+    issuer: valueForEnv(oidc.issuer, env),
+    audience: valueForEnv(oidc.audience, env),
+    jwksUrl: valueForEnv(oidc.jwksUrl, env),
+    userAccounts,
+    syncActorRoles: oidc.syncActorRoles ?? auth.adminRoles ?? [SYSTEM_MANAGER_ROLE],
+    fallback
+  });
+}
+
+function oidcOptions<TEnv extends CloudFrappeEnv>(
+  oidc: CloudFrappeAuthOptions<TEnv>["oidc"]
+): readonly CloudFrappeOidcAccountSyncOptions<TEnv>[] {
+  if (oidc === undefined) {
+    return [];
+  }
+  return isOidcOptionList(oidc) ? oidc : [oidc];
+}
+
+function isOidcOptionList<TEnv extends CloudFrappeEnv>(
+  oidc: NonNullable<CloudFrappeAuthOptions<TEnv>["oidc"]>
+): oidc is readonly CloudFrappeOidcAccountSyncOptions<TEnv>[] {
+  return Array.isArray(oidc);
 }
 
 function valueForEnv<TEnv, TValue>(value: TValue | ((env: TEnv) => TValue), env: TEnv): TValue {

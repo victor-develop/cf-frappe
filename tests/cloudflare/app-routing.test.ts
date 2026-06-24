@@ -18,6 +18,7 @@ import {
   type CloudflareAccessJwtClaims,
   type CloudflareAccessJwks,
   type JobMessage,
+  type OidcJwtClaims,
   type PasswordHasher,
 } from "../../src";
 import {
@@ -1493,6 +1494,243 @@ describe("CloudFrappe Worker routing", () => {
     });
   });
 
+  it("can sync OIDC accounts through Worker auth composition", async () => {
+    const signing = await createJwtSigner<OidcJwtClaims>();
+    const worker = createCloudFrappeWorker<CloudFrappeOidcAuthTestEnv>({
+      registry: createTestRegistry(),
+      actor: () => ({ id: "guest", roles: ["Guest"], tenantId: "acme" }),
+      auth: {
+        sessionSecret: (env) => env.SESSION_SECRET,
+        sessionMaxAgeSeconds: 60,
+        secure: false,
+        passwords: deterministicPasswords(),
+        ids: deterministicIds(["account-created", "provider-linked"]),
+        clock: fixedClock(now),
+        oidc: {
+          issuer: (env) => env.OIDC_ISSUER,
+          audience: (env) => env.OIDC_AUD,
+          jwksUrl: (env) => env.OIDC_JWKS_URL,
+          now: () => 1_000,
+          fetchJwks: async () => signing.jwks,
+          provider: "okta",
+          tenantId: () => "acme",
+          roles: () => [SYSTEM_MANAGER_ROLE]
+        }
+      }
+    });
+    const env = {
+      DB: fakeEventD1(),
+      AGGREGATES: fakeNamespace(),
+      SESSION_SECRET: "edge-secret",
+      OIDC_ISSUER: "https://login.example.com",
+      OIDC_AUD: "desk",
+      OIDC_JWKS_URL: "https://login.example.com/keys"
+    };
+    const token = await signing.sign({
+      iss: "https://login.example.com",
+      aud: "desk",
+      exp: 2_000,
+      nbf: 900,
+      sub: "oidc-subject-1",
+      email: "OWNER@EXAMPLE.COM",
+      email_verified: true,
+      groups: ["Support"]
+    });
+    const headers = { authorization: `Bearer ${token}` };
+
+    const me = await worker.fetch!(cfRequest("http://localhost/api/auth/me", { headers }), env, fakeExecutionContext());
+    expect(me.status).toBe(200);
+    await expect(me.json()).resolves.toMatchObject({
+      data: {
+        id: "owner@example.com",
+        email: "owner@example.com",
+        roles: [SYSTEM_MANAGER_ROLE],
+        tenantId: "acme"
+      }
+    });
+
+    const account = await worker.fetch!(
+      cfRequest("http://localhost/api/users/owner%40example.com", { headers }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(account.status).toBe(200);
+    await expect(account.json()).resolves.toMatchObject({
+      data: {
+        userId: "owner@example.com",
+        version: 2,
+        email: "owner@example.com",
+        emailVerifiedAt: now,
+        providers: [
+          {
+            provider: "okta",
+            subject: "oidc-subject-1"
+          }
+        ]
+      }
+    });
+  });
+
+  it("does not let a blank Access cookie suppress a valid OIDC identity", async () => {
+    const accessSigning = await createJwtSigner();
+    const oidcSigning = await createJwtSigner<OidcJwtClaims>("oidc-key");
+    const accessJwks = vi.fn(async () => accessSigning.jwks);
+    const worker = createCloudFrappeWorker<CloudFrappeAccessAuthTestEnv & CloudFrappeOidcAuthTestEnv>({
+      registry: createTestRegistry(),
+      actor: () => ({ id: "guest", roles: ["Guest"], tenantId: "acme" }),
+      auth: {
+        sessionSecret: (env) => env.SESSION_SECRET,
+        sessionMaxAgeSeconds: 60,
+        secure: false,
+        passwords: deterministicPasswords(),
+        ids: deterministicIds(["account-created", "provider-linked"]),
+        clock: fixedClock(now),
+        cloudflareAccess: {
+          teamDomain: (env) => env.CF_ACCESS_TEAM_DOMAIN,
+          audience: (env) => env.CF_ACCESS_AUD,
+          now: () => 1_000,
+          fetchJwks: accessJwks,
+          tenantId: () => "acme",
+          roles: () => [SYSTEM_MANAGER_ROLE]
+        },
+        oidc: {
+          issuer: (env) => env.OIDC_ISSUER,
+          audience: (env) => env.OIDC_AUD,
+          jwksUrl: (env) => env.OIDC_JWKS_URL,
+          now: () => 1_000,
+          fetchJwks: async () => oidcSigning.jwks,
+          provider: "okta",
+          tenantId: () => "acme",
+          roles: () => [SYSTEM_MANAGER_ROLE]
+        }
+      }
+    });
+    const env = {
+      DB: fakeEventD1(),
+      AGGREGATES: fakeNamespace(),
+      SESSION_SECRET: "edge-secret",
+      CF_ACCESS_TEAM_DOMAIN: "team.cloudflareaccess.com",
+      CF_ACCESS_AUD: "desk",
+      OIDC_ISSUER: "https://login.example.com",
+      OIDC_AUD: "desk",
+      OIDC_JWKS_URL: "https://login.example.com/keys"
+    };
+    const oidcToken = await oidcSigning.sign({
+      iss: "https://login.example.com",
+      aud: "desk",
+      exp: 2_000,
+      nbf: 900,
+      sub: "oidc-subject-1",
+      email: "OWNER@EXAMPLE.COM",
+      email_verified: true
+    });
+
+    const me = await worker.fetch!(
+      cfRequest("http://localhost/api/auth/me", {
+        headers: {
+          authorization: `Bearer ${oidcToken}`,
+          cookie: "CF_Authorization=; other=1"
+        }
+      }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(me.status).toBe(200);
+    expect(accessJwks).not.toHaveBeenCalled();
+    await expect(me.json()).resolves.toMatchObject({
+      data: {
+        id: "owner@example.com",
+        roles: [SYSTEM_MANAGER_ROLE],
+        tenantId: "acme"
+      }
+    });
+  });
+
+  it("tries later OIDC providers when provider lists share the Bearer token source", async () => {
+    const firstSigning = await createJwtSigner<OidcJwtClaims>("first-key");
+    const secondSigning = await createJwtSigner<OidcJwtClaims>("second-key");
+    const worker = createCloudFrappeWorker<CloudFrappeOidcAuthTestEnv>({
+      registry: createTestRegistry(),
+      actor: () => ({ id: "guest", roles: ["Guest"], tenantId: "acme" }),
+      auth: {
+        sessionSecret: (env) => env.SESSION_SECRET,
+        sessionMaxAgeSeconds: 60,
+        secure: false,
+        passwords: deterministicPasswords(),
+        ids: deterministicIds(["account-created", "provider-linked"]),
+        clock: fixedClock(now),
+        oidc: [
+          {
+            issuer: "https://first.example.com",
+            audience: "desk",
+            jwksUrl: "https://first.example.com/keys",
+            now: () => 1_000,
+            fetchJwks: async () => firstSigning.jwks,
+            provider: "provider-one",
+            tenantId: () => "acme",
+            roles: () => [SYSTEM_MANAGER_ROLE]
+          },
+          {
+            issuer: (env) => env.OIDC_ISSUER,
+            audience: (env) => env.OIDC_AUD,
+            jwksUrl: (env) => env.OIDC_JWKS_URL,
+            now: () => 1_000,
+            fetchJwks: async () => secondSigning.jwks,
+            provider: "provider-two",
+            tenantId: () => "acme",
+            roles: () => [SYSTEM_MANAGER_ROLE]
+          }
+        ]
+      }
+    });
+    const env = {
+      DB: fakeEventD1(),
+      AGGREGATES: fakeNamespace(),
+      SESSION_SECRET: "edge-secret",
+      OIDC_ISSUER: "https://second.example.com",
+      OIDC_AUD: "desk",
+      OIDC_JWKS_URL: "https://second.example.com/keys"
+    };
+    const token = await secondSigning.sign({
+      iss: "https://second.example.com",
+      aud: "desk",
+      exp: 2_000,
+      nbf: 900,
+      sub: "provider-two-subject",
+      email: "OWNER@EXAMPLE.COM",
+      email_verified: true
+    });
+    const headers = { authorization: `Bearer ${token}` };
+
+    const me = await worker.fetch!(cfRequest("http://localhost/api/auth/me", { headers }), env, fakeExecutionContext());
+    expect(me.status).toBe(200);
+    await expect(me.json()).resolves.toMatchObject({
+      data: {
+        id: "owner@example.com",
+        roles: [SYSTEM_MANAGER_ROLE],
+        tenantId: "acme"
+      }
+    });
+
+    const account = await worker.fetch!(
+      cfRequest("http://localhost/api/users/owner%40example.com", { headers }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(account.status).toBe(200);
+    await expect(account.json()).resolves.toMatchObject({
+      data: {
+        providers: [
+          {
+            provider: "provider-two",
+            subject: "provider-two-subject"
+          }
+        ]
+      }
+    });
+  });
+
   it("supports env-backed signed-session actor resolvers in the Worker factory", async () => {
     const cookie = await createSignedSessionCookie(owner, {
       secret: "edge-secret",
@@ -1919,6 +2157,12 @@ interface CloudFrappeAccessAuthTestEnv extends CloudFrappeAuthTestEnv {
   readonly CF_ACCESS_AUD: string;
 }
 
+interface CloudFrappeOidcAuthTestEnv extends CloudFrappeAuthTestEnv {
+  readonly OIDC_ISSUER: string;
+  readonly OIDC_AUD: string;
+  readonly OIDC_JWKS_URL: string;
+}
+
 interface CloudFrappeBrowserRenderingTestEnv extends CloudFrappeEnv {
   readonly BROWSER: CloudflareBrowserRenderingBinding;
 }
@@ -2311,12 +2555,14 @@ function fakeEventD1(): D1Database {
   } as unknown as D1Database;
 }
 
-interface JwtSigner {
+interface JwtSigner<TClaims extends CloudflareAccessJwtClaims | OidcJwtClaims = CloudflareAccessJwtClaims> {
   readonly jwks: CloudflareAccessJwks;
-  sign(claims: CloudflareAccessJwtClaims): Promise<string>;
+  sign(claims: TClaims): Promise<string>;
 }
 
-async function createJwtSigner(kid = "test-key"): Promise<JwtSigner> {
+async function createJwtSigner<TClaims extends CloudflareAccessJwtClaims | OidcJwtClaims = CloudflareAccessJwtClaims>(
+  kid = "test-key"
+): Promise<JwtSigner<TClaims>> {
   const keyPair = await crypto.subtle.generateKey(
     {
       name: "RSASSA-PKCS1-v1_5",
