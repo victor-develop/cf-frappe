@@ -3,6 +3,7 @@ import type {
   DocTypeDefinition,
   FieldDefinition,
   JsonPrimitive,
+  ListFilterValue,
   ListFilterBuilderField,
   ListDocumentsFilter,
   ListFilterControlDefinition,
@@ -18,7 +19,7 @@ export const DEFAULT_LIST_PAGE_SIZE = 50;
 export const MAX_LIST_PAGE_SIZE = 200;
 export const DEFAULT_LIST_ORDER_BY = "updatedAt";
 export const DEFAULT_LIST_ORDER: ListOrderDirection = "desc";
-export const LIST_FILTER_OPERATORS = ["eq", "ne", "contains", "gt", "gte", "lt", "lte"] as const;
+export const LIST_FILTER_OPERATORS = ["eq", "ne", "in", "not_in", "contains", "gt", "gte", "lt", "lte"] as const;
 export const LIST_ORDER_DIRECTIONS = ["asc", "desc"] as const;
 const SYSTEM_LIST_ORDER_OPTIONS = [
   { name: "name", label: "Name" },
@@ -29,6 +30,8 @@ const SYSTEM_LIST_ORDER_OPTIONS = [
 const LIST_FILTER_OPERATOR_LABELS: Record<ListFilterOperator, string> = {
   eq: "equals",
   ne: "is not",
+  in: "is in",
+  not_in: "is not in",
   contains: "contains",
   gt: "greater than",
   gte: "greater than or equal",
@@ -38,6 +41,10 @@ const LIST_FILTER_OPERATOR_LABELS: Record<ListFilterOperator, string> = {
 
 export function isListFilterOperator(operator: unknown): operator is ListFilterOperator {
   return typeof operator === "string" && LIST_FILTER_OPERATORS.includes(operator as ListFilterOperator);
+}
+
+export function isListMembershipOperator(operator: ListFilterOperator): operator is "in" | "not_in" {
+  return operator === "in" || operator === "not_in";
 }
 
 export function isListOrderDirection(order: unknown): order is ListOrderDirection {
@@ -158,7 +165,7 @@ export function normalizeListFilters(
     return {
       field: filter.field,
       ...(operator === "eq" ? {} : { operator }),
-      value: coerceFilterValue(field, filter.value, errorCode)
+      value: coerceFilterValue(field, filter.value, operator, errorCode)
     };
   });
 }
@@ -282,7 +289,7 @@ function supportedListFilterOperatorsForField(field: FieldDefinition): readonly 
   if (!isFilterable(field)) {
     return [];
   }
-  const operators: ListFilterOperator[] = ["eq", "ne"];
+  const operators: ListFilterOperator[] = ["eq", "ne", "in", "not_in"];
   if (field.type === "text" || field.type === "longText" || field.type === "link") {
     operators.push("contains");
   }
@@ -364,6 +371,35 @@ function listFilterInputType(field: FieldDefinition): ListFilterInputType {
 }
 
 function coerceFilterValue(
+  field: FieldDefinition,
+  value: ListFilterValue,
+  operator: ListFilterOperator,
+  errorCode: FrameworkErrorCode
+): ListFilterValue {
+  if (isListMembershipOperator(operator)) {
+    if (!isFilterValueArray(value)) {
+      throw new FrameworkError(errorCode, `Filter '${field.name}' must use an array value for ${operator}`, {
+        status: 400
+      });
+    }
+    if (value.length === 0) {
+      throw new FrameworkError(errorCode, `Filter '${field.name}' must include at least one value`, { status: 400 });
+    }
+    return value.map((item) => coerceScalarFilterValue(field, item, errorCode));
+  }
+  if (isFilterValueArray(value)) {
+    throw new FrameworkError(errorCode, `Filter '${field.name}' must use a scalar value for ${operator}`, {
+      status: 400
+    });
+  }
+  return coerceScalarFilterValue(field, value, errorCode);
+}
+
+function isFilterValueArray(value: ListFilterValue): value is readonly JsonPrimitive[] {
+  return Array.isArray(value);
+}
+
+function coerceScalarFilterValue(
   field: FieldDefinition,
   value: JsonPrimitive,
   errorCode: FrameworkErrorCode

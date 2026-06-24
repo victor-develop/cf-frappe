@@ -469,14 +469,15 @@ export interface DomainEvent<TPayload extends DocumentEventPayload = DocumentEve
 export type NewDomainEvent<TPayload extends DocumentEventPayload = DocumentEventPayload> =
   Omit<DomainEvent<TPayload>, "sequence">;
 
-export type ListFilterOperator = "eq" | "ne" | "contains" | "gt" | "gte" | "lt" | "lte";
+export type ListFilterOperator = "eq" | "ne" | "in" | "not_in" | "contains" | "gt" | "gte" | "lt" | "lte";
 export type ListFilterInputType = "text" | "number" | "date" | "datetime-local" | "select" | "boolean";
 export type ListOrderDirection = "asc" | "desc";
+export type ListFilterValue = JsonPrimitive | readonly JsonPrimitive[];
 
 export interface ListDocumentsFilter {
   readonly field: string;
   readonly operator?: ListFilterOperator;
-  readonly value: JsonPrimitive;
+  readonly value: ListFilterValue;
 }
 
 export interface ListFilterOperatorOption {

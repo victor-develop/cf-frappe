@@ -3,6 +3,7 @@ import type {
   DocumentName,
   DocumentSnapshot,
   JsonPrimitive,
+  ListFilterValue,
   ListOrderDirection,
   ListDocumentsFilter,
   ListDocumentsQuery,
@@ -104,37 +105,67 @@ function listFilterWhere(filters: readonly ListDocumentsFilter[]): ListFilterWhe
     switch (operator) {
       case "eq":
         conditions.push(`${expression} = ?`);
-        params.push(sqliteJsonValue(filter.value));
+        params.push(sqliteJsonValue(scalarFilterValue(filter)));
         break;
       case "ne":
         conditions.push(`${expression} IS NOT NULL AND ${expression} != ?`);
-        params.push(sqliteJsonValue(filter.value));
+        params.push(sqliteJsonValue(scalarFilterValue(filter)));
         break;
+      case "in": {
+        const values = membershipFilterValues(filter);
+        conditions.push(`${expression} IN (${values.map(() => "?").join(", ")})`);
+        params.push(...values.map(sqliteJsonValue));
+        break;
+      }
+      case "not_in": {
+        const values = membershipFilterValues(filter);
+        conditions.push(`${expression} IS NOT NULL AND ${expression} NOT IN (${values.map(() => "?").join(", ")})`);
+        params.push(...values.map(sqliteJsonValue));
+        break;
+      }
       case "contains":
         conditions.push(`LOWER(CAST(${expression} AS TEXT)) LIKE ? ESCAPE '\\'`);
-        params.push(`%${escapeLike(String(filter.value).toLowerCase())}%`);
+        params.push(`%${escapeLike(String(scalarFilterValue(filter)).toLowerCase())}%`);
         break;
       case "gt":
         conditions.push(`${expression} > ?`);
-        params.push(sqliteJsonValue(filter.value));
+        params.push(sqliteJsonValue(scalarFilterValue(filter)));
         break;
       case "gte":
         conditions.push(`${expression} >= ?`);
-        params.push(sqliteJsonValue(filter.value));
+        params.push(sqliteJsonValue(scalarFilterValue(filter)));
         break;
       case "lt":
         conditions.push(`${expression} < ?`);
-        params.push(sqliteJsonValue(filter.value));
+        params.push(sqliteJsonValue(scalarFilterValue(filter)));
         break;
       case "lte":
         conditions.push(`${expression} <= ?`);
-        params.push(sqliteJsonValue(filter.value));
+        params.push(sqliteJsonValue(scalarFilterValue(filter)));
         break;
       default:
         throw new Error(`Unsupported list filter operator '${String(operator)}'`);
     }
   }
   return { conditions, params };
+}
+
+function scalarFilterValue(filter: ListDocumentsFilter): JsonPrimitive {
+  if (isFilterValueArray(filter.value)) {
+    throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires a scalar value`);
+  }
+  return filter.value;
+}
+
+function membershipFilterValues(filter: ListDocumentsFilter): readonly JsonPrimitive[] {
+  if (!isFilterValueArray(filter.value) || filter.value.length === 0) {
+    throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires one or more values`);
+  }
+  return filter.value;
+}
+
+function isFilterValueArray(value: ListFilterValue): value is readonly JsonPrimitive[] {
+  return Array.isArray(value);
 }
 
 function sqliteJsonValue(value: JsonPrimitive): JsonPrimitive {

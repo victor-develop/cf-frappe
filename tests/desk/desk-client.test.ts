@@ -559,6 +559,37 @@ describe("Desk client runtime", () => {
     );
   });
 
+  it("maps resource membership filters to repeated query parameters", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: [] }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await runtime.resource.list("Task", {
+      filters: {
+        priority: { in: ["High", "Medium"] },
+        title: { not_in: ["", "Draft"] }
+      }
+    });
+
+    expect(calls[0]?.url).toBe(
+      "/api/resource/Task?filter_priority__in=High&filter_priority__in=Medium&filter_title__not_in=&filter_title__not_in=Draft&empty_filter=filter_title__not_in"
+    );
+    expect(
+      runtime.resource.csvUrl("Task", {
+        filters: {
+          priority: { in: ["High", "Medium"] },
+          title: { not_in: ["", "Draft"] }
+        }
+      })
+    ).toBe(
+      "/api/resource/Task/export.csv?filter_priority__in=High&filter_priority__in=Medium&filter_title__not_in=&filter_title__not_in=Draft&empty_filter=filter_title__not_in"
+    );
+  });
+
   it("wraps metadata-driven global search", async () => {
     const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
     const runtime = evaluateDeskClient(async (url, init) => {

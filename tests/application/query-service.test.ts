@@ -65,6 +65,14 @@ describe("QueryService", () => {
     ).resolves.toMatchObject({ data: [{ name: "Urgent Launch" }], total: 1 });
 
     await expect(
+      queries.listDocuments(owner, "Note", { filters: [{ field: "priority", operator: "in", value: ["High", "Medium"] }] })
+    ).resolves.toMatchObject({ data: [{ name: "Urgent Launch" }], total: 1 });
+
+    await expect(
+      queries.listDocuments(owner, "Note", { filters: [{ field: "priority", operator: "not_in", value: ["Low"] }] })
+    ).resolves.toMatchObject({ data: [{ name: "Urgent Launch" }], total: 1 });
+
+    await expect(
       queries.listDocuments(owner, "Note", {
         filters: [
           { field: "count", operator: "gt", value: 2 },
@@ -100,6 +108,20 @@ describe("QueryService", () => {
     ).rejects.toMatchObject({
       code: "BAD_REQUEST",
       message: "Filter 'count' does not support contains"
+    });
+
+    await expect(
+      queries.listDocuments(owner, "Note", { filters: [{ field: "priority", operator: "in", value: [] }] })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Filter 'priority' must include at least one value"
+    });
+
+    await expect(
+      queries.listDocuments(owner, "Note", { filters: [{ field: "priority", value: ["High"] }] })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Filter 'priority' must use a scalar value for eq"
     });
   });
 
@@ -560,6 +582,8 @@ describe("QueryService", () => {
         operators: [
           { operator: "eq", label: "equals" },
           { operator: "ne", label: "is not" },
+          { operator: "in", label: "is in" },
+          { operator: "not_in", label: "is not in" },
           { operator: "contains", label: "contains" }
         ]
       }),
@@ -568,7 +592,9 @@ describe("QueryService", () => {
         inputType: "select",
         operators: [
           { operator: "eq", label: "equals" },
-          { operator: "ne", label: "is not" }
+          { operator: "ne", label: "is not" },
+          { operator: "in", label: "is in" },
+          { operator: "not_in", label: "is not in" }
         ]
       }),
       expect.objectContaining({
@@ -576,7 +602,9 @@ describe("QueryService", () => {
         inputType: "select",
         operators: [
           { operator: "eq", label: "equals" },
-          { operator: "ne", label: "is not" }
+          { operator: "ne", label: "is not" },
+          { operator: "in", label: "is in" },
+          { operator: "not_in", label: "is not in" }
         ]
       }),
       expect.objectContaining({
@@ -585,6 +613,8 @@ describe("QueryService", () => {
         operators: [
           { operator: "eq", label: "equals" },
           { operator: "ne", label: "is not" },
+          { operator: "in", label: "is in" },
+          { operator: "not_in", label: "is not in" },
           { operator: "gt", label: "greater than" },
           { operator: "gte", label: "greater than or equal" },
           { operator: "lt", label: "less than" },

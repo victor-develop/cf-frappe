@@ -30,7 +30,9 @@ describe("list views", () => {
         inputType: "select",
         operators: [
           { operator: "eq", label: "equals" },
-          { operator: "ne", label: "is not" }
+          { operator: "ne", label: "is not" },
+          { operator: "in", label: "is in" },
+          { operator: "not_in", label: "is not in" }
         ]
       }
     ]);
@@ -80,11 +82,15 @@ describe("list views", () => {
     expect(listFilterOperatorsForField(Task.fields[0] ?? failField())).toEqual([
       { operator: "eq", label: "equals" },
       { operator: "ne", label: "is not" },
+      { operator: "in", label: "is in" },
+      { operator: "not_in", label: "is not in" },
       { operator: "contains", label: "contains" }
     ]);
     expect(listFilterOperatorsForField(Task.fields[1] ?? failField()).map((item) => item.operator)).toEqual([
       "eq",
       "ne",
+      "in",
+      "not_in",
       "gt",
       "gte",
       "lt",
@@ -92,7 +98,9 @@ describe("list views", () => {
     ]);
     expect(listFilterOperatorsForField(Task.fields[2] ?? failField()).map((item) => item.operator)).toEqual([
       "eq",
-      "ne"
+      "ne",
+      "in",
+      "not_in"
     ]);
     expect(listFilterOperatorsForField(Task.fields[3] ?? failField())).toEqual([]);
     expect(listFilterControlsForField(Task.fields[3] ?? failField())).toEqual([]);

@@ -27,11 +27,11 @@ import type { UserNotificationService } from "../../application/user-notificatio
 import type { UserPermissionService } from "../../application/user-permission-service.js";
 import type { UserProfileService } from "../../application/user-profile-service.js";
 import { badRequest, permissionDenied } from "../../core/errors.js";
-import { isListFilterOperator } from "../../core/list-view.js";
+import { isListFilterOperator, isListMembershipOperator } from "../../core/list-view.js";
 import { can } from "../../core/permissions.js";
 import { canReadReport } from "../../core/reports.js";
 import type { ModelRegistry } from "../../core/registry.js";
-import type { Actor, DocumentData, JsonPrimitive, ListDocumentsFilter, MutableDocumentData } from "../../core/types.js";
+import type { Actor, DocumentData, JsonPrimitive, ListDocumentsFilter, ListFilterValue, MutableDocumentData } from "../../core/types.js";
 import { SYSTEM_MANAGER_ROLE } from "../../core/types.js";
 import type { PrintPdfRenderer } from "../../ports/print-pdf-renderer.js";
 import {
@@ -994,15 +994,27 @@ function filtersValue(value: unknown): readonly ListDocumentsFilter[] {
     if (operator !== undefined && !isListFilterOperator(operator)) {
       throw badRequest("Saved filter operator is invalid");
     }
-    if (!isJsonPrimitive(filterValue)) {
-      throw badRequest("Saved filter value must be scalar");
-    }
+    const normalizedOperator = operator ?? "eq";
+    const value = filterValueValue(filterValue, normalizedOperator);
     return {
       field,
-      ...(operator === undefined || operator === "eq" ? {} : { operator }),
-      value: filterValue
+      ...(normalizedOperator === "eq" ? {} : { operator: normalizedOperator }),
+      value
     };
   });
+}
+
+function filterValueValue(value: unknown, operator: NonNullable<ListDocumentsFilter["operator"]>): ListFilterValue {
+  if (isListMembershipOperator(operator)) {
+    if (!Array.isArray(value) || value.length === 0 || !value.every(isJsonPrimitive)) {
+      throw badRequest("Saved filter membership value must be a non-empty scalar array");
+    }
+    return value;
+  }
+  if (!isJsonPrimitive(value)) {
+    throw badRequest("Saved filter value must be scalar");
+  }
+  return value;
 }
 
 function permissionsValue(value: unknown): readonly string[] {

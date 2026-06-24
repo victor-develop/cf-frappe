@@ -1,6 +1,7 @@
 import type {
   DocumentSnapshot,
   JsonPrimitive,
+  ListFilterValue,
   JsonValue,
   ListDocumentsFilter,
   ListOrderDirection
@@ -14,36 +15,55 @@ export function matchesListFilters(
     const actual = document.data[filter.field];
     switch (filter.operator ?? "eq") {
       case "eq":
-        return actual === filter.value;
+        return actual === scalarFilterValue(filter);
       case "ne":
-        return actual !== undefined && actual !== null && actual !== filter.value;
+        return actual !== undefined && actual !== null && actual !== scalarFilterValue(filter);
+      case "in":
+        return actual !== undefined && actual !== null && arrayIncludes(filter.value, actual);
+      case "not_in":
+        return actual !== undefined && actual !== null && !arrayIncludes(filter.value, actual);
       case "contains":
         if (actual === undefined || actual === null) {
           return false;
         }
-        return String(actual ?? "").toLowerCase().includes(String(filter.value).toLowerCase());
+        return String(actual ?? "").toLowerCase().includes(String(scalarFilterValue(filter)).toLowerCase());
       case "gt":
         if (actual === undefined || actual === null) {
           return false;
         }
-        return compareValues(actual, filter.value) > 0;
+        return compareValues(actual, scalarFilterValue(filter)) > 0;
       case "gte":
         if (actual === undefined || actual === null) {
           return false;
         }
-        return compareValues(actual, filter.value) >= 0;
+        return compareValues(actual, scalarFilterValue(filter)) >= 0;
       case "lt":
         if (actual === undefined || actual === null) {
           return false;
         }
-        return compareValues(actual, filter.value) < 0;
+        return compareValues(actual, scalarFilterValue(filter)) < 0;
       case "lte":
         if (actual === undefined || actual === null) {
           return false;
         }
-        return compareValues(actual, filter.value) <= 0;
+        return compareValues(actual, scalarFilterValue(filter)) <= 0;
     }
   });
+}
+
+function arrayIncludes(expected: ListDocumentsFilter["value"], actual: JsonValue): boolean {
+  return Array.isArray(expected) && expected.some((value) => actual === value);
+}
+
+function scalarFilterValue(filter: ListDocumentsFilter): JsonPrimitive {
+  if (isFilterValueArray(filter.value)) {
+    throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires a scalar value`);
+  }
+  return filter.value;
+}
+
+function isFilterValueArray(value: ListFilterValue): value is readonly JsonPrimitive[] {
+  return Array.isArray(value);
 }
 
 export function compareListDocuments(

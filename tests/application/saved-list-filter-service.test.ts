@@ -85,7 +85,7 @@ describe("SavedListFilterService", () => {
       id: saved.id,
       label: "Closed high notes",
       filters: [
-        { field: "priority", value: "High" },
+        { field: "priority", operator: "in", value: ["High", "Medium"] },
         { field: "workflow_state", value: "Closed" }
       ]
     });
@@ -94,7 +94,7 @@ describe("SavedListFilterService", () => {
       id: saved.id,
       label: "Closed high notes",
       filters: [
-        { field: "priority", value: "High" },
+        { field: "priority", operator: "in", value: ["High", "Medium"] },
         { field: "workflow_state", value: "Closed" }
       ]
     });

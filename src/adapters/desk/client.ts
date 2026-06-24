@@ -89,7 +89,7 @@ export function renderDeskClientScript(): string {
 
   function setFilterParam(params, key, value) {
     params[key] = value;
-    if (value === "") {
+    if (value === "" || (Array.isArray(value) && value.some(function (item) { return item === ""; }))) {
       appendParam(params, "empty_filter", key);
     }
   }

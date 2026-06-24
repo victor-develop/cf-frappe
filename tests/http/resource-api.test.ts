@@ -199,6 +199,8 @@ describe("resource api", () => {
             operators: [
               { operator: "eq", label: "equals" },
               { operator: "ne", label: "is not" },
+              { operator: "in", label: "is in" },
+              { operator: "not_in", label: "is not in" },
               { operator: "contains", label: "contains" }
             ]
           },
@@ -207,7 +209,9 @@ describe("resource api", () => {
             inputType: "select",
             operators: [
               { operator: "eq", label: "equals" },
-              { operator: "ne", label: "is not" }
+              { operator: "ne", label: "is not" },
+              { operator: "in", label: "is in" },
+              { operator: "not_in", label: "is not in" }
             ]
           },
           {
@@ -215,7 +219,9 @@ describe("resource api", () => {
             inputType: "select",
             operators: [
               { operator: "eq", label: "equals" },
-              { operator: "ne", label: "is not" }
+              { operator: "ne", label: "is not" },
+              { operator: "in", label: "is in" },
+              { operator: "not_in", label: "is not in" }
             ]
           },
           {
@@ -224,6 +230,8 @@ describe("resource api", () => {
             operators: [
               { operator: "eq", label: "equals" },
               { operator: "ne", label: "is not" },
+              { operator: "in", label: "is in" },
+              { operator: "not_in", label: "is not in" },
               { operator: "gt", label: "greater than" },
               { operator: "gte", label: "greater than or equal" },
               { operator: "lt", label: "less than" },
@@ -1206,6 +1214,27 @@ describe("resource api", () => {
       "HTTP High"
     ]);
 
+    const membership = await app.request("/api/resource/Note?filter_priority__in=High&filter_priority__in=Low", {
+      headers: userHeaders
+    });
+    expect(membership.status).toBe(200);
+    const membershipJson = (await membership.json()) as { readonly total: number; readonly data: readonly { readonly name: string }[] };
+    expect(membershipJson.total).toBe(3);
+    expect(membershipJson.data.map((document) => document.name).sort()).toEqual([
+      "HTTP Empty Body",
+      "HTTP High",
+      "HTTP Low"
+    ]);
+
+    const notIn = await app.request("/api/resource/Note?filter_priority__not_in=Low", {
+      headers: userHeaders
+    });
+    expect(notIn.status).toBe(200);
+    await expect(notIn.json()).resolves.toMatchObject({
+      data: [{ name: "HTTP High" }],
+      total: 1
+    });
+
     const advanced = await app.request("/api/resource/Note?filter_priority__ne=Low&filter_count__gt=2&filter_count__lt=9", {
       headers: userHeaders
     });
@@ -1279,22 +1308,21 @@ describe("resource api", () => {
       method: "POST",
       headers: userHeaders,
       body: JSON.stringify({
-        label: "High API notes",
-        filters: [{ field: "priority", value: "High" }]
+        label: "High or low API notes",
+        filters: [{ field: "priority", operator: "in", value: ["High", "Low"] }]
       })
     });
 
     expect(saved.status).toBe(201);
     const savedJson = await saved.json() as { data: { id: string; label: string } };
-    expect(savedJson.data).toMatchObject({ label: "High API notes" });
+    expect(savedJson.data).toMatchObject({ label: "High or low API notes" });
 
     const filtered = await app.request(`/api/resource/Note?saved_filter=${savedJson.data.id}`, {
       headers: userHeaders
     });
     expect(filtered.status).toBe(200);
     await expect(filtered.json()).resolves.toMatchObject({
-      data: [{ name: "API High" }],
-      total: 1
+      total: 2
     });
 
     const listed = await app.request("/api/resource/Note/saved-filters", { headers: userHeaders });
@@ -1321,6 +1349,19 @@ describe("resource api", () => {
     expect(invalidOrder.status).toBe(400);
     await expect(invalidOrder.json()).resolves.toMatchObject({
       error: { code: "BAD_REQUEST", message: "List order must be asc or desc" }
+    });
+
+    const invalidSavedFilter = await app.request("/api/resource/Note/saved-filters", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({
+        label: "Invalid membership",
+        filters: [{ field: "priority", operator: "in", value: "High" }]
+      })
+    });
+    expect(invalidSavedFilter.status).toBe(400);
+    await expect(invalidSavedFilter.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Saved filter membership value must be a non-empty scalar array" }
     });
   });
 

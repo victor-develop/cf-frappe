@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the resource list CSV export slice:
+As of the resource membership filter slice:
 
 - Vitest files: `80`
-- Vitest cases: `873`
+- Vitest cases: `875`
 
 ## Implication
 

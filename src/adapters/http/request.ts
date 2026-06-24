@@ -1,5 +1,5 @@
 import { badRequest } from "../../core/errors.js";
-import { LIST_FILTER_OPERATORS, isListOrderDirection } from "../../core/list-view.js";
+import { LIST_FILTER_OPERATORS, isListMembershipOperator, isListOrderDirection } from "../../core/list-view.js";
 import type {
   DocumentData,
   ListDocumentsFilter,
@@ -29,11 +29,23 @@ export function requestMetadata(request: Request): DocumentData {
 }
 
 export function listFiltersFromUrl(url: URL): readonly ListDocumentsFilter[] {
-  const filters: ListDocumentsFilter[] = [];
+  const filters: Array<ListDocumentsFilter | PendingMembershipFilter> = [];
+  const membershipFilters = new Map<string, PendingMembershipFilter>();
   const emptyFilterKeys = new Set(url.searchParams.getAll("empty_filter"));
   url.searchParams.forEach((value, key) => {
     const parsed = parseFilterKey(key);
     if (!parsed || (value === "" && !emptyFilterKeys.has(key))) {
+      return;
+    }
+    if (isListMembershipOperator(parsed.operator)) {
+      const existing = membershipFilters.get(key);
+      if (existing) {
+        existing.values.push(value);
+        return;
+      }
+      const filter = { field: parsed.field, operator: parsed.operator, values: [value] };
+      membershipFilters.set(key, filter);
+      filters.push(filter);
       return;
     }
     filters.push({
@@ -42,7 +54,11 @@ export function listFiltersFromUrl(url: URL): readonly ListDocumentsFilter[] {
       value
     });
   });
-  return filters;
+  return filters.map((filter) =>
+    "values" in filter
+      ? { field: filter.field, operator: filter.operator, value: filter.values }
+      : filter
+  );
 }
 
 export function listOrderFromUrl(url: URL): Pick<ListDocumentsQuery, "orderBy" | "order"> {
@@ -137,6 +153,12 @@ function parseFilterKey(key: string): { readonly field: string; readonly operato
     }
   }
   return { field: raw, operator: "eq" };
+}
+
+interface PendingMembershipFilter {
+  readonly field: string;
+  readonly operator: "in" | "not_in";
+  readonly values: string[];
 }
 
 function parseListOrder(value: string): NonNullable<ListDocumentsQuery["order"]> {

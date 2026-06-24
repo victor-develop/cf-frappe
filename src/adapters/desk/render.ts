@@ -687,13 +687,7 @@ function dashboardMetricHref(source: DashboardRunResult["cards"][number]["source
     const params = new URLSearchParams();
     params.set("default_filters", "0");
     for (const filter of source.filters ?? []) {
-      if (filter.value !== null) {
-        const key = dashboardListFilterQueryKey(filter.field, filter.operator);
-        params.set(key, String(filter.value));
-        if (filter.value === "") {
-          params.append("empty_filter", key);
-        }
-      }
+      appendDashboardListFilter(params, filter);
     }
     return `/desk/${encodeURIComponent(source.doctype)}?${params.toString()}`;
   }
@@ -701,6 +695,20 @@ function dashboardMetricHref(source: DashboardRunResult["cards"][number]["source
     return dashboardReportHref(source.report, source.filters ?? {});
   }
   return undefined;
+}
+
+function appendDashboardListFilter(params: URLSearchParams, filter: ListDocumentsFilter): void {
+  const key = dashboardListFilterQueryKey(filter.field, filter.operator);
+  const values = Array.isArray(filter.value) ? filter.value : [filter.value];
+  for (const value of values) {
+    if (value === null) {
+      continue;
+    }
+    params.append(key, String(value));
+    if (value === "") {
+      params.append("empty_filter", key);
+    }
+  }
 }
 
 function dashboardListFilterQueryKey(field: string, operator: ListFilterOperator | undefined): string {

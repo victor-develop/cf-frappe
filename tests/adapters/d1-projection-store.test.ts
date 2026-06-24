@@ -69,6 +69,43 @@ describe("D1ProjectionStore", () => {
     expect(count?.params).toEqual(["acme", "Note", "Low", 2, 9]);
   });
 
+  it("renders membership operators with bound filter parameters", async () => {
+    const db = new FakeD1Database([
+      documentRow({ name: "D1 High", data: { title: "D1 High", priority: "High" } }),
+      documentRow({ name: "D1 Medium", data: { title: "D1 Medium", priority: "Medium" } }),
+      documentRow({ name: "D1 Low", data: { title: "D1 Low", priority: "Low" } })
+    ]);
+    const store = new D1ProjectionStore(db as unknown as D1Database);
+
+    const result = await store.list({
+      tenantId: "acme",
+      doctype: "Note",
+      filters: [{ field: "priority", operator: "in", value: ["High", "Medium"] }]
+    });
+
+    expect(result).toMatchObject({ data: [{ name: "D1 High" }, { name: "D1 Medium" }], total: 2 });
+    const [rows, count] = db.statements;
+    expect(rows?.sql).toContain("json_extract(data_json, '$.priority') IN (?, ?)");
+    expect(rows?.sql).not.toContain("High");
+    expect(rows?.params).toEqual(["acme", "Note", "High", "Medium", 50, 0]);
+    expect(count?.sql).toContain("json_extract(data_json, '$.priority') IN (?, ?)");
+    expect(count?.params).toEqual(["acme", "Note", "High", "Medium"]);
+
+    const notInDb = new FakeD1Database(db.rows);
+    const notInStore = new D1ProjectionStore(notInDb as unknown as D1Database);
+    const notInResult = await notInStore.list({
+      tenantId: "acme",
+      doctype: "Note",
+      filters: [{ field: "priority", operator: "not_in", value: ["Low", "Medium"] }]
+    });
+
+    expect(notInResult).toMatchObject({ data: [{ name: "D1 High" }], total: 1 });
+    expect(notInDb.statements[0]?.sql).toContain(
+      "json_extract(data_json, '$.priority') IS NOT NULL AND json_extract(data_json, '$.priority') NOT IN (?, ?)"
+    );
+    expect(notInDb.statements[0]?.params).toEqual(["acme", "Note", "Low", "Medium", 50, 0]);
+  });
+
   it("orders rows by escaped JSON fields with deterministic fallbacks", async () => {
     const db = new FakeD1Database([
       documentRow({ name: "D1 High", data: { title: "apple", count: 5 } }),
@@ -242,6 +279,18 @@ class FakeD1PreparedStatement {
         return data.priority === filterParams[0];
       }
       let paramIndex = 0;
+      if (this.sql.includes("json_extract(data_json, '$.priority') IN (?, ?)")) {
+        if (!filterParams.slice(paramIndex, paramIndex + 2).includes(data.priority)) {
+          return false;
+        }
+        paramIndex += 2;
+      }
+      if (this.sql.includes("json_extract(data_json, '$.priority') IS NOT NULL AND json_extract(data_json, '$.priority') NOT IN (?, ?)")) {
+        if (data.priority === undefined || data.priority === null || filterParams.slice(paramIndex, paramIndex + 2).includes(data.priority)) {
+          return false;
+        }
+        paramIndex += 2;
+      }
       if (this.sql.includes("json_extract(data_json, '$.priority') IS NOT NULL AND json_extract(data_json, '$.priority') != ?")) {
         if (data.priority === undefined || data.priority === null || data.priority === filterParams[paramIndex]) {
           return false;

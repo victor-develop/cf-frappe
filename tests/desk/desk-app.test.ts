@@ -2395,6 +2395,14 @@ describe("Desk app", () => {
     expect(advancedHtml).toContain('name="filter_count__gte" value="2"');
     expect(advancedHtml).toContain('name="filter_count__lte" value="8"');
 
+    const membership = await app.request("/desk/Note?filter_priority__in=High&filter_priority__in=Low");
+    expect(membership.status).toBe(200);
+    const membershipHtml = await membership.text();
+    expect(membershipHtml).toContain("Desk High");
+    expect(membershipHtml).toContain("Desk Low");
+    expect(membershipHtml).toContain("Desk Empty Body");
+    expect(membershipHtml).not.toContain("Desk Closed High");
+
     const ordered = await app.request("/desk/Note?default_filters=0&order_by=count&order=asc");
     expect(ordered.status).toBe(200);
     const orderedHtml = await ordered.text();
