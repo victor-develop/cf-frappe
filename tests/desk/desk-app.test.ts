@@ -2594,6 +2594,34 @@ describe("Desk app", () => {
     expect(compoundHtml).toContain("priority eq High");
     expect(compoundHtml).toContain("/desk/Note/export.csv?default_filters=0&amp;filter_expression=");
 
+    const nestedCompoundExpression = encodeURIComponent(JSON.stringify({
+      kind: "group",
+      match: "all",
+      filters: [
+        { field: "priority", value: "High" },
+        {
+          kind: "group",
+          match: "any",
+          filters: [
+            { field: "count", operator: "between", value: [1, 1] },
+            { field: "priority", operator: "ne", value: "Low" }
+          ]
+        }
+      ]
+    }));
+    const nestedCompound = await app.request(`/desk/Note?default_filters=0&filter_expression=${nestedCompoundExpression}`);
+    expect(nestedCompound.status).toBe(200);
+    const nestedCompoundHtml = await nestedCompound.text();
+    const nestedCompoundVisualHtml = nestedCompoundHtml.split("<template")[0] ?? nestedCompoundHtml;
+    expect(nestedCompoundVisualHtml.match(/data-cf-frappe-filter-group>/g)?.length).toBe(2);
+    expect(nestedCompoundVisualHtml).toContain("data-cf-frappe-add-filter-group>Add group</button>");
+    expect(nestedCompoundVisualHtml).toContain("data-cf-frappe-remove-filter-group>Remove group</button>");
+    expect(nestedCompoundVisualHtml).toContain('data-cf-frappe-filter-match><option value="all">All</option><option value="any" selected>Any</option>');
+    expect(nestedCompoundVisualHtml).toContain('<option value="priority" selected>priority</option>');
+    expect(nestedCompoundVisualHtml).toContain('<option value="ne" selected>is not</option>');
+    expect(nestedCompoundVisualHtml).toContain('data-cf-frappe-filter-value type="text" value="Low"');
+    expect(nestedCompoundHtml).toContain("<strong>Any</strong>");
+
     const between = await app.request("/desk/Note?filter_count__between=6&filter_count__between=8");
     expect(between.status).toBe(200);
     const betweenHtml = await between.text();

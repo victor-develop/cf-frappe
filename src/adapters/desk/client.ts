@@ -759,19 +759,12 @@ export function renderDeskClientScript(): string {
         builder.__cfFrappeCompoundFilterSource = "text";
       });
     }
-    var match = builder.querySelector("[data-cf-frappe-filter-match]");
-    if (match) {
-      match.addEventListener("change", function () {
-        markCompoundFilterVisualDirty(builder);
-      });
-    }
-    Array.prototype.forEach.call(builder.querySelectorAll("[data-cf-frappe-filter-row]"), function (row) {
-      hydrateCompoundFilterRow(builder, row);
-    });
-    var addButton = builder.querySelector("[data-cf-frappe-add-filter]");
-    if (addButton) {
-      addButton.addEventListener("click", function () {
-        addCompoundFilterRow(builder);
+    var root = builder.querySelector("[data-cf-frappe-filter-group]");
+    if (root) {
+      hydrateCompoundFilterGroup(builder, root);
+    } else {
+      Array.prototype.forEach.call(builder.querySelectorAll("[data-cf-frappe-filter-row]"), function (row) {
+        hydrateCompoundFilterRow(builder, row);
       });
     }
     form.addEventListener("submit", function () {
@@ -779,7 +772,49 @@ export function renderDeskClientScript(): string {
     });
   }
 
+  function hydrateCompoundFilterGroup(builder, group) {
+    if (!group || group.__cfFrappeCompoundFilterGroupHydrated) {
+      return;
+    }
+    group.__cfFrappeCompoundFilterGroupHydrated = true;
+    var match = group.querySelector("[data-cf-frappe-filter-match]");
+    if (match) {
+      match.addEventListener("change", function () {
+        markCompoundFilterVisualDirty(builder);
+      });
+    }
+    var addButton = group.querySelector("[data-cf-frappe-add-filter]");
+    if (addButton) {
+      addButton.addEventListener("click", function () {
+        addCompoundFilterRow(builder, group);
+      });
+    }
+    var addGroupButton = group.querySelector("[data-cf-frappe-add-filter-group]");
+    if (addGroupButton) {
+      addGroupButton.addEventListener("click", function () {
+        addCompoundFilterGroup(builder, group);
+      });
+    }
+    var removeGroupButton = group.querySelector("[data-cf-frappe-remove-filter-group]");
+    if (removeGroupButton) {
+      removeGroupButton.addEventListener("click", function () {
+        markCompoundFilterVisualDirty(builder);
+        removeCompoundFilterGroup(builder, group);
+      });
+    }
+    Array.prototype.forEach.call(group.querySelectorAll("[data-cf-frappe-filter-row]"), function (row) {
+      hydrateCompoundFilterRow(builder, row);
+    });
+    Array.prototype.forEach.call(group.querySelectorAll("[data-cf-frappe-filter-group]"), function (childGroup) {
+      hydrateCompoundFilterGroup(builder, childGroup);
+    });
+  }
+
   function hydrateCompoundFilterRow(builder, row) {
+    if (row.__cfFrappeCompoundFilterRowHydrated) {
+      return;
+    }
+    row.__cfFrappeCompoundFilterRowHydrated = true;
     var field = row.querySelector("[data-cf-frappe-filter-field]");
     var operator = row.querySelector("[data-cf-frappe-filter-operator]");
     var remove = row.querySelector("[data-cf-frappe-remove-filter]");
@@ -816,19 +851,57 @@ export function renderDeskClientScript(): string {
     builder.__cfFrappeCompoundFilterSource = "visual";
   }
 
-  function addCompoundFilterRow(builder) {
-    var container = builder.querySelector("[data-cf-frappe-filter-rows]");
-    var template = builder.querySelector("[data-cf-frappe-filter-row]");
-    if (!container || !template || typeof template.cloneNode !== "function") {
+  function addCompoundFilterRow(builder, group) {
+    var container = compoundFilterItemsContainer(group || builder.querySelector("[data-cf-frappe-filter-group]"));
+    var row = cloneCompoundFilterTemplate(builder, "[data-cf-frappe-filter-row-template]");
+    if (!container || !row) {
       return;
     }
-    var row = template.cloneNode(true);
     resetCompoundFilterRow(row);
     container.appendChild(row);
     refreshCompoundFilterOperatorOptions(builder, row);
     refreshCompoundFilterValueInputType(builder, row);
     markCompoundFilterVisualDirty(builder);
     hydrateCompoundFilterRow(builder, row);
+  }
+
+  function addCompoundFilterGroup(builder, group) {
+    var container = compoundFilterItemsContainer(group);
+    var childGroup = cloneCompoundFilterTemplate(builder, "[data-cf-frappe-filter-group-template]");
+    if (!container || !childGroup) {
+      return;
+    }
+    resetCompoundFilterGroup(builder, childGroup);
+    container.appendChild(childGroup);
+    markCompoundFilterVisualDirty(builder);
+    hydrateCompoundFilterGroup(builder, childGroup);
+  }
+
+  function cloneCompoundFilterTemplate(builder, selector) {
+    var template = builder.querySelector(selector);
+    var content = template && template.content;
+    var element = content && content.firstElementChild;
+    if (!element || typeof element.cloneNode !== "function") {
+      return null;
+    }
+    return element.cloneNode(true);
+  }
+
+  function resetCompoundFilterGroup(builder, group) {
+    var match = group.querySelector("[data-cf-frappe-filter-match]");
+    if (match) {
+      match.value = "all";
+    }
+    var container = compoundFilterItemsContainer(group);
+    var row = cloneCompoundFilterTemplate(builder, "[data-cf-frappe-filter-row-template]");
+    if (!container || !row) {
+      return;
+    }
+    while (container.firstChild) {
+      container.removeChild(container.firstChild);
+    }
+    resetCompoundFilterRow(row);
+    container.appendChild(row);
   }
 
   function resetCompoundFilterRow(row) {
@@ -842,8 +915,9 @@ export function renderDeskClientScript(): string {
   }
 
   function removeCompoundFilterRow(builder, row) {
-    var rows = builder.querySelectorAll("[data-cf-frappe-filter-row]");
-    if (rows.length <= 1) {
+    var group = compoundFilterClosestGroup(row);
+    var container = compoundFilterItemsContainer(group);
+    if (compoundFilterContainerChildren(container).length <= 1) {
       resetCompoundFilterRow(row);
       refreshCompoundFilterOperatorOptions(builder, row);
       refreshCompoundFilterValueInputType(builder, row);
@@ -852,6 +926,31 @@ export function renderDeskClientScript(): string {
     if (typeof row.remove === "function") {
       row.remove();
     }
+  }
+
+  function removeCompoundFilterGroup(builder, group) {
+    if (group === builder.querySelector("[data-cf-frappe-filter-group]")) {
+      return;
+    }
+    var parent = compoundFilterParentGroup(group);
+    if (typeof group.remove === "function") {
+      group.remove();
+    }
+    ensureCompoundFilterGroupHasItem(builder, parent);
+  }
+
+  function ensureCompoundFilterGroupHasItem(builder, group) {
+    var container = compoundFilterItemsContainer(group);
+    if (!container || compoundFilterContainerChildren(container).length > 0) {
+      return;
+    }
+    var row = cloneCompoundFilterTemplate(builder, "[data-cf-frappe-filter-row-template]");
+    if (!row) {
+      return;
+    }
+    resetCompoundFilterRow(row);
+    container.appendChild(row);
+    hydrateCompoundFilterRow(builder, row);
   }
 
   function syncCompoundFilterExpression(builder) {
@@ -866,6 +965,10 @@ export function renderDeskClientScript(): string {
   }
 
   function compoundFilterExpressionFromBuilder(builder) {
+    var root = builder.querySelector("[data-cf-frappe-filter-group]");
+    if (root) {
+      return compoundFilterExpressionFromGroup(root, true);
+    }
     var filters = [];
     Array.prototype.forEach.call(builder.querySelectorAll("[data-cf-frappe-filter-row]"), function (row) {
       var filter = compoundFilterExpressionFromRow(row);
@@ -885,6 +988,57 @@ export function renderDeskClientScript(): string {
       match: match,
       filters: filters
     };
+  }
+
+  function compoundFilterExpressionFromGroup(group, root) {
+    var filters = [];
+    var container = compoundFilterItemsContainer(group);
+    compoundFilterContainerChildren(container).forEach(function (item) {
+      var filter = undefined;
+      if (compoundFilterElementMatches(item, "[data-cf-frappe-filter-row]")) {
+        filter = compoundFilterExpressionFromRow(item);
+      } else if (compoundFilterElementMatches(item, "[data-cf-frappe-filter-group]")) {
+        filter = compoundFilterExpressionFromGroup(item, false);
+      }
+      if (filter) {
+        filters.push(filter);
+      }
+    });
+    if (filters.length === 0) {
+      return undefined;
+    }
+    if (root && filters.length === 1) {
+      return filters[0];
+    }
+    var match = controlValue(group.querySelector("[data-cf-frappe-filter-match]")) === "any" ? "any" : "all";
+    return {
+      kind: "group",
+      match: match,
+      filters: filters
+    };
+  }
+
+  function compoundFilterItemsContainer(group) {
+    return group && typeof group.querySelector === "function"
+      ? group.querySelector("[data-cf-frappe-filter-items]") || group.querySelector("[data-cf-frappe-filter-rows]")
+      : null;
+  }
+
+  function compoundFilterContainerChildren(container) {
+    return container && container.children ? Array.prototype.slice.call(container.children) : [];
+  }
+
+  function compoundFilterClosestGroup(element) {
+    return element && typeof element.closest === "function" ? element.closest("[data-cf-frappe-filter-group]") : null;
+  }
+
+  function compoundFilterParentGroup(group) {
+    var parent = group && group.parentElement;
+    return parent && typeof parent.closest === "function" ? parent.closest("[data-cf-frappe-filter-group]") : null;
+  }
+
+  function compoundFilterElementMatches(element, selector) {
+    return element && typeof element.matches === "function" ? element.matches(selector) : false;
   }
 
   function compoundFilterExpressionFromRow(row) {

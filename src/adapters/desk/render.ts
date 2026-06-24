@@ -12,6 +12,8 @@ import {
   type ListDocumentsFilter,
   type ListFilterBuilderField,
   type ListFilterExpression,
+  type ListFilterGroup,
+  type ListFilterGroupMatch,
   type ListFilterOperator,
   type ResolvedFormSection,
   type ResolvedFormView,
@@ -70,11 +72,6 @@ import {
 type ReportChartPointResult = ReportRunResult["charts"][number]["points"][number];
 
 const REPORT_BUILDER_FORMULA_NESTED_LEVELS = 2;
-
-interface CompoundFilterVisualState {
-  readonly match: "all" | "any";
-  readonly rows: readonly ListDocumentsFilter[];
-}
 
 export type FormLinkOptions = Readonly<Record<string, readonly LinkOption[]>>;
 export type FormTableDefinitions = Readonly<Record<string, DocTypeDefinition>>;
@@ -2434,39 +2431,57 @@ function renderCompoundFilterBuilder(
     return "";
   }
   const value = expression === undefined ? "" : JSON.stringify(expression, null, 2);
-  const visualState = compoundFilterVisualState(expression);
-  const rows = (visualState.rows.length > 0 ? visualState.rows : [undefined])
-    .map((filter) => renderCompoundFilterRow(listView.filterBuilderFields, filter))
-    .join("");
+  const visualGroup = compoundFilterVisualGroup(expression);
   return `<fieldset class="compound-filter-builder" data-cf-frappe-compound-filter-builder data-filter-fields="${escapeHtml(JSON.stringify(listView.filterBuilderFields))}">
     <legend>Compound filters</legend>
     <div class="compound-filter-visual">
-      <label class="field compact" for="filter-expression-match"><span>Match</span><select id="filter-expression-match" data-cf-frappe-filter-match>${renderCompoundFilterMatchOptions(visualState.match)}</select></label>
-      <div class="compound-filter-rows" data-cf-frappe-filter-rows>${rows}</div>
-      <button class="button" type="button" data-cf-frappe-add-filter>Add condition</button>
+      ${renderCompoundFilterGroup(listView.filterBuilderFields, visualGroup, true)}
     </div>
+    <template data-cf-frappe-filter-row-template>${renderCompoundFilterRow(listView.filterBuilderFields, undefined)}</template>
+    <template data-cf-frappe-filter-group-template>${renderCompoundFilterGroup(listView.filterBuilderFields, { kind: "group", match: "all", filters: [] }, false)}</template>
     <label class="field wide" for="filter-expression"><span>Advanced JSON</span><textarea id="filter-expression" name="filter_expression" rows="5">${escapeHtml(value)}</textarea></label>
     ${expression === undefined ? "" : `<div class="filter-expression-preview">${renderListFilterExpression(expression)}</div>`}
   </fieldset>`;
 }
 
-function compoundFilterVisualState(expression: ListFilterExpression | undefined): CompoundFilterVisualState {
+function compoundFilterVisualGroup(expression: ListFilterExpression | undefined): ListFilterGroup {
   if (expression === undefined) {
-    return { match: "all", rows: [] };
+    return { kind: "group", match: "all", filters: [] };
   }
   if (!isListFilterGroup(expression)) {
-    return { match: "all", rows: [expression] };
+    return { kind: "group", match: "all", filters: [expression] };
   }
-  if (expression.filters.some(isListFilterGroup)) {
-    return { match: expression.match, rows: [] };
-  }
-  return {
-    match: expression.match,
-    rows: expression.filters.filter((filter): filter is ListDocumentsFilter => !isListFilterGroup(filter))
-  };
+  return expression;
 }
 
-function renderCompoundFilterMatchOptions(match: "all" | "any"): string {
+function renderCompoundFilterGroup(
+  fields: readonly ListFilterBuilderField[],
+  group: ListFilterGroup,
+  root: boolean
+): string {
+  const items = group.filters.length > 0 ? group.filters : [undefined];
+  return `<div class="compound-filter-group${root ? " compound-filter-root" : ""}" data-cf-frappe-filter-group>
+    <div class="compound-filter-group-head">
+      <label class="field compact"><span>Match</span><select data-cf-frappe-filter-match>${renderCompoundFilterMatchOptions(group.match)}</select></label>
+      <div class="compound-filter-group-actions">
+        <button class="button" type="button" data-cf-frappe-add-filter>Add condition</button>
+        <button class="button" type="button" data-cf-frappe-add-filter-group>Add group</button>
+        ${root ? "" : `<button class="button" type="button" data-cf-frappe-remove-filter-group>Remove group</button>`}
+      </div>
+    </div>
+    <div class="compound-filter-items compound-filter-rows" data-cf-frappe-filter-items data-cf-frappe-filter-rows>${items
+      .map((item) =>
+        item === undefined
+          ? renderCompoundFilterRow(fields, undefined)
+          : isListFilterGroup(item)
+            ? renderCompoundFilterGroup(fields, item, false)
+            : renderCompoundFilterRow(fields, item)
+      )
+      .join("")}</div>
+  </div>`;
+}
+
+function renderCompoundFilterMatchOptions(match: ListFilterGroupMatch): string {
   return [
     { value: "all", label: "All" },
     { value: "any", label: "Any" }
@@ -3569,9 +3584,27 @@ tr:last-child td { border-bottom: 0; }
   font-weight: 700;
 }
 .compound-filter-visual,
-.compound-filter-rows {
+.compound-filter-items {
   display: grid;
   gap: 10px;
+}
+.compound-filter-group {
+  display: grid;
+  gap: 10px;
+}
+.compound-filter-group:not(.compound-filter-root) {
+  border-left: 2px solid var(--border);
+  padding-left: 12px;
+}
+.compound-filter-group-head,
+.compound-filter-group-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+}
+.compound-filter-group-actions {
+  align-self: end;
 }
 .compound-filter-row {
   display: grid;
@@ -3949,6 +3982,8 @@ input[readonly], textarea[readonly] { background: #f3f4f6; color: var(--muted); 
   .main { margin-left: 0; padding: 16px; }
   .topbar, .form-head { align-items: flex-start; flex-direction: column; }
   .fields { grid-template-columns: 1fr; }
+  .compound-filter-group-head,
+  .compound-filter-group-actions { align-items: stretch; flex-direction: column; }
   .compound-filter-row { grid-template-columns: 1fr; }
   .timeline-assignment-form { grid-template-columns: 1fr; }
 }`;

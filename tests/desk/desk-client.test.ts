@@ -709,6 +709,80 @@ describe("Desk client runtime", () => {
     });
   });
 
+  it("serializes nested visual compound filter groups", () => {
+    const form = new FakeForm();
+    const nestedGroup = new FakeCompoundFilterGroup({
+      match: "any",
+      items: [
+        new FakeCompoundFilterRow("count", "between", "2, 5"),
+        new FakeCompoundFilterRow("priority", "ne", "Low")
+      ]
+    });
+    const builder = new FakeCompoundFilterBuilder(form, {
+      match: "all",
+      items: [new FakeCompoundFilterRow("priority", "eq", "High"), nestedGroup]
+    });
+    evaluateDeskClient(fetch, new FakeDocument({ form, compoundFilterBuilders: [builder] }));
+
+    nestedGroup.match.emit("change");
+    form.emitSubmit();
+
+    expect(JSON.parse(builder.expression.value)).toEqual({
+      kind: "group",
+      match: "all",
+      filters: [
+        { field: "priority", value: "High" },
+        {
+          kind: "group",
+          match: "any",
+          filters: [
+            { field: "count", operator: "between", value: ["2", "5"] },
+            { field: "priority", operator: "ne", value: "Low" }
+          ]
+        }
+      ]
+    });
+  });
+
+  it("adds and removes nested visual compound filter groups", () => {
+    const form = new FakeForm();
+    const builder = new FakeCompoundFilterBuilder(form, {
+      rows: [new FakeCompoundFilterRow("priority", "eq", "High")]
+    });
+    evaluateDeskClient(fetch, new FakeDocument({ form, compoundFilterBuilders: [builder] }));
+
+    builder.addGroup.click();
+    const nestedGroup = builder.root.groups[0];
+    expect(nestedGroup).toBeDefined();
+    const nestedRow = nestedGroup?.rows[0];
+    if (!nestedGroup || !nestedRow) {
+      throw new Error("nested group was not added");
+    }
+    nestedRow.field.value = "count";
+    nestedRow.operator.value = "between";
+    nestedRow.value.value = "3, 7";
+    nestedRow.value.emit("input");
+    form.emitSubmit();
+
+    expect(JSON.parse(builder.expression.value)).toEqual({
+      kind: "group",
+      match: "all",
+      filters: [
+        { field: "priority", value: "High" },
+        {
+          kind: "group",
+          match: "all",
+          filters: [{ field: "count", operator: "between", value: ["3", "7"] }]
+        }
+      ]
+    });
+
+    nestedGroup.removeGroupButton.click();
+    form.emitSubmit();
+
+    expect(JSON.parse(builder.expression.value)).toEqual({ field: "priority", value: "High" });
+  });
+
   it("marks intentional empty resource filters in query parameters", async () => {
     const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
     const runtime = evaluateDeskClient(async (url, init) => {
@@ -2790,11 +2864,14 @@ class FakeCompoundButton {
   }
 }
 
+type FakeCompoundFilterItem = FakeCompoundFilterGroup | FakeCompoundFilterRow;
+
 class FakeCompoundFilterRow {
   readonly field: FakeCompoundControl;
   readonly operator: FakeCompoundControl;
   readonly value: FakeCompoundControl;
   readonly removeButton = new FakeCompoundButton();
+  parentElement: FakeCompoundFilterItems | undefined = undefined;
   removed = false;
 
   constructor(field: string, operator: string, value: string) {
@@ -2804,7 +2881,7 @@ class FakeCompoundFilterRow {
   }
 
   cloneNode(): FakeCompoundFilterRow {
-    return new FakeCompoundFilterRow("", "", "");
+    return new FakeCompoundFilterRow(this.field.value, this.operator.value, this.value.value);
   }
 
   querySelector(selector: string): FakeCompoundControl | FakeCompoundButton | null {
@@ -2827,21 +2904,154 @@ class FakeCompoundFilterRow {
     return selector === "select, input" ? [this.field, this.operator, this.value] : [];
   }
 
+  closest(selector: string): FakeCompoundFilterGroup | null {
+    return selector === "[data-cf-frappe-filter-group]" ? this.parentElement?.group ?? null : null;
+  }
+
+  matches(selector: string): boolean {
+    return selector === "[data-cf-frappe-filter-row]";
+  }
+
   remove(): void {
+    this.parentElement?.removeChild(this);
     this.removed = true;
   }
 }
 
-class FakeCompoundFilterRows {
-  constructor(private readonly builder: FakeCompoundFilterBuilder) {}
+class FakeCompoundFilterItems {
+  constructor(readonly group: FakeCompoundFilterGroup) {}
 
-  appendChild(row: FakeCompoundFilterRow): void {
-    this.builder.rows.push(row);
+  get children(): readonly FakeCompoundFilterItem[] {
+    return this.group.items.filter((item) => !item.removed);
+  }
+
+  get firstChild(): FakeCompoundFilterItem | undefined {
+    return this.children[0];
+  }
+
+  appendChild(item: FakeCompoundFilterItem): void {
+    item.parentElement = this;
+    item.removed = false;
+    this.group.items.push(item);
+  }
+
+  removeChild(item: FakeCompoundFilterItem): void {
+    this.group.items = this.group.items.filter((child) => child !== item);
+    item.parentElement = undefined;
+    item.removed = true;
+  }
+
+  closest(selector: string): FakeCompoundFilterGroup | null {
+    return selector === "[data-cf-frappe-filter-group]" ? this.group : null;
+  }
+}
+
+class FakeCompoundFilterGroup {
+  readonly addFilter = new FakeCompoundButton();
+  readonly addGroup = new FakeCompoundButton();
+  readonly itemsContainer = new FakeCompoundFilterItems(this);
+  readonly match: FakeCompoundControl;
+  readonly removeGroupButton = new FakeCompoundButton();
+  parentElement: FakeCompoundFilterItems | undefined = undefined;
+  removed = false;
+  items: FakeCompoundFilterItem[];
+
+  constructor(
+    options: {
+      readonly match?: string;
+      readonly items?: readonly FakeCompoundFilterItem[];
+    } = {}
+  ) {
+    this.match = new FakeCompoundControl(options.match ?? "all");
+    this.items = [];
+    for (const item of options.items ?? [new FakeCompoundFilterRow("", "eq", "")]) {
+      this.itemsContainer.appendChild(item);
+    }
+  }
+
+  get rows(): readonly FakeCompoundFilterRow[] {
+    return this.children.flatMap((item) =>
+      item instanceof FakeCompoundFilterRow ? [item] : item.rows
+    );
+  }
+
+  get groups(): readonly FakeCompoundFilterGroup[] {
+    return this.children.flatMap((item) =>
+      item instanceof FakeCompoundFilterGroup ? [item, ...item.groups] : []
+    );
+  }
+
+  private get children(): readonly FakeCompoundFilterItem[] {
+    return this.items.filter((item) => !item.removed);
+  }
+
+  cloneNode(): FakeCompoundFilterGroup {
+    return new FakeCompoundFilterGroup({
+      match: this.match.value,
+      items: this.children.map((item) => item.cloneNode())
+    });
+  }
+
+  querySelector(
+    selector: string
+  ): FakeCompoundControl | FakeCompoundButton | FakeCompoundFilterGroup | FakeCompoundFilterItems | FakeCompoundFilterRow | null {
+    if (selector === "[data-cf-frappe-filter-match]") {
+      return this.match;
+    }
+    if (selector === "[data-cf-frappe-add-filter]") {
+      return this.addFilter;
+    }
+    if (selector === "[data-cf-frappe-add-filter-group]") {
+      return this.addGroup;
+    }
+    if (selector === "[data-cf-frappe-remove-filter-group]") {
+      return this.removeGroupButton;
+    }
+    if (selector === "[data-cf-frappe-filter-items]" || selector === "[data-cf-frappe-filter-rows]") {
+      return this.itemsContainer;
+    }
+    if (selector === "[data-cf-frappe-filter-row]") {
+      return this.rows[0] ?? null;
+    }
+    if (selector === "[data-cf-frappe-filter-group]") {
+      return this.groups[0] ?? null;
+    }
+    return null;
+  }
+
+  querySelectorAll(selector: string): readonly (FakeCompoundFilterGroup | FakeCompoundFilterRow)[] {
+    if (selector === "[data-cf-frappe-filter-row]") {
+      return this.rows;
+    }
+    if (selector === "[data-cf-frappe-filter-group]") {
+      return this.groups;
+    }
+    return [];
+  }
+
+  closest(selector: string): FakeCompoundFilterGroup | null {
+    return selector === "[data-cf-frappe-filter-group]" ? this : null;
+  }
+
+  matches(selector: string): boolean {
+    return selector === "[data-cf-frappe-filter-group]";
+  }
+
+  remove(): void {
+    this.parentElement?.removeChild(this);
+    this.removed = true;
+  }
+}
+
+class FakeCompoundTemplate<T extends FakeCompoundFilterGroup | FakeCompoundFilterRow> {
+  readonly content: { readonly firstElementChild: T };
+
+  constructor(element: T) {
+    this.content = { firstElementChild: element };
   }
 }
 
 class FakeCompoundFilterBuilder {
-  readonly add = new FakeCompoundButton();
   readonly dataset = {
     filterFields: JSON.stringify([
       {
@@ -2866,30 +3076,62 @@ class FakeCompoundFilterBuilder {
     ])
   };
   readonly expression: FakeCompoundControl;
-  readonly match: FakeCompoundControl;
-  readonly rowsContainer = new FakeCompoundFilterRows(this);
-  readonly rows: FakeCompoundFilterRow[];
+  readonly groupTemplate = new FakeCompoundTemplate(new FakeCompoundFilterGroup());
+  readonly root: FakeCompoundFilterGroup;
+  readonly rowTemplate = new FakeCompoundTemplate(new FakeCompoundFilterRow("", "eq", ""));
 
   constructor(
     private readonly form: FakeForm,
     options: {
       readonly expression?: string;
+      readonly items?: readonly FakeCompoundFilterItem[];
       readonly match?: string;
       readonly rows?: readonly FakeCompoundFilterRow[];
     } = {}
   ) {
     this.expression = new FakeCompoundControl(options.expression ?? "");
-    this.match = new FakeCompoundControl(options.match ?? "all");
-    this.rows = [...(options.rows ?? [new FakeCompoundFilterRow("", "eq", "")])];
+    this.root = new FakeCompoundFilterGroup({
+      match: options.match ?? "all",
+      items: options.items ?? options.rows ?? [new FakeCompoundFilterRow("", "eq", "")]
+    });
+  }
+
+  get add(): FakeCompoundButton {
+    return this.root.addFilter;
+  }
+
+  get addGroup(): FakeCompoundButton {
+    return this.root.addGroup;
+  }
+
+  get match(): FakeCompoundControl {
+    return this.root.match;
+  }
+
+  get rows(): readonly FakeCompoundFilterRow[] {
+    return this.root.rows;
   }
 
   closest(selector: string): FakeForm | null {
     return selector === "form" ? this.form : null;
   }
 
-  querySelector(selector: string): FakeCompoundControl | FakeCompoundButton | FakeCompoundFilterRow | FakeCompoundFilterRows | null {
+  querySelector(
+    selector: string
+  ):
+    | FakeCompoundControl
+    | FakeCompoundButton
+    | FakeCompoundFilterGroup
+    | FakeCompoundFilterItems
+    | FakeCompoundFilterRow
+    | FakeCompoundTemplate<FakeCompoundFilterGroup>
+    | FakeCompoundTemplate<FakeCompoundFilterRow>
+    | null {
     if (selector === '[name="filter_expression"]') {
       return this.expression;
+    }
+    if (selector === "[data-cf-frappe-filter-group]") {
+      return this.root;
     }
     if (selector === "[data-cf-frappe-filter-match]") {
       return this.match;
@@ -2898,16 +3140,28 @@ class FakeCompoundFilterBuilder {
       return this.add;
     }
     if (selector === "[data-cf-frappe-filter-row]") {
-      return this.rows.find((row) => !row.removed) ?? null;
+      return this.rows[0] ?? null;
     }
-    if (selector === "[data-cf-frappe-filter-rows]") {
-      return this.rowsContainer;
+    if (selector === "[data-cf-frappe-filter-items]" || selector === "[data-cf-frappe-filter-rows]") {
+      return this.root.itemsContainer;
+    }
+    if (selector === "[data-cf-frappe-filter-row-template]") {
+      return this.rowTemplate;
+    }
+    if (selector === "[data-cf-frappe-filter-group-template]") {
+      return this.groupTemplate;
     }
     return null;
   }
 
-  querySelectorAll(selector: string): readonly FakeCompoundFilterRow[] {
-    return selector === "[data-cf-frappe-filter-row]" ? this.rows.filter((row) => !row.removed) : [];
+  querySelectorAll(selector: string): readonly (FakeCompoundFilterGroup | FakeCompoundFilterRow)[] {
+    if (selector === "[data-cf-frappe-filter-row]") {
+      return this.rows;
+    }
+    if (selector === "[data-cf-frappe-filter-group]") {
+      return [this.root, ...this.root.groups];
+    }
+    return [];
   }
 }
 
