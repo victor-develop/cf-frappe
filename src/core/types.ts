@@ -278,8 +278,29 @@ export type DocumentEventPayload =
       readonly userId: string;
       readonly email?: string;
       readonly roles: readonly string[];
-      readonly passwordHash: string;
+      readonly passwordHash?: string;
       readonly enabled: boolean;
+      readonly emailVerifiedAt?: string;
+    }
+  | {
+      readonly kind: "UserAuthProviderLinked";
+      readonly userId: string;
+      readonly provider: string;
+      readonly subject: string;
+      readonly email?: string;
+      readonly roles?: readonly string[];
+      readonly enabled?: boolean;
+      readonly emailVerifiedAt?: string | null;
+    }
+  | {
+      readonly kind: "UserAuthProviderSynced";
+      readonly userId: string;
+      readonly provider: string;
+      readonly subject: string;
+      readonly email?: string;
+      readonly roles?: readonly string[];
+      readonly enabled?: boolean;
+      readonly emailVerifiedAt?: string | null;
     }
   | {
       readonly kind: "UserPasswordChanged";

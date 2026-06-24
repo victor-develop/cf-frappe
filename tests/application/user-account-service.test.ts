@@ -145,6 +145,228 @@ describe("UserAccountService", () => {
     ]);
   });
 
+  it("creates passwordless provider-linked accounts from auth-provider sync events", async () => {
+    const events = new InMemoryEventStore();
+    const notifier = createInMemoryAccountRecoveryNotifier();
+    let currentTime = "2026-01-02T00:00:00.000Z";
+    const userAccounts = new UserAccountService({
+      events,
+      passwords: deterministicPasswords(),
+      recovery: notifier,
+      ids: deterministicIds(["create-1", "link-1"]),
+      clock: { now: () => currentTime }
+    });
+
+    const synced = await userAccounts.syncProvider({
+      actor: admin,
+      userId: "owner@example.com",
+      provider: "cloudflare-access",
+      subject: "access-subject-1",
+      email: " OWNER@EXAMPLE.COM ",
+      roles: ["User", "Task Manager"],
+      emailVerified: true
+    });
+
+    expect(synced).toEqual({
+      tenantId: "acme",
+      userId: "owner@example.com",
+      version: 2,
+      email: "owner@example.com",
+      emailVerifiedAt: "2026-01-02T00:00:00.000Z",
+      roles: ["Task Manager", "User"],
+      providers: [
+        {
+          provider: "cloudflare-access",
+          subject: "access-subject-1",
+          email: "owner@example.com",
+          roles: ["Task Manager", "User"],
+          enabled: true,
+          emailVerifiedAt: "2026-01-02T00:00:00.000Z",
+          linkedAt: "2026-01-02T00:00:00.000Z",
+          lastSyncedAt: "2026-01-02T00:00:00.000Z"
+        }
+      ],
+      enabled: true,
+      createdAt: "2026-01-02T00:00:00.000Z",
+      updatedAt: "2026-01-02T00:00:00.000Z"
+    });
+    await expect(
+      userAccounts.authenticate({ tenantId: "acme", userId: "owner@example.com", password: "secret-123" })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+    await expect(events.readStream(userAccountsStream("acme", "owner@example.com"))).resolves.toMatchObject([
+      {
+        id: "evt_create-1",
+        payload: {
+          kind: "UserAccountCreated",
+          userId: "owner@example.com",
+          email: "owner@example.com",
+          roles: ["Task Manager", "User"],
+          enabled: true,
+          emailVerifiedAt: "2026-01-02T00:00:00.000Z"
+        }
+      },
+      {
+        id: "evt_link-1",
+        payload: {
+          kind: "UserAuthProviderLinked",
+          provider: "cloudflare-access",
+          subject: "access-subject-1"
+        }
+      }
+    ]);
+    currentTime = "2026-01-03T00:00:00.000Z";
+    const duplicate = await userAccounts.syncProvider({
+      actor: admin,
+      userId: "owner@example.com",
+      provider: "cloudflare-access",
+      subject: "access-subject-1",
+      email: "owner@example.com",
+      roles: ["Task Manager", "User"],
+      emailVerified: true,
+      expectedVersion: 2
+    });
+    expect(duplicate).toMatchObject({
+      version: 2,
+      emailVerifiedAt: "2026-01-02T00:00:00.000Z",
+      providers: [{ lastSyncedAt: "2026-01-02T00:00:00.000Z" }]
+    });
+    await expect(events.readStream(userAccountsStream("acme", "owner@example.com"))).resolves.toHaveLength(2);
+    await expect(
+      userAccounts.requestPasswordReset({ tenantId: "acme", userId: "owner@example.com" })
+    ).resolves.toEqual({ tenantId: "acme", userId: "owner@example.com", delivered: false });
+    expect(notifier.passwordResetMessages).toEqual([]);
+  });
+
+  it("links and syncs provider claims onto existing accounts without repeating identical events", async () => {
+    const events = new InMemoryEventStore();
+    const userAccounts = new UserAccountService({
+      events,
+      passwords: deterministicPasswords(),
+      ids: deterministicIds(["create-1", "link-1", "sync-1"]),
+      clock: fixedClock("2026-01-02T00:00:00.000Z")
+    });
+    await userAccounts.create({
+      actor: admin,
+      userId: "owner@example.com",
+      email: "old@example.com",
+      password: "secret-123",
+      roles: ["User"]
+    });
+
+    const linked = await userAccounts.syncProvider({
+      actor: admin,
+      userId: "owner@example.com",
+      provider: "cloudflare-access",
+      subject: "access-subject-1",
+      email: "owner@example.com",
+      roles: ["Support"],
+      enabled: false,
+      expectedVersion: 1
+    });
+    const duplicate = await userAccounts.syncProvider({
+      actor: admin,
+      userId: "owner@example.com",
+      provider: "cloudflare-access",
+      subject: "access-subject-1",
+      email: "owner@example.com",
+      roles: ["Support"],
+      enabled: false,
+      expectedVersion: 2
+    });
+    const synced = await userAccounts.syncProvider({
+      actor: admin,
+      userId: "owner@example.com",
+      provider: "cloudflare-access",
+      subject: "access-subject-1",
+      roles: ["Support", "User"],
+      enabled: true,
+      emailVerified: true,
+      expectedVersion: 2
+    });
+
+    expect(linked).toMatchObject({
+      version: 2,
+      email: "owner@example.com",
+      roles: ["Support"],
+      enabled: false
+    });
+    expect(duplicate.version).toBe(2);
+    expect(synced).toMatchObject({
+      version: 3,
+      emailVerifiedAt: "2026-01-02T00:00:00.000Z",
+      roles: ["Support", "User"],
+      enabled: true,
+      providers: [
+        {
+          provider: "cloudflare-access",
+          subject: "access-subject-1",
+          roles: ["Support", "User"],
+          enabled: true
+        }
+      ]
+    });
+    await expect(events.readStream(userAccountsStream("acme", "owner@example.com"))).resolves.toMatchObject([
+      { payload: { kind: "UserAccountCreated" } },
+      { payload: { kind: "UserAuthProviderLinked", enabled: false, roles: ["Support"] } },
+      { payload: { kind: "UserAuthProviderSynced", enabled: true, roles: ["Support", "User"] } }
+    ]);
+  });
+
+  it("clears pending recovery challenges when provider sync disables an account", async () => {
+    const events = new InMemoryEventStore();
+    const notifier = createInMemoryAccountRecoveryNotifier();
+    const userAccounts = new UserAccountService({
+      events,
+      passwords: deterministicPasswords(),
+      recovery: notifier,
+      ids: deterministicIds(["create-1", "reset-request-1", "link-1", "sync-1"]),
+      recoveryTokens: deterministicIds(["reset-token"]),
+      clock: fixedClock("2026-01-02T00:00:00.000Z")
+    });
+    await userAccounts.create({
+      actor: admin,
+      userId: "owner@example.com",
+      email: "owner@example.com",
+      password: "secret-123",
+      roles: ["User"]
+    });
+    await expect(
+      userAccounts.requestPasswordReset({ tenantId: "acme", userId: "owner@example.com" })
+    ).resolves.toEqual({ tenantId: "acme", userId: "owner@example.com", delivered: true });
+
+    await userAccounts.syncProvider({
+      actor: admin,
+      userId: "owner@example.com",
+      provider: "cloudflare-access",
+      subject: "access-subject-1",
+      enabled: false,
+      expectedVersion: 2
+    });
+    await userAccounts.syncProvider({
+      actor: admin,
+      userId: "owner@example.com",
+      provider: "cloudflare-access",
+      subject: "access-subject-1",
+      enabled: true,
+      expectedVersion: 3
+    });
+
+    await expect(
+      userAccounts.resetPassword({
+        tenantId: "acme",
+        userId: "owner@example.com",
+        token: "tok_reset-token",
+        password: "secret-456"
+      })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+    await expect(events.readStream(userAccountsStream("acme", "owner@example.com"))).resolves.toMatchObject([
+      { payload: { kind: "UserAccountCreated" } },
+      { payload: { kind: "UserPasswordResetRequested" } },
+      { payload: { kind: "UserAuthProviderLinked", enabled: false } },
+      { payload: { kind: "UserAuthProviderSynced", enabled: true } }
+    ]);
+  });
+
   it("revalidates signed-session actors against the current account stream version", async () => {
     const events = new InMemoryEventStore();
     const userAccounts = new UserAccountService({

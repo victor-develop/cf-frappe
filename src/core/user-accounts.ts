@@ -9,6 +9,7 @@ export interface UserAccountState {
   readonly email?: string;
   readonly emailVerifiedAt?: string;
   readonly roles: readonly string[];
+  readonly providers: readonly UserAuthProviderLink[];
   readonly passwordHash?: string;
   readonly passwordReset?: UserAccountRecoveryChallenge;
   readonly emailVerification?: UserAccountEmailVerificationChallenge;
@@ -24,9 +25,21 @@ export interface UserAccount {
   readonly email?: string;
   readonly emailVerifiedAt?: string;
   readonly roles: readonly string[];
+  readonly providers?: readonly UserAuthProviderLink[];
   readonly enabled: boolean;
   readonly createdAt?: string;
   readonly updatedAt?: string;
+}
+
+export interface UserAuthProviderLink {
+  readonly provider: string;
+  readonly subject: string;
+  readonly email?: string;
+  readonly roles?: readonly string[];
+  readonly enabled?: boolean;
+  readonly emailVerifiedAt?: string;
+  readonly linkedAt: string;
+  readonly lastSyncedAt: string;
 }
 
 export interface UserAccountRecoveryChallenge {
@@ -50,6 +63,7 @@ export function foldUserAccount(
     version: 0,
     exists: false,
     roles: [],
+    providers: [],
     enabled: false
   };
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
@@ -65,10 +79,34 @@ export function foldUserAccount(
           version: event.sequence,
           exists: true,
           ...(event.payload.email === undefined ? {} : { email: event.payload.email }),
+          ...(event.payload.emailVerifiedAt === undefined ? {} : { emailVerifiedAt: event.payload.emailVerifiedAt }),
           roles: normalizeUserRoles(event.payload.roles),
-          passwordHash: event.payload.passwordHash,
+          ...(event.payload.passwordHash === undefined ? {} : { passwordHash: event.payload.passwordHash }),
+          providers: [],
           enabled: event.payload.enabled,
           createdAt: event.occurredAt,
+          updatedAt: event.occurredAt
+        };
+        break;
+      case "UserAuthProviderLinked":
+        if (event.payload.userId !== userId || !state.exists) {
+          break;
+        }
+        state = {
+          ...applyProviderAccountPatch(state, event.payload, event.occurredAt),
+          version: event.sequence,
+          providers: upsertProviderLink(state.providers, event.payload, event.occurredAt, event.occurredAt),
+          updatedAt: event.occurredAt
+        };
+        break;
+      case "UserAuthProviderSynced":
+        if (event.payload.userId !== userId || !state.exists) {
+          break;
+        }
+        state = {
+          ...applyProviderAccountPatch(state, event.payload, event.occurredAt),
+          version: event.sequence,
+          providers: upsertProviderLink(state.providers, event.payload, undefined, event.occurredAt),
           updatedAt: event.occurredAt
         };
         break;
@@ -233,6 +271,7 @@ export function publicUserAccount(state: UserAccountState): UserAccount {
     ...(state.email === undefined ? {} : { email: state.email }),
     ...(state.emailVerifiedAt === undefined ? {} : { emailVerifiedAt: state.emailVerifiedAt }),
     roles: state.roles,
+    ...(state.providers.length === 0 ? {} : { providers: state.providers }),
     enabled: state.enabled,
     ...(state.createdAt === undefined ? {} : { createdAt: state.createdAt }),
     ...(state.updatedAt === undefined ? {} : { updatedAt: state.updatedAt })
@@ -245,4 +284,91 @@ export function normalizeUserRoles(roles: readonly string[]): readonly string[] 
 
 function uniqueSorted(values: readonly string[]): readonly string[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
+}
+
+function applyProviderAccountPatch(
+  state: UserAccountState,
+  payload: {
+    readonly email?: string;
+    readonly roles?: readonly string[];
+    readonly enabled?: boolean;
+    readonly emailVerifiedAt?: string | null;
+  },
+  occurredAt: string
+): UserAccountState {
+  let next: UserAccountState = {
+    ...state,
+    ...(payload.email === undefined ? {} : { email: payload.email }),
+    ...(payload.roles === undefined ? {} : { roles: normalizeUserRoles(payload.roles) }),
+    ...(payload.enabled === undefined ? {} : { enabled: payload.enabled }),
+    updatedAt: occurredAt
+  };
+  if (payload.enabled === false) {
+    const {
+      passwordReset: _passwordReset,
+      emailVerification: _emailVerification,
+      ...withoutChallenges
+    } = next;
+    next = withoutChallenges;
+  }
+  if (!Object.prototype.hasOwnProperty.call(payload, "emailVerifiedAt")) {
+    return next;
+  }
+  if (payload.emailVerifiedAt === null) {
+    const { emailVerifiedAt: _emailVerifiedAt, ...withoutEmailVerifiedAt } = next;
+    return withoutEmailVerifiedAt;
+  }
+  return {
+    ...next,
+    ...(payload.emailVerifiedAt === undefined ? {} : { emailVerifiedAt: payload.emailVerifiedAt })
+  };
+}
+
+function upsertProviderLink(
+  providers: readonly UserAuthProviderLink[],
+  payload: {
+    readonly provider: string;
+    readonly subject: string;
+    readonly email?: string;
+    readonly roles?: readonly string[];
+    readonly enabled?: boolean;
+    readonly emailVerifiedAt?: string | null;
+  },
+  linkedAt: string | undefined,
+  lastSyncedAt: string
+): readonly UserAuthProviderLink[] {
+  const current = providers.find(
+    (provider) => provider.provider === payload.provider && provider.subject === payload.subject
+  );
+  const link: UserAuthProviderLink = {
+    provider: payload.provider,
+    subject: payload.subject,
+    ...(payload.email === undefined ? (current?.email === undefined ? {} : { email: current.email }) : { email: payload.email }),
+    ...(payload.roles === undefined
+      ? (current?.roles === undefined ? {} : { roles: current.roles })
+      : { roles: normalizeUserRoles(payload.roles) }),
+    ...(payload.enabled === undefined
+      ? (current?.enabled === undefined ? {} : { enabled: current.enabled })
+      : { enabled: payload.enabled }),
+    ...(providerLinkEmailVerifiedAt(current, payload)),
+    linkedAt: current?.linkedAt ?? linkedAt ?? lastSyncedAt,
+    lastSyncedAt
+  };
+  return [
+    ...providers.filter((provider) => provider.provider !== payload.provider || provider.subject !== payload.subject),
+    link
+  ].sort((left, right) => `${left.provider}:${left.subject}`.localeCompare(`${right.provider}:${right.subject}`));
+}
+
+function providerLinkEmailVerifiedAt(
+  current: UserAuthProviderLink | undefined,
+  payload: { readonly emailVerifiedAt?: string | null }
+): { readonly emailVerifiedAt?: string } {
+  if (!Object.prototype.hasOwnProperty.call(payload, "emailVerifiedAt")) {
+    return current?.emailVerifiedAt === undefined ? {} : { emailVerifiedAt: current.emailVerifiedAt };
+  }
+  if (payload.emailVerifiedAt === null || payload.emailVerifiedAt === undefined) {
+    return {};
+  }
+  return { emailVerifiedAt: payload.emailVerifiedAt };
 }

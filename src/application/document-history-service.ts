@@ -288,6 +288,8 @@ function diffEvent(
     case "UserPermissionAllowed":
     case "UserPermissionRevoked":
     case "UserAccountCreated":
+    case "UserAuthProviderLinked":
+    case "UserAuthProviderSynced":
     case "UserPasswordChanged":
     case "UserPasswordResetRequested":
     case "UserPasswordResetCompleted":
@@ -396,6 +398,10 @@ function summarize(payload: DocumentEventPayload): string {
       return `Revoked ${payload.userId} access to ${payload.targetDoctype}/${payload.targetName}`;
     case "UserAccountCreated":
       return `Created user account ${payload.userId}`;
+    case "UserAuthProviderLinked":
+      return `Linked ${payload.provider} provider for ${payload.userId}`;
+    case "UserAuthProviderSynced":
+      return `Synced ${payload.provider} provider for ${payload.userId}`;
     case "UserPasswordChanged":
       return `Changed password for ${payload.userId}`;
     case "UserPasswordResetRequested":

@@ -1036,6 +1036,31 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     }
   });
 
+  app.post("/desk/admin/users/provider-sync", async (c) => {
+    const userAccounts = requireUserAccounts(options);
+    const actor = await options.actor(c.req.raw);
+    userAccounts.authorizeAdministration(actor);
+    let form: ParsedDeskSyncAuthProviderAccount | undefined;
+    try {
+      form = await parseDeskSyncAuthProviderAccount(c.req.raw);
+      await userAccounts.syncProvider({
+        actor,
+        userId: form.userId,
+        provider: form.provider,
+        subject: form.subject,
+        ...(form.email === undefined ? {} : { email: form.email }),
+        ...(form.roles.length === 0 ? {} : { roles: form.roles }),
+        ...(form.enabled === undefined ? {} : { enabled: form.enabled }),
+        ...(form.emailVerified === undefined ? {} : { emailVerified: form.emailVerified }),
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(`/desk/admin/users?user=${encodeURIComponent(form.userId)}`, 303);
+    } catch (error) {
+      return renderDeskUserAccountFailure(options, actor, userAccounts, form?.userId ?? "", error);
+    }
+  });
+
   app.post("/desk/admin/users/profile", async (c) => {
     const userAccounts = requireUserAccounts(options);
     const userProfiles = requireUserProfiles(options);
@@ -3295,6 +3320,17 @@ interface ParsedDeskChangeUserRoles {
   readonly expectedVersion?: number;
 }
 
+interface ParsedDeskSyncAuthProviderAccount {
+  readonly userId: string;
+  readonly provider: string;
+  readonly subject: string;
+  readonly email?: string;
+  readonly roles: readonly string[];
+  readonly enabled?: boolean;
+  readonly emailVerified?: boolean;
+  readonly expectedVersion?: number;
+}
+
 interface ParsedDeskChangeUserProfile {
   readonly userId: string;
   readonly profile: UserProfileInput;
@@ -3842,6 +3878,24 @@ async function parseDeskChangeUserRoles(request: Request): Promise<ParsedDeskCha
   return {
     userId: form.get("user") ?? "",
     roles: commaListFormValue(form.get("roles")),
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
+async function parseDeskSyncAuthProviderAccount(request: Request): Promise<ParsedDeskSyncAuthProviderAccount> {
+  const form = await readUrlEncodedDeskForm(request);
+  const email = stringSearchParamValue(form, "email");
+  const enabled = optionalBooleanSearchParamValue(form, "enabled", "enabled");
+  const emailVerified = optionalBooleanSearchParamValue(form, "emailVerified", "emailVerified");
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  return {
+    userId: form.get("user") ?? "",
+    provider: form.get("provider") ?? "",
+    subject: form.get("subject") ?? "",
+    ...(email === undefined ? {} : { email }),
+    roles: commaListFormValue(form.get("roles")),
+    ...(enabled === undefined ? {} : { enabled }),
+    ...(emailVerified === undefined ? {} : { emailVerified }),
     ...(expectedVersion !== undefined ? { expectedVersion } : {})
   };
 }

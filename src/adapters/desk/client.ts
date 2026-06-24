@@ -173,6 +173,10 @@ export function renderDeskClientScript(): string {
     return withQuery("/api/users/" + encodePart(userId) + "/profile", tenantParams(options || {}));
   }
 
+  function accountPath(userId, action, options) {
+    return withQuery("/api/users/" + encodePart(userId) + (action === undefined ? "" : "/" + action), tenantParams(options || {}));
+  }
+
   function notificationActionPath(notificationId, action, options) {
     return withQuery("/api/notifications/" + encodePart(notificationId) + "/" + action, notificationCommandParams(options || {}));
   }
@@ -1358,6 +1362,17 @@ export function renderDeskClientScript(): string {
       },
       requestPasswordReset: function (input) {
         return request("/api/auth/password-reset/request", { method: "POST", body: input || {} }).then(unwrapData);
+      }
+    }),
+    accounts: Object.freeze({
+      get: function (userId, options) {
+        return request(accountPath(userId, undefined, options || {})).then(unwrapData);
+      },
+      syncProvider: function (userId, input, options) {
+        return request(accountPath(userId, "provider-sync", options || {}), {
+          method: "POST",
+          body: commandBody(input, options)
+        }).then(unwrapData);
       }
     }),
     linkOptions: function (doctype, field, params) {

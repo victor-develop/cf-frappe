@@ -19,6 +19,14 @@ interface DeskClientRuntime {
     readonly requestEmailVerification: (input: Record<string, unknown>) => Promise<unknown>;
     readonly requestPasswordReset: (input: Record<string, unknown>) => Promise<unknown>;
   };
+  readonly accounts: {
+    readonly get: (userId: string, options?: { readonly tenant?: string }) => Promise<unknown>;
+    readonly syncProvider: (
+      userId: string,
+      input: Record<string, unknown>,
+      options?: { readonly expectedVersion?: number; readonly tenant?: string }
+    ) => Promise<unknown>;
+  };
   readonly audit: {
     readonly deleted: (doctype: string, name: string, options?: Record<string, unknown>) => Promise<unknown>;
     readonly events: (options?: Record<string, unknown>) => Promise<unknown>;
@@ -1044,6 +1052,43 @@ describe("Desk client runtime", () => {
       JSON.stringify({ userId: "owner@example.com", token: "email-token", tenantId: "acme" }),
       undefined
     ]);
+  });
+
+  it("wraps same-origin account provider sync APIs", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { userId: "owner@example.com" } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.accounts.get("owner@example.com", { tenant: "acme/east" })).resolves.toEqual({
+      userId: "owner@example.com"
+    });
+    await runtime.accounts.syncProvider(
+      "owner@example.com",
+      {
+        provider: "cloudflare-access",
+        subject: "access-subject-1",
+        email: "owner@example.com",
+        roles: ["User"],
+        expectedVersion: 1
+      },
+      { expectedVersion: 7, tenant: "acme/east" }
+    );
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/users/owner%40example.com?tenant=acme%2Feast",
+      "POST /api/users/owner%40example.com/provider-sync?tenant=acme%2Feast"
+    ]);
+    expect(calls[1]?.init.body).toBe(JSON.stringify({
+      provider: "cloudflare-access",
+      subject: "access-subject-1",
+      email: "owner@example.com",
+      roles: ["User"],
+      expectedVersion: 7
+    }));
   });
 
   it("wraps audit search and deleted recovery APIs without browser-side validation", async () => {

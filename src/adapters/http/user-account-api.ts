@@ -72,6 +72,27 @@ export function createUserAccountApi(options: UserAccountApiOptions): Hono {
     return c.json({ data });
   });
 
+  app.post("/api/users/:userId/provider-sync", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const tenantId = c.req.query("tenant");
+    options.userAccounts.authorizeAdministration(actor, tenantId);
+    const body = await readJsonObject(c.req.raw, { maxJsonBytes });
+    const data = await options.userAccounts.syncProvider({
+      actor,
+      userId: c.req.param("userId"),
+      provider: requiredString(body.provider, "provider"),
+      subject: requiredString(body.subject, "subject"),
+      ...(body.email === undefined ? {} : { email: requiredString(body.email, "email") }),
+      ...(body.roles === undefined ? {} : { roles: stringArray(body.roles, "roles") }),
+      ...(body.enabled === undefined ? {} : { enabled: booleanValue(body.enabled, "enabled") }),
+      ...(body.emailVerified === undefined ? {} : { emailVerified: booleanValue(body.emailVerified, "emailVerified") }),
+      ...(body.expectedVersion === undefined ? {} : { expectedVersion: integerValue(body.expectedVersion, "expectedVersion") }),
+      ...(tenantId === undefined ? {} : { tenantId }),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data });
+  });
+
   app.post("/api/users/:userId/enable", async (c) => {
     const actor = await options.actor(c.req.raw);
     const tenantId = c.req.query("tenant");

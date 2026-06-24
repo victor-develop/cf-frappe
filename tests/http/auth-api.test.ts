@@ -134,6 +134,56 @@ describe("auth and user account api", () => {
     await expect(enabled.json()).resolves.toMatchObject({ data: { version: 5, enabled: true } });
   });
 
+  it("syncs auth-provider accounts through the user account admin api", async () => {
+    const { app, services } = makeAuthApp();
+
+    const synced = await app.request("/api/users/owner%40example.com/provider-sync?tenant=acme", {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        provider: "cloudflare-access",
+        subject: "access-subject-1",
+        email: "OWNER@EXAMPLE.COM",
+        roles: ["User", "Task Manager"],
+        enabled: true,
+        emailVerified: true,
+        expectedVersion: 0
+      })
+    });
+
+    expect(synced.status).toBe(200);
+    await expect(synced.json()).resolves.toMatchObject({
+      data: {
+        userId: "owner@example.com",
+        version: 2,
+        email: "owner@example.com",
+        emailVerifiedAt: now,
+        roles: ["Task Manager", "User"],
+        providers: [
+          {
+            provider: "cloudflare-access",
+            subject: "access-subject-1"
+          }
+        ],
+        enabled: true
+      }
+    });
+    await expect(services.events.readStream(userAccountsStream("acme", "owner@example.com"))).resolves.toMatchObject([
+      { payload: { kind: "UserAccountCreated" } },
+      {
+        payload: { kind: "UserAuthProviderLinked" },
+        metadata: { url: "http://localhost/api/users/owner%40example.com/provider-sync?tenant=acme" }
+      }
+    ]);
+
+    const login = await app.request("/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId: "owner@example.com", password: "secret-123", tenantId: "acme" })
+    });
+    expect(login.status).toBe(403);
+  });
+
   it("maps auth route validation, permission, and body-limit failures to JSON errors", async () => {
     const { app } = makeAuthApp(40);
     const denied = await app.request("/api/users/owner%40example.com", {

@@ -16,6 +16,7 @@ import {
   userAccountActor,
   type UserAccount,
   type UserAccountEmailVerificationChallenge,
+  type UserAuthProviderLink,
   type UserAccountRecoveryChallenge,
   type UserAccountState
 } from "../core/user-accounts.js";
@@ -31,6 +32,7 @@ const DEFAULT_PASSWORD_RESET_EXPIRY_SECONDS = 3_600;
 const DEFAULT_EMAIL_VERIFICATION_EXPIRY_SECONDS = 86_400;
 const MAX_ACCOUNT_RECOVERY_EXPIRY_SECONDS = 604_800;
 const RECOVERY_ACTOR_ID = "anonymous";
+const DEFAULT_PROVIDER_ROLE = "User";
 
 export interface UserAccountServiceOptions {
   readonly events: EventStore;
@@ -79,6 +81,20 @@ export interface ChangeUserRolesCommand {
 export interface SetUserAccountEnabledCommand {
   readonly actor: Actor;
   readonly userId: string;
+  readonly tenantId?: TenantId;
+  readonly expectedVersion?: number;
+  readonly metadata?: DocumentData;
+}
+
+export interface SyncAuthProviderAccountCommand {
+  readonly actor: Actor;
+  readonly provider: string;
+  readonly subject: string;
+  readonly userId?: string;
+  readonly email?: string;
+  readonly roles?: readonly string[];
+  readonly enabled?: boolean;
+  readonly emailVerified?: boolean;
   readonly tenantId?: TenantId;
   readonly expectedVersion?: number;
   readonly metadata?: DocumentData;
@@ -268,6 +284,95 @@ export class UserAccountService {
     return this.changeEnabled(command, false);
   }
 
+  async syncProvider(command: SyncAuthProviderAccountCommand): Promise<UserAccount> {
+    this.ensureAdmin(command.actor);
+    const tenantId = resolveActorTenant(command.actor, command.tenantId);
+    const provider = normalizeRequired(command.provider, "Provider");
+    const subject = normalizeRequired(command.subject, "Provider subject");
+    const email = normalizeOptionalEmail(command.email);
+    const userId = normalizeRequired(command.userId ?? email ?? `${provider}:${subject}`, "User id");
+    const roles = command.roles === undefined ? undefined : normalizeRequiredRoles(command.roles);
+    const state = await this.stateFor(tenantId, userId);
+    ensureExpectedVersion(state, command.expectedVersion);
+    const verifiedPatch = emailVerificationPatch(
+      command.emailVerified,
+      email ?? state.email,
+      state.email,
+      state.emailVerifiedAt,
+      this.clock.now()
+    );
+
+    if (!state.exists) {
+      const createdRoles = roles ?? normalizeRequiredRoles([DEFAULT_PROVIDER_ROLE]);
+      const enabled = command.enabled ?? true;
+      await this.validateRoles(tenantId, createdRoles);
+      const createdPayload = {
+        kind: "UserAccountCreated",
+        userId,
+        ...(email === undefined ? {} : { email }),
+        roles: createdRoles,
+        enabled,
+        ...(typeof verifiedPatch === "string" ? { emailVerifiedAt: verifiedPatch } : {})
+      } satisfies NewDomainEvent["payload"];
+      const linkedPayload = {
+        kind: "UserAuthProviderLinked",
+        userId,
+        provider,
+        subject,
+        ...(email === undefined ? {} : { email }),
+        roles: createdRoles,
+        enabled,
+        ...(verifiedPatch === undefined ? {} : { emailVerifiedAt: verifiedPatch })
+      } satisfies NewDomainEvent["payload"];
+      const saved = await this.appendEvents({
+        tenantId,
+        stream: userAccountsStream(tenantId, userId),
+        expectedVersion: state.version,
+        documentName: userId,
+        actorId: command.actor.id,
+        metadata: command.metadata,
+        events: [
+          { type: "UserAccountCreated", payload: createdPayload },
+          { type: "UserAuthProviderLinked", payload: linkedPayload }
+        ]
+      });
+      return publicUserAccount(foldUserAccount(tenantId, userId, saved));
+    }
+
+    if (roles !== undefined) {
+      await this.validateRoles(tenantId, roles);
+    }
+    const link = providerLink(state.providers, provider, subject);
+    const payload = {
+      kind: link === undefined ? "UserAuthProviderLinked" : "UserAuthProviderSynced",
+      userId,
+      provider,
+      subject,
+      ...(email === undefined ? {} : { email }),
+      ...(roles === undefined ? {} : { roles }),
+      ...(command.enabled === undefined ? {} : { enabled: command.enabled }),
+      ...(verifiedPatch === undefined ? {} : { emailVerifiedAt: verifiedPatch })
+    } satisfies NewDomainEvent["payload"];
+    if (link !== undefined && !providerSyncChangesState(state, link, payload)) {
+      return publicUserAccount(state);
+    }
+    const saved = await this.appendEvents({
+      tenantId,
+      stream: userAccountsStream(tenantId, userId),
+      expectedVersion: state.version,
+      documentName: userId,
+      actorId: command.actor.id,
+      metadata: command.metadata,
+      events: [
+        {
+          type: link === undefined ? "UserAuthProviderLinked" : "UserAuthProviderSynced",
+          payload
+        }
+      ]
+    });
+    return this.refold(tenantId, userId, state.version, saved);
+  }
+
   async authenticate(command: AuthenticateUserAccountCommand): Promise<Actor> {
     return (await this.authenticateAccount(command)).actor;
   }
@@ -296,7 +401,7 @@ export class UserAccountService {
     const state = await this.stateFor(tenantId, userId);
     const recovery = this.recovery;
     const email = state.email;
-    if (!state.exists || !state.enabled || email === undefined || recovery === undefined) {
+    if (!state.exists || !state.enabled || state.passwordHash === undefined || email === undefined || recovery === undefined) {
       return { tenantId, userId, delivered: false };
     }
     const token = this.recoveryTokens.next("tok_");
@@ -350,6 +455,9 @@ export class UserAccountService {
     const token = normalizeRecoveryToken(command.token);
     const password = normalizePassword(command.password);
     const state = await this.stateFor(tenantId, userId);
+    if (state.passwordHash === undefined) {
+      throw invalidRecoveryToken();
+    }
     await this.ensureValidRecoveryChallenge(state, state.passwordReset, token);
     const passwordHash = await this.passwords.hash(password);
     const saved = await this.appendEvent({
@@ -514,19 +622,46 @@ export class UserAccountService {
     readonly metadata: DocumentData | undefined;
     readonly payload: TPayload;
   }) {
-    const event: NewDomainEvent<TPayload> = {
-      id: this.ids.next("evt_"),
+    return this.appendEvents({
       tenantId: options.tenantId,
       stream: options.stream,
-      type: options.type,
-      doctype: "__UserAccounts",
+      expectedVersion: options.expectedVersion,
       documentName: options.documentName,
       actorId: options.actorId,
-      occurredAt: this.clock.now(),
-      payload: options.payload,
-      metadata: options.metadata ?? {}
-    };
-    return this.events.append(options.stream, options.expectedVersion, [event]);
+      metadata: options.metadata,
+      events: [{ type: options.type, payload: options.payload }]
+    });
+  }
+
+  private async appendEvents(options: {
+    readonly tenantId: TenantId;
+    readonly stream: string;
+    readonly expectedVersion: number;
+    readonly documentName: string;
+    readonly actorId: string;
+    readonly metadata: DocumentData | undefined;
+    readonly events: readonly {
+      readonly type: string;
+      readonly payload: NewDomainEvent["payload"];
+    }[];
+  }) {
+    const occurredAt = this.clock.now();
+    return this.events.append(
+      options.stream,
+      options.expectedVersion,
+      options.events.map<NewDomainEvent>((item) => ({
+        id: this.ids.next("evt_"),
+        tenantId: options.tenantId,
+        stream: options.stream,
+        type: item.type,
+        doctype: "__UserAccounts",
+        documentName: options.documentName,
+        actorId: options.actorId,
+        occurredAt,
+        payload: item.payload,
+        metadata: options.metadata ?? {}
+      }))
+    );
   }
 
   private async markRecoveryDeliveryFailed<TPayload extends NewDomainEvent["payload"]>(options: {
@@ -683,6 +818,54 @@ function ensureExpectedVersion(state: UserAccountState, expectedVersion: number 
   if (expectedVersion !== undefined && state.version !== expectedVersion) {
     throw conflict(`Expected user account '${state.userId}' at version ${expectedVersion}, found ${state.version}`);
   }
+}
+
+function emailVerificationPatch(
+  emailVerified: boolean | undefined,
+  effectiveEmail: string | undefined,
+  currentEmail: string | undefined,
+  currentEmailVerifiedAt: string | undefined,
+  now: string
+): string | null | undefined {
+  if (emailVerified === undefined) {
+    return undefined;
+  }
+  if (!emailVerified) {
+    return null;
+  }
+  if (effectiveEmail === undefined) {
+    throw badRequest("email is required when emailVerified is true");
+  }
+  return currentEmail === effectiveEmail ? currentEmailVerifiedAt ?? now : now;
+}
+
+function providerLink(
+  providers: readonly UserAuthProviderLink[],
+  provider: string,
+  subject: string
+): UserAuthProviderLink | undefined {
+  return providers.find((link) => link.provider === provider && link.subject === subject);
+}
+
+function providerSyncChangesState(
+  state: UserAccountState,
+  link: UserAuthProviderLink,
+  payload: Extract<NewDomainEvent["payload"], { readonly kind: "UserAuthProviderSynced" | "UserAuthProviderLinked" }>
+): boolean {
+  if (payload.email !== undefined && (state.email !== payload.email || link.email !== payload.email)) {
+    return true;
+  }
+  if (payload.roles !== undefined && (!arrayEquals(state.roles, payload.roles) || !arrayEquals(link.roles ?? [], payload.roles))) {
+    return true;
+  }
+  if (payload.enabled !== undefined && (state.enabled !== payload.enabled || link.enabled !== payload.enabled)) {
+    return true;
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "emailVerifiedAt")) {
+    const next = payload.emailVerifiedAt === null ? undefined : payload.emailVerifiedAt;
+    return state.emailVerifiedAt !== next || link.emailVerifiedAt !== next;
+  }
+  return false;
 }
 
 function arrayEquals(left: readonly string[], right: readonly string[]): boolean {

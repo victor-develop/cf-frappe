@@ -1121,6 +1121,7 @@ export function renderUserAccountAdmin(state: UserAccountAdminState): string {
   const account = state.account;
   const selectedUserId = account?.userId ?? state.selectedUserId;
   const createUserId = account ? "" : selectedUserId;
+  const providerSyncForm = renderUserAuthProviderSyncForm(account, selectedUserId);
   const rows = account
     ? `<tr>
         <td>${escapeHtml(account.userId)}</td>
@@ -1178,6 +1179,7 @@ export function renderUserAccountAdmin(state: UserAccountAdminState): string {
     </div>
     <div class="actions"><button class="button primary" type="submit">Create</button></div>
   </form>
+  ${providerSyncForm}
   <section class="panel">
     <div class="table-wrap">
       <table>
@@ -1187,6 +1189,27 @@ export function renderUserAccountAdmin(state: UserAccountAdminState): string {
     </div>
   </section>
   ${accountTools}`;
+}
+
+function renderUserAuthProviderSyncForm(account: UserAccount | undefined, selectedUserId: string): string {
+  const userId = account?.userId ?? selectedUserId;
+  const expectedVersion = account?.version ?? 0;
+  const roles = account?.roles.join(", ") ?? "";
+  const email = account?.email ?? "";
+  return `<form class="panel form" method="post" action="/desk/admin/users/provider-sync">
+    <input type="hidden" name="expectedVersion" value="${String(expectedVersion)}">
+    <div class="form-head"><h2>Sync Auth Provider</h2><p>v${String(expectedVersion)}</p></div>
+    <div class="fields">
+      <label class="field"><span>User</span><input name="user" value="${escapeHtml(userId)}"></label>
+      <label class="field"><span>Provider</span><input name="provider" value=""></label>
+      <label class="field"><span>Subject</span><input name="subject" value=""></label>
+      <label class="field"><span>Email</span><input name="email" type="email" value="${escapeHtml(email)}"></label>
+      <label class="field"><span>Roles</span><input name="roles" value="${escapeHtml(roles)}"></label>
+      <label class="field"><span>Status</span><select name="enabled"><option value="" selected>Keep</option><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
+      <label class="field"><span>Email Verified</span><select name="emailVerified"><option value="" selected>Keep</option><option value="true">Verified</option><option value="false">Unverified</option></select></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Sync Provider</button></div>
+  </form>`;
 }
 
 function renderUserProfileForm(account: UserAccount, profile: UserProfileState): string {

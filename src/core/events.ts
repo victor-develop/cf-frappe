@@ -103,6 +103,8 @@ export function foldDocumentFrom(
       case "UserPermissionAllowed":
       case "UserPermissionRevoked":
       case "UserAccountCreated":
+      case "UserAuthProviderLinked":
+      case "UserAuthProviderSynced":
       case "UserPasswordChanged":
       case "UserPasswordResetRequested":
       case "UserPasswordResetCompleted":

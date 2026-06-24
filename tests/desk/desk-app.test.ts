@@ -3488,6 +3488,51 @@ describe("Desk app", () => {
     });
   });
 
+  it("syncs auth-provider accounts from the Desk account admin surface", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
+    const { app, services } = makeAccountDesk(admin);
+
+    const page = await app.request("/desk/admin/users?user=owner%40example.com");
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain("Sync Auth Provider");
+    expect(html).toContain('action="/desk/admin/users/provider-sync"');
+
+    const synced = await app.request("/desk/admin/users/provider-sync", {
+      method: "POST",
+      body: new URLSearchParams({
+        user: owner.id,
+        provider: "cloudflare-access",
+        subject: "access-subject-1",
+        email: "OWNER@EXAMPLE.COM",
+        roles: "User, Task Manager",
+        enabled: "true",
+        emailVerified: "true",
+        expectedVersion: "0"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(synced.status).toBe(303);
+    expect(synced.headers.get("location")).toBe("/desk/admin/users?user=owner%40example.com");
+    await expect(services.userAccounts.get(admin, owner.id)).resolves.toMatchObject({
+      version: 2,
+      email: "owner@example.com",
+      emailVerifiedAt: now,
+      roles: ["Task Manager", "User"],
+      providers: [
+        {
+          provider: "cloudflare-access",
+          subject: "access-subject-1"
+        }
+      ],
+      enabled: true
+    });
+    await expect(
+      services.userAccounts.authenticate({ tenantId: "acme", userId: owner.id, password: "secret-123" })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+  });
+
   it("requires user-account administrators for the Desk account surface", async () => {
     const { app } = makeAccountDesk(owner);
 

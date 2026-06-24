@@ -34,6 +34,8 @@ const DOCUMENT_EVENT_KINDS = new Set<DocumentEventPayload["kind"]>([
   "UserPermissionAllowed",
   "UserPermissionRevoked",
   "UserAccountCreated",
+  "UserAuthProviderLinked",
+  "UserAuthProviderSynced",
   "UserPasswordChanged",
   "UserPasswordResetRequested",
   "UserPasswordResetCompleted",
@@ -237,7 +239,7 @@ function redactSensitiveAuditPayload(event: DomainEvent): DomainEvent {
         ...event,
         payload: {
           ...event.payload,
-          passwordHash: "[redacted]"
+          ...(event.payload.passwordHash === undefined ? {} : { passwordHash: "[redacted]" })
         }
       };
     case "UserPasswordChanged":
