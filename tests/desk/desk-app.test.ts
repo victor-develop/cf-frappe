@@ -2578,6 +2578,17 @@ describe("Desk app", () => {
     expect(compoundHtml).toContain("Desk Low");
     expect(compoundHtml).not.toContain("Desk Empty Body");
     expect(compoundHtml).toContain('name="filter_expression"');
+    expect(compoundHtml).toContain("data-cf-frappe-compound-filter-builder");
+    expect(compoundHtml).toContain("data-cf-frappe-filter-row");
+    expect(compoundHtml).toContain('data-cf-frappe-filter-field><option value=""></option><option value="title">title</option><option value="priority" selected>priority</option>');
+    expect(compoundHtml).toContain('data-cf-frappe-filter-operator><option value="eq" selected>equals</option>');
+    expect(compoundHtml).toContain('data-cf-frappe-filter-value type="text" value="High"');
+    expect(compoundHtml).toContain('<option value="count" selected>count</option>');
+    expect(compoundHtml).toContain('<option value="between" selected>between</option>');
+    expect(compoundHtml).toContain('<option value="not_between">not between</option>');
+    expect(compoundHtml).toContain('data-cf-frappe-filter-value type="text" value="1, 1"');
+    expect(compoundHtml).toContain('data-cf-frappe-add-filter>Add condition</button>');
+    expect(compoundHtml).toContain('data-cf-frappe-filter-match><option value="all">All</option><option value="any" selected>Any</option>');
     expect(compoundHtml).toContain("&quot;match&quot;: &quot;any&quot;");
     expect(compoundHtml).toContain("<strong>Any</strong>");
     expect(compoundHtml).toContain("priority eq High");

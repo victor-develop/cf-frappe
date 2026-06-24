@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the nested compound list-filter expression slice:
+As of the generated compound list-filter builder slice:
 
 - Vitest files: `88`
-- Vitest cases: `951`
+- Vitest cases: `955`
 
 ## Implication
 

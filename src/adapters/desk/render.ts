@@ -10,6 +10,7 @@ import {
   type JsonValue,
   type LinkOption,
   type ListDocumentsFilter,
+  type ListFilterBuilderField,
   type ListFilterExpression,
   type ListFilterOperator,
   type ResolvedFormSection,
@@ -69,6 +70,11 @@ import {
 type ReportChartPointResult = ReportRunResult["charts"][number]["points"][number];
 
 const REPORT_BUILDER_FORMULA_NESTED_LEVELS = 2;
+
+interface CompoundFilterVisualState {
+  readonly match: "all" | "any";
+  readonly rows: readonly ListDocumentsFilter[];
+}
 
 export type FormLinkOptions = Readonly<Record<string, readonly LinkOption[]>>;
 export type FormTableDefinitions = Readonly<Record<string, DocTypeDefinition>>;
@@ -2428,18 +2434,114 @@ function renderCompoundFilterBuilder(
     return "";
   }
   const value = expression === undefined ? "" : JSON.stringify(expression, null, 2);
-  const fields = listView.filterBuilderFields
-    .map((field) => {
-      const operators = field.operators.map((operator) => operator.operator).join(", ");
-      return `<li><span>${escapeHtml(field.field)}</span><small>${escapeHtml(operators)}</small></li>`;
-    })
+  const visualState = compoundFilterVisualState(expression);
+  const rows = (visualState.rows.length > 0 ? visualState.rows : [undefined])
+    .map((filter) => renderCompoundFilterRow(listView.filterBuilderFields, filter))
     .join("");
-  return `<fieldset class="compound-filter-builder">
+  return `<fieldset class="compound-filter-builder" data-cf-frappe-compound-filter-builder data-filter-fields="${escapeHtml(JSON.stringify(listView.filterBuilderFields))}">
     <legend>Compound filters</legend>
-    <label class="field wide" for="filter-expression"><span>Expression</span><textarea id="filter-expression" name="filter_expression" rows="5">${escapeHtml(value)}</textarea></label>
-    <ul class="filter-builder-fields">${fields}</ul>
+    <div class="compound-filter-visual">
+      <label class="field compact" for="filter-expression-match"><span>Match</span><select id="filter-expression-match" data-cf-frappe-filter-match>${renderCompoundFilterMatchOptions(visualState.match)}</select></label>
+      <div class="compound-filter-rows" data-cf-frappe-filter-rows>${rows}</div>
+      <button class="button" type="button" data-cf-frappe-add-filter>Add condition</button>
+    </div>
+    <label class="field wide" for="filter-expression"><span>Advanced JSON</span><textarea id="filter-expression" name="filter_expression" rows="5">${escapeHtml(value)}</textarea></label>
     ${expression === undefined ? "" : `<div class="filter-expression-preview">${renderListFilterExpression(expression)}</div>`}
   </fieldset>`;
+}
+
+function compoundFilterVisualState(expression: ListFilterExpression | undefined): CompoundFilterVisualState {
+  if (expression === undefined) {
+    return { match: "all", rows: [] };
+  }
+  if (!isListFilterGroup(expression)) {
+    return { match: "all", rows: [expression] };
+  }
+  if (expression.filters.some(isListFilterGroup)) {
+    return { match: expression.match, rows: [] };
+  }
+  return {
+    match: expression.match,
+    rows: expression.filters.filter((filter): filter is ListDocumentsFilter => !isListFilterGroup(filter))
+  };
+}
+
+function renderCompoundFilterMatchOptions(match: "all" | "any"): string {
+  return [
+    { value: "all", label: "All" },
+    { value: "any", label: "Any" }
+  ]
+    .map((option) => `<option value="${option.value}"${option.value === match ? " selected" : ""}>${option.label}</option>`)
+    .join("");
+}
+
+function renderCompoundFilterRow(
+  fields: readonly ListFilterBuilderField[],
+  filter: ListDocumentsFilter | undefined
+): string {
+  const fieldName = filter?.field ?? "";
+  const operator = filter?.operator ?? "eq";
+  const builderField = fields.find((field) => field.field === fieldName);
+  const inputType = compoundFilterValueInputType(builderField?.inputType, operator);
+  return `<div class="compound-filter-row" data-cf-frappe-filter-row>
+    <label class="field compact"><span>Field</span><select data-cf-frappe-filter-field>${renderCompoundFilterFieldOptions(fields, fieldName)}</select></label>
+    <label class="field compact"><span>Operator</span><select data-cf-frappe-filter-operator>${renderCompoundFilterOperatorOptions(fields, builderField, operator)}</select></label>
+    <label class="field grow"><span>Value</span><input data-cf-frappe-filter-value type="${escapeHtml(inputType)}" value="${escapeHtml(filter === undefined ? "" : formatCompoundFilterVisualValue(filter.value))}"></label>
+    <button class="button" type="button" data-cf-frappe-remove-filter>Remove</button>
+  </div>`;
+}
+
+function compoundFilterValueInputType(
+  inputType: ListFilterBuilderField["inputType"] | undefined,
+  operator: ListFilterOperator
+): string {
+  if (operator === "in" || operator === "not_in" || operator === "between" || operator === "not_between") {
+    return "text";
+  }
+  return inputType === "number" || inputType === "date" || inputType === "datetime-local" ? inputType : "text";
+}
+
+function formatCompoundFilterVisualValue(value: ListDocumentsFilter["value"]): string {
+  return Array.isArray(value) ? value.map((item) => formatFormValue(item)).join(", ") : formatFormValue(value);
+}
+
+function renderCompoundFilterFieldOptions(
+  fields: readonly ListFilterBuilderField[],
+  selected: string
+): string {
+  return [`<option value=""></option>`]
+    .concat(
+      fields.map((field) =>
+        `<option value="${escapeHtml(field.field)}"${field.field === selected ? " selected" : ""}>${escapeHtml(field.field)}</option>`
+      )
+    )
+    .join("");
+}
+
+function renderCompoundFilterOperatorOptions(
+  fields: readonly ListFilterBuilderField[],
+  selectedField: ListFilterBuilderField | undefined,
+  selected: ListFilterOperator
+): string {
+  const operators = selectedField?.operators ?? uniqueListFilterOperators(fields);
+  return operators
+    .map((operator) =>
+      `<option value="${escapeHtml(operator.operator)}"${operator.operator === selected ? " selected" : ""}>${escapeHtml(operator.label)}</option>`
+    )
+    .join("");
+}
+
+function uniqueListFilterOperators(fields: readonly ListFilterBuilderField[]): ListFilterBuilderField["operators"] {
+  const seen = new Set<ListFilterOperator>();
+  return fields.flatMap((field) =>
+    field.operators.filter((operator) => {
+      if (seen.has(operator.operator)) {
+        return false;
+      }
+      seen.add(operator.operator);
+      return true;
+    })
+  );
 }
 
 function renderListFilterExpression(expression: ListFilterExpression): string {
@@ -3466,25 +3568,28 @@ tr:last-child td { border-bottom: 0; }
   color: var(--muted);
   font-weight: 700;
 }
-.filter-builder-fields {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.filter-builder-fields li {
+.compound-filter-visual,
+.compound-filter-rows {
   display: grid;
-  gap: 2px;
-  min-width: 140px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  gap: 10px;
 }
-.filter-builder-fields small,
+.compound-filter-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(150px, 0.8fr) minmax(180px, 1.2fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+.compound-filter-row .button {
+  white-space: nowrap;
+}
+.field.compact span,
+.field.grow span,
 .filter-expression-preview {
   color: var(--muted);
+  font-size: 13px;
+}
+.field.grow {
+  min-width: 0;
 }
 .filter-expression-group ul {
   margin: 8px 0 0 18px;
@@ -3844,6 +3949,7 @@ input[readonly], textarea[readonly] { background: #f3f4f6; color: var(--muted); 
   .main { margin-left: 0; padding: 16px; }
   .topbar, .form-head { align-items: flex-start; flex-direction: column; }
   .fields { grid-template-columns: 1fr; }
+  .compound-filter-row { grid-template-columns: 1fr; }
   .timeline-assignment-form { grid-template-columns: 1fr; }
 }`;
 }

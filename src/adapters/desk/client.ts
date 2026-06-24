@@ -736,6 +736,264 @@ export function renderDeskClientScript(): string {
     callback();
   }
 
+  function hydrateCompoundFilterBuilders() {
+    var builders = document.querySelectorAll("[data-cf-frappe-compound-filter-builder]");
+    if (!builders || builders.length === 0) {
+      return;
+    }
+    Array.prototype.forEach.call(builders, hydrateCompoundFilterBuilder);
+  }
+
+  function hydrateCompoundFilterBuilder(builder) {
+    var form = typeof builder.closest === "function" ? builder.closest("form") : null;
+    if (!form || builder.__cfFrappeCompoundFilterHydrated) {
+      return;
+    }
+    builder.__cfFrappeCompoundFilterHydrated = true;
+    var expression = builder.querySelector('[name="filter_expression"]');
+    if (expression) {
+      expression.addEventListener("input", function () {
+        builder.__cfFrappeCompoundFilterSource = "text";
+      });
+      expression.addEventListener("change", function () {
+        builder.__cfFrappeCompoundFilterSource = "text";
+      });
+    }
+    var match = builder.querySelector("[data-cf-frappe-filter-match]");
+    if (match) {
+      match.addEventListener("change", function () {
+        markCompoundFilterVisualDirty(builder);
+      });
+    }
+    Array.prototype.forEach.call(builder.querySelectorAll("[data-cf-frappe-filter-row]"), function (row) {
+      hydrateCompoundFilterRow(builder, row);
+    });
+    var addButton = builder.querySelector("[data-cf-frappe-add-filter]");
+    if (addButton) {
+      addButton.addEventListener("click", function () {
+        addCompoundFilterRow(builder);
+      });
+    }
+    form.addEventListener("submit", function () {
+      syncCompoundFilterExpression(builder);
+    });
+  }
+
+  function hydrateCompoundFilterRow(builder, row) {
+    var field = row.querySelector("[data-cf-frappe-filter-field]");
+    var operator = row.querySelector("[data-cf-frappe-filter-operator]");
+    var remove = row.querySelector("[data-cf-frappe-remove-filter]");
+    if (field) {
+      field.addEventListener("change", function () {
+        markCompoundFilterVisualDirty(builder);
+        refreshCompoundFilterOperatorOptions(builder, row);
+        refreshCompoundFilterValueInputType(builder, row);
+      });
+    }
+    if (operator) {
+      operator.addEventListener("change", function () {
+        markCompoundFilterVisualDirty(builder);
+        refreshCompoundFilterValueInputType(builder, row);
+      });
+    }
+    Array.prototype.forEach.call(row.querySelectorAll("select, input"), function (control) {
+      control.addEventListener("input", function () {
+        markCompoundFilterVisualDirty(builder);
+      });
+      control.addEventListener("change", function () {
+        markCompoundFilterVisualDirty(builder);
+      });
+    });
+    if (remove) {
+      remove.addEventListener("click", function () {
+        markCompoundFilterVisualDirty(builder);
+        removeCompoundFilterRow(builder, row);
+      });
+    }
+  }
+
+  function markCompoundFilterVisualDirty(builder) {
+    builder.__cfFrappeCompoundFilterSource = "visual";
+  }
+
+  function addCompoundFilterRow(builder) {
+    var container = builder.querySelector("[data-cf-frappe-filter-rows]");
+    var template = builder.querySelector("[data-cf-frappe-filter-row]");
+    if (!container || !template || typeof template.cloneNode !== "function") {
+      return;
+    }
+    var row = template.cloneNode(true);
+    resetCompoundFilterRow(row);
+    container.appendChild(row);
+    refreshCompoundFilterOperatorOptions(builder, row);
+    refreshCompoundFilterValueInputType(builder, row);
+    markCompoundFilterVisualDirty(builder);
+    hydrateCompoundFilterRow(builder, row);
+  }
+
+  function resetCompoundFilterRow(row) {
+    Array.prototype.forEach.call(row.querySelectorAll("select, input"), function (control) {
+      control.value = "";
+    });
+    var operator = row.querySelector("[data-cf-frappe-filter-operator]");
+    if (operator) {
+      operator.value = "eq";
+    }
+  }
+
+  function removeCompoundFilterRow(builder, row) {
+    var rows = builder.querySelectorAll("[data-cf-frappe-filter-row]");
+    if (rows.length <= 1) {
+      resetCompoundFilterRow(row);
+      refreshCompoundFilterOperatorOptions(builder, row);
+      refreshCompoundFilterValueInputType(builder, row);
+      return;
+    }
+    if (typeof row.remove === "function") {
+      row.remove();
+    }
+  }
+
+  function syncCompoundFilterExpression(builder) {
+    var target = builder.querySelector('[name="filter_expression"]');
+    if (!target) {
+      return;
+    }
+    if (builder.__cfFrappeCompoundFilterSource === "visual") {
+      var expression = compoundFilterExpressionFromBuilder(builder);
+      target.value = expression ? JSON.stringify(expression) : "";
+    }
+  }
+
+  function compoundFilterExpressionFromBuilder(builder) {
+    var filters = [];
+    Array.prototype.forEach.call(builder.querySelectorAll("[data-cf-frappe-filter-row]"), function (row) {
+      var filter = compoundFilterExpressionFromRow(row);
+      if (filter) {
+        filters.push(filter);
+      }
+    });
+    if (filters.length === 0) {
+      return undefined;
+    }
+    if (filters.length === 1) {
+      return filters[0];
+    }
+    var match = controlValue(builder.querySelector("[data-cf-frappe-filter-match]")) === "any" ? "any" : "all";
+    return {
+      kind: "group",
+      match: match,
+      filters: filters
+    };
+  }
+
+  function compoundFilterExpressionFromRow(row) {
+    var field = controlValue(row.querySelector("[data-cf-frappe-filter-field]"));
+    var operator = controlValue(row.querySelector("[data-cf-frappe-filter-operator]")) || "eq";
+    var value = controlValue(row.querySelector("[data-cf-frappe-filter-value]"));
+    if (!field || value === "") {
+      return undefined;
+    }
+    return Object.assign(
+      {
+        field: field,
+        value: compoundFilterValue(value, operator)
+      },
+      operator === "eq" ? {} : { operator: operator }
+    );
+  }
+
+  function compoundFilterValue(value, operator) {
+    if (operator === "in" || operator === "not_in" || operator === "between" || operator === "not_between") {
+      return value.split(",").map(function (item) {
+        return item.trim();
+      }).filter(function (item) {
+        return item !== "";
+      });
+    }
+    return value;
+  }
+
+  function refreshCompoundFilterOperatorOptions(builder, row) {
+    var field = controlValue(row.querySelector("[data-cf-frappe-filter-field]"));
+    var operator = row.querySelector("[data-cf-frappe-filter-operator]");
+    if (!operator || typeof document.createElement !== "function") {
+      return;
+    }
+    var options = compoundFilterFieldOptions(builder, field);
+    var selected = operator.value;
+    while (operator.firstChild) {
+      operator.removeChild(operator.firstChild);
+    }
+    options.forEach(function (option) {
+      var element = document.createElement("option");
+      element.value = option.operator;
+      element.textContent = option.label;
+      if (option.operator === selected) {
+        element.selected = true;
+      }
+      operator.appendChild(element);
+    });
+    if (!options.some(function (option) { return option.operator === operator.value; }) && options[0]) {
+      operator.value = options[0].operator;
+    }
+  }
+
+  function refreshCompoundFilterValueInputType(builder, row) {
+    var value = row.querySelector("[data-cf-frappe-filter-value]");
+    if (!value) {
+      return;
+    }
+    value.type = compoundFilterValueInputType(builder, row);
+  }
+
+  function compoundFilterValueInputType(builder, row) {
+    var operator = controlValue(row.querySelector("[data-cf-frappe-filter-operator]")) || "eq";
+    if (operator === "in" || operator === "not_in" || operator === "between" || operator === "not_between") {
+      return "text";
+    }
+    var field = controlValue(row.querySelector("[data-cf-frappe-filter-field]"));
+    var metadata = compoundFilterMetadata(builder).filter(function (item) {
+      return item && item.field === field;
+    })[0];
+    var inputType = metadata && metadata.inputType;
+    return inputType === "number" || inputType === "date" || inputType === "datetime-local" ? inputType : "text";
+  }
+
+  function compoundFilterFieldOptions(builder, field) {
+    var metadata = compoundFilterMetadata(builder);
+    var selected = metadata.filter(function (item) {
+      return item && item.field === field;
+    })[0];
+    if (selected && Array.isArray(selected.operators)) {
+      return selected.operators;
+    }
+    return metadata.reduce(function (operators, item) {
+      (item && Array.isArray(item.operators) ? item.operators : []).forEach(function (operator) {
+        if (!operators.some(function (existing) { return existing.operator === operator.operator; })) {
+          operators.push(operator);
+        }
+      });
+      return operators;
+    }, []);
+  }
+
+  function compoundFilterMetadata(builder) {
+    if (builder.__cfFrappeFilterFields) {
+      return builder.__cfFrappeFilterFields;
+    }
+    try {
+      builder.__cfFrappeFilterFields = JSON.parse((builder.dataset && builder.dataset.filterFields) || "[]");
+    } catch (_error) {
+      builder.__cfFrappeFilterFields = [];
+    }
+    return builder.__cfFrappeFilterFields;
+  }
+
+  function controlValue(control) {
+    return control && control.value !== undefined ? String(control.value).trim() : "";
+  }
+
   var formHandlers = {};
   var formBinding;
 
@@ -1920,6 +2178,7 @@ export function renderDeskClientScript(): string {
       }
     })
   }));
+  ready(hydrateCompoundFilterBuilders);
   ready(hydratePresencePanels);
 }());
 `;

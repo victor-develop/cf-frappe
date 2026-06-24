@@ -581,6 +581,134 @@ describe("Desk client runtime", () => {
     );
   });
 
+  it("hydrates visual compound filter builders into canonical expression JSON", () => {
+    const form = new FakeForm();
+    const builder = new FakeCompoundFilterBuilder(form, {
+      match: "any",
+      rows: [
+        new FakeCompoundFilterRow("priority", "eq", "High"),
+        new FakeCompoundFilterRow("count", "between", "1, 3")
+      ]
+    });
+    evaluateDeskClient(fetch, new FakeDocument({ form, compoundFilterBuilders: [builder] }));
+
+    builder.rows[1]?.value.emit("input");
+    form.emitSubmit();
+
+    expect(JSON.parse(builder.expression.value)).toEqual({
+      kind: "group",
+      match: "any",
+      filters: [
+        { field: "priority", value: "High" },
+        { field: "count", operator: "between", value: ["1", "3"] }
+      ]
+    });
+  });
+
+  it("preserves advanced nested filter JSON until visual rows change", () => {
+    const nestedExpression = JSON.stringify({
+      kind: "group",
+      match: "all",
+      filters: [
+        {
+          kind: "group",
+          match: "any",
+          filters: [{ field: "priority", value: "High" }]
+        }
+      ]
+    });
+    const form = new FakeForm();
+    const row = new FakeCompoundFilterRow("", "eq", "");
+    const builder = new FakeCompoundFilterBuilder(form, {
+      expression: nestedExpression,
+      rows: [row]
+    });
+    evaluateDeskClient(fetch, new FakeDocument({ form, compoundFilterBuilders: [builder] }));
+
+    form.emitSubmit();
+    expect(builder.expression.value).toBe(nestedExpression);
+
+    row.field.value = "priority";
+    row.value.value = "Low";
+    row.value.emit("input");
+    form.emitSubmit();
+
+    expect(builder.expression.value).toBe(JSON.stringify({ field: "priority", value: "Low" }));
+  });
+
+  it("does not overwrite manual advanced JSON edits with stale visual rows", () => {
+    const topLevelExpression = JSON.stringify({
+      kind: "group",
+      match: "any",
+      filters: [{ field: "priority", value: "High" }]
+    });
+    const nestedExpression = JSON.stringify({
+      kind: "group",
+      match: "all",
+      filters: [
+        {
+          kind: "group",
+          match: "any",
+          filters: [{ field: "priority", value: "Low" }]
+        }
+      ]
+    });
+    const form = new FakeForm();
+    const builder = new FakeCompoundFilterBuilder(form, {
+      expression: topLevelExpression,
+      match: "any",
+      rows: [new FakeCompoundFilterRow("priority", "eq", "High")]
+    });
+    evaluateDeskClient(fetch, new FakeDocument({ form, compoundFilterBuilders: [builder] }));
+
+    builder.expression.value = nestedExpression;
+    builder.expression.emit("input");
+    form.emitSubmit();
+
+    expect(builder.expression.value).toBe(nestedExpression);
+
+    builder.rows[0]?.value.emit("input");
+    builder.expression.value = nestedExpression;
+    builder.expression.emit("input");
+    form.emitSubmit();
+
+    expect(builder.expression.value).toBe(nestedExpression);
+  });
+
+  it("serializes visual compound filters when only match mode changes", () => {
+    const expression = JSON.stringify({
+      kind: "group",
+      match: "any",
+      filters: [
+        { field: "priority", value: "High" },
+        { field: "count", operator: "between", value: ["1", "3"] }
+      ]
+    });
+    const form = new FakeForm();
+    const builder = new FakeCompoundFilterBuilder(form, {
+      expression,
+      match: "any",
+      rows: [
+        new FakeCompoundFilterRow("priority", "eq", "High"),
+        new FakeCompoundFilterRow("count", "between", "1, 3")
+      ]
+    });
+    evaluateDeskClient(fetch, new FakeDocument({ form, compoundFilterBuilders: [builder] }));
+
+    builder.match.value = "all";
+    builder.match.emit("change");
+    form.emitSubmit();
+
+    expect(JSON.parse(builder.expression.value)).toEqual({
+      kind: "group",
+      match: "all",
+      filters: [
+        { field: "priority", value: "High" },
+        { field: "count", operator: "between", value: ["1", "3"] }
+      ]
+    });
+  });
+
   it("marks intentional empty resource filters in query parameters", async () => {
     const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
     const runtime = evaluateDeskClient(async (url, init) => {
@@ -2632,6 +2760,157 @@ class FakeSubmitter {
   }
 }
 
+class FakeCompoundControl {
+  readonly listeners: Record<string, Array<() => void>> = {};
+
+  constructor(public value: string) {}
+
+  addEventListener(type: string, listener: () => void): void {
+    this.listeners[type] = [...(this.listeners[type] ?? []), listener];
+  }
+
+  emit(type: string): void {
+    for (const listener of this.listeners[type] ?? []) {
+      listener();
+    }
+  }
+}
+
+class FakeCompoundButton {
+  readonly listeners: Record<string, Array<() => void>> = {};
+
+  addEventListener(type: string, listener: () => void): void {
+    this.listeners[type] = [...(this.listeners[type] ?? []), listener];
+  }
+
+  click(): void {
+    for (const listener of this.listeners.click ?? []) {
+      listener();
+    }
+  }
+}
+
+class FakeCompoundFilterRow {
+  readonly field: FakeCompoundControl;
+  readonly operator: FakeCompoundControl;
+  readonly value: FakeCompoundControl;
+  readonly removeButton = new FakeCompoundButton();
+  removed = false;
+
+  constructor(field: string, operator: string, value: string) {
+    this.field = new FakeCompoundControl(field);
+    this.operator = new FakeCompoundControl(operator);
+    this.value = new FakeCompoundControl(value);
+  }
+
+  cloneNode(): FakeCompoundFilterRow {
+    return new FakeCompoundFilterRow("", "", "");
+  }
+
+  querySelector(selector: string): FakeCompoundControl | FakeCompoundButton | null {
+    if (selector === "[data-cf-frappe-filter-field]") {
+      return this.field;
+    }
+    if (selector === "[data-cf-frappe-filter-operator]") {
+      return this.operator;
+    }
+    if (selector === "[data-cf-frappe-filter-value]") {
+      return this.value;
+    }
+    if (selector === "[data-cf-frappe-remove-filter]") {
+      return this.removeButton;
+    }
+    return null;
+  }
+
+  querySelectorAll(selector: string): readonly FakeCompoundControl[] {
+    return selector === "select, input" ? [this.field, this.operator, this.value] : [];
+  }
+
+  remove(): void {
+    this.removed = true;
+  }
+}
+
+class FakeCompoundFilterRows {
+  constructor(private readonly builder: FakeCompoundFilterBuilder) {}
+
+  appendChild(row: FakeCompoundFilterRow): void {
+    this.builder.rows.push(row);
+  }
+}
+
+class FakeCompoundFilterBuilder {
+  readonly add = new FakeCompoundButton();
+  readonly dataset = {
+    filterFields: JSON.stringify([
+      {
+        field: "priority",
+        inputType: "select",
+        operators: [
+          { operator: "eq", label: "equals" },
+          { operator: "ne", label: "is not" },
+          { operator: "in", label: "is in" },
+          { operator: "not_in", label: "is not in" },
+          { operator: "is", label: "is" }
+        ]
+      },
+      {
+        field: "count",
+        inputType: "number",
+        operators: [
+          { operator: "eq", label: "equals" },
+          { operator: "between", label: "between" }
+        ]
+      }
+    ])
+  };
+  readonly expression: FakeCompoundControl;
+  readonly match: FakeCompoundControl;
+  readonly rowsContainer = new FakeCompoundFilterRows(this);
+  readonly rows: FakeCompoundFilterRow[];
+
+  constructor(
+    private readonly form: FakeForm,
+    options: {
+      readonly expression?: string;
+      readonly match?: string;
+      readonly rows?: readonly FakeCompoundFilterRow[];
+    } = {}
+  ) {
+    this.expression = new FakeCompoundControl(options.expression ?? "");
+    this.match = new FakeCompoundControl(options.match ?? "all");
+    this.rows = [...(options.rows ?? [new FakeCompoundFilterRow("", "eq", "")])];
+  }
+
+  closest(selector: string): FakeForm | null {
+    return selector === "form" ? this.form : null;
+  }
+
+  querySelector(selector: string): FakeCompoundControl | FakeCompoundButton | FakeCompoundFilterRow | FakeCompoundFilterRows | null {
+    if (selector === '[name="filter_expression"]') {
+      return this.expression;
+    }
+    if (selector === "[data-cf-frappe-filter-match]") {
+      return this.match;
+    }
+    if (selector === "[data-cf-frappe-add-filter]") {
+      return this.add;
+    }
+    if (selector === "[data-cf-frappe-filter-row]") {
+      return this.rows.find((row) => !row.removed) ?? null;
+    }
+    if (selector === "[data-cf-frappe-filter-rows]") {
+      return this.rowsContainer;
+    }
+    return null;
+  }
+
+  querySelectorAll(selector: string): readonly FakeCompoundFilterRow[] {
+    return selector === "[data-cf-frappe-filter-row]" ? this.rows.filter((row) => !row.removed) : [];
+  }
+}
+
 class FakePresenceText {
   textContent = "";
 }
@@ -2661,17 +2940,20 @@ class FakeDocument {
   readonly currentScript = undefined;
   readonly readyState = "complete";
   private readonly form: FakeForm | undefined;
+  private readonly compoundFilterBuilders: readonly FakeCompoundFilterBuilder[];
   private readonly presencePanels: readonly FakePresencePanel[];
   private readonly runtime: { readonly dataset: Record<string, string> } | undefined;
 
   constructor(
     options: {
       readonly form?: FakeForm;
+      readonly compoundFilterBuilders?: readonly FakeCompoundFilterBuilder[];
       readonly presencePanels?: readonly FakePresencePanel[];
       readonly runtimeDataset?: Record<string, string>;
     } = {}
   ) {
     this.form = options.form;
+    this.compoundFilterBuilders = options.compoundFilterBuilders ?? [];
     this.presencePanels = options.presencePanels ?? [];
     this.runtime = options.runtimeDataset ? { dataset: options.runtimeDataset } : undefined;
   }
@@ -2688,7 +2970,13 @@ class FakeDocument {
     return null;
   }
 
-  querySelectorAll(selector: string): readonly FakePresencePanel[] {
-    return selector === '[data-cf-frappe-presence="document"]' ? this.presencePanels : [];
+  querySelectorAll(selector: string): readonly (FakePresencePanel | FakeCompoundFilterBuilder)[] {
+    if (selector === '[data-cf-frappe-presence="document"]') {
+      return this.presencePanels;
+    }
+    if (selector === "[data-cf-frappe-compound-filter-builder]") {
+      return this.compoundFilterBuilders;
+    }
+    return [];
   }
 }
