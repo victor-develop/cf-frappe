@@ -13,7 +13,7 @@ import { FrameworkError } from "./errors.js";
 import { normalizeListFilters } from "./list-view.js";
 import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-format.js";
 import { assertPrintFormatMatchesDocType, assertPrintLetterheadValid } from "./print-format.js";
-import type { ReportDefinition } from "./reports.js";
+import type { ReportDefinition, ReportSummaryDefinition } from "./reports.js";
 import { assertReportDefinition, assertReportFilterValues, assertReportMatchesDocType } from "./reports.js";
 import type { InstalledAppDefinition } from "./app.js";
 import { assertWorkspaceDefinition, defineWorkspace, type WorkspaceDefinition } from "./workspace.js";
@@ -448,15 +448,20 @@ export class ModelRegistry {
           { status: 400 }
         );
       }
-      if (
-        source.kind === "reportSummary" &&
-        !(report.summaries ?? []).some((summary) => summary.name === source.summary)
-      ) {
-        throw new FrameworkError(
-          "DASHBOARD_INVALID",
-          `Dashboard '${dashboard.name}' card '${card.name}' references unknown summary '${source.summary}' on report '${source.report}'`,
-          { status: 400 }
-        );
+      const summary = source.kind === "reportSummary"
+        ? (report.summaries ?? []).find((candidate) => candidate.name === source.summary)
+        : undefined;
+      if (source.kind === "reportSummary") {
+        if (!summary) {
+          throw new FrameworkError(
+            "DASHBOARD_INVALID",
+            `Dashboard '${dashboard.name}' card '${card.name}' references unknown summary '${source.summary}' on report '${source.report}'`,
+            { status: 400 }
+          );
+        }
+        if (card.indicatorRules !== undefined) {
+          this.assertDashboardReportSummaryIndicatorRulesResolve(dashboard, card.name, report, summary, this.get(report.doctype));
+        }
       }
       if (source.kind === "reportChart" && !(report.charts ?? []).some((chart) => chart.name === source.chart)) {
         throw new FrameworkError(
@@ -497,6 +502,37 @@ export class ModelRegistry {
       );
     }
   }
+
+  private assertDashboardReportSummaryIndicatorRulesResolve(
+    dashboard: DashboardDefinition,
+    cardName: string,
+    report: ReportDefinition,
+    summary: ReportSummaryDefinition,
+    doctype: DocTypeDefinition
+  ): void {
+    if (report.source?.kind === "custom") {
+      if (summary.aggregate === "count" || customReportSummaryIsNumeric(report, summary)) {
+        return;
+      }
+      throw new FrameworkError(
+        "DASHBOARD_INVALID",
+        `Dashboard '${dashboard.name}' card '${cardName}' indicator rules require a numeric summary '${summary.name}' on report '${report.name}'`,
+        { status: 400 }
+      );
+    }
+    if (summary.aggregate === "count" || summary.aggregate === "sum" || summary.aggregate === "avg") {
+      return;
+    }
+    const field = doctype.fields.find((candidate) => candidate.name === summary.field);
+    if (field && isNumericDashboardAggregateField(field)) {
+      return;
+    }
+    throw new FrameworkError(
+      "DASHBOARD_INVALID",
+      `Dashboard '${dashboard.name}' card '${cardName}' indicator rules require a numeric summary '${summary.name}' on report '${report.name}'`,
+      { status: 400 }
+    );
+  }
 }
 
 export function createRegistry(options: RegistryOptions = {}): ModelRegistry {
@@ -505,6 +541,18 @@ export function createRegistry(options: RegistryOptions = {}): ModelRegistry {
 
 function isNumericDashboardAggregateField(field: FieldDefinition): boolean {
   return field.type === "integer" || field.type === "number";
+}
+
+function customReportSummaryIsNumeric(report: ReportDefinition, summary: ReportSummaryDefinition): boolean {
+  const field = summary.field;
+  if (!field) {
+    return false;
+  }
+  if (summary.type === "integer" || summary.type === "number") {
+    return true;
+  }
+  const column = report.columns.find((candidate) => candidate.formula === undefined && (candidate.field ?? candidate.name) === field);
+  return column?.type === "integer" || column?.type === "number";
 }
 
 const emptyHooks: readonly DocumentHooks[] = Object.freeze([]);

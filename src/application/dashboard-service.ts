@@ -2,9 +2,10 @@ import { permissionDenied } from "../core/errors.js";
 import {
   canReadDashboard,
   type DashboardCardDefinition,
-  type DashboardDocumentAggregate,
   type DashboardCardSourceDefinition,
-  type DashboardDefinition
+  type DashboardDocumentAggregate,
+  type DashboardDefinition,
+  type DashboardIndicatorOperator
 } from "../core/dashboard.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { Actor, DocumentSnapshot, JsonPrimitive, ListDocumentsFilter } from "../core/types.js";
@@ -66,13 +67,14 @@ export class DashboardService {
 
   private async runCard(actor: Actor, card: DashboardCardDefinition): Promise<DashboardCardResult> {
     const value = await this.cardValue(actor, card.source);
+    const indicator = dashboardCardIndicator(card, value);
     return {
       name: card.name,
       label: card.label ?? card.name,
       value,
       source: card.source,
       ...(card.description === undefined ? {} : { description: card.description }),
-      ...(card.indicator === undefined ? {} : { indicator: card.indicator })
+      ...(indicator === undefined ? {} : { indicator })
     };
   }
 
@@ -215,4 +217,35 @@ function finishDocumentAggregate(state: DocumentAggregateState, aggregate: Dashb
     return state.max;
   }
   return state.count;
+}
+
+function dashboardCardIndicator(card: DashboardCardDefinition, value: DashboardCardValue): string | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return card.indicator;
+  }
+  const rule = card.indicatorRules?.find((candidate) => dashboardIndicatorMatches(value, candidate.operator, candidate.value));
+  return rule?.indicator ?? card.indicator;
+}
+
+function dashboardIndicatorMatches(
+  actual: number,
+  operator: DashboardIndicatorOperator,
+  expected: number
+): boolean {
+  if (operator === "eq") {
+    return actual === expected;
+  }
+  if (operator === "ne") {
+    return actual !== expected;
+  }
+  if (operator === "gt") {
+    return actual > expected;
+  }
+  if (operator === "gte") {
+    return actual >= expected;
+  }
+  if (operator === "lt") {
+    return actual < expected;
+  }
+  return actual <= expected;
 }

@@ -441,6 +441,10 @@ describe("Desk app", () => {
             {
               name: "open_count_sum",
               label: "Open Count Sum",
+              indicatorRules: [
+                { operator: "gte", value: 10, indicator: "green" },
+                { operator: "lt", value: 10, indicator: "amber" }
+              ],
               source: {
                 kind: "documentAggregate",
                 doctype: "Note",
@@ -525,6 +529,7 @@ describe("Desk app", () => {
     expect(html).toContain("<strong>2</strong>");
     expect(html).toContain("Open Count Sum");
     expect(html).toContain("<strong>10</strong>");
+    expect(html).toContain("<em>green</em>");
     expect(html).toContain("Note sum(count)");
     expect(html).toContain("High Count");
     expect(html).toContain("<strong>12</strong>");

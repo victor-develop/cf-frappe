@@ -26,6 +26,11 @@ describe("DashboardService", () => {
             {
               name: "open_notes",
               label: "Open Notes",
+              indicator: "gray",
+              indicatorRules: [
+                { operator: "gte", value: 2, indicator: "green" },
+                { operator: "lt", value: 2, indicator: "amber" }
+              ],
               source: {
                 kind: "documentCount",
                 doctype: "Note",
@@ -45,6 +50,10 @@ describe("DashboardService", () => {
             {
               name: "open_count_sum",
               label: "Open Count Sum",
+              indicatorRules: [
+                { operator: "gte", value: 10, indicator: "green" },
+                { operator: "gte", value: 1, indicator: "blue" }
+              ],
               source: {
                 kind: "documentAggregate",
                 doctype: "Note",
@@ -89,6 +98,7 @@ describe("DashboardService", () => {
             {
               name: "total_count",
               label: "Total Count",
+              indicatorRules: [{ operator: "eq", value: 10, indicator: "green" }],
               source: {
                 kind: "reportSummary",
                 report: "Open Notes",
@@ -143,6 +153,7 @@ describe("DashboardService", () => {
           name: "open_notes",
           label: "Open Notes",
           value: 1,
+          indicator: "amber",
           source: { kind: "documentCount", doctype: "Note" }
         },
         {
@@ -155,6 +166,7 @@ describe("DashboardService", () => {
           name: "open_count_sum",
           label: "Open Count Sum",
           value: 7,
+          indicator: "blue",
           source: { kind: "documentAggregate", doctype: "Note", aggregate: "sum", field: "count" }
         },
         {
@@ -179,6 +191,7 @@ describe("DashboardService", () => {
           name: "total_count",
           label: "Total Count",
           value: 10,
+          indicator: "green",
           source: { kind: "reportSummary", report: "Open Notes", summary: "total_count" }
         },
         {
@@ -234,6 +247,38 @@ describe("DashboardService", () => {
         { name: "min", value: null },
         { name: "max", value: null }
       ]
+    });
+  });
+
+  it("falls back to static card indicators when no numeric rule matches", async () => {
+    const registry = createRegistry({
+      doctypes: [noteDocType],
+      dashboards: [
+        defineDashboard({
+          name: "Indicator Fallbacks",
+          roles: ["User"],
+          cards: [
+            {
+              name: "open_notes",
+              indicator: "gray",
+              indicatorRules: [{ operator: "gt", value: 0, indicator: "green" }],
+              source: {
+                kind: "documentCount",
+                doctype: "Note",
+                filters: [{ field: "workflow_state", value: "Closed" }]
+              }
+            }
+          ]
+        })
+      ]
+    });
+    const store = new InMemoryDocumentStore();
+    const queries = new QueryService({ registry, projections: store });
+    const reports = new ReportService({ registry, queries });
+    const dashboards = new DashboardService({ registry, queries, reports });
+
+    await expect(dashboards.runDashboard(owner, "Indicator Fallbacks")).resolves.toMatchObject({
+      cards: [{ name: "open_notes", value: 0, indicator: "gray" }]
     });
   });
 

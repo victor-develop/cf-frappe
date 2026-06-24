@@ -33,6 +33,10 @@ describe("dashboard api", () => {
           },
           {
             name: "open_count_sum",
+            indicatorRules: [
+              { operator: "gte", value: 8, indicator: "green" },
+              { operator: "lt", value: 8, indicator: "amber" }
+            ],
             source: {
               kind: "documentAggregate",
               doctype: "Note",
@@ -101,7 +105,7 @@ describe("dashboard api", () => {
         dashboard: { name: "Operations" },
         cards: [
           { name: "open_notes", value: 2 },
-          { name: "open_count_sum", value: 8 },
+          { name: "open_count_sum", value: 8, indicator: "green" },
           { name: "total_count", value: 5 },
           {
             name: "priority_chart",

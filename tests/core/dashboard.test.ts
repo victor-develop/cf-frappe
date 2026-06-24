@@ -9,6 +9,10 @@ describe("dashboards", () => {
         {
           name: "open_notes",
           label: "Open Notes",
+          indicatorRules: [
+            { operator: "gte", value: 10, indicator: "green" },
+            { operator: "lt", value: 10, indicator: "amber" }
+          ],
           source: {
             kind: "documentCount",
             doctype: "Note",
@@ -49,6 +53,8 @@ describe("dashboards", () => {
     expect(Object.isFrozen(dashboard)).toBe(true);
     expect(Object.isFrozen(dashboard.cards)).toBe(true);
     expect(Object.isFrozen(dashboard.cards[0]?.source)).toBe(true);
+    expect(Object.isFrozen(dashboard.cards[0]?.indicatorRules ?? [])).toBe(true);
+    expect(Object.isFrozen(dashboard.cards[0]?.indicatorRules?.[0])).toBe(true);
     expect(Object.isFrozen(dashboard.cards[0]?.source.kind === "documentCount" ? dashboard.cards[0].source.filters : [])).toBe(true);
     expect(Object.isFrozen(dashboard.cards[1]?.source.kind === "documentAggregate" ? dashboard.cards[1].source.filters : [])).toBe(true);
     expect(Object.isFrozen(dashboard.cards[2]?.source.kind === "reportSummary" ? dashboard.cards[2].source.filters : {})).toBe(true);
@@ -77,6 +83,40 @@ describe("dashboards", () => {
         }
       ],
       charts: [{ name: "notes_by_state", type: "bar", group: "by_state", summary: "state_count" }]
+    });
+    const textSummaryReport = defineReport({
+      name: "Text Notes",
+      doctype: "Note",
+      columns: [{ name: "title" }],
+      summaries: [{ name: "first_title", aggregate: "min", field: "title" }]
+    });
+    const customMetricReport = defineReport({
+      name: "Priority Metrics",
+      doctype: "Note",
+      source: { kind: "custom", provider: "priority-metrics" },
+      columns: [{ name: "score", type: "number" }],
+      summaries: [{ name: "max_score", aggregate: "max", field: "score" }]
+    });
+    const fieldlessCustomMetricReport = defineReport({
+      name: "Fieldless Metrics",
+      doctype: "Note",
+      source: { kind: "custom", provider: "priority-metrics" },
+      columns: [{ name: "score", type: "number" }],
+      summaries: [{ name: "max_score", aggregate: "max", type: "number" }]
+    });
+    const fieldlessCustomSumReport = defineReport({
+      name: "Fieldless Sum Metrics",
+      doctype: "Note",
+      source: { kind: "custom", provider: "priority-metrics" },
+      columns: [{ name: "score", type: "number" }],
+      summaries: [{ name: "total_score", aggregate: "sum", type: "number" }]
+    });
+    const aliasedCustomMetricReport = defineReport({
+      name: "Aliased Metrics",
+      doctype: "Note",
+      source: { kind: "custom", provider: "priority-metrics" },
+      columns: [{ name: "display_score", field: "score", type: "number" }],
+      summaries: [{ name: "max_score", aggregate: "max", field: "display_score" }]
     });
 
     const registry = createRegistry({
@@ -124,6 +164,26 @@ describe("dashboards", () => {
         { name: "total_count", source: { kind: "reportSummary", report: "Open Notes" } },
         { name: "notes_by_state", source: { kind: "reportChart", report: "Open Notes", chart: "notes_by_state" } }
       ]
+    });
+    expect(
+      createRegistry({
+        doctypes: [Note],
+        reports: [customMetricReport],
+        dashboards: [
+          defineDashboard({
+            name: "Custom Metrics",
+            cards: [
+              {
+                name: "max_score",
+                indicatorRules: [{ operator: "gte", value: 90, indicator: "green" }],
+                source: { kind: "reportSummary", report: "Priority Metrics", summary: "max_score" }
+              }
+            ]
+          })
+        ]
+      }).getDashboard("Custom Metrics")
+    ).toMatchObject({
+      cards: [{ name: "max_score", source: { kind: "reportSummary", report: "Priority Metrics", summary: "max_score" } }]
     });
     expect(() =>
       createRegistry({
@@ -175,6 +235,66 @@ describe("dashboards", () => {
       })
     ).toThrow("count aggregate must not define a field");
     expect(() =>
+      defineDashboard({
+        name: "Broken",
+        cards: [
+          {
+            name: "notes",
+            indicatorRules: [],
+            source: { kind: "documentCount", doctype: "Note" }
+          }
+        ]
+      })
+    ).toThrow("indicator rules must not be empty");
+    expect(() =>
+      defineDashboard({
+        name: "Broken",
+        cards: [
+          {
+            name: "notes",
+            indicatorRules: [{ operator: "between" as "gt", value: 10, indicator: "green" }],
+            source: { kind: "documentCount", doctype: "Note" }
+          }
+        ]
+      })
+    ).toThrow("invalid operator 'between'");
+    expect(() =>
+      defineDashboard({
+        name: "Broken",
+        cards: [
+          {
+            name: "notes",
+            indicatorRules: [{ operator: "gt", value: Number.NaN, indicator: "green" }],
+            source: { kind: "documentCount", doctype: "Note" }
+          }
+        ]
+      })
+    ).toThrow("value must be a finite number");
+    expect(() =>
+      defineDashboard({
+        name: "Broken",
+        cards: [
+          {
+            name: "notes",
+            indicatorRules: [{ operator: "gt", value: 10, indicator: "" }],
+            source: { kind: "documentCount", doctype: "Note" }
+          }
+        ]
+      })
+    ).toThrow("indicator rule 1 indicator is required");
+    expect(() =>
+      defineDashboard({
+        name: "Broken",
+        cards: [
+          {
+            name: "chart",
+            indicatorRules: [{ operator: "gt", value: 10, indicator: "green" }],
+            source: { kind: "reportChart", report: "Open Notes", chart: "notes_by_state" }
+          }
+        ]
+      })
+    ).toThrow("chart cards cannot define indicator rules");
+    expect(() =>
       createRegistry({
         doctypes: [Note],
         reports: [report],
@@ -198,6 +318,78 @@ describe("dashboards", () => {
         ]
       })
     ).toThrow("references unknown chart");
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        reports: [textSummaryReport],
+        dashboards: [
+          defineDashboard({
+            name: "Broken",
+            cards: [
+              {
+                name: "first_title",
+                indicatorRules: [{ operator: "gt", value: 10, indicator: "green" }],
+                source: { kind: "reportSummary", report: "Text Notes", summary: "first_title" }
+              }
+            ]
+          })
+        ]
+      })
+    ).toThrow("indicator rules require a numeric summary");
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        reports: [fieldlessCustomMetricReport],
+        dashboards: [
+          defineDashboard({
+            name: "Broken",
+            cards: [
+              {
+                name: "max_score",
+                indicatorRules: [{ operator: "gte", value: 90, indicator: "green" }],
+                source: { kind: "reportSummary", report: "Fieldless Metrics", summary: "max_score" }
+              }
+            ]
+          })
+        ]
+      })
+    ).toThrow("indicator rules require a numeric summary");
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        reports: [fieldlessCustomSumReport],
+        dashboards: [
+          defineDashboard({
+            name: "Broken",
+            cards: [
+              {
+                name: "total_score",
+                indicatorRules: [{ operator: "gte", value: 90, indicator: "green" }],
+                source: { kind: "reportSummary", report: "Fieldless Sum Metrics", summary: "total_score" }
+              }
+            ]
+          })
+        ]
+      })
+    ).toThrow("indicator rules require a numeric summary");
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        reports: [aliasedCustomMetricReport],
+        dashboards: [
+          defineDashboard({
+            name: "Broken",
+            cards: [
+              {
+                name: "max_score",
+                indicatorRules: [{ operator: "gte", value: 90, indicator: "green" }],
+                source: { kind: "reportSummary", report: "Aliased Metrics", summary: "max_score" }
+              }
+            ]
+          })
+        ]
+      })
+    ).toThrow("indicator rules require a numeric summary");
   });
 
   it("validates dashboard report-summary filter presets at registration", () => {

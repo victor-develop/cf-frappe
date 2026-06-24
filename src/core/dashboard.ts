@@ -3,8 +3,10 @@ import { SYSTEM_MANAGER_ROLE, type Actor, type JsonPrimitive, type ListDocuments
 
 export type DashboardReportFilters = Readonly<Record<string, JsonPrimitive | undefined>>;
 export type DashboardDocumentAggregate = "count" | "sum" | "avg" | "min" | "max";
+export type DashboardIndicatorOperator = "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
 
 export const DASHBOARD_DOCUMENT_AGGREGATES = ["count", "sum", "avg", "min", "max"] as const satisfies readonly DashboardDocumentAggregate[];
+export const DASHBOARD_INDICATOR_OPERATORS = ["eq", "ne", "gt", "gte", "lt", "lte"] as const satisfies readonly DashboardIndicatorOperator[];
 
 export type DashboardCardSourceDefinition =
   | {
@@ -37,7 +39,14 @@ export interface DashboardCardDefinition {
   readonly label?: string;
   readonly description?: string;
   readonly indicator?: string;
+  readonly indicatorRules?: readonly DashboardIndicatorRule[];
   readonly source: DashboardCardSourceDefinition;
+}
+
+export interface DashboardIndicatorRule {
+  readonly operator: DashboardIndicatorOperator;
+  readonly value: number;
+  readonly indicator: string;
 }
 
 export interface DashboardDefinition {
@@ -58,7 +67,14 @@ export function defineDashboard(definition: DashboardDefinition): DashboardDefin
       definition.cards.map((card) =>
         Object.freeze({
           ...card,
-          source: freezeDashboardCardSource(card.source)
+          source: freezeDashboardCardSource(card.source),
+          ...(card.indicatorRules
+            ? {
+                indicatorRules: Object.freeze(
+                  card.indicatorRules.map((rule) => Object.freeze({ ...rule }))
+                )
+              }
+            : {})
         })
       )
     )
@@ -78,6 +94,7 @@ export function assertDashboardDefinition(definition: DashboardDefinition): void
   for (const card of definition.cards) {
     assertDashboardIdentifier(card.name, "dashboard card name");
     assertDashboardCardSource(definition.name, card);
+    assertDashboardIndicatorRules(definition.name, card);
   }
 }
 
@@ -150,6 +167,47 @@ function assertDashboardCardSource(dashboardName: string, card: DashboardCardDef
     `Dashboard '${dashboardName}' card '${card.name}' has invalid source`,
     { status: 400 }
   );
+}
+
+function assertDashboardIndicatorRules(dashboardName: string, card: DashboardCardDefinition): void {
+  const rules = card.indicatorRules;
+  if (rules === undefined) {
+    return;
+  }
+  if (card.source.kind === "reportChart") {
+    throw new FrameworkError(
+      "DASHBOARD_INVALID",
+      `Dashboard '${dashboardName}' card '${card.name}' chart cards cannot define indicator rules`,
+      { status: 400 }
+    );
+  }
+  if (rules.length === 0) {
+    throw new FrameworkError(
+      "DASHBOARD_INVALID",
+      `Dashboard '${dashboardName}' card '${card.name}' indicator rules must not be empty`,
+      { status: 400 }
+    );
+  }
+  for (const [index, rule] of rules.entries()) {
+    if (!DASHBOARD_INDICATOR_OPERATORS.includes(rule.operator)) {
+      throw new FrameworkError(
+        "DASHBOARD_INVALID",
+        `Dashboard '${dashboardName}' card '${card.name}' indicator rule ${index + 1} has invalid operator '${String(rule.operator)}'`,
+        { status: 400 }
+      );
+    }
+    if (typeof rule.value !== "number" || !Number.isFinite(rule.value)) {
+      throw new FrameworkError(
+        "DASHBOARD_INVALID",
+        `Dashboard '${dashboardName}' card '${card.name}' indicator rule ${index + 1} value must be a finite number`,
+        { status: 400 }
+      );
+    }
+    assertDashboardIdentifier(
+      typeof rule.indicator === "string" ? rule.indicator : "",
+      `dashboard '${dashboardName}' card '${card.name}' indicator rule ${index + 1} indicator`
+    );
+  }
 }
 
 function assertDashboardIdentifier(value: string, label: string): void {
