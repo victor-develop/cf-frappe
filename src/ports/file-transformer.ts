@@ -1,11 +1,16 @@
 import { badRequest } from "../core/errors.js";
 
 export const MAX_FILE_TRANSFORM_DIMENSION = 4096;
+export const MAX_FILE_TRANSFORM_WATERMARK_TEXT_LENGTH = 120;
 export const FILE_TRANSFORM_FITS = ["scale-down", "contain", "cover", "crop", "pad"] as const;
 export const FILE_TRANSFORM_FORMATS = ["jpeg", "png", "webp", "avif"] as const;
 
 export type FileTransformFit = typeof FILE_TRANSFORM_FITS[number];
 export type FileTransformFormat = typeof FILE_TRANSFORM_FORMATS[number];
+
+export interface FileTransformWatermark {
+  readonly text: string;
+}
 
 export interface FileTransformOptions {
   readonly width?: number;
@@ -13,6 +18,7 @@ export interface FileTransformOptions {
   readonly fit?: FileTransformFit;
   readonly format?: FileTransformFormat;
   readonly quality?: number;
+  readonly watermark?: FileTransformWatermark;
 }
 
 export interface FileTransformSource {
@@ -40,6 +46,7 @@ export interface TransformedFileObject {
 }
 
 export interface FileTransformer {
+  validateOptions?(options: FileTransformOptions): void;
   transform(command: TransformFileObjectCommand): Promise<TransformedFileObject>;
 }
 
@@ -60,7 +67,8 @@ export function normalizeFileTransformOptions(options: FileTransformOptions): Fi
     ...(options.height === undefined ? {} : { height: normalizeDimension(options.height, "height") }),
     ...(options.fit === undefined ? {} : { fit: normalizeFit(options.fit) }),
     ...(options.format === undefined ? {} : { format: normalizeFormat(options.format) }),
-    ...(options.quality === undefined ? {} : { quality: normalizeQuality(options.quality) })
+    ...(options.quality === undefined ? {} : { quality: normalizeQuality(options.quality) }),
+    ...(options.watermark === undefined ? {} : { watermark: normalizeWatermark(options.watermark) })
   };
   if (Object.keys(normalized).length === 0) {
     throw badRequest("At least one file transform option must be provided");
@@ -104,6 +112,21 @@ function normalizeFormat(value: string): FileTransformFormat {
     throw badRequest(`format must be one of ${FILE_TRANSFORM_FORMATS.join(", ")}`);
   }
   return value as FileTransformFormat;
+}
+
+function normalizeWatermark(value: FileTransformWatermark): FileTransformWatermark {
+  if (typeof value !== "object" || value === null || typeof value.text !== "string") {
+    throw badRequest(watermarkTextMessage());
+  }
+  const text = value.text.trim();
+  if (text.length === 0 || [...text].length > MAX_FILE_TRANSFORM_WATERMARK_TEXT_LENGTH) {
+    throw badRequest(watermarkTextMessage());
+  }
+  return { text };
+}
+
+function watermarkTextMessage(): string {
+  return `watermark must be a non-empty string up to ${String(MAX_FILE_TRANSFORM_WATERMARK_TEXT_LENGTH)} characters`;
 }
 
 function normalizeContentType(contentType: string): string {

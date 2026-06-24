@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk realtime stale-update warning slice:
+As of the file transform text-watermark slice:
 
 - Vitest files: `75`
-- Vitest cases: `822`
+- Vitest cases: `825`
 
 ## Implication
 

@@ -301,7 +301,15 @@ export function renderDeskClientScript(): string {
     setParam(params, "fit", options && options.fit);
     setParam(params, "format", options && options.format);
     setParam(params, "quality", options && options.quality);
+    setParam(params, "watermark", fileWatermarkText(options && options.watermark));
     return params;
+  }
+
+  function fileWatermarkText(value) {
+    if (value && typeof value === "object") {
+      return value.text;
+    }
+    return value;
   }
 
   var minMultipartChunkBytes = ${JSON.stringify(MIN_MULTIPART_FILE_PART_BYTES)};

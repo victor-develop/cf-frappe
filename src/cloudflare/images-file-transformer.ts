@@ -1,4 +1,4 @@
-import { FrameworkError } from "../core/errors.js";
+import { badRequest, FrameworkError } from "../core/errors.js";
 import type {
   FileTransformer,
   FileTransformFormat,
@@ -11,7 +11,14 @@ import { normalizeFileTransformContentType } from "../ports/file-transformer.js"
 export class CloudflareImagesFileTransformer implements FileTransformer {
   constructor(private readonly images: ImagesBinding) {}
 
+  validateOptions(options: FileTransformOptions): void {
+    if (options.watermark !== undefined) {
+      throw badRequest("Cloudflare Images binding does not support text watermarks");
+    }
+  }
+
   async transform(command: TransformFileObjectCommand): Promise<TransformedFileObject> {
+    this.validateOptions(command.options);
     try {
       const result = await this.images
         .input(command.source.body)

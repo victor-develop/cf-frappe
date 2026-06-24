@@ -103,7 +103,7 @@ describe("file api", () => {
     expect(uploaded.status).toBe(201);
 
     const transformed = await app.request(
-      "/api/files/file_object/transform?width=320&height=240&fit=cover&format=webp&quality=82",
+      "/api/files/file_object/transform?width=320&height=240&fit=cover&format=webp&quality=82&watermark=Draft%20Copy",
       {
         headers: userHeaders("guest", "Guest")
       }
@@ -119,7 +119,7 @@ describe("file api", () => {
       expect.objectContaining({
         actorId: "guest",
         tenantId: "acme",
-        options: { width: 320, height: 240, fit: "cover", format: "webp", quality: 82 },
+        options: { width: 320, height: 240, fit: "cover", format: "webp", quality: 82, watermark: { text: "Draft Copy" } },
         source: expect.objectContaining({
           key: "acme/files/file_object-avatar.png",
           contentType: "image/png",
@@ -202,6 +202,50 @@ describe("file api", () => {
     await expect(content.text()).resolves.toBe("transformed:image-bytes");
   });
 
+  it("accepts object-shaped text watermark rendition bodies", async () => {
+    const transformer = new RecordingTransformer();
+    const { app } = makeAppFixture(
+      1024,
+      ["create", "reserve-rendition", "complete-rendition"],
+      ["object", "attempt"],
+      { transformer }
+    );
+    await app.request("/api/files?filename=avatar.png&is_private=false", {
+      method: "POST",
+      headers: { ...userHeaders("owner@example.com", "User"), "content-type": "image/png" },
+      body: "image-bytes"
+    });
+
+    const generated = await app.request("/api/files/file_object/renditions", {
+      method: "POST",
+      headers: jsonHeaders("owner@example.com", "User"),
+      body: JSON.stringify({ width: 64, watermark: { text: " Draft Copy " } })
+    });
+
+    expect(generated.status).toBe(201);
+    await expect(generated.json()).resolves.toMatchObject({
+      data: {
+        data: {
+          renditions: [
+            {
+              id: expect.stringMatching(/^w64-wm-draft-copy-[0-9a-f]{64}$/),
+              options: { width: 64, watermark: { text: "Draft Copy" } }
+            }
+          ]
+        }
+      },
+      rendition: {
+        id: expect.stringMatching(/^w64-wm-draft-copy-[0-9a-f]{64}$/),
+        options: { width: 64, watermark: { text: "Draft Copy" } }
+      }
+    });
+    expect(transformer.commands).toEqual([
+      expect.objectContaining({
+        options: { width: 64, watermark: { text: "Draft Copy" } }
+      })
+    ]);
+  });
+
   it("validates file rendition generation bodies", async () => {
     const transformer = new RecordingTransformer();
     const { app } = makeAppFixture(1024, ["create"], ["object"], { transformer });
@@ -229,6 +273,16 @@ describe("file api", () => {
     expect(invalid.status).toBe(400);
     await expect(invalid.json()).resolves.toMatchObject({
       error: { code: "BAD_REQUEST", message: "width must be an integer from 1 to 4096" }
+    });
+
+    const invalidWatermark = await app.request("/api/files/file_object/renditions", {
+      method: "POST",
+      headers: jsonHeaders("guest", "Guest"),
+      body: JSON.stringify({ width: 64, watermark: "   " })
+    });
+    expect(invalidWatermark.status).toBe(400);
+    await expect(invalidWatermark.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "watermark must be a non-empty string up to 120 characters" }
     });
     expect(transformer.commands).toEqual([]);
   });
@@ -270,6 +324,14 @@ describe("file api", () => {
       {
         path: "/api/files/file_object/transform?width=64&fit=crop",
         message: "File transform fit 'crop' requires width and height"
+      },
+      {
+        path: "/api/files/file_object/transform?watermark=%20%20",
+        message: "watermark must be a non-empty string up to 120 characters"
+      },
+      {
+        path: `/api/files/file_object/transform?watermark=${"x".repeat(121)}`,
+        message: "watermark must be a non-empty string up to 120 characters"
       }
     ];
     for (const entry of cases) {

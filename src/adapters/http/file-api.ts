@@ -559,7 +559,7 @@ function multipartPartSizeHeader(headers: Headers): number | undefined {
 
 function fileTransformQuery(request: Request): FileTransformOptions {
   const params = new URL(request.url).searchParams;
-  const allowed = new Set(["width", "height", "fit", "format", "quality"]);
+  const allowed = new Set(["width", "height", "fit", "format", "quality", "watermark"]);
   const unknown = [...new Set([...params.keys()].filter((key) => !allowed.has(key)))];
   if (unknown.length > 0) {
     throw badRequest(`Unknown file transform query parameter '${unknown[0]}'`);
@@ -569,12 +569,13 @@ function fileTransformQuery(request: Request): FileTransformOptions {
     ...optionalTransformInteger(params, "height"),
     ...optionalTransformFit(params),
     ...optionalTransformFormat(params),
-    ...optionalTransformInteger(params, "quality")
+    ...optionalTransformInteger(params, "quality"),
+    ...optionalTransformWatermark(params)
   };
 }
 
 function fileTransformBody(body: Record<string, unknown>, label: string): FileTransformOptions {
-  const allowed = new Set(["width", "height", "fit", "format", "quality"]);
+  const allowed = new Set(["width", "height", "fit", "format", "quality", "watermark"]);
   const unknown = Object.keys(body).filter((key) => !allowed.has(key));
   if (unknown.length > 0) {
     throw badRequest(`Unknown ${label} field '${unknown[0]}'`);
@@ -584,7 +585,8 @@ function fileTransformBody(body: Record<string, unknown>, label: string): FileTr
     ...optionalTransformBodyInteger(body, "height"),
     ...optionalTransformBodyFit(body),
     ...optionalTransformBodyFormat(body),
-    ...optionalTransformBodyInteger(body, "quality")
+    ...optionalTransformBodyInteger(body, "quality"),
+    ...optionalTransformBodyWatermark(body)
   };
 }
 
@@ -624,6 +626,24 @@ function optionalTransformBodyFormat(body: Record<string, unknown>): Pick<FileTr
   return { format: value as FileTransformFormat };
 }
 
+function optionalTransformBodyWatermark(body: Record<string, unknown>): Pick<FileTransformOptions, "watermark"> {
+  const value = body.watermark;
+  if (value === undefined || value === null) {
+    return {};
+  }
+  if (typeof value !== "string") {
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      const text = (value as Record<string, unknown>).text;
+      if (typeof text !== "string") {
+        throw badRequest("watermark.text must be a string");
+      }
+      return { watermark: { text } };
+    }
+    throw badRequest("watermark must be a string or object with text");
+  }
+  return { watermark: { text: value } };
+}
+
 function optionalTransformInteger<TKey extends "width" | "height" | "quality">(
   params: URLSearchParams,
   key: TKey
@@ -653,6 +673,13 @@ function optionalTransformFormat(params: URLSearchParams): Pick<FileTransformOpt
     return {};
   }
   return { format: value as FileTransformFormat };
+}
+
+function optionalTransformWatermark(params: URLSearchParams): Pick<FileTransformOptions, "watermark"> {
+  if (!params.has("watermark")) {
+    return {};
+  }
+  return { watermark: { text: params.get("watermark") ?? "" } };
 }
 
 function fileMetadataPatch(body: Record<string, unknown>): MutableFileMetadataPatch {

@@ -34,6 +34,18 @@ describe("CloudflareImagesFileTransformer", () => {
     expect(calls.at(-1)).toEqual({ output: { format: "image/png", anim: false } });
   });
 
+  it("rejects text watermarks instead of silently dropping unsupported options", async () => {
+    const calls: unknown[] = [];
+    const transformer = new CloudflareImagesFileTransformer(fakeImages(calls));
+
+    await expect(transformer.transform(command({ width: 120, watermark: { text: "Draft Copy" } }))).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      status: 400,
+      message: "Cloudflare Images binding does not support text watermarks"
+    });
+    expect(calls).toEqual([]);
+  });
+
   it("maps Images binding failures to framework storage errors", async () => {
     const transformer = new CloudflareImagesFileTransformer({
       input() {

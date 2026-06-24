@@ -893,7 +893,8 @@ export class FileService {
       );
     }
     const sourceEtag = downloaded.object.metadata.httpEtag ?? downloaded.object.metadata.etag;
-    const renditionId = fileRenditionId(options);
+    this.validateTransformOptions(options);
+    const renditionId = await fileRenditionId(options);
     const existing = fileRenditions(downloaded.snapshot).find(
       (rendition) =>
         rendition.id === renditionId &&
@@ -1024,6 +1025,7 @@ export class FileService {
       throw badRequest(`File '${downloaded.snapshot.name}' cannot be transformed`);
     }
     const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
+    this.validateTransformOptions(options);
     const transform = await this.transformDownloadedFile({
       actor: command.actor,
       tenantId,
@@ -1181,6 +1183,10 @@ export class FileService {
       },
       options: command.options
     });
+  }
+
+  private validateTransformOptions(options: FileTransformOptions): void {
+    this.transformer?.validateOptions?.(options);
   }
 
   private async recordRenditionManifest(command: {
@@ -1477,13 +1483,23 @@ function fileRenditionView(entry: FileRenditionManifestEntry): FileRendition {
 function fileTransformOptionsFromData(data: DocumentData): FileTransformOptions {
   const fit = typeof data.fit === "string" ? data.fit as NonNullable<FileTransformOptions["fit"]> : undefined;
   const format = typeof data.format === "string" ? data.format as NonNullable<FileTransformOptions["format"]> : undefined;
+  const watermark = fileTransformWatermarkFromData(data.watermark);
   return {
     ...(typeof data.width === "number" ? { width: data.width } : {}),
     ...(typeof data.height === "number" ? { height: data.height } : {}),
     ...(fit === undefined ? {} : { fit }),
     ...(format === undefined ? {} : { format }),
-    ...(typeof data.quality === "number" ? { quality: data.quality } : {})
+    ...(typeof data.quality === "number" ? { quality: data.quality } : {}),
+    ...(watermark === undefined ? {} : { watermark })
   };
+}
+
+function fileTransformWatermarkFromData(value: JsonValue | undefined): FileTransformOptions["watermark"] | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const text = (value as Record<string, JsonValue>).text;
+  return typeof text === "string" ? { text } : undefined;
 }
 
 function pendingFileRendition(command: {
@@ -1543,18 +1559,42 @@ function fileTransformOptionsData(options: FileTransformOptions): DocumentData {
     ...(options.height === undefined ? {} : { height: options.height }),
     ...(options.fit === undefined ? {} : { fit: options.fit }),
     ...(options.format === undefined ? {} : { format: options.format }),
-    ...(options.quality === undefined ? {} : { quality: options.quality })
+    ...(options.quality === undefined ? {} : { quality: options.quality }),
+    ...(options.watermark === undefined ? {} : { watermark: { text: options.watermark.text } })
   };
 }
 
-function fileRenditionId(options: FileTransformOptions): string {
-  return [
+async function fileRenditionId(options: FileTransformOptions): Promise<string> {
+  return (await Promise.all([
     ...(options.width === undefined ? [] : [`w${String(options.width)}`]),
     ...(options.height === undefined ? [] : [`h${String(options.height)}`]),
     ...(options.fit === undefined ? [] : [`fit-${options.fit}`]),
     ...(options.format === undefined ? [] : [`f-${options.format}`]),
-    ...(options.quality === undefined ? [] : [`q${String(options.quality)}`])
-  ].join("-");
+    ...(options.quality === undefined ? [] : [`q${String(options.quality)}`]),
+    ...(options.watermark === undefined ? [] : [watermarkOptionsToken(options)])
+  ])).join("-");
+}
+
+async function watermarkOptionsToken(options: FileTransformOptions): Promise<string> {
+  const text = options.watermark?.text ?? "";
+  const slug = text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32)
+    .replace(/-+$/g, "") || "text";
+  return `wm-${slug}-${await sha256Hex(canonicalFileTransformOptions(options))}`;
+}
+
+function canonicalFileTransformOptions(options: FileTransformOptions): string {
+  return JSON.stringify(fileTransformOptionsData(options));
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function upsertFileRenditionManifest(

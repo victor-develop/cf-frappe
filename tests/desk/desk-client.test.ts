@@ -612,14 +612,20 @@ describe("Desk client runtime", () => {
       })
     ).resolves.toEqual({ data: { name: "file_upload" }, object: { etag: "etag" }, upload: { url: "https://upload.example" } });
     await runtime.files.completeDirectUpload("file/1", { expectedVersion: 3 });
-    await runtime.files.generateRendition("file/1", { width: 64, format: "webp" });
+    await runtime.files.generateRendition("file/1", { width: 64, format: "webp", watermark: { text: "Draft Copy" } });
 
     expect(runtime.files.contentUrl("file/1")).toBe("/api/files/file%2F1/content");
     expect(runtime.files.previewUrl("file/1")).toBe("/api/files/file%2F1/preview");
     expect(runtime.files.renditionContentUrl("file/1", "w64-f-webp"))
       .toBe("/api/files/file%2F1/renditions/w64-f-webp/content");
-    expect(runtime.files.transformUrl("file/1", { width: 320, height: 240, fit: "cover", format: "webp", quality: 82 }))
-      .toBe("/api/files/file%2F1/transform?width=320&height=240&fit=cover&format=webp&quality=82");
+    expect(runtime.files.transformUrl("file/1", {
+      width: 320,
+      height: 240,
+      fit: "cover",
+      format: "webp",
+      quality: 82,
+      watermark: { text: "Draft Copy" }
+    })).toBe("/api/files/file%2F1/transform?width=320&height=240&fit=cover&format=webp&quality=82&watermark=Draft+Copy");
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
       "POST /api/files?attached_to_doctype=Task+Type&attached_to_name=TASK%2F1&filename=hello.txt&is_private=true",
       "POST /api/files/direct-upload",
@@ -639,7 +645,7 @@ describe("Desk client runtime", () => {
       })
     );
     expect(calls[2]?.init.body).toBe(JSON.stringify({ expectedVersion: 3 }));
-    expect(calls[3]?.init.body).toBe(JSON.stringify({ width: 64, format: "webp" }));
+    expect(calls[3]?.init.body).toBe(JSON.stringify({ width: 64, format: "webp", watermark: { text: "Draft Copy" } }));
   });
 
   it("orchestrates multipart file uploads with chunk progress", async () => {

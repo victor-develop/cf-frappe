@@ -15,12 +15,14 @@ import {
 import { MIN_MULTIPART_FILE_PART_BYTES } from "../../src";
 import type {
   FileScanner,
+  FileTransformOptions,
   FileScanTarget,
   FileStorage,
   FileTransformer,
   PutFileObjectCommand,
   TransformFileObjectCommand
 } from "../../src";
+import { badRequest } from "../../src";
 import { guest, now, owner } from "../helpers";
 
 const otherUser = {
@@ -1478,8 +1480,9 @@ describe("FileService", () => {
     const generated = await services.files.generateRendition({
       actor: owner,
       name: uploaded.snapshot.name,
-      options: { width: 128, height: 128, fit: "cover", format: "webp", quality: 80 }
+      options: { width: 128, height: 128, fit: "cover", format: "webp", quality: 80, watermark: { text: "Draft Copy" } }
     });
+    const watermarkedRenditionId = expect.stringMatching(/^w128-h128-fit-cover-f-webp-q80-wm-draft-copy-[0-9a-f]{64}$/);
 
     expect(generated.created).toBe(true);
     expect(generated).toMatchObject({
@@ -1489,20 +1492,29 @@ describe("FileService", () => {
         data: {
           renditions: [
             {
-              id: "w128-h128-fit-cover-f-webp-q80",
-              key: "acme/file-renditions/file_object/w128-h128-fit-cover-f-webp-q80-rendition_attempt.webp",
+              id: watermarkedRenditionId,
+              key: expect.stringMatching(
+                /^acme\/file-renditions\/file_object\/w128-h128-fit-cover-f-webp-q80-wm-draft-copy-[0-9a-f]{64}-rendition_attempt\.webp$/
+              ),
               status: "available",
               content_type: "image/webp",
               size: 23,
               generated_by: owner.id,
               generated_at: now,
-              options: { width: 128, height: 128, fit: "cover", format: "webp", quality: 80 }
+              options: {
+                width: 128,
+                height: 128,
+                fit: "cover",
+                format: "webp",
+                quality: 80,
+                watermark: { text: "Draft Copy" }
+              }
             }
           ]
         }
       },
       rendition: {
-        id: "w128-h128-fit-cover-f-webp-q80",
+        id: watermarkedRenditionId,
         status: "available",
         contentType: "image/webp",
         size: 23
@@ -1510,7 +1522,7 @@ describe("FileService", () => {
     });
     await expect(
       new Response(
-        (await services.storage.get("acme/file-renditions/file_object/w128-h128-fit-cover-f-webp-q80-rendition_attempt.webp"))?.body
+        (await services.storage.get(generated.rendition.key))?.body
       ).text()
     ).resolves.toBe("transformed:image-bytes");
     await expect(
@@ -1534,7 +1546,7 @@ describe("FileService", () => {
           patch: {
             renditions: [
               expect.objectContaining({
-                id: "w128-h128-fit-cover-f-webp-q80",
+                id: watermarkedRenditionId,
                 status: "pending"
               })
             ]
@@ -1549,7 +1561,7 @@ describe("FileService", () => {
           patch: {
             renditions: [
               expect.objectContaining({
-                id: "w128-h128-fit-cover-f-webp-q80",
+                id: watermarkedRenditionId,
                 status: "available"
               })
             ]
@@ -1583,6 +1595,37 @@ describe("FileService", () => {
     expect(second.snapshot.version).toBe(first.snapshot.version);
     expect(second.rendition).toEqual(first.rendition);
     expect(transformer.commands).toHaveLength(1);
+  });
+
+  it("validates transformer rendition capabilities before appending metadata", async () => {
+    const transformer = new UnsupportedWatermarkTransformer();
+    const services = createFileServices(
+      ["create", "reserve-rendition", "complete-rendition"],
+      ["object", "attempt"],
+      { transformer }
+    );
+    const uploaded = await services.files.upload({
+      actor: owner,
+      filename: "avatar.png",
+      body: "image-bytes",
+      contentType: "image/png",
+      isPrivate: false
+    });
+
+    await expect(
+      services.files.generateRendition({
+        actor: owner,
+        name: uploaded.snapshot.name,
+        options: { width: 64, watermark: { text: "Draft Copy" } }
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "text watermarks are not supported by this transformer"
+    });
+    expect(transformer.commands).toEqual([]);
+    await expect(services.store.readStream(documentStream("acme", "File", uploaded.snapshot.name))).resolves.toEqual([
+      expect.objectContaining({ type: "FileCreated" })
+    ]);
   });
 
   it("treats pending file renditions as a generation lock", async () => {
@@ -2018,6 +2061,14 @@ class RecordingTransformer implements FileTransformer {
       ...(this.options.includeContentLength === false ? {} : { contentLength: content.length }),
       etag: '"transform"'
     };
+  }
+}
+
+class UnsupportedWatermarkTransformer extends RecordingTransformer {
+  validateOptions(options: FileTransformOptions): void {
+    if (options.watermark !== undefined) {
+      throw badRequest("text watermarks are not supported by this transformer");
+    }
   }
 }
 
