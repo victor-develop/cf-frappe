@@ -270,6 +270,9 @@ function workspaceShortcutKindLabel(kind: WorkspaceShortcutKind): string {
   if (kind === "report") {
     return "Report";
   }
+  if (kind === "dashboard") {
+    return "Dashboard";
+  }
   if (kind === "file") {
     return "Files";
   }

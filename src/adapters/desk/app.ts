@@ -361,7 +361,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const reports = listReports(options, actor);
     const dashboards = await listDashboards(options, actor);
     const workspaces = listWorkspaces(options, actor);
-    const page = workspacePageFor(options, actor, workspace, doctypes, reports);
+    const page = workspacePageFor(options, actor, workspace, doctypes, reports, dashboards);
     return html(
       renderDeskLayoutFor(options, {
         title: workspace.label ?? workspace.name,
@@ -2220,7 +2220,8 @@ function workspacePageFor(
   actor: Actor,
   workspace: WorkspaceDefinition,
   doctypes: readonly DocTypeDefinition[],
-  reports: ReturnType<typeof listReports>
+  reports: ReturnType<typeof listReports>,
+  dashboards: Awaited<ReturnType<typeof listDashboards>>
 ): WorkspacePageView {
   const adminLinks = adminLinksFor(options, actor);
   return {
@@ -2229,7 +2230,7 @@ function workspacePageFor(
       name: section.name,
       label: section.label ?? section.name,
       shortcuts: section.shortcuts.flatMap((shortcut) =>
-        workspaceShortcutFor(options, actor, shortcut, doctypes, reports, adminLinks)
+        workspaceShortcutFor(options, actor, shortcut, doctypes, reports, dashboards, adminLinks)
       )
     }))
   };
@@ -2241,6 +2242,7 @@ function workspaceShortcutFor(
   shortcut: WorkspaceShortcutDefinition,
   doctypes: readonly DocTypeDefinition[],
   reports: ReturnType<typeof listReports>,
+  dashboards: Awaited<ReturnType<typeof listDashboards>>,
   adminLinks: readonly DeskNavLink[]
 ): readonly WorkspaceShortcutView[] {
   if (!canReadWorkspaceShortcut(actor, shortcut)) {
@@ -2267,6 +2269,18 @@ function workspaceShortcutFor(
           ...(shortcut.description === undefined ? {} : { description: shortcut.description }),
           kind: shortcut.kind,
           href: `/desk/reports/${encodeURIComponent(report.name)}`
+        }]
+      : [];
+  }
+  if (shortcut.kind === "dashboard") {
+    const dashboard = dashboards.find((item) => item.name === shortcut.target);
+    return dashboard
+      ? [{
+          name: shortcut.name,
+          label: shortcut.label ?? dashboard.label ?? dashboard.name,
+          ...(shortcut.description === undefined ? {} : { description: shortcut.description }),
+          kind: shortcut.kind,
+          href: `/desk/dashboards/${encodeURIComponent(dashboard.name)}`
         }]
       : [];
   }

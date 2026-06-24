@@ -173,7 +173,7 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
 
   app.get("/api/meta/workspaces", async (c) => {
     const actor = await resolveActor(c.req.raw);
-    const access = workspaceMetadataAccess(options, actor);
+    const access = await workspaceMetadataAccess(options, actor);
     return c.json({
       data: options.registry
         .listWorkspaces()
@@ -188,7 +188,7 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     if (!canReadWorkspace(actor, workspace)) {
       throw permissionDenied(`Actor '${actor.id}' cannot read workspace '${workspace.name}'`);
     }
-    return c.json({ data: workspaceMetadataForActor(actor, workspace, workspaceMetadataAccess(options, actor)) });
+    return c.json({ data: workspaceMetadataForActor(actor, workspace, await workspaceMetadataAccess(options, actor)) });
   });
 
   app.get("/api/link-options/:doctype/:field", async (c) => {
@@ -811,12 +811,13 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
 interface WorkspaceMetadataAccess {
   readonly doctypes: ReadonlySet<string>;
   readonly reports: ReadonlySet<string>;
+  readonly dashboards: ReadonlySet<string>;
   readonly files: boolean;
   readonly notifications: boolean;
   readonly adminTargets: ReadonlySet<string>;
 }
 
-function workspaceMetadataAccess(options: ResourceApiOptions, actor: Actor): WorkspaceMetadataAccess {
+async function workspaceMetadataAccess(options: ResourceApiOptions, actor: Actor): Promise<WorkspaceMetadataAccess> {
   return {
     doctypes: new Set(options.queries.listDoctypes(actor).map((doctype) => doctype.name)),
     reports: new Set(
@@ -825,6 +826,7 @@ function workspaceMetadataAccess(options: ResourceApiOptions, actor: Actor): Wor
         .filter((report) => canReadReport(actor, report) && can(actor, options.registry.get(report.doctype), report.permissionAction ?? "read"))
         .map((report) => report.name)
     ),
+    dashboards: new Set((await options.dashboards?.listDashboards(actor) ?? []).map((dashboard) => dashboard.name)),
     files: options.files !== undefined,
     notifications: options.notifications !== undefined,
     adminTargets: workspaceAdminTargets(options, actor)
@@ -871,6 +873,9 @@ function canReadWorkspaceShortcutTarget(
   }
   if (shortcut.kind === "report") {
     return access.reports.has(shortcut.target ?? "");
+  }
+  if (shortcut.kind === "dashboard") {
+    return access.dashboards.has(shortcut.target ?? "");
   }
   if (shortcut.kind === "file") {
     return access.files;

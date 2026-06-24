@@ -329,6 +329,20 @@ describe("Desk app", () => {
     const registry = createRegistry({
       doctypes: [noteDocType],
       reports: [openNotesReport],
+      dashboards: [
+        defineDashboard({
+          name: "Operations Dashboard",
+          label: "Ops Dashboard",
+          roles: ["User"],
+          cards: [{ name: "open_notes", source: { kind: "documentCount", doctype: "Note" } }]
+        }),
+        defineDashboard({
+          name: "Management Dashboard",
+          label: "Management Dashboard",
+          roles: ["Task Manager"],
+          cards: [{ name: "managed_notes", source: { kind: "documentCount", doctype: "Note" } }]
+        })
+      ],
       workspaces: [
         defineWorkspace({
           name: "Operations",
@@ -342,6 +356,8 @@ describe("Desk app", () => {
               shortcuts: [
                 { name: "notes", label: "Notes", kind: "doctype", target: "Note" },
                 { name: "open-notes", label: "Open Notes", kind: "report", target: "Open Notes" },
+                { name: "ops-dashboard", kind: "dashboard", target: "Operations Dashboard" },
+                { name: "management-dashboard", kind: "dashboard", target: "Management Dashboard" },
                 { name: "manager-only", label: "Manager Only", kind: "doctype", target: "Note", roles: ["Task Manager"] }
               ]
             }
@@ -358,11 +374,13 @@ describe("Desk app", () => {
     });
     const queries = new QueryService({ registry, projections: store });
     const reports = new ReportService({ registry, queries });
+    const dashboards = new DashboardService({ registry, queries, reports });
     const app = createDeskApp({
       registry,
       documents,
       queries,
       reports,
+      dashboards,
       actor: () => owner
     });
 
@@ -378,6 +396,9 @@ describe("Desk app", () => {
     expect(html).toContain("Daily workspace");
     expect(html).toContain('href="/desk/Note"');
     expect(html).toContain('href="/desk/reports/Open%20Notes"');
+    expect(html).toContain('href="/desk/dashboards/Operations%20Dashboard"');
+    expect(html).toContain("Ops Dashboard");
+    expect(html).not.toContain("Management Dashboard");
     expect(html).not.toContain("Manager Only");
   });
 

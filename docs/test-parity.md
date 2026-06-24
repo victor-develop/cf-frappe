@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the metadata dashboard slice:
+As of the dashboard workspace shortcut slice:
 
 - Vitest files: `79`
-- Vitest cases: `862`
+- Vitest cases: `863`
 
 ## Implication
 

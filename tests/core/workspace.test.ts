@@ -1,5 +1,6 @@
 import {
   createRegistry,
+  defineDashboard,
   defineDocType,
   defineReport,
   defineWorkspace,
@@ -77,9 +78,13 @@ describe("workspaces", () => {
     ).toThrow("must define a target");
   });
 
-  it("registers workspace metadata after validating DocType and report references", () => {
+  it("registers workspace metadata after validating DocType, report, and dashboard references", () => {
     const Note = defineDocType({ name: "Note", fields: [{ name: "title", type: "text" }] });
     const report = defineReport({ name: "Open Notes", doctype: "Note", columns: [{ name: "title" }] });
+    const dashboard = defineDashboard({
+      name: "Operations Dashboard",
+      cards: [{ name: "open_notes", source: { kind: "documentCount", doctype: "Note" } }]
+    });
     const workspace = defineWorkspace({
       name: "Operations",
       sections: [
@@ -87,13 +92,14 @@ describe("workspaces", () => {
           name: "main",
           shortcuts: [
             { name: "notes", kind: "doctype", target: "Note" },
-            { name: "open-notes", kind: "report", target: "Open Notes" }
+            { name: "open-notes", kind: "report", target: "Open Notes" },
+            { name: "operations-dashboard", kind: "dashboard", target: "Operations Dashboard" }
           ]
         }
       ]
     });
 
-    const registry = createRegistry({ doctypes: [Note], reports: [report], workspaces: [workspace] });
+    const registry = createRegistry({ doctypes: [Note], reports: [report], dashboards: [dashboard], workspaces: [workspace] });
 
     expect(registry.listWorkspaces().map((item) => item.name)).toEqual(["Operations"]);
     expect(registry.getWorkspace("Operations")).toEqual(workspace);
@@ -108,8 +114,26 @@ describe("workspaces", () => {
         ]
       })
     ).toThrow("references unknown DocType");
-    expect(() => createRegistry({ doctypes: [Note], reports: [report], workspaces: [workspace, workspace] })).toThrow(
-      "already registered"
-    );
+    expect(() =>
+      createRegistry({ doctypes: [Note], reports: [report], dashboards: [dashboard], workspaces: [workspace, workspace] })
+    ).toThrow("already registered");
+  });
+
+  it("rejects workspace dashboard shortcuts that reference unregistered dashboards", () => {
+    expect(() =>
+      createRegistry({
+        workspaces: [
+          defineWorkspace({
+            name: "Broken Dashboard",
+            sections: [
+              {
+                name: "main",
+                shortcuts: [{ name: "missing-dashboard", kind: "dashboard", target: "Missing Dashboard" }]
+              }
+            ]
+          })
+        ]
+      })
+    ).toThrow("references unknown dashboard");
   });
 });

@@ -1,6 +1,8 @@
 import {
   createRegistry,
   createResourceApi,
+  DashboardService,
+  defineDashboard,
   defineWorkspace,
   deterministicIds,
   DocumentService,
@@ -8,6 +10,7 @@ import {
   InMemoryDocumentStore,
   QueryService,
   PrintSettingsService,
+  ReportService,
   SYSTEM_MANAGER_ROLE,
   unsafeHeaderActorResolver
 } from "../../src";
@@ -75,6 +78,20 @@ describe("resource api", () => {
     const registry = createRegistry({
       doctypes: [noteDocType],
       reports: [openNotesReport],
+      dashboards: [
+        defineDashboard({
+          name: "Operations Dashboard",
+          label: "Ops Dashboard",
+          roles: ["User"],
+          cards: [{ name: "open_notes", source: { kind: "documentCount", doctype: "Note" } }]
+        }),
+        defineDashboard({
+          name: "Management Dashboard",
+          label: "Management Dashboard",
+          roles: ["Task Manager"],
+          cards: [{ name: "managed_notes", source: { kind: "documentCount", doctype: "Note" } }]
+        })
+      ],
       workspaces: [
         defineWorkspace({
           name: "Operations",
@@ -87,6 +104,8 @@ describe("resource api", () => {
               shortcuts: [
                 { name: "notes", kind: "doctype", target: "Note" },
                 { name: "open-notes", kind: "report", target: "Open Notes" },
+                { name: "ops-dashboard", kind: "dashboard", target: "Operations Dashboard" },
+                { name: "management-dashboard", kind: "dashboard", target: "Management Dashboard" },
                 { name: "manager-only", kind: "doctype", target: "Note", roles: ["Task Manager"] },
                 { name: "files", kind: "file" },
                 { name: "inbox", kind: "notifications" },
@@ -111,10 +130,13 @@ describe("resource api", () => {
       ids: deterministicIds(["workspace-test"])
     });
     const queries = new QueryService({ registry, projections: store });
+    const reports = new ReportService({ registry, queries });
+    const dashboards = new DashboardService({ registry, queries, reports });
     return createResourceApi({
       registry,
       documents,
       queries,
+      dashboards,
       printSettings: new PrintSettingsService({ events: store }),
       actor: unsafeHeaderActorResolver
     });
@@ -239,7 +261,8 @@ describe("resource api", () => {
               name: "main",
               shortcuts: [
                 { name: "notes", kind: "doctype", target: "Note" },
-                { name: "open-notes", kind: "report", target: "Open Notes" }
+                { name: "open-notes", kind: "report", target: "Open Notes" },
+                { name: "ops-dashboard", kind: "dashboard", target: "Operations Dashboard" }
               ]
             }
           ]
@@ -247,6 +270,8 @@ describe("resource api", () => {
       ]
     });
     expect(JSON.stringify(listedBody)).not.toContain("manager-only");
+    expect(JSON.stringify(listedBody)).not.toContain("management-dashboard");
+    expect(JSON.stringify(listedBody)).not.toContain("Management Dashboard");
     expect(JSON.stringify(listedBody)).not.toContain("files");
     expect(JSON.stringify(listedBody)).not.toContain("inbox");
     expect(JSON.stringify(listedBody)).not.toContain("users-admin");
@@ -254,6 +279,8 @@ describe("resource api", () => {
     expect(direct.status).toBe(200);
     const directBody = await direct.json();
     expect(JSON.stringify(directBody)).not.toContain("manager-only");
+    expect(JSON.stringify(directBody)).not.toContain("management-dashboard");
+    expect(JSON.stringify(directBody)).not.toContain("Management Dashboard");
     expect(JSON.stringify(directBody)).not.toContain("files");
     expect(JSON.stringify(directBody)).not.toContain("inbox");
     expect(JSON.stringify(directBody)).not.toContain("users-admin");
@@ -277,6 +304,7 @@ describe("resource api", () => {
     expect(adminList.status).toBe(200);
     const adminBody = JSON.stringify(await adminList.json());
     expect(adminBody).toContain("manager-only");
+    expect(adminBody).toContain("management-dashboard");
     expect(adminBody).toContain("print-settings-admin");
     expect(adminBody).not.toContain("files");
     expect(adminBody).not.toContain("inbox");

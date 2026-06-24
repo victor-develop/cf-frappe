@@ -405,6 +405,13 @@ export class ModelRegistry {
             { status: 400 }
           );
         }
+        if (shortcut.kind === "dashboard" && !this.dashboards.has(shortcut.target ?? "")) {
+          throw new FrameworkError(
+            "WORKSPACE_INVALID",
+            `Workspace '${workspace.name}' shortcut '${shortcut.name}' references unknown dashboard '${shortcut.target ?? ""}'`,
+            { status: 400 }
+          );
+        }
       }
     }
   }
