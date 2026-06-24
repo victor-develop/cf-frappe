@@ -192,7 +192,7 @@ describe("resource api", () => {
     await expect(response.json()).resolves.toMatchObject({
       data: {
         columns: [{ name: "title" }, { name: "priority" }, { name: "workflow_state" }],
-        filterBuilderFields: [
+        filterBuilderFields: expect.arrayContaining([
           {
             field: "title",
             inputType: "text",
@@ -237,8 +237,32 @@ describe("resource api", () => {
               { operator: "lt", label: "less than" },
               { operator: "lte", label: "less than or equal" }
             ]
+          },
+          {
+            field: "system.docstatus",
+            inputType: "select",
+            operators: [
+              { operator: "eq", label: "equals" },
+              { operator: "ne", label: "is not" },
+              { operator: "in", label: "is in" },
+              { operator: "not_in", label: "is not in" }
+            ]
+          },
+          {
+            field: "system.updatedAt",
+            inputType: "datetime-local",
+            operators: [
+              { operator: "eq", label: "equals" },
+              { operator: "ne", label: "is not" },
+              { operator: "in", label: "is in" },
+              { operator: "not_in", label: "is not in" },
+              { operator: "gt", label: "greater than" },
+              { operator: "gte", label: "greater than or equal" },
+              { operator: "lt", label: "less than" },
+              { operator: "lte", label: "less than or equal" }
+            ]
           }
-        ],
+        ]),
         filterControls: [
           { field: "title", inputType: "text", operator: "contains", queryKey: "filter_title__contains" },
           { field: "title", inputType: "text", operator: "ne", queryKey: "filter_title__ne" },
@@ -1231,6 +1255,15 @@ describe("resource api", () => {
     });
     expect(notIn.status).toBe(200);
     await expect(notIn.json()).resolves.toMatchObject({
+      data: [{ name: "HTTP High" }],
+      total: 1
+    });
+
+    const byName = await app.request("/api/resource/Note?filter_system.name__contains=High", {
+      headers: userHeaders
+    });
+    expect(byName.status).toBe(200);
+    await expect(byName.json()).resolves.toMatchObject({
       data: [{ name: "HTTP High" }],
       total: 1
     });

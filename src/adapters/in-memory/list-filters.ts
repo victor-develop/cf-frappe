@@ -12,7 +12,7 @@ export function matchesListFilters(
   filters: readonly ListDocumentsFilter[] = []
 ): boolean {
   return filters.every((filter) => {
-    const actual = document.data[filter.field];
+    const actual = listFilterValue(document, filter.field);
     switch (filter.operator ?? "eq") {
       case "eq":
         return actual === scalarFilterValue(filter);
@@ -49,6 +49,23 @@ export function matchesListFilters(
         return compareValues(actual, scalarFilterValue(filter)) <= 0;
     }
   });
+}
+
+function listFilterValue(document: DocumentSnapshot, field: string): JsonValue | number | string | undefined {
+  switch (field) {
+    case "system.name":
+      return document.name;
+    case "system.docstatus":
+      return document.docstatus;
+    case "system.createdAt":
+      return document.createdAt;
+    case "system.updatedAt":
+      return document.updatedAt;
+    case "system.version":
+      return document.version;
+    default:
+      return document.data[field];
+  }
 }
 
 function arrayIncludes(expected: ListDocumentsFilter["value"], actual: JsonValue): boolean {

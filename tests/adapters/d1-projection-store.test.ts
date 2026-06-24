@@ -106,6 +106,54 @@ describe("D1ProjectionStore", () => {
     expect(notInDb.statements[0]?.params).toEqual(["acme", "Note", "Low", "Medium", 50, 0]);
   });
 
+  it("filters system projection fields with bound parameters", async () => {
+    const db = new FakeD1Database([
+      documentRow({
+        name: "D1 Draft",
+        version: 1,
+        docstatus: "draft",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        data: { title: "D1 Draft" }
+      }),
+      documentRow({
+        name: "D1 Submitted",
+        version: 3,
+        docstatus: "submitted",
+        updatedAt: "2026-01-05T00:00:00.000Z",
+        data: { title: "D1 Submitted" }
+      })
+    ]);
+    const store = new D1ProjectionStore(db as unknown as D1Database);
+
+    const result = await store.list({
+      tenantId: "acme",
+      doctype: "Note",
+      filters: [
+        { field: "system.docstatus", value: "submitted" },
+        { field: "system.updatedAt", operator: "gte", value: "2026-01-04T00:00:00.000Z" },
+        { field: "system.version", operator: "gt", value: 1 }
+      ]
+    });
+
+    expect(result).toMatchObject({ data: [{ name: "D1 Submitted" }], total: 1 });
+    const [rows, count] = db.statements;
+    expect(rows?.sql).toContain("docstatus = ?");
+    expect(rows?.sql).toContain("updated_at >= ?");
+    expect(rows?.sql).toContain("version > ?");
+    expect(rows?.sql).not.toContain("$.docstatus");
+    expect(rows?.sql).not.toContain("$.updatedAt");
+    expect(rows?.params).toEqual([
+      "acme",
+      "Note",
+      "submitted",
+      "2026-01-04T00:00:00.000Z",
+      1,
+      50,
+      0
+    ]);
+    expect(count?.params).toEqual(["acme", "Note", "submitted", "2026-01-04T00:00:00.000Z", 1]);
+  });
+
   it("orders rows by escaped JSON fields with deterministic fallbacks", async () => {
     const db = new FakeD1Database([
       documentRow({ name: "D1 High", data: { title: "apple", count: 5 } }),
@@ -207,22 +255,29 @@ interface FakeDocumentRow {
   readonly doctype: string;
   readonly name: string;
   readonly version: number;
-  readonly docstatus: "draft";
+  readonly docstatus: "draft" | "submitted" | "cancelled" | "deleted";
   readonly data_json: string;
   readonly created_at: string;
   readonly updated_at: string;
 }
 
-function documentRow(input: { readonly name: string; readonly data: DocumentData }): FakeDocumentRow {
+function documentRow(input: {
+  readonly name: string;
+  readonly data: DocumentData;
+  readonly version?: number;
+  readonly docstatus?: "draft" | "submitted" | "cancelled" | "deleted";
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+}): FakeDocumentRow {
   return {
     tenant_id: "acme",
     doctype: "Note",
     name: input.name,
-    version: 1,
-    docstatus: "draft",
+    version: input.version ?? 1,
+    docstatus: input.docstatus ?? "draft",
     data_json: JSON.stringify(input.data),
-    created_at: "2026-01-01T00:00:00.000Z",
-    updated_at: "2026-01-01T00:00:00.000Z"
+    created_at: input.createdAt ?? "2026-01-01T00:00:00.000Z",
+    updated_at: input.updatedAt ?? "2026-01-01T00:00:00.000Z"
   };
 }
 
@@ -279,6 +334,24 @@ class FakeD1PreparedStatement {
         return data.priority === filterParams[0];
       }
       let paramIndex = 0;
+      if (this.sql.includes("docstatus = ?")) {
+        if (row.docstatus !== filterParams[paramIndex]) {
+          return false;
+        }
+        paramIndex += 1;
+      }
+      if (this.sql.includes("updated_at >= ?")) {
+        if (!(row.updated_at >= String(filterParams[paramIndex]))) {
+          return false;
+        }
+        paramIndex += 1;
+      }
+      if (this.sql.includes("version > ?")) {
+        if (!(row.version > Number(filterParams[paramIndex]))) {
+          return false;
+        }
+        paramIndex += 1;
+      }
       if (this.sql.includes("json_extract(data_json, '$.priority') IN (?, ?)")) {
         if (!filterParams.slice(paramIndex, paramIndex + 2).includes(data.priority)) {
           return false;

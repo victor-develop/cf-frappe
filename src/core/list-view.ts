@@ -27,6 +27,13 @@ const SYSTEM_LIST_ORDER_OPTIONS = [
   { name: "updatedAt", label: "Updated" },
   { name: "version", label: "Version" }
 ] as const satisfies readonly ListOrderOption[];
+const SYSTEM_LIST_FILTER_FIELDS = [
+  { name: "system.name", label: "Name", type: "text", readOnly: true },
+  { name: "system.docstatus", label: "Status", type: "select", options: ["draft", "submitted", "cancelled"], readOnly: true },
+  { name: "system.createdAt", label: "Created", type: "datetime", readOnly: true },
+  { name: "system.updatedAt", label: "Updated", type: "datetime", readOnly: true },
+  { name: "system.version", label: "Version", type: "integer", readOnly: true }
+] as const satisfies readonly FieldDefinition[];
 const LIST_FILTER_OPERATOR_LABELS: Record<ListFilterOperator, string> = {
   eq: "equals",
   ne: "is not",
@@ -82,7 +89,7 @@ export function resolveListView(doctype: DocTypeDefinition): ResolvedListView {
   return {
     columns,
     filterFields,
-    filterBuilderFields: filterFields.map(listFilterBuilderField),
+    filterBuilderFields: listFilterBuilderFields(filterFields),
     filterControls: filterFields.flatMap(listFilterControlsForField),
     filters: normalizeListFilters(doctype, doctype.listView?.filters ?? [], { errorCode: "LIST_VIEW_INVALID" }),
     orderBy: order.orderBy,
@@ -145,7 +152,7 @@ export function normalizeListFilters(
   const errorCode = options.errorCode ?? "BAD_REQUEST";
   const fields = fieldMap(doctype);
   return filters.map((filter) => {
-    const field = fields.get(filter.field);
+    const field = systemFilterField(filter.field) ?? fields.get(filter.field);
     if (!field) {
       throw new FrameworkError(errorCode, `Filter field '${filter.field}' is not defined on ${doctype.name}`, {
         status: 400
@@ -214,6 +221,17 @@ function resolveListFilterFields(
   return flagged.length > 0 ? ensureFilterable(flagged) : columns.filter(isFilterable);
 }
 
+function listFilterBuilderFields(filterFields: readonly FieldDefinition[]): readonly ListFilterBuilderField[] {
+  const explicit = filterFields.map(listFilterBuilderField);
+  const existing = new Set(explicit.map((field) => field.field));
+  return [
+    ...explicit,
+    ...SYSTEM_LIST_FILTER_FIELDS
+      .filter((field) => !existing.has(field.name))
+      .map(listFilterBuilderField)
+  ];
+}
+
 function resolveFields(
   doctype: DocTypeDefinition,
   names: readonly string[],
@@ -222,7 +240,7 @@ function resolveFields(
   const fields = fieldMap(doctype);
   const seen = new Set<string>();
   return names.map((name) => {
-    const field = fields.get(name);
+    const field = label === "filter field" ? systemFilterField(name) ?? fields.get(name) : fields.get(name);
     if (!field) {
       throw new FrameworkError(
         "LIST_VIEW_INVALID",
@@ -279,6 +297,10 @@ function operatorAllowedForField(field: FieldDefinition, operator: ListFilterOpe
 
 function systemOrderOption(name: string): boolean {
   return SYSTEM_LIST_ORDER_OPTIONS.some((option) => option.name === name);
+}
+
+function systemFilterField(name: string): FieldDefinition | undefined {
+  return SYSTEM_LIST_FILTER_FIELDS.find((field) => field.name === name);
 }
 
 function isListSortable(field: FieldDefinition): boolean {

@@ -13,7 +13,10 @@ describe("list views", () => {
       listView: {
         columns: ["status", "title"],
         filterFields: ["status"],
-        filters: [{ field: "count", operator: "gte", value: "2" }],
+        filters: [
+          { field: "count", operator: "gte", value: "2" },
+          { field: "system.docstatus", value: "draft" }
+        ],
         orderBy: "count",
         order: "asc",
         pageSize: 500
@@ -24,7 +27,15 @@ describe("list views", () => {
 
     expect(listView.columns.map((field) => field.name)).toEqual(["status", "title"]);
     expect(listView.filterFields.map((field) => field.name)).toEqual(["status"]);
-    expect(listView.filterBuilderFields).toEqual([
+    expect(listView.filterBuilderFields.map((field) => field.field)).toEqual([
+      "status",
+      "system.name",
+      "system.docstatus",
+      "system.createdAt",
+      "system.updatedAt",
+      "system.version"
+    ]);
+    expect(listView.filterBuilderFields).toEqual(expect.arrayContaining([
       {
         field: "status",
         inputType: "select",
@@ -35,7 +46,7 @@ describe("list views", () => {
           { operator: "not_in", label: "is not in" }
         ]
       }
-    ]);
+    ]));
     expect(listView.filterControls).toEqual([
       {
         field: "status",
@@ -53,7 +64,10 @@ describe("list views", () => {
         queryKey: "filter_status__ne"
       }
     ]);
-    expect(listView.filters).toEqual([{ field: "count", operator: "gte", value: 2 }]);
+    expect(listView.filters).toEqual([
+      { field: "count", operator: "gte", value: 2 },
+      { field: "system.docstatus", value: "draft" }
+    ]);
     expect(listView.orderBy).toBe("count");
     expect(listView.order).toBe("asc");
     expect(listView.orderOptions).toEqual([

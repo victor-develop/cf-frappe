@@ -100,7 +100,7 @@ function listFilterWhere(filters: readonly ListDocumentsFilter[]): ListFilterWhe
   const conditions: string[] = [];
   const params: JsonPrimitive[] = [];
   for (const filter of filters) {
-    const expression = `json_extract(data_json, '${escapeSqlString(jsonPath(filter.field))}')`;
+    const expression = listFilterExpression(filter.field);
     const operator = filter.operator ?? "eq";
     switch (operator) {
       case "eq":
@@ -148,6 +148,31 @@ function listFilterWhere(filters: readonly ListDocumentsFilter[]): ListFilterWhe
     }
   }
   return { conditions, params };
+}
+
+function listFilterExpression(field: string): string {
+  const systemExpression = systemFilterExpression(field);
+  if (systemExpression) {
+    return systemExpression;
+  }
+  return `json_extract(data_json, '${escapeSqlString(jsonPath(field))}')`;
+}
+
+function systemFilterExpression(field: string): string | undefined {
+  switch (field) {
+    case "system.name":
+      return "name";
+    case "system.docstatus":
+      return "docstatus";
+    case "system.createdAt":
+      return "created_at";
+    case "system.updatedAt":
+      return "updated_at";
+    case "system.version":
+      return "version";
+    default:
+      return undefined;
+  }
 }
 
 function scalarFilterValue(filter: ListDocumentsFilter): JsonPrimitive {

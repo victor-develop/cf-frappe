@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the resource membership filter slice:
+As of the resource system-field filter slice:
 
 - Vitest files: `80`
-- Vitest cases: `875`
+- Vitest cases: `878`
 
 ## Implication
 

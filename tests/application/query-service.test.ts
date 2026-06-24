@@ -82,6 +82,89 @@ describe("QueryService", () => {
     ).resolves.toMatchObject({ data: [{ name: "Urgent Launch" }], total: 1 });
   });
 
+  it("filters list results through metadata-validated system fields", async () => {
+    const { projections, queries } = createServices();
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "Old Draft",
+      version: 1,
+      docstatus: "draft",
+      data: data({ title: "Old Draft", created_by: owner.id }),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-02T00:00:00.000Z"
+    });
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "New Submitted",
+      version: 3,
+      docstatus: "submitted",
+      data: data({ title: "New Submitted", created_by: owner.id }),
+      createdAt: "2026-01-03T00:00:00.000Z",
+      updatedAt: "2026-01-05T00:00:00.000Z"
+    });
+
+    await expect(
+      queries.listDocuments(owner, "Note", { filters: [{ field: "system.docstatus", value: "submitted" }] })
+    ).resolves.toMatchObject({ data: [{ name: "New Submitted" }], total: 1 });
+
+    await expect(
+      queries.listDocuments(owner, "Note", { filters: [{ field: "system.name", operator: "contains", value: "old" }] })
+    ).resolves.toMatchObject({ data: [{ name: "Old Draft" }], total: 1 });
+
+    await expect(
+      queries.listDocuments(owner, "Note", { filters: [{ field: "system.updatedAt", operator: "gte", value: "2026-01-04T00:00:00.000Z" }] })
+    ).resolves.toMatchObject({ data: [{ name: "New Submitted" }], total: 1 });
+
+    await expect(
+      queries.listDocuments(owner, "Note", { filters: [{ field: "system.version", operator: "gt", value: "1" }] })
+    ).resolves.toMatchObject({ data: [{ name: "New Submitted" }], total: 1 });
+  });
+
+  it("keeps system filters namespaced from DocType fields with the same names", async () => {
+    const Collision = defineDocType({
+      name: "Collision",
+      fields: [
+        { name: "name", type: "text", inListFilter: true },
+        { name: "version", type: "text", inListFilter: true }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read"] }]
+    });
+    const projections = new InMemoryDocumentStore();
+    const queries = new QueryService({
+      registry: createRegistry({ doctypes: [Collision] }),
+      projections
+    });
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Collision",
+      name: "System Row",
+      version: 7,
+      docstatus: "draft",
+      data: { name: "Data Name", version: "Data Version" },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    });
+
+    const dataName = await queries.listDocuments(owner, "Collision", {
+      filters: [{ field: "name", operator: "contains", value: "data" }]
+    });
+    expect(dataName).toMatchObject({ data: [{ name: "System Row" }], total: 1 });
+
+    const systemName = await queries.listDocuments(owner, "Collision", {
+      filters: [{ field: "system.name", operator: "contains", value: "system" }]
+    });
+    expect(systemName).toMatchObject({ data: [{ name: "System Row" }], total: 1 });
+
+    await expect(
+      queries.listDocuments(owner, "Collision", { filters: [{ field: "version", operator: "contains", value: "Data" }] })
+    ).resolves.toMatchObject({ data: [{ name: "System Row" }], total: 1 });
+    await expect(
+      queries.listDocuments(owner, "Collision", { filters: [{ field: "system.version", operator: "gt", value: "6" }] })
+    ).resolves.toMatchObject({ data: [{ name: "System Row" }], total: 1 });
+  });
+
   it("rejects list filters that are not declared by the DocType", async () => {
     const { queries } = createServices();
 
@@ -575,7 +658,18 @@ describe("QueryService", () => {
     const view = await queries.listDocumentsForView(owner, "Note");
 
     expect(view.listView.columns.map((field) => field.name)).toEqual(["title", "priority", "workflow_state"]);
-    expect(view.listView.filterBuilderFields).toEqual([
+    expect(view.listView.filterBuilderFields.map((field) => field.field)).toEqual([
+      "title",
+      "priority",
+      "workflow_state",
+      "count",
+      "system.name",
+      "system.docstatus",
+      "system.createdAt",
+      "system.updatedAt",
+      "system.version"
+    ]);
+    expect(view.listView.filterBuilderFields).toEqual(expect.arrayContaining([
       expect.objectContaining({
         field: "title",
         inputType: "text",
@@ -620,8 +714,32 @@ describe("QueryService", () => {
           { operator: "lt", label: "less than" },
           { operator: "lte", label: "less than or equal" }
         ]
+      }),
+      expect.objectContaining({
+        field: "system.docstatus",
+        inputType: "select",
+        operators: [
+          { operator: "eq", label: "equals" },
+          { operator: "ne", label: "is not" },
+          { operator: "in", label: "is in" },
+          { operator: "not_in", label: "is not in" }
+        ]
+      }),
+      expect.objectContaining({
+        field: "system.updatedAt",
+        inputType: "datetime-local",
+        operators: [
+          { operator: "eq", label: "equals" },
+          { operator: "ne", label: "is not" },
+          { operator: "in", label: "is in" },
+          { operator: "not_in", label: "is not in" },
+          { operator: "gt", label: "greater than" },
+          { operator: "gte", label: "greater than or equal" },
+          { operator: "lt", label: "less than" },
+          { operator: "lte", label: "less than or equal" }
+        ]
       })
-    ]);
+    ]));
     expect(view.listView.filterControls).toEqual([
       expect.objectContaining({ field: "title", inputType: "text", operator: "contains", queryKey: "filter_title__contains" }),
       expect.objectContaining({ field: "title", inputType: "text", operator: "ne", queryKey: "filter_title__ne" }),
