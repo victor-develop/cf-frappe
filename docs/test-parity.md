@@ -22,8 +22,8 @@ Observed counts:
 
 As of the event-sourced field property override slice:
 
-- Vitest files: `85`
-- Vitest cases: `931`
+- Vitest files: `88`
+- Vitest cases: `944`
 
 ## Implication
 

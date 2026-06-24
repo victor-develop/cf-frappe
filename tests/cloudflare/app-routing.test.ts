@@ -248,6 +248,48 @@ describe("CloudFrappe Worker routing", () => {
     });
   });
 
+  it("mounts notification rule administration routes on the Worker API", async () => {
+    const worker = createCloudFrappeWorker({
+      registry: createRegistry({ doctypes: [noteDocType] }),
+      actor: () => ({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"], tenantId: "acme" })
+    });
+    const env = {
+      DB: fakeEventD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const saved = await worker.fetch!(
+      cfRequest("http://localhost/api/notification-rules/Note/Managers", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          expectedVersion: 0,
+          rule: {
+            events: ["DocumentUpdated"],
+            recipients: [{ kind: "user", userId: "manager@example.com" }],
+            subject: "Note changed"
+          }
+        })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(saved.status).toBe(200);
+
+    const rules = await worker.fetch!(
+      cfRequest("http://localhost/api/notification-rules/Note"),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(rules.status).toBe(200);
+    await expect(rules.json()).resolves.toMatchObject({
+      data: {
+        rules: [{ rule: { name: "Managers", subject: "Note changed" } }]
+      }
+    });
+  });
+
   it("routes document share API commands through the aggregate namespace", async () => {
     const calls: AggregateCoordinatorCommand[] = [];
     const worker = createCloudFrappeWorker({

@@ -25,6 +25,7 @@ import type { SavedListFilterService } from "../../application/saved-list-filter
 import type { SavedReportService } from "../../application/saved-report-service.js";
 import type { UserAccountService } from "../../application/user-account-service.js";
 import type { UserNotificationService } from "../../application/user-notification-service.js";
+import type { NotificationRuleService } from "../../application/notification-rule-service.js";
 import type { UserPermissionService } from "../../application/user-permission-service.js";
 import type { UserProfileService } from "../../application/user-profile-service.js";
 import type { WorkflowService } from "../../application/workflow-service.js";
@@ -53,6 +54,7 @@ import { createFileApi } from "./file-api.js";
 import { createFieldPropertyApi } from "./field-property-api.js";
 import { createJobApi } from "./job-api.js";
 import { createNotificationApi } from "./notification-api.js";
+import { createNotificationRuleApi } from "./notification-rule-api.js";
 import { createPrintApi } from "./print-api.js";
 import { createReportApi } from "./report-api.js";
 import { listFiltersFromUrl, listOrderFromUrl, parseOptionalInteger, readJsonObject, requestMetadata } from "./request.js";
@@ -90,6 +92,7 @@ export interface ResourceApiOptions {
   readonly jobRetry?: JobRetryPort;
   readonly jobSchedules?: JobScheduleService;
   readonly notifications?: UserNotificationService;
+  readonly notificationRules?: NotificationRuleService;
   readonly userAccounts?: UserAccountService;
   readonly userProfiles?: UserProfileService;
   readonly auth?: AuthSessionOptions;
@@ -126,6 +129,17 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       createNotificationApi({
         notifications: options.notifications,
         actor: resolveActor
+      })
+    );
+  }
+
+  if (options.notificationRules) {
+    app.route(
+      "/",
+      createNotificationRuleApi({
+        notificationRules: options.notificationRules,
+        actor: resolveActor,
+        maxJsonBytes
       })
     );
   }

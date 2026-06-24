@@ -125,6 +125,47 @@ export interface WorkflowDefinition {
   readonly transitions: readonly WorkflowTransition[];
 }
 
+export type NotificationRuleEventKind =
+  | "DocumentCreated"
+  | "DocumentUpdated"
+  | "DocumentDeleted"
+  | "DocumentSubmitted"
+  | "DocumentCancelled"
+  | "DocumentCommentAdded"
+  | "DocumentActivityRecorded"
+  | "DocumentAssigned"
+  | "DocumentUnassigned"
+  | "DocumentTagged"
+  | "DocumentUntagged"
+  | "DocumentFollowed"
+  | "DocumentUnfollowed"
+  | "DocumentShared"
+  | "DocumentShareRevoked"
+  | "WorkflowTransitioned"
+  | "DomainCommandApplied";
+
+export type NotificationRuleRecipientDefinition =
+  | {
+      readonly kind: "user";
+      readonly userId: string;
+    }
+  | {
+      readonly kind: "field";
+      readonly field: string;
+    }
+  | {
+      readonly kind: "documentOwner";
+    };
+
+export interface NotificationRuleDefinition {
+  readonly name: string;
+  readonly enabled?: boolean;
+  readonly events: readonly NotificationRuleEventKind[];
+  readonly recipients: readonly NotificationRuleRecipientDefinition[];
+  readonly subject?: string;
+  readonly excludeActor?: boolean;
+}
+
 export interface DomainCommandContext {
   readonly actor: Actor;
   readonly document: DocumentSnapshot;
@@ -386,6 +427,8 @@ export type DocumentEventPayload =
       readonly doctype: DocTypeName;
       readonly documentName: DocumentName;
       readonly actorId: string;
+      readonly subject?: string;
+      readonly ruleName?: string;
     }
   | {
       readonly kind: "UserNotificationRead";
@@ -498,6 +541,16 @@ export type DocumentEventPayload =
   | {
       readonly kind: "WorkflowDefinitionCleared";
       readonly doctypeName: DocTypeName;
+    }
+  | {
+      readonly kind: "NotificationRuleSaved";
+      readonly doctypeName: DocTypeName;
+      readonly rule: NotificationRuleDefinition;
+    }
+  | {
+      readonly kind: "NotificationRuleCleared";
+      readonly doctypeName: DocTypeName;
+      readonly ruleName: string;
     }
   | {
       readonly kind: "WorkflowTransitioned";

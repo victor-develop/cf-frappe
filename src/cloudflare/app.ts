@@ -27,6 +27,7 @@ import { ReportService } from "../application/report-service.js";
 import { RoleService } from "../application/role-service.js";
 import { SavedListFilterService } from "../application/saved-list-filter-service.js";
 import { SavedReportService } from "../application/saved-report-service.js";
+import { NotificationRuleService } from "../application/notification-rule-service.js";
 import { UserAccountService } from "../application/user-account-service.js";
 import { UserNotificationService } from "../application/user-notification-service.js";
 import { UserProfileService } from "../application/user-profile-service.js";
@@ -95,6 +96,7 @@ export interface CloudFrappeRuntimeServices {
   readonly savedFilters: SavedListFilterService;
   readonly userAccounts?: UserAccountService;
   readonly notifications: UserNotificationService;
+  readonly notificationRules: NotificationRuleService;
   readonly userProfiles?: UserProfileService;
   readonly userPermissions: UserPermissionService;
   readonly customFields: CustomFieldService;
@@ -372,8 +374,15 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     events,
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
   });
+  const notificationRules = new NotificationRuleService({
+    registry: options.registry,
+    events,
+    ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles }),
+    preNotificationRuleDocTypeResolver: effectiveDocType
+  });
   const notifications = new UserNotificationService({
     events,
+    notificationRules,
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
   });
   const savedReports = new SavedReportService({ registry: options.registry, events, reports });
@@ -386,6 +395,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     savedFilters,
     ...(userAccounts === undefined ? {} : { userAccounts }),
     notifications,
+    notificationRules,
     ...(userProfiles === undefined ? {} : { userProfiles }),
     userPermissions,
     customFields,
@@ -515,6 +525,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     dashboards,
     roles,
     actor,
+    notificationRules,
     ...(options.maxJsonBytes ? { maxJsonBytes: options.maxJsonBytes } : {}),
     ...(files === undefined ? {} : { files }),
     ...(dataPatches === undefined ? {} : { dataPatches }),

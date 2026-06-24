@@ -3,6 +3,7 @@ import { CustomFieldService } from "../application/custom-field-service.js";
 import { DocumentShareService } from "../application/document-share-service.js";
 import { DocumentService, bulkDocumentFailure } from "../application/document-service.js";
 import { FieldPropertyService } from "../application/field-property-service.js";
+import { NotificationRuleService } from "../application/notification-rule-service.js";
 import { WorkflowService } from "../application/workflow-service.js";
 import type { BulkDocumentCommandFailure } from "../application/document-service.js";
 import { UserPermissionService } from "../application/user-permission-service.js";
@@ -98,12 +99,6 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
     constructor(_ctx: DurableObjectState, env: Env) {
       super(_ctx, env);
       const events = new D1EventStore(env.DB);
-      const notifications = options.notifications === false
-        ? undefined
-        : new UserNotificationService({
-            events,
-            ...(options.clock ? { clock: options.clock } : {})
-      });
       const customFields = new CustomFieldService({
         registry: options.registry,
         events
@@ -124,6 +119,19 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
       });
       const effectiveDocType = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
         workflows.effectiveDocType(base.name, context.tenantId);
+      const notificationRules = new NotificationRuleService({
+        registry: options.registry,
+        events,
+        ...(options.clock ? { clock: options.clock } : {}),
+        preNotificationRuleDocTypeResolver: effectiveDocType
+      });
+      const notifications = options.notifications === false
+        ? undefined
+        : new UserNotificationService({
+            events,
+            notificationRules,
+            ...(options.clock ? { clock: options.clock } : {})
+      });
       const deliveryHooks = createDocumentDeliveryHooks({
         ...(options.realtime ? { realtime: options.realtime(env) } : {}),
         ...(notifications ? { notifications } : {})

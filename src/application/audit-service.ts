@@ -65,6 +65,8 @@ const DOCUMENT_EVENT_KINDS = new Set<DocumentEventPayload["kind"]>([
   "FieldPropertyOverrideCleared",
   "WorkflowDefinitionSaved",
   "WorkflowDefinitionCleared",
+  "NotificationRuleSaved",
+  "NotificationRuleCleared",
   "WorkflowTransitioned",
   "DomainCommandApplied"
 ]);

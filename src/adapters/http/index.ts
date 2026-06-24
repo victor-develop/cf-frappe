@@ -10,6 +10,7 @@ export * from "./file-api.js";
 export * from "./field-property-api.js";
 export * from "./job-api.js";
 export * from "./notification-api.js";
+export * from "./notification-rule-api.js";
 export * from "./print-api.js";
 export * from "./report-api.js";
 export * from "./request.js";

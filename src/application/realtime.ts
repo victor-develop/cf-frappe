@@ -51,8 +51,8 @@ export function createDocumentDeliveryHooks(options: DocumentDeliveryHookOptions
 
 export function createDocumentNotificationHooks(notifications: UserNotificationService): DocumentHooks {
   return {
-    async afterCommit({ event }) {
-      await notifications.recordFromDomainEvent(event);
+    async afterCommit({ event, snapshot }) {
+      await notifications.recordFromDomainEvent(event, snapshot);
     }
   };
 }

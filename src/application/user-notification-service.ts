@@ -1,6 +1,7 @@
 import { FrameworkError, badRequest, notFound, permissionDenied } from "../core/errors.js";
 import {
   documentUserNotificationsFromDomainEvent,
+  documentUserNotificationsFromRules,
   type DocumentUserNotificationPayload
 } from "../core/notifications.js";
 import { userNotificationsStream } from "../core/streams.js";
@@ -9,7 +10,9 @@ import {
   SYSTEM_MANAGER_ROLE,
   type Actor,
   type DocumentData,
+  type DocumentSnapshot,
   type DomainEvent,
+  type NotificationRuleDefinition,
   type NewDomainEvent,
   type TenantId
 } from "../core/types.js";
@@ -26,6 +29,15 @@ export interface UserNotificationServiceOptions {
   readonly ids?: IdGenerator;
   readonly clock?: Clock;
   readonly adminRoles?: readonly string[];
+  readonly notificationRules?: NotificationRuleProvider;
+}
+
+export interface NotificationRuleProvider {
+  notificationRulesFor(
+    tenantId: TenantId,
+    doctypeName: string,
+    options?: { readonly occurredAt?: string }
+  ): Promise<readonly NotificationRuleDefinition[]>;
 }
 
 export interface UserNotificationInboxQuery {
@@ -51,6 +63,7 @@ export interface UserNotificationRecord {
   readonly documentName: string;
   readonly actorId: string;
   readonly subject: string;
+  readonly ruleName?: string;
   readonly read: boolean;
   readonly dismissed: boolean;
   readonly createdAt: string;
@@ -84,17 +97,22 @@ export class UserNotificationService {
   private readonly ids: IdGenerator;
   private readonly clock: Clock;
   private readonly adminRoles: readonly string[];
+  private readonly notificationRules: NotificationRuleProvider | undefined;
 
   constructor(options: UserNotificationServiceOptions) {
     this.events = options.events;
     this.ids = options.ids ?? cryptoIdGenerator;
     this.clock = options.clock ?? systemClock;
     this.adminRoles = options.adminRoles ?? [SYSTEM_MANAGER_ROLE];
+    this.notificationRules = options.notificationRules;
   }
 
-  async recordFromDomainEvent(event: DomainEvent): Promise<readonly UserNotificationRecord[]> {
+  async recordFromDomainEvent(
+    event: DomainEvent,
+    snapshot?: DocumentSnapshot | null
+  ): Promise<readonly UserNotificationRecord[]> {
     const recorded: UserNotificationRecord[] = [];
-    for (const notification of documentUserNotificationsFromDomainEvent(event)) {
+    for (const notification of await this.notificationsForEvent(event, snapshot)) {
       recorded.push(await this.recordNotification(notification, event.occurredAt));
     }
     return recorded;
@@ -197,7 +215,9 @@ export class UserNotificationService {
               recipientId: notification.recipientId,
               doctype: notification.doctype,
               documentName: notification.documentName,
-              actorId: notification.actorId
+              actorId: notification.actorId,
+              ...(notification.subject === undefined ? {} : { subject: notification.subject }),
+              ...(notification.ruleName === undefined ? {} : { ruleName: notification.ruleName })
             },
             metadata: {}
           } satisfies NewDomainEvent
@@ -254,6 +274,25 @@ export class UserNotificationService {
     }
     return { tenantId, userId };
   }
+
+  private async notificationsForEvent(
+    event: DomainEvent,
+    snapshot: DocumentSnapshot | null | undefined
+  ): Promise<readonly DocumentUserNotificationPayload[]> {
+    const direct = documentUserNotificationsFromDomainEvent(event);
+    const rules = this.notificationRules === undefined
+      ? []
+      : await this.notificationRules.notificationRulesFor(event.tenantId, event.doctype, {
+          occurredAt: event.occurredAt
+        });
+    if (rules.length === 0) {
+      return direct;
+    }
+    return [
+      ...direct,
+      ...documentUserNotificationsFromRules(event, snapshot ?? null, rules)
+    ];
+  }
 }
 
 function foldUserNotifications(
@@ -277,6 +316,7 @@ function foldUserNotifications(
           documentName: event.payload.documentName,
           actorId: event.payload.actorId,
           subject: notificationSubject(event.payload),
+          ...(event.payload.ruleName === undefined ? {} : { ruleName: event.payload.ruleName }),
           read: false,
           dismissed: false,
           createdAt: event.occurredAt
@@ -331,6 +371,7 @@ function notificationFromRecordedEvent(event: DomainEvent): UserNotificationReco
     documentName: event.payload.documentName,
     actorId: event.payload.actorId,
     subject: notificationSubject(event.payload),
+    ...(event.payload.ruleName === undefined ? {} : { ruleName: event.payload.ruleName }),
     read: false,
     dismissed: false,
     createdAt: event.occurredAt
@@ -344,10 +385,14 @@ function sortedNotifications(state: UserNotificationState): readonly UserNotific
 }
 
 function notificationIdentity(notification: DocumentUserNotificationPayload): string {
-  return `${notification.eventId}:user:${encodeURIComponent(notification.recipientId)}`;
+  const source = notification.ruleName === undefined ? "" : `rule:${encodeURIComponent(notification.ruleName)}:`;
+  return `${notification.eventId}:${source}user:${encodeURIComponent(notification.recipientId)}`;
 }
 
 function notificationSubject(payload: Extract<DomainEvent["payload"], { readonly kind: "UserNotificationRecorded" }>): string {
+  if (payload.subject !== undefined) {
+    return payload.subject;
+  }
   const target = `${payload.doctype} ${payload.documentName}`;
   switch (payload.payloadKind) {
     case "DocumentAssigned":

@@ -181,6 +181,10 @@ export function renderDeskClientScript(): string {
     return withQuery("/api/notifications/" + encodePart(notificationId) + "/" + action, notificationCommandParams(options || {}));
   }
 
+  function notificationRulePath(doctype, rule, options) {
+    return withQuery("/api/notification-rules/" + encodePart(doctype) + (rule === undefined ? "" : "/" + encodePart(rule)), tenantParams(options || {}));
+  }
+
   function rolePath(role, options) {
     return withQuery("/api/roles/" + encodePart(role), tenantParams(options || {}));
   }
@@ -286,6 +290,11 @@ export function renderDeskClientScript(): string {
   function customFieldBody(field, options) {
     var bodyField = isPlainObject(field) ? withoutKeys(field, ["expectedVersion"]) : field;
     return Object.assign({ field: bodyField }, versionBody(options));
+  }
+
+  function notificationRuleBody(rule, options) {
+    var bodyRule = isPlainObject(rule) ? withoutKeys(rule, ["name", "expectedVersion"]) : rule;
+    return Object.assign({ rule: bodyRule }, versionBody(options));
   }
 
   function userPermissionBody(grant, options) {
@@ -1609,6 +1618,17 @@ export function renderDeskClientScript(): string {
       },
       markRead: function (notificationId, options) {
         return request(notificationActionPath(notificationId, "read", options || {}), { method: "POST" }).then(unwrapData);
+      }
+    }),
+    notificationRules: Object.freeze({
+      clear: function (doctype, rule, options) {
+        return request(notificationRulePath(doctype, rule, options || {}), { method: "DELETE", body: versionBody(options) }).then(unwrapData);
+      },
+      list: function (doctype, options) {
+        return request(notificationRulePath(doctype, undefined, options || {})).then(unwrapData);
+      },
+      save: function (doctype, rule, options) {
+        return request(notificationRulePath(doctype, rule.name, options || {}), { method: "PUT", body: notificationRuleBody(rule, options) }).then(unwrapData);
       }
     }),
     profiles: Object.freeze({

@@ -52,6 +52,10 @@ export function userNotificationsStream(tenantId: TenantId, userId: string): Str
   return documentStream(tenantId, "__UserNotifications", userId);
 }
 
+export function notificationRulesStream(tenantId: TenantId): StreamName {
+  return documentStream(tenantId, "__NotificationRules", "rules");
+}
+
 export function roleCatalogStream(tenantId: TenantId): StreamName {
   return documentStream(tenantId, "__Roles", "catalog");
 }

@@ -320,6 +320,8 @@ function diffEvent(
     case "FieldPropertyOverrideCleared":
     case "WorkflowDefinitionSaved":
     case "WorkflowDefinitionCleared":
+    case "NotificationRuleSaved":
+    case "NotificationRuleCleared":
       return [];
   }
 }
@@ -466,6 +468,10 @@ function summarize(payload: DocumentEventPayload): string {
       return `Saved workflow definition for ${payload.doctypeName}`;
     case "WorkflowDefinitionCleared":
       return `Cleared workflow definition for ${payload.doctypeName}`;
+    case "NotificationRuleSaved":
+      return `Saved notification rule ${payload.doctypeName}.${payload.rule.name}`;
+    case "NotificationRuleCleared":
+      return `Cleared notification rule ${payload.doctypeName}.${payload.ruleName}`;
     case "WorkflowTransitioned":
       return workflowSummary(payload);
     case "DomainCommandApplied":
