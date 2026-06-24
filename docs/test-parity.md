@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Cloudflare Access setup CLI slice:
+As of the remote job operator CLI slice:
 
-- Vitest files: `90`
-- Vitest cases: `990`
+- Vitest files: `91`
+- Vitest cases: `998`
 
 ## Implication
 

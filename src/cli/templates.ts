@@ -242,6 +242,17 @@ npx cf-frappe data-patches rollback-retry --url https://your-worker.example --id
 npx cf-frappe data-patches rollback-retry-enqueue --url https://your-worker.example --id crm.customer_status_v1 --idempotency-key patches:rollback-retry-1 --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 
+Background jobs and runtime schedules use the same remote admin style:
+
+\`\`\`bash
+npx cf-frappe jobs list --url https://your-worker.example --status failed --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe jobs get --url https://your-worker.example --idempotency-key reports.daily:job_001 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe jobs retry --url https://your-worker.example --idempotency-key reports.daily:job_001 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe jobs schedules --url https://your-worker.example --job reports.daily --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe jobs schedule-run --url https://your-worker.example --id daily-reports --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe jobs schedule-save --url https://your-worker.example --id runtime-daily --cron "15 4 * * *" --job reports.daily --enabled --payload-json '{"scope":"runtime"}' --header-env Authorization=CF_FRAPPE_AUTH
+\`\`\`
+
 ## Deploy
 
 \`\`\`bash

@@ -1,5 +1,6 @@
 /// <reference types="node" />
 import { relative } from "node:path";
+import { MAX_JOB_QUEUE_DELAY_SECONDS } from "../ports/job-queue.js";
 import {
   AppInstallError,
   planInstallAppModule,
@@ -35,6 +36,13 @@ import {
   type DataPatchRemoteAction,
   type DataPatchRemoteCommand
 } from "./data-patches.js";
+import {
+  JobRemoteError,
+  runRemoteJobCommand,
+  type JobHeaderOption,
+  type JobRemoteAction,
+  type JobRemoteCommand
+} from "./jobs.js";
 import { scaffoldProject, ScaffoldError } from "./scaffold.js";
 import type { StarterAuthMode } from "./templates.js";
 
@@ -93,6 +101,7 @@ type ParsedCommand =
   | MigrateGenerateCommand
   | CloudflareAccessSetupCommand
   | DataPatchRemoteCommand
+  | JobRemoteCommand
   | HelpCommand
   | InvalidCommand;
 
@@ -110,6 +119,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   try {
     if (command.kind === "data-patches") {
       io.stdout.write(await runRemoteDataPatchCommand(command, {
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
+    if (command.kind === "jobs") {
+      io.stdout.write(await runRemoteJobCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -191,7 +207,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof PackageJsonError ||
       error instanceof PackageManagerError ||
       error instanceof CloudflareAccessSetupError ||
-      error instanceof DataPatchRemoteError
+      error instanceof DataPatchRemoteError ||
+      error instanceof JobRemoteError
     ) {
       io.stderr.write(`cf-frappe: ${error.message}\n`);
       return 1;
@@ -213,6 +230,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "data-patches") {
     return parseDataPatchesArgs(rest);
+  }
+  if (command === "jobs") {
+    return parseJobsArgs(rest);
   }
   if (command === "access") {
     return parseAccessArgs(rest);
@@ -476,7 +496,7 @@ function parseDataPatchesArgs(argv: readonly string[]): ParsedCommand {
       if (value === undefined) {
         return { kind: "invalid", message: "Missing value for --header" };
       }
-      const parsed = parseLiteralHeader(value);
+      const parsed = parseLiteralHeader(value, "Data patch");
       if (typeof parsed === "string") {
         return { kind: "invalid", message: parsed };
       }
@@ -489,7 +509,7 @@ function parseDataPatchesArgs(argv: readonly string[]): ParsedCommand {
       if (value === undefined) {
         return { kind: "invalid", message: "Missing value for --header-env" };
       }
-      const parsed = parseEnvHeader(value);
+      const parsed = parseEnvHeader(value, "Data patch");
       if (typeof parsed === "string") {
         return { kind: "invalid", message: parsed };
       }
@@ -610,34 +630,361 @@ function isDataPatchQueueAction(action: DataPatchRemoteAction): boolean {
   return action === "enqueue" || action === "rollback-enqueue" || action === "rollback-retry-enqueue";
 }
 
-function parseLiteralHeader(value: string): DataPatchHeaderOption | string {
+function parseJobsArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = jobAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown jobs command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: JobHeaderOption[] = [];
+  let jobName: string | undefined;
+  let runId: string | undefined;
+  let status: JobRemoteCommand["status"] | undefined;
+  let limit: number | undefined;
+  let idempotencyKey: string | undefined;
+  let scheduleId: string | undefined;
+  let cron: string | undefined;
+  let scheduleEnabled: boolean | undefined;
+  let pauseUntil: string | undefined;
+  let payload: Record<string, unknown> | undefined;
+  let metadata: Record<string, unknown> | undefined;
+  let scheduleIdempotencyKey: string | undefined;
+  let delaySeconds: number | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "Job");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "Job");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--job") {
+      if (action !== "list" && action !== "schedules" && action !== "schedule-save") {
+        return { kind: "invalid", message: `Cannot use --job with jobs ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      jobName = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--run-id") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --run-id with jobs ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      runId = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--status") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --status with jobs ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = jobStatus(value);
+      if (parsed === undefined) {
+        return { kind: "invalid", message: "Job status must be running, succeeded, or failed" };
+      }
+      status = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--limit") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --limit with jobs ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parsePositiveInteger(value, "Job history limit");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      limit = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--idempotency-key") {
+      if (action !== "get" && action !== "retry" && action !== "schedule-save") {
+        return { kind: "invalid", message: `Cannot use --idempotency-key with jobs ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      if (action === "schedule-save") {
+        scheduleIdempotencyKey = value;
+      } else {
+        idempotencyKey = value;
+      }
+      index += 1;
+      continue;
+    }
+    if (arg === "--id") {
+      if (!isJobScheduleAction(action)) {
+        return { kind: "invalid", message: `Cannot use --id with jobs ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      scheduleId = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--cron") {
+      if (action !== "schedules" && action !== "schedule-save") {
+        return { kind: "invalid", message: `Cannot use --cron with jobs ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      cron = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--enabled" || arg === "--disabled") {
+      if (action !== "schedule-save") {
+        return { kind: "invalid", message: `Cannot use ${arg} with jobs ${action}` };
+      }
+      if (scheduleEnabled !== undefined) {
+        return { kind: "invalid", message: "Use only one of --enabled or --disabled" };
+      }
+      scheduleEnabled = arg === "--enabled";
+      continue;
+    }
+    if (arg === "--until") {
+      if (action !== "schedule-pause") {
+        return { kind: "invalid", message: `Cannot use --until with jobs ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      pauseUntil = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--payload-json" || arg === "--metadata-json") {
+      if (action !== "schedule-save") {
+        return { kind: "invalid", message: `Cannot use ${arg} with jobs ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseJsonObject(value, arg === "--payload-json" ? "Job schedule payload" : "Job schedule metadata");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      if (arg === "--payload-json") {
+        payload = parsed;
+      } else {
+        metadata = parsed;
+      }
+      index += 1;
+      continue;
+    }
+    if (arg === "--delay-seconds") {
+      if (action !== "schedule-save") {
+        return { kind: "invalid", message: `Cannot use --delay-seconds with jobs ${action}` };
+      }
+      const value = rest[index + 1];
+      if (value === undefined) {
+        return { kind: "invalid", message: "Missing value for --delay-seconds" };
+      }
+      const parsed = parseIntegerBetween(value, "Job schedule delay", 0, MAX_JOB_QUEUE_DELAY_SECONDS);
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      delaySeconds = parsed;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown jobs ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if ((action === "get" || action === "retry") && idempotencyKey === undefined) {
+    return { kind: "invalid", message: `Job ${action} requires --idempotency-key` };
+  }
+  if (isRequiredScheduleIdAction(action) && scheduleId === undefined) {
+    return { kind: "invalid", message: `Job schedule ${jobScheduleActionLabel(action)} requires --id` };
+  }
+  if (action === "schedule-pause" && pauseUntil === undefined) {
+    return { kind: "invalid", message: "Job schedule pause requires --until" };
+  }
+  if (action === "schedule-save" && cron === undefined) {
+    return { kind: "invalid", message: "Job schedule save requires --cron" };
+  }
+  if (action === "schedule-save" && jobName === undefined) {
+    return { kind: "invalid", message: "Job schedule save requires --job" };
+  }
+  return {
+    kind: "jobs",
+    action,
+    url,
+    headers,
+    ...(jobName === undefined ? {} : { jobName }),
+    ...(runId === undefined ? {} : { runId }),
+    ...(status === undefined ? {} : { status }),
+    ...(limit === undefined ? {} : { limit }),
+    ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+    ...(scheduleId === undefined ? {} : { scheduleId }),
+    ...(cron === undefined ? {} : { cron }),
+    ...(scheduleEnabled === undefined ? {} : { scheduleEnabled }),
+    ...(pauseUntil === undefined ? {} : { pauseUntil }),
+    ...(payload === undefined ? {} : { payload }),
+    ...(metadata === undefined ? {} : { metadata }),
+    ...(scheduleIdempotencyKey === undefined ? {} : { scheduleIdempotencyKey }),
+    ...(delaySeconds === undefined ? {} : { delaySeconds })
+  };
+}
+
+function jobAction(value: string): JobRemoteAction | undefined {
+  return value === "list" ||
+    value === "get" ||
+    value === "retry" ||
+    value === "schedules" ||
+    value === "schedule-run" ||
+    value === "schedule-enable" ||
+    value === "schedule-disable" ||
+    value === "schedule-pause" ||
+    value === "schedule-reset" ||
+    value === "schedule-save" ||
+    value === "schedule-delete"
+    ? value
+    : undefined;
+}
+
+function jobStatus(value: string): JobRemoteCommand["status"] | undefined {
+  return value === "running" || value === "succeeded" || value === "failed" ? value : undefined;
+}
+
+function isJobScheduleAction(action: JobRemoteAction): boolean {
+  return action.startsWith("schedule-");
+}
+
+function isRequiredScheduleIdAction(action: JobRemoteAction): boolean {
+  return isJobScheduleAction(action) && action !== "schedule-save";
+}
+
+function jobScheduleActionLabel(action: JobRemoteAction): string {
+  if (action === "schedule-run") {
+    return "run";
+  }
+  if (action === "schedule-enable") {
+    return "enable";
+  }
+  if (action === "schedule-disable") {
+    return "disable";
+  }
+  if (action === "schedule-pause") {
+    return "pause";
+  }
+  if (action === "schedule-reset") {
+    return "reset";
+  }
+  if (action === "schedule-delete") {
+    return "delete";
+  }
+  return "save";
+}
+
+function parseJsonObject(value: string, label: string): Record<string, unknown> | string {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Fall through to the single validation message below.
+  }
+  return `${label} must be a valid JSON object`;
+}
+
+function parseLiteralHeader(value: string, label: string): DataPatchHeaderOption | JobHeaderOption | string {
   const separator = value.indexOf(":");
   if (separator < 1) {
-    return "Data patch header must use 'Name: value' syntax";
+    return `${label} header must use 'Name: value' syntax`;
   }
   const name = value.slice(0, separator).trim();
   const headerValue = value.slice(separator + 1).trim();
   if (!isHttpHeaderName(name)) {
-    return `Data patch header name '${name}' is invalid`;
+    return `${label} header name '${name}' is invalid`;
   }
   if (headerValue.length === 0) {
-    return `Data patch header '${name}' must have a non-empty value`;
+    return `${label} header '${name}' must have a non-empty value`;
   }
   return { kind: "literal", name, value: headerValue };
 }
 
-function parseEnvHeader(value: string): DataPatchHeaderOption | string {
+function parseEnvHeader(value: string, label: string): DataPatchHeaderOption | JobHeaderOption | string {
   const separator = value.indexOf("=");
   if (separator < 1) {
-    return "Data patch environment header must use 'Name=ENV_VAR' syntax";
+    return `${label} environment header must use 'Name=ENV_VAR' syntax`;
   }
   const name = value.slice(0, separator).trim();
   const envName = value.slice(separator + 1).trim();
   if (!isHttpHeaderName(name)) {
-    return `Data patch header name '${name}' is invalid`;
+    return `${label} header name '${name}' is invalid`;
   }
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(envName)) {
-    return `Data patch header env var '${envName}' is invalid`;
+    return `${label} header env var '${envName}' is invalid`;
   }
   return { kind: "env", name, envName };
 }
@@ -650,6 +997,13 @@ function parsePositiveInteger(value: string, label: string): number | string {
 function parseNonNegativeInteger(value: string, label: string): number | string {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : `${label} must be a non-negative integer`;
+}
+
+function parseIntegerBetween(value: string, label: string, min: number, max: number): number | string {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= min && parsed <= max
+    ? parsed
+    : `${label} must be an integer between ${min} and ${max}`;
 }
 
 function isHttpHeaderName(value: string): boolean {
@@ -883,6 +1237,17 @@ function helpText(): string {
     "  cf-frappe data-patches enqueue --url <origin> [--id <patchId>] [--limit <n>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches rollback-enqueue --url <origin> [--id <patchId>] [--limit <n>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches rollback-retry-enqueue --url <origin> --id <patchId> [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe jobs list --url <origin> [--job <name>] [--run-id <id>] [--status <running|succeeded|failed>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe jobs get --url <origin> --idempotency-key <key> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe jobs retry --url <origin> --idempotency-key <key> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe jobs schedules --url <origin> [--job <name>] [--cron <expr>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe jobs schedule-run --url <origin> --id <scheduleId> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe jobs schedule-enable --url <origin> --id <scheduleId> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe jobs schedule-disable --url <origin> --id <scheduleId> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe jobs schedule-pause --url <origin> --id <scheduleId> --until <timestamp> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe jobs schedule-reset --url <origin> --id <scheduleId> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe jobs schedule-save --url <origin> [--id <scheduleId>] --cron <expr> --job <name> [--enabled|--disabled] [--payload-json <json>] [--metadata-json <json>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe jobs schedule-delete --url <origin> --id <scheduleId> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe --help",
     "",
     "Commands:",
@@ -891,6 +1256,7 @@ function helpText(): string {
     "  migrate generate   Write reviewable D1 migration files from app metadata",
     "  access   Plan or create Cloudflare Access application and policy resources for a starter app",
     "  data-patches   Inspect, plan, apply, rollback, or enqueue remote app-declared data patches through the admin API",
+    "  jobs   Inspect remote job history, retry failed runs, and manage runtime schedules through the admin API",
     "",
     "Use --header-env for secret-bearing auth headers so tokens stay out of shell history.",
     ""

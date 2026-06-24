@@ -1,3 +1,5 @@
+import { requestRemoteAdmin, type RemoteAdminIo, type RemoteHeaderOption } from "./remote-admin.js";
+
 export type DataPatchRemoteAction =
   | "status"
   | "plan"
@@ -10,19 +12,7 @@ export type DataPatchRemoteAction =
   | "rollback-retry"
   | "rollback-retry-enqueue";
 
-export interface DataPatchHeaderLiteral {
-  readonly kind: "literal";
-  readonly name: string;
-  readonly value: string;
-}
-
-export interface DataPatchHeaderEnv {
-  readonly kind: "env";
-  readonly name: string;
-  readonly envName: string;
-}
-
-export type DataPatchHeaderOption = DataPatchHeaderLiteral | DataPatchHeaderEnv;
+export type DataPatchHeaderOption = RemoteHeaderOption;
 
 export interface DataPatchRemoteCommand {
   readonly kind: "data-patches";
@@ -35,10 +25,7 @@ export interface DataPatchRemoteCommand {
   readonly delaySeconds?: number;
 }
 
-export interface DataPatchRemoteIo {
-  readonly env?: (name: string) => string | undefined;
-  readonly fetch?: typeof fetch;
-}
+export type DataPatchRemoteIo = RemoteAdminIo;
 
 export class DataPatchRemoteError extends Error {
   constructor(message: string) {
@@ -197,30 +184,12 @@ async function requestRemoteDataPatch<TData>(
     readonly path: string;
   }
 ): Promise<TData> {
-  const runFetch = io.fetch ?? globalThis.fetch;
-  if (typeof runFetch !== "function") {
-    throw new DataPatchRemoteError("No fetch implementation is available for remote data patch commands");
-  }
-  const headers = resolveHeaders(command.headers, io.env);
-  headers.set("accept", "application/json");
-  const init: RequestInit = {
-    method: request.method,
-    headers
-  };
-  if (request.body !== undefined) {
-    headers.set("content-type", "application/json");
-    init.body = JSON.stringify(request.body);
-  }
-  const response = await runFetch(dataPatchApiUrl(command.url, request.path), init);
-  const payload = await readJsonResponse(response);
-  if (!response.ok) {
-    throw new DataPatchRemoteError(`Remote data patch request failed (${response.status}): ${remoteErrorMessage(payload)}`);
-  }
-  const data = payload.data;
-  if (!isRecord(data)) {
-    throw new DataPatchRemoteError("Remote data patch response did not include a data object");
-  }
-  return data as TData;
+  return requestRemoteAdmin<TData, DataPatchRemoteError>(command, io, request, {
+    error: DataPatchRemoteError,
+    fetchLabel: "remote data patch commands",
+    resourceLabel: "Remote data patch",
+    urlLabel: "Remote data patch"
+  });
 }
 
 function commandBody(
@@ -243,61 +212,6 @@ function commandBody(
     }
   }
   return body;
-}
-
-function resolveHeaders(
-  options: readonly DataPatchHeaderOption[],
-  readEnv: ((name: string) => string | undefined) | undefined
-): Headers {
-  const headers = new Headers();
-  for (const option of options) {
-    if (option.kind === "literal") {
-      headers.set(option.name, option.value);
-      continue;
-    }
-    const value = readEnv?.(option.envName);
-    if (value === undefined || value === "") {
-      throw new DataPatchRemoteError(`Environment variable '${option.envName}' is not set for header '${option.name}'`);
-    }
-    headers.set(option.name, value);
-  }
-  return headers;
-}
-
-function dataPatchApiUrl(baseUrl: string, path: string): string {
-  let url: URL;
-  try {
-    url = new URL(baseUrl);
-  } catch {
-    throw new DataPatchRemoteError(`Remote data patch URL '${baseUrl}' is not a valid absolute URL`);
-  }
-  url.pathname = `${url.pathname.replace(/\/+$/, "")}${path}`;
-  url.search = "";
-  url.hash = "";
-  return url.toString();
-}
-
-async function readJsonResponse(response: Response): Promise<Record<string, unknown>> {
-  const text = await response.text();
-  if (text.trim().length === 0) {
-    return {};
-  }
-  try {
-    const payload = JSON.parse(text) as unknown;
-    return isRecord(payload) ? payload : {};
-  } catch {
-    throw new DataPatchRemoteError(`Remote data patch response was not valid JSON (${response.status})`);
-  }
-}
-
-function remoteErrorMessage(payload: Record<string, unknown>): string {
-  const error = payload.error;
-  if (!isRecord(error)) {
-    return "remote endpoint returned an error";
-  }
-  const code = typeof error.code === "string" ? error.code : "ERROR";
-  const message = typeof error.message === "string" ? error.message : "remote endpoint returned an error";
-  return `${code}: ${message}`;
 }
 
 function formatDashboard(baseUrl: string, dashboard: DataPatchDashboardResponse): string {
@@ -443,8 +357,4 @@ function singlePatchId(command: DataPatchRemoteCommand, label = "retry"): string
     throw new DataPatchRemoteError(`Data patch ${label} requires exactly one --id`);
   }
   return patchIds[0]!;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
