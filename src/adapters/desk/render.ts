@@ -1998,6 +1998,7 @@ export function renderFormView(
     readonly lifecycleActions?: readonly FormLifecycleAction[];
     readonly workflowActions?: readonly FormWorkflowAction[];
     readonly printFormats?: readonly PrintFormatDefinition[];
+    readonly printPdfEnabled?: boolean;
     readonly clientScripts?: readonly ClientScriptDefinition[];
     readonly realtimeRoute?: string;
     readonly canDuplicate?: boolean;
@@ -2052,10 +2053,7 @@ export function renderFormView(
   const printLinks =
     options.mode === "update" && options.document && options.printFormats?.length
       ? `<section class="command-row" aria-label="Print formats">${options.printFormats
-          .map(
-            (format) =>
-              `<a class="button" href="/desk/print/${encodeURIComponent(format.name)}/${encodeURIComponent(options.document!.name)}">${escapeHtml(format.label ?? format.name)}</a>`
-          )
+          .map((format) => renderPrintFormatLinks(format, options.document!, Boolean(options.printPdfEnabled)))
           .join("")}</section>`
       : "";
   const duplicateAction =
@@ -2096,6 +2094,13 @@ export function renderFormView(
     options.document?.tenantId,
     options.realtimeRoute
   )}`;
+}
+
+function renderPrintFormatLinks(format: PrintFormatDefinition, document: DocumentSnapshot, pdfEnabled: boolean): string {
+  const baseHref = `/desk/print/${encodeURIComponent(format.name)}/${encodeURIComponent(document.name)}`;
+  const label = format.label ?? format.name;
+  const pdfLink = pdfEnabled ? `<a class="button" href="${baseHref}/pdf">${escapeHtml(label)} PDF</a>` : "";
+  return `<a class="button" href="${baseHref}">${escapeHtml(label)}</a>${pdfLink}`;
 }
 
 function renderClientScripts(

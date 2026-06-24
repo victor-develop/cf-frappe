@@ -72,4 +72,5 @@ export * from "./ports/job-execution-log.js";
 export * from "./ports/job-queue.js";
 export * from "./ports/password-hasher.js";
 export * from "./ports/projection-store.js";
+export * from "./ports/print-pdf-renderer.js";
 export * from "./ports/realtime.js";

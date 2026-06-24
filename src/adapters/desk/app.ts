@@ -37,7 +37,7 @@ import type { UserNotificationService } from "../../application/user-notificatio
 import type { UserPermissionService } from "../../application/user-permission-service.js";
 import type { UserProfileService } from "../../application/user-profile-service.js";
 import { DOCUMENT_SHARE_PERMISSIONS, documentSharePermissionsForActor } from "../../core/document-shares.js";
-import { FrameworkError } from "../../core/errors.js";
+import { FrameworkError, badRequest } from "../../core/errors.js";
 import { can } from "../../core/permissions.js";
 import type { ModelRegistry } from "../../core/registry.js";
 import {
@@ -55,6 +55,7 @@ import {
 } from "../../core/workspace.js";
 import { allowedWorkflowTransitions } from "../../core/workflow.js";
 import { MAX_JOB_QUEUE_DELAY_SECONDS, MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH } from "../../ports/job-queue.js";
+import type { PrintPdfRenderer } from "../../ports/print-pdf-renderer.js";
 import {
   CHILD_TABLE_ROW_INDEX_FIELD,
   FIELD_TYPES,
@@ -77,7 +78,13 @@ import type { ActorResolver } from "../http/actor.js";
 import { listFiltersFromUrl, parseOptionalInteger, readBoundedText } from "../http/request.js";
 import { writeReportCsvHeaders } from "../http/report-export.js";
 import { reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request.js";
-import { renderPrintDocument, renderPrintReport } from "../print/index.js";
+import {
+  printPdfResponseBody,
+  printPdfResponseHeaders,
+  renderPrintDocument,
+  renderPrintPdfDocument,
+  renderPrintReport
+} from "../print/index.js";
 import { DESK_CLIENT_SCRIPT_PATH, renderDeskClientScript } from "./client.js";
 import {
   deskReportFieldLabel,
@@ -155,6 +162,7 @@ export interface DeskAppOptions {
   readonly registry: ModelRegistry;
   readonly documents: DocumentCommandExecutor;
   readonly prints?: PrintService;
+  readonly printPdfRenderer?: PrintPdfRenderer;
   readonly files?: FileService;
   readonly queries: QueryService;
   readonly documentShares?: DocumentShareService;
@@ -1283,6 +1291,19 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     return c.body(csv.body);
   });
 
+  app.get("/desk/print/:format/:name/pdf", async (c) => {
+    if (!options.prints) {
+      throw new FrameworkError("PRINT_FORMAT_NOT_FOUND", "Print formats are not enabled", { status: 404 });
+    }
+    if (!options.printPdfRenderer) {
+      throw badRequest("PDF print rendering is not configured");
+    }
+    const actor = await options.actor(c.req.raw);
+    const view = await options.prints.printDocument(actor, c.req.param("format"), c.req.param("name"));
+    const pdf = await renderPrintPdfDocument({ actor, renderer: options.printPdfRenderer, view });
+    return new Response(printPdfResponseBody(pdf.body), { headers: printPdfResponseHeaders(pdf) });
+  });
+
   app.get("/desk/print/:format/:name", async (c) => {
     if (!options.prints) {
       throw new FrameworkError("PRINT_FORMAT_NOT_FOUND", "Print formats are not enabled", { status: 404 });
@@ -1967,6 +1988,7 @@ async function renderDeskError(
         ...(document ? { lifecycleActions: lifecycleActionsFor(actor, doctype, document) } : {}),
         ...(document ? { workflowActions: workflowActionsFor(actor, doctype, document) } : {}),
         ...(document ? { printFormats: listPrintFormats(options, actor, doctype.name) } : {}),
+        printPdfEnabled: options.printPdfRenderer !== undefined,
         clientScripts: options.registry.listClientScripts(doctype.name, "form"),
         ...deskRealtimeRouteOption(options),
         error: message
@@ -2666,6 +2688,7 @@ async function renderDeskDocumentPage(
     lifecycleActions,
     workflowActions,
     printFormats,
+    printPdfEnabled: options.printPdfRenderer !== undefined,
     clientScripts: options.registry.listClientScripts(doctype.name, "form"),
     canDuplicate: can(actor, doctype, "create"),
     canAmend: document.docstatus === "cancelled" && can(actor, doctype, "create"),

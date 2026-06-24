@@ -31,6 +31,7 @@ import { canReadReport } from "../../core/reports.js";
 import type { ModelRegistry } from "../../core/registry.js";
 import type { Actor, DocumentData, JsonPrimitive, ListDocumentsFilter, MutableDocumentData } from "../../core/types.js";
 import { SYSTEM_MANAGER_ROLE } from "../../core/types.js";
+import type { PrintPdfRenderer } from "../../ports/print-pdf-renderer.js";
 import {
   canReadWorkspace,
   canReadWorkspaceShortcut,
@@ -66,6 +67,7 @@ export interface ResourceApiOptions {
   readonly maxJsonBytes?: number;
   readonly files?: FileService;
   readonly prints?: PrintService;
+  readonly printPdfRenderer?: PrintPdfRenderer;
   readonly reports?: ReportService;
   readonly roles?: RoleService;
   readonly savedReports?: SavedReportService;
@@ -244,6 +246,7 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       "/",
       createPrintApi({
         prints: options.prints,
+        ...(options.printPdfRenderer === undefined ? {} : { pdfRenderer: options.printPdfRenderer }),
         actor: resolveActor
       })
     );

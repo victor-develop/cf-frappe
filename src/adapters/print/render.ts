@@ -8,7 +8,7 @@ import {
 import type { JsonValue } from "../../core/types.js";
 
 export function renderPrintDocument(view: PrintDocumentView): string {
-  const title = `${view.format.label ?? view.format.name} - ${view.document.name}`;
+  const title = printDocumentTitle(view);
   const sections = view.sections
     .map(
       (section) => `<section class="print-section">
@@ -48,6 +48,10 @@ export function renderPrintDocument(view: PrintDocumentView): string {
   </main>
 </body>
 </html>`;
+}
+
+export function printDocumentTitle(view: PrintDocumentView): string {
+  return `${view.format.label ?? view.format.name} - ${view.document.name}`;
 }
 
 export function renderPrintReport(result: ReportRunResult, options: { readonly title?: string } = {}): string {

@@ -1,5 +1,24 @@
-import { createResourceApi, definePrintFormat, definePrintLetterhead, unsafeHeaderActorResolver } from "../../src";
+import {
+  createResourceApi,
+  definePrintFormat,
+  definePrintLetterhead,
+  unsafeHeaderActorResolver,
+  type PrintPdfRenderer,
+  type RenderPrintPdfCommand,
+  type RenderedPrintPdf
+} from "../../src";
 import { createServices, data, owner } from "../helpers";
+
+class RecordingPrintPdfRenderer implements PrintPdfRenderer {
+  readonly calls: RenderPrintPdfCommand[] = [];
+
+  constructor(private readonly result: RenderedPrintPdf = { body: new Uint8Array([37, 80, 68, 70]) }) {}
+
+  async render(command: RenderPrintPdfCommand): Promise<RenderedPrintPdf> {
+    this.calls.push(command);
+    return this.result;
+  }
+}
 
 describe("print api", () => {
   const userHeaders = {
@@ -8,12 +27,13 @@ describe("print api", () => {
     "x-cf-frappe-tenant": "acme"
   };
 
-  function makeApp() {
+  function makeApp(options: { readonly printPdfRenderer?: PrintPdfRenderer } = {}) {
     const services = createServices(["e1"]);
     const app = createResourceApi({
       registry: services.registry,
       documents: services.documents,
       prints: services.prints,
+      ...(options.printPdfRenderer === undefined ? {} : { printPdfRenderer: options.printPdfRenderer }),
       queries: services.queries,
       reports: services.reports,
       actor: unsafeHeaderActorResolver
@@ -48,6 +68,55 @@ describe("print api", () => {
     expect(html).toContain("Printable");
     expect(html).not.toContain("<script>alert");
     expect(html).toContain("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;");
+  });
+
+  it("renders a printable document as PDF through the configured renderer", async () => {
+    const pdf = new Uint8Array([37, 80, 68, 70, 45, 49, 46, 55]);
+    const renderer = new RecordingPrintPdfRenderer({ body: pdf, contentLength: pdf.byteLength });
+    const { app, services } = makeApp({ printPdfRenderer: renderer });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Printable", priority: "High", body: "<script>alert('x')</script>" })
+    });
+
+    const response = await app.request("/api/print/Note%20Standard/Printable/pdf", { headers: userHeaders });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/pdf");
+    expect(response.headers.get("content-disposition")).toBe('inline; filename="Printable.Note-Standard.pdf"');
+    expect(response.headers.get("content-length")).toBe(String(pdf.byteLength));
+    await expect(response.arrayBuffer()).resolves.toEqual(pdf.buffer);
+    expect(renderer.calls).toHaveLength(1);
+    expect(renderer.calls[0]).toMatchObject({
+      actorId: owner.id,
+      tenantId: owner.tenantId,
+      formatName: "Note Standard",
+      documentName: "Printable",
+      documentDoctype: "Note",
+      title: "Standard - Printable"
+    });
+    expect(renderer.calls[0]?.html).toContain("Printable");
+    expect(renderer.calls[0]?.html).toContain("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;");
+  });
+
+  it("rejects PDF rendering when no renderer is configured", async () => {
+    const { app, services } = makeApp();
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Printable", priority: "Low", body: "Body" })
+    });
+
+    const response = await app.request("/api/print/Note%20Standard/Printable/pdf", { headers: userHeaders });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "BAD_REQUEST",
+        message: "PDF print rendering is not configured"
+      }
+    });
   });
 
   it("renders custom print templates with escaped document values", async () => {

@@ -82,6 +82,8 @@ interface DeskClientRuntime {
     readonly format: (format: string) => Promise<unknown>;
     readonly formats: (options?: { readonly doctype?: string }) => Promise<unknown>;
     readonly html: (format: string, name: string) => Promise<unknown>;
+    readonly pdf: (format: string, name: string) => Promise<ArrayBuffer>;
+    readonly pdfUrl: (format: string, name: string) => string;
     readonly url: (format: string, name: string) => string;
   };
   readonly reportBuilder: {
@@ -1381,9 +1383,15 @@ describe("Desk client runtime", () => {
   });
 
   it("wraps print metadata and document routes without browser-side rendering decisions", async () => {
+    const pdf = new Uint8Array([37, 80, 68, 70]);
     const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
     const runtime = evaluateDeskClient(async (url, init) => {
       calls.push({ url: String(url), init: init ?? {} });
+      if (String(url).endsWith("/pdf")) {
+        return new Response(pdf, {
+          headers: { "content-type": "application/pdf" }
+        });
+      }
       if (String(url).startsWith("/api/print/")) {
         return new Response("<!doctype html><title>Printable</title>", {
           headers: { "content-type": "text/html" }
@@ -1397,15 +1405,18 @@ describe("Desk client runtime", () => {
     await expect(runtime.print.formats({ doctype: "Task Type" })).resolves.toEqual({ ok: true });
     await expect(runtime.print.format("Task Standard")).resolves.toEqual({ ok: true });
     await expect(runtime.print.html("Task Standard", "TASK/1")).resolves.toBe("<!doctype html><title>Printable</title>");
+    await expect(runtime.print.pdf("Task Standard", "TASK/1")).resolves.toEqual(pdf.buffer);
 
     expect(runtime.print.url("Task Standard", "TASK/1")).toBe("/api/print/Task%20Standard/TASK%2F1");
+    expect(runtime.print.pdfUrl("Task Standard", "TASK/1")).toBe("/api/print/Task%20Standard/TASK%2F1/pdf");
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
       "GET /api/meta/print-formats?doctype=Task+Type",
       "GET /api/meta/print-formats/Task%20Standard",
-      "GET /api/print/Task%20Standard/TASK%2F1"
+      "GET /api/print/Task%20Standard/TASK%2F1",
+      "GET /api/print/Task%20Standard/TASK%2F1/pdf"
     ]);
-    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin"]);
-    expect(calls.map((call) => call.init.body)).toEqual([undefined, undefined, undefined]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin", "same-origin"]);
+    expect(calls.map((call) => call.init.body)).toEqual([undefined, undefined, undefined, undefined]);
   });
 
   it("wraps saved report-builder APIs without browser-side definition validation", async () => {

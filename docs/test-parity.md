@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the report not-equals filter slice:
+As of the PDF print renderer port slice:
 
 - Vitest files: `75`
-- Vitest cases: `828`
+- Vitest cases: `832`
 
 ## Implication
 

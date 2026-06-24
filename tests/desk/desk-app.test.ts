@@ -39,6 +39,9 @@ import {
   UserNotificationService,
   UserProfileService,
   type DocTypeDefinition,
+  type PrintPdfRenderer,
+  type RenderPrintPdfCommand,
+  type RenderedPrintPdf,
   type PasswordHasher
 } from "../../src";
 import {
@@ -55,16 +58,32 @@ import {
   owner
 } from "../helpers";
 
+class RecordingPrintPdfRenderer implements PrintPdfRenderer {
+  readonly calls: RenderPrintPdfCommand[] = [];
+
+  constructor(private readonly result: RenderedPrintPdf = { body: new Uint8Array([37, 80, 68, 70]) }) {}
+
+  async render(command: RenderPrintPdfCommand): Promise<RenderedPrintPdf> {
+    this.calls.push(command);
+    return this.result;
+  }
+}
+
 describe("Desk app", () => {
   function makeDesk(
     actor = owner,
-    options: { readonly realtime?: boolean; readonly documentShares?: boolean } = {}
+    options: {
+      readonly realtime?: boolean;
+      readonly documentShares?: boolean;
+      readonly printPdfRenderer?: PrintPdfRenderer;
+    } = {}
   ) {
     const services = createServices(["e1", "e2", "e3", "e4"]);
     const app = createDeskApp({
       registry: services.registry,
       documents: services.documents,
       prints: services.prints,
+      ...(options.printPdfRenderer === undefined ? {} : { printPdfRenderer: options.printPdfRenderer }),
       queries: services.queries,
       ...(options.documentShares === false ? {} : { documentShares: services.documentShares }),
       reports: services.reports,
@@ -4069,6 +4088,19 @@ describe("Desk app", () => {
     expect(html).toContain("/desk/print/Note%20Standard/My%20Note");
   });
 
+  it("renders PDF print links in edit forms when a renderer is configured", async () => {
+    const renderer = new RecordingPrintPdfRenderer();
+    const { app, services } = makeDesk(owner, { printPdfRenderer: renderer });
+    await services.documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    const response = await app.request("/desk/Note/My%20Note");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("/desk/print/Note%20Standard/My%20Note");
+    expect(html).toContain("/desk/print/Note%20Standard/My%20Note/pdf");
+  });
+
   it("renders document timeline entries on edit forms", async () => {
     const { app, services } = makeDesk();
     await services.documents.create({ actor: owner, doctype: "Note", data: data() });
@@ -4467,6 +4499,34 @@ describe("Desk app", () => {
     const html = await response.text();
     expect(html).toContain("Desk Print");
     expect(html).toContain("Print body");
+  });
+
+  it("renders printable documents as PDF from Desk through the configured renderer", async () => {
+    const pdf = new Uint8Array([37, 80, 68, 70, 45, 49, 46, 55]);
+    const renderer = new RecordingPrintPdfRenderer({ body: pdf, contentLength: pdf.byteLength });
+    const { app, services } = makeDesk(owner, { printPdfRenderer: renderer });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Desk Print", priority: "High", body: "Print body" })
+    });
+
+    const response = await app.request("/desk/print/Note%20Standard/Desk%20Print/pdf");
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/pdf");
+    expect(response.headers.get("content-disposition")).toBe('inline; filename="Desk-Print.Note-Standard.pdf"');
+    await expect(response.arrayBuffer()).resolves.toEqual(pdf.buffer);
+    expect(renderer.calls).toHaveLength(1);
+    expect(renderer.calls[0]).toMatchObject({
+      actorId: owner.id,
+      tenantId: owner.tenantId,
+      formatName: "Note Standard",
+      documentName: "Desk Print",
+      documentDoctype: "Note",
+      title: "Standard - Desk Print"
+    });
+    expect(renderer.calls[0]?.html).toContain("Print body");
   });
 
   it("creates documents from generated forms", async () => {

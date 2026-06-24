@@ -77,7 +77,7 @@ export function renderDeskClientScript(): string {
     return Object.prototype.toString.call(value) === "[object Object]";
   }
 
-  async function request(path, options) {
+  function requestInit(options) {
     var init = options || {};
     var headers = new Headers(init.headers || {});
     var body = init.body;
@@ -85,20 +85,40 @@ export function renderDeskClientScript(): string {
       headers.set("content-type", "application/json");
       body = JSON.stringify(body);
     }
-    var response = await fetch(path, Object.assign({}, init, {
+    return Object.assign({}, init, {
       body: body,
       credentials: init.credentials || "same-origin",
       headers: headers
-    }));
+    });
+  }
+
+  async function readResponsePayload(response) {
     var contentType = response.headers.get("content-type") || "";
-    var payload = contentType.indexOf("application/json") >= 0 ? await response.json() : await response.text();
+    return contentType.indexOf("application/json") >= 0 ? await response.json() : await response.text();
+  }
+
+  function throwResponseError(response, payload) {
+    var error = new Error((payload && payload.error && payload.error.message) || response.statusText);
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+
+  async function request(path, options) {
+    var response = await fetch(path, requestInit(options));
+    var payload = await readResponsePayload(response);
     if (!response.ok) {
-      var error = new Error((payload && payload.error && payload.error.message) || response.statusText);
-      error.status = response.status;
-      error.payload = payload;
-      throw error;
+      throwResponseError(response, payload);
     }
     return payload;
+  }
+
+  async function requestBinary(path, options) {
+    var response = await fetch(path, requestInit(options));
+    if (!response.ok) {
+      throwResponseError(response, await readResponsePayload(response));
+    }
+    return response.arrayBuffer();
   }
 
   function resourcePath(doctype, name) {
@@ -155,6 +175,10 @@ export function renderDeskClientScript(): string {
 
   function printDocumentPath(format, name) {
     return "/api/print/" + encodePart(format) + "/" + encodePart(name);
+  }
+
+  function printPdfDocumentPath(format, name) {
+    return printDocumentPath(format, name) + "/pdf";
   }
 
   function printFormatPath(format) {
@@ -1495,6 +1519,10 @@ export function renderDeskClientScript(): string {
       html: function (format, name) {
         return request(printDocumentPath(format, name));
       },
+      pdf: function (format, name) {
+        return requestBinary(printPdfDocumentPath(format, name));
+      },
+      pdfUrl: printPdfDocumentPath,
       url: printDocumentPath
     }),
     realtime: Object.freeze({
