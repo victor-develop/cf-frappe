@@ -13,6 +13,7 @@ export * from "./jwt.js";
 export * from "./notification-api.js";
 export * from "./notification-rule-api.js";
 export * from "./oidc.js";
+export * from "./oidc-providers.js";
 export * from "./print-api.js";
 export * from "./report-api.js";
 export * from "./request.js";

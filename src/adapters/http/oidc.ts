@@ -37,6 +37,7 @@ export interface OidcAccountSyncActorResolverOptions<TClaims extends OidcJwtClai
   extends Omit<OidcActorResolverOptions<TClaims>, "mapClaims"> {
   readonly userAccounts: UserAccountService;
   readonly provider?: string;
+  readonly allowed?: boolean | ((claims: TClaims) => boolean | undefined);
   readonly subject?: (claims: TClaims) => string | undefined;
   readonly enabled?: boolean | ((claims: TClaims) => boolean | undefined);
   readonly emailVerified?: boolean | ((claims: TClaims) => boolean | undefined);
@@ -131,6 +132,9 @@ export function oidcAccountSyncActorResolver<TClaims extends OidcJwtClaims = Oid
   return oidcActorResolver({
     ...options,
     mapClaims: async (claims) => {
+      if (booleanOptionFromClaims(claims, options.allowed) === false) {
+        throw permissionDenied("OIDC token is not allowed");
+      }
       const provider = firstNonBlank(options.provider) ?? "oidc";
       const email = emailFromClaims(claims);
       const subject = firstNonBlank(options.subject?.(claims), claims.sub);

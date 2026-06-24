@@ -210,7 +210,8 @@ describe("cf-frappe CLI scaffold", () => {
     expect(worker).toContain("jwksUrl: (env) => env.OIDC_JWKS_URL");
     expect(worker).toContain("provider: \"oidc\"");
     expect(worker).toContain("revalidateSignedSessions: true");
-    expect(worker).toContain("[\"User\", ...(claims.groups ?? []).map((group) => `OIDC:${group}`)]");
+    expect(worker).toContain("import { oidcGroupsRoleMapper, permissionDenied } from \"cf-frappe\"");
+    expect(worker).toContain("roles: oidcGroupsRoleMapper()");
     expect(worker).not.toContain("guestActor");
     expect(worker).not.toContain("signedSessionActorResolver");
     expect(worker).not.toContain("cloudflareAccess");

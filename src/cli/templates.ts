@@ -585,7 +585,7 @@ export default createCloudFrappeWorker<Env>({
 }
 
 function oidcWorkerTs(): string {
-  return `import { permissionDenied } from "cf-frappe";
+  return `import { oidcGroupsRoleMapper, permissionDenied } from "cf-frappe";
 import {
   createAggregateCoordinatorClass,
   createCloudFrappeWorker,
@@ -613,8 +613,7 @@ export default createCloudFrappeWorker<Env>({
       jwksUrl: (env) => env.OIDC_JWKS_URL,
       provider: "oidc",
       tenantId: () => "default",
-      roles: (claims) =>
-        ["User", ...(claims.groups ?? []).map((group) => \`OIDC:\${group}\`)]
+      roles: oidcGroupsRoleMapper()
     }
   }
 });

@@ -12,6 +12,7 @@ import {
   fixedClock,
   InMemoryDataPatchLog,
   InMemoryJobQueue,
+  oktaOidcProviderPreset,
   signedSessionActorResolver,
   SYSTEM_MANAGER_ROLE,
   unsafeHeaderActorResolver,
@@ -1512,9 +1513,10 @@ describe("CloudFrappe Worker routing", () => {
           jwksUrl: (env) => env.OIDC_JWKS_URL,
           now: () => 1_000,
           fetchJwks: async () => signing.jwks,
-          provider: "okta",
+          ...oktaOidcProviderPreset({
+            baseRoles: [SYSTEM_MANAGER_ROLE]
+          }),
           tenantId: () => "acme",
-          roles: () => [SYSTEM_MANAGER_ROLE]
         }
       }
     });
@@ -1544,7 +1546,7 @@ describe("CloudFrappe Worker routing", () => {
       data: {
         id: "owner@example.com",
         email: "owner@example.com",
-        roles: [SYSTEM_MANAGER_ROLE],
+        roles: ["Okta:Support", SYSTEM_MANAGER_ROLE],
         tenantId: "acme"
       }
     });

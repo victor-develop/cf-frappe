@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the OIDC starter scaffold slice:
+As of the OIDC provider preset slice:
 
 - Vitest files: `92`
-- Vitest cases: `1010`
+- Vitest cases: `1014`
 
 ## Implication
 

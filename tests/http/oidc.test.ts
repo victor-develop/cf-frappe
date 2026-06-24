@@ -4,11 +4,18 @@ import {
   fixedClock,
   hasOidcToken,
   InMemoryEventStore,
+  auth0OidcProviderPreset,
+  googleWorkspaceOidcProviderPreset,
   oidcAccountSyncActorResolver,
   oidcActorResolver,
+  oidcGroupsRoleMapper,
+  oktaOidcProviderPreset,
   UserAccountService,
   userAccountsStream,
+  type Auth0OidcClaims,
+  type GoogleWorkspaceOidcClaims,
   type OidcJwtClaims,
+  type OktaOidcClaims,
   type PasswordHasher
 } from "../../src";
 import { now } from "../helpers";
@@ -80,6 +87,27 @@ describe("OIDC actor resolver", () => {
       roles: ["OIDC:Desk Managers", "OIDC:Support"],
       tenantId: "acme",
       email: "manager@example.com"
+    });
+  });
+
+  it("uses shared group-role mapping for generic OIDC claims", async () => {
+    const signing = await createJwtSigner<OidcJwtClaims>();
+    const token = await signing.sign(defaultClaims({
+      groups: [" Support  Team ", "Support Team", "Approvers"]
+    }));
+    const resolver = oidcActorResolver({
+      issuer: "https://login.example.com",
+      audience: "desk",
+      jwksUrl: "https://login.example.com/keys",
+      now: () => 1_000,
+      fetchJwks: async () => signing.jwks,
+      roles: oidcGroupsRoleMapper()
+    });
+
+    await expect(
+      resolver(new Request("https://app.test", { headers: { authorization: `Bearer ${token}` } }))
+    ).resolves.toMatchObject({
+      roles: ["User", "OIDC:Support Team", "OIDC:Approvers"]
     });
   });
 
@@ -325,6 +353,188 @@ describe("OIDC actor resolver", () => {
         }
       }
     ]);
+  });
+
+  it("maps Okta groups into event-sourced account roles through the provider preset", async () => {
+    const signing = await createJwtSigner<OktaOidcClaims>();
+    const events = new InMemoryEventStore();
+    const userAccounts = new UserAccountService({
+      events,
+      passwords: deterministicPasswords(),
+      ids: deterministicIds(["account-created", "provider-linked"]),
+      clock: fixedClock(now)
+    });
+    const resolver = oidcAccountSyncActorResolver<OktaOidcClaims>({
+      issuer: "https://okta.example.com/oauth2/default",
+      audience: "desk",
+      jwksUrl: "https://okta.example.com/oauth2/default/v1/keys",
+      now: () => 1_000,
+      fetchJwks: async () => signing.jwks,
+      userAccounts,
+      tenantId: () => "acme",
+      ...oktaOidcProviderPreset({
+        metadataClaims: ["groups", "preferred_username"]
+      })
+    });
+    const token = await signing.sign({
+      iss: "https://okta.example.com/oauth2/default",
+      aud: "desk",
+      exp: 2_000,
+      nbf: 900,
+      sub: "00u1",
+      email: "owner@example.com",
+      preferred_username: "owner@example.com",
+      email_verified: true,
+      groups: ["Support", "Desk Managers"]
+    });
+
+    await expect(
+      resolver(new Request("https://app.test", { headers: { authorization: `Bearer ${token}` } }))
+    ).resolves.toMatchObject({
+      id: "owner@example.com",
+      roles: ["Okta:Desk Managers", "Okta:Support", "User"],
+      tenantId: "acme"
+    });
+    const saved = await events.readStream(userAccountsStream("acme", "owner@example.com"));
+    expect(saved).toHaveLength(2);
+    expect(saved[0]).toMatchObject({
+      metadata: {
+        groups: ["Support", "Desk Managers"],
+        preferred_username: "owner@example.com"
+      },
+      payload: {
+        kind: "UserAccountCreated",
+        roles: ["Okta:Desk Managers", "Okta:Support", "User"]
+      }
+    });
+  });
+
+  it("maps Auth0 namespaced roles, optional permissions, and organization tenants", async () => {
+    interface Auth0TestClaims extends Auth0OidcClaims {
+      readonly "https://app.example.com/roles"?: readonly string[];
+    }
+    const signing = await createJwtSigner<Auth0TestClaims>();
+    const events = new InMemoryEventStore();
+    const userAccounts = new UserAccountService({
+      events,
+      passwords: deterministicPasswords(),
+      ids: deterministicIds(["account-created", "provider-linked"]),
+      clock: fixedClock(now)
+    });
+    const resolver = oidcAccountSyncActorResolver<Auth0TestClaims>({
+      issuer: "https://tenant.us.auth0.com/",
+      audience: "desk",
+      jwksUrl: "https://tenant.us.auth0.com/.well-known/jwks.json",
+      now: () => 1_000,
+      fetchJwks: async () => signing.jwks,
+      userAccounts,
+      ...auth0OidcProviderPreset({
+        namespace: "https://app.example.com",
+        includePermissions: true,
+        metadataClaims: ["org_id", "org_name"]
+      })
+    });
+    const token = await signing.sign({
+      iss: "https://tenant.us.auth0.com/",
+      aud: "desk",
+      exp: 2_000,
+      nbf: 900,
+      sub: "auth0|abc",
+      email: "owner@example.com",
+      email_verified: true,
+      org_id: "tenant-acme",
+      org_name: "Acme",
+      permissions: ["tickets:read"],
+      "https://app.example.com/roles": ["Desk Managers"]
+    });
+
+    await expect(
+      resolver(new Request("https://app.test", { headers: { authorization: `Bearer ${token}` } }))
+    ).resolves.toMatchObject({
+      roles: ["Auth0:Desk Managers", "Auth0Permission:tickets:read", "User"],
+      tenantId: "tenant-acme"
+    });
+    const saved = await events.readStream(userAccountsStream("tenant-acme", "owner@example.com"));
+    expect(saved).toHaveLength(2);
+    expect(saved[0]).toMatchObject({
+      metadata: {
+        org_id: "tenant-acme",
+        org_name: "Acme"
+      },
+      payload: {
+        kind: "UserAccountCreated",
+        roles: ["Auth0:Desk Managers", "Auth0Permission:tickets:read", "User"]
+      }
+    });
+  });
+
+  it("rejects Google Workspace tokens outside allowed domains before syncing accounts", async () => {
+    const signing = await createJwtSigner<GoogleWorkspaceOidcClaims>();
+    const events = new InMemoryEventStore();
+    const userAccounts = new UserAccountService({
+      events,
+      passwords: deterministicPasswords(),
+      ids: deterministicIds(["account-created", "provider-linked"]),
+      clock: fixedClock(now)
+    });
+    const resolver = oidcAccountSyncActorResolver<GoogleWorkspaceOidcClaims>({
+      issuer: "https://accounts.google.com",
+      audience: "desk-client",
+      jwksUrl: "https://www.googleapis.com/oauth2/v3/certs",
+      now: () => 1_000,
+      fetchJwks: async () => signing.jwks,
+      userAccounts,
+      ...googleWorkspaceOidcProviderPreset({
+        hostedDomains: ["example.com"],
+        tenantId: "acme",
+        metadataClaims: ["hd"]
+      })
+    });
+    const blocked = await signing.sign({
+      iss: "https://accounts.google.com",
+      aud: "desk-client",
+      exp: 2_000,
+      nbf: 900,
+      sub: "google-sub-1",
+      email: "owner@other.com",
+      email_verified: true,
+      hd: "other.com"
+    });
+    await expect(
+      resolver(new Request("https://app.test", { headers: { authorization: `Bearer ${blocked}` } }))
+    ).rejects.toMatchObject({
+      code: "PERMISSION_DENIED",
+      message: "OIDC token is not allowed"
+    });
+    await expect(events.readStream(userAccountsStream("acme", "owner@other.com"))).resolves.toEqual([]);
+
+    const allowed = await signing.sign({
+      iss: "https://accounts.google.com",
+      aud: "desk-client",
+      exp: 2_000,
+      nbf: 900,
+      sub: "google-sub-2",
+      email: "owner@example.com",
+      email_verified: true,
+      hd: "example.com"
+    });
+    await expect(
+      resolver(new Request("https://app.test", { headers: { authorization: `Bearer ${allowed}` } }))
+    ).resolves.toEqual({
+      id: "owner@example.com",
+      roles: ["User"],
+      tenantId: "acme",
+      email: "owner@example.com"
+    });
+    const saved = await events.readStream(userAccountsStream("acme", "owner@example.com"));
+    expect(saved).toHaveLength(2);
+    expect(saved[0]).toMatchObject({
+      metadata: { hd: "example.com" },
+      payload: {
+        kind: "UserAccountCreated",
+        emailVerifiedAt: now
+      }
+    });
   });
 });
 
