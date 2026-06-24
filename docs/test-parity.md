@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the global print settings slice:
+As of the Desk print settings admin slice:
 
 - Vitest files: `76`
-- Vitest cases: `838`
+- Vitest cases: `840`
 
 ## Implication
 

@@ -482,6 +482,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     registry: options.registry,
     documents,
     prints,
+    printSettings,
     ...(files === undefined ? {} : { files }),
     queries: restrictedQueries,
     documentShares,

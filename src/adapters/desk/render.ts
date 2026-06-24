@@ -39,7 +39,13 @@ import type { ReportRunResult } from "../../application/report-service.js";
 import type { RoleCatalogState } from "../../core/roles.js";
 import type { SavedListFilter } from "../../application/saved-list-filter-service.js";
 import type { SavedReport } from "../../application/saved-report-service.js";
-import type { PrintFormatDefinition } from "../../core/print-format.js";
+import {
+  PRINT_PAGE_ORIENTATIONS,
+  PRINT_PAGE_SIZE_NAMES,
+  type PrintFormatDefinition,
+  type PrintLayoutDefinition
+} from "../../core/print-format.js";
+import type { PrintSettingsState } from "../../core/print-settings.js";
 import type { UserAccount } from "../../core/user-accounts.js";
 import type { UserNotificationInbox } from "../../application/user-notification-service.js";
 import { USER_PROFILE_FIELDS, type UserProfileState } from "../../core/user-profiles.js";
@@ -1201,6 +1207,80 @@ export function renderCustomFieldAdmin(state: CustomFieldAdminState): string {
       </table>
     </div>
   </section>`;
+}
+
+export function renderPrintSettingsAdmin(
+  state: PrintSettingsState,
+  options: { readonly error?: string } = {}
+): string {
+  const layout = state.settings.defaultLayout;
+  return `${options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : ""}
+  <form class="panel form" method="post" action="/desk/admin/print-settings">
+    <input type="hidden" name="expectedVersion" value="${String(state.version)}">
+    <div class="form-head"><h2>Default Print Layout</h2><p>v${String(state.version)}</p></div>
+    <div class="fields">
+      <label class="field"><span>Page Size</span><select name="pageSize">${renderPrintPageSizeOptions(layout)}</select></label>
+      <label class="field"><span>Orientation</span><select name="orientation">${renderPrintOrientationOptions(layout)}</select></label>
+      <label class="field"><span>Custom Width (mm)</span><input name="customWidthMm" type="number" step="any" min="1" max="2000" value="${printCustomPageSizeValue(layout, "widthMm")}"></label>
+      <label class="field"><span>Custom Height (mm)</span><input name="customHeightMm" type="number" step="any" min="1" max="2000" value="${printCustomPageSizeValue(layout, "heightMm")}"></label>
+      <label class="field"><span>Top Margin (mm)</span><input name="topMm" type="number" step="any" min="0" max="100" value="${printMarginValue(layout, "topMm")}"></label>
+      <label class="field"><span>Right Margin (mm)</span><input name="rightMm" type="number" step="any" min="0" max="100" value="${printMarginValue(layout, "rightMm")}"></label>
+      <label class="field"><span>Bottom Margin (mm)</span><input name="bottomMm" type="number" step="any" min="0" max="100" value="${printMarginValue(layout, "bottomMm")}"></label>
+      <label class="field"><span>Left Margin (mm)</span><input name="leftMm" type="number" step="any" min="0" max="100" value="${printMarginValue(layout, "leftMm")}"></label>
+      <label class="field"><span>Font Family</span><input name="fontFamily" value="${escapeHtml(layout?.font?.family ?? "")}"></label>
+      <label class="field"><span>Font Size (pt)</span><input name="fontSizePt" type="number" step="any" min="6" max="72" value="${printNumberValue(layout?.font?.sizePt)}"></label>
+    </div>
+    <div class="choices">
+      <label class="choice"><input type="checkbox" name="clearDefaultLayout" value="1"><span>Clear Default Layout</span></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Save Settings</button></div>
+  </form>`;
+}
+
+function renderPrintPageSizeOptions(layout: PrintLayoutDefinition | undefined): string {
+  const selected = typeof layout?.pageSize === "string" ? layout.pageSize : "";
+  return [
+    `<option value=""${selected === "" ? " selected" : ""}></option>`,
+    ...PRINT_PAGE_SIZE_NAMES.map(
+      (pageSize) =>
+        `<option value="${escapeHtml(pageSize)}"${pageSize === selected ? " selected" : ""}>${escapeHtml(pageSize)}</option>`
+    )
+  ].join("");
+}
+
+function renderPrintOrientationOptions(layout: PrintLayoutDefinition | undefined): string {
+  const selected = layout?.orientation ?? "";
+  return [
+    `<option value=""${selected === "" ? " selected" : ""}></option>`,
+    ...PRINT_PAGE_ORIENTATIONS.map(
+      (orientation) =>
+        `<option value="${escapeHtml(orientation)}"${orientation === selected ? " selected" : ""}>${escapeHtml(printOrientationLabel(orientation))}</option>`
+    )
+  ].join("");
+}
+
+function printOrientationLabel(orientation: (typeof PRINT_PAGE_ORIENTATIONS)[number]): string {
+  return orientation === "landscape" ? "Landscape" : "Portrait";
+}
+
+function printMarginValue(
+  layout: PrintLayoutDefinition | undefined,
+  side: keyof NonNullable<PrintLayoutDefinition["margins"]>
+): string {
+  return printNumberValue(layout?.margins?.[side]);
+}
+
+function printCustomPageSizeValue(
+  layout: PrintLayoutDefinition | undefined,
+  dimension: "widthMm" | "heightMm"
+): string {
+  return layout?.pageSize === undefined || typeof layout.pageSize === "string"
+    ? ""
+    : printNumberValue(layout.pageSize[dimension]);
+}
+
+function printNumberValue(value: number | undefined): string {
+  return value === undefined ? "" : escapeHtml(String(value));
 }
 
 function renderCustomFieldDoctypeOptions(doctypes: readonly DocTypeDefinition[], selectedDoctype: string): string {

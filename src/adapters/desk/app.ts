@@ -27,6 +27,7 @@ import type { JobHistoryService } from "../../application/job-history-service.js
 import type { JobRetryPort } from "../../application/job-retry-service.js";
 import type { JobScheduleService } from "../../application/job-schedule-service.js";
 import type { PrintService } from "../../application/print-service.js";
+import type { PrintSettingsService } from "../../application/print-settings-service.js";
 import { QueryService } from "../../application/query-service.js";
 import type { ReportService } from "../../application/report-service.js";
 import type { RoleService } from "../../application/role-service.js";
@@ -56,6 +57,14 @@ import {
 import { allowedWorkflowTransitions } from "../../core/workflow.js";
 import { MAX_JOB_QUEUE_DELAY_SECONDS, MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH } from "../../ports/job-queue.js";
 import type { PrintPdfRenderer } from "../../ports/print-pdf-renderer.js";
+import {
+  PRINT_PAGE_ORIENTATIONS,
+  PRINT_PAGE_SIZE_NAMES,
+  type PrintLayoutDefinition,
+  type PrintPageOrientation,
+  type PrintPageSizeName
+} from "../../core/print-format.js";
+import type { PrintSettingsInput } from "../../core/print-settings.js";
 import {
   CHILD_TABLE_ROW_INDEX_FIELD,
   FIELD_TYPES,
@@ -108,6 +117,7 @@ import {
   renderJobScheduleAdmin,
   renderListView,
   renderNotFound,
+  renderPrintSettingsAdmin,
   renderReportList,
   renderReportView,
   renderRoleAdmin,
@@ -158,10 +168,16 @@ interface ParsedDeskReportChartControls {
   readonly yAxisLabel?: string;
 }
 
+interface ParsedDeskPrintSettings {
+  readonly expectedVersion?: number;
+  readonly settings: PrintSettingsInput;
+}
+
 export interface DeskAppOptions {
   readonly registry: ModelRegistry;
   readonly documents: DocumentCommandExecutor;
   readonly prints?: PrintService;
+  readonly printSettings?: PrintSettingsService;
   readonly printPdfRenderer?: PrintPdfRenderer;
   readonly files?: FileService;
   readonly queries: QueryService;
@@ -506,6 +522,30 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const selectedDoctype = url.searchParams.get("doctype")?.trim() || doctypes[0]?.name || "";
     const state = selectedDoctype ? await customFields.list(actor, selectedDoctype) : undefined;
     return renderDeskCustomFieldPage(options, actor, selectedDoctype, state);
+  });
+
+  app.get("/desk/admin/print-settings", async (c) => {
+    const printSettings = requirePrintSettings(options);
+    const actor = await options.actor(c.req.raw);
+    const state = await printSettings.get(actor);
+    return renderDeskPrintSettingsPage(options, actor, state);
+  });
+
+  app.post("/desk/admin/print-settings", async (c) => {
+    const printSettings = requirePrintSettings(options);
+    const actor = await options.actor(c.req.raw);
+    try {
+      const form = await parseDeskPrintSettings(c.req.raw);
+      await printSettings.change({
+        actor,
+        settings: form.settings,
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect("/desk/admin/print-settings", 303);
+    } catch (error) {
+      return renderDeskPrintSettingsFailure(options, actor, printSettings, error);
+    }
   });
 
   app.get("/desk/admin/jobs", async (c) => {
@@ -2028,6 +2068,9 @@ function adminLinksFor(options: DeskAppOptions, actor: Actor): readonly DeskNavL
     ...(options.customFields === undefined
       ? []
       : [{ id: "custom-fields", label: "Custom Fields", href: "/desk/admin/custom-fields" }]),
+    ...(options.printSettings === undefined
+      ? []
+      : [{ id: "print-settings", label: "Print Settings", href: "/desk/admin/print-settings" }]),
     ...(options.userPermissions === undefined
       ? []
       : [{ id: "user-permissions", label: "User Permissions", href: "/desk/admin/user-permissions" }]),
@@ -2164,6 +2207,13 @@ function requireCustomFields(options: DeskAppOptions): CustomFieldService {
     throw new FrameworkError("DOCUMENT_NOT_FOUND", "Custom fields are not enabled", { status: 404 });
   }
   return options.customFields;
+}
+
+function requirePrintSettings(options: DeskAppOptions): PrintSettingsService {
+  if (!options.printSettings) {
+    throw new FrameworkError("DOCUMENT_NOT_FOUND", "Print settings are not enabled", { status: 404 });
+  }
+  return options.printSettings;
 }
 
 function requireJobs(options: DeskAppOptions): JobHistoryService {
@@ -2645,6 +2695,48 @@ async function renderDeskCustomFieldFailure(
     options,
     actor,
     fallbackDoctype,
+    state,
+    error instanceof FrameworkError ? error.status : 500,
+    message
+  );
+}
+
+async function renderDeskPrintSettingsPage(
+  options: DeskAppOptions,
+  actor: Actor,
+  state: Awaited<ReturnType<PrintSettingsService["get"]>>,
+  status = 200,
+  error?: string
+): Promise<Response> {
+  const doctypes = options.queries.listDoctypes(actor);
+  const reports = listReports(options, actor);
+  return html(
+    renderDeskLayoutFor(options, {
+      title: "Print Settings",
+      activeAdmin: "print-settings",
+      adminLinks: adminLinksFor(options, actor),
+      doctypes,
+      reports,
+      body: renderPrintSettingsAdmin(state, error === undefined ? {} : { error })
+    }),
+    status
+  );
+}
+
+async function renderDeskPrintSettingsFailure(
+  options: DeskAppOptions,
+  actor: Actor,
+  printSettings: PrintSettingsService,
+  error: unknown
+): Promise<Response> {
+  if (error instanceof FrameworkError && error.status === 403) {
+    throw error;
+  }
+  const state = await printSettings.get(actor);
+  const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
+  return renderDeskPrintSettingsPage(
+    options,
+    actor,
     state,
     error instanceof FrameworkError ? error.status : 500,
     message
@@ -3687,6 +3779,99 @@ function commaListFormValue(value: FormDataEntryValue | null): readonly string[]
 async function parseDeskExpectedVersion(request: Request): Promise<number | undefined> {
   const form = await request.formData();
   return coerceExpectedVersion(form.get("expectedVersion"));
+}
+
+async function parseDeskPrintSettings(request: Request): Promise<ParsedDeskPrintSettings> {
+  const form = await readUrlEncodedDeskForm(request);
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  if (truthyDeskParam(form.get("clearDefaultLayout"))) {
+    return { ...(expectedVersion === undefined ? {} : { expectedVersion }), settings: { defaultLayout: null } };
+  }
+  const defaultLayout = printLayoutSearchParamValue(form);
+  return {
+    ...(expectedVersion === undefined ? {} : { expectedVersion }),
+    settings: defaultLayout === undefined ? {} : { defaultLayout }
+  };
+}
+
+function printLayoutSearchParamValue(form: URLSearchParams): PrintLayoutDefinition | undefined {
+  const pageSize = printPageSizeSearchParamValue(form);
+  const orientation = printOrientationSearchParamValue(form);
+  const margins = printMarginsSearchParamValue(form);
+  const font = printFontSearchParamValue(form);
+  if (pageSize === undefined && orientation === undefined && margins === undefined && font === undefined) {
+    return undefined;
+  }
+  return {
+    ...(pageSize === undefined ? {} : { pageSize }),
+    ...(orientation === undefined ? {} : { orientation }),
+    ...(margins === undefined ? {} : { margins }),
+    ...(font === undefined ? {} : { font })
+  };
+}
+
+function printPageSizeSearchParamValue(form: URLSearchParams): PrintLayoutDefinition["pageSize"] | undefined {
+  const value = stringSearchParamValue(form, "pageSize");
+  const widthMm = optionalNumberSearchParamValue(form, "customWidthMm", "Custom Width");
+  const heightMm = optionalNumberSearchParamValue(form, "customHeightMm", "Custom Height");
+  if (widthMm !== undefined || heightMm !== undefined) {
+    if (widthMm === undefined || heightMm === undefined) {
+      throw new FrameworkError("BAD_REQUEST", "Custom Page Size requires width and height", { status: 400 });
+    }
+    if (value !== undefined) {
+      throw new FrameworkError("BAD_REQUEST", "Custom Page Size cannot be combined with Page Size", { status: 400 });
+    }
+    return { widthMm, heightMm };
+  }
+  if (value !== undefined && (PRINT_PAGE_SIZE_NAMES as readonly string[]).includes(value)) {
+    return value as PrintPageSizeName;
+  }
+  if (value === undefined) {
+    return undefined;
+  }
+  throw new FrameworkError("BAD_REQUEST", "Page Size is invalid", { status: 400 });
+}
+
+function printOrientationSearchParamValue(form: URLSearchParams): PrintPageOrientation | undefined {
+  const value = stringSearchParamValue(form, "orientation");
+  if (value === undefined) {
+    return undefined;
+  }
+  if ((PRINT_PAGE_ORIENTATIONS as readonly string[]).includes(value)) {
+    return value as PrintPageOrientation;
+  }
+  throw new FrameworkError("BAD_REQUEST", "Orientation is invalid", { status: 400 });
+}
+
+function printMarginsSearchParamValue(form: URLSearchParams): PrintLayoutDefinition["margins"] | undefined {
+  const margins = {
+    ...optionalPrintNumberSearchParamValue(form, "topMm", "Top Margin"),
+    ...optionalPrintNumberSearchParamValue(form, "rightMm", "Right Margin"),
+    ...optionalPrintNumberSearchParamValue(form, "bottomMm", "Bottom Margin"),
+    ...optionalPrintNumberSearchParamValue(form, "leftMm", "Left Margin")
+  };
+  return Object.keys(margins).length === 0 ? undefined : margins;
+}
+
+function optionalPrintNumberSearchParamValue<TKey extends "topMm" | "rightMm" | "bottomMm" | "leftMm">(
+  form: URLSearchParams,
+  key: TKey,
+  label: string
+): { readonly [K in TKey]?: number } {
+  const value = optionalNumberSearchParamValue(form, key, label);
+  return value === undefined ? {} : { [key]: value } as { readonly [K in TKey]: number };
+}
+
+function printFontSearchParamValue(form: URLSearchParams): PrintLayoutDefinition["font"] | undefined {
+  const family = stringSearchParamValue(form, "fontFamily");
+  const sizePt = optionalNumberSearchParamValue(form, "fontSizePt", "Font Size");
+  if (family === undefined && sizePt === undefined) {
+    return undefined;
+  }
+  return {
+    ...(family === undefined ? {} : { family }),
+    ...(sizePt === undefined ? {} : { sizePt })
+  };
 }
 
 async function readUrlEncodedDeskForm(request: Request): Promise<URLSearchParams> {

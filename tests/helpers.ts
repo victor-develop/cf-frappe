@@ -317,7 +317,7 @@ export function createServices(
   const printSettings = new PrintSettingsService({
     events: store,
     clock: fixedClock(now),
-    ids: deterministicIds(["print-settings-event-1", "print-settings-event-2"])
+    ids: deterministicIds(["print-settings-event-1", "print-settings-event-2", "print-settings-event-3"])
   });
   const prints = new PrintService({ registry, queries, printSettings });
   const reports = new ReportService({ registry, queries });

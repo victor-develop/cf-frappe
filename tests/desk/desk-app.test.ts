@@ -3586,6 +3586,7 @@ describe("Desk app", () => {
       userPermissions: services.userPermissions,
       roles: new RoleService({ events: services.store }),
       customFields,
+      printSettings: services.printSettings,
       dataPatches,
       jobSchedules: new JobScheduleService({
         registry: createJobRegistry({
@@ -3603,9 +3604,16 @@ describe("Desk app", () => {
     expect(homeHtml).toContain('href="/desk/admin/user-permissions"');
     expect(homeHtml).toContain('href="/desk/admin/roles"');
     expect(homeHtml).toContain('href="/desk/admin/custom-fields"');
+    expect(homeHtml).toContain('href="/desk/admin/print-settings"');
     expect(homeHtml).toContain('href="/desk/admin/data-patches"');
     expect(homeHtml).toContain('href="/desk/admin/jobs/schedules"');
     expect(homeHtml).not.toContain('href="/desk/admin/users"');
+
+    const printSettingsPage = await app.request("/desk/admin/print-settings");
+    expect(printSettingsPage.status).toBe(200);
+    await expect(printSettingsPage.text()).resolves.toContain(
+      '<a class="nav-link is-active" href="/desk/admin/print-settings">Print Settings</a>'
+    );
 
     const dataPatchPage = await app.request("/desk/admin/data-patches");
     expect(dataPatchPage.status).toBe(200);
@@ -3686,6 +3694,147 @@ describe("Desk app", () => {
     const missing = await disabled.request("/desk/admin/data-patches");
     expect(missing.status).toBe(404);
     await expect(missing.text()).resolves.toContain("Data patches are not enabled");
+  });
+
+  it("renders and updates print settings from the Desk admin surface", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const services = createServices();
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      printSettings: services.printSettings,
+      actor: () => admin
+    });
+
+    const empty = await app.request("/desk/admin/print-settings");
+    expect(empty.status).toBe(200);
+    const emptyHtml = await empty.text();
+    expect(emptyHtml).toContain('action="/desk/admin/print-settings"');
+    expect(emptyHtml).toContain('name="expectedVersion" value="0"');
+    expect(emptyHtml).toContain('name="pageSize"');
+    expect(emptyHtml).toContain('name="orientation"');
+    expect(emptyHtml).toContain('name="customWidthMm"');
+    expect(emptyHtml).toContain('name="customHeightMm"');
+    expect(emptyHtml).toContain('name="topMm"');
+    expect(emptyHtml).toContain('name="rightMm"');
+    expect(emptyHtml).toContain('name="bottomMm"');
+    expect(emptyHtml).toContain('name="leftMm"');
+    expect(emptyHtml).toContain('name="fontFamily"');
+    expect(emptyHtml).toContain('name="fontSizePt"');
+
+    const saved = await app.request("/desk/admin/print-settings", {
+      method: "POST",
+      body: new URLSearchParams({
+        expectedVersion: "0",
+        pageSize: "A4",
+        orientation: "landscape",
+        topMm: "12",
+        rightMm: "10",
+        bottomMm: "14",
+        leftMm: "10",
+        fontFamily: "Inter",
+        fontSizePt: "10"
+      })
+    });
+    expect(saved.status).toBe(303);
+    expect(saved.headers.get("location")).toBe("/desk/admin/print-settings");
+    await expect(services.printSettings.get(admin)).resolves.toMatchObject({
+      version: 1,
+      settings: {
+        defaultLayout: {
+          pageSize: "A4",
+          orientation: "landscape",
+          margins: { topMm: 12, rightMm: 10, bottomMm: 14, leftMm: 10 },
+          font: { family: "Inter", sizePt: 10 }
+        }
+      }
+    });
+
+    const current = await app.request("/desk/admin/print-settings");
+    expect(current.status).toBe(200);
+    const currentHtml = await current.text();
+    expect(currentHtml).toContain('name="expectedVersion" value="1"');
+    expect(currentHtml).toContain('<option value="A4" selected>A4</option>');
+    expect(currentHtml).toContain('<option value="landscape" selected>Landscape</option>');
+    expect(currentHtml).toContain('name="topMm" type="number" step="any" min="0" max="100" value="12"');
+    expect(currentHtml).toContain('name="fontFamily" value="Inter"');
+    expect(currentHtml).toContain('name="fontSizePt" type="number" step="any" min="6" max="72" value="10"');
+
+    const stale = await app.request("/desk/admin/print-settings", {
+      method: "POST",
+      body: new URLSearchParams({
+        expectedVersion: "0",
+        pageSize: "Letter"
+      })
+    });
+    expect(stale.status).toBe(409);
+    const staleHtml = await stale.text();
+    expect(staleHtml).toContain("Expected print settings at version 0, found 1");
+    expect(staleHtml).toContain('name="expectedVersion" value="1"');
+
+    const cleared = await app.request("/desk/admin/print-settings", {
+      method: "POST",
+      body: new URLSearchParams({
+        expectedVersion: "1",
+        clearDefaultLayout: "1"
+      })
+    });
+    expect(cleared.status).toBe(303);
+    await expect(services.printSettings.get(admin)).resolves.toMatchObject({
+      version: 2,
+      settings: {}
+    });
+
+    const custom = await app.request("/desk/admin/print-settings", {
+      method: "POST",
+      body: new URLSearchParams({
+        expectedVersion: "2",
+        customWidthMm: "210",
+        customHeightMm: "297",
+        topMm: "8"
+      })
+    });
+    expect(custom.status).toBe(303);
+    await expect(services.printSettings.get(admin)).resolves.toMatchObject({
+      version: 3,
+      settings: {
+        defaultLayout: {
+          pageSize: { widthMm: 210, heightMm: 297 },
+          margins: { topMm: 8 }
+        }
+      }
+    });
+
+    const customPage = await app.request("/desk/admin/print-settings");
+    const customHtml = await customPage.text();
+    expect(customHtml).toContain('name="customWidthMm" type="number" step="any" min="1" max="2000" value="210"');
+    expect(customHtml).toContain('name="customHeightMm" type="number" step="any" min="1" max="2000" value="297"');
+  });
+
+  it("renders Desk print settings admin route errors", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const services = createServices();
+    const disabled = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: () => admin
+    });
+    const missing = await disabled.request("/desk/admin/print-settings");
+    expect(missing.status).toBe(404);
+    await expect(missing.text()).resolves.toContain("Print settings are not enabled");
+
+    const userApp = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      printSettings: services.printSettings,
+      actor: () => guest
+    });
+    const denied = await userApp.request("/desk/admin/print-settings");
+    expect(denied.status).toBe(403);
+    await expect(denied.text()).resolves.toContain("cannot manage print settings");
   });
 
   it("renders and dispatches job schedules from the Desk admin surface", async () => {

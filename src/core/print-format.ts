@@ -20,8 +20,10 @@ export interface PrintLetterheadDefinition {
   readonly roles?: readonly string[];
 }
 
-export type PrintPageSizeName = "A3" | "A4" | "A5" | "Letter" | "Legal";
-export type PrintPageOrientation = "portrait" | "landscape";
+export const PRINT_PAGE_SIZE_NAMES = ["A3", "A4", "A5", "Letter", "Legal"] as const;
+export type PrintPageSizeName = (typeof PRINT_PAGE_SIZE_NAMES)[number];
+export const PRINT_PAGE_ORIENTATIONS = ["portrait", "landscape"] as const;
+export type PrintPageOrientation = (typeof PRINT_PAGE_ORIENTATIONS)[number];
 
 export interface PrintCustomPageSizeDefinition {
   readonly widthMm: number;
@@ -101,7 +103,6 @@ export interface PrintFormatDefinition {
   readonly permissionAction?: PermissionAction;
 }
 
-const PRINT_PAGE_SIZE_NAMES = ["A3", "A4", "A5", "Letter", "Legal"] as const;
 const PRINT_TEMPLATE_PATTERN = /{{\s*([^{}]+?)\s*}}/g;
 const DOCUMENT_METADATA_FIELDS = ["doctype", "name", "tenantId", "version", "docstatus", "createdAt", "updatedAt"] as const;
 const PRINT_FORMAT_METADATA_FIELDS = ["doctype", "name", "label", "module", "description"] as const;
