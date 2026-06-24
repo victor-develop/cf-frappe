@@ -57,6 +57,22 @@ describe("QueryService", () => {
     ).resolves.toMatchObject({ data: [{ name: "Urgent Launch" }], total: 1 });
 
     await expect(
+      queries.listDocuments(owner, "Note", { filters: [{ field: "body", operator: "like", value: "Launch%" }] })
+    ).resolves.toMatchObject({ data: [{ name: "Urgent Launch" }], total: 1 });
+
+    await expect(
+      queries.listDocuments(owner, "Note", { filters: [{ field: "body", operator: "like", value: "\\L%" }] })
+    ).resolves.toMatchObject({ data: [{ name: "Urgent Launch" }], total: 1 });
+
+    await expect(
+      queries.listDocuments(owner, "Note", { filters: [{ field: "body", operator: "like", value: "Launch report\\" }] })
+    ).resolves.toMatchObject({ data: [], total: 0 });
+
+    await expect(
+      queries.listDocuments(owner, "Note", { filters: [{ field: "body", operator: "not_like", value: "%note%" }] })
+    ).resolves.toMatchObject({ data: [{ name: "Urgent Launch" }], total: 1 });
+
+    await expect(
       queries.listDocuments(owner, "Note", { filters: [{ field: "count", operator: "gte", value: "2" }] })
     ).resolves.toMatchObject({ data: [{ name: "Urgent Launch" }], total: 1 });
 
@@ -774,7 +790,9 @@ describe("QueryService", () => {
           { operator: "in", label: "is in" },
           { operator: "not_in", label: "is not in" },
           { operator: "is", label: "is" },
-          { operator: "contains", label: "contains" }
+          { operator: "contains", label: "contains" },
+          { operator: "like", label: "like" },
+          { operator: "not_like", label: "not like" }
         ]
       }),
       expect.objectContaining({

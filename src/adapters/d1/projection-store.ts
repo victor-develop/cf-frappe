@@ -130,6 +130,14 @@ function listFilterWhere(filters: readonly ListDocumentsFilter[]): ListFilterWhe
         conditions.push(`LOWER(CAST(${expression} AS TEXT)) LIKE ? ESCAPE '\\'`);
         params.push(`%${escapeLike(String(scalarFilterValue(filter)).toLowerCase())}%`);
         break;
+      case "like":
+        conditions.push(`LOWER(CAST(${expression} AS TEXT)) LIKE ? ESCAPE '\\'`);
+        params.push(patternFilterValue(filter));
+        break;
+      case "not_like":
+        conditions.push(`${expression} IS NOT NULL AND LOWER(CAST(${expression} AS TEXT)) NOT LIKE ? ESCAPE '\\'`);
+        params.push(patternFilterValue(filter));
+        break;
       case "gt":
         conditions.push(`${expression} > ?`);
         params.push(sqliteJsonValue(scalarFilterValue(filter)));
@@ -203,6 +211,14 @@ function presenceFilterValue(filter: ListDocumentsFilter): "set" | "not set" {
     return filter.value;
   }
   throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires set or not set`);
+}
+
+function patternFilterValue(filter: ListDocumentsFilter): string {
+  const value = scalarFilterValue(filter);
+  if (value === null) {
+    throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires a non-null pattern value`);
+  }
+  return String(value).toLowerCase();
 }
 
 function rangeFilterValues(filter: ListDocumentsFilter): readonly [JsonPrimitive, JsonPrimitive] {

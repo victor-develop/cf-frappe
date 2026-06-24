@@ -150,7 +150,8 @@ describe("resource api", () => {
       fields: [
         { name: "title", type: "text", required: true },
         { name: "count__between", type: "integer" },
-        { name: "body__is", type: "text" }
+        { name: "body__is", type: "text" },
+        { name: "title__like", type: "text" }
       ],
       permissions: [{ roles: ["User"], actions: ["read", "create"] }]
     });
@@ -231,7 +232,9 @@ describe("resource api", () => {
               { operator: "in", label: "is in" },
               { operator: "not_in", label: "is not in" },
               { operator: "is", label: "is" },
-              { operator: "contains", label: "contains" }
+              { operator: "contains", label: "contains" },
+              { operator: "like", label: "like" },
+              { operator: "not_like", label: "not like" }
             ]
           },
           {
@@ -1323,6 +1326,24 @@ describe("resource api", () => {
       total: 1
     });
 
+    const like = await app.request("/api/resource/Note?filter_body__like=Escal%25", {
+      headers: userHeaders
+    });
+    expect(like.status).toBe(200);
+    await expect(like.json()).resolves.toMatchObject({
+      data: [{ name: "HTTP High" }],
+      total: 1
+    });
+
+    const notLike = await app.request("/api/resource/Note?filter_priority=High&filter_body__not_like=%25Routine%25", {
+      headers: userHeaders
+    });
+    expect(notLike.status).toBe(200);
+    await expect(notLike.json()).resolves.toMatchObject({
+      data: [{ name: "HTTP High" }],
+      total: 1
+    });
+
     const set = await app.request("/api/resource/Note?filter_body__is=set", {
       headers: userHeaders
     });
@@ -1411,12 +1432,12 @@ describe("resource api", () => {
     await app.request("/api/resource/FilterCollision", {
       method: "POST",
       headers: userHeaders,
-      body: JSON.stringify({ title: "Collision Match", count__between: 7, body__is: "literal" })
+      body: JSON.stringify({ title: "Collision Match", count__between: 7, body__is: "literal", title__like: "literal" })
     });
     await app.request("/api/resource/FilterCollision", {
       method: "POST",
       headers: userHeaders,
-      body: JSON.stringify({ title: "Collision Miss", count__between: 3, body__is: "other" })
+      body: JSON.stringify({ title: "Collision Miss", count__between: 3, body__is: "other", title__like: "other" })
     });
 
     const response = await app.request("/api/resource/FilterCollision?filter_count__between=7", {
@@ -1434,6 +1455,15 @@ describe("resource api", () => {
     });
     expect(presenceCollision.status).toBe(200);
     await expect(presenceCollision.json()).resolves.toMatchObject({
+      data: [{ name: "Collision Match" }],
+      total: 1
+    });
+
+    const patternCollision = await app.request("/api/resource/FilterCollision?filter_title__like=literal", {
+      headers: userHeaders
+    });
+    expect(patternCollision.status).toBe(200);
+    await expect(patternCollision.json()).resolves.toMatchObject({
       data: [{ name: "Collision Match" }],
       total: 1
     });
@@ -1460,7 +1490,8 @@ describe("resource api", () => {
         filters: [
           { field: "priority", operator: "in", value: ["High", "Low"] },
           { field: "count", operator: "between", value: [1, 7] },
-          { field: "body", operator: "is", value: "set" }
+          { field: "body", operator: "is", value: "set" },
+          { field: "body", operator: "like", value: "%High%" }
         ]
       })
     });
@@ -1474,7 +1505,7 @@ describe("resource api", () => {
     });
     expect(filtered.status).toBe(200);
     await expect(filtered.json()).resolves.toMatchObject({
-      total: 2
+      total: 1
     });
 
     const listed = await app.request("/api/resource/Note/saved-filters", { headers: userHeaders });

@@ -215,6 +215,67 @@ describe("D1ProjectionStore", () => {
     expect(setDb.statements[0]?.params).toEqual(["acme", "Note", 50, 0]);
   });
 
+  it("renders pattern operators with bound LIKE parameters", async () => {
+    const db = new FakeD1Database([
+      documentRow({ name: "D1 Launch", data: { title: "Launch Plan" } }),
+      documentRow({ name: "D1 Launchpad", data: { title: "Launchpad" } }),
+      documentRow({ name: "D1 Routine", data: { title: "Routine Check" } })
+    ]);
+    const store = new D1ProjectionStore(db as unknown as D1Database);
+
+    const like = await store.list({
+      tenantId: "acme",
+      doctype: "Note",
+      filters: [{ field: "title", operator: "like", value: "launch%" }]
+    });
+
+    expect(like.data.map((document) => document.name)).toEqual(["D1 Launch", "D1 Launchpad"]);
+    expect(like.total).toBe(2);
+    const [rows, count] = db.statements;
+    expect(rows?.sql).toContain("LOWER(CAST(json_extract(data_json, '$.title') AS TEXT)) LIKE ? ESCAPE '\\'");
+    expect(rows?.sql).not.toContain("launch%");
+    expect(rows?.params).toEqual(["acme", "Note", "launch%", 50, 0]);
+    expect(count?.params).toEqual(["acme", "Note", "launch%"]);
+
+    const notLikeDb = new FakeD1Database(db.rows);
+    const notLikeStore = new D1ProjectionStore(notLikeDb as unknown as D1Database);
+    const notLike = await notLikeStore.list({
+      tenantId: "acme",
+      doctype: "Note",
+      filters: [{ field: "title", operator: "not_like", value: "%launch%" }]
+    });
+
+    expect(notLike.data.map((document) => document.name)).toEqual(["D1 Routine"]);
+    expect(notLike.total).toBe(1);
+    expect(notLikeDb.statements[0]?.sql).toContain(
+      "json_extract(data_json, '$.title') IS NOT NULL AND LOWER(CAST(json_extract(data_json, '$.title') AS TEXT)) NOT LIKE ? ESCAPE '\\'"
+    );
+    expect(notLikeDb.statements[0]?.sql).not.toContain("%launch%");
+    expect(notLikeDb.statements[0]?.params).toEqual(["acme", "Note", "%launch%", 50, 0]);
+
+    const escapedDb = new FakeD1Database(db.rows);
+    const escapedStore = new D1ProjectionStore(escapedDb as unknown as D1Database);
+    const escaped = await escapedStore.list({
+      tenantId: "acme",
+      doctype: "Note",
+      filters: [{ field: "title", operator: "like", value: "\\l%" }]
+    });
+
+    expect(escaped.data.map((document) => document.name)).toEqual(["D1 Launch", "D1 Launchpad"]);
+    expect(escapedDb.statements[0]?.params).toEqual(["acme", "Note", "\\l%", 50, 0]);
+
+    const trailingEscapeDb = new FakeD1Database(db.rows);
+    const trailingEscapeStore = new D1ProjectionStore(trailingEscapeDb as unknown as D1Database);
+    const trailingEscape = await trailingEscapeStore.list({
+      tenantId: "acme",
+      doctype: "Note",
+      filters: [{ field: "title", operator: "like", value: "launch plan\\" }]
+    });
+
+    expect(trailingEscape).toMatchObject({ data: [], total: 0 });
+    expect(trailingEscapeDb.statements[0]?.params).toEqual(["acme", "Note", "launch plan\\", 50, 0]);
+  });
+
   it("orders rows by escaped JSON fields with deterministic fallbacks", async () => {
     const db = new FakeD1Database([
       documentRow({ name: "D1 High", data: { title: "apple", count: 5 } }),
@@ -441,6 +502,18 @@ class FakeD1PreparedStatement {
           return false;
         }
       }
+      if (this.sql.includes("LOWER(CAST(json_extract(data_json, '$.title') AS TEXT)) LIKE ? ESCAPE")) {
+        if (!matchesSqlLikePattern(data.title, filterParams[paramIndex])) {
+          return false;
+        }
+        paramIndex += 1;
+      }
+      if (this.sql.includes("LOWER(CAST(json_extract(data_json, '$.title') AS TEXT)) NOT LIKE ? ESCAPE")) {
+        if (data.title === undefined || data.title === null || matchesSqlLikePattern(data.title, filterParams[paramIndex])) {
+          return false;
+        }
+        paramIndex += 1;
+      }
       if (this.sql.includes("json_extract(data_json, '$.count') > ?")) {
         if (!compares(data.count, filterParams[paramIndex], (actual, expected) => actual > expected)) {
           return false;
@@ -511,4 +584,42 @@ function compares(
   predicate: (actual: number, expected: number) => boolean
 ): boolean {
   return typeof actual === "number" && typeof expected === "number" && predicate(actual, expected);
+}
+
+function matchesSqlLikePattern(actual: unknown, pattern: unknown): boolean {
+  if (actual === undefined || actual === null || typeof pattern !== "string") {
+    return false;
+  }
+  return new RegExp(`^${sqlLikePatternRegex(pattern)}$`, "i").test(String(actual));
+}
+
+function sqlLikePatternRegex(pattern: string): string {
+  let regex = "";
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index];
+    if (char === "\\") {
+      const next = pattern[index + 1];
+      if (next === undefined) {
+        regex += "(?!)";
+        continue;
+      }
+      regex += escapeRegex(next);
+      index += 1;
+      continue;
+    }
+    if (char === "%") {
+      regex += "[\\s\\S]*";
+      continue;
+    }
+    if (char === "_") {
+      regex += "[\\s\\S]";
+      continue;
+    }
+    regex += escapeRegex(char ?? "");
+  }
+  return regex;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
 }

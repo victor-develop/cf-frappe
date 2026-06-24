@@ -108,7 +108,8 @@ describe("Desk app", () => {
       fields: [
         { name: "title", type: "text", required: true },
         { name: "count__between", type: "integer" },
-        { name: "body__is", type: "text" }
+        { name: "body__is", type: "text" },
+        { name: "title__like", type: "text" }
       ],
       permissions: [{ roles: ["User"], actions: ["read", "create"] }]
     });
@@ -2431,6 +2432,20 @@ describe("Desk app", () => {
     expect(betweenHtml).not.toContain("Desk Low");
     expect(betweenHtml).not.toContain("Desk Closed High");
 
+    const like = await app.request("/desk/Note?filter_body__like=Hidden%25");
+    expect(like.status).toBe(200);
+    const likeHtml = await like.text();
+    expect(likeHtml).toContain("Desk High");
+    expect(likeHtml).not.toContain("Desk Low");
+    expect(likeHtml).not.toContain("Desk Closed High");
+
+    const notLike = await app.request("/desk/Note?filter_priority=High&filter_body__not_like=%25Routine%25");
+    expect(notLike.status).toBe(200);
+    const notLikeHtml = await notLike.text();
+    expect(notLikeHtml).toContain("Desk High");
+    expect(notLikeHtml).not.toContain("Desk Low");
+    expect(notLikeHtml).not.toContain("Desk Closed High");
+
     const set = await app.request("/desk/Note?filter_body__is=set");
     expect(set.status).toBe(200);
     const setHtml = await set.text();
@@ -2512,12 +2527,12 @@ describe("Desk app", () => {
     await documents.create({
       actor: owner,
       doctype: "FilterCollision",
-      data: { title: "Desk Collision Match", count__between: 7, body__is: "literal" }
+      data: { title: "Desk Collision Match", count__between: 7, body__is: "literal", title__like: "literal" }
     });
     await documents.create({
       actor: owner,
       doctype: "FilterCollision",
-      data: { title: "Desk Collision Miss", count__between: 3, body__is: "other" }
+      data: { title: "Desk Collision Miss", count__between: 3, body__is: "other", title__like: "other" }
     });
 
     const response = await app.request("/desk/FilterCollision?filter_count__between=7");
@@ -2532,6 +2547,12 @@ describe("Desk app", () => {
     const presenceCollisionHtml = await presenceCollision.text();
     expect(presenceCollisionHtml).toContain("Desk Collision Match");
     expect(presenceCollisionHtml).not.toContain("Desk Collision Miss");
+
+    const patternCollision = await app.request("/desk/FilterCollision?filter_title__like=literal");
+    expect(patternCollision.status).toBe(200);
+    const patternCollisionHtml = await patternCollision.text();
+    expect(patternCollisionHtml).toContain("Desk Collision Match");
+    expect(patternCollisionHtml).not.toContain("Desk Collision Miss");
   });
 
   it("renders and submits generated list bulk document deletes", async () => {

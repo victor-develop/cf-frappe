@@ -476,6 +476,8 @@ export type ListFilterOperator =
   | "not_in"
   | "is"
   | "contains"
+  | "like"
+  | "not_like"
   | "gt"
   | "gte"
   | "lt"

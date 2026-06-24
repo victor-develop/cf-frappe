@@ -615,6 +615,31 @@ describe("Desk client runtime", () => {
     ).toBe("/api/resource/Task/export.csv?filter_body__is=not+set");
   });
 
+  it("maps resource pattern filters to query parameters", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: [] }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await runtime.resource.list("Task", {
+      filters: {
+        title: { like: "Launch%", not_like: "%Draft%" }
+      }
+    });
+
+    expect(calls[0]?.url).toBe("/api/resource/Task?filter_title__like=Launch%25&filter_title__not_like=%25Draft%25");
+    expect(
+      runtime.resource.csvUrl("Task", {
+        filters: {
+          title: { like: "Launch%", not_like: "%Draft%" }
+        }
+      })
+    ).toBe("/api/resource/Task/export.csv?filter_title__like=Launch%25&filter_title__not_like=%25Draft%25");
+  });
+
   it("wraps metadata-driven global search", async () => {
     const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
     const runtime = evaluateDeskClient(async (url, init) => {

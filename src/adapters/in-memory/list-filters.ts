@@ -31,6 +31,10 @@ export function matchesListFilters(
           return false;
         }
         return String(actual ?? "").toLowerCase().includes(String(scalarFilterValue(filter)).toLowerCase());
+      case "like":
+        return actual !== undefined && actual !== null && likePatternMatches(actual, patternFilterValue(filter));
+      case "not_like":
+        return actual !== undefined && actual !== null && !likePatternMatches(actual, patternFilterValue(filter));
       case "gt":
         if (actual === undefined || actual === null) {
           return false;
@@ -95,6 +99,49 @@ function presenceFilterValue(filter: ListDocumentsFilter): "set" | "not set" {
     return filter.value;
   }
   throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires set or not set`);
+}
+
+function patternFilterValue(filter: ListDocumentsFilter): string {
+  const value = scalarFilterValue(filter);
+  if (value === null) {
+    throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires a non-null pattern value`);
+  }
+  return String(value);
+}
+
+function likePatternMatches(actual: JsonValue | number | string, pattern: string): boolean {
+  return new RegExp(`^${likePatternRegex(pattern)}$`, "i").test(String(actual));
+}
+
+function likePatternRegex(pattern: string): string {
+  let regex = "";
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index];
+    if (char === "\\") {
+      const next = pattern[index + 1];
+      if (next === undefined) {
+        regex += "(?!)";
+        continue;
+      }
+      regex += escapeRegex(next);
+      index += 1;
+      continue;
+    }
+    if (char === "%") {
+      regex += "[\\s\\S]*";
+      continue;
+    }
+    if (char === "_") {
+      regex += "[\\s\\S]";
+      continue;
+    }
+    regex += escapeRegex(char ?? "");
+  }
+  return regex;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
 }
 
 function rangeFilterValues(filter: ListDocumentsFilter): readonly [JsonPrimitive, JsonPrimitive] {

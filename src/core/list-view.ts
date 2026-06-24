@@ -19,7 +19,21 @@ export const DEFAULT_LIST_PAGE_SIZE = 50;
 export const MAX_LIST_PAGE_SIZE = 200;
 export const DEFAULT_LIST_ORDER_BY = "updatedAt";
 export const DEFAULT_LIST_ORDER: ListOrderDirection = "desc";
-export const LIST_FILTER_OPERATORS = ["eq", "ne", "in", "not_in", "is", "contains", "gt", "gte", "lt", "lte", "between"] as const;
+export const LIST_FILTER_OPERATORS = [
+  "eq",
+  "ne",
+  "in",
+  "not_in",
+  "is",
+  "contains",
+  "like",
+  "not_like",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "between"
+] as const;
 export const LIST_ORDER_DIRECTIONS = ["asc", "desc"] as const;
 const SYSTEM_LIST_ORDER_OPTIONS = [
   { name: "name", label: "Name" },
@@ -41,6 +55,8 @@ const LIST_FILTER_OPERATOR_LABELS: Record<ListFilterOperator, string> = {
   not_in: "is not in",
   is: "is",
   contains: "contains",
+  like: "like",
+  not_like: "not like",
   gt: "greater than",
   gte: "greater than or equal",
   lt: "less than",
@@ -62,6 +78,10 @@ export function isListRangeOperator(operator: ListFilterOperator): operator is "
 
 export function isListPresenceOperator(operator: ListFilterOperator): operator is "is" {
   return operator === "is";
+}
+
+export function isListPatternOperator(operator: ListFilterOperator): operator is "like" | "not_like" {
+  return operator === "like" || operator === "not_like";
 }
 
 export function isListOrderDirection(order: unknown): order is ListOrderDirection {
@@ -323,7 +343,7 @@ function supportedListFilterOperatorsForField(field: FieldDefinition): readonly 
   }
   const operators: ListFilterOperator[] = ["eq", "ne", "in", "not_in", "is"];
   if (field.type === "text" || field.type === "longText" || field.type === "link") {
-    operators.push("contains");
+    operators.push("contains", "like", "not_like");
   }
   if (field.type === "integer" || field.type === "number" || field.type === "date" || field.type === "datetime") {
     operators.push("gt", "gte", "lt", "lte", "between");
