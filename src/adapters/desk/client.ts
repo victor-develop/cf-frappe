@@ -1148,6 +1148,206 @@ export function renderDeskClientScript(): string {
     return control && control.value !== undefined ? String(control.value).trim() : "";
   }
 
+  function hydrateReportFormulaBuilders() {
+    var builders = document.querySelectorAll("[data-cf-frappe-report-formula-builder]");
+    if (!builders || builders.length === 0) {
+      return;
+    }
+    Array.prototype.forEach.call(builders, hydrateReportFormulaBuilder);
+  }
+
+  function hydrateReportFormulaBuilder(builder) {
+    if (!builder || builder.__cfFrappeReportFormulaHydrated) {
+      return;
+    }
+    builder.__cfFrappeReportFormulaHydrated = true;
+    Array.prototype.forEach.call(builder.querySelectorAll("[data-cf-frappe-formula-operand]"), function (operand) {
+      hydrateReportFormulaOperand(builder, operand);
+    });
+  }
+
+  function hydrateReportFormulaOperand(builder, operand) {
+    if (!operand || operand.__cfFrappeReportFormulaOperandHydrated) {
+      return;
+    }
+    operand.__cfFrappeReportFormulaOperandHydrated = true;
+    var kind = operand.querySelector("[data-cf-frappe-formula-kind]");
+    if (kind) {
+      kind.addEventListener("change", function () {
+        syncReportFormulaNestedOperand(builder, operand);
+      });
+    }
+  }
+
+  function syncReportFormulaNestedOperand(builder, operand) {
+    var nested = operand.querySelector("[data-cf-frappe-formula-nested]");
+    if (!nested) {
+      return;
+    }
+    var kind = controlValue(operand.querySelector("[data-cf-frappe-formula-kind]"));
+    if (kind !== "nested") {
+      clearReportFormulaNested(nested);
+      return;
+    }
+    if (nested.firstChild) {
+      return;
+    }
+    var group = createReportFormulaNestedGroup(builder, operand);
+    if (!group) {
+      return;
+    }
+    nested.appendChild(group);
+    Array.prototype.forEach.call(group.querySelectorAll("[data-cf-frappe-formula-operand]"), function (childOperand) {
+      hydrateReportFormulaOperand(builder, childOperand);
+    });
+  }
+
+  function clearReportFormulaNested(nested) {
+    while (nested.firstChild) {
+      nested.removeChild(nested.firstChild);
+    }
+  }
+
+  function createReportFormulaNestedGroup(builder, operand) {
+    if (typeof document.createElement !== "function") {
+      return null;
+    }
+    var prefix = reportFormulaOperandPrefix(operand);
+    var label = reportFormulaOperandLabel(operand);
+    var depth = reportFormulaOperandDepth(operand);
+    if (!prefix || !label || depth > reportFormulaMaxDepth(builder)) {
+      return null;
+    }
+    var group = document.createElement("div");
+    group.className = "report-formula-nested-group";
+    group.appendChild(createReportFormulaOperatorControl(prefix, label));
+    group.appendChild(createReportFormulaOperand(builder, prefix + "Left", label + " Left", depth + 1));
+    group.appendChild(createReportFormulaOperand(builder, prefix + "Right", label + " Right", depth + 1));
+    return group;
+  }
+
+  function createReportFormulaOperand(builder, prefix, label, depth) {
+    var operand = document.createElement("div");
+    operand.className = "report-formula-operand";
+    operand.setAttribute("data-cf-frappe-formula-operand", "");
+    operand.dataset.formulaPrefix = prefix;
+    operand.dataset.formulaLabel = label;
+    operand.dataset.formulaDepth = String(depth);
+    operand.appendChild(createReportFormulaKindControl(builder, prefix, label, depth));
+    operand.appendChild(createReportFormulaFieldControl(builder, prefix, label));
+    operand.appendChild(createReportFormulaLiteralControl(prefix, label));
+    var nested = document.createElement("div");
+    nested.className = "report-formula-nested";
+    nested.setAttribute("data-cf-frappe-formula-nested", "");
+    operand.appendChild(nested);
+    return operand;
+  }
+
+  function createReportFormulaKindControl(builder, prefix, label, depth) {
+    var select = document.createElement("select");
+    setReportFormulaControlName(select, prefix + "Kind");
+    select.setAttribute("data-cf-frappe-formula-kind", "");
+    appendReportFormulaOption(select, "field", "Field");
+    appendReportFormulaOption(select, "literal", "Number");
+    if (depth <= reportFormulaMaxDepth(builder)) {
+      appendReportFormulaOption(select, "nested", "Nested formula");
+    }
+    return reportFormulaField(label + " Type", select);
+  }
+
+  function createReportFormulaFieldControl(builder, prefix, label) {
+    var select = document.createElement("select");
+    setReportFormulaControlName(select, prefix);
+    appendReportFormulaOption(select, "", "");
+    reportFormulaFields(builder).forEach(function (field) {
+      appendReportFormulaOption(select, field.name, field.label || field.name);
+    });
+    return reportFormulaField(label, select);
+  }
+
+  function createReportFormulaLiteralControl(prefix, label) {
+    var input = document.createElement("input");
+    setReportFormulaControlName(input, prefix + "Literal");
+    input.type = "number";
+    input.step = "any";
+    return reportFormulaField(label + " Number", input);
+  }
+
+  function createReportFormulaOperatorControl(prefix, label) {
+    var select = document.createElement("select");
+    setReportFormulaControlName(select, prefix + "Operator");
+    appendReportFormulaOption(select, "", "");
+    appendReportFormulaOption(select, "add", "Add");
+    appendReportFormulaOption(select, "subtract", "Subtract");
+    appendReportFormulaOption(select, "multiply", "Multiply");
+    appendReportFormulaOption(select, "divide", "Divide");
+    return reportFormulaField(label + " Operator", select);
+  }
+
+  function reportFormulaField(label, control) {
+    var field = document.createElement("label");
+    field.className = "field";
+    var span = document.createElement("span");
+    span.textContent = label;
+    field.appendChild(span);
+    field.appendChild(control);
+    return field;
+  }
+
+  function setReportFormulaControlName(control, name) {
+    control.name = name;
+    if (typeof control.setAttribute === "function") {
+      control.setAttribute("name", name);
+    }
+  }
+
+  function appendReportFormulaOption(select, value, label) {
+    var option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    select.appendChild(option);
+  }
+
+  function reportFormulaFields(builder) {
+    if (builder.__cfFrappeReportFormulaFields) {
+      return builder.__cfFrappeReportFormulaFields;
+    }
+    try {
+      var parsed = JSON.parse((builder.dataset && builder.dataset.formulaFields) || "[]");
+      builder.__cfFrappeReportFormulaFields = Array.isArray(parsed)
+        ? parsed.filter(function (field) {
+            return field && typeof field.name === "string";
+          }).map(function (field) {
+            return {
+              name: field.name,
+              label: typeof field.label === "string" ? field.label : field.name
+            };
+          })
+        : [];
+    } catch (_error) {
+      builder.__cfFrappeReportFormulaFields = [];
+    }
+    return builder.__cfFrappeReportFormulaFields;
+  }
+
+  function reportFormulaMaxDepth(builder) {
+    var value = Number(builder.dataset && builder.dataset.formulaMaxDepth);
+    return Number.isFinite(value) && value > 0 ? value : 16;
+  }
+
+  function reportFormulaOperandPrefix(operand) {
+    return operand.dataset && operand.dataset.formulaPrefix ? String(operand.dataset.formulaPrefix) : "";
+  }
+
+  function reportFormulaOperandLabel(operand) {
+    return operand.dataset && operand.dataset.formulaLabel ? String(operand.dataset.formulaLabel) : "";
+  }
+
+  function reportFormulaOperandDepth(operand) {
+    var value = Number(operand.dataset && operand.dataset.formulaDepth);
+    return Number.isFinite(value) && value > 0 ? value : 1;
+  }
+
   var formHandlers = {};
   var formBinding;
 
@@ -2333,6 +2533,7 @@ export function renderDeskClientScript(): string {
     })
   }));
   ready(hydrateCompoundFilterBuilders);
+  ready(hydrateReportFormulaBuilders);
   ready(hydratePresencePanels);
 }());
 `;

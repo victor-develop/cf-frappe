@@ -20,7 +20,12 @@ import {
   type ResolvedListView
 } from "../../core/types.js";
 import { isListFilterGroup } from "../../core/list-view.js";
-import { isReportChartColor, type ReportDefinition, type ReportFilterOperator } from "../../core/reports.js";
+import {
+  isReportChartColor,
+  REPORT_FORMULA_MAX_DEPTH,
+  type ReportDefinition,
+  type ReportFilterOperator
+} from "../../core/reports.js";
 import type { DashboardDefinition } from "../../core/dashboard.js";
 import type { ClientScriptDefinition, ClientScriptScope } from "../../core/client-script.js";
 import type { WorkspaceDefinition, WorkspaceShortcutKind } from "../../core/workspace.js";
@@ -70,8 +75,6 @@ import {
 } from "./report-builder.js";
 
 type ReportChartPointResult = ReportRunResult["charts"][number]["points"][number];
-
-const REPORT_BUILDER_FORMULA_NESTED_LEVELS = 2;
 
 export type FormLinkOptions = Readonly<Record<string, readonly LinkOption[]>>;
 export type FormTableDefinitions = Readonly<Record<string, DocTypeDefinition>>;
@@ -774,22 +777,16 @@ export function renderSavedReportBuilder(
     ...numericFields.map((field) => renderReportBuilderCheckbox("summary", field, false))
   ].join("");
   const formulaFieldOptions = renderReportBuilderFieldOptions(numericFields);
-  const formulaControls = [
+  const formulaFieldMetadata = numericFields.map((field) => ({
+    name: field.name,
+    label: deskReportFieldLabel(field)
+  }));
+  const formulaControls = `<div class="report-formula-builder" data-cf-frappe-report-formula-builder data-formula-max-depth="${REPORT_FORMULA_MAX_DEPTH}" data-formula-fields="${escapeHtml(JSON.stringify(formulaFieldMetadata))}">${[
     `<label class="field"><span>Formula Label</span><input name="formulaLabel"></label>`,
-    renderReportBuilderFormulaOperandControls(
-      "formulaLeft",
-      "Formula Left",
-      formulaFieldOptions,
-      REPORT_BUILDER_FORMULA_NESTED_LEVELS
-    ),
+    renderReportBuilderFormulaOperandControls("formulaLeft", "Formula Left", formulaFieldOptions, 2),
     renderReportBuilderFormulaOperatorControl("formula", "Formula"),
-    renderReportBuilderFormulaOperandControls(
-      "formulaRight",
-      "Formula Right",
-      formulaFieldOptions,
-      REPORT_BUILDER_FORMULA_NESTED_LEVELS
-    )
-  ].join("");
+    renderReportBuilderFormulaOperandControls("formulaRight", "Formula Right", formulaFieldOptions, 2)
+  ].join("")}</div>`;
   const groupOptions = renderReportBuilderFieldOptions(
     visibleFields.filter(isDeskGroupableReportField)
   );
@@ -1039,25 +1036,19 @@ function renderReportBuilderFormulaOperandControls(
   prefix: string,
   label: string,
   fieldOptions: string,
-  nestedLevels: number
+  depth: number
 ): string {
-  const nestedKindOption = nestedLevels > 0 ? `<option value="nested">Nested formula</option>` : "";
-  const nestedFormulaControls =
-    nestedLevels > 0
-      ? [
-          renderReportBuilderFormulaOperatorControl(prefix, label),
-          renderReportBuilderFormulaOperandControls(`${prefix}Left`, `${label} Left`, fieldOptions, nestedLevels - 1),
-          renderReportBuilderFormulaOperandControls(`${prefix}Right`, `${label} Right`, fieldOptions, nestedLevels - 1)
-        ].join("")
-      : "";
-  return `<label class="field"><span>${escapeHtml(label)} Type</span><select name="${escapeHtml(prefix)}Kind">
+  const nestedKindOption = depth <= REPORT_FORMULA_MAX_DEPTH ? `<option value="nested">Nested formula</option>` : "";
+  return `<div class="report-formula-operand" data-cf-frappe-formula-operand data-formula-prefix="${escapeHtml(prefix)}" data-formula-label="${escapeHtml(label)}" data-formula-depth="${depth}">
+      <label class="field"><span>${escapeHtml(label)} Type</span><select name="${escapeHtml(prefix)}Kind" data-cf-frappe-formula-kind>
         <option value="field">Field</option>
         <option value="literal">Number</option>
         ${nestedKindOption}
       </select></label>
       <label class="field"><span>${escapeHtml(label)}</span><select name="${escapeHtml(prefix)}">${fieldOptions}</select></label>
       <label class="field"><span>${escapeHtml(label)} Number</span><input name="${escapeHtml(prefix)}Literal" type="number" step="any"></label>
-      ${nestedFormulaControls}`;
+      <div class="report-formula-nested" data-cf-frappe-formula-nested></div>
+    </div>`;
 }
 
 function renderReportBuilderFormulaOperatorControl(prefix: string, label: string): string {
@@ -3906,6 +3897,31 @@ tr:last-child td { border-bottom: 0; }
   gap: 8px;
   align-content: start;
 }
+.report-formula-builder {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.report-formula-builder > .field {
+  grid-column: 1 / -1;
+}
+.report-formula-operand,
+.report-formula-nested-group {
+  display: grid;
+  gap: 10px;
+}
+.report-formula-operand {
+  min-width: 0;
+}
+.report-formula-nested {
+  display: grid;
+  gap: 10px;
+}
+.report-formula-nested-group {
+  border-left: 2px solid var(--border);
+  padding-left: 12px;
+}
 .report-builder-filter .field span {
   color: var(--muted);
   font-size: 13px;
@@ -3982,6 +3998,7 @@ input[readonly], textarea[readonly] { background: #f3f4f6; color: var(--muted); 
   .main { margin-left: 0; padding: 16px; }
   .topbar, .form-head { align-items: flex-start; flex-direction: column; }
   .fields { grid-template-columns: 1fr; }
+  .report-formula-builder { grid-template-columns: 1fr; }
   .compound-filter-group-head,
   .compound-filter-group-actions { align-items: stretch; flex-direction: column; }
   .compound-filter-row { grid-template-columns: 1fr; }

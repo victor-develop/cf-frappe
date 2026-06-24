@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the nested compound list-filter builder slice:
+As of the arbitrary-depth Desk formula builder slice:
 
 - Vitest files: `88`
-- Vitest cases: `957`
+- Vitest cases: `961`
 
 ## Implication
 

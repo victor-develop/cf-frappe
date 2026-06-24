@@ -165,6 +165,7 @@ const REPORT_CHART_TYPES = ["bar", "line", "pie"] as const;
 const REPORT_CHART_ORDER_BY = ["key", "label", "value"] as const;
 const REPORT_CHART_ORDERS = ["asc", "desc"] as const;
 const REPORT_FORMULA_OPERATORS = ["add", "subtract", "multiply", "divide"] as const;
+const REPORT_FORMULA_ROOT_OPERAND_DEPTH = 2;
 
 type DeskReportChartType = (typeof REPORT_CHART_TYPES)[number];
 type DeskReportChartOrderBy = (typeof REPORT_CHART_ORDER_BY)[number];
@@ -4698,7 +4699,13 @@ function reportFormulaOperandFor(
   form: URLSearchParams,
   side: "left" | "right"
 ): ReportFormulaOperand | undefined {
-  return reportFormulaOperandAt(fields, form, side === "left" ? "formulaLeft" : "formulaRight", side, 2);
+  return reportFormulaOperandAt(
+    fields,
+    form,
+    side === "left" ? "formulaLeft" : "formulaRight",
+    side,
+    REPORT_FORMULA_ROOT_OPERAND_DEPTH
+  );
 }
 
 function reportFormulaOperandAt(

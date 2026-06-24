@@ -783,6 +783,58 @@ describe("Desk client runtime", () => {
     expect(JSON.parse(builder.expression.value)).toEqual({ field: "priority", value: "High" });
   });
 
+  it("hydrates report formula builders with recursive nested operand controls", () => {
+    const builder = new FakeReportFormulaBuilder(3);
+    evaluateDeskClient(fetch, new FakeDocument({ formulaBuilders: [builder] }));
+
+    const leftKind = builder.namedControl("formulaLeftKind");
+    leftKind.value = "nested";
+    leftKind.emit("change");
+
+    expect(builder.namedControl("formulaLeftOperator").name).toBe("formulaLeftOperator");
+    expect(builder.namedControl("formulaLeftLeftKind").name).toBe("formulaLeftLeftKind");
+    expect(builder.namedControl("formulaLeftRightLiteral").type).toBe("number");
+
+    const leftLeftKind = builder.namedControl("formulaLeftLeftKind");
+    leftLeftKind.value = "nested";
+    leftLeftKind.emit("change");
+
+    expect(builder.namedControl("formulaLeftLeftOperator").name).toBe("formulaLeftLeftOperator");
+    expect(builder.namedControl("formulaLeftLeftLeftKind").optionValues()).toEqual(["field", "literal"]);
+  });
+
+  it("treats malformed report formula field metadata as an empty field list", () => {
+    const builder = new FakeReportFormulaBuilder(3);
+    builder.dataset.formulaFields = "{}";
+    evaluateDeskClient(fetch, new FakeDocument({ formulaBuilders: [builder] }));
+
+    const leftKind = builder.namedControl("formulaLeftKind");
+    leftKind.value = "nested";
+    expect(() => leftKind.emit("change")).not.toThrow();
+    expect(builder.namedControl("formulaLeftLeft").optionValues()).toEqual([""]);
+  });
+
+  it("removes nested report formula descendants when operand type changes away from nested", () => {
+    const builder = new FakeReportFormulaBuilder(3);
+    evaluateDeskClient(fetch, new FakeDocument({ formulaBuilders: [builder] }));
+
+    const leftKind = builder.namedControl("formulaLeftKind");
+    leftKind.value = "nested";
+    leftKind.emit("change");
+    const leftLeftKind = builder.namedControl("formulaLeftLeftKind");
+    leftLeftKind.value = "nested";
+    leftLeftKind.emit("change");
+
+    expect(builder.querySelector('[name="formulaLeftLeftLeftKind"]')).not.toBeNull();
+
+    leftKind.value = "field";
+    leftKind.emit("change");
+
+    expect(builder.querySelector('[name="formulaLeftOperator"]')).toBeNull();
+    expect(builder.querySelector('[name="formulaLeftLeftKind"]')).toBeNull();
+    expect(builder.querySelector('[name="formulaLeftLeftLeftKind"]')).toBeNull();
+  });
+
   it("marks intentional empty resource filters in query parameters", async () => {
     const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
     const runtime = evaluateDeskClient(async (url, init) => {
@@ -3165,6 +3217,151 @@ class FakeCompoundFilterBuilder {
   }
 }
 
+class FakeFormulaElement {
+  readonly attributes: Record<string, string> = {};
+  readonly children: FakeFormulaElement[] = [];
+  readonly dataset: Record<string, string> = {};
+  readonly listeners: Record<string, Array<() => void>> = {};
+  className = "";
+  name = "";
+  parentElement: FakeFormulaElement | undefined = undefined;
+  step = "";
+  textContent = "";
+  type = "";
+  value = "";
+
+  constructor(readonly tagName: string) {}
+
+  addEventListener(type: string, listener: () => void): void {
+    this.listeners[type] = [...(this.listeners[type] ?? []), listener];
+  }
+
+  appendChild(child: FakeFormulaElement): FakeFormulaElement {
+    child.parentElement = this;
+    this.children.push(child);
+    return child;
+  }
+
+  emit(type: string): void {
+    for (const listener of this.listeners[type] ?? []) {
+      listener();
+    }
+  }
+
+  get firstChild(): FakeFormulaElement | undefined {
+    return this.children[0];
+  }
+
+  optionValues(): readonly string[] {
+    return this.children.filter((child) => child.tagName === "option").map((child) => child.value);
+  }
+
+  querySelector(selector: string): FakeFormulaElement | null {
+    return this.querySelectorAll(selector)[0] ?? null;
+  }
+
+  querySelectorAll(selector: string): readonly FakeFormulaElement[] {
+    return this.children.flatMap((child) => [
+      ...(child.matches(selector) ? [child] : []),
+      ...child.querySelectorAll(selector)
+    ]);
+  }
+
+  removeChild(child: FakeFormulaElement): void {
+    const index = this.children.indexOf(child);
+    if (index >= 0) {
+      this.children.splice(index, 1);
+      child.parentElement = undefined;
+    }
+  }
+
+  setAttribute(name: string, value: string): void {
+    this.attributes[name] = value;
+    if (name === "name") {
+      this.name = value;
+    }
+  }
+
+  private matches(selector: string): boolean {
+    if (selector === "[data-cf-frappe-formula-operand]") {
+      return Object.prototype.hasOwnProperty.call(this.attributes, "data-cf-frappe-formula-operand");
+    }
+    if (selector === "[data-cf-frappe-formula-kind]") {
+      return Object.prototype.hasOwnProperty.call(this.attributes, "data-cf-frappe-formula-kind");
+    }
+    if (selector === "[data-cf-frappe-formula-nested]") {
+      return Object.prototype.hasOwnProperty.call(this.attributes, "data-cf-frappe-formula-nested");
+    }
+    const nameMatch = selector.match(/^\[name="(.+)"\]$/);
+    return nameMatch ? this.name === nameMatch[1] : false;
+  }
+}
+
+class FakeReportFormulaBuilder extends FakeFormulaElement {
+  constructor(maxDepth: number) {
+    super("div");
+    this.setAttribute("data-cf-frappe-report-formula-builder", "");
+    this.dataset.formulaMaxDepth = String(maxDepth);
+    this.dataset.formulaFields = JSON.stringify([{ name: "count", label: "count" }]);
+    this.appendChild(fakeFormulaOperand("formulaLeft", "Formula Left", 2, maxDepth));
+    this.appendChild(fakeFormulaOperand("formulaRight", "Formula Right", 2, maxDepth));
+  }
+
+  namedControl(name: string): FakeFormulaElement {
+    const control = this.querySelector(`[name="${name}"]`);
+    if (!control) {
+      throw new Error(`Missing formula control ${name}`);
+    }
+    return control;
+  }
+}
+
+function fakeFormulaOperand(prefix: string, label: string, depth: number, maxDepth: number): FakeFormulaElement {
+  const operand = new FakeFormulaElement("div");
+  operand.setAttribute("data-cf-frappe-formula-operand", "");
+  operand.dataset.formulaPrefix = prefix;
+  operand.dataset.formulaLabel = label;
+  operand.dataset.formulaDepth = String(depth);
+  operand.appendChild(fakeFormulaSelect(`${prefix}Kind`, "field", true, depth <= maxDepth));
+  operand.appendChild(fakeFormulaSelect(prefix, "", false, false));
+  const literal = new FakeFormulaElement("input");
+  literal.name = `${prefix}Literal`;
+  literal.type = "number";
+  literal.step = "any";
+  operand.appendChild(literal);
+  const nested = new FakeFormulaElement("div");
+  nested.setAttribute("data-cf-frappe-formula-nested", "");
+  operand.appendChild(nested);
+  return operand;
+}
+
+function fakeFormulaSelect(
+  name: string,
+  value: string,
+  kind: boolean,
+  nested: boolean
+): FakeFormulaElement {
+  const select = new FakeFormulaElement("select");
+  select.name = name;
+  select.value = value;
+  if (kind) {
+    select.setAttribute("data-cf-frappe-formula-kind", "");
+    select.appendChild(fakeFormulaOption("field"));
+    select.appendChild(fakeFormulaOption("literal"));
+    if (nested) {
+      select.appendChild(fakeFormulaOption("nested"));
+    }
+  }
+  return select;
+}
+
+function fakeFormulaOption(value: string): FakeFormulaElement {
+  const option = new FakeFormulaElement("option");
+  option.value = value;
+  option.textContent = value;
+  return option;
+}
+
 class FakePresenceText {
   textContent = "";
 }
@@ -3195,6 +3392,7 @@ class FakeDocument {
   readonly readyState = "complete";
   private readonly form: FakeForm | undefined;
   private readonly compoundFilterBuilders: readonly FakeCompoundFilterBuilder[];
+  private readonly formulaBuilders: readonly FakeReportFormulaBuilder[];
   private readonly presencePanels: readonly FakePresencePanel[];
   private readonly runtime: { readonly dataset: Record<string, string> } | undefined;
 
@@ -3202,17 +3400,23 @@ class FakeDocument {
     options: {
       readonly form?: FakeForm;
       readonly compoundFilterBuilders?: readonly FakeCompoundFilterBuilder[];
+      readonly formulaBuilders?: readonly FakeReportFormulaBuilder[];
       readonly presencePanels?: readonly FakePresencePanel[];
       readonly runtimeDataset?: Record<string, string>;
     } = {}
   ) {
     this.form = options.form;
     this.compoundFilterBuilders = options.compoundFilterBuilders ?? [];
+    this.formulaBuilders = options.formulaBuilders ?? [];
     this.presencePanels = options.presencePanels ?? [];
     this.runtime = options.runtimeDataset ? { dataset: options.runtimeDataset } : undefined;
   }
 
   addEventListener(): void {}
+
+  createElement(tagName: string): FakeFormulaElement {
+    return new FakeFormulaElement(tagName);
+  }
 
   querySelector(selector: string): FakeForm | { readonly dataset: Record<string, string> } | null {
     if (selector === 'script[data-cf-frappe-runtime="desk"]') {
@@ -3224,12 +3428,15 @@ class FakeDocument {
     return null;
   }
 
-  querySelectorAll(selector: string): readonly (FakePresencePanel | FakeCompoundFilterBuilder)[] {
+  querySelectorAll(selector: string): readonly (FakePresencePanel | FakeCompoundFilterBuilder | FakeReportFormulaBuilder)[] {
     if (selector === '[data-cf-frappe-presence="document"]') {
       return this.presencePanels;
     }
     if (selector === "[data-cf-frappe-compound-filter-builder]") {
       return this.compoundFilterBuilders;
+    }
+    if (selector === "[data-cf-frappe-report-formula-builder]") {
+      return this.formulaBuilders;
     }
     return [];
   }

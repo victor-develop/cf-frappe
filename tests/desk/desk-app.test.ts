@@ -35,6 +35,7 @@ import {
   jobScheduleDefinitionsStream,
   QueryService,
   ReportService,
+  REPORT_FORMULA_MAX_DEPTH,
   RoleService,
   SavedReportService,
   SavedListFilterService,
@@ -892,11 +893,12 @@ describe("Desk app", () => {
     expect(builderHtml).toContain('name="chartXAxisLabel"');
     expect(builderHtml).toContain('name="chartYAxisLabel"');
     expect(builderHtml).toContain('name="formulaLabel"');
+    expect(builderHtml).toContain("data-cf-frappe-report-formula-builder");
+    expect(builderHtml).toContain(`data-formula-max-depth="${REPORT_FORMULA_MAX_DEPTH}"`);
     expect(builderHtml).toContain('name="formulaLeftKind"');
     expect(builderHtml).toContain('name="formulaLeftLiteral" type="number" step="any"');
-    expect(builderHtml).toContain('name="formulaLeftOperator"');
-    expect(builderHtml).toContain('name="formulaLeftLeftKind"');
-    expect(builderHtml).toContain('name="formulaLeftRightLiteral" type="number" step="any"');
+    expect(builderHtml).toContain('data-formula-prefix="formulaLeft"');
+    expect(builderHtml).not.toContain('name="formulaLeftLeftKind"');
     expect(builderHtml).toContain('<select name="formulaOperator">');
     expect(builderHtml).toContain('name="formulaRightKind"');
     expect(builderHtml).toContain('name="formulaRightLiteral" type="number" step="any"');
@@ -1311,9 +1313,9 @@ describe("Desk app", () => {
     const builder = await app.request("/desk/report-builder/Note");
     expect(builder.status).toBe(200);
     const builderHtml = await builder.text();
-    expect(builderHtml).toContain('name="formulaLeftLeftOperator"');
-    expect(builderHtml).toContain('name="formulaLeftLeftLeftKind"');
-    expect(builderHtml).toContain('name="formulaLeftLeftRightLiteral" type="number" step="any"');
+    expect(builderHtml).toContain("data-cf-frappe-report-formula-builder");
+    expect(builderHtml).toContain(`data-formula-max-depth="${REPORT_FORMULA_MAX_DEPTH}"`);
+    expect(builderHtml).not.toContain('name="formulaLeftLeftOperator"');
 
     const body = new URLSearchParams();
     body.set("label", "Deep nested formula report");
@@ -1368,6 +1370,56 @@ describe("Desk app", () => {
     const html = await run.text();
     expect(html).toContain("<th>Deep Score</th>");
     expect(html).toContain("<td>8</td>");
+  });
+
+  it("builds core-depth saved report formulas from visual Desk report-builder control names", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Core Depth Count", priority: "High", count: 4 })
+    });
+
+    const body = new URLSearchParams();
+    body.set("label", "Core depth formula report");
+    body.append("column", "title");
+    body.append("column", "count");
+    body.set("formulaLabel", "Core Depth Score");
+    body.set("formulaOperator", "add");
+    body.set("formulaRightKind", "literal");
+    body.set("formulaRightLiteral", "1");
+    addLeftNestedFormulaPath(body, REPORT_FORMULA_MAX_DEPTH);
+
+    const saved = await app.request("/desk/report-builder/Note", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body
+    });
+
+    expect(saved.status).toBe(303);
+    await expect(services.savedReports.get(owner, "Note", "report_saved-report-1")).resolves.toMatchObject({
+      definition: {
+        columns: [
+          expect.objectContaining({ name: "title" }),
+          expect.objectContaining({ name: "count" }),
+          expect.objectContaining({
+            name: "core_depth_score",
+            label: "Core Depth Score",
+            formula: {
+              operator: "add",
+              left: coreDepthFormulaExpectation(REPORT_FORMULA_MAX_DEPTH),
+              right: 1
+            }
+          })
+        ]
+      }
+    });
+
+    const run = await app.request("/desk/report-builder/Note/report_saved-report-1");
+    expect(run.status).toBe(200);
+    const html = await run.text();
+    expect(html).toContain("<th>Core Depth Score</th>");
+    expect(html).toContain("<td>20</td>");
   });
 
   it("rejects invalid Desk report-builder formula literal operands without persisting them", async () => {
@@ -5922,6 +5974,30 @@ describe("Desk app", () => {
     expect(html).toContain("cf-frappe Desk");
   });
 });
+
+function addLeftNestedFormulaPath(body: URLSearchParams, maxDepth: number): void {
+  let prefix = "formulaLeft";
+  for (let depth = 2; depth <= maxDepth; depth += 1) {
+    body.set(`${prefix}Kind`, "nested");
+    body.set(`${prefix}Operator`, "add");
+    body.set(`${prefix}RightKind`, "literal");
+    body.set(`${prefix}RightLiteral`, "1");
+    if (depth === maxDepth) {
+      body.set(`${prefix}LeftKind`, "field");
+      body.set(`${prefix}Left`, "count");
+    } else {
+      prefix = `${prefix}Left`;
+    }
+  }
+}
+
+function coreDepthFormulaExpectation(maxDepth: number): unknown {
+  let operand: unknown = "count";
+  for (let depth = maxDepth; depth >= 2; depth -= 1) {
+    operand = { operator: "add", left: operand, right: 1 };
+  }
+  return operand;
+}
 
 function deterministicPasswords(): PasswordHasher {
   return {
