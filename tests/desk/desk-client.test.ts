@@ -476,10 +476,12 @@ interface DeskFormRuntime {
   readonly get_value: (fieldname: string) => unknown;
   readonly is_dirty: () => boolean;
   readonly is_new: () => boolean;
+  readonly last_merge_result?: unknown;
   readonly mergePlan: (remote?: Record<string, unknown>, draft?: Record<string, unknown>) => Record<string, unknown>;
+  readonly merge_save: () => Promise<unknown>;
   readonly refresh: () => boolean;
   readonly refresh_field: (fieldname: string) => void;
-  readonly save: () => boolean;
+  readonly save: (options?: { readonly merge?: boolean }) => boolean | Promise<unknown>;
   readonly set_df_property: (fieldname: string, property: string, value: unknown) => DeskFormRuntime;
   readonly set_value: (fieldname: string, value: unknown) => Promise<unknown>;
   readonly toggle_display: (fieldname: string, show: boolean) => DeskFormRuntime;
@@ -3292,6 +3294,137 @@ describe("Desk client runtime", () => {
 
     expect(form.emitSubmit()).toBe(true);
     expect(events.at(-1)).toBe("validate:Blocked");
+  });
+
+  it("merge-saves generated form drafts through the resource merge endpoint", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const fetch = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return jsonResponse({
+        data: {
+          status: "applied",
+          plan: {
+            status: "clean",
+            baseVersion: 1,
+            remoteVersion: 2,
+            patch: { body: "Local body" },
+            unset: []
+          },
+          document: {
+            tenantId: "acme",
+            doctype: "Note",
+            name: "My Note",
+            version: 3,
+            docstatus: "draft",
+            data: { title: "My Note", body: "Local body", priority: "High", metadata: { color: "red" } },
+            createdAt: "now",
+            updatedAt: "now"
+          }
+        }
+      });
+    };
+    const title = new FakeField("title", "My Note");
+    const body = new FakeField("body", "Base body");
+    const priority = new FakeField("priority", "Low");
+    const metadata = new FakeField("metadata", "{\"color\":\"blue\"}");
+    metadata.dataset.cfFrappeFieldType = "json";
+    const expectedVersion = new FakeField("expectedVersion", "1", "hidden");
+    const form = new FakeForm([title, body, priority, metadata, expectedVersion]);
+    const runtime = evaluateDeskClient(fetch, new FakeDocument({
+      form,
+      runtimeDataset: {
+        doctype: "Note",
+        documentName: "My Note",
+        documentStatus: "draft",
+        documentVersion: "1",
+        scope: "form",
+        tenantId: "acme"
+      }
+    }));
+
+    body.value = "Local body";
+    body.emit("input");
+    const result = await runtime.form.current()?.save({ merge: true });
+
+    expect(result).toMatchObject({ status: "applied", document: { version: 3 } });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("/api/resource/Note/My%20Note/merge");
+    expect(calls[0]?.init.method).toBe("POST");
+    expect(calls[0]?.init.body).toBe(JSON.stringify({
+      baseVersion: 1,
+      patch: { body: "Local body" }
+    }));
+    expect(expectedVersion.value).toBe("3");
+    expect(priority.value).toBe("High");
+    expect(JSON.parse(metadata.value)).toEqual({ color: "red" });
+    expect(form.dataset.documentVersion).toBe("3");
+    expect(form.dataset.remoteMergeState).toBe("clean");
+    expect(form.dataset.dirty).toBeUndefined();
+    expect(runtime.form.current()?.is_dirty()).toBe(false);
+    expect(runtime.form.current()?.last_merge_result).toMatchObject({ status: "applied" });
+  });
+
+  it("keeps generated form drafts in place when merge-save returns conflicts", async () => {
+    const fetch = async () => jsonResponse({
+      data: {
+        status: "conflict",
+        plan: {
+          status: "conflict",
+          baseVersion: 1,
+          remoteVersion: 2,
+          patch: {},
+          unset: [],
+          conflicts: [
+            {
+              field: "body",
+              reason: "remote_changed",
+              baseValue: "Base body",
+              localValue: "Local body",
+              remoteValue: "Remote body"
+            }
+          ]
+        },
+        document: {
+          tenantId: "acme",
+          doctype: "Note",
+          name: "My Note",
+          version: 2,
+          docstatus: "draft",
+          data: { title: "My Note", body: "Remote body" },
+          createdAt: "now",
+          updatedAt: "now"
+        }
+      }
+    });
+    const body = new FakeField("body", "Base body");
+    const expectedVersion = new FakeField("expectedVersion", "1", "hidden");
+    const form = new FakeForm([new FakeField("title", "My Note"), body, expectedVersion]);
+    const runtime = evaluateDeskClient(fetch, new FakeDocument({
+      form,
+      runtimeDataset: {
+        doctype: "Note",
+        documentName: "My Note",
+        documentVersion: "1",
+        scope: "form",
+        tenantId: "acme"
+      }
+    }));
+
+    body.value = "Local body";
+    body.emit("input");
+    const result = await runtime.form.current()?.merge_save();
+
+    expect(result).toMatchObject({
+      status: "conflict",
+      plan: {
+        status: "conflict",
+        conflicts: [expect.objectContaining({ field: "body", reason: "remote_changed" })]
+      }
+    });
+    expect(body.value).toBe("Local body");
+    expect(expectedVersion.value).toBe("1");
+    expect(form.dataset.remoteMergeState).toBe("conflict");
+    expect(runtime.form.current()?.last_merge_result).toMatchObject({ status: "conflict" });
   });
 
   it("exposes Frappe-style user feedback helpers for client scripts", () => {

@@ -1446,12 +1446,7 @@ export function renderDeskClientScript(): string {
       if (!isSaveSubmit(event)) {
         return;
       }
-      syncFormData(binding);
-      binding.validated = true;
-      binding.frm.validated = true;
-      var valid = triggerFormEvent(binding, "validate") !== false && binding.frm.validated !== false && binding.validated !== false;
-      var beforeSave = valid ? triggerFormEvent(binding, "before_save") !== false : false;
-      if (!valid || !beforeSave || binding.frm.validated === false || binding.validated === false) {
+      if (!validateFormForSave(binding)) {
         event.preventDefault();
       }
     });
@@ -1491,27 +1486,11 @@ export function renderDeskClientScript(): string {
       refresh_field: function (fieldname) {
         setFieldValue(binding.form, fieldname, docValue(binding.doc, fieldname));
       },
-      save: function () {
-        binding.validated = true;
-        frm.validated = true;
-        if (
-          triggerFormEvent(binding, "validate") === false ||
-          frm.validated === false ||
-          binding.validated === false ||
-          triggerFormEvent(binding, "before_save") === false ||
-          frm.validated === false ||
-          binding.validated === false
-        ) {
-          return false;
+      save: function (options) {
+        if (options && options.merge) {
+          return mergeSaveForm(binding);
         }
-        binding.submitting = true;
-        if (typeof binding.form.requestSubmit === "function") {
-          binding.form.requestSubmit();
-        } else if (typeof binding.form.submit === "function") {
-          binding.form.submit();
-        }
-        binding.submitting = false;
-        return true;
+        return submitNativeForm(binding);
       },
       set_value: function (fieldname, value) {
         setFieldValue(binding.form, fieldname, value);
@@ -1537,9 +1516,70 @@ export function renderDeskClientScript(): string {
       },
       mergePlan: function (remote, draft) {
         return currentFormMergePlan(binding, remote, draft);
+      },
+      merge_save: function () {
+        return mergeSaveForm(binding);
       }
     };
     return frm;
+  }
+
+  function validateFormForSave(binding) {
+    syncFormData(binding);
+    binding.validated = true;
+    binding.frm.validated = true;
+    var valid = triggerFormEvent(binding, "validate") !== false &&
+      binding.frm.validated !== false &&
+      binding.validated !== false;
+    var beforeSave = valid ? triggerFormEvent(binding, "before_save") !== false : false;
+    return valid && beforeSave && binding.frm.validated !== false && binding.validated !== false;
+  }
+
+  function submitNativeForm(binding) {
+    if (!validateFormForSave(binding)) {
+      return false;
+    }
+    binding.submitting = true;
+    if (typeof binding.form.requestSubmit === "function") {
+      binding.form.requestSubmit();
+    } else if (typeof binding.form.submit === "function") {
+      binding.form.submit();
+    }
+    binding.submitting = false;
+    return true;
+  }
+
+  function mergeSaveForm(binding) {
+    if (binding.submitting) {
+      return Promise.resolve(false);
+    }
+    if (!binding.context.doctype || !binding.context.documentName || binding.baseVersion === undefined) {
+      return Promise.reject(new Error("Merge save requires an existing document"));
+    }
+    if (!validateFormForSave(binding)) {
+      return Promise.resolve(false);
+    }
+    var plan = currentFormLocalChangePlan(binding);
+    var input = {
+      baseVersion: binding.baseVersion,
+      patch: plan.patch
+    };
+    if (plan.unset.length > 0) {
+      input.unset = plan.unset;
+    }
+    binding.submitting = true;
+    return request(resourcePath(binding.context.doctype, binding.context.documentName) + "/merge", {
+      method: "POST",
+      body: input
+    })
+      .then(unwrapData)
+      .then(function (result) {
+        applyMergeSaveResult(binding, result);
+        return result;
+      })
+      .finally(function () {
+        binding.submitting = false;
+      });
   }
 
   function attachFieldListeners(binding) {
@@ -1696,6 +1736,8 @@ export function renderDeskClientScript(): string {
   function setControlValue(field, value) {
     if (field.type === "checkbox") {
       field.checked = Boolean(value);
+    } else if (field.dataset && field.dataset.cfFrappeFieldType === "json" && value !== null && typeof value === "object") {
+      field.value = JSON.stringify(value);
     } else {
       field.value = value == null ? "" : String(value);
     }
@@ -1833,16 +1875,84 @@ export function renderDeskClientScript(): string {
       version: binding.baseVersion,
       data: binding.baseDoc
     };
-    var baseSnapshot = Object.assign({
-      version: binding.baseVersion,
-      data: binding.baseDoc
-    }, binding.baseDocstatus === undefined ? {} : { docstatus: binding.baseDocstatus });
+    var baseSnapshot = formBaseSnapshot(binding);
     return documentMergePlan(
       baseSnapshot,
       remoteSnapshot,
       draft || binding.doc,
       { fields: formFieldNames(binding.form) }
     );
+  }
+
+  function currentFormLocalChangePlan(binding) {
+    syncFormData(binding);
+    var baseSnapshot = formBaseSnapshot(binding);
+    return documentMergePlan(
+      baseSnapshot,
+      baseSnapshot,
+      binding.doc,
+      { fields: formFieldNames(binding.form) }
+    );
+  }
+
+  function formBaseSnapshot(binding) {
+    return Object.assign({
+      version: binding.baseVersion,
+      data: binding.baseDoc
+    }, binding.baseDocstatus === undefined ? {} : { docstatus: binding.baseDocstatus });
+  }
+
+  function applyMergeSaveResult(binding, result) {
+    binding.frm.last_merge_result = result;
+    if (result && result.plan) {
+      binding.remoteMergePlan = result.plan;
+      binding.frm.remote_merge_plan = result.plan;
+      binding.form.dataset.remoteMergeState = result.plan.status;
+    }
+    if (result && result.document) {
+      binding.remoteSnapshot = result.document;
+    }
+    if (result && (result.status === "applied" || result.status === "noop") && result.document) {
+      applyDocumentSnapshotToForm(binding, result.document);
+    }
+  }
+
+  function applyDocumentSnapshotToForm(binding, snapshot) {
+    if (!snapshot || !isPlainObject(snapshot.data)) {
+      return;
+    }
+    binding.baseDoc = cloneMergeValue(snapshot.data);
+    binding.baseDocstatus = snapshot.docstatus;
+    if (typeof snapshot.version === "number") {
+      binding.baseVersion = snapshot.version;
+      binding.context.documentVersion = snapshot.version;
+      binding.form.dataset.documentVersion = String(snapshot.version);
+    }
+    binding.doc = cloneMergeValue(snapshot.data);
+    binding.frm.doc = binding.doc;
+    writeDocumentToForm(binding, binding.doc);
+    binding.dirty = false;
+    delete binding.form.dataset.dirty;
+    delete binding.form.dataset.remoteUpdate;
+    delete binding.remoteSnapshot;
+    delete binding.remoteMergePlan;
+    delete binding.frm.remote_merge_plan;
+    binding.form.dataset.remoteMergeState = "clean";
+  }
+
+  function writeDocumentToForm(binding, data) {
+    Array.prototype.forEach.call(binding.form.querySelectorAll("[name]"), function (field) {
+      if (field.name === "expectedVersion") {
+        setControlValue(field, binding.baseVersion);
+        rememberLockedFieldValue(field);
+        return;
+      }
+      if (isInternalFormField(field.name)) {
+        return;
+      }
+      setControlValue(field, docValue(data, field.name));
+      rememberLockedFieldValue(field);
+    });
   }
 
   function isSaveSubmit(event) {
@@ -2961,6 +3071,7 @@ export function renderDeskClientScript(): string {
       }
     })
   }));
+  ready(currentFormBinding);
   ready(hydrateCompoundFilterBuilders);
   ready(hydrateReportFormulaBuilders);
   ready(hydratePresencePanels);
