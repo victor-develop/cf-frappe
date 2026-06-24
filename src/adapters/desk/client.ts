@@ -169,6 +169,18 @@ export function renderDeskClientScript(): string {
     return "/api/report-builder/" + encodePart(doctype) + (id === undefined ? "" : "/" + encodePart(id)) + (action === undefined ? "" : "/" + action);
   }
 
+  function reportPath(report, action) {
+    return "/api/report/" + encodePart(report) + (action === undefined ? "" : "/" + action);
+  }
+
+  function reportPdfPath(report, options) {
+    return withQuery(reportPath(report, "pdf"), reportRunParams(options || {}));
+  }
+
+  function reportBuilderPdfPath(doctype, id, options) {
+    return withQuery(reportBuilderPath(doctype, id, "pdf"), reportRunParams(options || {}));
+  }
+
   function auditDeletedPath(doctype, name, options) {
     return withQuery("/api/audit/deleted/" + encodePart(doctype) + "/" + encodePart(name), tenantParams(options || {}));
   }
@@ -1601,7 +1613,7 @@ export function renderDeskClientScript(): string {
     }),
     report: Object.freeze({
       csvUrl: function (report, options) {
-        return withQuery("/api/report/" + encodePart(report) + "/export.csv", resourceListParams(options || {}));
+        return withQuery(reportPath(report, "export.csv"), reportExportParams(options || {}));
       },
       get: function (report) {
         return request("/api/meta/reports/" + encodePart(report)).then(unwrapData);
@@ -1609,8 +1621,12 @@ export function renderDeskClientScript(): string {
       list: function () {
         return request("/api/meta/reports").then(unwrapData);
       },
+      pdf: function (report, options) {
+        return requestBinary(reportPdfPath(report, options || {}));
+      },
+      pdfUrl: reportPdfPath,
       run: function (report, options) {
-        return request(withQuery("/api/report/" + encodePart(report) + "/run", resourceListParams(options || {})));
+        return request(withQuery(reportPath(report, "run"), reportRunParams(options || {})));
       }
     }),
     reportBuilder: Object.freeze({
@@ -1629,6 +1645,10 @@ export function renderDeskClientScript(): string {
       list: function (doctype) {
         return request(reportBuilderPath(doctype)).then(unwrapData);
       },
+      pdf: function (doctype, id, options) {
+        return requestBinary(reportBuilderPdfPath(doctype, id, options || {}));
+      },
+      pdfUrl: reportBuilderPdfPath,
       run: function (doctype, id, options) {
         return request(withQuery(reportBuilderPath(doctype, id, "run"), reportRunParams(options || {})));
       },

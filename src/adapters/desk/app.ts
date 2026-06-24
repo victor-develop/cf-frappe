@@ -88,10 +88,12 @@ import { listFiltersFromUrl, parseOptionalInteger, readBoundedText } from "../ht
 import { writeReportCsvHeaders } from "../http/report-export.js";
 import { reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request.js";
 import {
+  defaultPrintLayoutFor,
   printPdfResponseBody,
   printPdfResponseHeaders,
   renderPrintDocument,
   renderPrintPdfDocument,
+  renderPrintPdfReport,
   renderPrintReport
 } from "../print/index.js";
 import { DESK_CLIENT_SCRIPT_PATH, renderDeskClientScript } from "./client.js";
@@ -1203,6 +1205,36 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     return c.body(csv.body);
   });
 
+  app.get("/desk/report-builder/:doctype/:id/pdf", async (c) => {
+    const savedReports = requireSavedReports(options);
+    if (!options.printPdfRenderer) {
+      throw badRequest("PDF print rendering is not configured");
+    }
+    const actor = await options.actor(c.req.raw);
+    const url = new URL(c.req.url);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const saved = await savedReports.get(actor, doctype.name, c.req.param("id"));
+    const result = await savedReports.run({
+      actor,
+      doctype: doctype.name,
+      id: saved.id,
+      options: {
+        filters: reportFiltersFromUrl(url),
+        ...reportOrderingFromUrl(url),
+        limit: 100
+      }
+    });
+    const layout = await defaultPrintLayoutFor(options.printSettings, actor);
+    const pdf = await renderPrintPdfReport({
+      actor,
+      renderer: options.printPdfRenderer,
+      result,
+      title: saved.label,
+      ...(layout === undefined ? {} : { layout })
+    });
+    return new Response(printPdfResponseBody(pdf.body), { headers: printPdfResponseHeaders(pdf) });
+  });
+
   app.get("/desk/report-builder/:doctype/:id/print", async (c) => {
     const savedReports = requireSavedReports(options);
     const actor = await options.actor(c.req.raw);
@@ -1219,7 +1251,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         limit: 100
       }
     });
-    const layout = await reportPrintLayoutFor(options, actor);
+    const layout = await defaultPrintLayoutFor(options.printSettings, actor);
     return html(renderPrintReport(result, { title: saved.label, ...(layout === undefined ? {} : { layout }) }));
   });
 
@@ -1255,6 +1287,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     });
     const base = `/desk/report-builder/${encodeURIComponent(doctype.name)}/${encodeURIComponent(saved.id)}`;
     const printHref = `${base}/print${url.search}`;
+    const pdfHref = options.printPdfRenderer === undefined ? undefined : `${base}/pdf${url.search}`;
     return html(
       renderDeskLayoutFor(options, {
         title: saved.label,
@@ -1267,6 +1300,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
           listHref: `/desk/report-builder/${encodeURIComponent(doctype.name)}`,
           exportHref: `${base}/export.csv${url.search}`,
           printHref,
+          ...(pdfHref === undefined ? {} : { pdfHref }),
           deleteAction: `${base}/delete`,
           drilldownBaseHref: `${base}${url.search}`
         })
@@ -1285,8 +1319,32 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       ...reportOrderingFromUrl(url),
       limit: 100
     });
-    const layout = await reportPrintLayoutFor(options, actor);
+    const layout = await defaultPrintLayoutFor(options.printSettings, actor);
     return html(renderPrintReport(result, layout === undefined ? {} : { layout }));
+  });
+
+  app.get("/desk/reports/:report/pdf", async (c) => {
+    if (!options.reports) {
+      throw new FrameworkError("REPORT_NOT_FOUND", "Reports are not enabled", { status: 404 });
+    }
+    if (!options.printPdfRenderer) {
+      throw badRequest("PDF print rendering is not configured");
+    }
+    const actor = await options.actor(c.req.raw);
+    const url = new URL(c.req.url);
+    const result = await options.reports.runReport(actor, c.req.param("report"), {
+      filters: reportFiltersFromUrl(url),
+      ...reportOrderingFromUrl(url),
+      limit: 100
+    });
+    const layout = await defaultPrintLayoutFor(options.printSettings, actor);
+    const pdf = await renderPrintPdfReport({
+      actor,
+      renderer: options.printPdfRenderer,
+      result,
+      ...(layout === undefined ? {} : { layout })
+    });
+    return new Response(printPdfResponseBody(pdf.body), { headers: printPdfResponseHeaders(pdf) });
   });
 
   app.get("/desk/reports/:report", async (c) => {
@@ -1304,6 +1362,9 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     });
     const exportHref = `/desk/reports/${encodeURIComponent(result.report.name)}/export.csv${url.search}`;
     const printHref = `/desk/reports/${encodeURIComponent(result.report.name)}/print${url.search}`;
+    const pdfHref = options.printPdfRenderer === undefined
+      ? undefined
+      : `/desk/reports/${encodeURIComponent(result.report.name)}/pdf${url.search}`;
     const drilldownBaseHref = `/desk/reports/${encodeURIComponent(result.report.name)}${url.search}`;
     return html(
       renderDeskLayoutFor(options, {
@@ -1312,7 +1373,12 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         activeReport: result.report.name,
         doctypes,
         reports,
-        body: renderReportView(result, { exportHref, printHref, drilldownBaseHref })
+        body: renderReportView(result, {
+          exportHref,
+          printHref,
+          ...(pdfHref === undefined ? {} : { pdfHref }),
+          drilldownBaseHref
+        })
       })
     );
   });
@@ -2174,13 +2240,6 @@ function workspaceShortcutView(
 
 function listPrintFormats(options: DeskAppOptions, actor: Actor, doctype?: string) {
   return options.prints?.listPrintFormats(actor, doctype) ?? [];
-}
-
-async function reportPrintLayoutFor(
-  options: DeskAppOptions,
-  actor: Actor
-): Promise<PrintLayoutDefinition | undefined> {
-  return (await options.printSettings?.defaultsFor(actor))?.settings.defaultLayout;
 }
 
 function requireUserPermissions(options: DeskAppOptions): UserPermissionService {

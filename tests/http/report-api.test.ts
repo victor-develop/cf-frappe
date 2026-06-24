@@ -1,5 +1,24 @@
-import { createResourceApi, defineReport, unsafeHeaderActorResolver } from "../../src";
-import { createServices, data } from "../helpers";
+import {
+  createResourceApi,
+  defineReport,
+  SYSTEM_MANAGER_ROLE,
+  unsafeHeaderActorResolver,
+  type PrintPdfRenderer,
+  type RenderPrintPdfCommand,
+  type RenderedPrintPdf
+} from "../../src";
+import { createServices, data, owner } from "../helpers";
+
+class RecordingPrintPdfRenderer implements PrintPdfRenderer {
+  readonly calls: RenderPrintPdfCommand[] = [];
+
+  constructor(private readonly result: RenderedPrintPdf = { body: new Uint8Array([37, 80, 68, 70]) }) {}
+
+  async render(command: RenderPrintPdfCommand): Promise<RenderedPrintPdf> {
+    this.calls.push(command);
+    return this.result;
+  }
+}
 
 describe("report api", () => {
   const userHeaders = {
@@ -8,13 +27,15 @@ describe("report api", () => {
     "x-cf-frappe-tenant": "acme"
   };
 
-  function makeApp() {
+  function makeApp(options: { readonly printPdfRenderer?: PrintPdfRenderer } = {}) {
     const services = createServices(["e1", "e2", "e3"]);
     const app = createResourceApi({
       registry: services.registry,
       documents: services.documents,
       queries: services.queries,
       reports: services.reports,
+      printSettings: services.printSettings,
+      ...(options.printPdfRenderer === undefined ? {} : { printPdfRenderer: options.printPdfRenderer }),
       actor: unsafeHeaderActorResolver
     });
     return { app, services };
@@ -214,6 +235,55 @@ describe("report api", () => {
     expect(response.headers.get("x-cf-frappe-export-limit")).toBe("1");
     expect(response.headers.get("x-cf-frappe-export-truncated")).toBe("true");
     await expect(response.text()).resolves.toBe("Title,Priority,Body\nHigh Note A,High,Needs care");
+  });
+
+  it("renders a report as PDF through the configured renderer", async () => {
+    const pdf = new Uint8Array([37, 80, 68, 70, 45, 49, 46, 55]);
+    const renderer = new RecordingPrintPdfRenderer({ body: pdf, contentLength: pdf.byteLength });
+    const { app, services } = makeApp({ printPdfRenderer: renderer });
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Beta Note", priority: "High", body: "Later", count: 2 }) });
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Alpha Note", priority: "High", body: "Needs care", count: 5 }) });
+    await services.printSettings.change({
+      actor: { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] },
+      settings: {
+        defaultLayout: {
+          pageSize: "A4",
+          orientation: "landscape",
+          margins: { topMm: 12, rightMm: 10, bottomMm: 14, leftMm: 10 },
+          font: { family: "Inter", sizePt: 10 }
+        }
+      }
+    });
+
+    const response = await app.request(
+      "/api/report/Open%20Notes/pdf?filter_priority=High&order_by=title&order=asc&limit=1",
+      { headers: userHeaders }
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/pdf");
+    expect(response.headers.get("content-disposition")).toBe('inline; filename="Open-Notes.report.pdf"');
+    expect(response.headers.get("content-length")).toBe(String(pdf.byteLength));
+    await expect(response.arrayBuffer()).resolves.toEqual(pdf.buffer);
+    expect(renderer.calls).toHaveLength(1);
+    expect(renderer.calls[0]).toMatchObject({
+      actorId: owner.id,
+      tenantId: owner.tenantId,
+      formatName: "Report",
+      documentName: "Open Notes",
+      documentDoctype: "Note",
+      title: "Open Notes - Report",
+      layout: {
+        pageSize: "A4",
+        orientation: "landscape",
+        margins: { topMm: 12, rightMm: 10, bottomMm: 14, leftMm: 10 },
+        font: { family: "Inter", sizePt: 10 }
+      }
+    });
+    expect(renderer.calls[0]?.html).toContain("@page { size: A4 landscape; margin: 12mm 10mm 14mm 10mm; }");
+    expect(renderer.calls[0]?.html).toContain("<dt>Priority</dt><dd>High</dd>");
+    expect(renderer.calls[0]?.html).toContain("<td>Alpha Note</td>");
+    expect(renderer.calls[0]?.html).not.toContain("<td>Beta Note</td>");
   });
 
   it("hides reports from actors without report roles", async () => {

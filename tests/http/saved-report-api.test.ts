@@ -1,5 +1,25 @@
-import { createResourceApi, REPORT_FORMULA_MAX_DEPTH, unsafeHeaderActorResolver, type JsonObject } from "../../src";
+import {
+  createResourceApi,
+  REPORT_FORMULA_MAX_DEPTH,
+  SYSTEM_MANAGER_ROLE,
+  unsafeHeaderActorResolver,
+  type JsonObject,
+  type PrintPdfRenderer,
+  type RenderPrintPdfCommand,
+  type RenderedPrintPdf
+} from "../../src";
 import { createServices, data, owner } from "../helpers";
+
+class RecordingPrintPdfRenderer implements PrintPdfRenderer {
+  readonly calls: RenderPrintPdfCommand[] = [];
+
+  constructor(private readonly result: RenderedPrintPdf = { body: new Uint8Array([37, 80, 68, 70]) }) {}
+
+  async render(command: RenderPrintPdfCommand): Promise<RenderedPrintPdf> {
+    this.calls.push(command);
+    return this.result;
+  }
+}
 
 describe("saved report api", () => {
   const userHeaders = {
@@ -9,7 +29,7 @@ describe("saved report api", () => {
     "x-cf-frappe-tenant": "acme"
   };
 
-  function makeApp() {
+  function makeApp(options: { readonly printPdfRenderer?: PrintPdfRenderer } = {}) {
     const services = createServices(["doc-1", "doc-2", "doc-3"], {
       savedReportIds: ["high-counts", "event-1", "event-2", "event-3", "event-4"]
     });
@@ -19,6 +39,8 @@ describe("saved report api", () => {
       queries: services.queries,
       reports: services.reports,
       savedReports: services.savedReports,
+      printSettings: services.printSettings,
+      ...(options.printPdfRenderer === undefined ? {} : { printPdfRenderer: options.printPdfRenderer }),
       actor: unsafeHeaderActorResolver
     });
     return { app, services };
@@ -123,6 +145,58 @@ describe("saved report api", () => {
     expect(csv.headers.get("x-cf-frappe-export-total")).toBe("2");
     expect(csv.headers.get("x-cf-frappe-exported")).toBe("1");
     await expect(csv.text()).resolves.toBe("Title,Count\nHigh Count B,7");
+  });
+
+  it("renders a saved report as PDF through the configured renderer", async () => {
+    const pdf = new Uint8Array([37, 80, 68, 70, 45, 49, 46, 55]);
+    const renderer = new RecordingPrintPdfRenderer({ body: pdf, contentLength: pdf.byteLength });
+    const { app, services } = makeApp({ printPdfRenderer: renderer });
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Low Count", priority: "Low", count: 1 }) });
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "High Count A", priority: "High", count: 3 }) });
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "High Count B", priority: "High", count: 7 }) });
+    await services.printSettings.change({
+      actor: { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] },
+      settings: {
+        defaultLayout: {
+          pageSize: { widthMm: 210, heightMm: 297 },
+          margins: { topMm: 8, rightMm: 8, bottomMm: 12, leftMm: 8 }
+        }
+      }
+    });
+    const created = await app.request("/api/report-builder/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ label: "Counts", definition: highCountsDefinition() })
+    });
+    expect(created.status).toBe(201);
+
+    const response = await app.request(
+      "/api/report-builder/Note/report_high-counts/pdf?filter_priority=High&order_by=count&order=desc&limit=1",
+      { headers: userHeaders }
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/pdf");
+    expect(response.headers.get("content-disposition")).toBe('inline; filename="Saved-Report-report_high-counts.report.pdf"');
+    expect(response.headers.get("content-length")).toBe(String(pdf.byteLength));
+    await expect(response.arrayBuffer()).resolves.toEqual(pdf.buffer);
+    expect(renderer.calls).toHaveLength(1);
+    expect(renderer.calls[0]).toMatchObject({
+      actorId: owner.id,
+      tenantId: owner.tenantId,
+      formatName: "Report",
+      documentName: "Saved Report report_high counts",
+      documentDoctype: "Note",
+      title: "Counts - Report",
+      layout: {
+        pageSize: { widthMm: 210, heightMm: 297 },
+        margins: { topMm: 8, rightMm: 8, bottomMm: 12, leftMm: 8 }
+      }
+    });
+    expect(renderer.calls[0]?.html).toContain("@page { size: 210mm 297mm; margin: 8mm 8mm 12mm 8mm; }");
+    expect(renderer.calls[0]?.html).toContain("<h1>Counts</h1>");
+    expect(renderer.calls[0]?.html).toContain("<td>High Count B</td><td>7</td>");
+    expect(renderer.calls[0]?.html).not.toContain("<td>High Count A</td><td>3</td>");
   });
 
   it("round-trips not-equals saved report filters through the JSON API", async () => {

@@ -505,6 +505,63 @@ describe("Desk app", () => {
     expect(printHtml.indexOf("Report Note")).toBeLessThan(printHtml.indexOf("Alpha Report"));
   });
 
+  it("renders report PDF links and routes in Desk when a renderer is configured", async () => {
+    const pdf = new Uint8Array([37, 80, 68, 70, 45, 49, 46, 55]);
+    const renderer = new RecordingPrintPdfRenderer({ body: pdf, contentLength: pdf.byteLength });
+    const { app, services } = makeDesk(owner, { printPdfRenderer: renderer });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Beta Report", priority: "High", body: "Later", count: 2 })
+    });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Alpha Report", priority: "High", body: "First", count: 5 })
+    });
+    await services.printSettings.change({
+      actor: { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] },
+      settings: {
+        defaultLayout: {
+          pageSize: "A4",
+          orientation: "landscape",
+          margins: { topMm: 12, rightMm: 10, bottomMm: 14, leftMm: 10 }
+        }
+      }
+    });
+
+    const page = await app.request("/desk/reports/Open%20Notes?filter_priority=High&order_by=title&order=asc");
+    expect(page.status).toBe(200);
+    await expect(page.text()).resolves.toContain(
+      "/desk/reports/Open%20Notes/pdf?filter_priority=High&amp;order_by=title&amp;order=asc"
+    );
+
+    const response = await app.request("/desk/reports/Open%20Notes/pdf?filter_priority=High&order_by=title&order=asc");
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/pdf");
+    expect(response.headers.get("content-disposition")).toBe('inline; filename="Open-Notes.report.pdf"');
+    await expect(response.arrayBuffer()).resolves.toEqual(pdf.buffer);
+    expect(renderer.calls).toHaveLength(1);
+    expect(renderer.calls[0]).toMatchObject({
+      actorId: owner.id,
+      tenantId: owner.tenantId,
+      formatName: "Report",
+      documentName: "Open Notes",
+      documentDoctype: "Note",
+      title: "Open Notes - Report",
+      layout: {
+        pageSize: "A4",
+        orientation: "landscape",
+        margins: { topMm: 12, rightMm: 10, bottomMm: 14, leftMm: 10 }
+      }
+    });
+    expect(renderer.calls[0]?.html).toContain("@page { size: A4 landscape; margin: 12mm 10mm 14mm 10mm; }");
+    expect(renderer.calls[0]?.html.indexOf("Alpha Report")).toBeLessThan(
+      renderer.calls[0]?.html.indexOf("Beta Report") ?? Number.MAX_SAFE_INTEGER
+    );
+  });
+
   it("builds, runs, exports, and deletes saved reports in Desk", async () => {
     const { app, services } = makeDesk();
     await services.documents.create({
@@ -674,6 +731,77 @@ describe("Desk app", () => {
     expect(deleted.headers.get("location")).toBe("/desk/report-builder/Note");
     const afterDelete = await app.request("/desk/report-builder/Note");
     await expect(afterDelete.text()).resolves.toContain("No saved reports.");
+  });
+
+  it("renders saved report PDF links and routes in Desk when a renderer is configured", async () => {
+    const pdf = new Uint8Array([37, 80, 68, 70, 45, 49, 46, 55]);
+    const renderer = new RecordingPrintPdfRenderer({ body: pdf, contentLength: pdf.byteLength });
+    const { app, services } = makeDesk(owner, { printPdfRenderer: renderer });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "High Count A", priority: "High", count: 3 })
+    });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "High Count B", priority: "High", count: 7 })
+    });
+    await services.printSettings.change({
+      actor: { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] },
+      settings: {
+        defaultLayout: {
+          pageSize: { widthMm: 210, heightMm: 297 },
+          margins: { topMm: 8, rightMm: 8, bottomMm: 12, leftMm: 8 }
+        }
+      }
+    });
+
+    const body = new URLSearchParams();
+    body.set("label", "High count desk report");
+    body.append("column", "title");
+    body.append("column", "count");
+    body.append("filter", "priority");
+    body.set("orderBy", "count");
+    body.set("order", "desc");
+    const saved = await app.request("/desk/report-builder/Note", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body
+    });
+    expect(saved.status).toBe(303);
+
+    const page = await app.request(
+      "/desk/report-builder/Note/report_saved-report-1?filter_priority=High&order_by=count&order=desc"
+    );
+    expect(page.status).toBe(200);
+    await expect(page.text()).resolves.toContain(
+      "/desk/report-builder/Note/report_saved-report-1/pdf?filter_priority=High&amp;order_by=count&amp;order=desc"
+    );
+
+    const response = await app.request(
+      "/desk/report-builder/Note/report_saved-report-1/pdf?filter_priority=High&order_by=count&order=desc"
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/pdf");
+    expect(response.headers.get("content-disposition")).toBe('inline; filename="Saved-Report-report_saved-report-1.report.pdf"');
+    await expect(response.arrayBuffer()).resolves.toEqual(pdf.buffer);
+    expect(renderer.calls).toHaveLength(1);
+    expect(renderer.calls[0]).toMatchObject({
+      actorId: owner.id,
+      tenantId: owner.tenantId,
+      formatName: "Report",
+      documentName: "Saved Report report_saved report 1",
+      documentDoctype: "Note",
+      title: "High count desk report - Report",
+      layout: {
+        pageSize: { widthMm: 210, heightMm: 297 },
+        margins: { topMm: 8, rightMm: 8, bottomMm: 12, leftMm: 8 }
+      }
+    });
+    expect(renderer.calls[0]?.html).toContain("<h1>High count desk report</h1>");
+    expect(renderer.calls[0]?.html).toContain("<td>High Count B</td><td>7</td>");
   });
 
   it("builds saved report filter presets from visual Desk report-builder controls", async () => {

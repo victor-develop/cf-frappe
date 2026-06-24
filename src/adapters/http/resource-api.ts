@@ -216,6 +216,8 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       "/",
       createReportApi({
         reports: options.reports,
+        ...(options.printSettings === undefined ? {} : { printSettings: options.printSettings }),
+        ...(options.printPdfRenderer === undefined ? {} : { pdfRenderer: options.printPdfRenderer }),
         actor: resolveActor
       })
     );
@@ -237,6 +239,8 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       "/",
       createSavedReportApi({
         savedReports: options.savedReports,
+        ...(options.printSettings === undefined ? {} : { printSettings: options.printSettings }),
+        ...(options.printPdfRenderer === undefined ? {} : { pdfRenderer: options.printPdfRenderer }),
         actor: resolveActor,
         maxJsonBytes
       })

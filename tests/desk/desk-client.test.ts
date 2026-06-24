@@ -88,12 +88,22 @@ interface DeskClientRuntime {
     readonly updateSettings: (input: Record<string, unknown>, options?: Record<string, unknown>) => Promise<unknown>;
     readonly url: (format: string, name: string) => string;
   };
+  readonly report: {
+    readonly csvUrl: (report: string, options?: Record<string, unknown>) => string;
+    readonly get: (report: string) => Promise<unknown>;
+    readonly list: () => Promise<unknown>;
+    readonly pdf: (report: string, options?: Record<string, unknown>) => Promise<ArrayBuffer>;
+    readonly pdfUrl: (report: string, options?: Record<string, unknown>) => string;
+    readonly run: (report: string, options?: Record<string, unknown>) => Promise<unknown>;
+  };
   readonly reportBuilder: {
     readonly create: (doctype: string, input: Record<string, unknown>) => Promise<unknown>;
     readonly csvUrl: (doctype: string, id: string, options?: Record<string, unknown>) => string;
     readonly delete: (doctype: string, id: string) => Promise<unknown>;
     readonly get: (doctype: string, id: string) => Promise<unknown>;
     readonly list: (doctype: string) => Promise<unknown>;
+    readonly pdf: (doctype: string, id: string, options?: Record<string, unknown>) => Promise<ArrayBuffer>;
+    readonly pdfUrl: (doctype: string, id: string, options?: Record<string, unknown>) => string;
     readonly run: (doctype: string, id: string, options?: Record<string, unknown>) => Promise<unknown>;
     readonly update: (doctype: string, id: string, input: Record<string, unknown>) => Promise<unknown>;
   };
@@ -1441,7 +1451,77 @@ describe("Desk client runtime", () => {
     ]);
   });
 
+  it("wraps report APIs and PDF rendering routes without browser-side rendering decisions", async () => {
+    const pdf = new Uint8Array([37, 80, 68, 70]);
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      if (String(url).endsWith("/pdf?filter_priority=High&order_by=title&order=asc&limit=5&offset=10")) {
+        return new Response(pdf, {
+          headers: { "content-type": "application/pdf" }
+        });
+      }
+      return new Response(JSON.stringify({ data: { ok: true }, rows: [] }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.report.list()).resolves.toEqual({ ok: true });
+    await expect(runtime.report.get("Open Notes")).resolves.toEqual({ ok: true });
+    await expect(
+      runtime.report.run("Open Notes", {
+        filters: { priority: "High" },
+        orderBy: "title",
+        order: "asc",
+        limit: 5,
+        offset: 10
+      })
+    ).resolves.toEqual({ data: { ok: true }, rows: [] });
+    await expect(
+      runtime.report.pdf("Open Notes", {
+        filters: { priority: "High" },
+        orderBy: "title",
+        order: "asc",
+        limit: 5,
+        offset: 10
+      })
+    ).resolves.toEqual(pdf.buffer);
+
+    expect(
+      runtime.report.csvUrl("Open Notes", {
+        filters: { priority: "High" },
+        order_by: "title",
+        order: "desc",
+        limit: 5,
+        offset: 10
+      })
+    ).toBe("/api/report/Open%20Notes/export.csv?filter_priority=High&order_by=title&order=desc&limit=5");
+    expect(
+      runtime.report.pdfUrl("Open Notes", {
+        filters: { priority: "High" },
+        order_by: "title",
+        order: "asc",
+        limit: 5,
+        offset: 10
+      })
+    ).toBe("/api/report/Open%20Notes/pdf?filter_priority=High&order_by=title&order=asc&limit=5&offset=10");
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/meta/reports",
+      "GET /api/meta/reports/Open%20Notes",
+      "GET /api/report/Open%20Notes/run?filter_priority=High&order_by=title&order=asc&limit=5&offset=10",
+      "GET /api/report/Open%20Notes/pdf?filter_priority=High&order_by=title&order=asc&limit=5&offset=10"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual([
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin"
+    ]);
+    expect(calls.map((call) => call.init.body)).toEqual([undefined, undefined, undefined, undefined]);
+  });
+
   it("wraps saved report-builder APIs without browser-side definition validation", async () => {
+    const pdf = new Uint8Array([37, 80, 68, 70]);
     const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
     const input = {
       label: "High counts",
@@ -1454,6 +1534,11 @@ describe("Desk client runtime", () => {
     };
     const runtime = evaluateDeskClient(async (url, init) => {
       calls.push({ url: String(url), init: init ?? {} });
+      if (String(url).endsWith("/pdf?filter_priority=High&order_by=count&order=asc&limit=5&offset=10")) {
+        return new Response(pdf, {
+          headers: { "content-type": "application/pdf" }
+        });
+      }
       if ((init?.method ?? "GET") === "DELETE") {
         return new Response(null, { status: 204 });
       }
@@ -1476,6 +1561,15 @@ describe("Desk client runtime", () => {
         offset: 10
       })
     ).resolves.toEqual({ data: { ok: true }, rows: [] });
+    await expect(
+      runtime.reportBuilder.pdf("Task Type", "report/high-counts", {
+        filters: { priority: "High" },
+        orderBy: "count",
+        order: "asc",
+        limit: 5,
+        offset: 10
+      })
+    ).resolves.toEqual(pdf.buffer);
     await expect(runtime.reportBuilder.delete("Task Type", "report/high-counts")).resolves.toBe("");
 
     expect(
@@ -1487,15 +1581,28 @@ describe("Desk client runtime", () => {
         offset: 10
       })
     ).toBe("/api/report-builder/Task%20Type/report%2Fhigh-counts/export.csv?filter_priority=High&order_by=count&order=desc&limit=5");
+    expect(
+      runtime.reportBuilder.pdfUrl("Task Type", "report/high-counts", {
+        filters: { priority: "High" },
+        order_by: "count",
+        order: "asc",
+        limit: 5,
+        offset: 10
+      })
+    ).toBe(
+      "/api/report-builder/Task%20Type/report%2Fhigh-counts/pdf?filter_priority=High&order_by=count&order=asc&limit=5&offset=10"
+    );
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
       "POST /api/report-builder/Task%20Type",
       "GET /api/report-builder/Task%20Type",
       "GET /api/report-builder/Task%20Type/report%2Fhigh-counts",
       "PUT /api/report-builder/Task%20Type/report%2Fhigh-counts",
       "GET /api/report-builder/Task%20Type/report%2Fhigh-counts/run?filter_priority=High&order_by=count&order=asc&limit=5&offset=10",
+      "GET /api/report-builder/Task%20Type/report%2Fhigh-counts/pdf?filter_priority=High&order_by=count&order=asc&limit=5&offset=10",
       "DELETE /api/report-builder/Task%20Type/report%2Fhigh-counts"
     ]);
     expect(calls.map((call) => call.init.credentials)).toEqual([
+      "same-origin",
       "same-origin",
       "same-origin",
       "same-origin",
@@ -1508,6 +1615,7 @@ describe("Desk client runtime", () => {
       undefined,
       undefined,
       JSON.stringify(input),
+      undefined,
       undefined,
       undefined
     ]);
