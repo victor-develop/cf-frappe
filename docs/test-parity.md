@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk report printouts slice:
+As of the two-level Desk report formula controls slice:
 
 - Vitest files: `75`
-- Vitest cases: `816`
+- Vitest cases: `817`
 
 ## Implication
 

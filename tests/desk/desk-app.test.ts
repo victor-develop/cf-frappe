@@ -783,6 +783,76 @@ describe("Desk app", () => {
     expect(html).toContain("<td>15</td>");
   });
 
+  it("builds two-level nested saved report formulas from visual Desk report-builder controls", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Deep Nested Count", priority: "High", count: 5 })
+    });
+
+    const builder = await app.request("/desk/report-builder/Note");
+    expect(builder.status).toBe(200);
+    const builderHtml = await builder.text();
+    expect(builderHtml).toContain('name="formulaLeftLeftOperator"');
+    expect(builderHtml).toContain('name="formulaLeftLeftLeftKind"');
+    expect(builderHtml).toContain('name="formulaLeftLeftRightLiteral" type="number" step="any"');
+
+    const body = new URLSearchParams();
+    body.set("label", "Deep nested formula report");
+    body.append("column", "title");
+    body.append("column", "count");
+    body.set("formulaLabel", "Deep Score");
+    body.set("formulaLeftKind", "nested");
+    body.set("formulaLeftOperator", "subtract");
+    body.set("formulaLeftLeftKind", "nested");
+    body.set("formulaLeftLeftOperator", "multiply");
+    body.set("formulaLeftLeftLeftKind", "field");
+    body.set("formulaLeftLeftLeft", "count");
+    body.set("formulaLeftLeftRightKind", "literal");
+    body.set("formulaLeftLeftRightLiteral", "2");
+    body.set("formulaLeftRightKind", "literal");
+    body.set("formulaLeftRightLiteral", "3");
+    body.set("formulaOperator", "add");
+    body.set("formulaRightKind", "literal");
+    body.set("formulaRightLiteral", "1");
+
+    const saved = await app.request("/desk/report-builder/Note", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body
+    });
+
+    expect(saved.status).toBe(303);
+    await expect(services.savedReports.get(owner, "Note", "report_saved-report-1")).resolves.toMatchObject({
+      definition: {
+        columns: [
+          expect.objectContaining({ name: "title" }),
+          expect.objectContaining({ name: "count" }),
+          expect.objectContaining({
+            name: "deep_score",
+            label: "Deep Score",
+            formula: {
+              operator: "add",
+              left: {
+                operator: "subtract",
+                left: { operator: "multiply", left: "count", right: 2 },
+                right: 3
+              },
+              right: 1
+            }
+          })
+        ]
+      }
+    });
+
+    const run = await app.request("/desk/report-builder/Note/report_saved-report-1");
+    expect(run.status).toBe(200);
+    const html = await run.text();
+    expect(html).toContain("<th>Deep Score</th>");
+    expect(html).toContain("<td>8</td>");
+  });
+
   it("rejects invalid Desk report-builder formula literal operands without persisting them", async () => {
     const { app } = makeDesk();
     const invalidLiteral = new URLSearchParams();

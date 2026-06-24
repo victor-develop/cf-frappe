@@ -56,7 +56,7 @@ import {
 
 type ReportChartPointResult = ReportRunResult["charts"][number]["points"][number];
 
-const REPORT_BUILDER_FORMULA_NESTED_LEVELS = 1;
+const REPORT_BUILDER_FORMULA_NESTED_LEVELS = 2;
 
 export type FormLinkOptions = Readonly<Record<string, readonly LinkOption[]>>;
 export type FormTableDefinitions = Readonly<Record<string, DocTypeDefinition>>;
