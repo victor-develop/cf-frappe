@@ -1847,6 +1847,14 @@ function renderReportFilterControl(filter: ReportRunResult["filters"][number]): 
   const label = escapeHtml(filter.label);
   const value = formatFormValue(filter.value);
   const required = filter.required ? " required" : "";
+  if (filter.operator === "between" || filter.operator === "not_between") {
+    const values = Array.isArray(filter.value) ? filter.value : [];
+    const type = inputTypeForFieldType(filter.type);
+    return [
+      `<label class="field" for="${id}-min"><span>${label} from</span><input id="${id}-min" name="${name}" type="${type}" value="${escapeHtml(formatFormValue(values[0]))}"${required}></label>`,
+      `<label class="field" for="${id}-max"><span>${label} to</span><input id="${id}-max" name="${name}" type="${type}" value="${escapeHtml(formatFormValue(values[1]))}"${required}></label>`
+    ].join("");
+  }
   if (filter.type === "select") {
     return `<label class="field" for="${id}"><span>${label}</span><select id="${id}" name="${name}"${required}>${renderReportSelectOptions(filter.options, value)}</select></label>`;
   }

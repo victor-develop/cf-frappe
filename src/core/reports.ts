@@ -2,7 +2,8 @@ import { FrameworkError, type FrameworkErrorCode } from "./errors.js";
 import type { Actor, DocTypeDefinition, FieldDefinition, FieldType, JsonPrimitive, PermissionAction } from "./types.js";
 import { SYSTEM_MANAGER_ROLE } from "./types.js";
 
-export type ReportFilterOperator = "eq" | "ne" | "contains" | "gte" | "lte";
+export type ReportFilterOperator = "eq" | "ne" | "contains" | "gte" | "lte" | "between" | "not_between";
+export type ReportFilterValue = JsonPrimitive | readonly JsonPrimitive[];
 export type ReportSummaryAggregate = "count" | "sum" | "avg" | "min" | "max";
 export type ReportChartType = "bar" | "line" | "pie";
 export type ReportChartOrderBy = "key" | "label" | "value";
@@ -14,7 +15,7 @@ export type ReportSourceDefinition =
   | { readonly kind: "documents" }
   | { readonly kind: "custom"; readonly provider: string };
 
-const REPORT_FILTER_OPERATORS = ["eq", "ne", "contains", "gte", "lte"] as const;
+const REPORT_FILTER_OPERATORS = ["eq", "ne", "contains", "gte", "lte", "between", "not_between"] as const;
 const REPORT_FILTER_TYPES = ["text", "longText", "integer", "number", "boolean", "date", "datetime", "select", "link"] as const;
 const REPORT_FIELD_TYPES = ["text", "longText", "integer", "number", "boolean", "date", "datetime", "json", "select", "link", "table"] as const;
 const REPORT_ORDERS = ["asc", "desc"] as const;
@@ -44,7 +45,7 @@ export interface ReportFilterDefinition {
   readonly type?: FieldType;
   readonly operator?: ReportFilterOperator;
   readonly required?: boolean;
-  readonly defaultValue?: JsonPrimitive;
+  readonly defaultValue?: ReportFilterValue;
   readonly options?: readonly string[];
 }
 
@@ -105,6 +106,9 @@ export function defineReport(definition: ReportDefinition): ReportDefinition {
         definition.filters.map((filter) =>
           Object.freeze({
             ...filter,
+            ...(Array.isArray(filter.defaultValue)
+              ? { defaultValue: Object.freeze([...filter.defaultValue]) }
+              : {}),
             ...(filter.options ? { options: Object.freeze([...filter.options]) } : {})
           })
         )
@@ -229,19 +233,34 @@ export function assertReportFilterValues(
         { status: 400 }
       );
     }
-    assertReportFilterValue(report, filter.name, value, type, context, code);
+    assertReportFilterValue(report, filter, value, type, context, code);
   }
 }
 
 function assertReportFilterValue(
   report: ReportDefinition,
-  filterName: string,
+  filter: ReportFilterDefinition,
   value: unknown,
   type: FieldType | undefined,
   context: string,
   code: FrameworkErrorCode
 ): void {
+  const operator = filter.operator ?? "eq";
+  const filterName = filter.name;
   if (value === undefined || value === null || value === "") {
+    return;
+  }
+  if (operator === "between" || operator === "not_between") {
+    if (!Array.isArray(value) || value.length !== 2) {
+      throw new FrameworkError(
+        code,
+        `${context} filter '${filterName}' on report '${report.name}' must include exactly two values for ${operator}`,
+        { status: 400 }
+      );
+    }
+    for (const endpoint of value) {
+      assertReportRangeEndpoint(report, filterName, endpoint, type, context, code);
+    }
     return;
   }
   if (!isJsonPrimitive(value)) {
@@ -279,6 +298,55 @@ function assertReportFilterValue(
       { status: 400 }
     );
   }
+}
+
+function assertReportRangeEndpoint(
+  report: ReportDefinition,
+  filterName: string,
+  value: unknown,
+  type: FieldType | undefined,
+  context: string,
+  code: FrameworkErrorCode
+): void {
+  if (value === undefined || value === null) {
+    throw new FrameworkError(
+      code,
+      `${context} filter '${filterName}' on report '${report.name}' range values cannot be null`,
+      { status: 400 }
+    );
+  }
+  if (typeof value === "string" && value.trim() === "") {
+    throw new FrameworkError(
+      code,
+      `${context} filter '${filterName}' on report '${report.name}' range values cannot be empty`,
+      { status: 400 }
+    );
+  }
+  if (!isJsonPrimitive(value)) {
+    throw new FrameworkError(
+      code,
+      `${context} filter '${filterName}' on report '${report.name}' range values must be JSON primitives`,
+      { status: 400 }
+    );
+  }
+  if (type === "date" || type === "datetime") {
+    if (typeof value !== "string") {
+      throw new FrameworkError(
+        code,
+        `${context} filter '${filterName}' on report '${report.name}' range values must be strings`,
+        { status: 400 }
+      );
+    }
+    return;
+  }
+  if (typeof value === "boolean") {
+    throw new FrameworkError(
+      code,
+      `${context} filter '${filterName}' on report '${report.name}' range values cannot be boolean`,
+      { status: 400 }
+    );
+  }
+  assertReportFilterValue(report, { name: filterName, field: filterName }, value, type, context, code);
 }
 
 function numericReportFilterValue(value: JsonPrimitive): number {
@@ -343,6 +411,7 @@ export function assertReportMatchesDocType(report: ReportDefinition, doctype: Do
         { status: 400 }
       );
     }
+    assertReportFilterOperatorMatchesType(report, filter, field.type);
   }
   for (const summary of report.summaries ?? []) {
     assertSummaryMatchesDocType(report.name, summary, fields);
@@ -393,7 +462,27 @@ function assertCustomReportReferences(
         { status: 400 }
       );
     }
+    assertReportFilterOperatorMatchesType(report, filter, filter.type ?? field?.type);
   }
+}
+
+function assertReportFilterOperatorMatchesType(
+  report: ReportDefinition,
+  filter: ReportFilterDefinition,
+  type: FieldType | undefined
+): void {
+  const operator = filter.operator ?? "eq";
+  if ((operator === "between" || operator === "not_between") && !isReportRangeFilterType(type)) {
+    throw new FrameworkError(
+      "REPORT_INVALID",
+      `Report '${report.name}' filter '${filter.name}' does not support ${operator}`,
+      { status: 400 }
+    );
+  }
+}
+
+function isReportRangeFilterType(type: FieldType | undefined): boolean {
+  return type === "integer" || type === "number" || type === "date" || type === "datetime";
 }
 
 function assertReportOrderValid(report: ReportDefinition): void {

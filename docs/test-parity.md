@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the resource not-between filter slice:
+As of the report range filter slice:
 
 - Vitest files: `80`
-- Vitest cases: `889`
+- Vitest cases: `895`
 
 ## Implication
 

@@ -1432,6 +1432,52 @@ describe("Desk app", () => {
     expect(expandedHtml).toContain("High Range Count");
   });
 
+  it("renders saved report not-between range filters with repeated inputs", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Desk Report Low", priority: "Low", count: 1 })
+    });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Desk Report Middle", priority: "Medium", count: 5 })
+    });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Desk Report High", priority: "High", count: 9 })
+    });
+    await services.savedReports.save({
+      actor: owner,
+      doctype: "Note",
+      label: "Outside count report",
+      definition: {
+        columns: [{ name: "title" }, { name: "count" }],
+        filters: [{ name: "outside_count", field: "count", operator: "not_between", defaultValue: [2, 8] }]
+      }
+    });
+
+    const run = await app.request("/desk/report-builder/Note/report_saved-report-1");
+    expect(run.status).toBe(200);
+    const html = await run.text();
+    expect(html).toContain('<input id="filter-outside-count-min" name="filter_outside_count" type="number" value="2">');
+    expect(html).toContain('<input id="filter-outside-count-max" name="filter_outside_count" type="number" value="8">');
+    expect(html).toContain("Desk Report Low");
+    expect(html).toContain("Desk Report High");
+    expect(html).not.toContain("Desk Report Middle");
+
+    const narrowed = await app.request(
+      "/desk/report-builder/Note/report_saved-report-1?filter_outside_count=0&filter_outside_count=10"
+    );
+    expect(narrowed.status).toBe(200);
+    const narrowedHtml = await narrowed.text();
+    expect(narrowedHtml).not.toContain("Desk Report Low");
+    expect(narrowedHtml).not.toContain("Desk Report Middle");
+    expect(narrowedHtml).not.toContain("Desk Report High");
+  });
+
   it("builds saved report date and datetime range filters from visual Desk report-builder controls", async () => {
     const Event = defineDocType({
       name: "Event",

@@ -1669,13 +1669,13 @@ describe("Desk client runtime", () => {
 
     expect(
       runtime.report.csvUrl("Open Notes", {
-        filters: { priority: "High" },
+        filters: { priority: "High", count_range: [2, 8] },
         order_by: "title",
         order: "desc",
         limit: 5,
         offset: 10
       })
-    ).toBe("/api/report/Open%20Notes/export.csv?filter_priority=High&order_by=title&order=desc&limit=5");
+    ).toBe("/api/report/Open%20Notes/export.csv?filter_priority=High&filter_count_range=2&filter_count_range=8&order_by=title&order=desc&limit=5");
     expect(
       runtime.report.pdfUrl("Open Notes", {
         filters: { priority: "High" },
@@ -1754,13 +1754,13 @@ describe("Desk client runtime", () => {
 
     expect(
       runtime.reportBuilder.csvUrl("Task Type", "report/high-counts", {
-        filters: { priority: "High" },
+        filters: { priority: "High", outside_count: [2, 8] },
         order_by: "count",
         order: "desc",
         limit: 5,
         offset: 10
       })
-    ).toBe("/api/report-builder/Task%20Type/report%2Fhigh-counts/export.csv?filter_priority=High&order_by=count&order=desc&limit=5");
+    ).toBe("/api/report-builder/Task%20Type/report%2Fhigh-counts/export.csv?filter_priority=High&filter_outside_count=2&filter_outside_count=8&order_by=count&order=desc&limit=5");
     expect(
       runtime.reportBuilder.pdfUrl("Task Type", "report/high-counts", {
         filters: { priority: "High" },

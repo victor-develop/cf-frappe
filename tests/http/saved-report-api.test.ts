@@ -147,6 +147,48 @@ describe("saved report api", () => {
     await expect(csv.text()).resolves.toBe("Title,Count\nHigh Count B,7");
   });
 
+  it("round-trips saved report range filter defaults through JSON APIs", async () => {
+    const { app, services } = makeApp();
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Saved Report Low", priority: "Low", count: 1 }) });
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Saved Report Middle", priority: "Medium", count: 5 }) });
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Saved Report High", priority: "High", count: 9 }) });
+
+    const created = await app.request("/api/report-builder/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({
+        label: "Outside counts",
+        definition: {
+          columns: [{ name: "title" }, { name: "count" }],
+          filters: [
+            { name: "outside_count", field: "count", operator: "not_between", defaultValue: [2, 8] }
+          ]
+        }
+      })
+    });
+
+    expect(created.status).toBe(201);
+    await expect(created.json()).resolves.toMatchObject({
+      data: {
+        definition: {
+          filters: [{ name: "outside_count", operator: "not_between", defaultValue: [2, 8] }]
+        }
+      }
+    });
+
+    const run = await app.request("/api/report-builder/Note/report_high-counts/run", { headers: userHeaders });
+
+    expect(run.status).toBe(200);
+    await expect(run.json()).resolves.toMatchObject({
+      filters: [{ name: "outside_count", operator: "not_between", value: [2, 8] }],
+      rows: [
+        { title: "Saved Report Low", count: 1 },
+        { title: "Saved Report High", count: 9 }
+      ],
+      total: 2
+    });
+  });
+
   it("renders a saved report as PDF through the configured renderer", async () => {
     const pdf = new Uint8Array([37, 80, 68, 70, 45, 49, 46, 55]);
     const renderer = new RecordingPrintPdfRenderer({ body: pdf, contentLength: pdf.byteLength });

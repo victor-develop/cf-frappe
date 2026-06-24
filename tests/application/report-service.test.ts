@@ -794,6 +794,73 @@ describe("ReportService", () => {
     expect(result.total).toBe(2);
   });
 
+  it("supports inclusive and exclusive report range filters", async () => {
+    const { documents, queries, registry, reports } = createServices(["e1", "e2", "e3"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Low Range Note", priority: "Low", count: 1 }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Middle Range Note", priority: "Medium", count: 5 }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "High Range Note", priority: "High", count: 9 }) });
+
+    const between = await reports.runReportDefinition(
+      owner,
+      defineReport({
+        name: "Middle Count Notes",
+        doctype: "Note",
+        columns: [{ name: "title" }, { name: "count" }],
+        filters: [{ name: "count_range", field: "count", operator: "between", defaultValue: [2, 8] }]
+      })
+    );
+
+    expect(between.filters).toContainEqual(expect.objectContaining({
+      name: "count_range",
+      operator: "between",
+      value: [2, 8]
+    }));
+    expect(between.rows).toEqual([{ title: "Middle Range Note", count: 5 }]);
+
+    registry.registerReport(
+      defineReport({
+        name: "Outside Count Rows",
+        doctype: "Note",
+        source: { kind: "custom", provider: "outside-counts" },
+        columns: [{ name: "title", type: "text" }, { name: "count", type: "integer" }],
+        filters: [{ name: "outside_count", field: "count", type: "integer", operator: "not_between" }],
+        roles: ["User"]
+      })
+    );
+    const customReports = new ReportService({
+      registry,
+      queries,
+      rowProviders: {
+        "outside-counts": {
+          async rows() {
+            return [
+              { title: "Custom Low", count: 1 },
+              { title: "Custom Middle", count: 5 },
+              { title: "Custom High", count: 9 },
+              { title: "Custom Null", count: null },
+              { title: "Custom Missing" }
+            ];
+          }
+        }
+      }
+    });
+
+    const notBetween = await customReports.runReport(owner, "Outside Count Rows", {
+      filters: { outside_count: ["2", "8"] }
+    });
+
+    expect(notBetween.filters).toContainEqual(expect.objectContaining({
+      name: "outside_count",
+      operator: "not_between",
+      value: [2, 8]
+    }));
+    expect(notBetween.rows).toEqual([
+      { title: "Custom Low", count: 1 },
+      { title: "Custom High", count: 9 }
+    ]);
+    expect(notBetween.total).toBe(2);
+  });
+
   it("exports all filtered report rows as CSV with escaped cells", async () => {
     const { documents, reports } = createServices(["e1", "e2", "e3", "e4"]);
     await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Low Note", priority: "Low" }) });

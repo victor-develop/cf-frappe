@@ -456,7 +456,7 @@ function filterFromPayload(payload: JsonObject): ReportFilterDefinition {
     ...(type === undefined ? {} : { type }),
     ...(operator === undefined ? {} : { operator }),
     ...(typeof payload.required === "boolean" ? { required: payload.required } : {}),
-    ...(isJsonPrimitive(payload.defaultValue) ? { defaultValue: payload.defaultValue } : {})
+    ...(isReportFilterValue(payload.defaultValue) ? { defaultValue: payload.defaultValue } : {})
   };
 }
 
@@ -563,6 +563,10 @@ function isJsonObject(value: JsonValue): value is JsonObject {
 
 function isJsonPrimitive(value: JsonValue | undefined): value is string | number | boolean | null {
   return value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+}
+
+function isReportFilterValue(value: JsonValue | undefined): value is NonNullable<ReportFilterDefinition["defaultValue"]> {
+  return isJsonPrimitive(value) || (Array.isArray(value) && value.every(isJsonPrimitive));
 }
 
 function runtimeReportName(id: string): string {

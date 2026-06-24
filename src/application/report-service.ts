@@ -13,6 +13,7 @@ import {
   type ReportDefinition,
   type ReportFilterDefinition,
   type ReportFilterOperator,
+  type ReportFilterValue,
   type ReportFormulaOperand,
   type ReportGroupDefinition,
   type ReportOrder,
@@ -24,7 +25,7 @@ import type { Actor, DocTypeDefinition, DocumentSnapshot, FieldDefinition, Field
 import { QueryService } from "./query-service.js";
 import { CSV_CONTENT_TYPE, csvLine, filenamePart } from "./csv.js";
 
-export type ReportFilters = Readonly<Record<string, JsonPrimitive | undefined>>;
+export type ReportFilters = Readonly<Record<string, ReportFilterValue | undefined>>;
 export type ReportRow = Readonly<Record<string, JsonValue>>;
 
 const DEFAULT_CSV_EXPORT_LIMIT = 10_000;
@@ -88,7 +89,7 @@ export interface ReportFilterControlResult {
   readonly type?: FieldType;
   readonly operator: ReportFilterOperator;
   readonly required: boolean;
-  readonly value?: JsonPrimitive;
+  readonly value?: ReportFilterValue;
   readonly options: readonly string[];
 }
 
@@ -418,11 +419,11 @@ export class ReportService {
 
   private materializeFilters(report: ReportDefinition, doctype: DocTypeDefinition, input: ReportFilters): ReportFilters {
     const fields = new Map(doctype.fields.map((field) => [field.name, field]));
-    const values: Record<string, JsonPrimitive | undefined> = {};
+    const values: Record<string, ReportFilterValue | undefined> = {};
     for (const filter of report.filters ?? []) {
       const type = resolvedReportFilterType(filter, fields.get(filter.field));
       const raw = input[filter.name] ?? filter.defaultValue;
-      const value = coerceFilterValue(raw, type, filter.name);
+      const value = coerceFilterValue(raw, type, filter.name, filter.operator ?? "eq");
       if (filter.required && (value === undefined || value === "")) {
         throw badRequest(`Report filter '${filter.name}' is required`);
       }
@@ -659,7 +660,7 @@ function compareOrderedRows(left: OrderedReportRow, right: OrderedReportRow, dir
 function matchesReportFilters(document: DocumentSnapshot, report: ReportDefinition, filters: ReportFilters): boolean {
   return (report.filters ?? []).every((filter) => {
     const expected = filters[filter.name];
-    if (expected === undefined || expected === "") {
+    if (isEmptyReportFilterValue(expected)) {
       return true;
     }
     const actual = document.data[filter.field];
@@ -671,9 +672,23 @@ function matchesReportFilters(document: DocumentSnapshot, report: ReportDefiniti
       case "contains":
         return String(actual ?? "").toLowerCase().includes(String(expected).toLowerCase());
       case "gte":
-        return compareValues(actual, expected) >= 0;
+        return compareValues(actual, scalarReportFilterValue(expected)) >= 0;
       case "lte":
-        return compareValues(actual, expected) <= 0;
+        return compareValues(actual, scalarReportFilterValue(expected)) <= 0;
+      case "between": {
+        if (actual === undefined || actual === null) {
+          return false;
+        }
+        const [minimum, maximum] = rangeFilterValues(expected);
+        return compareValues(actual, minimum) >= 0 && compareValues(actual, maximum) <= 0;
+      }
+      case "not_between": {
+        if (actual === undefined || actual === null) {
+          return false;
+        }
+        const [minimum, maximum] = rangeFilterValues(expected);
+        return compareValues(actual, minimum) < 0 || compareValues(actual, maximum) > 0;
+      }
     }
   });
 }
@@ -681,7 +696,7 @@ function matchesReportFilters(document: DocumentSnapshot, report: ReportDefiniti
 function matchesReportRowFilters(row: ReportRow, report: ReportDefinition, filters: ReportFilters): boolean {
   return (report.filters ?? []).every((filter) => {
     const expected = filters[filter.name];
-    if (expected === undefined || expected === "") {
+    if (isEmptyReportFilterValue(expected)) {
       return true;
     }
     const actual = row[filter.field];
@@ -693,9 +708,23 @@ function matchesReportRowFilters(row: ReportRow, report: ReportDefinition, filte
       case "contains":
         return String(actual ?? "").toLowerCase().includes(String(expected).toLowerCase());
       case "gte":
-        return compareValues(actual, expected) >= 0;
+        return compareValues(actual, scalarReportFilterValue(expected)) >= 0;
       case "lte":
-        return compareValues(actual, expected) <= 0;
+        return compareValues(actual, scalarReportFilterValue(expected)) <= 0;
+      case "between": {
+        if (actual === undefined || actual === null) {
+          return false;
+        }
+        const [minimum, maximum] = rangeFilterValues(expected);
+        return compareValues(actual, minimum) >= 0 && compareValues(actual, maximum) <= 0;
+      }
+      case "not_between": {
+        if (actual === undefined || actual === null) {
+          return false;
+        }
+        const [minimum, maximum] = rangeFilterValues(expected);
+        return compareValues(actual, minimum) < 0 || compareValues(actual, maximum) > 0;
+      }
     }
   });
 }
@@ -1048,33 +1077,79 @@ function groupLabel(value: JsonPrimitive): string {
   return value === null ? "(empty)" : String(value);
 }
 
-function coerceFilterValue(value: JsonPrimitive | undefined, type: FieldType | undefined, filterName: string): JsonPrimitive | undefined {
+function coerceFilterValue(
+  value: ReportFilterValue | undefined,
+  type: FieldType | undefined,
+  filterName: string,
+  operator: ReportFilterOperator
+): ReportFilterValue | undefined {
   if (value === undefined || value === null || value === "") {
     return value;
   }
+  if (operator === "between" || operator === "not_between") {
+    if (!isReportFilterArray(value) || value.length !== 2) {
+      throw badRequest(`Report filter '${filterName}' must include exactly two values for ${operator}`);
+    }
+    const minimum = value[0];
+    const maximum = value[1];
+    if (minimum === undefined || maximum === undefined) {
+      throw badRequest(`Report filter '${filterName}' must include exactly two values for ${operator}`);
+    }
+    return [
+      coerceRangeFilterEndpoint(minimum, type, filterName),
+      coerceRangeFilterEndpoint(maximum, type, filterName)
+    ];
+  }
+  if (Array.isArray(value)) {
+    throw badRequest(`Report filter '${filterName}' must be scalar`);
+  }
+  const scalar = scalarReportFilterValue(value);
   if (type === "integer") {
-    const parsed = numericFilterValue(value, filterName, "an integer");
+    const parsed = numericFilterValue(scalar, filterName, "an integer");
     if (!Number.isInteger(parsed)) {
       throw badRequest(`Report filter '${filterName}' must be an integer`);
     }
     return parsed;
   }
   if (type === "number") {
-    return numericFilterValue(value, filterName, "a number");
+    return numericFilterValue(scalar, filterName, "a number");
   }
   if (type === "boolean") {
-    if (typeof value === "boolean") {
-      return value;
+    if (typeof scalar === "boolean") {
+      return scalar;
     }
-    if (value === "true" || value === "1" || value === "on") {
+    if (scalar === "true" || scalar === "1" || scalar === "on") {
       return true;
     }
-    if (value === "false" || value === "0" || value === "off") {
+    if (scalar === "false" || scalar === "0" || scalar === "off") {
       return false;
     }
     throw badRequest(`Report filter '${filterName}' must be a boolean`);
   }
-  return typeof value === "string" ? value : String(value);
+  return typeof scalar === "string" ? scalar : String(scalar);
+}
+
+function coerceRangeFilterEndpoint(
+  value: JsonPrimitive,
+  type: FieldType | undefined,
+  filterName: string
+): JsonPrimitive {
+  if (value === null) {
+    throw badRequest(`Report filter '${filterName}' range values cannot be null`);
+  }
+  if (typeof value === "string" && value.trim() === "") {
+    throw badRequest(`Report filter '${filterName}' range values cannot be empty`);
+  }
+  if (type === "date" || type === "datetime") {
+    if (typeof value !== "string") {
+      throw badRequest(`Report filter '${filterName}' range values must be strings`);
+    }
+    return value;
+  }
+  if (typeof value === "boolean") {
+    throw badRequest(`Report filter '${filterName}' range values cannot be boolean`);
+  }
+  return coerceFilterValue(value, type, filterName, "eq") as JsonPrimitive;
 }
 
 function numericFilterValue(value: JsonPrimitive, filterName: string, expectedType: "an integer" | "a number"): number {
@@ -1083,6 +1158,33 @@ function numericFilterValue(value: JsonPrimitive, filterName: string, expectedTy
     throw badRequest(`Report filter '${filterName}' must be ${expectedType}`);
   }
   return parsed;
+}
+
+function isEmptyReportFilterValue(value: ReportFilterValue | undefined): value is undefined | null | "" {
+  return value === undefined || value === null || value === "";
+}
+
+function rangeFilterValues(value: ReportFilterValue): readonly [JsonPrimitive, JsonPrimitive] {
+  if (!isReportFilterArray(value) || value.length !== 2) {
+    throw badRequest("Report range filter must include exactly two values");
+  }
+  const minimum = value[0];
+  const maximum = value[1];
+  if (minimum === undefined || maximum === undefined) {
+    throw badRequest("Report range filter must include exactly two values");
+  }
+  return [minimum, maximum];
+}
+
+function scalarReportFilterValue(value: ReportFilterValue): JsonPrimitive {
+  if (isReportFilterArray(value)) {
+    throw badRequest("Report filter must be scalar");
+  }
+  return value;
+}
+
+function isReportFilterArray(value: ReportFilterValue): value is readonly JsonPrimitive[] {
+  return Array.isArray(value);
 }
 
 function compareValues(actual: JsonValue | undefined, expected: JsonPrimitive): number {

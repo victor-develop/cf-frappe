@@ -74,6 +74,22 @@ describe("reports", () => {
     });
   });
 
+  it("freezes report filter range defaults", () => {
+    const defaultValue = [2, 8];
+    const report = defineReport({
+      name: "Range Defaults",
+      doctype: "Note",
+      columns: [{ name: "title" }],
+      filters: [{ name: "count_range", field: "count", operator: "between", defaultValue }]
+    });
+    const rangeDefault = report.filters?.[0]?.defaultValue;
+
+    defaultValue[0] = 1;
+
+    expect(rangeDefault).toEqual([2, 8]);
+    expect(Object.isFrozen(rangeDefault)).toBe(true);
+  });
+
   it("validates report summary and group fields against the DocType", () => {
     const Note = defineDocType({
       name: "Note",
@@ -214,11 +230,25 @@ describe("reports", () => {
             name: "Broken Filter Operator",
             doctype: "Note",
             columns: [{ name: "title" }],
-            filters: [{ name: "title_filter", field: "title", operator: "between" as "eq" }]
+            filters: [{ name: "title_filter", field: "title", operator: "unknown" as "eq" }]
           }
         ]
       })
-    ).toThrow("Report 'Broken Filter Operator' filter 'title_filter' has invalid operator 'between'");
+    ).toThrow("Report 'Broken Filter Operator' filter 'title_filter' has invalid operator 'unknown'");
+
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        reports: [
+          {
+            name: "Broken Filter Range Operator",
+            doctype: "Note",
+            columns: [{ name: "title" }],
+            filters: [{ name: "title_filter", field: "title", operator: "not_between" }]
+          }
+        ]
+      })
+    ).toThrow("Report 'Broken Filter Range Operator' filter 'title_filter' does not support not_between");
 
     expect(() =>
       createRegistry({

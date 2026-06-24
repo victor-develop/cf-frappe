@@ -197,7 +197,7 @@ function filterValue(value: Record<string, unknown>): ReportFilterDefinition {
     ...optionalFieldType(value),
     ...optionalStringField(value, "operator"),
     ...(value.required === undefined ? {} : { required: booleanValue(value.required, "Saved report filter required must be a boolean") }),
-    ...(value.defaultValue === undefined ? {} : { defaultValue: jsonPrimitiveValue(value.defaultValue, "Saved report filter defaultValue must be scalar") })
+    ...(value.defaultValue === undefined ? {} : { defaultValue: reportFilterValue(value.defaultValue, "Saved report filter defaultValue must be scalar or a scalar array") })
   };
 }
 
@@ -329,6 +329,18 @@ function integerValue(value: unknown, message: string): number {
 
 function jsonPrimitiveValue(value: unknown, message: string): JsonPrimitive {
   if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  throw badRequest(message);
+}
+
+function reportFilterValue(value: unknown, message: string): Exclude<ReportFilterDefinition["defaultValue"], undefined> {
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  if (Array.isArray(value) && value.every((item) =>
+    item === null || typeof item === "string" || typeof item === "number" || typeof item === "boolean"
+  )) {
     return value;
   }
   throw badRequest(message);

@@ -92,6 +92,63 @@ describe("report api", () => {
     });
   });
 
+  it("runs reports with repeated range query-string filters", async () => {
+    const { app, services } = makeApp();
+    services.registry.registerReport(
+      defineReport({
+        name: "Outside Count Notes",
+        doctype: "Note",
+        columns: [{ name: "title" }, { name: "count" }],
+        filters: [{ name: "outside_count", field: "count", operator: "not_between" }],
+        roles: ["User"]
+      })
+    );
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "HTTP Report Low", priority: "Low", count: 1 }) });
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "HTTP Report Middle", priority: "Medium", count: 5 }) });
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "HTTP Report High", priority: "High", count: 9 }) });
+
+    const response = await app.request(
+      "/api/report/Outside%20Count%20Notes/run?filter_outside_count=2&filter_outside_count=8",
+      { headers: userHeaders }
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      filters: [{ name: "outside_count", operator: "not_between", value: [2, 8] }],
+      rows: [
+        { title: "HTTP Report Low", count: 1 },
+        { title: "HTTP Report High", count: 9 }
+      ],
+      total: 2
+    });
+  });
+
+  it("rejects malformed repeated range query-string filters", async () => {
+    const { app, services } = makeApp();
+    services.registry.registerReport(
+      defineReport({
+        name: "Malformed Count Range",
+        doctype: "Note",
+        columns: [{ name: "title" }, { name: "count" }],
+        filters: [{ name: "count_range", field: "count", operator: "between" }],
+        roles: ["User"]
+      })
+    );
+
+    const response = await app.request(
+      "/api/report/Malformed%20Count%20Range/run?filter_count_range=2&filter_count_range=8&filter_count_range=10",
+      { headers: userHeaders }
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "BAD_REQUEST",
+        message: "Report filter 'count_range' must include exactly two values for between"
+      }
+    });
+  });
+
   it("returns report chart controls through the JSON API", async () => {
     const { app, services } = makeApp();
     services.registry.registerReport(
