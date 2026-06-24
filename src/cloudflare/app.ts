@@ -1,5 +1,6 @@
 import { AuditService } from "../application/audit-service.js";
 import { CustomFieldService } from "../application/custom-field-service.js";
+import { DashboardService } from "../application/dashboard-service.js";
 import {
   DATA_PATCH_APPLY_JOB_NAME,
   DATA_PATCH_ROLLBACK_JOB_NAME,
@@ -90,6 +91,7 @@ export interface CloudFrappeRuntimeServices {
   readonly prints: PrintService;
   readonly queries: QueryService;
   readonly reports: ReportService;
+  readonly dashboards: DashboardService;
   readonly roles: RoleService;
   readonly savedReports: SavedReportService;
   readonly dataPatches?: DataPatchAdminPort;
@@ -323,6 +325,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   });
   const prints = new PrintService({ registry: options.registry, queries: restrictedQueries, printSettings });
   const reports = new ReportService({ registry: options.registry, queries: restrictedQueries });
+  const dashboards = new DashboardService({ registry: options.registry, queries: restrictedQueries, reports });
   const roles = new RoleService({
     events,
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
@@ -348,6 +351,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     prints,
     queries: restrictedQueries,
     reports,
+    dashboards,
     roles,
     savedReports
   };
@@ -462,6 +466,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     userPermissions,
     customFields,
     reports,
+    dashboards,
     roles,
     actor,
     ...(options.maxJsonBytes ? { maxJsonBytes: options.maxJsonBytes } : {}),

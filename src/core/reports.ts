@@ -1,4 +1,4 @@
-import { FrameworkError } from "./errors.js";
+import { FrameworkError, type FrameworkErrorCode } from "./errors.js";
 import type { Actor, DocTypeDefinition, FieldDefinition, FieldType, JsonPrimitive, PermissionAction } from "./types.js";
 import { SYSTEM_MANAGER_ROLE } from "./types.js";
 
@@ -191,6 +191,114 @@ export function canReadReport(actor: Actor, report: ReportDefinition): boolean {
     return true;
   }
   return report.roles === undefined || report.roles.some((role) => actor.roles.includes(role));
+}
+
+export function assertReportFilterValues(
+  report: ReportDefinition,
+  doctype: DocTypeDefinition,
+  filters: Readonly<Record<string, unknown>>,
+  options: {
+    readonly context?: string;
+    readonly code?: FrameworkErrorCode;
+  } = {}
+): void {
+  const code = options.code ?? "REPORT_INVALID";
+  const context = options.context ?? `Report '${report.name}' filters`;
+  const filtersByName = new Map((report.filters ?? []).map((filter) => [filter.name, filter]));
+  const fieldsByName = new Map(doctype.fields.map((field) => [field.name, field]));
+
+  for (const filterName of Object.keys(filters)) {
+    if (!filtersByName.has(filterName)) {
+      throw new FrameworkError(
+        code,
+        `${context} references unknown filter '${filterName}' on report '${report.name}'`,
+        { status: 400 }
+      );
+    }
+  }
+
+  for (const filter of report.filters ?? []) {
+    const value = Object.prototype.hasOwnProperty.call(filters, filter.name)
+      ? filters[filter.name]
+      : filter.defaultValue;
+    const type = filter.type ?? fieldsByName.get(filter.field)?.type;
+    if (filter.required && (value === undefined || value === null || value === "")) {
+      throw new FrameworkError(
+        code,
+        `${context} is missing required filter '${filter.name}' on report '${report.name}'`,
+        { status: 400 }
+      );
+    }
+    assertReportFilterValue(report, filter.name, value, type, context, code);
+  }
+}
+
+function assertReportFilterValue(
+  report: ReportDefinition,
+  filterName: string,
+  value: unknown,
+  type: FieldType | undefined,
+  context: string,
+  code: FrameworkErrorCode
+): void {
+  if (value === undefined || value === null || value === "") {
+    return;
+  }
+  if (!isJsonPrimitive(value)) {
+    throw new FrameworkError(
+      code,
+      `${context} filter '${filterName}' on report '${report.name}' must be a JSON primitive`,
+      { status: 400 }
+    );
+  }
+  if (type === "integer") {
+    const parsed = numericReportFilterValue(value);
+    if (!Number.isInteger(parsed)) {
+      throw new FrameworkError(
+        code,
+        `${context} filter '${filterName}' on report '${report.name}' must be an integer`,
+        { status: 400 }
+      );
+    }
+    return;
+  }
+  if (type === "number") {
+    if (!Number.isFinite(numericReportFilterValue(value))) {
+      throw new FrameworkError(
+        code,
+        `${context} filter '${filterName}' on report '${report.name}' must be a number`,
+        { status: 400 }
+      );
+    }
+    return;
+  }
+  if (type === "boolean" && !isBooleanReportFilterValue(value)) {
+    throw new FrameworkError(
+      code,
+      `${context} filter '${filterName}' on report '${report.name}' must be a boolean`,
+      { status: 400 }
+    );
+  }
+}
+
+function numericReportFilterValue(value: JsonPrimitive): number {
+  return typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+}
+
+function isBooleanReportFilterValue(value: JsonPrimitive): boolean {
+  return (
+    typeof value === "boolean" ||
+    value === "true" ||
+    value === "1" ||
+    value === "on" ||
+    value === "false" ||
+    value === "0" ||
+    value === "off"
+  );
+}
+
+function isJsonPrimitive(value: unknown): value is JsonPrimitive {
+  return value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean";
 }
 
 export function isReportChartColor(value: string): boolean {

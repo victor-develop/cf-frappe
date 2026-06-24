@@ -174,6 +174,11 @@ interface DeskClientRuntime {
     readonly retry: (patchId: string) => Promise<unknown>;
     readonly status: () => Promise<unknown>;
   };
+  readonly dashboard: {
+    readonly get: (dashboard: string) => Promise<unknown>;
+    readonly list: () => Promise<unknown>;
+    readonly run: (dashboard: string) => Promise<unknown>;
+  };
   readonly jobs: {
     readonly createSchedule: (input: Record<string, unknown>) => Promise<unknown>;
     readonly dashboard: (options?: Record<string, unknown>) => Promise<unknown>;
@@ -518,6 +523,31 @@ describe("Desk client runtime", () => {
 
     expect(calls[0]?.url).toBe("/api/search?q=launch+plan&limit=5&tenant=acme");
     expect(calls[0]?.init.credentials).toBe("same-origin");
+  });
+
+  it("wraps metadata dashboard APIs", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { route: String(url) } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.dashboard.list()).resolves.toEqual({ route: "/api/meta/dashboards" });
+    await expect(runtime.dashboard.get("Operations Board")).resolves.toEqual({
+      route: "/api/meta/dashboards/Operations%20Board"
+    });
+    await expect(runtime.dashboard.run("Operations Board")).resolves.toEqual({
+      route: "/api/dashboard/Operations%20Board/run"
+    });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/meta/dashboards",
+      "GET /api/meta/dashboards/Operations%20Board",
+      "GET /api/dashboard/Operations%20Board/run"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin"]);
   });
 
   it("wraps selected-document bulk resource APIs with encoded JSON requests", async () => {

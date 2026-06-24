@@ -7,6 +7,7 @@ import type {
   DataPatchRollbackRetryQueuePort
 } from "../../application/data-patch-jobs.js";
 import type { DataPatchAdminPort } from "../../application/data-patch-service.js";
+import type { DashboardService } from "../../application/dashboard-service.js";
 import type { DocumentShareService } from "../../application/document-share-service.js";
 import type { BulkDocumentSelection, DocumentCommandExecutor } from "../../application/document-service.js";
 import type { DocumentHistoryService } from "../../application/document-history-service.js";
@@ -43,6 +44,7 @@ import type { ActorResolver } from "./actor.js";
 import { createAuthApi, type AuthSessionOptions } from "./auth-api.js";
 import { createAuditApi } from "./audit-api.js";
 import { createCustomFieldApi } from "./custom-field-api.js";
+import { createDashboardApi } from "./dashboard-api.js";
 import { createDataPatchApi } from "./data-patch-api.js";
 import { toErrorResponse } from "./errors.js";
 import { createFileApi } from "./file-api.js";
@@ -75,6 +77,7 @@ export interface ResourceApiOptions {
   readonly savedReports?: SavedReportService;
   readonly audit?: AuditService;
   readonly dataPatches?: DataPatchAdminPort;
+  readonly dashboards?: DashboardService;
   readonly dataPatchQueue?: DataPatchQueuePort;
   readonly dataPatchRollbackQueue?: DataPatchRollbackQueuePort;
   readonly dataPatchRollbackRetryQueue?: DataPatchRollbackRetryQueuePort;
@@ -220,6 +223,16 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
         actor: resolveActor,
         maxJsonBytes,
         ...(options.maxFileBytes === undefined ? {} : { maxFileBytes: options.maxFileBytes })
+      })
+    );
+  }
+
+  if (options.dashboards) {
+    app.route(
+      "/",
+      createDashboardApi({
+        dashboards: options.dashboards,
+        actor: resolveActor
       })
     );
   }

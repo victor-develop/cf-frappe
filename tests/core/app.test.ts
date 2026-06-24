@@ -1,6 +1,7 @@
 import {
   createRegistry,
   createRegistryFromApps,
+  defineDashboard,
   defineApp,
   defineClientScript,
   defineDataPatch,
@@ -61,7 +62,7 @@ describe("app manifests", () => {
     expect(registry.hooksFor("Task")).toEqual([coreHook, auditHook]);
   });
 
-  it("carries print, report, workspace, and letterhead metadata from apps", () => {
+  it("carries print, report, dashboard, workspace, and letterhead metadata from apps", () => {
     const Note = defineDocType({ name: "Note", fields: [{ name: "title", type: "text" }] });
     const letterhead = definePrintLetterhead({ name: "Standard", headerHtml: "<strong>Acme</strong>" });
     const printFormat = definePrintFormat({
@@ -70,7 +71,12 @@ describe("app manifests", () => {
       letterhead: "Standard",
       sections: [{ fields: [{ field: "title" }] }]
     });
-    const report = defineReport({ name: "All Notes", doctype: "Note", columns: [{ name: "title" }] });
+    const report = defineReport({
+      name: "All Notes",
+      doctype: "Note",
+      columns: [{ name: "title" }],
+      summaries: [{ name: "note_count", aggregate: "count" }]
+    });
     const workspace = defineWorkspace({
       name: "Operations",
       sections: [
@@ -83,6 +89,10 @@ describe("app manifests", () => {
         }
       ]
     });
+    const dashboard = defineDashboard({
+      name: "Operations Dashboard",
+      cards: [{ name: "all_notes", source: { kind: "reportSummary", report: "All Notes", summary: "note_count" } }]
+    });
     const clientScript = defineClientScript({ name: "note-form", doctype: "Note", src: "/assets/note-form.js" });
 
     const registry = createRegistryFromApps([
@@ -92,6 +102,7 @@ describe("app manifests", () => {
         letterheads: [letterhead],
         printFormats: [printFormat],
         reports: [report],
+        dashboards: [dashboard],
         workspaces: [workspace],
         clientScripts: [clientScript]
       })
@@ -100,6 +111,7 @@ describe("app manifests", () => {
     expect(registry.getPrintLetterhead("Standard")).toBe(letterhead);
     expect(registry.getPrintFormat("Note Standard")).toBe(printFormat);
     expect(registry.getReport("All Notes")).toBe(report);
+    expect(registry.getDashboard("Operations Dashboard")).toEqual(dashboard);
     expect(registry.getWorkspace("Operations")).toEqual(workspace);
     expect(registry.listClientScripts("Note")).toEqual([clientScript]);
   });
@@ -141,6 +153,12 @@ describe("app manifests", () => {
       name: "notes",
       modules: ["Notes"],
       doctypes: [defineDocType({ name: "Note", fields: [] })],
+      dashboards: [
+        defineDashboard({
+          name: "Operations",
+          cards: [{ name: "notes", source: { kind: "documentCount", doctype: "Note" } }]
+        })
+      ],
       workspaces: [
         defineWorkspace({
           name: "Operations",
@@ -155,6 +173,7 @@ describe("app manifests", () => {
 
     expect(options.apps).toEqual([{ name: "notes", modules: ["Notes"], dependencies: [] }]);
     expect(options.doctypes?.map((doctype) => doctype.name)).toEqual(["Note"]);
+    expect(options.dashboards?.map((dashboard) => dashboard.name)).toEqual(["Operations"]);
     expect(options.workspaces?.map((workspace) => workspace.name)).toEqual(["Operations"]);
     expect(options.clientScripts?.map((script) => script.name)).toEqual(["note-form"]);
     expect(options.hooks?.Note).toEqual([hook]);

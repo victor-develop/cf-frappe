@@ -3,11 +3,13 @@ import { resolveAppDependencyOrder } from "./app-graph.js";
 import { clientScriptAppliesTo, defineClientScript } from "./client-script.js";
 import type { ClientScriptDefinition, ClientScriptScope } from "./client-script.js";
 import { assertDataPatchId, defineDataPatch, type DataPatchDefinition } from "./data-patch.js";
+import { assertDashboardDefinition, defineDashboard, type DashboardDefinition } from "./dashboard.js";
 import { FrameworkError } from "./errors.js";
+import { normalizeListFilters } from "./list-view.js";
 import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-format.js";
 import { assertPrintFormatMatchesDocType, assertPrintLetterheadValid } from "./print-format.js";
 import type { ReportDefinition } from "./reports.js";
-import { assertReportDefinition, assertReportMatchesDocType } from "./reports.js";
+import { assertReportDefinition, assertReportFilterValues, assertReportMatchesDocType } from "./reports.js";
 import type { InstalledAppDefinition } from "./app.js";
 import { assertWorkspaceDefinition, defineWorkspace, type WorkspaceDefinition } from "./workspace.js";
 import type {
@@ -44,6 +46,7 @@ export interface RegistryOptions {
   readonly letterheads?: readonly PrintLetterheadDefinition[];
   readonly printFormats?: readonly PrintFormatDefinition[];
   readonly reports?: readonly ReportDefinition[];
+  readonly dashboards?: readonly DashboardDefinition[];
   readonly workspaces?: readonly WorkspaceDefinition[];
   readonly clientScripts?: readonly ClientScriptDefinition[];
   readonly dataPatches?: readonly DataPatchDefinition[];
@@ -56,6 +59,7 @@ export class ModelRegistry {
   private readonly letterheads = new Map<string, PrintLetterheadDefinition>();
   private readonly printFormats = new Map<string, PrintFormatDefinition>();
   private readonly reports = new Map<string, ReportDefinition>();
+  private readonly dashboards = new Map<string, DashboardDefinition>();
   private readonly workspaces = new Map<string, WorkspaceDefinition>();
   private readonly clientScripts = new Map<string, ClientScriptDefinition>();
   private readonly dataPatches = new Map<string, DataPatchDefinition>();
@@ -74,6 +78,9 @@ export class ModelRegistry {
     }
     for (const report of options.reports ?? []) {
       this.registerReport(report);
+    }
+    for (const dashboard of options.dashboards ?? []) {
+      this.registerDashboard(dashboard);
     }
     for (const format of options.printFormats ?? []) {
       this.registerPrintFormat(format);
@@ -238,6 +245,18 @@ export class ModelRegistry {
     this.dataPatches.set(definition.id, definition);
   }
 
+  registerDashboard(dashboard: DashboardDefinition): void {
+    const definition = defineDashboard(dashboard);
+    if (this.dashboards.has(definition.name)) {
+      throw new FrameworkError("DASHBOARD_DUPLICATE", `Dashboard '${definition.name}' is already registered`, {
+        status: 409
+      });
+    }
+    assertDashboardDefinition(definition);
+    this.assertDashboardReferencesResolve(definition);
+    this.dashboards.set(definition.name, definition);
+  }
+
   registerWorkspace(workspace: WorkspaceDefinition): void {
     const definition = defineWorkspace(workspace);
     if (this.workspaces.has(definition.name)) {
@@ -293,6 +312,20 @@ export class ModelRegistry {
 
   listReports(): readonly ReportDefinition[] {
     return [...this.reports.values()].sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  getDashboard(dashboardName: string): DashboardDefinition {
+    const definition = this.dashboards.get(dashboardName);
+    if (!definition) {
+      throw new FrameworkError("DASHBOARD_NOT_FOUND", `Dashboard '${dashboardName}' is not registered`, {
+        status: 404
+      });
+    }
+    return definition;
+  }
+
+  listDashboards(): readonly DashboardDefinition[] {
+    return [...this.dashboards.values()].sort((left, right) => left.name.localeCompare(right.name));
   }
 
   getPrintFormat(formatName: string): PrintFormatDefinition {
@@ -373,6 +406,43 @@ export class ModelRegistry {
           );
         }
       }
+    }
+  }
+
+  private assertDashboardReferencesResolve(dashboard: DashboardDefinition): void {
+    for (const card of dashboard.cards) {
+      const source = card.source;
+      if (source.kind === "documentCount") {
+        const doctype = this.doctypes.get(source.doctype);
+        if (!doctype) {
+          throw new FrameworkError(
+            "DASHBOARD_INVALID",
+            `Dashboard '${dashboard.name}' card '${card.name}' references unknown DocType '${source.doctype}'`,
+            { status: 400 }
+          );
+        }
+        normalizeListFilters(doctype, source.filters ?? []);
+        continue;
+      }
+      const report = this.reports.get(source.report);
+      if (!report) {
+        throw new FrameworkError(
+          "DASHBOARD_INVALID",
+          `Dashboard '${dashboard.name}' card '${card.name}' references unknown report '${source.report}'`,
+          { status: 400 }
+        );
+      }
+      if (!(report.summaries ?? []).some((summary) => summary.name === source.summary)) {
+        throw new FrameworkError(
+          "DASHBOARD_INVALID",
+          `Dashboard '${dashboard.name}' card '${card.name}' references unknown summary '${source.summary}' on report '${source.report}'`,
+          { status: 400 }
+        );
+      }
+      assertReportFilterValues(report, this.get(report.doctype), source.filters ?? {}, {
+        code: "DASHBOARD_INVALID",
+        context: `Dashboard '${dashboard.name}' card '${card.name}' filters`
+      });
     }
   }
 }

@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the metadata global-search slice:
+As of the metadata dashboard slice:
 
-- Vitest files: `76`
-- Vitest cases: `852`
+- Vitest files: `79`
+- Vitest cases: `860`
 
 ## Implication
 

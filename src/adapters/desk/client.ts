@@ -165,6 +165,14 @@ export function renderDeskClientScript(): string {
     return "/api/data-patches" + (patchId === undefined ? "" : "/" + encodePart(patchId)) + (action === undefined ? "" : "/" + action);
   }
 
+  function dashboardPath(dashboard, action) {
+    return (dashboard === undefined ? "/api/meta/dashboards" : "/api/dashboard/" + encodePart(dashboard)) + (action === undefined ? "" : "/" + action);
+  }
+
+  function dashboardMetaPath(dashboard) {
+    return "/api/meta/dashboards" + (dashboard === undefined ? "" : "/" + encodePart(dashboard));
+  }
+
   function reportBuilderPath(doctype, id, action) {
     return "/api/report-builder/" + encodePart(doctype) + (id === undefined ? "" : "/" + encodePart(id)) + (action === undefined ? "" : "/" + action);
   }
@@ -1399,6 +1407,17 @@ export function renderDeskClientScript(): string {
       },
       status: function () {
         return request(dataPatchPath()).then(unwrapData);
+      }
+    }),
+    dashboard: Object.freeze({
+      get: function (dashboard) {
+        return request(dashboardMetaPath(dashboard)).then(unwrapData);
+      },
+      list: function () {
+        return request(dashboardMetaPath()).then(unwrapData);
+      },
+      run: function (dashboard) {
+        return request(dashboardPath(dashboard, "run")).then(unwrapData);
       }
     }),
     jobs: Object.freeze({
