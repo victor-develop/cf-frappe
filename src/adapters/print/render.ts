@@ -1,4 +1,5 @@
 import type { PrintDocumentView, PrintFieldView } from "../../application/print-service.js";
+import type { ReportRunResult } from "../../application/report-service.js";
 import {
   parsePrintTemplatePath,
   substitutePrintTemplate,
@@ -49,6 +50,64 @@ export function renderPrintDocument(view: PrintDocumentView): string {
 </html>`;
 }
 
+export function renderPrintReport(result: ReportRunResult, options: { readonly title?: string } = {}): string {
+  const title = options.title ?? result.report.label ?? result.report.name;
+  const filters = result.filters.filter((filter) => filter.value !== undefined && filter.value !== "");
+  const filterSection = filters.length > 0
+    ? `<section class="print-section report-print-filters">
+        <h2>Applied Filters</h2>
+        <dl>${filters.map(renderReportFilter).join("")}</dl>
+      </section>`
+    : "";
+  const summarySection = result.summary.length > 0
+    ? `<section class="print-section report-print-summary">
+        <h2>Summary</h2>
+        <dl>${result.summary.map(renderReportSummaryValue).join("")}</dl>
+      </section>`
+    : "";
+  const groups = result.groups.map(renderReportGroup).join("");
+  const headers = result.columns.map((column) => `<th>${escapeHtml(column.label ?? column.name)}</th>`).join("");
+  const rows = result.rows
+    .map(
+      (row) =>
+        `<tr>${result.columns
+          .map((column) => `<td>${escapeHtml(formatValue(row[column.name]))}</td>`)
+          .join("")}</tr>`
+    )
+    .join("");
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(title)} - Report</title>
+  <style>${printCss()}</style>
+</head>
+<body>
+  <main class="print-page report-print-page">
+    <header class="print-header">
+      <p>${escapeHtml(result.report.doctype)}</p>
+      <h1>${escapeHtml(title)}</h1>
+      <span>${String(result.total)} total rows</span>
+    </header>
+    ${filterSection}
+    ${summarySection}
+    ${groups}
+    <section class="print-section report-print-rows">
+      <h2>Rows</h2>
+      <div class="print-table-wrap">
+        <table>
+          <thead><tr>${headers}</tr></thead>
+          <tbody>${rows || `<tr><td colspan="${String(result.columns.length)}">No rows matched.</td></tr>`}</tbody>
+        </table>
+      </div>
+    </section>
+    <footer class="print-footer">Showing ${String(result.rows.length)} of ${String(result.total)} rows</footer>
+  </main>
+</body>
+</html>`;
+}
+
 function renderField(field: PrintFieldView): string {
   return `<div class="print-field">
     <dt>${escapeHtml(field.label)}</dt>
@@ -56,14 +115,57 @@ function renderField(field: PrintFieldView): string {
   </div>`;
 }
 
-function formatValue(value: JsonValue): string {
-  if (value === null) {
+function renderReportFilter(filter: ReportRunResult["filters"][number]): string {
+  return `<div class="print-field"><dt>${escapeHtml(reportFilterLabel(filter))}</dt><dd>${escapeHtml(formatValue(filter.value))}</dd></div>`;
+}
+
+function renderReportSummaryValue(summary: ReportRunResult["summary"][number]): string {
+  return `<div class="print-field"><dt>${escapeHtml(summary.label)}</dt><dd>${escapeHtml(formatValue(summary.value))}</dd></div>`;
+}
+
+function renderReportGroup(group: ReportRunResult["groups"][number]): string {
+  const summaryHeaders = (group.rows[0]?.summaries ?? [])
+    .map((summary) => `<th>${escapeHtml(summary.label)}</th>`)
+    .join("");
+  const rows = group.rows
+    .map(
+      (row) =>
+        `<tr><td>${escapeHtml(row.label)}</td>${row.summaries
+          .map((summary) => `<td>${escapeHtml(formatValue(summary.value))}</td>`)
+          .join("")}</tr>`
+    )
+    .join("");
+  return `<section class="print-section report-print-group">
+    <h2>${escapeHtml(group.label)}</h2>
+    <div class="print-table-wrap">
+      <table>
+        <thead><tr><th>${escapeHtml(group.field)}</th>${summaryHeaders}</tr></thead>
+        <tbody>${rows || `<tr><td colspan="2">No rows matched.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+function formatValue(value: JsonValue | undefined): string {
+  if (value === undefined || value === null) {
     return "";
   }
   if (typeof value === "object") {
     return JSON.stringify(value);
   }
   return String(value);
+}
+
+function reportFilterLabel(filter: ReportRunResult["filters"][number]): string {
+  return filter.label === filter.name || filter.label === filter.field ? humanizeIdentifier(filter.label) : filter.label;
+}
+
+function humanizeIdentifier(value: string): string {
+  return value
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function renderTemplate(template: string, view: PrintDocumentView): string {
@@ -196,10 +298,29 @@ dt {
   text-transform: uppercase;
 }
 dd { margin: 4px 0 0; white-space: pre-wrap; }
+.print-table-wrap { overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12px;
+}
+th, td {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+th {
+  color: var(--muted);
+  font-weight: 700;
+  text-transform: uppercase;
+}
 .print-footer { padding-top: 18px; font-size: 12px; }
 @media print {
   body { background: #fff; }
   .print-page { width: auto; min-height: 0; margin: 0; padding: 0; border: 0; }
+  .print-table-wrap { overflow: visible; }
 }
 @media (max-width: 640px) {
   .print-page { padding: 24px; }

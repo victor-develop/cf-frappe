@@ -77,7 +77,7 @@ import type { ActorResolver } from "../http/actor.js";
 import { listFiltersFromUrl, parseOptionalInteger, readBoundedText } from "../http/request.js";
 import { writeReportCsvHeaders } from "../http/report-export.js";
 import { reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request.js";
-import { renderPrintDocument } from "../print/index.js";
+import { renderPrintDocument, renderPrintReport } from "../print/index.js";
 import { DESK_CLIENT_SCRIPT_PATH, renderDeskClientScript } from "./client.js";
 import {
   deskReportFieldLabel,
@@ -1155,6 +1155,25 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     return c.body(csv.body);
   });
 
+  app.get("/desk/report-builder/:doctype/:id/print", async (c) => {
+    const savedReports = requireSavedReports(options);
+    const actor = await options.actor(c.req.raw);
+    const url = new URL(c.req.url);
+    const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
+    const saved = await savedReports.get(actor, doctype.name, c.req.param("id"));
+    const result = await savedReports.run({
+      actor,
+      doctype: doctype.name,
+      id: saved.id,
+      options: {
+        filters: reportFiltersFromUrl(url),
+        ...reportOrderingFromUrl(url),
+        limit: 100
+      }
+    });
+    return html(renderPrintReport(result, { title: saved.label }));
+  });
+
   app.post("/desk/report-builder/:doctype/:id/delete", async (c) => {
     const savedReports = requireSavedReports(options);
     const actor = await options.actor(c.req.raw);
@@ -1186,6 +1205,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       }
     });
     const base = `/desk/report-builder/${encodeURIComponent(doctype.name)}/${encodeURIComponent(saved.id)}`;
+    const printHref = `${base}/print${url.search}`;
     return html(
       renderDeskLayoutFor(options, {
         title: saved.label,
@@ -1197,11 +1217,26 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         body: renderSavedReportView(saved, result, {
           listHref: `/desk/report-builder/${encodeURIComponent(doctype.name)}`,
           exportHref: `${base}/export.csv${url.search}`,
+          printHref,
           deleteAction: `${base}/delete`,
           drilldownBaseHref: `${base}${url.search}`
         })
       })
     );
+  });
+
+  app.get("/desk/reports/:report/print", async (c) => {
+    if (!options.reports) {
+      throw new FrameworkError("REPORT_NOT_FOUND", "Reports are not enabled", { status: 404 });
+    }
+    const actor = await options.actor(c.req.raw);
+    const url = new URL(c.req.url);
+    const result = await options.reports.runReport(actor, c.req.param("report"), {
+      filters: reportFiltersFromUrl(url),
+      ...reportOrderingFromUrl(url),
+      limit: 100
+    });
+    return html(renderPrintReport(result));
   });
 
   app.get("/desk/reports/:report", async (c) => {
@@ -1218,6 +1253,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       limit: 100
     });
     const exportHref = `/desk/reports/${encodeURIComponent(result.report.name)}/export.csv${url.search}`;
+    const printHref = `/desk/reports/${encodeURIComponent(result.report.name)}/print${url.search}`;
     const drilldownBaseHref = `/desk/reports/${encodeURIComponent(result.report.name)}${url.search}`;
     return html(
       renderDeskLayoutFor(options, {
@@ -1226,7 +1262,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         activeReport: result.report.name,
         doctypes,
         reports,
-        body: renderReportView(result, { exportHref, drilldownBaseHref })
+        body: renderReportView(result, { exportHref, printHref, drilldownBaseHref })
       })
     );
   });

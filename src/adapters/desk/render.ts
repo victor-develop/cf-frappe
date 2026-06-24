@@ -727,6 +727,7 @@ export function renderSavedReportView(
   options: {
     readonly listHref: string;
     readonly exportHref: string;
+    readonly printHref?: string;
     readonly deleteAction: string;
     readonly drilldownBaseHref?: string;
   }
@@ -734,6 +735,7 @@ export function renderSavedReportView(
   return `<section class="toolbar saved-report-toolbar">
     <a class="button" href="${escapeHtml(options.listHref)}">Back</a>
     <a class="button" href="${escapeHtml(options.exportHref)}">Export CSV</a>
+    ${options.printHref ? `<a class="button" href="${escapeHtml(options.printHref)}">Print</a>` : ""}
     <form class="inline-action" method="post" action="${escapeHtml(options.deleteAction)}">
       <button class="button danger" type="submit">Delete</button>
     </form>
@@ -748,6 +750,7 @@ export function renderSavedReportView(
   </section>
   ${renderReportView(result, {
     exportHref: options.exportHref,
+    ...(options.printHref === undefined ? {} : { printHref: options.printHref }),
     ...(options.drilldownBaseHref === undefined ? {} : { drilldownBaseHref: options.drilldownBaseHref })
   })}`;
 }
@@ -1544,7 +1547,7 @@ function dynamicScheduleFields(schedule: JobScheduleDashboard["schedules"][numbe
 
 export function renderReportView(
   result: ReportRunResult,
-  options: { readonly exportHref?: string; readonly drilldownBaseHref?: string } = {}
+  options: { readonly exportHref?: string; readonly printHref?: string; readonly drilldownBaseHref?: string } = {}
 ): string {
   const filterForm = result.filters.map(renderReportFilterControl).join("");
   const orderForm = renderReportOrderControls(result.order);
@@ -1561,7 +1564,11 @@ export function renderReportView(
   const exportAction = options.exportHref
     ? `<a class="button" href="${escapeHtml(options.exportHref)}">Export CSV</a>`
     : "";
-  return `${controls ? `<form class="panel form report-filters" method="get"><div class="fields">${controls}</div><div class="actions"><button class="button primary" type="submit">Run</button>${exportAction}</div></form>` : exportAction ? `<section class="toolbar">${exportAction}</section>` : ""}
+  const printAction = options.printHref
+    ? `<a class="button" href="${escapeHtml(options.printHref)}">Print</a>`
+    : "";
+  const actions = `${exportAction}${printAction}`;
+  return `${controls ? `<form class="panel form report-filters" method="get"><div class="fields">${controls}</div><div class="actions"><button class="button primary" type="submit">Run</button>${actions}</div></form>` : actions ? `<section class="toolbar">${actions}</section>` : ""}
   ${renderReportSummary(result.summary)}
   ${renderReportCharts(result.charts, options.drilldownBaseHref)}
   ${renderReportGroups(result.groups)}

@@ -449,6 +449,7 @@ describe("Desk app", () => {
       '<a class="chart-drilldown" href="/desk/reports/Open%20Notes?filter_priority=High&amp;order_by=title&amp;order=desc"><g>'
     );
     expect(html).toContain("/desk/reports/Open%20Notes/export.csv?filter_priority=High&amp;order_by=title&amp;order=desc");
+    expect(html).toContain("/desk/reports/Open%20Notes/print?filter_priority=High&amp;order_by=title&amp;order=desc");
 
     const csv = await app.request("/desk/reports/Open%20Notes/export.csv?filter_priority=High&order_by=title&order=desc");
     expect(csv.status).toBe(200);
@@ -457,6 +458,16 @@ describe("Desk app", () => {
     expect(csv.headers.get("x-cf-frappe-exported")).toBe("2");
     expect(csv.headers.get("x-cf-frappe-export-truncated")).toBe("false");
     await expect(csv.text()).resolves.toBe("Title,Priority,Body\nReport Note,High,For reporting\nAlpha Report,High,Earlier title");
+
+    const printable = await app.request("/desk/reports/Open%20Notes/print?filter_priority=High&order_by=title&order=desc");
+    expect(printable.status).toBe(200);
+    const printHtml = await printable.text();
+    expect(printHtml).toContain('<main class="print-page report-print-page">');
+    expect(printHtml).toContain("<h1>Open Notes</h1>");
+    expect(printHtml).toContain("<dt>Priority</dt><dd>High</dd>");
+    expect(printHtml).toContain("<th>Title</th><th>Priority</th><th>Body</th>");
+    expect(printHtml).toContain("<td>Report Note</td>");
+    expect(printHtml.indexOf("Report Note")).toBeLessThan(printHtml.indexOf("Alpha Report"));
   });
 
   it("builds, runs, exports, and deletes saved reports in Desk", async () => {
@@ -569,6 +580,7 @@ describe("Desk app", () => {
       '<a class="chart-drilldown" href="/desk/report-builder/Note/report_saved-report-1?filter_priority=High&amp;order_by=count&amp;order=desc"><g>'
     );
     expect(html).toContain("/desk/report-builder/Note/report_saved-report-1/export.csv?filter_priority=High&amp;order_by=count&amp;order=desc");
+    expect(html).toContain("/desk/report-builder/Note/report_saved-report-1/print?filter_priority=High&amp;order_by=count&amp;order=desc");
     expect(html).toContain('action="/desk/report-builder/Note/report_saved-report-1/delete"');
     await expect(services.savedReports.get(owner, "Note", "report_saved-report-1")).resolves.toMatchObject({
       definition: {
@@ -598,6 +610,16 @@ describe("Desk app", () => {
     expect(csv.status).toBe(200);
     expect(csv.headers.get("content-disposition")).toBe('attachment; filename="Saved-Report-report_saved-report-1.csv"');
     await expect(csv.text()).resolves.toBe("title,count,Double Count\nHigh Count B,7,14\nHigh Count A,3,6");
+
+    const printable = await app.request(
+      "/desk/report-builder/Note/report_saved-report-1/print?filter_priority=High&order_by=count&order=desc"
+    );
+    expect(printable.status).toBe(200);
+    const printHtml = await printable.text();
+    expect(printHtml).toContain("<h1>High count desk report</h1>");
+    expect(printHtml).toContain("<dt>Priority</dt><dd>High</dd>");
+    expect(printHtml).toContain("<th>title</th><th>count</th><th>Double Count</th>");
+    expect(printHtml).toContain("<td>High Count B</td><td>7</td><td>14</td>");
 
     const deleted = await app.request("/desk/report-builder/Note/report_saved-report-1/delete", {
       method: "POST"

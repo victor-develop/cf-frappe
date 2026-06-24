@@ -20,7 +20,7 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk report-builder filter preset controls slice:
+As of the Desk report printouts slice:
 
 - Vitest files: `75`
 - Vitest cases: `816`
