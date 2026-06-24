@@ -19,6 +19,7 @@ import {
   DocumentService,
   fileDocType,
   FileService,
+  FieldPropertyService,
   fixedClock,
   createJobRegistry,
   InMemoryEventStore,
@@ -279,6 +280,49 @@ describe("Desk app", () => {
       actor: () => actor
     });
     return { app, services: { ...services, documents, queries, workflows } };
+  }
+
+  function makeFieldPropertyDesk(actor = owner) {
+    const services = createServices(["base-1", "base-2"]);
+    const fieldProperties = new FieldPropertyService({
+      registry: services.registry,
+      events: services.store,
+      ids: deterministicIds(["property-1", "property-2"]),
+      clock: fixedClock(now)
+    });
+    const doctypeResolver = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
+      fieldProperties.effectiveDocType(base.name, context.tenantId, base);
+    const documents = new DocumentService({
+      registry: services.registry,
+      store: services.store,
+      doctypeResolver,
+      documentShares: services.documentShares,
+      userPermissions: services.userPermissions,
+      ids: deterministicIds(["property-doc-1", "property-doc-2"]),
+      clock: fixedClock(now)
+    });
+    const queries = new QueryService({
+      registry: services.registry,
+      projections: services.store,
+      doctypeResolver,
+      documentShares: services.documentShares,
+      userPermissions: services.userPermissions
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents,
+      prints: services.prints,
+      queries,
+      documentShares: services.documentShares,
+      reports: services.reports,
+      timeline: services.history,
+      savedFilters: services.savedFilters,
+      savedReports: services.savedReports,
+      fieldProperties,
+      userPermissions: services.userPermissions,
+      actor: () => actor
+    });
+    return { app, services: { ...services, documents, queries, fieldProperties } };
   }
 
   function makeChildTableCustomFieldDesk(actor = owner) {
@@ -3187,6 +3231,69 @@ describe("Desk app", () => {
     expect((await services.workflows.list(admin, "Note")).workflow).toBeUndefined();
   });
 
+  it("renders and mutates field property overrides from the Desk admin surface", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"] };
+    const { app, services } = makeFieldPropertyDesk(admin);
+
+    const empty = await app.request("/desk/admin/field-properties?doctype=Note&field=priority");
+    expect(empty.status).toBe(200);
+    const emptyHtml = await empty.text();
+    expect(emptyHtml).toContain("Field Properties");
+    expect(emptyHtml).toContain('name="field"');
+    expect(emptyHtml).toContain("No field property overrides configured.");
+
+    const created = await app.request("/desk/admin/field-properties", {
+      method: "POST",
+      body: new URLSearchParams({
+        doctype: "Note",
+        fieldName: "priority",
+        label: "Urgency",
+        inListFilter: "true",
+        options: "Low, High",
+        defaultValue: JSON.stringify("High"),
+        expectedVersion: "0"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(created.status).toBe(303);
+    expect(created.headers.get("location")).toBe("/desk/admin/field-properties?doctype=Note&field=priority");
+    await expect(services.fieldProperties.list(admin, "Note")).resolves.toMatchObject({
+      version: 1,
+      fields: [{ fieldName: "priority", overrides: { label: "Urgency", inListFilter: true, options: ["Low", "High"] } }]
+    });
+
+    const current = await app.request("/desk/admin/field-properties?doctype=Note&field=priority");
+    expect(current.status).toBe(200);
+    const currentHtml = await current.text();
+    expect(currentHtml).toContain("Urgency");
+    expect(currentHtml).toContain("options: Low, High");
+    expect(currentHtml).toContain('formaction="/desk/admin/field-properties/Note/priority/clear"');
+    expect(currentHtml).toContain('name="expectedVersion" value="1"');
+
+    const stale = await app.request("/desk/admin/field-properties", {
+      method: "POST",
+      body: new URLSearchParams({
+        doctype: "Note",
+        fieldName: "body",
+        label: "Details",
+        expectedVersion: "0"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(stale.status).toBe(409);
+    const staleHtml = await stale.text();
+    expect(staleHtml).toContain("Expected field property overrides at version 0, found 1");
+    expect(staleHtml).toContain("Urgency");
+
+    const cleared = await app.request("/desk/admin/field-properties/Note/priority/clear", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(cleared.status).toBe(303);
+    await expect(services.fieldProperties.list(admin, "Note")).resolves.toMatchObject({ version: 2, fields: [] });
+  });
+
   it("applies custom fields to generated Desk forms and lists", async () => {
     const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"] };
     const { app, services } = makeCustomFieldDesk(admin);
@@ -4297,6 +4404,7 @@ describe("Desk app", () => {
       patches: [defineDataPatch({ id: "core.seed", checksum: "v1", run: () => undefined })]
     });
     const customFields = new CustomFieldService({ registry: services.registry, events: services.store });
+    const fieldProperties = new FieldPropertyService({ registry: services.registry, events: services.store });
     const workflows = new WorkflowService({ registry: services.registry, events: services.store });
     const app = createDeskApp({
       registry: services.registry,
@@ -4305,6 +4413,7 @@ describe("Desk app", () => {
       userPermissions: services.userPermissions,
       roles: new RoleService({ events: services.store }),
       customFields,
+      fieldProperties,
       workflows,
       printSettings: services.printSettings,
       dataPatches,
@@ -4324,6 +4433,7 @@ describe("Desk app", () => {
     expect(homeHtml).toContain('href="/desk/admin/user-permissions"');
     expect(homeHtml).toContain('href="/desk/admin/roles"');
     expect(homeHtml).toContain('href="/desk/admin/custom-fields"');
+    expect(homeHtml).toContain('href="/desk/admin/field-properties"');
     expect(homeHtml).toContain('href="/desk/admin/workflows"');
     expect(homeHtml).toContain('href="/desk/admin/print-settings"');
     expect(homeHtml).toContain('href="/desk/admin/data-patches"');

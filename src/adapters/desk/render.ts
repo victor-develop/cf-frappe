@@ -26,6 +26,7 @@ import type {
   DocumentTimeline
 } from "../../application/document-history-service.js";
 import type { CustomFieldState } from "../../core/custom-fields.js";
+import type { FieldPropertyOverrideState } from "../../core/field-property-overrides.js";
 import type { WorkflowDefinitionState } from "../../core/workflow.js";
 import type { DocumentSharePermission, DocumentShareState } from "../../core/document-shares.js";
 import type { FileDashboard } from "../../application/file-service.js";
@@ -1379,6 +1380,76 @@ export function renderCustomFieldAdmin(state: CustomFieldAdminState): string {
   </section>`;
 }
 
+export interface FieldPropertyAdminState {
+  readonly doctypes: readonly DocTypeDefinition[];
+  readonly selectedDoctype: string;
+  readonly selectedField: string;
+  readonly doctype?: DocTypeDefinition;
+  readonly state?: FieldPropertyOverrideState;
+  readonly error?: string;
+}
+
+export function renderFieldPropertyAdmin(state: FieldPropertyAdminState): string {
+  const doctype = state.doctype ?? state.doctypes.find((item) => item.name === state.selectedDoctype);
+  const selectedField = state.selectedField || doctype?.fields[0]?.name || "";
+  const version = state.state?.version ?? 0;
+  const current = state.state?.fields.find((entry) => entry.fieldName === selectedField);
+  const overrides = current?.overrides ?? {};
+  const rows = state.state?.fields
+    .map((entry) => `<tr>
+      <td>${escapeHtml(entry.fieldName)}</td>
+      <td>${escapeHtml(renderFieldPropertyOverrides(entry.overrides))}</td>
+      <td>${escapeHtml(entry.updatedAt)}</td>
+      <td>
+        <form class="inline-action" method="post" action="/desk/admin/field-properties/${encodeURIComponent(state.selectedDoctype)}/${encodeURIComponent(entry.fieldName)}/clear">
+          <input type="hidden" name="expectedVersion" value="${String(version)}">
+          <button class="button danger" type="submit">Clear</button>
+        </form>
+      </td>
+    </tr>`)
+    .join("");
+  return `<form class="panel form" method="get" action="/desk/admin/field-properties">
+    <div class="fields">
+      <label class="field"><span>DocType</span><select name="doctype">${renderCustomFieldDoctypeOptions(state.doctypes, state.selectedDoctype)}</select></label>
+      <label class="field"><span>Field</span><select name="field">${renderFieldPropertyFieldOptions(doctype, selectedField)}</select></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Load</button></div>
+  </form>
+  ${state.error ? `<p class="error" role="alert">${escapeHtml(state.error)}</p>` : ""}
+  <form class="panel form" method="post" action="/desk/admin/field-properties">
+    <input type="hidden" name="doctype" value="${escapeHtml(state.selectedDoctype)}">
+    <input type="hidden" name="fieldName" value="${escapeHtml(selectedField)}">
+    <input type="hidden" name="expectedVersion" value="${String(version)}">
+    <div class="form-head"><h2>Field Properties</h2><p>v${String(version)}</p></div>
+    <div class="fields">
+      <label class="field"><span>Label</span><input name="label" value="${escapeHtml(overrides.label ?? "")}"></label>
+      <label class="field"><span>Required</span><select name="required">${renderBooleanOverrideOptions(overrides.required)}</select></label>
+      <label class="field"><span>Read Only</span><select name="readOnly">${renderBooleanOverrideOptions(overrides.readOnly)}</select></label>
+      <label class="field"><span>Hidden</span><select name="hidden">${renderBooleanOverrideOptions(overrides.hidden)}</select></label>
+      <label class="field"><span>Form View</span><select name="inFormView">${renderBooleanOverrideOptions(overrides.inFormView)}</select></label>
+      <label class="field"><span>Global Search</span><select name="inGlobalSearch">${renderBooleanOverrideOptions(overrides.inGlobalSearch)}</select></label>
+      <label class="field"><span>List View</span><select name="inListView">${renderBooleanOverrideOptions(overrides.inListView)}</select></label>
+      <label class="field"><span>List Filter</span><select name="inListFilter">${renderBooleanOverrideOptions(overrides.inListFilter)}</select></label>
+      <label class="field"><span>Options</span><input name="options" value="${escapeHtml((overrides.options ?? []).join(", "))}"></label>
+      <label class="field"><span>Minimum</span><input name="min" type="number" step="any" value="${escapeHtml(overrides.min === undefined ? "" : String(overrides.min))}"></label>
+      <label class="field"><span>Maximum</span><input name="max" type="number" step="any" value="${escapeHtml(overrides.max === undefined ? "" : String(overrides.max))}"></label>
+      <label class="field"><span>Default JSON</span><textarea name="defaultValue">${escapeHtml(overrides.defaultValue === undefined ? "" : JSON.stringify(overrides.defaultValue))}</textarea></label>
+    </div>
+    <div class="actions">
+      <button class="button primary" type="submit">Save Properties</button>
+      ${current ? `<button class="button danger" type="submit" formaction="/desk/admin/field-properties/${encodeURIComponent(state.selectedDoctype)}/${encodeURIComponent(selectedField)}/clear">Clear Override</button>` : ""}
+    </div>
+  </form>
+  <section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Field</th><th>Overrides</th><th>Updated</th><th>Actions</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="4" class="empty">No field property overrides configured.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
 export interface WorkflowAdminState {
   readonly doctypes: readonly DocTypeDefinition[];
   readonly selectedDoctype: string;
@@ -1510,6 +1581,40 @@ function renderCustomFieldDoctypeOptions(doctypes: readonly DocTypeDefinition[],
   return doctypes
     .map((doctype) => `<option value="${escapeHtml(doctype.name)}"${doctype.name === selectedDoctype ? " selected" : ""}>${escapeHtml(doctype.label ?? doctype.name)}</option>`)
     .join("");
+}
+
+function renderFieldPropertyFieldOptions(doctype: DocTypeDefinition | undefined, selectedField: string): string {
+  return (doctype?.fields ?? [])
+    .map(
+      (field) =>
+        `<option value="${escapeHtml(field.name)}"${field.name === selectedField ? " selected" : ""}>${escapeHtml(field.label ?? field.name)}</option>`
+    )
+    .join("");
+}
+
+function renderBooleanOverrideOptions(value: boolean | undefined): string {
+  return [
+    `<option value=""${value === undefined ? " selected" : ""}>Inherit</option>`,
+    `<option value="true"${value === true ? " selected" : ""}>True</option>`,
+    `<option value="false"${value === false ? " selected" : ""}>False</option>`
+  ].join("");
+}
+
+function renderFieldPropertyOverrides(overrides: FieldPropertyOverrideState["fields"][number]["overrides"]): string {
+  return [
+    overrides.label === undefined ? "" : `label: ${overrides.label}`,
+    overrides.required === undefined ? "" : `required: ${String(overrides.required)}`,
+    overrides.readOnly === undefined ? "" : `read only: ${String(overrides.readOnly)}`,
+    overrides.hidden === undefined ? "" : `hidden: ${String(overrides.hidden)}`,
+    overrides.inFormView === undefined ? "" : `form: ${String(overrides.inFormView)}`,
+    overrides.inGlobalSearch === undefined ? "" : `search: ${String(overrides.inGlobalSearch)}`,
+    overrides.inListView === undefined ? "" : `list: ${String(overrides.inListView)}`,
+    overrides.inListFilter === undefined ? "" : `filter: ${String(overrides.inListFilter)}`,
+    overrides.options === undefined ? "" : `options: ${overrides.options.join(", ")}`,
+    overrides.min === undefined ? "" : `min: ${String(overrides.min)}`,
+    overrides.max === undefined ? "" : `max: ${String(overrides.max)}`,
+    overrides.defaultValue === undefined ? "" : `default: ${JSON.stringify(overrides.defaultValue)}`
+  ].filter(Boolean).join("; ");
 }
 
 function renderWorkflowDoctypeOptions(doctypes: readonly DocTypeDefinition[], selectedDoctype: string): string {

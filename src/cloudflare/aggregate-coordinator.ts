@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { CustomFieldService } from "../application/custom-field-service.js";
 import { DocumentShareService } from "../application/document-share-service.js";
 import { DocumentService, bulkDocumentFailure } from "../application/document-service.js";
+import { FieldPropertyService } from "../application/field-property-service.js";
 import { WorkflowService } from "../application/workflow-service.js";
 import type { BulkDocumentCommandFailure } from "../application/document-service.js";
 import { UserPermissionService } from "../application/user-permission-service.js";
@@ -107,8 +108,15 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
         registry: options.registry,
         events
       });
-      const preWorkflowDocType = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
+      const prePropertyDocType = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
         customFields.effectiveDocType(base.name, context.tenantId);
+      const fieldProperties = new FieldPropertyService({
+        registry: options.registry,
+        events,
+        prePropertyDocTypeResolver: prePropertyDocType
+      });
+      const preWorkflowDocType = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
+        fieldProperties.effectiveDocType(base.name, context.tenantId);
       const workflows = new WorkflowService({
         registry: options.registry,
         events,

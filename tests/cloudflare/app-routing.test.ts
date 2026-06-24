@@ -185,6 +185,46 @@ describe("CloudFrappe Worker routing", () => {
     });
   });
 
+  it("mounts field property routes and applies them to Worker metadata", async () => {
+    const worker = createCloudFrappeWorker({
+      registry: createRegistry({ doctypes: [noteDocType] }),
+      actor: () => ({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"], tenantId: "acme" })
+    });
+    const env = {
+      DB: fakeEventD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const saved = await worker.fetch!(
+      cfRequest("http://localhost/api/field-properties/Note/priority", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          expectedVersion: 0,
+          overrides: {
+            label: "Urgency",
+            options: ["Low", "High"],
+            defaultValue: "High"
+          }
+        })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(saved.status).toBe(200);
+
+    const meta = await worker.fetch!(cfRequest("http://localhost/api/meta/doctypes/Note"), env, fakeExecutionContext());
+
+    expect(meta.status).toBe(200);
+    await expect(meta.json()).resolves.toMatchObject({
+      data: {
+        fields: expect.arrayContaining([
+          expect.objectContaining({ name: "priority", label: "Urgency", options: ["Low", "High"] })
+        ])
+      }
+    });
+  });
+
   it("mounts durable user notification inbox routes on the Worker API", async () => {
     const worker = createCloudFrappeWorker({
       registry: createTestRegistry(),

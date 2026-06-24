@@ -17,6 +17,7 @@ import type {
 import type { DocumentShareService } from "../../application/document-share-service.js";
 import type { DocumentCommandExecutor } from "../../application/document-service.js";
 import type { DocumentHistoryService } from "../../application/document-history-service.js";
+import type { FieldPropertyService } from "../../application/field-property-service.js";
 import type {
   FileDashboard,
   FileDashboardQuery,
@@ -76,6 +77,7 @@ import {
   type DocumentData,
   type DocumentSnapshot,
   type FieldDefinition,
+  type FieldPropertyOverrides,
   type FieldType,
   type JsonPrimitive,
   type JsonValue,
@@ -116,6 +118,7 @@ import {
   renderErrorPanel,
   renderFileAttachmentPanel,
   renderFileManager,
+  renderFieldPropertyAdmin,
   renderDataPatchAdmin,
   renderCustomFieldAdmin,
   renderDocumentPresencePanel,
@@ -196,6 +199,7 @@ export interface DeskAppOptions {
   readonly savedReports?: SavedReportService;
   readonly roles?: RoleService;
   readonly customFields?: CustomFieldService;
+  readonly fieldProperties?: FieldPropertyService;
   readonly workflows?: WorkflowService;
   readonly userAccounts?: UserAccountService;
   readonly notifications?: UserNotificationService;
@@ -582,6 +586,19 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const selectedDoctype = url.searchParams.get("doctype")?.trim() || doctypes[0]?.name || "";
     const state = selectedDoctype ? await customFields.list(actor, selectedDoctype) : undefined;
     return renderDeskCustomFieldPage(options, actor, selectedDoctype, state);
+  });
+
+  app.get("/desk/admin/field-properties", async (c) => {
+    const fieldProperties = requireFieldProperties(options);
+    const actor = await options.actor(c.req.raw);
+    fieldProperties.authorizeAdministration(actor);
+    const url = new URL(c.req.url);
+    const doctypes = options.queries.listDoctypes(actor);
+    const selectedDoctype = url.searchParams.get("doctype")?.trim() || doctypes[0]?.name || "";
+    const doctype = selectedDoctype ? await options.queries.getEffectiveMeta(actor, selectedDoctype) : undefined;
+    const selectedField = url.searchParams.get("field")?.trim() || doctype?.fields[0]?.name || "";
+    const state = selectedDoctype ? await fieldProperties.list(actor, selectedDoctype) : undefined;
+    return renderDeskFieldPropertyPage(options, actor, selectedDoctype, selectedField, doctype, state);
   });
 
   app.get("/desk/admin/workflows", async (c) => {
@@ -1247,6 +1264,46 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       return c.redirect(customFieldAdminHref(c.req.param("doctype")), 303);
     } catch (error) {
       return renderDeskCustomFieldFailure(options, actor, customFields, c.req.param("doctype"), error);
+    }
+  });
+
+  app.post("/desk/admin/field-properties", async (c) => {
+    const fieldProperties = requireFieldProperties(options);
+    const actor = await options.actor(c.req.raw);
+    fieldProperties.authorizeAdministration(actor);
+    let form: ParsedDeskFieldPropertyOverride | undefined;
+    try {
+      form = await parseDeskFieldPropertyOverride(c.req.raw);
+      await fieldProperties.save({
+        actor,
+        doctype: form.doctype,
+        fieldName: form.fieldName,
+        overrides: form.overrides,
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(fieldPropertyAdminHref(form.doctype, form.fieldName), 303);
+    } catch (error) {
+      return renderDeskFieldPropertyFailure(options, actor, fieldProperties, form?.doctype ?? "", form?.fieldName ?? "", error);
+    }
+  });
+
+  app.post("/desk/admin/field-properties/:doctype/:field/clear", async (c) => {
+    const fieldProperties = requireFieldProperties(options);
+    const actor = await options.actor(c.req.raw);
+    fieldProperties.authorizeAdministration(actor);
+    try {
+      const form = await parseDeskFieldPropertyOverrideClear(c.req.raw);
+      await fieldProperties.clear({
+        actor,
+        doctype: c.req.param("doctype"),
+        fieldName: c.req.param("field"),
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(fieldPropertyAdminHref(c.req.param("doctype"), c.req.param("field")), 303);
+    } catch (error) {
+      return renderDeskFieldPropertyFailure(options, actor, fieldProperties, c.req.param("doctype"), c.req.param("field"), error);
     }
   });
 
@@ -2311,6 +2368,9 @@ function adminLinksFor(options: DeskAppOptions, actor: Actor): readonly DeskNavL
     ...(options.customFields === undefined
       ? []
       : [{ id: "custom-fields", label: "Custom Fields", href: "/desk/admin/custom-fields" }]),
+    ...(options.fieldProperties === undefined
+      ? []
+      : [{ id: "field-properties", label: "Field Properties", href: "/desk/admin/field-properties" }]),
     ...(options.workflows === undefined
       ? []
       : [{ id: "workflows", label: "Workflows", href: "/desk/admin/workflows" }]),
@@ -2467,6 +2527,13 @@ function requireCustomFields(options: DeskAppOptions): CustomFieldService {
     throw new FrameworkError("DOCUMENT_NOT_FOUND", "Custom fields are not enabled", { status: 404 });
   }
   return options.customFields;
+}
+
+function requireFieldProperties(options: DeskAppOptions): FieldPropertyService {
+  if (!options.fieldProperties) {
+    throw new FrameworkError("DOCUMENT_NOT_FOUND", "Field properties are not enabled", { status: 404 });
+  }
+  return options.fieldProperties;
 }
 
 function requireWorkflows(options: DeskAppOptions): WorkflowService {
@@ -2975,6 +3042,74 @@ async function renderDeskCustomFieldFailure(
   );
 }
 
+async function renderDeskFieldPropertyPage(
+  options: DeskAppOptions,
+  actor: Actor,
+  selectedDoctype: string,
+  selectedField: string,
+  doctype: DocTypeDefinition | undefined,
+  state: Awaited<ReturnType<FieldPropertyService["list"]>> | undefined,
+  status = 200,
+  error?: string
+): Promise<Response> {
+  const doctypes = options.queries.listDoctypes(actor);
+  const reports = listReports(options, actor);
+  return html(
+    renderDeskLayoutFor(options, {
+      title: "Field Properties",
+      activeAdmin: "field-properties",
+      adminLinks: adminLinksFor(options, actor),
+      doctypes,
+      reports,
+      body: renderFieldPropertyAdmin({
+        doctypes,
+        selectedDoctype,
+        selectedField,
+        ...(doctype === undefined ? {} : { doctype }),
+        ...(state === undefined ? {} : { state }),
+        ...(error === undefined ? {} : { error })
+      })
+    }),
+    status
+  );
+}
+
+async function renderDeskFieldPropertyFailure(
+  options: DeskAppOptions,
+  actor: Actor,
+  fieldProperties: FieldPropertyService,
+  selectedDoctype: string,
+  selectedField: string,
+  error: unknown
+): Promise<Response> {
+  if (error instanceof FrameworkError && error.status === 403) {
+    throw error;
+  }
+  const fallbackDoctype = selectedDoctype || options.queries.listDoctypes(actor)[0]?.name || "";
+  let doctype: DocTypeDefinition | undefined;
+  let state: Awaited<ReturnType<FieldPropertyService["list"]>> | undefined;
+  try {
+    doctype = fallbackDoctype ? await options.queries.getEffectiveMeta(actor, fallbackDoctype) : undefined;
+    state = fallbackDoctype ? await fieldProperties.list(actor, fallbackDoctype) : undefined;
+  } catch (listError) {
+    if (!(listError instanceof FrameworkError && listError.status === 404)) {
+      throw listError;
+    }
+  }
+  const fallbackField = selectedField || doctype?.fields[0]?.name || "";
+  const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
+  return renderDeskFieldPropertyPage(
+    options,
+    actor,
+    fallbackDoctype,
+    fallbackField,
+    doctype,
+    state,
+    error instanceof FrameworkError ? error.status : 500,
+    message
+  );
+}
+
 async function renderDeskWorkflowPage(
   options: DeskAppOptions,
   actor: Actor,
@@ -3077,6 +3212,10 @@ async function renderDeskPrintSettingsFailure(
 
 function customFieldAdminHref(doctype: string): string {
   return `/desk/admin/custom-fields?doctype=${encodeURIComponent(doctype)}`;
+}
+
+function fieldPropertyAdminHref(doctype: string, fieldName: string): string {
+  return `/desk/admin/field-properties?doctype=${encodeURIComponent(doctype)}&field=${encodeURIComponent(fieldName)}`;
 }
 
 function workflowAdminHref(doctype: string): string {
@@ -3491,6 +3630,17 @@ interface ParsedDeskCustomField {
 }
 
 interface ParsedDeskCustomFieldDisable {
+  readonly expectedVersion?: number;
+}
+
+interface ParsedDeskFieldPropertyOverride {
+  readonly doctype: string;
+  readonly fieldName: string;
+  readonly overrides: FieldPropertyOverrides;
+  readonly expectedVersion?: number;
+}
+
+interface ParsedDeskFieldPropertyOverrideClear {
   readonly expectedVersion?: number;
 }
 
@@ -4136,6 +4286,43 @@ async function parseDeskCustomFieldDisable(request: Request): Promise<ParsedDesk
   };
 }
 
+async function parseDeskFieldPropertyOverride(request: Request): Promise<ParsedDeskFieldPropertyOverride> {
+  const form = await readUrlEncodedDeskForm(request);
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  const options = commaListFormValue(form.get("options"));
+  const defaultValue = optionalJsonSearchParamValue(form, "defaultValue", "Default value");
+  const overrides = {
+    ...optionalStringProperty(form, "label", "label"),
+    ...optionalBooleanProperty(form, "required", "required", "Required"),
+    ...optionalBooleanProperty(form, "readOnly", "readOnly", "Read only"),
+    ...optionalBooleanProperty(form, "hidden", "hidden", "Hidden"),
+    ...optionalBooleanProperty(form, "inFormView", "inFormView", "Form view"),
+    ...optionalBooleanProperty(form, "inGlobalSearch", "inGlobalSearch", "Global search"),
+    ...optionalBooleanProperty(form, "inListView", "inListView", "List view"),
+    ...optionalBooleanProperty(form, "inListFilter", "inListFilter", "List filter"),
+    ...(options.length === 0 ? {} : { options }),
+    ...optionalNumberProperty(form, "min", "min", "Minimum"),
+    ...optionalNumberProperty(form, "max", "max", "Maximum"),
+    ...(defaultValue === undefined ? {} : { defaultValue })
+  };
+  return {
+    doctype: requiredSearchParamValue(form, "doctype", "DocType"),
+    fieldName: requiredSearchParamValue(form, "fieldName", "Field"),
+    overrides,
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
+async function parseDeskFieldPropertyOverrideClear(
+  request: Request
+): Promise<ParsedDeskFieldPropertyOverrideClear> {
+  const form = await readUrlEncodedDeskForm(request);
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  return {
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
 async function parseDeskWorkflow(request: Request): Promise<ParsedDeskWorkflow> {
   const form = await readUrlEncodedDeskForm(request);
   const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
@@ -4404,6 +4591,35 @@ function optionalBooleanSearchParamValue(form: URLSearchParams, key: string, lab
     return false;
   }
   throw new FrameworkError("BAD_REQUEST", `${label} must be true or false`, { status: 400 });
+}
+
+function optionalStringProperty<TKey extends string>(
+  form: URLSearchParams,
+  key: string,
+  outputKey: TKey
+): { readonly [K in TKey]?: string } {
+  const value = stringSearchParamValue(form, key);
+  return value === undefined ? {} : { [outputKey]: value } as { readonly [K in TKey]: string };
+}
+
+function optionalBooleanProperty<TKey extends string>(
+  form: URLSearchParams,
+  key: string,
+  outputKey: TKey,
+  label: string
+): { readonly [K in TKey]?: boolean } {
+  const value = optionalBooleanSearchParamValue(form, key, label);
+  return value === undefined ? {} : { [outputKey]: value } as { readonly [K in TKey]: boolean };
+}
+
+function optionalNumberProperty<TKey extends string>(
+  form: URLSearchParams,
+  key: string,
+  outputKey: TKey,
+  label: string
+): { readonly [K in TKey]?: number } {
+  const value = optionalNumberSearchParamValue(form, key, label);
+  return value === undefined ? {} : { [outputKey]: value } as { readonly [K in TKey]: number };
 }
 
 function truthyDeskParam(value: string | null): boolean {

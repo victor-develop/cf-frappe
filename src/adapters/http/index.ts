@@ -7,6 +7,7 @@ export * from "./dashboard-api.js";
 export * from "./data-patch-api.js";
 export * from "./errors.js";
 export * from "./file-api.js";
+export * from "./field-property-api.js";
 export * from "./job-api.js";
 export * from "./notification-api.js";
 export * from "./print-api.js";

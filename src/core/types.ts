@@ -54,6 +54,21 @@ export interface PersistedFieldDefinition extends Omit<FieldDefinition, "default
   readonly defaultValue?: JsonValue;
 }
 
+export interface FieldPropertyOverrides {
+  readonly label?: string;
+  readonly required?: boolean;
+  readonly readOnly?: boolean;
+  readonly hidden?: boolean;
+  readonly inFormView?: boolean;
+  readonly inGlobalSearch?: boolean;
+  readonly inListView?: boolean;
+  readonly inListFilter?: boolean;
+  readonly options?: readonly string[];
+  readonly min?: number;
+  readonly max?: number;
+  readonly defaultValue?: JsonValue;
+}
+
 export type PermissionAction =
   | "read"
   | "rendition"
@@ -461,6 +476,17 @@ export type DocumentEventPayload =
     }
   | {
       readonly kind: "CustomFieldDisabled";
+      readonly doctypeName: DocTypeName;
+      readonly fieldName: string;
+    }
+  | {
+      readonly kind: "FieldPropertyOverrideSaved";
+      readonly doctypeName: DocTypeName;
+      readonly fieldName: string;
+      readonly overrides: FieldPropertyOverrides;
+    }
+  | {
+      readonly kind: "FieldPropertyOverrideCleared";
       readonly doctypeName: DocTypeName;
       readonly fieldName: string;
     }

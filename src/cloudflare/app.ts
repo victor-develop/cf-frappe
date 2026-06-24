@@ -19,6 +19,7 @@ import { JobRetryService } from "../application/job-retry-service.js";
 import { JobScheduleService } from "../application/job-schedule-service.js";
 import { DocumentHistoryService } from "../application/document-history-service.js";
 import { DocumentShareService } from "../application/document-share-service.js";
+import { FieldPropertyService } from "../application/field-property-service.js";
 import { PrintSettingsService } from "../application/print-settings-service.js";
 import { PrintService } from "../application/print-service.js";
 import { QueryService } from "../application/query-service.js";
@@ -97,6 +98,7 @@ export interface CloudFrappeRuntimeServices {
   readonly userProfiles?: UserProfileService;
   readonly userPermissions: UserPermissionService;
   readonly customFields: CustomFieldService;
+  readonly fieldProperties: FieldPropertyService;
   readonly workflows: WorkflowService;
   readonly printSettings: PrintSettingsService;
   readonly prints: PrintService;
@@ -297,8 +299,16 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     events,
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
   });
-  const preWorkflowDocType = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
+  const prePropertyDocType = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
     customFields.effectiveDocType(base.name, context.tenantId);
+  const fieldProperties = new FieldPropertyService({
+    registry: options.registry,
+    events,
+    ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles }),
+    prePropertyDocTypeResolver: prePropertyDocType
+  });
+  const preWorkflowDocType = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
+    fieldProperties.effectiveDocType(base.name, context.tenantId);
   const workflows = new WorkflowService({
     registry: options.registry,
     events,
@@ -379,6 +389,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(userProfiles === undefined ? {} : { userProfiles }),
     userPermissions,
     customFields,
+    fieldProperties,
     workflows,
     printSettings,
     prints,
@@ -498,6 +509,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(userAccounts === undefined || options.auth === undefined ? {} : { auth: authSessionOptions(options.auth, env) }),
     userPermissions,
     customFields,
+    fieldProperties,
     workflows,
     reports,
     dashboards,
@@ -532,6 +544,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(userProfiles === undefined ? {} : { userProfiles }),
     userPermissions,
     customFields,
+    fieldProperties,
     workflows,
     reports,
     dashboards,

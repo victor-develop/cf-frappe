@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the event-sourced runtime workflow definitions slice:
+As of the event-sourced field property override slice:
 
-- Vitest files: `82`
-- Vitest cases: `919`
+- Vitest files: `85`
+- Vitest cases: `931`
 
 ## Implication
 

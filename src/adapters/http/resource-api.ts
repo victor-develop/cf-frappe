@@ -12,6 +12,7 @@ import type { DocumentShareService } from "../../application/document-share-serv
 import type { BulkDocumentSelection, DocumentCommandExecutor } from "../../application/document-service.js";
 import type { DocumentHistoryService } from "../../application/document-history-service.js";
 import type { FileService } from "../../application/file-service.js";
+import type { FieldPropertyService } from "../../application/field-property-service.js";
 import type { JobHistoryService } from "../../application/job-history-service.js";
 import type { JobRetryPort } from "../../application/job-retry-service.js";
 import type { JobScheduleService } from "../../application/job-schedule-service.js";
@@ -49,6 +50,7 @@ import { createDashboardApi } from "./dashboard-api.js";
 import { createDataPatchApi } from "./data-patch-api.js";
 import { toErrorResponse } from "./errors.js";
 import { createFileApi } from "./file-api.js";
+import { createFieldPropertyApi } from "./field-property-api.js";
 import { createJobApi } from "./job-api.js";
 import { createNotificationApi } from "./notification-api.js";
 import { createPrintApi } from "./print-api.js";
@@ -93,6 +95,7 @@ export interface ResourceApiOptions {
   readonly auth?: AuthSessionOptions;
   readonly userPermissions?: UserPermissionService;
   readonly customFields?: CustomFieldService;
+  readonly fieldProperties?: FieldPropertyService;
   readonly workflows?: WorkflowService;
   readonly maxFileBytes?: number;
 }
@@ -347,6 +350,17 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       "/",
       createCustomFieldApi({
         customFields: options.customFields,
+        actor: resolveActor,
+        maxJsonBytes
+      })
+    );
+  }
+
+  if (options.fieldProperties) {
+    app.route(
+      "/",
+      createFieldPropertyApi({
+        fieldProperties: options.fieldProperties,
         actor: resolveActor,
         maxJsonBytes
       })

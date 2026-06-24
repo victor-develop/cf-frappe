@@ -28,6 +28,10 @@ export function workflowDefinitionsStream(tenantId: TenantId): StreamName {
   return documentStream(tenantId, "__Workflows", "definitions");
 }
 
+export function fieldPropertyOverridesStream(tenantId: TenantId): StreamName {
+  return documentStream(tenantId, "__FieldProperties", "overrides");
+}
+
 export function userPermissionsStream(tenantId: TenantId, userId: string): StreamName {
   return documentStream(tenantId, "__UserPermissions", userId);
 }
