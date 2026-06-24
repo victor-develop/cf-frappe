@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the dashboard metric drilldown slice:
+As of the metadata-aware list ordering slice:
 
 - Vitest files: `80`
-- Vitest cases: `866`
+- Vitest cases: `870`
 
 ## Implication
 

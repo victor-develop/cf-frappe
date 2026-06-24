@@ -2388,6 +2388,16 @@ describe("Desk app", () => {
     expect(advancedHtml).toContain('<option value="Low" selected>Low</option>');
     expect(advancedHtml).toContain('name="filter_count__gte" value="2"');
     expect(advancedHtml).toContain('name="filter_count__lte" value="8"');
+
+    const ordered = await app.request("/desk/Note?default_filters=0&order_by=count&order=asc");
+    expect(ordered.status).toBe(200);
+    const orderedHtml = await ordered.text();
+    expect(orderedHtml).toContain('<select id="list-order-by" name="order_by">');
+    expect(orderedHtml).toContain('<option value="count" selected>count</option>');
+    expect(orderedHtml).toContain('<select id="list-order" name="order">');
+    expect(orderedHtml).toContain('<option value="asc" selected>Ascending</option>');
+    expect(orderedHtml.indexOf("Desk Low")).toBeLessThan(orderedHtml.indexOf("Desk Closed High"));
+    expect(orderedHtml.indexOf("Desk Closed High")).toBeLessThan(orderedHtml.indexOf("Desk High"));
   });
 
   it("renders and submits generated list bulk document deletes", async () => {

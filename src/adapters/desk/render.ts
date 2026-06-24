@@ -2143,6 +2143,13 @@ export function renderListView(
       return field ? renderFilterControl(field, filters, control) : "";
     })
     .join("");
+  const orderForm = renderListOrderControls(listView);
+  const savedFilterControl = filterForm
+    ? `<label class="field" for="saved-filter-label"><span>Saved filter name</span><input id="saved-filter-label" name="saved_filter_label" type="text"></label>`
+    : "";
+  const saveFilterButton = filterForm
+    ? `<button class="button" type="submit" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/saved-filters">Save filter</button>`
+    : "";
   const savedFilterPanel = renderSavedFilters(doctype, options.savedFilters ?? [], options.selectedSavedFilterId);
   const header = fields.map((field) => `<th>${escapeHtml(field.label ?? field.name)}</th>`).join("");
   const bulkActions = options.bulkActions ?? [];
@@ -2169,7 +2176,7 @@ export function renderListView(
     ${hasBulkActions ? `<form id="${bulkActionFormId}" method="post" action="${escapeHtml(bulkActions[0]?.action ?? "")}"></form>${bulkActions.map((action) => renderListBulkActionButton(action, bulkActionFormId)).join("")}` : ""}
   </section>
   ${savedFilterPanel}
-  ${filterForm ? `<form class="panel form list-filters" method="get"><div class="fields">${filterForm}<label class="field" for="saved-filter-label"><span>Saved filter name</span><input id="saved-filter-label" name="saved_filter_label" type="text"></label></div><div class="actions"><button class="button primary" type="submit">Filter</button><button class="button" type="submit" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/saved-filters">Save filter</button><a class="button" href="/desk/${encodeURIComponent(doctype.name)}?default_filters=0">Clear</a></div></form>` : ""}
+  ${filterForm || orderForm ? `<form class="panel form list-filters" method="get"><div class="fields">${filterForm}${orderForm}${savedFilterControl}</div><div class="actions"><button class="button primary" type="submit">Filter</button>${saveFilterButton}<a class="button" href="/desk/${encodeURIComponent(doctype.name)}?default_filters=0">Clear</a></div></form>` : ""}
   <section class="panel">
     <div class="table-wrap">
       <table>
@@ -2179,6 +2186,29 @@ export function renderListView(
     </div>
   </section>
   ${renderClientScripts(doctype.name, "list", options.clientScripts ?? [], undefined, undefined, options.realtimeRoute)}`;
+}
+
+function renderListOrderControls(listView: ResolvedListView): string {
+  return `<label class="field" for="list-order-by"><span>Order By</span><select id="list-order-by" name="order_by">${renderListOrderOptions(listView)}</select></label>
+  <label class="field" for="list-order"><span>Direction</span><select id="list-order" name="order">${renderListOrderDirectionOptions(listView.order)}</select></label>`;
+}
+
+function renderListOrderOptions(listView: ResolvedListView): string {
+  return listView.orderOptions
+    .map(
+      (option) =>
+        `<option value="${escapeHtml(option.name)}"${option.name === listView.orderBy ? " selected" : ""}>${escapeHtml(option.label)}</option>`
+    )
+    .join("");
+}
+
+function renderListOrderDirectionOptions(order: ResolvedListView["order"]): string {
+  return [
+    { value: "desc", label: "Descending" },
+    { value: "asc", label: "Ascending" }
+  ]
+    .map((option) => `<option value="${option.value}"${option.value === order ? " selected" : ""}>${option.label}</option>`)
+    .join("");
 }
 
 function renderBulkDocumentActionCell(document: DocumentSnapshot, selectable: boolean, formId: string): string {

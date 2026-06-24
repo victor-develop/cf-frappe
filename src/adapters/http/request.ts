@@ -1,6 +1,12 @@
 import { badRequest } from "../../core/errors.js";
-import { LIST_FILTER_OPERATORS } from "../../core/list-view.js";
-import type { DocumentData, ListDocumentsFilter, ListFilterOperator, MutableDocumentData } from "../../core/types.js";
+import { LIST_FILTER_OPERATORS, isListOrderDirection } from "../../core/list-view.js";
+import type {
+  DocumentData,
+  ListDocumentsFilter,
+  ListDocumentsQuery,
+  ListFilterOperator,
+  MutableDocumentData
+} from "../../core/types.js";
 
 const SENSITIVE_QUERY_KEYS = new Set(["token", "password", "secret", "api_key", "apikey", "key"]);
 
@@ -37,6 +43,15 @@ export function listFiltersFromUrl(url: URL): readonly ListDocumentsFilter[] {
     });
   });
   return filters;
+}
+
+export function listOrderFromUrl(url: URL): Pick<ListDocumentsQuery, "orderBy" | "order"> {
+  const orderBy = nonEmptyQueryValue(url.searchParams.get("order_by"));
+  const order = nonEmptyQueryValue(url.searchParams.get("order"));
+  return {
+    ...(orderBy === undefined ? {} : { orderBy }),
+    ...(order === undefined ? {} : { order: parseListOrder(order) })
+  };
 }
 
 export async function readBoundedText(request: Request, maxBytes: number, errorMessage: string): Promise<string> {
@@ -122,6 +137,17 @@ function parseFilterKey(key: string): { readonly field: string; readonly operato
     }
   }
   return { field: raw, operator: "eq" };
+}
+
+function parseListOrder(value: string): NonNullable<ListDocumentsQuery["order"]> {
+  if (isListOrderDirection(value)) {
+    return value;
+  }
+  throw badRequest("List order must be asc or desc");
+}
+
+function nonEmptyQueryValue(value: string | null): string | undefined {
+  return value === null || value === "" ? undefined : value;
 }
 
 function redactedRequestUrl(value: string): string {

@@ -85,7 +85,7 @@ import {
 } from "../../core/types.js";
 import { fileContentHeaders } from "../file-content.js";
 import type { ActorResolver } from "../http/actor.js";
-import { listFiltersFromUrl, parseOptionalInteger, readBoundedText } from "../http/request.js";
+import { listFiltersFromUrl, listOrderFromUrl, parseOptionalInteger, readBoundedText } from "../http/request.js";
 import { writeReportCsvHeaders } from "../http/report-export.js";
 import { reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request.js";
 import {
@@ -1483,6 +1483,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctypes = await listDeskDoctypes(options, actor);
     const reports = listReports(options, actor);
     const filters = listFiltersFromUrl(url);
+    const order = listOrderFromUrl(url);
     const savedFilterId = url.searchParams.get("saved_filter") ?? undefined;
     const savedFilter = savedFilterId && options.savedFilters
       ? await options.savedFilters.get(actor, doctype.name, savedFilterId)
@@ -1492,6 +1493,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const offset = parseOptionalInteger(url.searchParams.get("offset") ?? undefined);
     const { listView, filters: effectiveFilters, result } = await options.queries.listDocumentsForView(actor, doctype.name, {
       filters: effectiveRequestedFilters,
+      ...order,
       useDefaultFilters: savedFilter ? false : url.searchParams.get("default_filters") !== "0",
       ...(limit !== undefined ? { limit } : {}),
       ...(offset !== undefined ? { offset } : {})

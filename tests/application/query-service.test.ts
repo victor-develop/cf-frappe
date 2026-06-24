@@ -103,6 +103,66 @@ describe("QueryService", () => {
     });
   });
 
+  it("orders list results through metadata-validated fields", async () => {
+    const Ticket = defineDocType({
+      name: "Ticket",
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "rank", type: "integer" },
+        { name: "secret_rank", type: "integer", hidden: true },
+        { name: "payload", type: "json" }
+      ],
+      listView: {
+        columns: ["title", "rank"],
+        orderBy: "rank",
+        order: "asc"
+      },
+      permissions: [{ roles: ["User"], actions: ["read"] }]
+    });
+    const projections = new InMemoryDocumentStore();
+    const queries = new QueryService({
+      registry: createRegistry({ doctypes: [Ticket] }),
+      projections
+    });
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Ticket",
+      name: "Later",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "Later", rank: 2 },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-02T00:00:00.000Z"
+    });
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Ticket",
+      name: "Sooner",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "Sooner", rank: 1 },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    });
+
+    const view = await queries.listDocumentsForView(owner, "Ticket");
+    expect(view.listView).toMatchObject({ orderBy: "rank", order: "asc" });
+    expect(view.result.data.map((document) => document.name)).toEqual(["Sooner", "Later"]);
+
+    const override = await queries.listDocumentsForView(owner, "Ticket", { orderBy: "name", order: "desc" });
+    expect(override.listView).toMatchObject({ orderBy: "name", order: "desc" });
+    expect(override.result.data.map((document) => document.name)).toEqual(["Sooner", "Later"]);
+
+    await expect(queries.listDocuments(owner, "Ticket", { orderBy: "payload" })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "List orderBy field 'payload' cannot be a json field"
+    });
+    await expect(queries.listDocuments(owner, "Ticket", { orderBy: "secret_rank" })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "List orderBy field 'secret_rank' is hidden on Ticket"
+    });
+  });
+
   it("lists readable link options for link fields", async () => {
     const { documents, queries } = createLinkedServices(["p1", "p2"]);
     await documents.create({ actor: owner, doctype: "Project", data: { title: "Apollo" } });

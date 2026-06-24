@@ -471,6 +471,7 @@ export type NewDomainEvent<TPayload extends DocumentEventPayload = DocumentEvent
 
 export type ListFilterOperator = "eq" | "ne" | "contains" | "gt" | "gte" | "lt" | "lte";
 export type ListFilterInputType = "text" | "number" | "date" | "datetime-local" | "select" | "boolean";
+export type ListOrderDirection = "asc" | "desc";
 
 export interface ListDocumentsFilter {
   readonly field: string;
@@ -498,6 +499,11 @@ export interface ListFilterBuilderField {
   readonly operators: readonly ListFilterOperatorOption[];
 }
 
+export interface ListOrderOption {
+  readonly name: string;
+  readonly label: string;
+}
+
 export interface FormSectionDefinition {
   readonly heading?: string;
   readonly fields: readonly string[];
@@ -523,6 +529,8 @@ export interface ListViewDefinition {
   readonly columns?: readonly string[];
   readonly filterFields?: readonly string[];
   readonly filters?: readonly ListDocumentsFilter[];
+  readonly orderBy?: string;
+  readonly order?: ListOrderDirection;
   readonly pageSize?: number;
 }
 
@@ -532,6 +540,9 @@ export interface ResolvedListView {
   readonly filterBuilderFields: readonly ListFilterBuilderField[];
   readonly filterControls: readonly ListFilterControlDefinition[];
   readonly filters: readonly ListDocumentsFilter[];
+  readonly orderBy: string;
+  readonly order: ListOrderDirection;
+  readonly orderOptions: readonly ListOrderOption[];
   readonly pageSize: number;
 }
 
@@ -539,6 +550,8 @@ export interface ListDocumentsQuery {
   readonly tenantId: TenantId;
   readonly doctype: DocTypeName;
   readonly filters?: readonly ListDocumentsFilter[];
+  readonly orderBy?: string;
+  readonly order?: ListOrderDirection;
   readonly limit?: number;
   readonly offset?: number;
 }

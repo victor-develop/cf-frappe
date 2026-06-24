@@ -69,6 +69,57 @@ describe("D1ProjectionStore", () => {
     expect(count?.params).toEqual(["acme", "Note", "Low", 2, 9]);
   });
 
+  it("orders rows by escaped JSON fields with deterministic fallbacks", async () => {
+    const db = new FakeD1Database([
+      documentRow({ name: "D1 High", data: { title: "apple", count: 5 } }),
+      documentRow({ name: "D1 Missing", data: { title: "missing" } }),
+      documentRow({ name: "D1 Low", data: { title: "Zebra", count: 1 } }),
+      documentRow({ name: "a", data: { title: "same", count: 9 } }),
+      documentRow({ name: "B", data: { title: "same", count: 9 } })
+    ]);
+    const store = new D1ProjectionStore(db as unknown as D1Database);
+
+    const result = await store.list({
+      tenantId: "acme",
+      doctype: "Note",
+      orderBy: "count",
+      order: "asc"
+    });
+
+    expect(result.data.map((document) => document.name)).toEqual(["D1 Low", "D1 High", "B", "a", "D1 Missing"]);
+    const [rows] = db.statements;
+    expect(rows?.sql).toContain(
+      "ORDER BY json_extract(data_json, '$.count') IS NULL ASC, json_extract(data_json, '$.count') COLLATE BINARY ASC, updated_at COLLATE BINARY DESC, name COLLATE BINARY ASC"
+    );
+    expect(rows?.params).toEqual(["acme", "Note", 50, 0]);
+
+    const dbForTextOrder = new FakeD1Database(db.rows);
+    const textStore = new D1ProjectionStore(dbForTextOrder as unknown as D1Database);
+    const textResult = await textStore.list({
+      tenantId: "acme",
+      doctype: "Note",
+      orderBy: "title",
+      order: "asc"
+    });
+
+    expect(textResult.data.map((document) => document.name)).toEqual(["D1 Low", "D1 High", "D1 Missing", "B", "a"]);
+    expect(dbForTextOrder.statements[0]?.sql).toContain(
+      "ORDER BY json_extract(data_json, '$.title') IS NULL ASC, json_extract(data_json, '$.title') COLLATE BINARY ASC, updated_at COLLATE BINARY DESC, name COLLATE BINARY ASC"
+    );
+
+    const dbForNameOrder = new FakeD1Database(db.rows);
+    const nameStore = new D1ProjectionStore(dbForNameOrder as unknown as D1Database);
+    await nameStore.list({
+      tenantId: "acme",
+      doctype: "Note",
+      orderBy: "name",
+      order: "asc"
+    });
+    expect(dbForNameOrder.statements[0]?.sql).toContain(
+      "ORDER BY name COLLATE BINARY ASC, updated_at COLLATE BINARY DESC"
+    );
+  });
+
   it("applies advanced scalar operators to D1 rows and counts", async () => {
     const db = new FakeD1Database([
       documentRow({ name: "D1 Match", data: { title: "D1 Match", priority: "High", count: 5 } }),
@@ -176,7 +227,7 @@ class FakeD1PreparedStatement {
     if (this.sql.includes("COUNT(*)")) {
       return { results: [{ total: filtered.length }] };
     }
-    return { results: filtered };
+    return { results: this.applyOrdering(filtered) };
   }
 
   private applyFilters(rows: readonly FakeDocumentRow[]): readonly FakeDocumentRow[] {
@@ -221,6 +272,44 @@ class FakeD1PreparedStatement {
       return true;
     });
   }
+
+  private applyOrdering(rows: readonly FakeDocumentRow[]): readonly FakeDocumentRow[] {
+    if (this.sql.includes("json_extract(data_json, '$.count') COLLATE BINARY ASC")) {
+      return [...rows].sort((left, right) => {
+        const leftData = JSON.parse(left.data_json) as DocumentData;
+        const rightData = JSON.parse(right.data_json) as DocumentData;
+        const count = Number(leftData.count ?? Number.POSITIVE_INFINITY) - Number(rightData.count ?? Number.POSITIVE_INFINITY);
+        if (count !== 0) {
+          return count;
+        }
+        const updated = binaryCompare(right.updated_at, left.updated_at);
+        return updated !== 0 ? updated : binaryCompare(left.name, right.name);
+      });
+    }
+    if (this.sql.includes("json_extract(data_json, '$.title') COLLATE BINARY ASC")) {
+      return [...rows].sort((left, right) => {
+        const leftData = JSON.parse(left.data_json) as DocumentData;
+        const rightData = JSON.parse(right.data_json) as DocumentData;
+        const title = binaryCompare(String(leftData.title ?? ""), String(rightData.title ?? ""));
+        if (title !== 0) {
+          return title;
+        }
+        const updated = binaryCompare(right.updated_at, left.updated_at);
+        return updated !== 0 ? updated : binaryCompare(left.name, right.name);
+      });
+    }
+    return rows;
+  }
+}
+
+function binaryCompare(left: string, right: string): number {
+  if (left < right) {
+    return -1;
+  }
+  if (left > right) {
+    return 1;
+  }
+  return 0;
 }
 
 function compares(

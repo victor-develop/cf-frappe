@@ -16,7 +16,7 @@ import type { AuditDocumentEventQuery, AuditEventQuery, AuditEventStore } from "
 import type { EventStore } from "../../ports/event-store.js";
 import type { ProjectionStore } from "../../ports/projection-store.js";
 import { readInMemoryAuditDocumentEvents, searchInMemoryAuditEvents } from "./audit-events.js";
-import { matchesListFilters } from "./list-filters.js";
+import { compareListDocuments, matchesListFilters } from "./list-filters.js";
 
 export class InMemoryDocumentStore implements DocumentStore, EventStore, ProjectionStore, AuditEventStore {
   private readonly streams = new Map<StreamName, DomainEvent[]>();
@@ -90,7 +90,7 @@ export class InMemoryDocumentStore implements DocumentStore, EventStore, Project
     const all = [...this.documents.values()]
       .filter((document) => document.tenantId === query.tenantId && document.doctype === query.doctype)
       .filter((document) => matchesListFilters(document, query.filters))
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      .sort((left, right) => compareListDocuments(left, right, query.orderBy ?? "updatedAt", query.order ?? "desc"));
     return {
       data: all.slice(offset, offset + limit),
       limit,

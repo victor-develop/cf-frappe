@@ -9,12 +9,23 @@ import type {
   ListFilterInputType,
   ListFilterOperator,
   ListFilterOperatorOption,
+  ListOrderDirection,
+  ListOrderOption,
   ResolvedListView
 } from "./types.js";
 
 export const DEFAULT_LIST_PAGE_SIZE = 50;
 export const MAX_LIST_PAGE_SIZE = 200;
+export const DEFAULT_LIST_ORDER_BY = "updatedAt";
+export const DEFAULT_LIST_ORDER: ListOrderDirection = "desc";
 export const LIST_FILTER_OPERATORS = ["eq", "ne", "contains", "gt", "gte", "lt", "lte"] as const;
+export const LIST_ORDER_DIRECTIONS = ["asc", "desc"] as const;
+const SYSTEM_LIST_ORDER_OPTIONS = [
+  { name: "name", label: "Name" },
+  { name: "createdAt", label: "Created" },
+  { name: "updatedAt", label: "Updated" },
+  { name: "version", label: "Version" }
+] as const satisfies readonly ListOrderOption[];
 const LIST_FILTER_OPERATOR_LABELS: Record<ListFilterOperator, string> = {
   eq: "equals",
   ne: "is not",
@@ -27,6 +38,10 @@ const LIST_FILTER_OPERATOR_LABELS: Record<ListFilterOperator, string> = {
 
 export function isListFilterOperator(operator: unknown): operator is ListFilterOperator {
   return typeof operator === "string" && LIST_FILTER_OPERATORS.includes(operator as ListFilterOperator);
+}
+
+export function isListOrderDirection(order: unknown): order is ListOrderDirection {
+  return typeof order === "string" && LIST_ORDER_DIRECTIONS.includes(order as ListOrderDirection);
 }
 
 export function listFilterOperatorsForField(field: FieldDefinition): readonly ListFilterOperatorOption[] {
@@ -54,14 +69,62 @@ export function assertListViewDefinition(doctype: DocTypeDefinition): void {
 export function resolveListView(doctype: DocTypeDefinition): ResolvedListView {
   const columns = resolveListColumns(doctype);
   const filterFields = resolveListFilterFields(doctype, columns);
+  const order = normalizeListOrder(doctype, doctype.listView?.orderBy, doctype.listView?.order, {
+    errorCode: "LIST_VIEW_INVALID"
+  });
   return {
     columns,
     filterFields,
     filterBuilderFields: filterFields.map(listFilterBuilderField),
     filterControls: filterFields.flatMap(listFilterControlsForField),
     filters: normalizeListFilters(doctype, doctype.listView?.filters ?? [], { errorCode: "LIST_VIEW_INVALID" }),
+    orderBy: order.orderBy,
+    order: order.order,
+    orderOptions: listOrderOptionsForDocType(doctype),
     pageSize: normalizeListPageSize(doctype.listView?.pageSize, doctype.name)
   };
+}
+
+export function normalizeListOrder(
+  doctype: DocTypeDefinition,
+  orderBy = DEFAULT_LIST_ORDER_BY,
+  order: ListOrderDirection = DEFAULT_LIST_ORDER,
+  options: NormalizeListFiltersOptions = {}
+): { readonly orderBy: string; readonly order: ListOrderDirection } {
+  const errorCode = options.errorCode ?? "BAD_REQUEST";
+  if (!isListOrderDirection(order)) {
+    throw new FrameworkError(errorCode, "List order must be asc or desc", { status: 400 });
+  }
+  if (systemOrderOption(orderBy)) {
+    return { orderBy, order };
+  }
+  const field = fieldMap(doctype).get(orderBy);
+  if (!field) {
+    throw new FrameworkError(errorCode, `List orderBy field '${orderBy}' is not defined on ${doctype.name}`, {
+      status: 400
+    });
+  }
+  if (field.hidden) {
+    throw new FrameworkError(errorCode, `List orderBy field '${orderBy}' is hidden on ${doctype.name}`, {
+      status: 400
+    });
+  }
+  if (!isListSortable(field)) {
+    throw new FrameworkError(errorCode, `List orderBy field '${orderBy}' cannot be a ${field.type} field`, {
+      status: 400
+    });
+  }
+  return { orderBy, order };
+}
+
+export function listOrderOptionsForDocType(doctype: DocTypeDefinition): readonly ListOrderOption[] {
+  return [
+    ...SYSTEM_LIST_ORDER_OPTIONS,
+    ...doctype.fields
+      .filter(isListSortable)
+      .filter((field) => !systemOrderOption(field.name))
+      .map((field) => ({ name: field.name, label: field.label ?? field.name }))
+  ];
 }
 
 export function normalizeListFilters(
@@ -205,6 +268,14 @@ function normalizeFilterOperator(operator: unknown, errorCode: FrameworkErrorCod
 
 function operatorAllowedForField(field: FieldDefinition, operator: ListFilterOperator): boolean {
   return supportedListFilterOperatorsForField(field).includes(operator);
+}
+
+function systemOrderOption(name: string): boolean {
+  return SYSTEM_LIST_ORDER_OPTIONS.some((option) => option.name === name);
+}
+
+function isListSortable(field: FieldDefinition): boolean {
+  return !field.hidden && field.type !== "json" && field.type !== "table";
 }
 
 function supportedListFilterOperatorsForField(field: FieldDefinition): readonly ListFilterOperator[] {

@@ -78,6 +78,78 @@ describe("in-memory adapters", () => {
     });
   });
 
+  it("orders projections by metadata fields with stable fallbacks", async () => {
+    const projections = new InMemoryProjectionStore();
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "Missing",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "missing" },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-03T00:00:00.000Z"
+    });
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "Low",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "Zebra", count: 1 },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-02T00:00:00.000Z"
+    });
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "High",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "apple", count: 5 },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    });
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "a",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "same", count: 9 },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-04T00:00:00.000Z"
+    });
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "B",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "same", count: 9 },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-04T00:00:00.000Z"
+    });
+
+    await expect(
+      projections.list({ tenantId: "acme", doctype: "Note", orderBy: "count", order: "asc" })
+    ).resolves.toMatchObject({
+      data: [{ name: "Low" }, { name: "High" }, { name: "B" }, { name: "a" }, { name: "Missing" }]
+    });
+
+    await expect(
+      projections.list({ tenantId: "acme", doctype: "Note", orderBy: "name", order: "desc" })
+    ).resolves.toMatchObject({
+      data: [{ name: "a" }, { name: "Missing" }, { name: "Low" }, { name: "High" }, { name: "B" }]
+    });
+
+    await expect(
+      projections.list({ tenantId: "acme", doctype: "Note", orderBy: "title", order: "asc" })
+    ).resolves.toMatchObject({
+      data: [{ name: "Low" }, { name: "High" }, { name: "Missing" }, { name: "B" }, { name: "a" }]
+    });
+  });
+
   it("applies projection list filters before paging", async () => {
     const projections = new InMemoryProjectionStore();
     await projections.save({

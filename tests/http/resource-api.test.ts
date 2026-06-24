@@ -1223,6 +1223,18 @@ describe("resource api", () => {
       data: [{ name: "HTTP Empty Body" }],
       total: 1
     });
+
+    const ordered = await app.request("/api/resource/Note?default_filters=0&order_by=count&order=asc", {
+      headers: userHeaders
+    });
+    expect(ordered.status).toBe(200);
+    const orderedJson = (await ordered.json()) as { readonly data: readonly { readonly name: string }[] };
+    expect(orderedJson.data.map((document) => document.name)).toEqual([
+      "HTTP Low",
+      "HTTP Closed High",
+      "HTTP Empty Body",
+      "HTTP High"
+    ]);
   });
 
   it("saves and applies resource list filters through the API", async () => {
@@ -1278,6 +1290,12 @@ describe("resource api", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "BAD_REQUEST", message: "Filter field 'missing' is not defined on Note" }
+    });
+
+    const invalidOrder = await app.request("/api/resource/Note?order=sideways", { headers: userHeaders });
+    expect(invalidOrder.status).toBe(400);
+    await expect(invalidOrder.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "List order must be asc or desc" }
     });
   });
 

@@ -7,12 +7,15 @@ describe("list views", () => {
       fields: [
         { name: "title", type: "text" },
         { name: "status", type: "select", options: ["Open", "Closed"] },
-        { name: "count", type: "integer" }
+        { name: "count", type: "integer" },
+        { name: "secret", type: "text", hidden: true }
       ],
       listView: {
         columns: ["status", "title"],
         filterFields: ["status"],
         filters: [{ field: "count", operator: "gte", value: "2" }],
+        orderBy: "count",
+        order: "asc",
         pageSize: 500
       }
     });
@@ -49,6 +52,17 @@ describe("list views", () => {
       }
     ]);
     expect(listView.filters).toEqual([{ field: "count", operator: "gte", value: 2 }]);
+    expect(listView.orderBy).toBe("count");
+    expect(listView.order).toBe("asc");
+    expect(listView.orderOptions).toEqual([
+      { name: "name", label: "Name" },
+      { name: "createdAt", label: "Created" },
+      { name: "updatedAt", label: "Updated" },
+      { name: "version", label: "Version" },
+      { name: "title", label: "title" },
+      { name: "status", label: "status" },
+      { name: "count", label: "count" }
+    ]);
     expect(listView.pageSize).toBe(200);
   });
 
@@ -138,6 +152,40 @@ describe("list views", () => {
         listView: { filters: [{ field: "count", operator: "gte", value: "many" }] }
       })
     ).toThrow(expect.objectContaining({ code: "LIST_VIEW_INVALID" }));
+  });
+
+  it("rejects invalid list ordering metadata", () => {
+    expect(() =>
+      defineDocType({
+        name: "Task",
+        fields: [{ name: "title", type: "text" }],
+        listView: { orderBy: "missing" }
+      })
+    ).toThrow("List orderBy field 'missing' is not defined on Task");
+
+    expect(() =>
+      defineDocType({
+        name: "Task",
+        fields: [{ name: "payload", type: "json" }],
+        listView: { orderBy: "payload" }
+      })
+    ).toThrow("List orderBy field 'payload' cannot be a json field");
+
+    expect(() =>
+      defineDocType({
+        name: "Task",
+        fields: [{ name: "secret", type: "text", hidden: true }],
+        listView: { orderBy: "secret" }
+      })
+    ).toThrow("List orderBy field 'secret' is hidden on Task");
+
+    expect(() =>
+      defineDocType({
+        name: "Task",
+        fields: [{ name: "title", type: "text" }],
+        listView: { order: "sideways" as "asc" }
+      })
+    ).toThrow("List order must be asc or desc");
   });
 });
 

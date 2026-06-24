@@ -3,6 +3,7 @@ import type {
   DocumentName,
   DocumentSnapshot,
   JsonPrimitive,
+  ListOrderDirection,
   ListDocumentsFilter,
   ListDocumentsQuery,
   ListDocumentsResult,
@@ -62,13 +63,14 @@ export class D1ProjectionStore implements ProjectionStore {
     const filtered = listFilterWhere(query.filters ?? []);
     const where = ["tenant_id = ?", "doctype = ?", ...filtered.conditions].join(" AND ");
     const params = [query.tenantId, query.doctype, ...filtered.params];
+    const orderBy = listOrderExpression(query.orderBy ?? "updatedAt", query.order ?? "desc");
     const [rows, count] = await this.db.batch([
       this.db
         .prepare(
           `SELECT tenant_id, doctype, name, version, docstatus, data_json, created_at, updated_at
            FROM cf_frappe_documents
            WHERE ${where}
-           ORDER BY updated_at DESC
+           ORDER BY ${orderBy}
            LIMIT ? OFFSET ?`
         )
         .bind(...params, limit, offset),
@@ -137,6 +139,41 @@ function listFilterWhere(filters: readonly ListDocumentsFilter[]): ListFilterWhe
 
 function sqliteJsonValue(value: JsonPrimitive): JsonPrimitive {
   return typeof value === "boolean" ? Number(value) : value;
+}
+
+function listOrderExpression(orderBy: string, order: ListOrderDirection): string {
+  const direction = order === "asc" ? "ASC" : "DESC";
+  const systemExpression = systemOrderExpression(orderBy);
+  if (systemExpression) {
+    if (systemExpression === "version") {
+      return `${systemExpression} ${direction}, updated_at COLLATE BINARY DESC, name COLLATE BINARY ASC`;
+    }
+    if (systemExpression === "updated_at") {
+      return `${systemExpression} COLLATE BINARY ${direction}`;
+    }
+    const fallbacks =
+      systemExpression === "name"
+        ? "updated_at COLLATE BINARY DESC"
+        : "updated_at COLLATE BINARY DESC, name COLLATE BINARY ASC";
+    return `${systemExpression} COLLATE BINARY ${direction}, ${fallbacks}`;
+  }
+  const expression = `json_extract(data_json, '${escapeSqlString(jsonPath(orderBy))}')`;
+  return `${expression} IS NULL ASC, ${expression} COLLATE BINARY ${direction}, updated_at COLLATE BINARY DESC, name COLLATE BINARY ASC`;
+}
+
+function systemOrderExpression(orderBy: string): string | undefined {
+  switch (orderBy) {
+    case "name":
+      return "name";
+    case "createdAt":
+      return "created_at";
+    case "updatedAt":
+      return "updated_at";
+    case "version":
+      return "version";
+    default:
+      return undefined;
+  }
 }
 
 function jsonPath(field: string): string {

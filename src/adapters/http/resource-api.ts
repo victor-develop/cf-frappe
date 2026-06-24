@@ -52,7 +52,7 @@ import { createJobApi } from "./job-api.js";
 import { createNotificationApi } from "./notification-api.js";
 import { createPrintApi } from "./print-api.js";
 import { createReportApi } from "./report-api.js";
-import { listFiltersFromUrl, parseOptionalInteger, readJsonObject, requestMetadata } from "./request.js";
+import { listFiltersFromUrl, listOrderFromUrl, parseOptionalInteger, readJsonObject, requestMetadata } from "./request.js";
 import { createRoleApi } from "./role-api.js";
 import { createSavedReportApi } from "./saved-report-api.js";
 import { createUserAccountApi } from "./user-account-api.js";
@@ -357,8 +357,10 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     const savedFilter = await savedFilterFromUrl(options, actor, c.req.param("doctype"), url);
     const urlFilters = listFiltersFromUrl(url);
     const filters = options.savedFilters?.mergeSavedFilter(savedFilter, urlFilters) ?? urlFilters;
+    const order = listOrderFromUrl(url);
     const { result } = await options.queries.listDocumentsForView(actor, c.req.param("doctype"), {
       filters,
+      ...order,
       useDefaultFilters: savedFilter ? false : url.searchParams.get("default_filters") !== "0",
       ...(limit !== undefined ? { limit } : {}),
       ...(offset !== undefined ? { offset } : {})

@@ -1,6 +1,6 @@
 import { FrameworkError, notFound, permissionDenied } from "../core/errors.js";
 import { resolveFormView } from "../core/form-view.js";
-import { mergeListFilters, normalizeListFilters, resolveListView } from "../core/list-view.js";
+import { mergeListFilters, normalizeListFilters, normalizeListOrder, resolveListView } from "../core/list-view.js";
 import { documentShareAllows, type DocumentShareProvider } from "../core/document-shares.js";
 import { can } from "../core/permissions.js";
 import type { ModelRegistry } from "../core/registry.js";
@@ -21,6 +21,7 @@ import {
   type JsonValue,
   type ListDocumentsFilter,
   type ListDocumentsResult,
+  type ListOrderDirection,
   type LinkOption,
   type LinkOptionsResult,
   type ResolvedFormView,
@@ -91,6 +92,8 @@ export class QueryService {
     options: {
       readonly tenantId?: string;
       readonly filters?: readonly ListDocumentsFilter[];
+      readonly orderBy?: string;
+      readonly order?: ListOrderDirection;
       readonly limit?: number;
       readonly offset?: number;
     } = {}
@@ -102,10 +105,13 @@ export class QueryService {
     }
     const limit = clampLimit(options.limit);
     const offset = Math.max(0, options.offset ?? 0);
+    const order = normalizeListOrder(doctype, options.orderBy, options.order);
     const result = await this.projections.list({
       tenantId,
       doctype: doctype.name,
       filters: normalizeListFilters(doctype, options.filters ?? []),
+      orderBy: order.orderBy,
+      order: order.order,
       limit,
       offset
     });
@@ -241,6 +247,8 @@ export class QueryService {
       readonly tenantId?: string;
       readonly filters?: readonly ListDocumentsFilter[];
       readonly useDefaultFilters?: boolean;
+      readonly orderBy?: string;
+      readonly order?: ListOrderDirection;
       readonly limit?: number;
       readonly offset?: number;
     } = {}
@@ -259,13 +267,20 @@ export class QueryService {
       options.useDefaultFilters === false ? [] : listView.filters,
       options.filters ?? []
     );
+    const order = normalizeListOrder(
+      doctype,
+      options.orderBy ?? listView.orderBy,
+      options.order ?? listView.order
+    );
     const result = await this.listDocuments(actor, doctype.name, {
       tenantId,
       filters,
+      orderBy: order.orderBy,
+      order: order.order,
       limit: options.limit ?? listView.pageSize,
       ...(options.offset !== undefined ? { offset: options.offset } : {})
     });
-    return { listView, filters, result };
+    return { listView: { ...listView, orderBy: order.orderBy, order: order.order }, filters, result };
   }
 
   private async doctypeFor(actor: Actor, doctypeName: string, tenantId: string): Promise<DocTypeDefinition> {
