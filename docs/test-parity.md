@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Cloudflare Access account sync slice:
+As of the Cloudflare Access starter auth mode slice:
 
 - Vitest files: `80`
-- Vitest cases: `907`
+- Vitest cases: `908`
 
 ## Implication
 

@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { starterProjectFiles } from "./templates.js";
+import { starterProjectFiles, type StarterAuthMode } from "./templates.js";
 
 const DEFAULT_COMPATIBILITY_DATE = "2026-06-22";
 
@@ -15,6 +15,7 @@ export interface ScaffoldProjectOptions {
   readonly typescriptVersion?: string;
   readonly tsxVersion?: string;
   readonly wranglerVersion?: string;
+  readonly authMode?: StarterAuthMode;
 }
 
 export interface ScaffoldProjectResult {
@@ -70,7 +71,8 @@ export async function scaffoldProject(options: ScaffoldProjectOptions): Promise<
     projectName,
     typescriptVersion: metadata.typescriptVersion,
     tsxVersion: metadata.tsxVersion,
-    wranglerVersion: metadata.wranglerVersion
+    wranglerVersion: metadata.wranglerVersion,
+    auth: options.authMode ?? "signed-session"
   });
 
   await mkdir(projectDirectory, { recursive: true });

@@ -65,12 +65,15 @@ describe("cf-frappe CLI scaffold", () => {
     expect(packageJson.devDependencies["@types/node"]).toBe("^26.0.0");
     expect(packageJson.devDependencies.tsx).toBe("^4.20.6");
 
-    await expect(readFile(join(target, "wrangler.jsonc"), "utf8")).resolves.toContain(
-      '"new_sqlite_classes": ["AggregateCoordinator"]'
-    );
-    await expect(readFile(join(target, "wrangler.jsonc"), "utf8")).resolves.toContain(
-      '"directory": "./public"'
-    );
+    const wrangler = await readFile(join(target, "wrangler.jsonc"), "utf8");
+    const wranglerConfig = JSON.parse(wrangler) as {
+      readonly secrets?: { readonly required?: readonly string[] };
+      readonly vars?: Record<string, string>;
+    };
+    expect(wranglerConfig.secrets?.required).toEqual(["SESSION_SECRET"]);
+    expect(wranglerConfig.vars).toBeUndefined();
+    expect(wrangler).toContain('"new_sqlite_classes": ["AggregateCoordinator"]');
+    expect(wrangler).toContain('"directory": "./public"');
     await expect(readFile(join(target, "src/worker.ts"), "utf8")).resolves.toContain(
       "signedSessionActorResolver"
     );
@@ -122,6 +125,47 @@ describe("cf-frappe CLI scaffold", () => {
     await expect(readFile(join(target, "migrations/0006_doctype_task_v1_indexes.sql"), "utf8")).resolves.toContain(
       "-- checksum: fnv1a32:"
     );
+  });
+
+  it("creates a Cloudflare Access-backed starter app", async () => {
+    const target = join(tempRoot, "Access App");
+
+    const result = await scaffoldProject({
+      targetDirectory: target,
+      authMode: "cloudflare-access",
+      compatibilityDate: "2026-06-22",
+      cfFrappeVersion: "0.1.0",
+      nodeTypesVersion: "^26.0.0",
+      typescriptVersion: "^5.7.2",
+      wranglerVersion: "^4.103.0"
+    });
+
+    expect(result.projectName).toBe("access-app");
+    const wrangler = await readFile(join(target, "wrangler.jsonc"), "utf8");
+    const wranglerConfig = JSON.parse(wrangler) as { readonly vars: Record<string, string> };
+    expect(wranglerConfig.vars).toEqual({
+      CF_ACCESS_TEAM_DOMAIN: "your-team.cloudflareaccess.com",
+      CF_ACCESS_AUD: "replace-with-access-application-aud"
+    });
+    expect(wrangler).toContain('"CF_ACCESS_TEAM_DOMAIN": "your-team.cloudflareaccess.com"');
+    expect(wrangler).toContain('"CF_ACCESS_AUD": "replace-with-access-application-aud"');
+    await expect(readFile(join(target, ".dev.vars.example"), "utf8")).resolves.toContain(
+      "CF_ACCESS_TEAM_DOMAIN=your-team.cloudflareaccess.com"
+    );
+    const worker = await readFile(join(target, "src/worker.ts"), "utf8");
+    expect(worker).toContain("auth: {");
+    expect(worker).toContain("cloudflareAccess");
+    expect(worker).toContain("throw permissionDenied(\"Cloudflare Access JWT is required\")");
+    expect(worker).toContain("teamDomain: (env) => env.CF_ACCESS_TEAM_DOMAIN");
+    expect(worker).toContain("audience: (env) => env.CF_ACCESS_AUD");
+    expect(worker).toContain("revalidateSignedSessions: true");
+    expect(worker).toContain("[\"User\", ...(claims.groups ?? []).map((group) => `Access:${group}`)]");
+    expect(worker).not.toContain("guestActor");
+    expect(worker).not.toContain("signedSessionActorResolver");
+    const readme = await readFile(join(target, "README.md"), "utf8");
+    expect(readme).toContain("Cloudflare Access account auto-sync");
+    expect(readme).toContain("Access application audience tag");
+    expect(readme).toContain("denies requests that do not carry a valid Access token");
   });
 
   it("refuses to write into a non-empty target unless forced", async () => {
@@ -422,6 +466,16 @@ describe("cf-frappe CLI scaffold", () => {
       kind: "init",
       targetDirectory: "demo",
       force: true
+    });
+    expect(parseCliArgs(["init", "access-demo", "--auth", "cloudflare-access"])).toEqual({
+      kind: "init",
+      targetDirectory: "access-demo",
+      force: false,
+      authMode: "cloudflare-access"
+    });
+    expect(parseCliArgs(["init", "bad-auth", "--auth", "oauth"])).toEqual({
+      kind: "invalid",
+      message: "Unsupported starter auth mode 'oauth'"
     });
     expect(parseCliArgs([
       "install",

@@ -29,6 +29,7 @@ import {
   type DataPatchRemoteCommand
 } from "./data-patches.js";
 import { scaffoldProject, ScaffoldError } from "./scaffold.js";
+import type { StarterAuthMode } from "./templates.js";
 
 export interface CliIo {
   readonly cwd: () => string;
@@ -48,6 +49,7 @@ interface InitCommand {
   readonly kind: "init";
   readonly targetDirectory: string;
   readonly force: boolean;
+  readonly authMode?: StarterAuthMode;
 }
 
 interface InstallCommand {
@@ -147,7 +149,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     const result = await scaffoldProject({
       cwd: io.cwd(),
       force: command.force,
-      targetDirectory: command.targetDirectory
+      targetDirectory: command.targetDirectory,
+      ...(command.authMode === undefined ? {} : { authMode: command.authMode })
     });
     const projectPath = displayPath(io.cwd(), result.projectDirectory);
     io.stdout.write(
@@ -474,13 +477,31 @@ function parseMigrateArgs(argv: readonly string[]): ParsedCommand {
 function parseInitArgs(argv: readonly string[]): ParsedCommand {
   let targetDirectory: string | undefined;
   let force = false;
+  let authMode: StarterAuthMode | undefined;
 
-  for (const arg of argv) {
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === undefined) {
+      break;
+    }
     if (arg === "--help" || arg === "-h") {
       return { kind: "help" };
     }
     if (arg === "--force" || arg === "-f") {
       force = true;
+      continue;
+    }
+    if (arg === "--auth") {
+      const value = argv[index + 1];
+      if (value === undefined) {
+        return { kind: "invalid", message: "Missing value for --auth" };
+      }
+      const parsed = starterAuthMode(value);
+      if (parsed === undefined) {
+        return { kind: "invalid", message: `Unsupported starter auth mode '${value}'` };
+      }
+      authMode = parsed;
+      index += 1;
       continue;
     }
     if (arg.startsWith("-")) {
@@ -495,7 +516,12 @@ function parseInitArgs(argv: readonly string[]): ParsedCommand {
   if (targetDirectory === undefined) {
     return { kind: "invalid", message: "Missing project directory" };
   }
-  return { kind: "init", targetDirectory, force };
+  return {
+    kind: "init",
+    targetDirectory,
+    force,
+    ...(authMode === undefined ? {} : { authMode })
+  };
 }
 
 function parseInstallArgs(argv: readonly string[]): ParsedCommand {
@@ -609,7 +635,7 @@ function helpText(): string {
     "cf-frappe",
     "",
     "Usage:",
-    "  cf-frappe init <directory> [--force]",
+    "  cf-frappe init <directory> [--force] [--auth <signed-session|cloudflare-access>]",
     "  cf-frappe install <module> [--version <range>] [--export <name>] [--as <localName>] [--registry <path>] [--package-manager <npm|pnpm|yarn|bun>] [--no-install] [--no-save]",
     "  cf-frappe migrate generate [--registry <path>] [--migrations <dir>] [--no-core]",
     "  cf-frappe data-patches status --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
@@ -671,6 +697,10 @@ function installSuccessText(
 
 function packageManagerName(value: string): PackageManagerName | undefined {
   return value === "npm" || value === "pnpm" || value === "yarn" || value === "bun" ? value : undefined;
+}
+
+function starterAuthMode(value: string): StarterAuthMode | undefined {
+  return value === "signed-session" || value === "cloudflare-access" ? value : undefined;
 }
 
 function displayPath(cwd: string, projectDirectory: string): string {

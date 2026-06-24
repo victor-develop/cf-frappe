@@ -31,7 +31,10 @@ export interface StarterProjectTemplateInput {
   readonly typescriptVersion: string;
   readonly tsxVersion: string;
   readonly wranglerVersion: string;
+  readonly auth: StarterAuthMode;
 }
+
+export type StarterAuthMode = "signed-session" | "cloudflare-access";
 
 export interface StarterProjectFile {
   readonly path: string;
@@ -44,12 +47,12 @@ export function starterProjectFiles(input: StarterProjectTemplateInput): readonl
     { path: "wrangler.jsonc", contents: wranglerJsonc(input) },
     { path: "tsconfig.json", contents: tsconfigJson() },
     { path: ".gitignore", contents: gitignore() },
-    { path: ".dev.vars.example", contents: devVarsExample() },
+    { path: ".dev.vars.example", contents: devVarsExample(input) },
     { path: "README.md", contents: readme(input) },
     { path: "public/assets/task-form.js", contents: taskFormJs() },
     { path: "src/apps/tasks.ts", contents: taskAppTs() },
     { path: "src/apps/index.ts", contents: appsIndexTs() },
-    { path: "src/worker.ts", contents: workerTs() },
+    { path: "src/worker.ts", contents: workerTs(input) },
     { path: "migrations/0001_cf_frappe_core.sql", contents: starterMigrationSql(D1_CORE_MIGRATION_ID) },
     { path: "migrations/0002_cf_frappe_job_executions.sql", contents: starterMigrationSql(D1_JOB_EXECUTION_MIGRATION_ID) },
     {
@@ -128,7 +131,7 @@ function wranglerJsonc(input: StarterProjectTemplateInput): string {
       "new_sqlite_classes": ["AggregateCoordinator"]
     }
   ],
-  "secrets": {
+${cloudflareAccessVarsJsonc(input)}  "secrets": {
     "required": ["SESSION_SECRET"]
   },
   "observability": {
@@ -170,14 +173,34 @@ function gitignore(): string {
   return ["node_modules", ".wrangler", "dist", ".dev.vars", ""].join("\n");
 }
 
-function devVarsExample(): string {
-  return ["SESSION_SECRET=replace-with-a-long-random-local-dev-secret", ""].join("\n");
+function cloudflareAccessVarsJsonc(input: StarterProjectTemplateInput): string {
+  if (input.auth !== "cloudflare-access") {
+    return "";
+  }
+  return `  "vars": {
+    "CF_ACCESS_TEAM_DOMAIN": "your-team.cloudflareaccess.com",
+    "CF_ACCESS_AUD": "replace-with-access-application-aud"
+  },
+`;
+}
+
+function devVarsExample(input: StarterProjectTemplateInput): string {
+  return [
+    "SESSION_SECRET=replace-with-a-long-random-local-dev-secret",
+    ...(input.auth === "cloudflare-access"
+      ? [
+          "CF_ACCESS_TEAM_DOMAIN=your-team.cloudflareaccess.com",
+          "CF_ACCESS_AUD=replace-with-access-application-aud"
+        ]
+      : []),
+    ""
+  ].join("\n");
 }
 
 function readme(input: StarterProjectTemplateInput): string {
   return `# ${input.projectName}
 
-Cloudflare-native cf-frappe starter app with D1 projections, a Durable Object command coordinator, metadata-defined DocTypes, and signed-session actor resolution.
+Cloudflare-native cf-frappe starter app with D1 projections, a Durable Object command coordinator, metadata-defined DocTypes, and ${authReadmeSummary(input.auth)}.
 
 ## Local Development
 
@@ -190,8 +213,9 @@ npm run d1:migrate:local
 npm run dev
 \`\`\`
 
-Open \`/desk\` for the generated Desk UI or \`/api/meta/doctypes/Task\` for the metadata API. The starter falls back to a read-only guest actor when no signed session cookie is present.
+Open \`/desk\` for the generated Desk UI or \`/api/meta/doctypes/Task\` for the metadata API. ${authLocalReadme(input.auth)}
 Client scripts live under \`public/assets\`; add them with \`defineClientScript(...)\` in files under \`src/apps\`.
+${cloudflareAccessReadme(input.auth)}
 
 ## Apps
 
@@ -231,8 +255,41 @@ wrangler secret put SESSION_SECRET
 npm run d1:migrate:remote
 npm run deploy
 \`\`\`
+${cloudflareAccessDeployReadme(input.auth)}
 
 Run \`npm run cf:types\` after changing bindings so \`worker-configuration.d.ts\` stays aligned with \`wrangler.jsonc\`.
+`;
+}
+
+function authReadmeSummary(auth: StarterAuthMode): string {
+  return auth === "cloudflare-access"
+    ? "Cloudflare Access account auto-sync"
+    : "signed-session actor resolution";
+}
+
+function authLocalReadme(auth: StarterAuthMode): string {
+  return auth === "cloudflare-access"
+    ? "The starter syncs verified Cloudflare Access JWTs into event-sourced provider accounts, and denies requests that do not carry a valid Access token."
+    : "The starter falls back to a read-only guest actor when no signed session cookie is present.";
+}
+
+function cloudflareAccessReadme(auth: StarterAuthMode): string {
+  if (auth !== "cloudflare-access") {
+    return "";
+  }
+  return `
+## Cloudflare Access Auth
+
+This starter expects Cloudflare Access to protect the deployed Worker hostname. Set \`CF_ACCESS_TEAM_DOMAIN\` to your Access team domain, such as \`your-team.cloudflareaccess.com\`, and \`CF_ACCESS_AUD\` to the Access application audience tag. Requests with a valid Access JWT are verified, synced into cf-frappe user-account provider events, and then authorized as the folded account actor. Keep Access application and policy creation in Cloudflare Zero Trust so rollout, allowed groups, and posture rules stay reviewable outside the app code.
+`;
+}
+
+function cloudflareAccessDeployReadme(auth: StarterAuthMode): string {
+  if (auth !== "cloudflare-access") {
+    return "";
+  }
+  return `
+For Cloudflare Access deployments, update the \`vars\` block in \`wrangler.jsonc\` with your Access team domain and application audience tag before deploy. The checked-in placeholders are safe for local scaffolding only.
 `;
 }
 
@@ -393,7 +450,11 @@ export const registry = createRegistryFromApps(installedApps);
 `;
 }
 
-function workerTs(): string {
+function workerTs(input: StarterProjectTemplateInput): string {
+  return input.auth === "cloudflare-access" ? cloudflareAccessWorkerTs() : signedSessionWorkerTs();
+}
+
+function signedSessionWorkerTs(): string {
   return `import {
   signedSessionActorResolver,
   type Actor
@@ -424,6 +485,41 @@ export default createCloudFrappeWorker<Env>({
       secret: env.SESSION_SECRET,
       fallback: () => guestActor
     })(request)
+});
+`;
+}
+
+function cloudflareAccessWorkerTs(): string {
+  return `import { permissionDenied } from "cf-frappe";
+import {
+  createAggregateCoordinatorClass,
+  createCloudFrappeWorker,
+  type CloudFrappeEnv
+} from "cf-frappe/cloudflare";
+import { registry } from "./apps";
+
+type Env = Cloudflare.Env & CloudFrappeEnv;
+
+export class AggregateCoordinator extends createAggregateCoordinatorClass<Env>({
+  registry
+}) {}
+
+export default createCloudFrappeWorker<Env>({
+  registry,
+  actor: () => {
+    throw permissionDenied("Cloudflare Access JWT is required");
+  },
+  auth: {
+    sessionSecret: (env) => env.SESSION_SECRET,
+    revalidateSignedSessions: true,
+    cloudflareAccess: {
+      teamDomain: (env) => env.CF_ACCESS_TEAM_DOMAIN,
+      audience: (env) => env.CF_ACCESS_AUD,
+      tenantId: () => "default",
+      roles: (claims) =>
+        ["User", ...(claims.groups ?? []).map((group) => \`Access:\${group}\`)]
+    }
+  }
 });
 `;
 }
