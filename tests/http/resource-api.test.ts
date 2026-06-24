@@ -1239,6 +1239,42 @@ describe("resource api", () => {
     });
   });
 
+  it("serves permissioned metadata-driven global search", async () => {
+    const app = makeApp();
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Search Launch", body: "Visible" })
+    });
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: {
+        ...userHeaders,
+        "x-cf-frappe-user": "other@example.com"
+      },
+      body: JSON.stringify({ title: "HTTP Search Launch Secret", body: "Hidden" })
+    });
+
+    const response = await app.request("/api/search?q=launch&limit=5", { headers: userHeaders });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        query: "launch",
+        total: 1,
+        data: [
+          {
+            doctype: "Note",
+            name: "HTTP Search Launch",
+            label: "HTTP Search Launch",
+            matchedField: "name",
+            route: "/desk/Note/HTTP%20Search%20Launch"
+          }
+        ]
+      }
+    });
+  });
+
   it("returns link field options from projected target documents", async () => {
     const { app, services } = makeLinkedApp();
     await services.documents.create({ actor: owner, doctype: "Project", data: { title: "Apollo" } });

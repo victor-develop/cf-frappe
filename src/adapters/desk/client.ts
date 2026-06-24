@@ -547,6 +547,14 @@ export function renderDeskClientScript(): string {
     return params;
   }
 
+  function searchParams(q, options) {
+    var params = {};
+    setParam(params, "q", q);
+    setParam(params, "limit", options && options.limit);
+    setParam(params, "tenant", options && options.tenant);
+    return params;
+  }
+
   function jobDashboardParams(options) {
     var params = {};
     setParam(params, "job", options && (options.jobName !== undefined ? options.jobName : options.job));
@@ -1314,6 +1322,9 @@ export function renderDeskClientScript(): string {
     }),
     linkOptions: function (doctype, field, params) {
       return request(withQuery("/api/link-options/" + encodePart(doctype) + "/" + encodePart(field), params || {})).then(unwrapData);
+    },
+    search: function (q, options) {
+      return request(withQuery("/api/search", searchParams(q, options || {}))).then(unwrapData);
     },
     customFields: Object.freeze({
       disable: function (doctype, field, options) {

@@ -16,6 +16,9 @@ import {
   type DocTypeDefinition,
   type DocumentSnapshot,
   type FieldDefinition,
+  type GlobalSearchResult,
+  type GlobalSearchResultItem,
+  type JsonValue,
   type ListDocumentsFilter,
   type ListDocumentsResult,
   type LinkOption,
@@ -207,6 +210,30 @@ export class QueryService {
     };
   }
 
+  async search(
+    actor: Actor,
+    options: {
+      readonly tenantId?: string;
+      readonly q?: string;
+      readonly limit?: number;
+    }
+  ): Promise<GlobalSearchResult> {
+    const tenantId = options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
+    const query = normalizeRequiredSearch(options.q);
+    const limit = clampSearchLimit(options.limit);
+    const results: GlobalSearchResultItem[] = [];
+    for (const doctype of await this.listEffectiveDoctypes(actor, tenantId)) {
+      await this.collectSearchResults(actor, doctype, tenantId, query, results);
+    }
+    const sorted = results.sort(compareSearchResults);
+    return {
+      query,
+      limit,
+      total: sorted.length,
+      data: sorted.slice(0, limit)
+    };
+  }
+
   async listDocumentsForView(
     actor: Actor,
     doctypeName: string,
@@ -291,6 +318,35 @@ export class QueryService {
     }
   }
 
+  private async collectSearchResults(
+    actor: Actor,
+    doctype: DocTypeDefinition,
+    tenantId: string,
+    query: string,
+    results: GlobalSearchResultItem[]
+  ): Promise<void> {
+    const pageSize = 200;
+    for (let offset = 0; ; offset += pageSize) {
+      const result = await this.projections.list({
+        tenantId,
+        doctype: doctype.name,
+        filters: [],
+        limit: pageSize,
+        offset
+      });
+      const readable = await this.filterReadableDocuments(actor, doctype, result.data);
+      for (const document of readable) {
+        const match = globalSearchMatch(doctype, document, query);
+        if (match) {
+          results.push(toGlobalSearchResult(doctype, document, match));
+        }
+      }
+      if (offset + pageSize >= result.total) {
+        return;
+      }
+    }
+  }
+
   private async filterReadableDocuments(
     actor: Actor,
     doctype: DocTypeDefinition,
@@ -364,6 +420,16 @@ function clampLimit(limit?: number): number {
   return Math.min(limit, 200);
 }
 
+function clampSearchLimit(limit?: number): number {
+  if (limit === undefined) {
+    return 20;
+  }
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new FrameworkError("BAD_REQUEST", "Search limit must be a positive integer", { status: 400 });
+  }
+  return Math.min(limit, 100);
+}
+
 function getField(doctype: DocTypeDefinition, fieldName: string): FieldDefinition {
   const field = doctype.fields.find((item) => item.name === fieldName);
   if (!field) {
@@ -377,6 +443,95 @@ function getField(doctype: DocTypeDefinition, fieldName: string): FieldDefinitio
 function normalizeSearch(q: string | undefined): string | undefined {
   const search = q?.trim().toLowerCase();
   return search ? search : undefined;
+}
+
+function normalizeRequiredSearch(q: string | undefined): string {
+  const search = normalizeSearch(q);
+  if (!search) {
+    throw new FrameworkError("BAD_REQUEST", "Search query is required", { status: 400 });
+  }
+  return search;
+}
+
+interface GlobalSearchMatch {
+  readonly field: string;
+  readonly text: string;
+}
+
+function globalSearchMatch(
+  doctype: DocTypeDefinition,
+  document: DocumentSnapshot,
+  query: string
+): GlobalSearchMatch | undefined {
+  return globalSearchCandidates(doctype, document).find((candidate) =>
+    candidate.text.toLowerCase().includes(query)
+  );
+}
+
+function globalSearchCandidates(
+  doctype: DocTypeDefinition,
+  document: DocumentSnapshot
+): readonly GlobalSearchMatch[] {
+  const candidates: GlobalSearchMatch[] = [];
+  const seen = new Set<string>();
+  const add = (field: string, value: JsonValue | undefined) => {
+    const text = searchableText(value);
+    if (text === undefined) {
+      return;
+    }
+    const key = `${field}:${text}`;
+    if (!seen.has(key)) {
+      candidates.push({ field, text });
+      seen.add(key);
+    }
+  };
+  add("name", document.name);
+  add("title", document.data.title);
+  if (doctype.naming?.kind === "field") {
+    add(doctype.naming.field, document.data[doctype.naming.field]);
+  }
+  for (const field of doctype.fields) {
+    if (field.inGlobalSearch) {
+      add(field.name, document.data[field.name]);
+    }
+  }
+  return candidates;
+}
+
+function searchableText(value: JsonValue | undefined): string | undefined {
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text ? text : undefined;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return undefined;
+}
+
+function toGlobalSearchResult(
+  doctype: DocTypeDefinition,
+  document: DocumentSnapshot,
+  match: GlobalSearchMatch
+): GlobalSearchResultItem {
+  return {
+    doctype: doctype.name,
+    name: document.name,
+    label: labelForLinkedDocument(document, doctype),
+    matchedField: match.field,
+    matchedText: match.text,
+    route: `/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(document.name)}`,
+    updatedAt: document.updatedAt
+  };
+}
+
+function compareSearchResults(left: GlobalSearchResultItem, right: GlobalSearchResultItem): number {
+  return (
+    right.updatedAt.localeCompare(left.updatedAt) ||
+    left.label.localeCompare(right.label) ||
+    left.doctype.localeCompare(right.doctype) ||
+    left.name.localeCompare(right.name)
+  );
 }
 
 function toLinkOption(document: DocumentSnapshot, doctype: DocTypeDefinition): LinkOption {

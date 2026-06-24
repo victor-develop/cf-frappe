@@ -1,5 +1,5 @@
 import { createLinkedServices, createServices, data, guest, owner } from "../helpers";
-import { applyCustomFieldsToDocType, QueryService } from "../../src";
+import { applyCustomFieldsToDocType, createRegistry, defineDocType, InMemoryDocumentStore, QueryService } from "../../src";
 import type { ProjectionStore } from "../../src";
 
 describe("QueryService", () => {
@@ -261,6 +261,130 @@ describe("QueryService", () => {
 
     await expect(queries.listLinkOptions(owner, "Task", "project", { q: "needle", limit: 1 })).resolves.toMatchObject({
       options: [{ value: "Needle", label: "Needle" }]
+    });
+  });
+
+  it("searches readable documents across metadata global-search fields", async () => {
+    const SearchNote = defineDocType({
+      name: "Search Note",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "body", type: "longText", inGlobalSearch: true },
+        { name: "internal_code", type: "text" },
+        { name: "created_by", type: "text" }
+      ],
+      permissions: [
+        {
+          roles: ["User"],
+          actions: ["read"],
+          when: ({ actor, document }) => !document || document.data.created_by === actor.id
+        }
+      ]
+    });
+    const SearchProject = defineDocType({
+      name: "Search Project",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "summary", type: "longText", inGlobalSearch: true },
+        { name: "created_by", type: "text" }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read"] }]
+    });
+    const registry = createRegistry({ doctypes: [SearchNote, SearchProject] });
+    const projections = new InMemoryDocumentStore();
+    const queries = new QueryService({ registry, projections });
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Search Note",
+      name: "Launch Plan",
+      version: 1,
+      docstatus: "draft",
+      data: {
+        title: "Launch Plan",
+        body: "Coordinate Saturn release",
+        internal_code: "not-secret",
+        created_by: owner.id
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    });
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Search Project",
+      name: "Saturn Project",
+      version: 1,
+      docstatus: "draft",
+      data: {
+        title: "Saturn Project",
+        summary: "Mission planning",
+        created_by: "other@example.com"
+      },
+      createdAt: "2026-01-01T00:00:01.000Z",
+      updatedAt: "2026-01-01T00:00:01.000Z"
+    });
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Search Note",
+      name: "Private Note",
+      version: 1,
+      docstatus: "draft",
+      data: {
+        title: "Private Note",
+        body: "Saturn unreadable",
+        internal_code: "not-secret",
+        created_by: "other@example.com"
+      },
+      createdAt: "2026-01-01T00:00:02.000Z",
+      updatedAt: "2026-01-01T00:00:02.000Z"
+    });
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Search Note",
+      name: "Internal Only",
+      version: 1,
+      docstatus: "draft",
+      data: {
+        title: "Internal Only",
+        body: "Visible body",
+        internal_code: "saturn-hidden",
+        created_by: owner.id
+      },
+      createdAt: "2026-01-01T00:00:03.000Z",
+      updatedAt: "2026-01-01T00:00:03.000Z"
+    });
+
+    await expect(queries.search(owner, { q: "saturn" })).resolves.toMatchObject({
+      query: "saturn",
+      limit: 20,
+      total: 2,
+      data: [
+        {
+          doctype: "Search Project",
+          name: "Saturn Project",
+          label: "Saturn Project",
+          matchedField: "name",
+          matchedText: "Saturn Project",
+          route: "/desk/Search%20Project/Saturn%20Project"
+        },
+        {
+          doctype: "Search Note",
+          name: "Launch Plan",
+          label: "Launch Plan",
+          matchedField: "body",
+          matchedText: "Coordinate Saturn release",
+          route: "/desk/Search%20Note/Launch%20Plan"
+        }
+      ]
+    });
+    await expect(queries.search(owner, { q: "saturn", limit: 1 })).resolves.toMatchObject({
+      total: 2,
+      data: [{ doctype: "Search Project", name: "Saturn Project" }]
+    });
+    await expect(queries.search(owner, { q: "  " })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Search query is required"
     });
   });
 

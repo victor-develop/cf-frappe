@@ -199,6 +199,19 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     return c.json({ data });
   });
 
+  app.get("/api/search", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    const q = c.req.query("q");
+    const limit = parseOptionalInteger(c.req.query("limit"));
+    const tenantId = c.req.query("tenant");
+    const data = await options.queries.search(actor, {
+      ...(q !== undefined ? { q } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+      ...(tenantId !== undefined ? { tenantId } : {})
+    });
+    return c.json({ data });
+  });
+
   if (options.files) {
     app.route(
       "/",

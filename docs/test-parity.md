@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the custom report row-provider slice:
+As of the metadata global-search slice:
 
 - Vitest files: `76`
-- Vitest cases: `849`
+- Vitest cases: `852`
 
 ## Implication
 

@@ -39,6 +39,7 @@ export interface FieldDefinition {
   readonly readOnly?: boolean;
   readonly hidden?: boolean;
   readonly inFormView?: boolean;
+  readonly inGlobalSearch?: boolean;
   readonly inListView?: boolean;
   readonly inListFilter?: boolean;
   readonly options?: readonly string[];
@@ -559,6 +560,23 @@ export interface LinkOptionsResult {
   readonly field: string;
   readonly target: DocTypeName;
   readonly options: readonly LinkOption[];
+}
+
+export interface GlobalSearchResultItem {
+  readonly doctype: DocTypeName;
+  readonly name: DocumentName;
+  readonly label: string;
+  readonly matchedField: string;
+  readonly matchedText: string;
+  readonly route: string;
+  readonly updatedAt: string;
+}
+
+export interface GlobalSearchResult {
+  readonly query: string;
+  readonly limit: number;
+  readonly total: number;
+  readonly data: readonly GlobalSearchResultItem[];
 }
 
 export const CHILD_TABLE_ROW_INDEX_FIELD = "__cf_frappe_row_index";

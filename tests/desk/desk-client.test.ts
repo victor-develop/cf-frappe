@@ -65,6 +65,7 @@ interface DeskClientRuntime {
     readonly current: () => DeskFormRuntime | null;
     readonly on: (doctype: string, handlers: DeskFormHandlers) => void;
   };
+  readonly search: (q: string, options?: { readonly limit?: number; readonly tenant?: string }) => Promise<unknown>;
   readonly msgprint: (message: unknown) => string;
   readonly "throw": (message: unknown) => never;
   readonly ui: {
@@ -500,6 +501,23 @@ describe("Desk client runtime", () => {
     expect(calls[0]?.url).toBe(
       "/api/resource/Task?filter_priority__ne=Low&filter_count__gt=2&filter_count__lt=9&filter_title=Launch"
     );
+  });
+
+  it("wraps metadata-driven global search", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { data: [{ name: "TASK-1" }] } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.search("launch plan", { limit: 5, tenant: "acme" })).resolves.toEqual({
+      data: [{ name: "TASK-1" }]
+    });
+
+    expect(calls[0]?.url).toBe("/api/search?q=launch+plan&limit=5&tenant=acme");
+    expect(calls[0]?.init.credentials).toBe("same-origin");
   });
 
   it("wraps selected-document bulk resource APIs with encoded JSON requests", async () => {
