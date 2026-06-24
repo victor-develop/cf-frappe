@@ -743,7 +743,8 @@ export function renderDeskClientScript(): string {
   function context(script) {
     var source = script || document.currentScript || runtimeScript();
     var dataset = source && source.dataset ? source.dataset : {};
-    return {
+    var documentVersion = Number(dataset.documentVersion);
+    var pageContext = {
       doctype: dataset.doctype,
       documentName: dataset.documentName,
       realtimeRoute: dataset.realtimeRoute,
@@ -751,6 +752,13 @@ export function renderDeskClientScript(): string {
       scope: dataset.scope,
       tenantId: dataset.tenantId
     };
+    if (dataset.documentStatus !== undefined) {
+      pageContext.documentStatus = dataset.documentStatus;
+    }
+    if (Number.isInteger(documentVersion) && documentVersion >= 0) {
+      pageContext.documentVersion = documentVersion;
+    }
+    return pageContext;
   }
 
   function ready(callback) {
@@ -1416,10 +1424,14 @@ export function renderDeskClientScript(): string {
   }
 
   function createFormBinding(pageContext, form) {
+    var baseDoc = readFormData(form);
     var binding = {
+      baseDoc: cloneMergeValue(baseDoc),
+      baseDocstatus: pageContext.documentStatus,
+      baseVersion: pageContext.documentVersion === undefined ? formExpectedVersion(form) : pageContext.documentVersion,
       context: pageContext,
       dirty: false,
-      doc: readFormData(form),
+      doc: baseDoc,
       form: form,
       submitting: false,
       validated: true
@@ -1522,6 +1534,9 @@ export function renderDeskClientScript(): string {
       },
       trigger: function (eventName) {
         return triggerFormEvent(binding, eventName);
+      },
+      mergePlan: function (remote, draft) {
+        return currentFormMergePlan(binding, remote, draft);
       }
     };
     return frm;
@@ -1597,9 +1612,40 @@ export function renderDeskClientScript(): string {
     binding.frm.doc = binding.doc;
   }
 
+  function formExpectedVersion(form) {
+    var fields = fieldsNamed(form, "expectedVersion");
+    if (fields.length === 0) {
+      return 0;
+    }
+    var value = Number(fields[0].value);
+    return Number.isInteger(value) && value >= 0 ? value : 0;
+  }
+
   function fieldValue(field) {
+    var fieldType = field.dataset && field.dataset.cfFrappeFieldType;
     if (field.type === "checkbox") {
       return Boolean(field.checked);
+    }
+    if (fieldType && field.value === "" && !field.required) {
+      return undefined;
+    }
+    if (fieldType === "integer") {
+      var integerValue = Number(field.value);
+      return Number.isInteger(integerValue) ? integerValue : field.value;
+    }
+    if (fieldType === "number") {
+      var numberValue = Number(field.value);
+      return Number.isFinite(numberValue) ? numberValue : field.value;
+    }
+    if (fieldType === "boolean") {
+      return field.value === "on" || field.value === "true";
+    }
+    if (fieldType === "json") {
+      try {
+        return JSON.parse(field.value);
+      } catch (_error) {
+        return field.value;
+      }
     }
     return field.value;
   }
@@ -1763,6 +1809,40 @@ export function renderDeskClientScript(): string {
   function isInternalFormField(fieldname) {
     var child = childFieldPath(fieldname);
     return fieldname === "expectedVersion" || fieldname === childRowIndexField || (child && child.field === childRowIndexField);
+  }
+
+  function formFieldNames(form) {
+    var names = [];
+    var seen = {};
+    Array.prototype.forEach.call(form.querySelectorAll("[name]"), function (field) {
+      var fieldname = String(field.name || "").trim();
+      var child = childFieldPath(fieldname);
+      var mergeField = child ? child.table : fieldname;
+      if (!mergeField || isInternalFormField(fieldname) || seen[mergeField]) {
+        return;
+      }
+      seen[mergeField] = true;
+      names.push(mergeField);
+    });
+    return names;
+  }
+
+  function currentFormMergePlan(binding, remote, draft) {
+    syncFormData(binding);
+    var remoteSnapshot = remote || binding.remoteSnapshot || {
+      version: binding.baseVersion,
+      data: binding.baseDoc
+    };
+    var baseSnapshot = Object.assign({
+      version: binding.baseVersion,
+      data: binding.baseDoc
+    }, binding.baseDocstatus === undefined ? {} : { docstatus: binding.baseDocstatus });
+    return documentMergePlan(
+      baseSnapshot,
+      remoteSnapshot,
+      draft || binding.doc,
+      { fields: formFieldNames(binding.form) }
+    );
   }
 
   function isSaveSubmit(event) {
@@ -1937,6 +2017,167 @@ export function renderDeskClientScript(): string {
     return message;
   }
 
+  function documentMergePlan(base, remote, draft, options) {
+    var baseSnapshot = mergeSnapshot(base, 0);
+    var remoteSnapshot = mergeSnapshot(remote, baseSnapshot.version);
+    var draftData = isPlainObject(draft) ? draft : {};
+    var fields = mergeFields(baseSnapshot.data, remoteSnapshot.data, draftData, options && options.fields);
+    var localChangedFields = [];
+    var remoteChangedFields = [];
+    var mergedFields = [];
+    var conflicts = [];
+    var patch = {};
+    var unset = [];
+    if (baseSnapshot.docstatus !== undefined && remoteSnapshot.docstatus !== undefined && baseSnapshot.docstatus !== remoteSnapshot.docstatus) {
+      conflicts.push(mergeConflict("docstatus", "remote_status_changed", {
+        basePresent: true,
+        localPresent: true,
+        remotePresent: true,
+        baseValue: baseSnapshot.docstatus,
+        localValue: baseSnapshot.docstatus,
+        remoteValue: remoteSnapshot.docstatus
+      }));
+    }
+    fields.forEach(function (field) {
+      var basePresent = Object.prototype.hasOwnProperty.call(baseSnapshot.data, field);
+      var localPresent = Object.prototype.hasOwnProperty.call(draftData, field);
+      var remotePresent = Object.prototype.hasOwnProperty.call(remoteSnapshot.data, field);
+      var baseValue = baseSnapshot.data[field];
+      var localValue = draftData[field];
+      var remoteValue = remoteSnapshot.data[field];
+      var localChanged = localPresent && !mergeJsonEqual(localValue, baseValue);
+      var remoteChanged = !mergeJsonEqual(remoteValue, baseValue);
+      if (localChanged) {
+        localChangedFields.push(field);
+      }
+      if (remoteChanged) {
+        remoteChangedFields.push(field);
+      }
+      if (!localChanged) {
+        return;
+      }
+      if (remoteChanged && !mergeJsonEqual(localValue, remoteValue)) {
+        conflicts.push(mergeConflict(field, "remote_changed", {
+          basePresent: basePresent,
+          localPresent: localPresent,
+          remotePresent: remotePresent,
+          baseValue: baseValue,
+          localValue: localValue,
+          remoteValue: remoteValue
+        }));
+        return;
+      }
+      if (mergeJsonEqual(localValue, remoteValue)) {
+        mergedFields.push(field);
+        return;
+      }
+      mergedFields.push(field);
+      if (localValue === undefined) {
+        unset.push(field);
+      } else {
+        patch[field] = cloneMergeValue(localValue);
+      }
+    });
+    return {
+      status: conflicts.length === 0 ? "clean" : "conflict",
+      baseVersion: baseSnapshot.version,
+      remoteVersion: remoteSnapshot.version,
+      localChangedFields: localChangedFields,
+      remoteChangedFields: remoteChangedFields,
+      mergedFields: mergedFields,
+      patch: patch,
+      unset: unset,
+      conflicts: conflicts
+    };
+  }
+
+  function mergeSnapshot(value, fallbackVersion) {
+    var source = isPlainObject(value) ? value : {};
+    var hasData = isPlainObject(source.data);
+    var version = typeof source.version === "number" && Number.isFinite(source.version) ? source.version : fallbackVersion;
+    return Object.assign({
+      version: version,
+      data: cloneMergeValue(hasData ? source.data : source)
+    }, source.docstatus === undefined ? {} : { docstatus: source.docstatus });
+  }
+
+  function mergeFields(base, remote, draft, fields) {
+    var input = Array.isArray(fields) ? fields : Object.keys(base).concat(Object.keys(remote), Object.keys(draft));
+    var seen = {};
+    var result = [];
+    input.forEach(function (field) {
+      var name = String(field || "").trim();
+      if (!name || seen[name]) {
+        return;
+      }
+      seen[name] = true;
+      result.push(name);
+    });
+    return result;
+  }
+
+  function mergeConflict(field, reason, values) {
+    var conflict = {
+      field: field,
+      reason: reason,
+      basePresent: values.basePresent,
+      localPresent: values.localPresent,
+      remotePresent: values.remotePresent
+    };
+    if (values.baseValue !== undefined) {
+      conflict.baseValue = cloneMergeValue(values.baseValue);
+    }
+    if (values.localValue !== undefined) {
+      conflict.localValue = cloneMergeValue(values.localValue);
+    }
+    if (values.remoteValue !== undefined) {
+      conflict.remoteValue = cloneMergeValue(values.remoteValue);
+    }
+    return conflict;
+  }
+
+  function mergeJsonEqual(left, right) {
+    if (left === right) {
+      return true;
+    }
+    if (left === undefined || right === undefined) {
+      return false;
+    }
+    if (left === null || right === null || typeof left !== "object" || typeof right !== "object") {
+      return false;
+    }
+    if (Array.isArray(left) || Array.isArray(right)) {
+      if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+        return false;
+      }
+      return left.every(function (item, index) {
+        return mergeJsonEqual(item, right[index]);
+      });
+    }
+    var leftKeys = Object.keys(left).sort();
+    var rightKeys = Object.keys(right).sort();
+    if (leftKeys.length !== rightKeys.length) {
+      return false;
+    }
+    return leftKeys.every(function (key, index) {
+      return key === rightKeys[index] && mergeJsonEqual(left[key], right[key]);
+    });
+  }
+
+  function cloneMergeValue(value) {
+    if (value === null || typeof value !== "object") {
+      return value;
+    }
+    if (Array.isArray(value)) {
+      return value.map(cloneMergeValue);
+    }
+    var clone = {};
+    Object.keys(value).forEach(function (key) {
+      clone[key] = cloneMergeValue(value[key]);
+    });
+    return clone;
+  }
+
   function addSocketListener(socket, type, listener) {
     if (typeof socket.addEventListener === "function") {
       socket.addEventListener(type, listener);
@@ -2029,15 +2270,21 @@ export function renderDeskClientScript(): string {
       "[data-cf-frappe-document-update]",
       "Document updated to v" + String(remoteVersion) + ". Refresh to review latest changes."
     );
-    markCurrentFormRemoteUpdate(doctype, documentName);
+    markCurrentFormRemoteUpdate(doctype, documentName, snapshot);
   }
 
-  function markCurrentFormRemoteUpdate(doctype, documentName) {
+  function markCurrentFormRemoteUpdate(doctype, documentName, snapshot) {
     var binding = currentFormBinding();
     if (!binding || binding.context.doctype !== doctype || binding.context.documentName !== documentName) {
       return;
     }
     binding.form.dataset.remoteUpdate = "1";
+    if (snapshot && isPlainObject(snapshot.data)) {
+      binding.remoteSnapshot = snapshot;
+      binding.remoteMergePlan = currentFormMergePlan(binding, snapshot);
+      binding.frm.remote_merge_plan = binding.remoteMergePlan;
+      binding.form.dataset.remoteMergeState = binding.remoteMergePlan.status;
+    }
   }
 
   function setPresencePanelConnections(panel, state, connections) {
@@ -2527,6 +2774,7 @@ export function renderDeskClientScript(): string {
     }),
     collaboration: Object.freeze({
       fieldEditMessage: realtimeFieldEditMessage,
+      mergePlan: documentMergePlan,
       sendFieldEdit: function (subscription, field, input) {
         if (!subscription || typeof subscription.sendFieldEdit !== "function") {
           return realtimeFieldEditMessage(field, input);

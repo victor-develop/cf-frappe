@@ -2557,6 +2557,8 @@ describe("Desk app", () => {
     expect(createHtml).toContain('src="/assets/note-shared.js"');
     expect(createHtml).not.toContain('src="/assets/note-list.js"');
     expect(createHtml).not.toContain("data-document-name=");
+    expect(createHtml).not.toContain("data-document-status=");
+    expect(createHtml).not.toContain("data-document-version=");
 
     const update = await app.request(`/desk/Note/${encodeURIComponent(document.name)}`);
     expect(update.status).toBe(200);
@@ -2564,6 +2566,8 @@ describe("Desk app", () => {
     expect(updateHtml).toContain('src="/assets/note-&quot;&lt;form&gt;.js"');
     expect(updateHtml).toContain('data-cf-frappe-script="note-&quot;&lt;form&gt;"');
     expect(updateHtml).toContain('data-document-name="Script &quot; &lt;Note&gt;"');
+    expect(updateHtml).toContain('data-document-status="draft"');
+    expect(updateHtml).toContain('data-document-version="1"');
     expect(updateHtml).toContain('data-tenant-id="acme"');
   });
 
@@ -2582,6 +2586,7 @@ describe("Desk app", () => {
     expect(html).toContain('data-cf-frappe-presence="document"');
     expect(html).toContain('data-doctype="Note"');
     expect(html).toContain('data-document-name="Collaborative Note"');
+    expect(html).toContain('data-document-status="draft"');
     expect(html).toContain('data-document-version="1"');
     expect(html).toContain('data-realtime-route="/api/realtime"');
     expect(html).toContain('data-tenant-id="acme"');
@@ -5791,6 +5796,7 @@ describe("Desk app", () => {
     expect(html).toContain('name="items[0].product"');
     expect(html).toContain('<option value="SKU-1">Widget</option>');
     expect(html).toContain('name="items[0].quantity"');
+    expect(html).toContain('name="items[0].quantity" data-cf-frappe-field-type="integer"');
     expect(html).not.toContain("/desk/Sales%20Invoice%20Item");
 
     const created = await app.request("/desk/Sales%20Invoice", {

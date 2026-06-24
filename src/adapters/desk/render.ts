@@ -2807,7 +2807,8 @@ export function renderFormView(
     options.clientScripts ?? [],
     options.document?.name,
     options.document?.tenantId,
-    options.realtimeRoute
+    options.realtimeRoute,
+    options.document
   )}`;
 }
 
@@ -2824,22 +2825,29 @@ function renderClientScripts(
   scripts: readonly ClientScriptDefinition[],
   documentName?: string,
   documentTenantId?: string,
-  realtimeRoute?: string
+  realtimeRoute?: string,
+  document?: DocumentSnapshot
 ): string {
   const documentAttribute = documentName === undefined
     ? ""
     : ` data-document-name="${escapeHtml(documentName)}"`;
+  const documentVersionAttribute = document === undefined
+    ? ""
+    : ` data-document-version="${String(document.version)}"`;
+  const documentStatusAttribute = document === undefined
+    ? ""
+    : ` data-document-status="${escapeHtml(document.docstatus)}"`;
   const tenantAttribute = documentTenantId === undefined
     ? ""
     : ` data-tenant-id="${escapeHtml(documentTenantId)}"`;
   const realtimeAttribute = realtimeRoute === undefined
     ? ""
     : ` data-realtime-route="${escapeHtml(realtimeRoute)}"`;
-  const runtime = `<script src="${DESK_CLIENT_SCRIPT_PATH}" data-cf-frappe-runtime="desk" data-doctype="${escapeHtml(doctype)}" data-scope="${scope}"${documentAttribute}${tenantAttribute}${realtimeAttribute}></script>`;
+  const runtime = `<script src="${DESK_CLIENT_SCRIPT_PATH}" data-cf-frappe-runtime="desk" data-doctype="${escapeHtml(doctype)}" data-scope="${scope}"${documentAttribute}${documentVersionAttribute}${documentStatusAttribute}${tenantAttribute}${realtimeAttribute}></script>`;
   const declared = scripts
     .map((script) => {
       const type = (script.type ?? "module") === "module" ? ' type="module"' : "";
-      return `<script${type} src="${escapeHtml(script.src)}" data-cf-frappe-script="${escapeHtml(script.name)}" data-doctype="${escapeHtml(doctype)}" data-scope="${scope}"${documentAttribute}${tenantAttribute}${realtimeAttribute}></script>`;
+      return `<script${type} src="${escapeHtml(script.src)}" data-cf-frappe-script="${escapeHtml(script.name)}" data-doctype="${escapeHtml(doctype)}" data-scope="${scope}"${documentAttribute}${documentVersionAttribute}${documentStatusAttribute}${tenantAttribute}${realtimeAttribute}></script>`;
     })
     .join("");
   return `${runtime}${declared}`;
@@ -3154,7 +3162,7 @@ function renderField(
   const label = escapeHtml(field.label ?? field.name);
   const required = field.required ? " required" : "";
   const readonly = field.readOnly || (mode === "update" && field.readOnly) ? " readonly" : "";
-  const common = `id="${id}" name="${escapeHtml(field.name)}"${required}${readonly}`;
+  const common = `id="${id}" name="${escapeHtml(field.name)}" data-cf-frappe-field-type="${field.type}"${required}${readonly}`;
   const formatted = formatFormValue(value);
   const help = field.readOnly ? `<small>Read only</small>` : "";
   if (field.type === "table") {
@@ -3189,7 +3197,7 @@ function renderTableField(
 ): string {
   const label = escapeHtml(field.label ?? field.name);
   if (!child) {
-    return `<label class="field" for="field-${slug(field.name)}"><span>${label}${field.required ? " *" : ""}</span><textarea id="field-${slug(field.name)}" name="${escapeHtml(field.name)}">${escapeHtml(formatFormValue(value))}</textarea></label>`;
+    return `<label class="field" for="field-${slug(field.name)}"><span>${label}${field.required ? " *" : ""}</span><textarea id="field-${slug(field.name)}" name="${escapeHtml(field.name)}" data-cf-frappe-field-type="${field.type}">${escapeHtml(formatFormValue(value))}</textarea></label>`;
   }
   const rows = Array.isArray(value) ? value.filter(isJsonObject) : [];
   const renderRows = rows.length > 0 ? rows : [{}];
@@ -3294,7 +3302,7 @@ function renderTableCellInput(
     return renderTableField(field, value, child, allLinkOptions, tableDefinitions, fieldDefinitionPath, name);
   }
   const id = `field-${slug(name)}`;
-  const common = `id="${id}" name="${escapeHtml(name)}"`;
+  const common = `id="${id}" name="${escapeHtml(name)}" data-cf-frappe-field-type="${field.type}"`;
   const formatted = formatFormValue(value);
   if (field.type === "link") {
     return `<select ${common}>${renderLinkOptions(linkOptions, formatted)}</select>`;

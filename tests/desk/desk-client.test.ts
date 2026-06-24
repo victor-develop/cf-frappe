@@ -5,6 +5,8 @@ interface DeskClientRuntime {
   readonly context: (script?: { readonly dataset?: Record<string, string> }) => {
     readonly doctype?: string;
     readonly documentName?: string;
+    readonly documentStatus?: string;
+    readonly documentVersion?: number;
     readonly realtimeRoute?: string;
     readonly scope?: string;
     readonly script?: string;
@@ -71,6 +73,12 @@ interface DeskClientRuntime {
   };
   readonly collaboration: {
     readonly fieldEditMessage: (field: string, input?: unknown) => Record<string, unknown>;
+    readonly mergePlan: (
+      base: Record<string, unknown>,
+      remote: Record<string, unknown>,
+      draft: Record<string, unknown>,
+      options?: { readonly fields?: readonly string[] }
+    ) => Record<string, unknown>;
     readonly sendFieldEdit: (
       subscription: DeskRealtimeSubscription,
       field: string,
@@ -459,6 +467,7 @@ interface DeskFormRuntime {
   readonly get_value: (fieldname: string) => unknown;
   readonly is_dirty: () => boolean;
   readonly is_new: () => boolean;
+  readonly mergePlan: (remote?: Record<string, unknown>, draft?: Record<string, unknown>) => Record<string, unknown>;
   readonly refresh: () => boolean;
   readonly refresh_field: (fieldname: string) => void;
   readonly save: () => boolean;
@@ -2320,6 +2329,8 @@ describe("Desk client runtime", () => {
           cfFrappeScript: "task-form",
           doctype: "Task",
           documentName: "TASK-1",
+          documentStatus: "draft",
+          documentVersion: "7",
           realtimeRoute: "/rt",
           scope: "form",
           tenantId: "acme"
@@ -2328,6 +2339,8 @@ describe("Desk client runtime", () => {
     ).toEqual({
       doctype: "Task",
       documentName: "TASK-1",
+      documentStatus: "draft",
+      documentVersion: 7,
       realtimeRoute: "/rt",
       script: "task-form",
       scope: "form",
@@ -2695,6 +2708,283 @@ describe("Desk client runtime", () => {
         value: "Queued"
       })
     ]);
+  });
+
+  it("plans field-level document merges for client scripts", () => {
+    const runtime = evaluateDeskClient();
+
+    expect(
+      runtime.collaboration.mergePlan(
+        { version: 1, docstatus: "draft", data: { title: "Queued", body: "Draft" } },
+        { version: 2, docstatus: "draft", data: { title: "Queued", body: "Remote body" } },
+        { title: "Local title", body: "Draft" }
+      )
+    ).toEqual({
+      status: "clean",
+      baseVersion: 1,
+      remoteVersion: 2,
+      localChangedFields: ["title"],
+      remoteChangedFields: ["body"],
+      mergedFields: ["title"],
+      patch: { title: "Local title" },
+      unset: [],
+      conflicts: []
+    });
+
+    expect(
+      runtime.collaboration.mergePlan(
+        { version: 1, docstatus: "draft", data: { title: "Queued" } },
+        { version: 2, docstatus: "draft", data: { title: "Remote title" } },
+        { title: "Local title" }
+      )
+    ).toMatchObject({
+      status: "conflict",
+      conflicts: [
+        {
+          field: "title",
+          reason: "remote_changed",
+          baseValue: "Queued",
+          localValue: "Local title",
+          remoteValue: "Remote title"
+        }
+      ]
+    });
+
+    expect(
+      runtime.collaboration.mergePlan(
+        { version: 1, docstatus: "draft", data: { title: "Queued", body: "Draft" } },
+        { version: 2, docstatus: "draft", data: { title: "Shared title", body: "Draft" } },
+        { title: "Shared title", body: "Draft" }
+      )
+    ).toMatchObject({
+      status: "clean",
+      localChangedFields: ["title"],
+      remoteChangedFields: ["title"],
+      mergedFields: ["title"],
+      patch: {},
+      unset: [],
+      conflicts: []
+    });
+
+    expect(
+      runtime.collaboration.mergePlan(
+        { version: 1, docstatus: "draft", data: { title: "Queued" } },
+        { version: 2, docstatus: "submitted", data: { title: "Queued" } },
+        { title: "Local title" }
+      )
+    ).toMatchObject({
+      status: "conflict",
+      conflicts: [
+        {
+          field: "docstatus",
+          reason: "remote_status_changed",
+          baseValue: "draft",
+          localValue: "draft",
+          remoteValue: "submitted"
+        }
+      ]
+    });
+  });
+
+  it("exposes generated form merge plans from the initial rendered form state", () => {
+    const title = new FakeField("title", "Queued");
+    const body = new FakeField("body", "Draft");
+    const expectedVersion = new FakeField("expectedVersion", "1", "hidden");
+    const runtime = evaluateDeskClient(
+      fetch,
+      new FakeDocument({
+        form: new FakeForm([title, body, expectedVersion]),
+        runtimeDataset: {
+          doctype: "Task",
+          documentName: "TASK-1",
+          scope: "form",
+          tenantId: "acme"
+        }
+      })
+    );
+
+    expect(runtime.form.current()?.doc).toMatchObject({ title: "Queued", body: "Draft" });
+    title.value = "Local title";
+    title.emit("input");
+
+    expect(runtime.form.current()?.mergePlan({
+      version: 2,
+      docstatus: "draft",
+      data: {
+        title: "Queued",
+        body: "Remote body"
+      }
+    })).toEqual({
+      status: "clean",
+      baseVersion: 1,
+      remoteVersion: 2,
+      localChangedFields: ["title"],
+      remoteChangedFields: ["body"],
+      mergedFields: ["title"],
+      patch: { title: "Local title" },
+      unset: [],
+      conflicts: []
+    });
+  });
+
+  it("plans generated form table edits at the top-level table field", () => {
+    const product = new FakeField("items[0].product", "SKU-1");
+    const quantity = new FakeField("items[0].quantity", "2", "number");
+    quantity.dataset.cfFrappeFieldType = "integer";
+    const runtime = evaluateDeskClient(
+      fetch,
+      new FakeDocument({
+        form: new FakeForm([
+          product,
+          quantity,
+          new FakeField("items[0].__cf_frappe_row_index", "0", "hidden"),
+          new FakeField("expectedVersion", "1", "hidden")
+        ]),
+        runtimeDataset: {
+          doctype: "Sales Invoice",
+          documentName: "INV-1",
+          documentStatus: "draft",
+          documentVersion: "1",
+          scope: "form",
+          tenantId: "acme"
+        }
+      })
+    );
+
+    expect(runtime.form.current()?.doc).toEqual({
+      items: [{ product: "SKU-1", quantity: 2 }]
+    });
+
+    quantity.value = "3";
+    quantity.emit("input");
+
+    expect(runtime.form.current()?.mergePlan({
+      version: 2,
+      docstatus: "draft",
+      data: {
+        items: [{ product: "SKU-2", quantity: 2 }]
+      }
+    })).toEqual({
+      status: "conflict",
+      baseVersion: 1,
+      remoteVersion: 2,
+      localChangedFields: ["items"],
+      remoteChangedFields: ["items"],
+      mergedFields: [],
+      patch: {},
+      unset: [],
+      conflicts: [
+        {
+          field: "items",
+          reason: "remote_changed",
+          basePresent: true,
+          localPresent: true,
+          remotePresent: true,
+          baseValue: [{ product: "SKU-1", quantity: 2 }],
+          localValue: [{ product: "SKU-1", quantity: 3 }],
+          remoteValue: [{ product: "SKU-2", quantity: 2 }]
+        }
+      ]
+    });
+  });
+
+  it("includes rendered document status in generated form merge plans", () => {
+    const runtime = evaluateDeskClient(
+      fetch,
+      new FakeDocument({
+        form: new FakeForm([new FakeField("title", "Queued")]),
+        runtimeDataset: {
+          doctype: "Task",
+          documentName: "TASK-1",
+          documentStatus: "draft",
+          documentVersion: "1",
+          scope: "form",
+          tenantId: "acme"
+        }
+      })
+    );
+
+    expect(runtime.form.current()?.mergePlan({
+      version: 2,
+      docstatus: "submitted",
+      data: { title: "Queued" }
+    })).toMatchObject({
+      status: "conflict",
+      baseVersion: 1,
+      remoteVersion: 2,
+      conflicts: [
+        {
+          field: "docstatus",
+          reason: "remote_status_changed",
+          baseValue: "draft",
+          localValue: "draft",
+          remoteValue: "submitted"
+        }
+      ]
+    });
+  });
+
+  it("coerces generated typed form controls before planning merges", () => {
+    const quantity = new FakeField("quantity", "2", "number");
+    quantity.dataset.cfFrappeFieldType = "integer";
+    const amount = new FakeField("amount", "10.5", "number");
+    amount.dataset.cfFrappeFieldType = "number";
+    const metadata = new FakeField("metadata", "{\"color\":\"red\"}", "textarea");
+    metadata.dataset.cfFrappeFieldType = "json";
+    const reviewed = new FakeField("reviewed", "true", "checkbox");
+    reviewed.checked = true;
+    reviewed.dataset.cfFrappeFieldType = "boolean";
+    const runtime = evaluateDeskClient(
+      fetch,
+      new FakeDocument({
+        form: new FakeForm([
+          quantity,
+          amount,
+          metadata,
+          reviewed,
+          new FakeField("expectedVersion", "5", "hidden")
+        ]),
+        runtimeDataset: {
+          doctype: "Task",
+          documentName: "TASK-1",
+          documentStatus: "draft",
+          documentVersion: "5",
+          scope: "form",
+          tenantId: "acme"
+        }
+      })
+    );
+
+    expect(runtime.form.current()?.doc).toEqual({
+      quantity: 2,
+      amount: 10.5,
+      metadata: { color: "red" },
+      reviewed: true
+    });
+
+    quantity.value = "3";
+    quantity.emit("input");
+
+    expect(runtime.form.current()?.mergePlan({
+      version: 6,
+      docstatus: "draft",
+      data: {
+        quantity: 2,
+        amount: 10.5,
+        metadata: { color: "red" },
+        reviewed: true
+      }
+    })).toEqual({
+      status: "clean",
+      baseVersion: 5,
+      remoteVersion: 6,
+      localChangedFields: ["quantity"],
+      remoteChangedFields: [],
+      mergedFields: ["quantity"],
+      patch: { quantity: 3 },
+      unset: [],
+      conflicts: []
+    });
   });
 
   it("shows generated document presence panel field-edit activity from collaboration messages", async () => {
@@ -3086,6 +3376,7 @@ function fakeWebSocketClass(sockets: FakeWebSocket[]) {
 
 class FakeField {
   readonly attributes: Record<string, string> = {};
+  readonly dataset: Record<string, string> = {};
   readonly listeners: Record<string, Array<() => void>> = {};
   checked = false;
   disabled = false;

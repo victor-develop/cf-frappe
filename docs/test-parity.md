@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the realtime document field-edit collaboration slice:
+As of the document field-merge planning slice:
 
-- Vitest files: `92`
-- Vitest cases: `1021`
+- Vitest files: `93`
+- Vitest cases: `1030`
 
 ## Implication
 
