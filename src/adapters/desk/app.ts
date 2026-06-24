@@ -38,6 +38,7 @@ import type { UserAccountService } from "../../application/user-account-service.
 import type { UserNotificationService } from "../../application/user-notification-service.js";
 import type { UserPermissionService } from "../../application/user-permission-service.js";
 import type { UserProfileService } from "../../application/user-profile-service.js";
+import type { WorkflowService } from "../../application/workflow-service.js";
 import { DOCUMENT_SHARE_PERMISSIONS, documentSharePermissionsForActor } from "../../core/document-shares.js";
 import { FrameworkError, badRequest } from "../../core/errors.js";
 import { can } from "../../core/permissions.js";
@@ -81,7 +82,9 @@ import {
   type LinkOption,
   type ListDocumentsFilter,
   type MutableDocumentData,
-  type ResolvedFormView
+  type ResolvedFormView,
+  type WorkflowDefinition,
+  type WorkflowTransition
 } from "../../core/types.js";
 import { fileContentHeaders } from "../file-content.js";
 import type { ActorResolver } from "../http/actor.js";
@@ -131,6 +134,7 @@ import {
   renderUserNotificationInbox,
   renderUserAccountAdmin,
   renderUserPermissionAdmin,
+  renderWorkflowAdmin,
   renderWorkspacePage,
   type DeskLayoutOptions,
   type DeskNavLink,
@@ -192,6 +196,7 @@ export interface DeskAppOptions {
   readonly savedReports?: SavedReportService;
   readonly roles?: RoleService;
   readonly customFields?: CustomFieldService;
+  readonly workflows?: WorkflowService;
   readonly userAccounts?: UserAccountService;
   readonly notifications?: UserNotificationService;
   readonly userProfiles?: UserProfileService;
@@ -577,6 +582,17 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const selectedDoctype = url.searchParams.get("doctype")?.trim() || doctypes[0]?.name || "";
     const state = selectedDoctype ? await customFields.list(actor, selectedDoctype) : undefined;
     return renderDeskCustomFieldPage(options, actor, selectedDoctype, state);
+  });
+
+  app.get("/desk/admin/workflows", async (c) => {
+    const workflows = requireWorkflows(options);
+    const actor = await options.actor(c.req.raw);
+    workflows.authorizeAdministration(actor);
+    const url = new URL(c.req.url);
+    const doctypes = options.queries.listDoctypes(actor);
+    const selectedDoctype = url.searchParams.get("doctype")?.trim() || doctypes[0]?.name || "";
+    const state = selectedDoctype ? await workflows.list(actor, selectedDoctype) : undefined;
+    return renderDeskWorkflowPage(options, actor, selectedDoctype, state);
   });
 
   app.get("/desk/admin/print-settings", async (c) => {
@@ -1231,6 +1247,44 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       return c.redirect(customFieldAdminHref(c.req.param("doctype")), 303);
     } catch (error) {
       return renderDeskCustomFieldFailure(options, actor, customFields, c.req.param("doctype"), error);
+    }
+  });
+
+  app.post("/desk/admin/workflows", async (c) => {
+    const workflows = requireWorkflows(options);
+    const actor = await options.actor(c.req.raw);
+    workflows.authorizeAdministration(actor);
+    let form: ParsedDeskWorkflow | undefined;
+    try {
+      form = await parseDeskWorkflow(c.req.raw);
+      await workflows.save({
+        actor,
+        doctype: form.doctype,
+        workflow: form.workflow,
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(workflowAdminHref(form.doctype), 303);
+    } catch (error) {
+      return renderDeskWorkflowFailure(options, actor, workflows, form?.doctype ?? "", error);
+    }
+  });
+
+  app.post("/desk/admin/workflows/:doctype/clear", async (c) => {
+    const workflows = requireWorkflows(options);
+    const actor = await options.actor(c.req.raw);
+    workflows.authorizeAdministration(actor);
+    try {
+      const form = await parseDeskWorkflowClear(c.req.raw);
+      await workflows.clear({
+        actor,
+        doctype: c.req.param("doctype"),
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(workflowAdminHref(c.req.param("doctype")), 303);
+    } catch (error) {
+      return renderDeskWorkflowFailure(options, actor, workflows, c.req.param("doctype"), error);
     }
   });
 
@@ -2257,6 +2311,9 @@ function adminLinksFor(options: DeskAppOptions, actor: Actor): readonly DeskNavL
     ...(options.customFields === undefined
       ? []
       : [{ id: "custom-fields", label: "Custom Fields", href: "/desk/admin/custom-fields" }]),
+    ...(options.workflows === undefined
+      ? []
+      : [{ id: "workflows", label: "Workflows", href: "/desk/admin/workflows" }]),
     ...(options.printSettings === undefined
       ? []
       : [{ id: "print-settings", label: "Print Settings", href: "/desk/admin/print-settings" }]),
@@ -2410,6 +2467,13 @@ function requireCustomFields(options: DeskAppOptions): CustomFieldService {
     throw new FrameworkError("DOCUMENT_NOT_FOUND", "Custom fields are not enabled", { status: 404 });
   }
   return options.customFields;
+}
+
+function requireWorkflows(options: DeskAppOptions): WorkflowService {
+  if (!options.workflows) {
+    throw new FrameworkError("DOCUMENT_NOT_FOUND", "Workflows are not enabled", { status: 404 });
+  }
+  return options.workflows;
 }
 
 function requirePrintSettings(options: DeskAppOptions): PrintSettingsService {
@@ -2911,6 +2975,64 @@ async function renderDeskCustomFieldFailure(
   );
 }
 
+async function renderDeskWorkflowPage(
+  options: DeskAppOptions,
+  actor: Actor,
+  selectedDoctype: string,
+  state: Awaited<ReturnType<WorkflowService["list"]>> | undefined,
+  status = 200,
+  error?: string
+): Promise<Response> {
+  const doctypes = options.queries.listDoctypes(actor);
+  const reports = listReports(options, actor);
+  return html(
+    renderDeskLayoutFor(options, {
+      title: "Workflows",
+      activeAdmin: "workflows",
+      adminLinks: adminLinksFor(options, actor),
+      doctypes,
+      reports,
+      body: renderWorkflowAdmin({
+        doctypes,
+        selectedDoctype,
+        ...(state === undefined ? {} : { state }),
+        ...(error === undefined ? {} : { error })
+      })
+    }),
+    status
+  );
+}
+
+async function renderDeskWorkflowFailure(
+  options: DeskAppOptions,
+  actor: Actor,
+  workflows: WorkflowService,
+  selectedDoctype: string,
+  error: unknown
+): Promise<Response> {
+  if (error instanceof FrameworkError && error.status === 403) {
+    throw error;
+  }
+  const fallbackDoctype = selectedDoctype || options.queries.listDoctypes(actor)[0]?.name || "";
+  let state: Awaited<ReturnType<WorkflowService["list"]>> | undefined;
+  try {
+    state = fallbackDoctype ? await workflows.list(actor, fallbackDoctype) : undefined;
+  } catch (listError) {
+    if (!(listError instanceof FrameworkError && listError.status === 404)) {
+      throw listError;
+    }
+  }
+  const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
+  return renderDeskWorkflowPage(
+    options,
+    actor,
+    fallbackDoctype,
+    state,
+    error instanceof FrameworkError ? error.status : 500,
+    message
+  );
+}
+
 async function renderDeskPrintSettingsPage(
   options: DeskAppOptions,
   actor: Actor,
@@ -2955,6 +3077,10 @@ async function renderDeskPrintSettingsFailure(
 
 function customFieldAdminHref(doctype: string): string {
   return `/desk/admin/custom-fields?doctype=${encodeURIComponent(doctype)}`;
+}
+
+function workflowAdminHref(doctype: string): string {
+  return `/desk/admin/workflows?doctype=${encodeURIComponent(doctype)}`;
 }
 
 async function renderDeskDocumentPage(
@@ -3365,6 +3491,16 @@ interface ParsedDeskCustomField {
 }
 
 interface ParsedDeskCustomFieldDisable {
+  readonly expectedVersion?: number;
+}
+
+interface ParsedDeskWorkflow {
+  readonly doctype: string;
+  readonly workflow: WorkflowDefinition;
+  readonly expectedVersion?: number;
+}
+
+interface ParsedDeskWorkflowClear {
   readonly expectedVersion?: number;
 }
 
@@ -4000,6 +4136,30 @@ async function parseDeskCustomFieldDisable(request: Request): Promise<ParsedDesk
   };
 }
 
+async function parseDeskWorkflow(request: Request): Promise<ParsedDeskWorkflow> {
+  const form = await readUrlEncodedDeskForm(request);
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  const stateField = stringSearchParamValue(form, "stateField");
+  return {
+    doctype: requiredSearchParamValue(form, "doctype", "DocType"),
+    workflow: {
+      ...(stateField === undefined ? {} : { stateField }),
+      initialState: requiredSearchParamValue(form, "initialState", "Initial state"),
+      states: workflowStatesFormValue(form.get("states")),
+      transitions: workflowTransitionsFormValue(form.get("transitions"))
+    },
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
+async function parseDeskWorkflowClear(request: Request): Promise<ParsedDeskWorkflowClear> {
+  const form = await readUrlEncodedDeskForm(request);
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  return {
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
 async function parseDeskForm(
   request: Request,
   doctype: DocTypeDefinition,
@@ -4039,6 +4199,41 @@ function commaListFormValue(value: FormDataEntryValue | null): readonly string[]
     return [];
   }
   return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function workflowStatesFormValue(value: string | null): readonly string[] {
+  if (value === null) {
+    return [];
+  }
+  return value
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function workflowTransitionsFormValue(value: string | null): readonly WorkflowTransition[] {
+  if (value === null) {
+    return [];
+  }
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [action = "", from = "", to = "", roles = "", eventType = ""] = line.split("|").map((part) => part.trim());
+      return {
+        action,
+        from,
+        to,
+        ...optionalWorkflowRoles(roles),
+        ...(eventType === "" ? {} : { eventType })
+      };
+    });
+}
+
+function optionalWorkflowRoles(value: string): { readonly roles?: readonly string[] } {
+  const roles = commaListFormValue(value);
+  return roles.length === 0 ? {} : { roles };
 }
 
 async function parseDeskExpectedVersion(request: Request): Promise<number | undefined> {

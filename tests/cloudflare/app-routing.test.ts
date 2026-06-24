@@ -149,6 +149,42 @@ describe("CloudFrappe Worker routing", () => {
     await expect(response.json()).resolves.toMatchObject({ data: { tenantId: "acme", events: [] } });
   });
 
+  it("mounts workflow definition routes and applies them to Worker metadata", async () => {
+    const worker = createCloudFrappeWorker({
+      registry: createRegistry({ doctypes: [noteDocType] }),
+      actor: () => ({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"], tenantId: "acme" })
+    });
+    const env = {
+      DB: fakeEventD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const saved = await worker.fetch!(
+      cfRequest("http://localhost/api/workflows/Note", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          expectedVersion: 0,
+          workflow: {
+            initialState: "Open",
+            states: ["Open", "Closed"],
+            transitions: [{ action: "approve", from: "Open", to: "Closed", roles: ["User"] }]
+          }
+        })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+    expect(saved.status).toBe(200);
+
+    const meta = await worker.fetch!(cfRequest("http://localhost/api/meta/doctypes/Note"), env, fakeExecutionContext());
+
+    expect(meta.status).toBe(200);
+    await expect(meta.json()).resolves.toMatchObject({
+      data: { workflow: { transitions: [{ action: "approve" }] } }
+    });
+  });
+
   it("mounts durable user notification inbox routes on the Worker API", async () => {
     const worker = createCloudFrappeWorker({
       registry: createTestRegistry(),

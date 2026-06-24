@@ -2,10 +2,11 @@ import { DurableObject } from "cloudflare:workers";
 import { CustomFieldService } from "../application/custom-field-service.js";
 import { DocumentShareService } from "../application/document-share-service.js";
 import { DocumentService, bulkDocumentFailure } from "../application/document-service.js";
+import { WorkflowService } from "../application/workflow-service.js";
 import type { BulkDocumentCommandFailure } from "../application/document-service.js";
 import { UserPermissionService } from "../application/user-permission-service.js";
 import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator.js";
-import type { DomainEvent, DocumentSnapshot } from "../core/types.js";
+import type { DocTypeDefinition, DomainEvent, DocumentSnapshot } from "../core/types.js";
 import { createDocumentDeliveryHooks } from "../application/realtime.js";
 import { UserNotificationService } from "../application/user-notification-service.js";
 import type {
@@ -106,6 +107,15 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
         registry: options.registry,
         events
       });
+      const preWorkflowDocType = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
+        customFields.effectiveDocType(base.name, context.tenantId);
+      const workflows = new WorkflowService({
+        registry: options.registry,
+        events,
+        preWorkflowDocTypeResolver: preWorkflowDocType
+      });
+      const effectiveDocType = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
+        workflows.effectiveDocType(base.name, context.tenantId);
       const deliveryHooks = createDocumentDeliveryHooks({
         ...(options.realtime ? { realtime: options.realtime(env) } : {}),
         ...(notifications ? { notifications } : {})
@@ -113,7 +123,7 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
       this.service = new DocumentService({
         registry: options.registry,
         store: new D1DocumentStore(env.DB),
-        doctypeResolver: (base, { tenantId }) => customFields.effectiveDocType(base.name, tenantId),
+        doctypeResolver: effectiveDocType,
         documentShares: new DocumentShareService({ events }),
         userPermissions: new UserPermissionService({
           events,

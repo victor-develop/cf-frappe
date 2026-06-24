@@ -19,3 +19,4 @@ export * from "./signed-session.js";
 export * from "./user-account-api.js";
 export * from "./user-permission-api.js";
 export * from "./user-profile-api.js";
+export * from "./workflow-api.js";

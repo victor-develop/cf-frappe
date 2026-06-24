@@ -24,6 +24,10 @@ export function customFieldsStream(tenantId: TenantId, doctype: DocTypeName): St
   return documentStream(tenantId, "__CustomFields", doctype);
 }
 
+export function workflowDefinitionsStream(tenantId: TenantId): StreamName {
+  return documentStream(tenantId, "__Workflows", "definitions");
+}
+
 export function userPermissionsStream(tenantId: TenantId, userId: string): StreamName {
   return documentStream(tenantId, "__UserPermissions", userId);
 }

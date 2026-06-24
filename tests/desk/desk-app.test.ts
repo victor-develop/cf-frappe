@@ -41,6 +41,7 @@ import {
   UserAccountService,
   UserNotificationService,
   UserProfileService,
+  WorkflowService,
   type DocTypeDefinition,
   type PrintPdfRenderer,
   type RenderPrintPdfCommand,
@@ -235,6 +236,49 @@ describe("Desk app", () => {
       actor: () => actor
     });
     return { app, services: { ...services, documents, queries, savedFilters, customFields } };
+  }
+
+  function makeWorkflowDesk(actor = owner) {
+    const services = createServices(["base-1", "base-2"]);
+    const workflows = new WorkflowService({
+      registry: services.registry,
+      events: services.store,
+      ids: deterministicIds(["workflow-1", "workflow-2"]),
+      clock: fixedClock(now)
+    });
+    const doctypeResolver = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
+      workflows.effectiveDocType(base.name, context.tenantId, base);
+    const documents = new DocumentService({
+      registry: services.registry,
+      store: services.store,
+      doctypeResolver,
+      documentShares: services.documentShares,
+      userPermissions: services.userPermissions,
+      ids: deterministicIds(["workflow-doc-1", "workflow-doc-2"]),
+      clock: fixedClock(now)
+    });
+    const queries = new QueryService({
+      registry: services.registry,
+      projections: services.store,
+      doctypeResolver,
+      documentShares: services.documentShares,
+      userPermissions: services.userPermissions
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents,
+      prints: services.prints,
+      queries,
+      documentShares: services.documentShares,
+      reports: services.reports,
+      timeline: services.history,
+      savedFilters: services.savedFilters,
+      savedReports: services.savedReports,
+      workflows,
+      userPermissions: services.userPermissions,
+      actor: () => actor
+    });
+    return { app, services: { ...services, documents, queries, workflows } };
   }
 
   function makeChildTableCustomFieldDesk(actor = owner) {
@@ -3075,6 +3119,74 @@ describe("Desk app", () => {
     });
   });
 
+  it("renders and mutates workflow definitions from the Desk admin surface", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"] };
+    const { app, services } = makeWorkflowDesk(admin);
+
+    const empty = await app.request("/desk/admin/workflows?doctype=Note");
+    expect(empty.status).toBe(200);
+    const emptyHtml = await empty.text();
+    expect(emptyHtml).toContain("Workflows");
+    expect(emptyHtml).toContain('name="stateField" value="workflow_state"');
+    expect(emptyHtml).toContain("No workflow override configured.");
+
+    const created = await app.request("/desk/admin/workflows", {
+      method: "POST",
+      body: new URLSearchParams({
+        doctype: "Note",
+        stateField: "workflow_state",
+        initialState: "Open",
+        states: "Open\nClosed",
+        transitions: "approve | Open | Closed | User | NoteApproved",
+        expectedVersion: "0"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(created.status).toBe(303);
+    expect(created.headers.get("location")).toBe("/desk/admin/workflows?doctype=Note");
+    await expect(services.workflows.list(admin, "Note")).resolves.toMatchObject({
+      version: 1,
+      workflow: {
+        initialState: "Open",
+        states: ["Open", "Closed"],
+        transitions: [{ action: "approve", from: "Open", to: "Closed", roles: ["User"], eventType: "NoteApproved" }]
+      }
+    });
+
+    const current = await app.request("/desk/admin/workflows?doctype=Note");
+    expect(current.status).toBe(200);
+    const currentHtml = await current.text();
+    expect(currentHtml).toContain("approve");
+    expect(currentHtml).toContain("NoteApproved");
+    expect(currentHtml).toContain('formaction="/desk/admin/workflows/Note/clear"');
+    expect(currentHtml).toContain('name="expectedVersion" value="1"');
+
+    const stale = await app.request("/desk/admin/workflows", {
+      method: "POST",
+      body: new URLSearchParams({
+        doctype: "Note",
+        initialState: "Open",
+        states: "Open\nClosed",
+        transitions: "review | Open | Closed",
+        expectedVersion: "0"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(stale.status).toBe(409);
+    const staleHtml = await stale.text();
+    expect(staleHtml).toContain("Expected workflow definitions at version 0, found 1");
+    expect(staleHtml).toContain("approve");
+
+    const cleared = await app.request("/desk/admin/workflows/Note/clear", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(cleared.status).toBe(303);
+    await expect(services.workflows.list(admin, "Note")).resolves.toMatchObject({ version: 2 });
+    expect((await services.workflows.list(admin, "Note")).workflow).toBeUndefined();
+  });
+
   it("applies custom fields to generated Desk forms and lists", async () => {
     const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"] };
     const { app, services } = makeCustomFieldDesk(admin);
@@ -4185,6 +4297,7 @@ describe("Desk app", () => {
       patches: [defineDataPatch({ id: "core.seed", checksum: "v1", run: () => undefined })]
     });
     const customFields = new CustomFieldService({ registry: services.registry, events: services.store });
+    const workflows = new WorkflowService({ registry: services.registry, events: services.store });
     const app = createDeskApp({
       registry: services.registry,
       documents: services.documents,
@@ -4192,6 +4305,7 @@ describe("Desk app", () => {
       userPermissions: services.userPermissions,
       roles: new RoleService({ events: services.store }),
       customFields,
+      workflows,
       printSettings: services.printSettings,
       dataPatches,
       jobSchedules: new JobScheduleService({
@@ -4210,6 +4324,7 @@ describe("Desk app", () => {
     expect(homeHtml).toContain('href="/desk/admin/user-permissions"');
     expect(homeHtml).toContain('href="/desk/admin/roles"');
     expect(homeHtml).toContain('href="/desk/admin/custom-fields"');
+    expect(homeHtml).toContain('href="/desk/admin/workflows"');
     expect(homeHtml).toContain('href="/desk/admin/print-settings"');
     expect(homeHtml).toContain('href="/desk/admin/data-patches"');
     expect(homeHtml).toContain('href="/desk/admin/jobs/schedules"');

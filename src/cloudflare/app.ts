@@ -30,6 +30,7 @@ import { UserAccountService } from "../application/user-account-service.js";
 import { UserNotificationService } from "../application/user-notification-service.js";
 import { UserProfileService } from "../application/user-profile-service.js";
 import { UserPermissionService } from "../application/user-permission-service.js";
+import { WorkflowService } from "../application/workflow-service.js";
 import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator.js";
 import { RoleCatalogUserRoleValidator } from "../application/user-role-validator.js";
 import type { DocumentCommandExecutor } from "../application/document-service.js";
@@ -48,7 +49,7 @@ import type {
   AuthSessionOptions,
   CloudflareAccessAccountSyncActorResolverOptions
 } from "../adapters/http/index.js";
-import { DEFAULT_TENANT_ID, SYSTEM_MANAGER_ROLE, type Actor } from "../core/types.js";
+import { DEFAULT_TENANT_ID, SYSTEM_MANAGER_ROLE, type Actor, type DocTypeDefinition } from "../core/types.js";
 import { FrameworkError } from "../core/errors.js";
 import type { JobRegistry, JobRetryPolicy } from "../core/jobs.js";
 import type { DataPatchDefinition } from "../core/data-patch.js";
@@ -96,6 +97,7 @@ export interface CloudFrappeRuntimeServices {
   readonly userProfiles?: UserProfileService;
   readonly userPermissions: UserPermissionService;
   readonly customFields: CustomFieldService;
+  readonly workflows: WorkflowService;
   readonly printSettings: PrintSettingsService;
   readonly prints: PrintService;
   readonly queries: QueryService;
@@ -295,10 +297,20 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     events,
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
   });
+  const preWorkflowDocType = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
+    customFields.effectiveDocType(base.name, context.tenantId);
+  const workflows = new WorkflowService({
+    registry: options.registry,
+    events,
+    ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles }),
+    preWorkflowDocTypeResolver: preWorkflowDocType
+  });
+  const effectiveDocType = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
+    workflows.effectiveDocType(base.name, context.tenantId);
   const savedFilters = new SavedListFilterService({
     registry: options.registry,
     events,
-    doctypeResolver: (base, { tenantId }) => customFields.effectiveDocType(base.name, tenantId)
+    doctypeResolver: effectiveDocType
   });
   const documentShares = new DocumentShareService({ events });
   const roleValidator = options.auth?.validateRolesWithCatalog
@@ -334,7 +346,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   const restrictedQueries = new QueryService({
     registry: options.registry,
     projections,
-    doctypeResolver: (base, { tenantId }) => customFields.effectiveDocType(base.name, tenantId),
+    doctypeResolver: effectiveDocType,
     userPermissions,
     documentShares
   });
@@ -367,6 +379,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(userProfiles === undefined ? {} : { userProfiles }),
     userPermissions,
     customFields,
+    workflows,
     printSettings,
     prints,
     queries: restrictedQueries,
@@ -485,6 +498,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(userAccounts === undefined || options.auth === undefined ? {} : { auth: authSessionOptions(options.auth, env) }),
     userPermissions,
     customFields,
+    workflows,
     reports,
     dashboards,
     roles,
@@ -518,6 +532,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(userProfiles === undefined ? {} : { userProfiles }),
     userPermissions,
     customFields,
+    workflows,
     reports,
     dashboards,
     roles,

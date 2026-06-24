@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Cloudflare Access starter auth mode slice:
+As of the event-sourced runtime workflow definitions slice:
 
-- Vitest files: `80`
-- Vitest cases: `908`
+- Vitest files: `82`
+- Vitest cases: `919`
 
 ## Implication
 

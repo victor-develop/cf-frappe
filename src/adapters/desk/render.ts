@@ -26,6 +26,7 @@ import type {
   DocumentTimeline
 } from "../../application/document-history-service.js";
 import type { CustomFieldState } from "../../core/custom-fields.js";
+import type { WorkflowDefinitionState } from "../../core/workflow.js";
 import type { DocumentSharePermission, DocumentShareState } from "../../core/document-shares.js";
 import type { FileDashboard } from "../../application/file-service.js";
 import type {
@@ -1378,6 +1379,59 @@ export function renderCustomFieldAdmin(state: CustomFieldAdminState): string {
   </section>`;
 }
 
+export interface WorkflowAdminState {
+  readonly doctypes: readonly DocTypeDefinition[];
+  readonly selectedDoctype: string;
+  readonly state?: WorkflowDefinitionState;
+  readonly error?: string;
+}
+
+export function renderWorkflowAdmin(state: WorkflowAdminState): string {
+  const version = state.state?.version ?? 0;
+  const workflow = state.state?.workflow;
+  const states = workflow?.states.join("\n") ?? "";
+  const transitions = workflow?.transitions.map(renderWorkflowTransitionLine).join("\n") ?? "";
+  const rows = workflow?.transitions
+    .map((transition) => `<tr>
+      <td>${escapeHtml(transition.action)}</td>
+      <td>${escapeHtml(transition.from)}</td>
+      <td>${escapeHtml(transition.to)}</td>
+      <td>${escapeHtml((transition.roles ?? []).join(", "))}</td>
+      <td>${escapeHtml(transition.eventType ?? "")}</td>
+    </tr>`)
+    .join("");
+  return `<form class="panel form" method="get" action="/desk/admin/workflows">
+    <div class="fields cols-1">
+      <label class="field"><span>DocType</span><select name="doctype">${renderWorkflowDoctypeOptions(state.doctypes, state.selectedDoctype)}</select></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Load</button></div>
+  </form>
+  ${state.error ? `<p class="error" role="alert">${escapeHtml(state.error)}</p>` : ""}
+  <form class="panel form" method="post" action="/desk/admin/workflows">
+    <input type="hidden" name="doctype" value="${escapeHtml(state.selectedDoctype)}">
+    <input type="hidden" name="expectedVersion" value="${String(version)}">
+    <div class="form-head"><h2>Workflow Definition</h2><p>v${String(version)}</p></div>
+    <div class="fields">
+      <label class="field"><span>State Field</span><input name="stateField" value="${escapeHtml(workflow?.stateField ?? "workflow_state")}"></label>
+      <label class="field"><span>Initial State</span><input name="initialState" value="${escapeHtml(workflow?.initialState ?? "")}"></label>
+      <label class="field"><span>States</span><textarea name="states">${escapeHtml(states)}</textarea></label>
+      <label class="field"><span>Transitions</span><textarea name="transitions">${escapeHtml(transitions)}</textarea></label>
+    </div>
+    <div class="actions">
+      <button class="button primary" type="submit">Save Workflow</button>
+      ${workflow ? `<button class="button danger" type="submit" formaction="/desk/admin/workflows/${encodeURIComponent(state.selectedDoctype)}/clear">Clear Override</button>` : ""}
+    </div>
+  </form>
+  <section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Action</th><th>From</th><th>To</th><th>Roles</th><th>Event Type</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="5" class="empty">No workflow override configured.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
 export function renderPrintSettingsAdmin(
   state: PrintSettingsState,
   options: { readonly error?: string } = {}
@@ -1456,6 +1510,22 @@ function renderCustomFieldDoctypeOptions(doctypes: readonly DocTypeDefinition[],
   return doctypes
     .map((doctype) => `<option value="${escapeHtml(doctype.name)}"${doctype.name === selectedDoctype ? " selected" : ""}>${escapeHtml(doctype.label ?? doctype.name)}</option>`)
     .join("");
+}
+
+function renderWorkflowDoctypeOptions(doctypes: readonly DocTypeDefinition[], selectedDoctype: string): string {
+  return renderCustomFieldDoctypeOptions(doctypes, selectedDoctype);
+}
+
+function renderWorkflowTransitionLine(
+  transition: NonNullable<WorkflowDefinitionState["workflow"]>["transitions"][number]
+): string {
+  return [
+    transition.action,
+    transition.from,
+    transition.to,
+    (transition.roles ?? []).join(", "),
+    transition.eventType ?? ""
+  ].join(" | ");
 }
 
 function renderCustomFieldTypeOptions(): string {

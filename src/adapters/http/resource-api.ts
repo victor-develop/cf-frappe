@@ -26,6 +26,7 @@ import type { UserAccountService } from "../../application/user-account-service.
 import type { UserNotificationService } from "../../application/user-notification-service.js";
 import type { UserPermissionService } from "../../application/user-permission-service.js";
 import type { UserProfileService } from "../../application/user-profile-service.js";
+import type { WorkflowService } from "../../application/workflow-service.js";
 import { badRequest, permissionDenied } from "../../core/errors.js";
 import { isListFilterOperator, isListMembershipOperator, isListPresenceOperator, isListRangeOperator } from "../../core/list-view.js";
 import { can } from "../../core/permissions.js";
@@ -59,6 +60,7 @@ import { createSavedReportApi } from "./saved-report-api.js";
 import { createUserAccountApi } from "./user-account-api.js";
 import { createUserPermissionApi } from "./user-permission-api.js";
 import { createUserProfileApi } from "./user-profile-api.js";
+import { createWorkflowApi } from "./workflow-api.js";
 
 export interface ResourceApiOptions {
   readonly registry: ModelRegistry;
@@ -91,6 +93,7 @@ export interface ResourceApiOptions {
   readonly auth?: AuthSessionOptions;
   readonly userPermissions?: UserPermissionService;
   readonly customFields?: CustomFieldService;
+  readonly workflows?: WorkflowService;
   readonly maxFileBytes?: number;
 }
 
@@ -344,6 +347,17 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       "/",
       createCustomFieldApi({
         customFields: options.customFields,
+        actor: resolveActor,
+        maxJsonBytes
+      })
+    );
+  }
+
+  if (options.workflows) {
+    app.route(
+      "/",
+      createWorkflowApi({
+        workflows: options.workflows,
         actor: resolveActor,
         maxJsonBytes
       })

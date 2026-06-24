@@ -465,6 +465,15 @@ export type DocumentEventPayload =
       readonly fieldName: string;
     }
   | {
+      readonly kind: "WorkflowDefinitionSaved";
+      readonly doctypeName: DocTypeName;
+      readonly workflow: WorkflowDefinition;
+    }
+  | {
+      readonly kind: "WorkflowDefinitionCleared";
+      readonly doctypeName: DocTypeName;
+    }
+  | {
       readonly kind: "WorkflowTransitioned";
       readonly action: string;
       readonly from: string;

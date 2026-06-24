@@ -316,6 +316,8 @@ function diffEvent(
     case "JobScheduleDeleted":
     case "CustomFieldSaved":
     case "CustomFieldDisabled":
+    case "WorkflowDefinitionSaved":
+    case "WorkflowDefinitionCleared":
       return [];
   }
 }
@@ -454,6 +456,10 @@ function summarize(payload: DocumentEventPayload): string {
       return `Saved custom field ${payload.doctypeName}.${payload.field.name}`;
     case "CustomFieldDisabled":
       return `Disabled custom field ${payload.doctypeName}.${payload.fieldName}`;
+    case "WorkflowDefinitionSaved":
+      return `Saved workflow definition for ${payload.doctypeName}`;
+    case "WorkflowDefinitionCleared":
+      return `Cleared workflow definition for ${payload.doctypeName}`;
     case "WorkflowTransitioned":
       return workflowSummary(payload);
     case "DomainCommandApplied":
