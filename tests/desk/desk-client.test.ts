@@ -2509,7 +2509,10 @@ describe("Desk client runtime", () => {
 
   it("marks generated document presence panels stale when document realtime events advance the version", async () => {
     const sockets: FakeWebSocket[] = [];
-    const form = new FakeForm([new FakeField("title", "Queued")]);
+    const title = new FakeField("title", "Queued");
+    const body = new FakeField("body", "Base body");
+    const expectedVersion = new FakeField("expectedVersion", "3", "hidden");
+    const form = new FakeForm([title, body, expectedVersion]);
     const panel = new FakePresencePanel({
       doctype: "Task",
       documentName: "TASK-1",
@@ -2517,23 +2520,45 @@ describe("Desk client runtime", () => {
       realtimeRoute: "/rt",
       tenantId: "acme"
     });
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
 
     evaluateDeskClient(
-      async () =>
-        new Response(JSON.stringify({
+      async (url, init) => {
+        calls.push({ url: String(url), init: init ?? {} });
+        if (init?.method === "POST" && String(url).endsWith("/merge")) {
+          return jsonResponse({
+            data: {
+              status: "applied",
+              plan: { status: "clean", baseVersion: 3, remoteVersion: 4, patch: { body: "Local body" }, unset: [] },
+              document: {
+                tenantId: "acme",
+                doctype: "Task",
+                name: "TASK-1",
+                version: 5,
+                docstatus: "draft",
+                data: { title: "Queued", body: "Local body" },
+                createdAt: "now",
+                updatedAt: "now"
+              }
+            }
+          });
+        }
+        return new Response(JSON.stringify({
           data: {
             topic: "document:acme:Task:TASK-1",
             connections: []
           }
         }), {
           headers: { "content-type": "application/json" }
-        }),
+        });
+      },
       new FakeDocument({
         form,
         presencePanels: [panel],
         runtimeDataset: {
           doctype: "Task",
           documentName: "TASK-1",
+          documentVersion: "3",
           scope: "form",
           tenantId: "acme"
         }
@@ -2544,7 +2569,10 @@ describe("Desk client runtime", () => {
 
     expect(panel.update.textContent).toBe("Viewing latest saved version.");
     expect(form.dataset.remoteUpdate).toBeUndefined();
+    expect(panel.merge.hidden).toBe(true);
 
+    body.value = "Local body";
+    body.emit("input");
     sockets[0]?.emitMessage(JSON.stringify({
       type: "cf-frappe.realtime.event",
       cursor: 9,
@@ -2563,6 +2591,98 @@ describe("Desk client runtime", () => {
     expect(panel.dataset.remoteVersion).toBe("4");
     expect(panel.update.textContent).toBe("Document updated to v4. Refresh to review latest changes.");
     expect(form.dataset.remoteUpdate).toBe("1");
+    expect(panel.merge.hidden).toBe(false);
+    expect(panel.merge.disabled).toBe(false);
+    expect(panel.merge.textContent).toBe("Merge saved changes");
+
+    panel.merge.click();
+    expect(panel.merge.disabled).toBe(true);
+    expect(panel.update.textContent).toBe("Merging saved changes.");
+    await flushPromises();
+
+    expect(calls.at(-1)).toMatchObject({
+      url: "/api/resource/Task/TASK-1/merge",
+      init: {
+        method: "POST",
+        body: JSON.stringify({ baseVersion: 3, patch: { body: "Local body" } })
+      }
+    });
+    expect(panel.dataset.documentState).toBe("merged");
+    expect(panel.dataset.documentVersion).toBe("5");
+    expect(panel.update.textContent).toBe("Merged saved changes at v5.");
+    expect(panel.merge.hidden).toBe(true);
+    expect(expectedVersion.value).toBe("5");
+  });
+
+  it("does not report validation-blocked presence panel merges as conflicts", async () => {
+    const sockets: FakeWebSocket[] = [];
+    const form = new FakeForm([
+      new FakeField("title", "Blocked"),
+      new FakeField("expectedVersion", "3", "hidden")
+    ]);
+    const panel = new FakePresencePanel({
+      doctype: "Task",
+      documentName: "TASK-1",
+      documentVersion: "3",
+      realtimeRoute: "/rt",
+      tenantId: "acme"
+    });
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(
+      async (url, init) => {
+        calls.push({ url: String(url), init: init ?? {} });
+        return jsonResponse({
+          data: {
+            topic: "document:acme:Task:TASK-1",
+            connections: []
+          }
+        });
+      },
+      new FakeDocument({
+        form,
+        presencePanels: [panel],
+        runtimeDataset: {
+          doctype: "Task",
+          documentName: "TASK-1",
+          documentVersion: "3",
+          scope: "form",
+          tenantId: "acme"
+        }
+      }),
+      sockets
+    );
+    runtime.form.on("Task", {
+      validate: (frm) => {
+        if (frm.get_value("title") === "Blocked") {
+          frm.validated = false;
+        }
+      }
+    });
+    await flushPromises();
+
+    sockets[0]?.emitMessage(JSON.stringify({
+      type: "cf-frappe.realtime.event",
+      cursor: 10,
+      event: {
+        id: "event-10",
+        type: "TaskUpdated",
+        payload: {
+          snapshot: {
+            version: 4,
+            data: { title: "Remote" }
+          }
+        }
+      }
+    }));
+    panel.merge.click();
+    await flushPromises();
+
+    expect(calls.filter((call) => call.init.method === "POST" && call.url.endsWith("/merge"))).toHaveLength(0);
+    expect(panel.dataset.documentState).toBe("validation-blocked");
+    expect(panel.update.textContent).toBe("Fix validation errors before merging saved changes.");
+    expect(panel.merge.hidden).toBe(false);
+    expect(panel.merge.disabled).toBe(false);
+    expect(panel.merge.textContent).toBe("Try merge again");
   });
 
   it("parses realtime subscriptions into events and redacted user notifications", () => {
@@ -4107,15 +4227,33 @@ class FakePresenceText {
   constructor(public textContent = "") {}
 }
 
+class FakePresenceButton {
+  readonly listeners: Record<string, Array<() => void>> = {};
+  disabled = false;
+  hidden = true;
+  textContent = "";
+
+  addEventListener(type: string, listener: () => void): void {
+    this.listeners[type] = [...(this.listeners[type] ?? []), listener];
+  }
+
+  click(): void {
+    for (const listener of this.listeners.click ?? []) {
+      listener();
+    }
+  }
+}
+
 class FakePresencePanel {
   readonly count = new FakePresenceText();
   readonly fieldEdits = new FakePresenceText("No live field edits.");
   readonly list = new FakePresenceText();
+  readonly merge = new FakePresenceButton();
   readonly update = new FakePresenceText();
 
   constructor(readonly dataset: Record<string, string>) {}
 
-  querySelector(selector: string): FakePresenceText | null {
+  querySelector(selector: string): FakePresenceText | FakePresenceButton | null {
     if (selector === "[data-cf-frappe-presence-count]") {
       return this.count;
     }
@@ -4127,6 +4265,9 @@ class FakePresencePanel {
     }
     if (selector === "[data-cf-frappe-document-update]") {
       return this.update;
+    }
+    if (selector === "[data-cf-frappe-merge-save]") {
+      return this.merge;
     }
     return null;
   }

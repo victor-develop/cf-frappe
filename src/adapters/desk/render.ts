@@ -478,6 +478,7 @@ export function renderDocumentPresencePanel(
     <p class="presence-list" data-cf-frappe-presence-list>Checking active collaborators.</p>
     <p class="presence-list" data-cf-frappe-field-edits>No live field edits.</p>
     <p class="presence-list" data-cf-frappe-document-update>Viewing latest saved version.</p>
+    <button type="button" data-cf-frappe-merge-save hidden>Merge saved changes</button>
   </section>`;
 }
 

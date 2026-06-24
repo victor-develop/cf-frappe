@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the generated stale-form merge save slice:
+As of the generated presence-panel merge action slice:
 
 - Vitest files: `93`
-- Vitest cases: `1041`
+- Vitest cases: `1042`
 
 ## Implication
 

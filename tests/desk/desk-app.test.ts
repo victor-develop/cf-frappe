@@ -2592,6 +2592,7 @@ describe("Desk app", () => {
     expect(html).toContain('data-tenant-id="acme"');
     expect(html).toContain("Checking active collaborators.");
     expect(html).toContain("Viewing latest saved version.");
+    expect(html).toContain('data-cf-frappe-merge-save hidden');
 
     const create = await app.request("/desk/Note/new");
     await expect(create.text()).resolves.not.toContain('data-cf-frappe-presence="document"');

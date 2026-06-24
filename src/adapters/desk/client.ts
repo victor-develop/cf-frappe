@@ -2323,6 +2323,8 @@ export function renderDeskClientScript(): string {
     var realtimeOptions = Object.assign({ tenantId: tenantId }, realtimeRoute ? { realtimeRoute: realtimeRoute } : {});
     setPresencePanelState(panel, "loading", "Checking active collaborators.", "Checking active collaborators.");
     setPanelText(panel, "[data-cf-frappe-document-update]", "Viewing latest saved version.");
+    attachPresencePanelMergeSave(panel, doctype, documentName);
+    setPresencePanelMergeAction(panel, false, false);
     realtimePresenceDocument(doctype, documentName, realtimeOptions)
       .then(function (snapshot) {
         setPresencePanelConnections(panel, "ready", snapshot && snapshot.connections);
@@ -2380,13 +2382,14 @@ export function renderDeskClientScript(): string {
       "[data-cf-frappe-document-update]",
       "Document updated to v" + String(remoteVersion) + ". Refresh to review latest changes."
     );
-    markCurrentFormRemoteUpdate(doctype, documentName, snapshot);
+    var binding = markCurrentFormRemoteUpdate(doctype, documentName, snapshot);
+    setPresencePanelMergeAction(panel, Boolean(binding), false, "Merge saved changes");
   }
 
   function markCurrentFormRemoteUpdate(doctype, documentName, snapshot) {
     var binding = currentFormBinding();
     if (!binding || binding.context.doctype !== doctype || binding.context.documentName !== documentName) {
-      return;
+      return null;
     }
     binding.form.dataset.remoteUpdate = "1";
     if (snapshot && isPlainObject(snapshot.data)) {
@@ -2394,6 +2397,89 @@ export function renderDeskClientScript(): string {
       binding.remoteMergePlan = currentFormMergePlan(binding, snapshot);
       binding.frm.remote_merge_plan = binding.remoteMergePlan;
       binding.form.dataset.remoteMergeState = binding.remoteMergePlan.status;
+    }
+    return binding;
+  }
+
+  function attachPresencePanelMergeSave(panel, doctype, documentName) {
+    if (panel.__cfFrappeMergeSaveAttached) {
+      return;
+    }
+    var button = panel.querySelector && panel.querySelector("[data-cf-frappe-merge-save]");
+    if (!button || typeof button.addEventListener !== "function") {
+      return;
+    }
+    panel.__cfFrappeMergeSaveAttached = true;
+    button.addEventListener("click", function () {
+      var binding = currentFormBinding();
+      if (!binding || binding.context.doctype !== doctype || binding.context.documentName !== documentName) {
+        return;
+      }
+      setPresencePanelMergeAction(panel, true, true, "Merging...");
+      setPanelText(panel, "[data-cf-frappe-document-update]", "Merging saved changes.");
+      binding.frm.merge_save()
+        .then(function (result) {
+          if (result === false) {
+            if (panel.dataset) {
+              panel.dataset.documentState = "validation-blocked";
+            }
+            setPanelText(panel, "[data-cf-frappe-document-update]", "Fix validation errors before merging saved changes.");
+            setPresencePanelMergeAction(panel, true, false, "Try merge again");
+            return;
+          }
+          updatePresencePanelMergeResult(panel, result);
+        })
+        .catch(function (error) {
+          if (panel.dataset) {
+            panel.dataset.documentState = "merge-error";
+          }
+          setPanelText(
+            panel,
+            "[data-cf-frappe-document-update]",
+            error && error.message ? error.message : "Unable to merge saved changes."
+          );
+          setPresencePanelMergeAction(panel, true, false, "Try merge again");
+        });
+    });
+  }
+
+  function updatePresencePanelMergeResult(panel, result) {
+    var document = result && result.document;
+    var version = document && document.version;
+    if (result && (result.status === "applied" || result.status === "noop")) {
+      if (panel.dataset) {
+        panel.dataset.documentState = "merged";
+        if (typeof version === "number") {
+          panel.dataset.documentVersion = String(version);
+          panel.dataset.remoteVersion = String(version);
+        }
+      }
+      setPanelText(
+        panel,
+        "[data-cf-frappe-document-update]",
+        result.status === "applied"
+          ? "Merged saved changes" + (typeof version === "number" ? " at v" + String(version) : "") + "."
+          : "Already up to date" + (typeof version === "number" ? " at v" + String(version) : "") + "."
+      );
+      setPresencePanelMergeAction(panel, false, false);
+      return;
+    }
+    if (panel.dataset) {
+      panel.dataset.documentState = "conflict";
+    }
+    setPanelText(panel, "[data-cf-frappe-document-update]", "Merge conflict. Review local changes before saving.");
+    setPresencePanelMergeAction(panel, true, false, "Try merge again");
+  }
+
+  function setPresencePanelMergeAction(panel, visible, disabled, label) {
+    var button = panel.querySelector && panel.querySelector("[data-cf-frappe-merge-save]");
+    if (!button) {
+      return;
+    }
+    button.hidden = !visible;
+    button.disabled = Boolean(disabled);
+    if (label !== undefined) {
+      button.textContent = label;
     }
   }
 
