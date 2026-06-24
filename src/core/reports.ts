@@ -1,5 +1,5 @@
 import { FrameworkError } from "./errors.js";
-import type { Actor, DocTypeDefinition, FieldType, JsonPrimitive, PermissionAction } from "./types.js";
+import type { Actor, DocTypeDefinition, FieldDefinition, FieldType, JsonPrimitive, PermissionAction } from "./types.js";
 import { SYSTEM_MANAGER_ROLE } from "./types.js";
 
 export type ReportFilterOperator = "eq" | "ne" | "contains" | "gte" | "lte";
@@ -10,6 +10,9 @@ export type ReportOrder = "asc" | "desc";
 export type ReportChartOrder = ReportOrder;
 export type ReportFormulaOperator = "add" | "subtract" | "multiply" | "divide";
 export type ReportFormulaOperand = string | number | ReportFormulaDefinition;
+export type ReportSourceDefinition =
+  | { readonly kind: "documents" }
+  | { readonly kind: "custom"; readonly provider: string };
 
 const REPORT_FILTER_OPERATORS = ["eq", "ne", "contains", "gte", "lte"] as const;
 const REPORT_FILTER_TYPES = ["text", "longText", "integer", "number", "boolean", "date", "datetime", "select", "link"] as const;
@@ -42,6 +45,7 @@ export interface ReportFilterDefinition {
   readonly operator?: ReportFilterOperator;
   readonly required?: boolean;
   readonly defaultValue?: JsonPrimitive;
+  readonly options?: readonly string[];
 }
 
 export interface ReportSummaryDefinition {
@@ -82,6 +86,7 @@ export interface ReportDefinition {
   readonly module?: string;
   readonly description?: string;
   readonly doctype: string;
+  readonly source?: ReportSourceDefinition;
   readonly columns: readonly ReportColumnDefinition[];
   readonly filters?: readonly ReportFilterDefinition[];
   readonly summaries?: readonly ReportSummaryDefinition[];
@@ -95,6 +100,16 @@ export interface ReportDefinition {
 
 export function defineReport(definition: ReportDefinition): ReportDefinition {
   assertReportDefinition(definition);
+  const filters = definition.filters
+    ? Object.freeze(
+        definition.filters.map((filter) =>
+          Object.freeze({
+            ...filter,
+            ...(filter.options ? { options: Object.freeze([...filter.options]) } : {})
+          })
+        )
+      )
+    : undefined;
   const columns = Object.freeze(
     definition.columns.map((column) =>
       Object.freeze({
@@ -126,8 +141,9 @@ export function defineReport(definition: ReportDefinition): ReportDefinition {
     : undefined;
   return Object.freeze({
     ...definition,
+    ...(definition.source ? { source: Object.freeze({ ...definition.source }) } : {}),
     columns,
-    ...(definition.filters ? { filters: Object.freeze([...definition.filters]) } : {}),
+    ...(filters ? { filters } : {}),
     ...(summaries ? { summaries } : {}),
     ...(groups ? { groups } : {}),
     ...(charts ? { charts } : {})
@@ -136,6 +152,7 @@ export function defineReport(definition: ReportDefinition): ReportDefinition {
 
 export function assertReportDefinition(definition: ReportDefinition): void {
   assertIdentifier(definition.name, "report name");
+  assertReportSourceValid(definition);
   if (definition.columns.length === 0) {
     throw new FrameworkError("REPORT_INVALID", `Report '${definition.name}' must define at least one column`, {
       status: 400
@@ -182,6 +199,10 @@ export function isReportChartColor(value: string): boolean {
 
 export function assertReportMatchesDocType(report: ReportDefinition, doctype: DocTypeDefinition): void {
   const fields = new Map(doctype.fields.map((field) => [field.name, field]));
+  if (isCustomReport(report)) {
+    assertCustomReportReferences(report, fields);
+    return;
+  }
   for (const column of report.columns) {
     const formula = column.formula;
     if (formula !== undefined) {
@@ -240,6 +261,33 @@ export function assertReportMatchesDocType(report: ReportDefinition, doctype: Do
   }
 }
 
+export function isCustomReport(report: ReportDefinition): boolean {
+  return report.source?.kind === "custom";
+}
+
+function assertCustomReportReferences(
+  report: ReportDefinition,
+  fields: ReadonlyMap<string, FieldDefinition>
+): void {
+  for (const filter of report.filters ?? []) {
+    const field = fields.get(filter.field);
+    if (field?.type === "json" || field?.type === "table") {
+      throw new FrameworkError(
+        "REPORT_INVALID",
+        `Report '${report.name}' filter '${filter.name}' cannot filter by ${field.type} field '${filter.field}'`,
+        { status: 400 }
+      );
+    }
+    if (!field && filter.type === undefined) {
+      throw new FrameworkError(
+        "REPORT_INVALID",
+        `Report '${report.name}' custom filter '${filter.name}' must declare a type when field '${filter.field}' is not on DocType '${report.doctype}'`,
+        { status: 400 }
+      );
+    }
+  }
+}
+
 function assertReportOrderValid(report: ReportDefinition): void {
   if (report.order !== undefined && !(REPORT_ORDERS as readonly string[]).includes(report.order)) {
     throw new FrameworkError(
@@ -258,6 +306,20 @@ function assertReportOrderValid(report: ReportDefinition): void {
       { status: 400 }
     );
   }
+}
+
+function assertReportSourceValid(report: ReportDefinition): void {
+  if (report.source === undefined || report.source.kind === "documents") {
+    return;
+  }
+  if (report.source.kind === "custom" && typeof report.source.provider === "string" && report.source.provider.trim() !== "") {
+    return;
+  }
+  throw new FrameworkError(
+    "REPORT_INVALID",
+    `Report '${report.name}' has invalid source`,
+    { status: 400 }
+  );
 }
 
 function assertReportOrderMatchesDocType(
@@ -371,6 +433,22 @@ function assertFiltersValid(report: ReportDefinition): void {
         `Report '${report.name}' filter '${filter.name}' has invalid type '${String(filter.type)}'`,
         { status: 400 }
       );
+    }
+    if (filter.options !== undefined) {
+      if (filter.type !== "select") {
+        throw new FrameworkError(
+          "REPORT_INVALID",
+          `Report '${report.name}' filter '${filter.name}' options require select type`,
+          { status: 400 }
+        );
+      }
+      if (!filter.options.every((option) => typeof option === "string")) {
+        throw new FrameworkError(
+          "REPORT_INVALID",
+          `Report '${report.name}' filter '${filter.name}' options must be strings`,
+          { status: 400 }
+        );
+      }
     }
   }
 }

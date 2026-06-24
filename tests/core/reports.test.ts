@@ -37,6 +37,43 @@ describe("reports", () => {
     expect(() => createRegistry({ reports: [report] })).toThrow("DocType 'Missing' is not registered");
   });
 
+  it("allows custom-source reports to describe row-shaped query outputs", () => {
+    const Note = defineDocType({ name: "Note", fields: [{ name: "title", type: "text" }] });
+    const report = defineReport({
+      name: "Priority Metrics",
+      doctype: "Note",
+      source: { kind: "custom", provider: "priority-metrics" },
+      columns: [
+        { name: "priority", type: "select" },
+        { name: "open_count", label: "Open Count", type: "integer" }
+      ],
+      filters: [
+        {
+          name: "priority_filter",
+          label: "Priority",
+          field: "priority",
+          type: "select",
+          options: ["Low", "Medium", "High"]
+        }
+      ],
+      summaries: [{ name: "total_open", aggregate: "sum", field: "open_count", type: "integer" }],
+      groups: [
+        {
+          name: "by_priority",
+          field: "priority",
+          summaries: [{ name: "rows", aggregate: "count" }]
+        }
+      ]
+    });
+
+    const registry = createRegistry({ doctypes: [Note], reports: [report] });
+
+    expect(registry.getReport("Priority Metrics")).toMatchObject({
+      source: { kind: "custom", provider: "priority-metrics" },
+      columns: [{ name: "priority" }, { name: "open_count" }]
+    });
+  });
+
   it("validates report summary and group fields against the DocType", () => {
     const Note = defineDocType({
       name: "Note",

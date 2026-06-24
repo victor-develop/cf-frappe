@@ -4,6 +4,7 @@ import {
   assertReportDefinition,
   assertReportMatchesDocType,
   canReadReport,
+  isCustomReport,
   type ReportColumnDefinition,
   type ReportChartDefinition,
   type ReportChartOrder,
@@ -139,18 +140,31 @@ export interface ReportCsvExport {
   readonly limit: number;
 }
 
+export interface ReportRowProviderContext {
+  readonly actor: Actor;
+  readonly report: ReportDefinition;
+  readonly filters: ReportFilters;
+}
+
+export interface ReportRowProvider {
+  rows(context: ReportRowProviderContext): Promise<readonly ReportRow[]>;
+}
+
 export interface ReportServiceOptions {
   readonly registry: ModelRegistry;
   readonly queries: QueryService;
+  readonly rowProviders?: Readonly<Record<string, ReportRowProvider>>;
 }
 
 export class ReportService {
   private readonly registry: ModelRegistry;
   private readonly queries: QueryService;
+  private readonly rowProviders: Readonly<Record<string, ReportRowProvider>>;
 
   constructor(options: ReportServiceOptions) {
     this.registry = options.registry;
     this.queries = options.queries;
+    this.rowProviders = options.rowProviders ?? {};
   }
 
   listReports(actor: Actor): readonly ReportDefinition[] {
@@ -174,21 +188,26 @@ export class ReportService {
     options: ReportRunOptions = {}
   ): Promise<ReportRunResult> {
     const doctype = this.readableReport(actor, report);
+    if (isCustomReport(report)) {
+      return this.runCustomReportDefinition(actor, report, doctype, options);
+    }
     const limit = clampLimit(options.limit);
     const offset = Math.max(0, options.offset ?? 0);
     const filters = this.materializeFilters(report, doctype, options.filters ?? {});
     const order = resolveReportOrder(report, doctype, options);
     const filtered = await this.filteredDocuments(actor, report, filters);
     const sorted = sortReportDocuments(filtered, report, order);
-    const groups = buildReportGroups(filtered, report.groups ?? []);
+    const aggregateRows = filtered.map((document) => document.data as ReportRow);
+    const groups = buildReportGroups(aggregateRows, report.groups ?? []);
+    const limitedGroups = limitReportGroups(groups, report.groups ?? []);
     const rows = sorted.slice(offset, offset + limit).map((document) => reportRow(document, report.columns));
     return {
       report,
       columns: report.columns,
       filters: buildReportFilterControls(report, doctype, filters),
       order,
-      summary: buildReportSummary(filtered, report.summaries ?? []),
-      groups: limitReportGroups(groups, report.groups ?? []),
+      summary: buildReportSummary(aggregateRows, report.summaries ?? []),
+      groups: limitedGroups,
       charts: buildReportCharts(groups, report),
       rows,
       limit,
@@ -212,6 +231,9 @@ export class ReportService {
     options: ReportCsvExportOptions = {}
   ): Promise<ReportCsvExport> {
     const doctype = this.readableReport(actor, report);
+    if (isCustomReport(report)) {
+      return this.exportCustomReportCsv(actor, report, doctype, options);
+    }
     const limit = clampCsvExportLimit(options.limit);
     const filters = this.materializeFilters(report, doctype, options.filters ?? {});
     const order = resolveReportOrder(report, doctype, options);
@@ -272,6 +294,76 @@ export class ReportService {
       truncated: exported < total,
       limit
     };
+  }
+
+  private async runCustomReportDefinition(
+    actor: Actor,
+    report: ReportDefinition,
+    doctype: DocTypeDefinition,
+    options: ReportRunOptions
+  ): Promise<ReportRunResult> {
+    const limit = clampLimit(options.limit);
+    const offset = Math.max(0, options.offset ?? 0);
+    const filters = this.materializeFilters(report, doctype, options.filters ?? {});
+    const order = resolveReportOrder(report, doctype, options);
+    const rows = await this.customReportRows(actor, report, filters);
+    const filtered = rows.filter((row) => matchesReportRowFilters(row, report, filters));
+    const projected = filtered.map((row) => projectReportRow(row, report.columns));
+    const sorted = sortReportRows(projected, report, order);
+    const groups = buildReportGroups(filtered, report.groups ?? []);
+    const limitedGroups = limitReportGroups(groups, report.groups ?? []);
+    return {
+      report,
+      columns: report.columns,
+      filters: buildReportFilterControls(report, doctype, filters),
+      order,
+      summary: buildReportSummary(filtered, report.summaries ?? []),
+      groups: limitedGroups,
+      charts: buildReportCharts(groups, report),
+      rows: sorted.slice(offset, offset + limit),
+      limit,
+      offset,
+      total: filtered.length
+    };
+  }
+
+  private async exportCustomReportCsv(
+    actor: Actor,
+    report: ReportDefinition,
+    doctype: DocTypeDefinition,
+    options: ReportCsvExportOptions
+  ): Promise<ReportCsvExport> {
+    const limit = clampCsvExportLimit(options.limit);
+    const filters = this.materializeFilters(report, doctype, options.filters ?? {});
+    const order = resolveReportOrder(report, doctype, options);
+    const rows = await this.customReportRows(actor, report, filters);
+    const projected = rows
+      .filter((row) => matchesReportRowFilters(row, report, filters))
+      .map((row) => projectReportRow(row, report.columns));
+    const sorted = sortReportRows(projected, report, order);
+    const exportedRows = sorted.slice(0, limit);
+    return {
+      filename: `${filenamePart(report.name)}.csv`,
+      contentType: "text/csv; charset=utf-8",
+      body: [reportCsvHeader(report.columns), ...exportedRows.map((row) => reportRowToCsv(report.columns, row))].join("\n"),
+      exported: exportedRows.length,
+      total: sorted.length,
+      truncated: exportedRows.length < sorted.length,
+      limit
+    };
+  }
+
+  private async customReportRows(
+    actor: Actor,
+    report: ReportDefinition,
+    filters: ReportFilters
+  ): Promise<readonly ReportRow[]> {
+    const providerName = report.source?.kind === "custom" ? report.source.provider : undefined;
+    const provider = providerName === undefined ? undefined : this.rowProviders[providerName];
+    if (!provider || providerName === undefined) {
+      throw badRequest(`Custom report provider '${providerName ?? report.name}' is not configured`);
+    }
+    return provider.rows({ actor, report, filters });
   }
 
   private canAccess(actor: Actor, report: ReportDefinition): boolean {
@@ -357,12 +449,20 @@ function buildReportFilterControls(
       operator: filter.operator ?? "eq",
       required: filter.required ?? false,
       ...(value === undefined ? {} : { value }),
-      options: type === "select" ? field?.options ?? [] : []
+      options: filter.options ?? (type === "select" ? field?.options ?? [] : [])
     };
   });
 }
 
 function buildReportOrderOptions(report: ReportDefinition, doctype: DocTypeDefinition): readonly ReportOrderOptionResult[] {
+  if (isCustomReport(report)) {
+    return report.columns
+      .filter((column) => column.type !== "json" && column.type !== "table")
+      .map((column) => ({
+        name: column.name,
+        label: column.label ?? column.name
+      }));
+  }
   const fields = new Map(doctype.fields.map((field) => [field.name, field]));
   return report.columns
     .filter((column) => {
@@ -514,6 +614,29 @@ function sortReportDocuments(
     .map((item) => item.document);
 }
 
+function sortReportRows(
+  rows: readonly ReportRow[],
+  report: ReportDefinition,
+  order: ReportOrderControlResult
+): readonly ReportRow[] {
+  if (order.orderBy === undefined) {
+    return rows;
+  }
+  const column = report.columns.find((item) => item.name === order.orderBy);
+  const columnName = column?.name;
+  if (!columnName) {
+    return rows;
+  }
+  const direction = order.order === "desc" ? -1 : 1;
+  return rows
+    .map((row, index) => ({ row, index }))
+    .sort((left, right) => {
+      const compared = compareDocumentValues(left.row[columnName], right.row[columnName]);
+      return compared === 0 ? left.index - right.index : compared * direction;
+    })
+    .map((item) => item.row);
+}
+
 function reportSortValue(
   document: DocumentSnapshot,
   columns: readonly ReportColumnDefinition[],
@@ -554,9 +677,37 @@ function matchesReportFilters(document: DocumentSnapshot, report: ReportDefiniti
   });
 }
 
+function matchesReportRowFilters(row: ReportRow, report: ReportDefinition, filters: ReportFilters): boolean {
+  return (report.filters ?? []).every((filter) => {
+    const expected = filters[filter.name];
+    if (expected === undefined || expected === "") {
+      return true;
+    }
+    const actual = row[filter.field];
+    switch (filter.operator ?? "eq") {
+      case "eq":
+        return actual === expected;
+      case "ne":
+        return actual !== expected;
+      case "contains":
+        return String(actual ?? "").toLowerCase().includes(String(expected).toLowerCase());
+      case "gte":
+        return compareValues(actual, expected) >= 0;
+      case "lte":
+        return compareValues(actual, expected) <= 0;
+    }
+  });
+}
+
 function reportRow(document: DocumentSnapshot, columns: readonly ReportColumnDefinition[]): ReportRow {
   return Object.fromEntries(
     columns.map((column) => [column.name, reportColumnValue(document, column)])
+  ) as ReportRow;
+}
+
+function projectReportRow(row: ReportRow, columns: readonly ReportColumnDefinition[]): ReportRow {
+  return Object.fromEntries(
+    columns.map((column) => [column.name, reportRowColumnValue(row, column)])
   ) as ReportRow;
 }
 
@@ -565,6 +716,13 @@ function reportColumnValue(document: DocumentSnapshot, column: ReportColumnDefin
     return reportFormulaValue(document, column.formula);
   }
   return document.data[column.field ?? column.name] ?? null;
+}
+
+function reportRowColumnValue(row: ReportRow, column: ReportColumnDefinition): JsonValue {
+  if (column.formula !== undefined) {
+    return reportRowFormulaValue(row, column.formula);
+  }
+  return row[column.field ?? column.name] ?? null;
 }
 
 function reportFormulaValue(
@@ -596,6 +754,38 @@ function numericFormulaOperand(document: DocumentSnapshot, operand: ReportFormul
     return reportFormulaValue(document, operand);
   }
   const value = document.data[operand];
+  return typeof value === "number" ? value : null;
+}
+
+function reportRowFormulaValue(
+  row: ReportRow,
+  formula: NonNullable<ReportColumnDefinition["formula"]>
+): number | null {
+  const left = numericRowFormulaOperand(row, formula.left);
+  const right = numericRowFormulaOperand(row, formula.right);
+  if (left === null || right === null) {
+    return null;
+  }
+  switch (formula.operator) {
+    case "add":
+      return left + right;
+    case "subtract":
+      return left - right;
+    case "multiply":
+      return left * right;
+    case "divide":
+      return right === 0 ? null : left / right;
+  }
+}
+
+function numericRowFormulaOperand(row: ReportRow, operand: ReportFormulaOperand): number | null {
+  if (typeof operand === "number") {
+    return operand;
+  }
+  if (typeof operand === "object") {
+    return reportRowFormulaValue(row, operand);
+  }
+  const value = row[operand];
   return typeof value === "number" ? value : null;
 }
 
@@ -643,40 +833,40 @@ function clampCsvExportLimit(limit: number | undefined): number {
 }
 
 function buildReportSummary(
-  documents: readonly DocumentSnapshot[],
+  rows: readonly ReportRow[],
   summaries: readonly ReportSummaryDefinition[]
 ): readonly ReportSummaryValue[] {
-  return summaries.map((summary) => summaryValue(summary, documents));
+  return summaries.map((summary) => summaryValue(summary, rows));
 }
 
 function buildReportGroups(
-  documents: readonly DocumentSnapshot[],
+  rows: readonly ReportRow[],
   groups: readonly ReportGroupDefinition[]
 ): readonly ReportGroupResult[] {
   return groups.map((group) => {
-    const buckets = new Map<string, { readonly key: JsonPrimitive; readonly documents: DocumentSnapshot[] }>();
-    for (const document of documents) {
-      const key = primitiveValue(document, group.field) ?? null;
+    const buckets = new Map<string, { readonly key: JsonPrimitive; readonly rows: ReportRow[] }>();
+    for (const row of rows) {
+      const key = primitiveRowValue(row, group.field) ?? null;
       const bucketKey = JSON.stringify(key);
       const existing = buckets.get(bucketKey);
       if (existing) {
-        existing.documents.push(document);
+        existing.rows.push(row);
       } else {
-        buckets.set(bucketKey, { key, documents: [document] });
+        buckets.set(bucketKey, { key, rows: [row] });
       }
     }
-    const rows = [...buckets.values()]
+    const groupRows = [...buckets.values()]
       .sort((left, right) => compareValues(left.key, right.key))
       .map((bucket) => ({
         key: bucket.key,
         label: groupLabel(bucket.key),
-        summaries: buildReportSummary(bucket.documents, group.summaries)
+        summaries: buildReportSummary(bucket.rows, group.summaries)
       }));
     return {
       name: group.name,
       label: group.label ?? group.name,
       field: group.field,
-      rows
+      rows: groupRows
     };
   });
 }
@@ -801,36 +991,36 @@ function compareChartValues(left: number | null, right: number | null, direction
 
 function summaryValue(
   summary: ReportSummaryDefinition,
-  documents: readonly DocumentSnapshot[]
+  rows: readonly ReportRow[]
 ): ReportSummaryValue {
   return {
     name: summary.name,
     label: summary.label ?? summary.name,
     aggregate: summary.aggregate,
-    value: aggregateValue(summary, documents),
+    value: aggregateValue(summary, rows),
     ...(summary.field ? { field: summary.field } : {}),
     ...(summary.type ? { type: summary.type } : summary.aggregate === "count" ? { type: "integer" } : {}),
     ...(summary.indicator ? { indicator: summary.indicator } : {})
   };
 }
 
-function aggregateValue(summary: ReportSummaryDefinition, documents: readonly DocumentSnapshot[]): JsonPrimitive {
+function aggregateValue(summary: ReportSummaryDefinition, rows: readonly ReportRow[]): JsonPrimitive {
   const field = summary.field;
   switch (summary.aggregate) {
     case "count":
       return field
-        ? documents.filter((document) => isPresentValue(document.data[field])).length
-        : documents.length;
+        ? rows.filter((row) => isPresentValue(row[field])).length
+        : rows.length;
     case "sum":
-      return numericValues(documents, requiredSummaryField(summary)).reduce((total, value) => total + value, 0);
+      return numericValues(rows, requiredSummaryField(summary)).reduce((total, value) => total + value, 0);
     case "avg": {
-      const values = numericValues(documents, requiredSummaryField(summary));
+      const values = numericValues(rows, requiredSummaryField(summary));
       return values.length === 0 ? null : values.reduce((total, value) => total + value, 0) / values.length;
     }
     case "min":
-      return minMaxValue(documents, requiredSummaryField(summary), "min");
+      return minMaxValue(rows, requiredSummaryField(summary), "min");
     case "max":
-      return minMaxValue(documents, requiredSummaryField(summary), "max");
+      return minMaxValue(rows, requiredSummaryField(summary), "max");
   }
 }
 
@@ -841,19 +1031,19 @@ function requiredSummaryField(summary: ReportSummaryDefinition): string {
   return summary.field;
 }
 
-function numericValues(documents: readonly DocumentSnapshot[], field: string): readonly number[] {
-  return documents
-    .map((document) => primitiveValue(document, field))
+function numericValues(rows: readonly ReportRow[], field: string): readonly number[] {
+  return rows
+    .map((row) => primitiveRowValue(row, field))
     .filter((value): value is number => typeof value === "number");
 }
 
 function minMaxValue(
-  documents: readonly DocumentSnapshot[],
+  rows: readonly ReportRow[],
   field: string,
   direction: "min" | "max"
 ): JsonPrimitive {
-  const values = documents
-    .map((document) => primitiveValue(document, field))
+  const values = rows
+    .map((row) => primitiveRowValue(row, field))
     .filter((value): value is Exclude<JsonPrimitive, null> => value !== undefined && value !== null);
   if (values.length === 0) {
     return null;
@@ -866,8 +1056,8 @@ function minMaxValue(
   }, values[0]!);
 }
 
-function primitiveValue(document: DocumentSnapshot, field: string): JsonPrimitive | undefined {
-  const value = document.data[field];
+function primitiveRowValue(row: ReportRow, field: string): JsonPrimitive | undefined {
+  const value = row[field];
   if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return value;
   }

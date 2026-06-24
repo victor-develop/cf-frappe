@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the report PDF routes slice:
+As of the custom report row-provider slice:
 
 - Vitest files: `76`
-- Vitest cases: `845`
+- Vitest cases: `849`
 
 ## Implication
 

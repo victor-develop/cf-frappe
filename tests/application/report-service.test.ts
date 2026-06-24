@@ -92,6 +92,120 @@ describe("ReportService", () => {
     });
   });
 
+  it("runs custom row-provider reports through shared report semantics", async () => {
+    const { queries, registry } = createServices();
+    registry.registerReport(
+      defineReport({
+        name: "Priority Metrics",
+        doctype: "Note",
+        source: { kind: "custom", provider: "priority-metrics" },
+        columns: [
+          { name: "priority", label: "Priority", type: "select" },
+          { name: "open_count", label: "Open Count", type: "integer" }
+        ],
+        filters: [{ name: "minimum", field: "open_count", type: "integer", operator: "gte" }],
+        summaries: [{ name: "total_open", label: "Total Open", aggregate: "sum", field: "open_count", type: "integer" }],
+        groups: [
+          {
+            name: "by_priority",
+            label: "By Priority",
+            field: "priority",
+            summaries: [{ name: "rows", label: "Rows", aggregate: "count" }]
+          }
+        ],
+        charts: [
+          {
+            name: "priority_rows",
+            type: "bar",
+            group: "by_priority",
+            summary: "rows",
+            orderBy: "value",
+            order: "desc"
+          }
+        ],
+        orderBy: "open_count",
+        order: "desc",
+        roles: ["User"]
+      })
+    );
+    const calls: unknown[] = [];
+    const reports = new ReportService({
+      registry,
+      queries,
+      rowProviders: {
+        "priority-metrics": {
+          async rows(context) {
+            calls.push(context);
+            return [
+              { priority: "Low", open_count: 1 },
+              { priority: "High", open_count: 7 },
+              { priority: "Medium", open_count: 3 }
+            ];
+          }
+        }
+      }
+    });
+
+    const result = await reports.runReport(owner, "Priority Metrics", {
+      filters: { minimum: "3" },
+      limit: 1
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      actor: owner,
+      report: { name: "Priority Metrics" },
+      filters: { minimum: 3 }
+    });
+    expect(result).toMatchObject({
+      rows: [{ priority: "High", open_count: 7 }],
+      total: 2,
+      summary: [{ name: "total_open", value: 10 }],
+      groups: [
+        {
+          name: "by_priority",
+          rows: [
+            { key: "High", summaries: [{ name: "rows", value: 1 }] },
+            { key: "Medium", summaries: [{ name: "rows", value: 1 }] }
+          ]
+        }
+      ],
+      charts: [
+        {
+          name: "priority_rows",
+          points: [
+            { key: "High", value: 1 },
+            { key: "Medium", value: 1 }
+          ]
+        }
+      ],
+      order: { orderBy: "open_count", order: "desc" }
+    });
+
+    const csv = await reports.exportReportCsv(owner, "Priority Metrics", { filters: { minimum: 3 }, limit: 2 });
+    expect(csv.body).toBe("Priority,Open Count\nHigh,7\nMedium,3");
+    expect(csv.total).toBe(2);
+    expect(csv.truncated).toBe(false);
+  });
+
+  it("rejects custom reports when their row provider is not configured", async () => {
+    const { queries, registry } = createServices();
+    registry.registerReport(
+      defineReport({
+        name: "Priority Metrics",
+        doctype: "Note",
+        source: { kind: "custom", provider: "priority-metrics" },
+        columns: [{ name: "priority", type: "select" }],
+        roles: ["User"]
+      })
+    );
+    const reports = new ReportService({ registry, queries });
+
+    await expect(reports.runReport(owner, "Priority Metrics")).rejects.toThrow(
+      "Custom report provider 'priority-metrics' is not configured"
+    );
+  });
+
   it("computes report summaries and groups before pagination", async () => {
     const { documents, reports } = createServices(["e1", "e2", "e3"]);
     await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Low Note", priority: "Low", count: 2 }) });

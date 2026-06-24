@@ -1,6 +1,7 @@
 import {
   createResourceApi,
   defineReport,
+  ReportService,
   SYSTEM_MANAGER_ROLE,
   unsafeHeaderActorResolver,
   type PrintPdfRenderer,
@@ -284,6 +285,68 @@ describe("report api", () => {
     expect(renderer.calls[0]?.html).toContain("<dt>Priority</dt><dd>High</dd>");
     expect(renderer.calls[0]?.html).toContain("<td>Alpha Note</td>");
     expect(renderer.calls[0]?.html).not.toContain("<td>Beta Note</td>");
+  });
+
+  it("serves custom row-provider reports through the report API", async () => {
+    const services = createServices(["e1"]);
+    services.registry.registerReport(
+      defineReport({
+        name: "Priority Metrics",
+        doctype: "Note",
+        source: { kind: "custom", provider: "priority-metrics" },
+        columns: [
+          { name: "priority", label: "Priority", type: "select" },
+          { name: "open_count", label: "Open Count", type: "integer" }
+        ],
+        filters: [{ name: "minimum", field: "open_count", type: "integer", operator: "gte" }],
+        orderBy: "open_count",
+        order: "desc",
+        roles: ["User"]
+      })
+    );
+    const reports = new ReportService({
+      registry: services.registry,
+      queries: services.queries,
+      rowProviders: {
+        "priority-metrics": {
+          async rows() {
+            return [
+              { priority: "Low", open_count: 1 },
+              { priority: "High", open_count: 7 },
+              { priority: "Medium", open_count: 3 }
+            ];
+          }
+        }
+      }
+    });
+    const app = createResourceApi({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      reports,
+      actor: unsafeHeaderActorResolver
+    });
+
+    const response = await app.request(
+      "/api/report/Priority%20Metrics/run?filter_minimum=3&order_by=open_count&order=desc&limit=1",
+      { headers: userHeaders }
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      rows: [{ priority: "High", open_count: 7 }],
+      total: 2,
+      filters: [{ name: "minimum", value: 3 }],
+      order: { orderBy: "open_count", order: "desc" }
+    });
+
+    const csv = await app.request(
+      "/api/report/Priority%20Metrics/export.csv?filter_minimum=3&order_by=open_count&order=asc",
+      { headers: userHeaders }
+    );
+    expect(csv.status).toBe(200);
+    expect(csv.headers.get("content-disposition")).toBe('attachment; filename="Priority-Metrics.csv"');
+    await expect(csv.text()).resolves.toBe("Priority,Open Count\nMedium,3\nHigh,7");
   });
 
   it("hides reports from actors without report roles", async () => {
