@@ -22,6 +22,10 @@ export function matchesListFilters(
         return actual !== undefined && actual !== null && arrayIncludes(filter.value, actual);
       case "not_in":
         return actual !== undefined && actual !== null && !arrayIncludes(filter.value, actual);
+      case "is":
+        return presenceFilterValue(filter) === "set"
+          ? actual !== undefined && actual !== null
+          : actual === undefined || actual === null;
       case "contains":
         if (actual === undefined || actual === null) {
           return false;
@@ -84,6 +88,13 @@ function scalarFilterValue(filter: ListDocumentsFilter): JsonPrimitive {
     throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires a scalar value`);
   }
   return filter.value;
+}
+
+function presenceFilterValue(filter: ListDocumentsFilter): "set" | "not set" {
+  if (filter.value === "set" || filter.value === "not set") {
+    return filter.value;
+  }
+  throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires set or not set`);
 }
 
 function rangeFilterValues(filter: ListDocumentsFilter): readonly [JsonPrimitive, JsonPrimitive] {

@@ -149,7 +149,8 @@ describe("resource api", () => {
       naming: { kind: "field", field: "title" },
       fields: [
         { name: "title", type: "text", required: true },
-        { name: "count__between", type: "integer" }
+        { name: "count__between", type: "integer" },
+        { name: "body__is", type: "text" }
       ],
       permissions: [{ roles: ["User"], actions: ["read", "create"] }]
     });
@@ -229,6 +230,7 @@ describe("resource api", () => {
               { operator: "ne", label: "is not" },
               { operator: "in", label: "is in" },
               { operator: "not_in", label: "is not in" },
+              { operator: "is", label: "is" },
               { operator: "contains", label: "contains" }
             ]
           },
@@ -239,7 +241,8 @@ describe("resource api", () => {
               { operator: "eq", label: "equals" },
               { operator: "ne", label: "is not" },
               { operator: "in", label: "is in" },
-              { operator: "not_in", label: "is not in" }
+              { operator: "not_in", label: "is not in" },
+              { operator: "is", label: "is" }
             ]
           },
           {
@@ -249,7 +252,8 @@ describe("resource api", () => {
               { operator: "eq", label: "equals" },
               { operator: "ne", label: "is not" },
               { operator: "in", label: "is in" },
-              { operator: "not_in", label: "is not in" }
+              { operator: "not_in", label: "is not in" },
+              { operator: "is", label: "is" }
             ]
           },
           {
@@ -260,6 +264,7 @@ describe("resource api", () => {
               { operator: "ne", label: "is not" },
               { operator: "in", label: "is in" },
               { operator: "not_in", label: "is not in" },
+              { operator: "is", label: "is" },
               { operator: "gt", label: "greater than" },
               { operator: "gte", label: "greater than or equal" },
               { operator: "lt", label: "less than" },
@@ -274,7 +279,8 @@ describe("resource api", () => {
               { operator: "eq", label: "equals" },
               { operator: "ne", label: "is not" },
               { operator: "in", label: "is in" },
-              { operator: "not_in", label: "is not in" }
+              { operator: "not_in", label: "is not in" },
+              { operator: "is", label: "is" }
             ]
           },
           {
@@ -285,6 +291,7 @@ describe("resource api", () => {
               { operator: "ne", label: "is not" },
               { operator: "in", label: "is in" },
               { operator: "not_in", label: "is not in" },
+              { operator: "is", label: "is" },
               { operator: "gt", label: "greater than" },
               { operator: "gte", label: "greater than or equal" },
               { operator: "lt", label: "less than" },
@@ -1316,6 +1323,18 @@ describe("resource api", () => {
       total: 1
     });
 
+    const set = await app.request("/api/resource/Note?filter_body__is=set", {
+      headers: userHeaders
+    });
+    expect(set.status).toBe(200);
+    const setJson = (await set.json()) as { readonly total: number; readonly data: readonly { readonly name: string }[] };
+    expect(setJson.total).toBe(3);
+    expect(setJson.data.map((document) => document.name).sort()).toEqual([
+      "HTTP Empty Body",
+      "HTTP High",
+      "HTTP Low"
+    ]);
+
     const explicitEmpty = await app.request("/api/resource/Note?default_filters=0&filter_body=&empty_filter=filter_body", {
       headers: userHeaders
     });
@@ -1363,17 +1382,41 @@ describe("resource api", () => {
     ].join("\n"));
   });
 
+  it("lists resources with presence filters for missing fields", async () => {
+    const app = makeApp();
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Body Set", priority: "High", body: "Visible" })
+    });
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "HTTP Body Missing", priority: "Medium" })
+    });
+
+    const response = await app.request("/api/resource/Note?filter_body__is=not+set", {
+      headers: userHeaders
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: [{ name: "HTTP Body Missing" }],
+      total: 1
+    });
+  });
+
   it("keeps equality filters for fields ending with operator suffixes", async () => {
     const app = makeFilterCollisionApp();
     await app.request("/api/resource/FilterCollision", {
       method: "POST",
       headers: userHeaders,
-      body: JSON.stringify({ title: "Collision Match", count__between: 7 })
+      body: JSON.stringify({ title: "Collision Match", count__between: 7, body__is: "literal" })
     });
     await app.request("/api/resource/FilterCollision", {
       method: "POST",
       headers: userHeaders,
-      body: JSON.stringify({ title: "Collision Miss", count__between: 3 })
+      body: JSON.stringify({ title: "Collision Miss", count__between: 3, body__is: "other" })
     });
 
     const response = await app.request("/api/resource/FilterCollision?filter_count__between=7", {
@@ -1382,6 +1425,15 @@ describe("resource api", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
+      data: [{ name: "Collision Match" }],
+      total: 1
+    });
+
+    const presenceCollision = await app.request("/api/resource/FilterCollision?filter_body__is=literal", {
+      headers: userHeaders
+    });
+    expect(presenceCollision.status).toBe(200);
+    await expect(presenceCollision.json()).resolves.toMatchObject({
       data: [{ name: "Collision Match" }],
       total: 1
     });
@@ -1407,7 +1459,8 @@ describe("resource api", () => {
         label: "High or low API notes",
         filters: [
           { field: "priority", operator: "in", value: ["High", "Low"] },
-          { field: "count", operator: "between", value: [1, 7] }
+          { field: "count", operator: "between", value: [1, 7] },
+          { field: "body", operator: "is", value: "set" }
         ]
       })
     });
@@ -1487,6 +1540,19 @@ describe("resource api", () => {
     expect(emptyRangeSavedFilter.status).toBe(400);
     await expect(emptyRangeSavedFilter.json()).resolves.toMatchObject({
       error: { code: "BAD_REQUEST", message: "Filter 'count' range values cannot be empty" }
+    });
+
+    const invalidPresenceSavedFilter = await app.request("/api/resource/Note/saved-filters", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({
+        label: "Invalid presence",
+        filters: [{ field: "body", operator: "is", value: "present" }]
+      })
+    });
+    expect(invalidPresenceSavedFilter.status).toBe(400);
+    await expect(invalidPresenceSavedFilter.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Saved filter presence value must be set or not set" }
     });
   });
 

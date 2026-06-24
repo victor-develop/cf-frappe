@@ -107,7 +107,8 @@ describe("Desk app", () => {
       naming: { kind: "field", field: "title" },
       fields: [
         { name: "title", type: "text", required: true },
-        { name: "count__between", type: "integer" }
+        { name: "count__between", type: "integer" },
+        { name: "body__is", type: "text" }
       ],
       permissions: [{ roles: ["User"], actions: ["read", "create"] }]
     });
@@ -2430,6 +2431,14 @@ describe("Desk app", () => {
     expect(betweenHtml).not.toContain("Desk Low");
     expect(betweenHtml).not.toContain("Desk Closed High");
 
+    const set = await app.request("/desk/Note?filter_body__is=set");
+    expect(set.status).toBe(200);
+    const setHtml = await set.text();
+    expect(setHtml).toContain("Desk High");
+    expect(setHtml).toContain("Desk Low");
+    expect(setHtml).toContain("Desk Empty Body");
+    expect(setHtml).not.toContain("Desk Closed High");
+
     const membership = await app.request("/desk/Note?filter_priority__in=High&filter_priority__in=Low");
     expect(membership.status).toBe(200);
     const membershipHtml = await membership.text();
@@ -2477,17 +2486,38 @@ describe("Desk app", () => {
     ].join("\n"));
   });
 
+  it("lists Desk resources with presence filters for missing fields", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: { title: "Desk Body Set", priority: "High", body: "Visible" }
+    });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: { title: "Desk Body Missing", priority: "Medium" }
+    });
+
+    const response = await app.request("/desk/Note?filter_body__is=not+set");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Desk Body Missing");
+    expect(html).not.toContain("Desk Body Set");
+  });
+
   it("keeps Desk equality filters for fields ending with operator suffixes", async () => {
     const { app, documents } = makeFilterCollisionDesk();
     await documents.create({
       actor: owner,
       doctype: "FilterCollision",
-      data: { title: "Desk Collision Match", count__between: 7 }
+      data: { title: "Desk Collision Match", count__between: 7, body__is: "literal" }
     });
     await documents.create({
       actor: owner,
       doctype: "FilterCollision",
-      data: { title: "Desk Collision Miss", count__between: 3 }
+      data: { title: "Desk Collision Miss", count__between: 3, body__is: "other" }
     });
 
     const response = await app.request("/desk/FilterCollision?filter_count__between=7");
@@ -2496,6 +2526,12 @@ describe("Desk app", () => {
     const html = await response.text();
     expect(html).toContain("Desk Collision Match");
     expect(html).not.toContain("Desk Collision Miss");
+
+    const presenceCollision = await app.request("/desk/FilterCollision?filter_body__is=literal");
+    expect(presenceCollision.status).toBe(200);
+    const presenceCollisionHtml = await presenceCollision.text();
+    expect(presenceCollisionHtml).toContain("Desk Collision Match");
+    expect(presenceCollisionHtml).not.toContain("Desk Collision Miss");
   });
 
   it("renders and submits generated list bulk document deletes", async () => {

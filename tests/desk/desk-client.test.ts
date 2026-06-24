@@ -590,6 +590,31 @@ describe("Desk client runtime", () => {
     );
   });
 
+  it("maps resource presence filters to query parameters", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: [] }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await runtime.resource.list("Task", {
+      filters: {
+        body: { is: "not set" }
+      }
+    });
+
+    expect(calls[0]?.url).toBe("/api/resource/Task?filter_body__is=not+set");
+    expect(
+      runtime.resource.csvUrl("Task", {
+        filters: {
+          body: { is: "not set" }
+        }
+      })
+    ).toBe("/api/resource/Task/export.csv?filter_body__is=not+set");
+  });
+
   it("wraps metadata-driven global search", async () => {
     const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
     const runtime = evaluateDeskClient(async (url, init) => {

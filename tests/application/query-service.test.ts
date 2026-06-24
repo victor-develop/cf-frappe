@@ -100,6 +100,50 @@ describe("QueryService", () => {
     ).resolves.toMatchObject({ data: [{ name: "In Range" }], total: 1 });
   });
 
+  it("filters list results through presence checks", async () => {
+    const { projections, queries } = createServices();
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "Body Set",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "Body Set", body: "Body", created_by: owner.id },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    });
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "Body Empty",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "Body Empty", body: "", created_by: owner.id },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    });
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "Body Missing",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "Body Missing", created_by: owner.id },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    });
+
+    const set = await queries.listDocuments(owner, "Note", {
+      filters: [{ field: "body", operator: "is", value: "set" }]
+    });
+    expect(set.data.map((document) => document.name).sort()).toEqual(["Body Empty", "Body Set"]);
+    expect(set.total).toBe(2);
+
+    await expect(
+      queries.listDocuments(owner, "Note", { filters: [{ field: "body", operator: "is", value: "not set" }] })
+    ).resolves.toMatchObject({ data: [{ name: "Body Missing" }], total: 1 });
+  });
+
   it("filters list results through metadata-validated system fields", async () => {
     const { projections, queries } = createServices();
     await projections.save({
@@ -249,6 +293,13 @@ describe("QueryService", () => {
     ).rejects.toMatchObject({
       code: "BAD_REQUEST",
       message: "Filter 'count' range values cannot be empty"
+    });
+
+    await expect(
+      queries.listDocuments(owner, "Note", { filters: [{ field: "body", operator: "is", value: "present" }] })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Filter 'body' must be set or not set"
     });
   });
 
@@ -722,6 +773,7 @@ describe("QueryService", () => {
           { operator: "ne", label: "is not" },
           { operator: "in", label: "is in" },
           { operator: "not_in", label: "is not in" },
+          { operator: "is", label: "is" },
           { operator: "contains", label: "contains" }
         ]
       }),
@@ -732,7 +784,8 @@ describe("QueryService", () => {
           { operator: "eq", label: "equals" },
           { operator: "ne", label: "is not" },
           { operator: "in", label: "is in" },
-          { operator: "not_in", label: "is not in" }
+          { operator: "not_in", label: "is not in" },
+          { operator: "is", label: "is" }
         ]
       }),
       expect.objectContaining({
@@ -742,7 +795,8 @@ describe("QueryService", () => {
           { operator: "eq", label: "equals" },
           { operator: "ne", label: "is not" },
           { operator: "in", label: "is in" },
-          { operator: "not_in", label: "is not in" }
+          { operator: "not_in", label: "is not in" },
+          { operator: "is", label: "is" }
         ]
       }),
       expect.objectContaining({
@@ -753,6 +807,7 @@ describe("QueryService", () => {
           { operator: "ne", label: "is not" },
           { operator: "in", label: "is in" },
           { operator: "not_in", label: "is not in" },
+          { operator: "is", label: "is" },
           { operator: "gt", label: "greater than" },
           { operator: "gte", label: "greater than or equal" },
           { operator: "lt", label: "less than" },
@@ -767,7 +822,8 @@ describe("QueryService", () => {
           { operator: "eq", label: "equals" },
           { operator: "ne", label: "is not" },
           { operator: "in", label: "is in" },
-          { operator: "not_in", label: "is not in" }
+          { operator: "not_in", label: "is not in" },
+          { operator: "is", label: "is" }
         ]
       }),
       expect.objectContaining({
@@ -778,6 +834,7 @@ describe("QueryService", () => {
           { operator: "ne", label: "is not" },
           { operator: "in", label: "is in" },
           { operator: "not_in", label: "is not in" },
+          { operator: "is", label: "is" },
           { operator: "gt", label: "greater than" },
           { operator: "gte", label: "greater than or equal" },
           { operator: "lt", label: "less than" },

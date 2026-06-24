@@ -177,6 +177,44 @@ describe("D1ProjectionStore", () => {
     expect(count?.params).toEqual(["acme", "Note", 2, 8]);
   });
 
+  it("renders presence operators without binding filter values", async () => {
+    const db = new FakeD1Database([
+      documentRow({ name: "D1 Body", data: { title: "body", body: "Body" } }),
+      documentRow({ name: "D1 Empty Body", data: { title: "empty", body: "" } }),
+      documentRow({ name: "D1 Null Body", data: { title: "null", body: null } }),
+      documentRow({ name: "D1 Missing Body", data: { title: "missing" } })
+    ]);
+    const store = new D1ProjectionStore(db as unknown as D1Database);
+
+    const missing = await store.list({
+      tenantId: "acme",
+      doctype: "Note",
+      filters: [{ field: "body", operator: "is", value: "not set" }]
+    });
+
+    expect(missing.data.map((document) => document.name)).toEqual(["D1 Null Body", "D1 Missing Body"]);
+    expect(missing.total).toBe(2);
+    const [rows, count] = db.statements;
+    expect(rows?.sql).toContain("json_extract(data_json, '$.body') IS NULL");
+    expect(rows?.sql).not.toContain("not set");
+    expect(rows?.params).toEqual(["acme", "Note", 50, 0]);
+    expect(count?.params).toEqual(["acme", "Note"]);
+
+    const setDb = new FakeD1Database(db.rows);
+    const setStore = new D1ProjectionStore(setDb as unknown as D1Database);
+    const set = await setStore.list({
+      tenantId: "acme",
+      doctype: "Note",
+      filters: [{ field: "body", operator: "is", value: "set" }]
+    });
+
+    expect(set.data.map((document) => document.name)).toEqual(["D1 Body", "D1 Empty Body"]);
+    expect(set.total).toBe(2);
+    expect(setDb.statements[0]?.sql).toContain("json_extract(data_json, '$.body') IS NOT NULL");
+    expect(setDb.statements[0]?.sql).not.toContain("set");
+    expect(setDb.statements[0]?.params).toEqual(["acme", "Note", 50, 0]);
+  });
+
   it("orders rows by escaped JSON fields with deterministic fallbacks", async () => {
     const db = new FakeD1Database([
       documentRow({ name: "D1 High", data: { title: "apple", count: 5 } }),
@@ -392,6 +430,16 @@ class FakeD1PreparedStatement {
           return false;
         }
         paramIndex += 1;
+      }
+      if (this.sql.includes("json_extract(data_json, '$.body') IS NOT NULL")) {
+        if (data.body === undefined || data.body === null) {
+          return false;
+        }
+      }
+      if (this.sql.includes("json_extract(data_json, '$.body') IS NULL")) {
+        if (data.body !== undefined && data.body !== null) {
+          return false;
+        }
       }
       if (this.sql.includes("json_extract(data_json, '$.count') > ?")) {
         if (!compares(data.count, filterParams[paramIndex], (actual, expected) => actual > expected)) {

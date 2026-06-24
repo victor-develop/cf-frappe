@@ -123,6 +123,9 @@ function listFilterWhere(filters: readonly ListDocumentsFilter[]): ListFilterWhe
         params.push(...values.map(sqliteJsonValue));
         break;
       }
+      case "is":
+        conditions.push(`${expression} ${presenceFilterValue(filter) === "set" ? "IS NOT NULL" : "IS NULL"}`);
+        break;
       case "contains":
         conditions.push(`LOWER(CAST(${expression} AS TEXT)) LIKE ? ESCAPE '\\'`);
         params.push(`%${escapeLike(String(scalarFilterValue(filter)).toLowerCase())}%`);
@@ -193,6 +196,13 @@ function membershipFilterValues(filter: ListDocumentsFilter): readonly JsonPrimi
     throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires one or more values`);
   }
   return filter.value;
+}
+
+function presenceFilterValue(filter: ListDocumentsFilter): "set" | "not set" {
+  if (filter.value === "set" || filter.value === "not set") {
+    return filter.value;
+  }
+  throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires set or not set`);
 }
 
 function rangeFilterValues(filter: ListDocumentsFilter): readonly [JsonPrimitive, JsonPrimitive] {

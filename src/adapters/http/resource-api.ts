@@ -27,7 +27,7 @@ import type { UserNotificationService } from "../../application/user-notificatio
 import type { UserPermissionService } from "../../application/user-permission-service.js";
 import type { UserProfileService } from "../../application/user-profile-service.js";
 import { badRequest, permissionDenied } from "../../core/errors.js";
-import { isListFilterOperator, isListMembershipOperator, isListRangeOperator } from "../../core/list-view.js";
+import { isListFilterOperator, isListMembershipOperator, isListPresenceOperator, isListRangeOperator } from "../../core/list-view.js";
 import { can } from "../../core/permissions.js";
 import { canReadReport } from "../../core/reports.js";
 import type { ModelRegistry } from "../../core/registry.js";
@@ -1016,6 +1016,12 @@ function filterValueValue(value: unknown, operator: NonNullable<ListDocumentsFil
   if (isListRangeOperator(operator)) {
     if (!Array.isArray(value) || value.length !== 2 || !value.every(isJsonPrimitive)) {
       throw badRequest("Saved filter range value must be a two-item scalar array");
+    }
+    return value;
+  }
+  if (isListPresenceOperator(operator)) {
+    if (value !== "set" && value !== "not set") {
+      throw badRequest("Saved filter presence value must be set or not set");
     }
     return value;
   }

@@ -19,7 +19,7 @@ export const DEFAULT_LIST_PAGE_SIZE = 50;
 export const MAX_LIST_PAGE_SIZE = 200;
 export const DEFAULT_LIST_ORDER_BY = "updatedAt";
 export const DEFAULT_LIST_ORDER: ListOrderDirection = "desc";
-export const LIST_FILTER_OPERATORS = ["eq", "ne", "in", "not_in", "contains", "gt", "gte", "lt", "lte", "between"] as const;
+export const LIST_FILTER_OPERATORS = ["eq", "ne", "in", "not_in", "is", "contains", "gt", "gte", "lt", "lte", "between"] as const;
 export const LIST_ORDER_DIRECTIONS = ["asc", "desc"] as const;
 const SYSTEM_LIST_ORDER_OPTIONS = [
   { name: "name", label: "Name" },
@@ -39,6 +39,7 @@ const LIST_FILTER_OPERATOR_LABELS: Record<ListFilterOperator, string> = {
   ne: "is not",
   in: "is in",
   not_in: "is not in",
+  is: "is",
   contains: "contains",
   gt: "greater than",
   gte: "greater than or equal",
@@ -57,6 +58,10 @@ export function isListMembershipOperator(operator: ListFilterOperator): operator
 
 export function isListRangeOperator(operator: ListFilterOperator): operator is "between" {
   return operator === "between";
+}
+
+export function isListPresenceOperator(operator: ListFilterOperator): operator is "is" {
+  return operator === "is";
 }
 
 export function isListOrderDirection(order: unknown): order is ListOrderDirection {
@@ -316,7 +321,7 @@ function supportedListFilterOperatorsForField(field: FieldDefinition): readonly 
   if (!isFilterable(field)) {
     return [];
   }
-  const operators: ListFilterOperator[] = ["eq", "ne", "in", "not_in"];
+  const operators: ListFilterOperator[] = ["eq", "ne", "in", "not_in", "is"];
   if (field.type === "text" || field.type === "longText" || field.type === "link") {
     operators.push("contains");
   }
@@ -427,12 +432,31 @@ function coerceFilterValue(
     }
     return value.map((item) => coerceRangeFilterValue(field, item, errorCode));
   }
+  if (isListPresenceOperator(operator)) {
+    if (isFilterValueArray(value)) {
+      throw new FrameworkError(errorCode, `Filter '${field.name}' must use a scalar value for ${operator}`, {
+        status: 400
+      });
+    }
+    return coercePresenceFilterValue(field, value, errorCode);
+  }
   if (isFilterValueArray(value)) {
     throw new FrameworkError(errorCode, `Filter '${field.name}' must use a scalar value for ${operator}`, {
       status: 400
     });
   }
   return coerceScalarFilterValue(field, value, errorCode);
+}
+
+function coercePresenceFilterValue(
+  field: FieldDefinition,
+  value: JsonPrimitive,
+  errorCode: FrameworkErrorCode
+): JsonPrimitive {
+  if (value === "set" || value === "not set") {
+    return value;
+  }
+  throw new FrameworkError(errorCode, `Filter '${field.name}' must be set or not set`, { status: 400 });
 }
 
 function isFilterValueArray(value: ListFilterValue): value is readonly JsonPrimitive[] {
