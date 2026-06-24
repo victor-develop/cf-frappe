@@ -280,7 +280,14 @@ function cloudflareAccessReadme(auth: StarterAuthMode): string {
   return `
 ## Cloudflare Access Auth
 
-This starter expects Cloudflare Access to protect the deployed Worker hostname. Set \`CF_ACCESS_TEAM_DOMAIN\` to your Access team domain, such as \`your-team.cloudflareaccess.com\`, and \`CF_ACCESS_AUD\` to the Access application audience tag. Requests with a valid Access JWT are verified, synced into cf-frappe user-account provider events, and then authorized as the folded account actor. Keep Access application and policy creation in Cloudflare Zero Trust so rollout, allowed groups, and posture rules stay reviewable outside the app code.
+This starter expects Cloudflare Access to protect the deployed Worker hostname. Set \`CF_ACCESS_TEAM_DOMAIN\` to your Access team domain, such as \`your-team.cloudflareaccess.com\`, and \`CF_ACCESS_AUD\` to the Access application audience tag. Requests with a valid Access JWT are verified, synced into cf-frappe user-account provider events, and then authorized as the folded account actor. You can review or create the matching Access application and policy with:
+
+\`\`\`bash
+npx cf-frappe access plan --account-id <account-id> --team-domain your-team.cloudflareaccess.com --name "My App" --domain app.example.com --email-domain example.com
+npx cf-frappe access apply --account-id <account-id> --team-domain your-team.cloudflareaccess.com --name "My App" --domain app.example.com --email-domain example.com --api-token-env CF_API_TOKEN
+\`\`\`
+
+Use \`access plan\` first so rollout, allowed groups, and posture assumptions stay reviewable before mutating Cloudflare Zero Trust resources. The API token used for \`access apply\` should have Access application and policy write permissions.
 `;
 }
 
@@ -289,7 +296,7 @@ function cloudflareAccessDeployReadme(auth: StarterAuthMode): string {
     return "";
   }
   return `
-For Cloudflare Access deployments, update the \`vars\` block in \`wrangler.jsonc\` with your Access team domain and application audience tag before deploy. The checked-in placeholders are safe for local scaffolding only.
+For Cloudflare Access deployments, run \`npx cf-frappe access plan --account-id <account-id> --team-domain your-team.cloudflareaccess.com --name "My App" --domain app.example.com --email-domain example.com\` to review the Access application/policy payloads, then run the same command as \`access apply\` with \`--api-token-env CF_API_TOKEN\` when you are ready to create them. Copy the returned \`CF_ACCESS_TEAM_DOMAIN\` and \`CF_ACCESS_AUD\` into the \`vars\` block in \`wrangler.jsonc\` before deploy. The checked-in placeholders are safe for local scaffolding only.
 `;
 }
 

@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the image overlay transform source slice:
+As of the Cloudflare Access setup CLI slice:
 
-- Vitest files: `89`
-- Vitest cases: `983`
+- Vitest files: `90`
+- Vitest cases: `990`
 
 ## Implication
 

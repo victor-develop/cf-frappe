@@ -165,6 +165,10 @@ describe("cf-frappe CLI scaffold", () => {
     const readme = await readFile(join(target, "README.md"), "utf8");
     expect(readme).toContain("Cloudflare Access account auto-sync");
     expect(readme).toContain("Access application audience tag");
+    expect(readme).toContain("npx cf-frappe access plan");
+    expect(readme).toContain("npx cf-frappe access apply");
+    expect(readme).toContain("--api-token-env CF_API_TOKEN");
+    expect(readme).toContain("then run the same command as `access apply`");
     expect(readme).toContain("denies requests that do not carry a valid Access token");
   });
 

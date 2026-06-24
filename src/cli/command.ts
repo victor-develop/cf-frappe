@@ -22,6 +22,13 @@ import {
   type PackageManagerRunner
 } from "./package-manager.js";
 import {
+  CloudflareAccessSetupError,
+  runCloudflareAccessSetupCommand,
+  type CloudflareAccessPolicyInclude,
+  type CloudflareAccessSetupCommand,
+  type CloudflareAccessSetupScope
+} from "./access-setup.js";
+import {
   DataPatchRemoteError,
   runRemoteDataPatchCommand,
   type DataPatchHeaderOption,
@@ -84,6 +91,7 @@ type ParsedCommand =
   | InitCommand
   | InstallCommand
   | MigrateGenerateCommand
+  | CloudflareAccessSetupCommand
   | DataPatchRemoteCommand
   | HelpCommand
   | InvalidCommand;
@@ -102,6 +110,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   try {
     if (command.kind === "data-patches") {
       io.stdout.write(await runRemoteDataPatchCommand(command, {
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
+    if (command.kind === "access-setup") {
+      io.stdout.write(await runCloudflareAccessSetupCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -175,6 +190,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof MigrationGenerateError ||
       error instanceof PackageJsonError ||
       error instanceof PackageManagerError ||
+      error instanceof CloudflareAccessSetupError ||
       error instanceof DataPatchRemoteError
     ) {
       io.stderr.write(`cf-frappe: ${error.message}\n`);
@@ -198,10 +214,227 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   if (command === "data-patches") {
     return parseDataPatchesArgs(rest);
   }
+  if (command === "access") {
+    return parseAccessArgs(rest);
+  }
   if (command !== "init") {
     return { kind: "invalid", message: `Unknown command '${command}'` };
   }
   return parseInitArgs(rest);
+}
+
+function parseAccessArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  if (subcommand !== "plan" && subcommand !== "apply") {
+    return { kind: "invalid", message: `Unknown access command '${subcommand}'` };
+  }
+
+  let accountId: string | undefined;
+  let zoneId: string | undefined;
+  let name: string | undefined;
+  let domain: string | undefined;
+  let teamDomain: string | undefined;
+  let policyName: string | undefined;
+  let sessionDuration: string | undefined;
+  let apiTokenEnv: string | undefined;
+  let apiBaseUrl: string | undefined;
+  const includes: CloudflareAccessPolicyInclude[] = [];
+  const allowedIdps: string[] = [];
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--account-id") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      accountId = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--zone-id") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      zoneId = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--name") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      name = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--domain") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      domain = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--team-domain") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      teamDomain = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--policy-name") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      policyName = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--session-duration") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      sessionDuration = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--api-token-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
+        return { kind: "invalid", message: `Cloudflare API token env var '${value}' is invalid` };
+      }
+      apiTokenEnv = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--api-base-url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      apiBaseUrl = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--email") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      includes.push({ kind: "email", email: value });
+      index += 1;
+      continue;
+    }
+    if (arg === "--email-domain") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      includes.push({ kind: "email-domain", domain: value });
+      index += 1;
+      continue;
+    }
+    if (arg === "--group") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      includes.push({ kind: "group", id: value });
+      index += 1;
+      continue;
+    }
+    if (arg === "--everyone") {
+      includes.push({ kind: "everyone" });
+      continue;
+    }
+    if (arg === "--allowed-idp") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      allowedIdps.push(value);
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown access ${subcommand} option '${arg}'` };
+  }
+
+  if (accountId !== undefined && zoneId !== undefined) {
+    return { kind: "invalid", message: "Provide only one of --account-id or --zone-id" };
+  }
+  if (accountId === undefined && zoneId === undefined) {
+    return { kind: "invalid", message: "Cloudflare Access setup requires --account-id or --zone-id" };
+  }
+  const scope: CloudflareAccessSetupScope = accountId === undefined
+    ? { kind: "zone", id: zoneId! }
+    : { kind: "account", id: accountId };
+  if (name === undefined) {
+    return { kind: "invalid", message: "Cloudflare Access setup requires --name" };
+  }
+  if (domain === undefined) {
+    return { kind: "invalid", message: "Cloudflare Access setup requires --domain" };
+  }
+  if (teamDomain === undefined) {
+    return { kind: "invalid", message: "Cloudflare Access setup requires --team-domain" };
+  }
+  if (includes.length === 0) {
+    return { kind: "invalid", message: "Cloudflare Access setup requires at least one policy include selector" };
+  }
+  if (subcommand === "apply" && apiTokenEnv === undefined) {
+    return { kind: "invalid", message: "Cloudflare Access apply requires --api-token-env" };
+  }
+  return {
+    kind: "access-setup",
+    action: subcommand,
+    scope,
+    name,
+    domain,
+    teamDomain,
+    policyName: policyName ?? `${name} allow`,
+    includes,
+    ...(allowedIdps.length === 0 ? {} : { allowedIdps }),
+    ...(sessionDuration === undefined ? {} : { sessionDuration }),
+    ...(apiTokenEnv === undefined ? {} : { apiTokenEnv }),
+    ...(apiBaseUrl === undefined ? {} : { apiBaseUrl })
+  };
+}
+
+function parseRequiredOption(
+  argv: readonly string[],
+  index: number,
+  option: string
+): string | InvalidCommand {
+  const value = argv[index + 1];
+  if (value === undefined) {
+    return { kind: "invalid", message: `Missing value for ${option}` };
+  }
+  if (value.startsWith("-")) {
+    return { kind: "invalid", message: `Missing value for ${option}` };
+  }
+  if (value.trim().length === 0) {
+    return { kind: "invalid", message: `${option} must be non-empty` };
+  }
+  return value.trim();
 }
 
 function parseDataPatchesArgs(argv: readonly string[]): ParsedCommand {
@@ -638,6 +871,8 @@ function helpText(): string {
     "  cf-frappe init <directory> [--force] [--auth <signed-session|cloudflare-access>]",
     "  cf-frappe install <module> [--version <range>] [--export <name>] [--as <localName>] [--registry <path>] [--package-manager <npm|pnpm|yarn|bun>] [--no-install] [--no-save]",
     "  cf-frappe migrate generate [--registry <path>] [--migrations <dir>] [--no-core]",
+    "  cf-frappe access plan (--account-id <id>|--zone-id <id>) --team-domain <team.cloudflareaccess.com> --name <appName> --domain <host[/path]> (--email <user>|--email-domain <domain>|--group <id>|--everyone) [--policy-name <name>] [--allowed-idp <id>] [--session-duration <duration>]",
+    "  cf-frappe access apply (--account-id <id>|--zone-id <id>) --team-domain <team.cloudflareaccess.com> --name <appName> --domain <host[/path]> (--email <user>|--email-domain <domain>|--group <id>|--everyone) --api-token-env <ENV> [--policy-name <name>] [--allowed-idp <id>] [--session-duration <duration>]",
     "  cf-frappe data-patches status --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches plan --url <origin> [--id <patchId>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches rollback-plan --url <origin> [--id <patchId>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
@@ -654,6 +889,7 @@ function helpText(): string {
     "  init   Create a Cloudflare-ready cf-frappe starter app",
     "  install   Save, install, and wire an app module into a generated app registry",
     "  migrate generate   Write reviewable D1 migration files from app metadata",
+    "  access   Plan or create Cloudflare Access application and policy resources for a starter app",
     "  data-patches   Inspect, plan, apply, rollback, or enqueue remote app-declared data patches through the admin API",
     "",
     "Use --header-env for secret-bearing auth headers so tokens stay out of shell history.",
