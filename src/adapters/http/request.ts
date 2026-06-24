@@ -24,9 +24,10 @@ export function requestMetadata(request: Request): DocumentData {
 
 export function listFiltersFromUrl(url: URL): readonly ListDocumentsFilter[] {
   const filters: ListDocumentsFilter[] = [];
+  const emptyFilterKeys = new Set(url.searchParams.getAll("empty_filter"));
   url.searchParams.forEach((value, key) => {
     const parsed = parseFilterKey(key);
-    if (!parsed || value === "") {
+    if (!parsed || (value === "" && !emptyFilterKeys.has(key))) {
       return;
     }
     filters.push({

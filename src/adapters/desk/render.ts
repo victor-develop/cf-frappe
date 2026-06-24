@@ -643,12 +643,14 @@ function renderDashboardCard(card: DashboardRunResult["cards"][number]): string 
       <small>${escapeHtml(dashboardCardSourceLabel(card.source))}</small>
     </section>`;
   }
-  return `<section class="dashboard-card">
-    <span>${escapeHtml(card.label)}</span>
+  const href = dashboardMetricHref(card.source);
+  const content = `<span>${escapeHtml(card.label)}</span>
     <strong>${escapeHtml(formatValue(dashboardMetricValue(card.value)))}</strong>
     ${card.indicator === undefined ? "" : `<em>${escapeHtml(card.indicator)}</em>`}
     ${card.description === undefined ? "" : `<p>${escapeHtml(card.description)}</p>`}
-    <small>${escapeHtml(dashboardCardSourceLabel(card.source))}</small>
+    <small>${escapeHtml(dashboardCardSourceLabel(card.source))}</small>`;
+  return `<section class="dashboard-card">
+    ${href === undefined ? content : `<a class="dashboard-card-link" href="${escapeHtml(href)}">${content}</a>`}
   </section>`;
 }
 
@@ -666,14 +668,43 @@ function dashboardChartValue(
 }
 
 function dashboardReportChartHref(source: Extract<DashboardRunResult["cards"][number]["source"], { readonly kind: "reportChart" }>): string {
+  return dashboardReportHref(source.report, source.filters ?? {});
+}
+
+function dashboardReportHref(report: string, filters: Readonly<Record<string, JsonValue | undefined>>): string {
   const params = new URLSearchParams();
-  for (const [name, value] of Object.entries(source.filters ?? {})) {
-    if (value !== undefined && value !== null && value !== "") {
+  for (const [name, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== null) {
       params.set(`filter_${name}`, String(value));
     }
   }
   const query = params.toString();
-  return `/desk/reports/${encodeURIComponent(source.report)}${query ? `?${query}` : ""}`;
+  return `/desk/reports/${encodeURIComponent(report)}${query ? `?${query}` : ""}`;
+}
+
+function dashboardMetricHref(source: DashboardRunResult["cards"][number]["source"]): string | undefined {
+  if (source.kind === "documentCount" || source.kind === "documentAggregate") {
+    const params = new URLSearchParams();
+    params.set("default_filters", "0");
+    for (const filter of source.filters ?? []) {
+      if (filter.value !== null) {
+        const key = dashboardListFilterQueryKey(filter.field, filter.operator);
+        params.set(key, String(filter.value));
+        if (filter.value === "") {
+          params.append("empty_filter", key);
+        }
+      }
+    }
+    return `/desk/${encodeURIComponent(source.doctype)}?${params.toString()}`;
+  }
+  if (source.kind === "reportSummary") {
+    return dashboardReportHref(source.report, source.filters ?? {});
+  }
+  return undefined;
+}
+
+function dashboardListFilterQueryKey(field: string, operator: ListFilterOperator | undefined): string {
+  return `filter_${field}${operator === undefined || operator === "eq" ? "" : `__${operator}`}`;
 }
 
 function dashboardCardSourceLabel(source: DashboardRunResult["cards"][number]["source"]): string {
@@ -3062,6 +3093,13 @@ h3 { margin: 0 0 12px; font-size: 16px; line-height: 1.35; letter-spacing: 0; }
   border-radius: 8px;
   background: var(--surface);
 }
+.dashboard-card-link {
+  display: grid;
+  gap: 6px;
+  color: inherit;
+  text-decoration: none;
+}
+.dashboard-card:hover { border-color: var(--primary); }
 .dashboard-card span,
 .dashboard-card small {
   color: var(--muted);

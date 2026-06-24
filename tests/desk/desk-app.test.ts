@@ -526,12 +526,16 @@ describe("Desk app", () => {
     expect(page.status).toBe(200);
     const html = await page.text();
     expect(html).toContain("Readable open notes");
+    expect(html).toContain(
+      '<a class="dashboard-card-link" href="/desk/Note?default_filters=0&amp;filter_workflow_state=Open">'
+    );
     expect(html).toContain("<strong>2</strong>");
     expect(html).toContain("Open Count Sum");
     expect(html).toContain("<strong>10</strong>");
     expect(html).toContain("<em>green</em>");
     expect(html).toContain("Note sum(count)");
     expect(html).toContain("High Count");
+    expect(html).toContain('<a class="dashboard-card-link" href="/desk/reports/Open%20Notes?filter_priority=High">');
     expect(html).toContain("<strong>12</strong>");
     expect(html).toContain("Open Notes / total_count");
     expect(html).toContain("Priority Mix");

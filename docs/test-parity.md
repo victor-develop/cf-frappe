@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the dashboard indicator rule slice:
+As of the dashboard metric drilldown slice:
 
-- Vitest files: `79`
-- Vitest cases: `865`
+- Vitest files: `80`
+- Vitest cases: `866`
 
 ## Implication
 
