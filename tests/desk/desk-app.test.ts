@@ -710,6 +710,7 @@ describe("Desk app", () => {
     const builderHtml = await builder.text();
     expect(builderHtml).toContain('name="filterOperator:project"');
     expect(builderHtml).toContain('<option value="eq" selected>Equals</option>');
+    expect(builderHtml).toContain('<option value="ne">Not equals</option>');
 
     const body = new URLSearchParams();
     body.set("label", "Task project report");
@@ -725,6 +726,60 @@ describe("Desk app", () => {
     const report = await savedReports.get(owner, "Task", "report_saved-report-1");
     expect(report.definition.filters?.[0]).toMatchObject({ name: "project", field: "project", type: "link" });
     expect(report.definition.filters?.[0]).not.toHaveProperty("operator");
+  });
+
+  it("builds saved report not-equals filters from visual Desk report-builder controls", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Low Filter Preset", priority: "Low", count: 1 })
+    });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "High Filter Preset", priority: "High", count: 5 })
+    });
+
+    const builder = await app.request("/desk/report-builder/Note");
+    expect(builder.status).toBe(200);
+    const builderHtml = await builder.text();
+    expect(builderHtml).toContain('name="filterOperator:priority"');
+    expect(builderHtml).toContain('<option value="ne">Not equals</option>');
+
+    const body = new URLSearchParams();
+    body.set("label", "Not high report");
+    body.append("column", "title");
+    body.append("column", "priority");
+    body.append("filter", "priority");
+    body.set("filterOperator:priority", "ne");
+    body.set("filterDefault:priority", "High");
+
+    const saved = await app.request("/desk/report-builder/Note", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body
+    });
+
+    expect(saved.status).toBe(303);
+    await expect(services.savedReports.get(owner, "Note", "report_saved-report-1")).resolves.toMatchObject({
+      definition: {
+        filters: [
+          expect.objectContaining({
+            name: "priority",
+            operator: "ne",
+            defaultValue: "High"
+          })
+        ]
+      }
+    });
+
+    const run = await app.request("/desk/report-builder/Note/report_saved-report-1");
+    expect(run.status).toBe(200);
+    const html = await run.text();
+    expect(html).toContain("Low Filter Preset");
+    expect(html).not.toContain("High Filter Preset");
+    expect(html).toContain('<option value="High" selected>High</option>');
   });
 
   it("builds nested saved report formulas from visual Desk report-builder controls", async () => {

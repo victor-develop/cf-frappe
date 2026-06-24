@@ -3976,12 +3976,12 @@ function reportFilterOperatorFor(field: FieldDefinition, form: URLSearchParams):
 
 function reportFilterOperatorsFor(field: FieldDefinition): readonly ReportFilterOperator[] {
   if (field.type === "text" || field.type === "longText" || field.type === "link") {
-    return ["contains", "eq"];
+    return ["contains", "eq", "ne"];
   }
   if (field.type === "integer" || field.type === "number" || field.type === "date" || field.type === "datetime") {
-    return ["eq", "gte", "lte"];
+    return ["eq", "ne", "gte", "lte"];
   }
-  return ["eq"];
+  return ["eq", "ne"];
 }
 
 function defaultReportFilterOperatorFor(field: FieldDefinition): ReportFilterOperator {

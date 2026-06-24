@@ -652,6 +652,34 @@ describe("ReportService", () => {
     expect(result.total).toBe(2);
   });
 
+  it("supports not-equals report filters", async () => {
+    const { documents, reports } = createServices(["e1", "e2", "e3"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Low Note", priority: "Low", count: 1 }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "High Note", priority: "High", count: 5 }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Medium Note", priority: "Medium", count: 3 }) });
+
+    const result = await reports.runReportDefinition(
+      owner,
+      defineReport({
+        name: "Not High Notes",
+        doctype: "Note",
+        columns: [{ name: "title" }, { name: "priority" }],
+        filters: [{ name: "excluded_priority", field: "priority", type: "select", operator: "ne", defaultValue: "High" }]
+      })
+    );
+
+    expect(result.filters).toContainEqual(expect.objectContaining({
+      name: "excluded_priority",
+      operator: "ne",
+      value: "High"
+    }));
+    expect(result.rows).toEqual([
+      { title: "Low Note", priority: "Low" },
+      { title: "Medium Note", priority: "Medium" }
+    ]);
+    expect(result.total).toBe(2);
+  });
+
   it("exports all filtered report rows as CSV with escaped cells", async () => {
     const { documents, reports } = createServices(["e1", "e2", "e3", "e4"]);
     await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Low Note", priority: "Low" }) });

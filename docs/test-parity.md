@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file transform text-watermark slice:
+As of the report not-equals filter slice:
 
 - Vitest files: `75`
-- Vitest cases: `825`
+- Vitest cases: `828`
 
 ## Implication
 

@@ -2,7 +2,7 @@ import { FrameworkError } from "./errors.js";
 import type { Actor, DocTypeDefinition, FieldType, JsonPrimitive, PermissionAction } from "./types.js";
 import { SYSTEM_MANAGER_ROLE } from "./types.js";
 
-export type ReportFilterOperator = "eq" | "contains" | "gte" | "lte";
+export type ReportFilterOperator = "eq" | "ne" | "contains" | "gte" | "lte";
 export type ReportSummaryAggregate = "count" | "sum" | "avg" | "min" | "max";
 export type ReportChartType = "bar" | "line" | "pie";
 export type ReportChartOrderBy = "key" | "label" | "value";
@@ -11,7 +11,7 @@ export type ReportChartOrder = ReportOrder;
 export type ReportFormulaOperator = "add" | "subtract" | "multiply" | "divide";
 export type ReportFormulaOperand = string | number | ReportFormulaDefinition;
 
-const REPORT_FILTER_OPERATORS = ["eq", "contains", "gte", "lte"] as const;
+const REPORT_FILTER_OPERATORS = ["eq", "ne", "contains", "gte", "lte"] as const;
 const REPORT_FILTER_TYPES = ["text", "longText", "integer", "number", "boolean", "date", "datetime", "select", "link"] as const;
 const REPORT_FIELD_TYPES = ["text", "longText", "integer", "number", "boolean", "date", "datetime", "json", "select", "link", "table"] as const;
 const REPORT_ORDERS = ["asc", "desc"] as const;

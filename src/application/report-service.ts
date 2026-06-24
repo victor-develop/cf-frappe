@@ -542,6 +542,8 @@ function matchesReportFilters(document: DocumentSnapshot, report: ReportDefiniti
     switch (filter.operator ?? "eq") {
       case "eq":
         return actual === expected;
+      case "ne":
+        return actual !== expected;
       case "contains":
         return String(actual ?? "").toLowerCase().includes(String(expected).toLowerCase());
       case "gte":

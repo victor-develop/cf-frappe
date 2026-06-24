@@ -42,10 +42,25 @@ describe("reports", () => {
       name: "Note",
       fields: [
         { name: "title", type: "text" },
+        { name: "status", type: "select", options: ["Open", "Closed"] },
         { name: "count", type: "integer" },
         { name: "meta", type: "json" }
       ]
     });
+
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        reports: [
+          {
+            name: "Open Except Closed",
+            doctype: "Note",
+            columns: [{ name: "title" }],
+            filters: [{ name: "status_filter", field: "status", operator: "ne" }]
+          }
+        ]
+      })
+    ).not.toThrow();
 
     expect(() =>
       createRegistry({

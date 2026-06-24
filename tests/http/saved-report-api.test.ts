@@ -125,6 +125,42 @@ describe("saved report api", () => {
     await expect(csv.text()).resolves.toBe("Title,Count\nHigh Count B,7");
   });
 
+  it("round-trips not-equals saved report filters through the JSON API", async () => {
+    const { app, services } = makeApp();
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Low Count", priority: "Low", count: 1 }) });
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "High Count", priority: "High", count: 3 }) });
+    const created = await app.request("/api/report-builder/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({
+        label: "Not high",
+        definition: {
+          columns: [{ name: "title" }, { name: "priority" }],
+          filters: [{ name: "excluded_priority", field: "priority", type: "select", operator: "ne", defaultValue: "High" }]
+        }
+      })
+    });
+
+    expect(created.status).toBe(201);
+    const createdBody = await created.json() as { readonly data: { readonly id: string } };
+    expect(createdBody).toMatchObject({
+      data: {
+        id: "report_high-counts",
+        definition: {
+          filters: [expect.objectContaining({ name: "excluded_priority", operator: "ne", defaultValue: "High" })]
+        }
+      }
+    });
+
+    const reportId = String(createdBody.data.id);
+    const run = await app.request(`/api/report-builder/Note/${encodeURIComponent(reportId)}/run`, { headers: userHeaders });
+    expect(run.status).toBe(200);
+    await expect(run.json()).resolves.toMatchObject({
+      rows: [{ title: "Low Count", priority: "Low" }],
+      total: 1
+    });
+  });
+
   it("round-trips formula columns through the report-builder JSON API", async () => {
     const { app, services } = makeApp();
     await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Low Count", priority: "Low", count: 1 }) });

@@ -828,23 +828,29 @@ function reportBuilderFilterOperatorsFor(
   if (field.type === "text" || field.type === "longText") {
     return [
       { value: "contains", label: "Contains", selected: true },
-      { value: "eq", label: "Equals" }
+      { value: "eq", label: "Equals" },
+      { value: "ne", label: "Not equals" }
     ];
   }
   if (field.type === "link") {
     return [
       { value: "eq", label: "Equals", selected: true },
+      { value: "ne", label: "Not equals" },
       { value: "contains", label: "Contains" }
     ];
   }
   if (field.type === "integer" || field.type === "number" || field.type === "date" || field.type === "datetime") {
     return [
       { value: "eq", label: "Equals", selected: true },
+      { value: "ne", label: "Not equals" },
       { value: "gte", label: "At least" },
       { value: "lte", label: "At most" }
     ];
   }
-  return [{ value: "eq", label: "Equals", selected: true }];
+  return [
+    { value: "eq", label: "Equals", selected: true },
+    { value: "ne", label: "Not equals" }
+  ];
 }
 
 function renderReportBuilderFilterDefaultControl(field: FieldDefinition): string {
