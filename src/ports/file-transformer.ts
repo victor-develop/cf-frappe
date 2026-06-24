@@ -2,14 +2,22 @@ import { badRequest } from "../core/errors.js";
 
 export const MAX_FILE_TRANSFORM_DIMENSION = 4096;
 export const MAX_FILE_TRANSFORM_WATERMARK_TEXT_LENGTH = 120;
+export const MIN_FILE_TRANSFORM_WATERMARK_FONT_SIZE = 8;
+export const MAX_FILE_TRANSFORM_WATERMARK_FONT_SIZE = 256;
 export const FILE_TRANSFORM_FITS = ["scale-down", "contain", "cover", "crop", "pad"] as const;
 export const FILE_TRANSFORM_FORMATS = ["jpeg", "png", "webp", "avif"] as const;
+export const FILE_TRANSFORM_WATERMARK_PLACEMENTS = ["center", "top-left", "top-right", "bottom-left", "bottom-right"] as const;
 
 export type FileTransformFit = typeof FILE_TRANSFORM_FITS[number];
 export type FileTransformFormat = typeof FILE_TRANSFORM_FORMATS[number];
+export type FileTransformWatermarkPlacement = typeof FILE_TRANSFORM_WATERMARK_PLACEMENTS[number];
 
 export interface FileTransformWatermark {
   readonly text: string;
+  readonly placement?: FileTransformWatermarkPlacement;
+  readonly opacity?: number;
+  readonly color?: string;
+  readonly fontSize?: number;
 }
 
 export interface FileTransformOptions {
@@ -122,11 +130,55 @@ function normalizeWatermark(value: FileTransformWatermark): FileTransformWaterma
   if (text.length === 0 || [...text].length > MAX_FILE_TRANSFORM_WATERMARK_TEXT_LENGTH) {
     throw badRequest(watermarkTextMessage());
   }
-  return { text };
+  return {
+    text,
+    ...(value.placement === undefined ? {} : { placement: normalizeWatermarkPlacement(value.placement) }),
+    ...(value.opacity === undefined ? {} : { opacity: normalizeWatermarkOpacity(value.opacity) }),
+    ...(value.color === undefined ? {} : { color: normalizeWatermarkColor(value.color) }),
+    ...(value.fontSize === undefined ? {} : { fontSize: normalizeWatermarkFontSize(value.fontSize) })
+  };
 }
 
 function watermarkTextMessage(): string {
   return `watermark must be a non-empty string up to ${String(MAX_FILE_TRANSFORM_WATERMARK_TEXT_LENGTH)} characters`;
+}
+
+function normalizeWatermarkPlacement(value: string): FileTransformWatermarkPlacement {
+  if (!FILE_TRANSFORM_WATERMARK_PLACEMENTS.includes(value as FileTransformWatermarkPlacement)) {
+    throw badRequest(`watermark.placement must be one of ${FILE_TRANSFORM_WATERMARK_PLACEMENTS.join(", ")}`);
+  }
+  return value as FileTransformWatermarkPlacement;
+}
+
+function normalizeWatermarkOpacity(value: number): number {
+  if (!Number.isInteger(value) || value < 1 || value > 100) {
+    throw badRequest("watermark.opacity must be an integer from 1 to 100");
+  }
+  return value;
+}
+
+function normalizeWatermarkFontSize(value: number): number {
+  if (
+    !Number.isInteger(value) ||
+    value < MIN_FILE_TRANSFORM_WATERMARK_FONT_SIZE ||
+    value > MAX_FILE_TRANSFORM_WATERMARK_FONT_SIZE
+  ) {
+    throw badRequest(
+      `watermark.fontSize must be an integer from ${String(MIN_FILE_TRANSFORM_WATERMARK_FONT_SIZE)} to ${String(MAX_FILE_TRANSFORM_WATERMARK_FONT_SIZE)}`
+    );
+  }
+  return value;
+}
+
+function normalizeWatermarkColor(value: string): string {
+  if (typeof value !== "string") {
+    throw badRequest("watermark.color must be a hex color like #123456");
+  }
+  const color = value.trim().toLowerCase();
+  if (!/^#[0-9a-f]{6}$/.test(color)) {
+    throw badRequest("watermark.color must be a hex color like #123456");
+  }
+  return color;
 }
 
 function normalizeContentType(contentType: string): string {

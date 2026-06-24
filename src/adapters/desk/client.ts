@@ -386,6 +386,10 @@ export function renderDeskClientScript(): string {
     setParam(params, "format", options && options.format);
     setParam(params, "quality", options && options.quality);
     setParam(params, "watermark", fileWatermarkText(options && options.watermark));
+    setParam(params, "watermarkPlacement", fileWatermarkField(options && options.watermark, "placement"));
+    setParam(params, "watermarkOpacity", fileWatermarkField(options && options.watermark, "opacity"));
+    setParam(params, "watermarkColor", fileWatermarkField(options && options.watermark, "color"));
+    setParam(params, "watermarkFontSize", fileWatermarkField(options && options.watermark, "fontSize"));
     return params;
   }
 
@@ -394,6 +398,13 @@ export function renderDeskClientScript(): string {
       return value.text;
     }
     return value;
+  }
+
+  function fileWatermarkField(value, field) {
+    if (value && typeof value === "object") {
+      return value[field];
+    }
+    return undefined;
   }
 
   var minMultipartChunkBytes = ${JSON.stringify(MIN_MULTIPART_FILE_PART_BYTES)};

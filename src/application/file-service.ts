@@ -33,6 +33,7 @@ import {
   normalizeFileTransformOptions,
   type FileTransformer,
   type FileTransformOptions,
+  type FileTransformWatermarkPlacement,
   type TransformedFileObject
 } from "../ports/file-transformer.js";
 import type {
@@ -1498,8 +1499,18 @@ function fileTransformWatermarkFromData(value: JsonValue | undefined): FileTrans
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return undefined;
   }
-  const text = (value as Record<string, JsonValue>).text;
-  return typeof text === "string" ? { text } : undefined;
+  const data = value as Record<string, JsonValue>;
+  const text = data.text;
+  if (typeof text !== "string") {
+    return undefined;
+  }
+  return {
+    text,
+    ...(typeof data.placement === "string" ? { placement: data.placement as FileTransformWatermarkPlacement } : {}),
+    ...(typeof data.opacity === "number" ? { opacity: data.opacity } : {}),
+    ...(typeof data.color === "string" ? { color: data.color } : {}),
+    ...(typeof data.fontSize === "number" ? { fontSize: data.fontSize } : {})
+  };
 }
 
 function pendingFileRendition(command: {
@@ -1560,7 +1571,17 @@ function fileTransformOptionsData(options: FileTransformOptions): DocumentData {
     ...(options.fit === undefined ? {} : { fit: options.fit }),
     ...(options.format === undefined ? {} : { format: options.format }),
     ...(options.quality === undefined ? {} : { quality: options.quality }),
-    ...(options.watermark === undefined ? {} : { watermark: { text: options.watermark.text } })
+    ...(options.watermark === undefined ? {} : { watermark: fileTransformWatermarkData(options.watermark) })
+  };
+}
+
+function fileTransformWatermarkData(watermark: NonNullable<FileTransformOptions["watermark"]>): DocumentData {
+  return {
+    text: watermark.text,
+    ...(watermark.placement === undefined ? {} : { placement: watermark.placement }),
+    ...(watermark.opacity === undefined ? {} : { opacity: watermark.opacity }),
+    ...(watermark.color === undefined ? {} : { color: watermark.color }),
+    ...(watermark.fontSize === undefined ? {} : { fontSize: watermark.fontSize })
   };
 }
 

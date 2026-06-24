@@ -103,7 +103,7 @@ describe("file api", () => {
     expect(uploaded.status).toBe(201);
 
     const transformed = await app.request(
-      "/api/files/file_object/transform?width=320&height=240&fit=cover&format=webp&quality=82&watermark=Draft%20Copy",
+      "/api/files/file_object/transform?width=320&height=240&fit=cover&format=webp&quality=82&watermark=Draft%20Copy&watermarkPlacement=bottom-right&watermarkOpacity=65&watermarkColor=%23123456&watermarkFontSize=24",
       {
         headers: userHeaders("guest", "Guest")
       }
@@ -119,7 +119,20 @@ describe("file api", () => {
       expect.objectContaining({
         actorId: "guest",
         tenantId: "acme",
-        options: { width: 320, height: 240, fit: "cover", format: "webp", quality: 82, watermark: { text: "Draft Copy" } },
+        options: {
+          width: 320,
+          height: 240,
+          fit: "cover",
+          format: "webp",
+          quality: 82,
+          watermark: {
+            text: "Draft Copy",
+            placement: "bottom-right",
+            opacity: 65,
+            color: "#123456",
+            fontSize: 24
+          }
+        },
         source: expect.objectContaining({
           key: "acme/files/file_object-avatar.png",
           contentType: "image/png",
@@ -127,6 +140,28 @@ describe("file api", () => {
         })
       })
     ]);
+  });
+
+  it("ignores empty watermark style query fields", async () => {
+    const transformer = new RecordingTransformer();
+    const { app } = makeAppFixture(1024, ["create"], ["object"], { transformer });
+    await app.request("/api/files?filename=avatar.png&is_private=false", {
+      method: "POST",
+      headers: { ...userHeaders("owner@example.com", "User"), "content-type": "image/png" },
+      body: "image-bytes"
+    });
+
+    const transformed = await app.request(
+      "/api/files/file_object/transform?width=64&watermarkPlacement=&watermarkOpacity=&watermarkColor=&watermarkFontSize=",
+      {
+        headers: userHeaders("guest", "Guest")
+      }
+    );
+
+    expect(transformed.status).toBe(200);
+    await expect(transformed.text()).resolves.toBe("transformed:image-bytes");
+    expect(transformer.commands).toHaveLength(1);
+    expect(transformer.commands[0]?.options).toEqual({ width: 64 });
   });
 
   it("generates and serves persisted image renditions through the file API", async () => {
@@ -219,7 +254,16 @@ describe("file api", () => {
     const generated = await app.request("/api/files/file_object/renditions", {
       method: "POST",
       headers: jsonHeaders("owner@example.com", "User"),
-      body: JSON.stringify({ width: 64, watermark: { text: " Draft Copy " } })
+      body: JSON.stringify({
+        width: 64,
+        watermark: {
+          text: " Draft Copy ",
+          placement: "bottom-left",
+          opacity: 70,
+          color: "#ABCDEF",
+          fontSize: 18
+        }
+      })
     });
 
     expect(generated.status).toBe(201);
@@ -229,19 +273,46 @@ describe("file api", () => {
           renditions: [
             {
               id: expect.stringMatching(/^w64-wm-draft-copy-[0-9a-f]{64}$/),
-              options: { width: 64, watermark: { text: "Draft Copy" } }
+              options: {
+                width: 64,
+                watermark: {
+                  text: "Draft Copy",
+                  placement: "bottom-left",
+                  opacity: 70,
+                  color: "#abcdef",
+                  fontSize: 18
+                }
+              }
             }
           ]
         }
       },
       rendition: {
         id: expect.stringMatching(/^w64-wm-draft-copy-[0-9a-f]{64}$/),
-        options: { width: 64, watermark: { text: "Draft Copy" } }
+        options: {
+          width: 64,
+          watermark: {
+            text: "Draft Copy",
+            placement: "bottom-left",
+            opacity: 70,
+            color: "#abcdef",
+            fontSize: 18
+          }
+        }
       }
     });
     expect(transformer.commands).toEqual([
       expect.objectContaining({
-        options: { width: 64, watermark: { text: "Draft Copy" } }
+        options: {
+          width: 64,
+          watermark: {
+            text: "Draft Copy",
+            placement: "bottom-left",
+            opacity: 70,
+            color: "#abcdef",
+            fontSize: 18
+          }
+        }
       })
     ]);
   });
@@ -283,6 +354,15 @@ describe("file api", () => {
     expect(invalidWatermark.status).toBe(400);
     await expect(invalidWatermark.json()).resolves.toMatchObject({
       error: { code: "BAD_REQUEST", message: "watermark must be a non-empty string up to 120 characters" }
+    });
+    const unknownWatermarkField = await app.request("/api/files/file_object/renditions", {
+      method: "POST",
+      headers: jsonHeaders("guest", "Guest"),
+      body: JSON.stringify({ width: 64, watermark: { text: "Draft Copy", blendMode: "multiply" } })
+    });
+    expect(unknownWatermarkField.status).toBe(400);
+    await expect(unknownWatermarkField.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Unknown watermark field 'blendMode'" }
     });
     expect(transformer.commands).toEqual([]);
   });
@@ -331,6 +411,26 @@ describe("file api", () => {
       },
       {
         path: `/api/files/file_object/transform?watermark=${"x".repeat(121)}`,
+        message: "watermark must be a non-empty string up to 120 characters"
+      },
+      {
+        path: "/api/files/file_object/transform?watermark=Draft&watermarkPlacement=middle",
+        message: "watermark.placement must be one of center, top-left, top-right, bottom-left, bottom-right"
+      },
+      {
+        path: "/api/files/file_object/transform?watermark=Draft&watermarkOpacity=0",
+        message: "watermark.opacity must be an integer from 1 to 100"
+      },
+      {
+        path: "/api/files/file_object/transform?watermark=Draft&watermarkColor=blue",
+        message: "watermark.color must be a hex color like #123456"
+      },
+      {
+        path: "/api/files/file_object/transform?watermark=Draft&watermarkFontSize=7",
+        message: "watermark.fontSize must be an integer from 8 to 256"
+      },
+      {
+        path: "/api/files/file_object/transform?watermarkColor=%23123456",
         message: "watermark must be a non-empty string up to 120 characters"
       }
     ];

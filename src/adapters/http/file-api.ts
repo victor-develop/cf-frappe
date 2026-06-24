@@ -4,7 +4,12 @@ import {
   type FileService,
   type UpdateFileMetadataCommand
 } from "../../application/file-service.js";
-import type { FileTransformFit, FileTransformFormat, FileTransformOptions } from "../../ports/file-transformer.js";
+import type {
+  FileTransformFit,
+  FileTransformFormat,
+  FileTransformOptions,
+  FileTransformWatermarkPlacement
+} from "../../ports/file-transformer.js";
 import { badRequest } from "../../core/errors.js";
 import { fileContentHeaders, fileRenditionContentHeaders, transformedFileContentHeaders } from "../file-content.js";
 import type { ActorResolver } from "./actor.js";
@@ -559,7 +564,18 @@ function multipartPartSizeHeader(headers: Headers): number | undefined {
 
 function fileTransformQuery(request: Request): FileTransformOptions {
   const params = new URL(request.url).searchParams;
-  const allowed = new Set(["width", "height", "fit", "format", "quality", "watermark"]);
+  const allowed = new Set([
+    "width",
+    "height",
+    "fit",
+    "format",
+    "quality",
+    "watermark",
+    "watermarkPlacement",
+    "watermarkOpacity",
+    "watermarkColor",
+    "watermarkFontSize"
+  ]);
   const unknown = [...new Set([...params.keys()].filter((key) => !allowed.has(key)))];
   if (unknown.length > 0) {
     throw badRequest(`Unknown file transform query parameter '${unknown[0]}'`);
@@ -633,11 +649,28 @@ function optionalTransformBodyWatermark(body: Record<string, unknown>): Pick<Fil
   }
   if (typeof value !== "string") {
     if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-      const text = (value as Record<string, unknown>).text;
+      const watermark = value as Record<string, unknown>;
+      const unknown = Object.keys(watermark).filter(
+        (key) => !["text", "placement", "opacity", "color", "fontSize"].includes(key)
+      );
+      if (unknown.length > 0) {
+        throw badRequest(`Unknown watermark field '${unknown[0]}'`);
+      }
+      const text = watermark.text;
       if (typeof text !== "string") {
         throw badRequest("watermark.text must be a string");
       }
-      return { watermark: { text } };
+      return {
+        watermark: {
+          text,
+          ...(watermark.placement === undefined
+            ? {}
+            : { placement: stringWatermarkField(watermark.placement, "watermark.placement") as FileTransformWatermarkPlacement }),
+          ...(watermark.opacity === undefined ? {} : { opacity: integerWatermarkField(watermark.opacity, "watermark.opacity") }),
+          ...(watermark.color === undefined ? {} : { color: stringWatermarkField(watermark.color, "watermark.color") }),
+          ...(watermark.fontSize === undefined ? {} : { fontSize: integerWatermarkField(watermark.fontSize, "watermark.fontSize") })
+        }
+      };
     }
     throw badRequest("watermark must be a string or object with text");
   }
@@ -676,10 +709,70 @@ function optionalTransformFormat(params: URLSearchParams): Pick<FileTransformOpt
 }
 
 function optionalTransformWatermark(params: URLSearchParams): Pick<FileTransformOptions, "watermark"> {
-  if (!params.has("watermark")) {
+  const watermarkKeys = ["watermark", "watermarkPlacement", "watermarkOpacity", "watermarkColor", "watermarkFontSize"];
+  const hasWatermarkValue = watermarkKeys.some((key) => params.get(key) !== null && params.get(key) !== "");
+  if (!hasWatermarkValue) {
     return {};
   }
-  return { watermark: { text: params.get("watermark") ?? "" } };
+  return {
+    watermark: {
+      text: params.get("watermark") ?? "",
+      ...optionalTransformWatermarkPlacement(params),
+      ...optionalTransformWatermarkInteger(params, "watermarkOpacity", "opacity"),
+      ...optionalTransformWatermarkColor(params),
+      ...optionalTransformWatermarkInteger(params, "watermarkFontSize", "fontSize")
+    }
+  };
+}
+
+function optionalTransformWatermarkPlacement(
+  params: URLSearchParams
+): Pick<NonNullable<FileTransformOptions["watermark"]>, "placement"> {
+  const value = params.get("watermarkPlacement");
+  if (value === null || value === "") {
+    return {};
+  }
+  return { placement: value as FileTransformWatermarkPlacement };
+}
+
+function optionalTransformWatermarkColor(
+  params: URLSearchParams
+): Pick<NonNullable<FileTransformOptions["watermark"]>, "color"> {
+  const value = params.get("watermarkColor");
+  if (value === null || value === "") {
+    return {};
+  }
+  return { color: value };
+}
+
+function optionalTransformWatermarkInteger<TKey extends "opacity" | "fontSize">(
+  params: URLSearchParams,
+  sourceKey: string,
+  targetKey: TKey
+): { readonly [K in TKey]?: number } {
+  const value = params.get(sourceKey);
+  if (value === null || value === "") {
+    return {};
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) {
+    throw badRequest(`${sourceKey} must be an integer`);
+  }
+  return { [targetKey]: parsed } as { readonly [K in TKey]: number };
+}
+
+function stringWatermarkField(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw badRequest(`${field} must be a string`);
+  }
+  return value;
+}
+
+function integerWatermarkField(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw badRequest(`${field} must be an integer`);
+  }
+  return value;
 }
 
 function fileMetadataPatch(body: Record<string, unknown>): MutableFileMetadataPatch {

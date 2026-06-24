@@ -1480,7 +1480,20 @@ describe("FileService", () => {
     const generated = await services.files.generateRendition({
       actor: owner,
       name: uploaded.snapshot.name,
-      options: { width: 128, height: 128, fit: "cover", format: "webp", quality: 80, watermark: { text: "Draft Copy" } }
+      options: {
+        width: 128,
+        height: 128,
+        fit: "cover",
+        format: "webp",
+        quality: 80,
+        watermark: {
+          text: "Draft Copy",
+          placement: "bottom-right",
+          opacity: 75,
+          color: "#abcdef",
+          fontSize: 24
+        }
+      }
     });
     const watermarkedRenditionId = expect.stringMatching(/^w128-h128-fit-cover-f-webp-q80-wm-draft-copy-[0-9a-f]{64}$/);
 
@@ -1507,7 +1520,13 @@ describe("FileService", () => {
                 fit: "cover",
                 format: "webp",
                 quality: 80,
-                watermark: { text: "Draft Copy" }
+                watermark: {
+                  text: "Draft Copy",
+                  placement: "bottom-right",
+                  opacity: 75,
+                  color: "#abcdef",
+                  fontSize: 24
+                }
               }
             }
           ]
