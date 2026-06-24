@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the arbitrary-depth Desk formula builder slice:
+As of the Cloudflare Browser Rendering PDF adapter slice:
 
-- Vitest files: `88`
-- Vitest cases: `961`
+- Vitest files: `89`
+- Vitest cases: `966`
 
 ## Implication
 

@@ -21,9 +21,12 @@ import {
   type PasswordHasher,
 } from "../../src";
 import {
+  CloudflareBrowserRenderingPdfRenderer,
   createCloudFrappeWorker,
   type AggregateCoordinatorCommand,
   type AggregateCoordinatorRpc,
+  type CloudflareBrowserRenderingBinding,
+  type CloudFrappeEnv,
   type RealtimeHubNamespace,
   type RpcDurableObjectNamespace
 } from "../../src/cloudflare";
@@ -346,6 +349,38 @@ describe("CloudFrappe Worker routing", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ data: [] });
+  });
+
+  it("wires configured Cloudflare Browser Rendering PDF renderer into Worker report routes", async () => {
+    const browser = new RecordingBrowserRun(new Response(new Uint8Array([37, 80, 68, 70]), {
+      headers: { "content-type": "application/pdf" }
+    }));
+    const worker = createCloudFrappeWorker<CloudFrappeBrowserRenderingTestEnv>({
+      registry: createTestRegistry(),
+      actor: () => owner,
+      printPdfRenderer: (env) => new CloudflareBrowserRenderingPdfRenderer({ browser: env.BROWSER })
+    });
+    const env = {
+      DB: fakeD1(),
+      AGGREGATES: fakeNamespace(),
+      BROWSER: browser
+    };
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/api/report/Open%20Notes/pdf"),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/pdf");
+    await expect(response.arrayBuffer()).resolves.toEqual(new Uint8Array([37, 80, 68, 70]).buffer);
+    expect(browser.calls).toHaveLength(1);
+    const call = browser.calls[0];
+    if (call === undefined || !("html" in call.options)) {
+      throw new Error("Expected Browser Rendering PDF to receive print HTML");
+    }
+    expect(call.options.html).toContain("Open Notes");
   });
 
   it("mounts app-declared data patch admin routes on the Worker", async () => {
@@ -1882,6 +1917,21 @@ interface CloudFrappeAuthTestEnv {
 interface CloudFrappeAccessAuthTestEnv extends CloudFrappeAuthTestEnv {
   readonly CF_ACCESS_TEAM_DOMAIN: string;
   readonly CF_ACCESS_AUD: string;
+}
+
+interface CloudFrappeBrowserRenderingTestEnv extends CloudFrappeEnv {
+  readonly BROWSER: CloudflareBrowserRenderingBinding;
+}
+
+class RecordingBrowserRun implements CloudflareBrowserRenderingBinding {
+  readonly calls: Array<{ readonly action: "pdf"; readonly options: BrowserRunPDFOptions }> = [];
+
+  constructor(private readonly response: Response) {}
+
+  async quickAction(action: "pdf", options: BrowserRunPDFOptions): Promise<Response> {
+    this.calls.push({ action, options });
+    return this.response.clone();
+  }
 }
 
 function fakeNamespace(): RpcDurableObjectNamespace<AggregateCoordinatorRpc> {

@@ -67,6 +67,7 @@ import type { IdGenerator } from "../ports/id-generator.js";
 import type { JobExecutionLog } from "../ports/job-execution-log.js";
 import type { JobMessage, JobQueue } from "../ports/job-queue.js";
 import type { PasswordHasher } from "../ports/password-hasher.js";
+import type { PrintPdfRenderer } from "../ports/print-pdf-renderer.js";
 import type { RealtimePublisher } from "../ports/realtime.js";
 import {
   DurableObjectCommandExecutor,
@@ -199,6 +200,7 @@ export interface CloudFrappeWorkerOptions<
   readonly realtime?: CloudFrappeRealtimeOptions<TEnv>;
   readonly jobs?: CloudFrappeJobOptions<TEnv, TJobResources>;
   readonly dataPatches?: CloudFrappeDataPatchOptions<TEnv, TDataPatchResources>;
+  readonly printPdfRenderer?: (env: TEnv, services: CloudFrappeRuntimeServices) => PrintPdfRenderer;
 }
 
 export type CloudFrappeActorResolver<TEnv extends CloudFrappeEnv = CloudFrappeEnv> = (
@@ -437,6 +439,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   const jobOptions = options.jobs;
   const schedules = jobOptions?.schedules ?? [];
   const jobExecutionLog = jobOptions?.executionLog?.(env, runtimeServices);
+  const printPdfRenderer = options.printPdfRenderer?.(env, runtimeServices);
   const dataPatchApplyQueueEnabled = dataPatches !== undefined &&
     jobOptions !== undefined &&
     jobOptions.registry.has(DATA_PATCH_APPLY_JOB_NAME);
@@ -524,6 +527,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     reports,
     dashboards,
     roles,
+    ...(printPdfRenderer === undefined ? {} : { printPdfRenderer }),
     actor,
     notificationRules,
     ...(options.maxJsonBytes ? { maxJsonBytes: options.maxJsonBytes } : {}),
@@ -560,6 +564,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     reports,
     dashboards,
     roles,
+    ...(printPdfRenderer === undefined ? {} : { printPdfRenderer }),
     ...(dataPatches === undefined ? {} : { dataPatches }),
     ...(dataPatchQueue === undefined || !dataPatchApplyQueueEnabled ? {} : { dataPatchQueue }),
     ...(dataPatchQueue === undefined || !dataPatchRollbackQueueEnabled ? {} : { dataPatchRollbackQueue: dataPatchQueue }),
