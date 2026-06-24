@@ -1480,7 +1480,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const url = new URL(c.req.url);
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
-    const filters = listFiltersFromUrl(url);
+    const filters = listFiltersFromUrl(url, { fields: listFilterParseFields(doctype) });
     const order = listOrderFromUrl(url);
     const savedFilterId = url.searchParams.get("saved_filter") ?? undefined;
     const savedFilter = savedFilterId && options.savedFilters
@@ -1504,7 +1504,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
     const doctypes = await listDeskDoctypes(options, actor);
     const reports = listReports(options, actor);
-    const filters = listFiltersFromUrl(url);
+    const filters = listFiltersFromUrl(url, { fields: listFilterParseFields(doctype) });
     const order = listOrderFromUrl(url);
     const savedFilterId = url.searchParams.get("saved_filter") ?? undefined;
     const savedFilter = savedFilterId && options.savedFilters
@@ -1549,7 +1549,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
     try {
-      const form = await parseDeskSavedFilter(c.req.raw);
+      const form = await parseDeskSavedFilter(c.req.raw, doctype);
       const saved = await options.savedFilters.save({
         actor,
         doctype: doctype.name,
@@ -3655,7 +3655,10 @@ async function parseDeskComment(request: Request): Promise<ParsedDeskComment> {
   };
 }
 
-async function parseDeskSavedFilter(request: Request): Promise<ParsedDeskSavedFilter> {
+async function parseDeskSavedFilter(
+  request: Request,
+  doctype: DocTypeDefinition
+): Promise<ParsedDeskSavedFilter> {
   const form = await request.formData();
   const label = form.get("saved_filter_label");
   const params = new URLSearchParams();
@@ -3666,8 +3669,14 @@ async function parseDeskSavedFilter(request: Request): Promise<ParsedDeskSavedFi
   });
   return {
     label: typeof label === "string" ? label : "",
-    filters: listFiltersFromUrl(new URL(`https://desk.local/?${params.toString()}`))
+    filters: listFiltersFromUrl(new URL(`https://desk.local/?${params.toString()}`), {
+      fields: listFilterParseFields(doctype)
+    })
   };
+}
+
+function listFilterParseFields(doctype: DocTypeDefinition): readonly string[] {
+  return doctype.fields.map((field) => field.name);
 }
 
 async function parseDeskSavedReport(

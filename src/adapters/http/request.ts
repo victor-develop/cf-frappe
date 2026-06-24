@@ -1,5 +1,5 @@
 import { badRequest } from "../../core/errors.js";
-import { LIST_FILTER_OPERATORS, isListMembershipOperator, isListOrderDirection } from "../../core/list-view.js";
+import { LIST_FILTER_OPERATORS, isListMembershipOperator, isListOrderDirection, isListRangeOperator } from "../../core/list-view.js";
 import type {
   DocumentData,
   ListDocumentsFilter,
@@ -28,23 +28,28 @@ export function requestMetadata(request: Request): DocumentData {
   };
 }
 
-export function listFiltersFromUrl(url: URL): readonly ListDocumentsFilter[] {
-  const filters: Array<ListDocumentsFilter | PendingMembershipFilter> = [];
-  const membershipFilters = new Map<string, PendingMembershipFilter>();
+export interface ListFiltersFromUrlOptions {
+  readonly fields?: readonly string[];
+}
+
+export function listFiltersFromUrl(url: URL, options: ListFiltersFromUrlOptions = {}): readonly ListDocumentsFilter[] {
+  const filters: Array<ListDocumentsFilter | PendingArrayFilter> = [];
+  const arrayFilters = new Map<string, PendingArrayFilter>();
   const emptyFilterKeys = new Set(url.searchParams.getAll("empty_filter"));
+  const fields = new Set(options.fields ?? []);
   url.searchParams.forEach((value, key) => {
-    const parsed = parseFilterKey(key);
+    const parsed = parseFilterKey(key, fields);
     if (!parsed || (value === "" && !emptyFilterKeys.has(key))) {
       return;
     }
-    if (isListMembershipOperator(parsed.operator)) {
-      const existing = membershipFilters.get(key);
+    if (isListMembershipOperator(parsed.operator) || isListRangeOperator(parsed.operator)) {
+      const existing = arrayFilters.get(key);
       if (existing) {
         existing.values.push(value);
         return;
       }
       const filter = { field: parsed.field, operator: parsed.operator, values: [value] };
-      membershipFilters.set(key, filter);
+      arrayFilters.set(key, filter);
       filters.push(filter);
       return;
     }
@@ -141,11 +146,21 @@ export async function readBoundedBytes(
   return bytes.buffer;
 }
 
-function parseFilterKey(key: string): { readonly field: string; readonly operator: ListFilterOperator } | null {
+function parseFilterKey(
+  key: string,
+  fields: ReadonlySet<string>
+): { readonly field: string; readonly operator: ListFilterOperator } | null {
   if (!key.startsWith("filter_")) {
     return null;
   }
   const raw = key.slice("filter_".length);
+  if (fields.has(raw)) {
+    return { field: raw, operator: "eq" };
+  }
+  const explicitEqSuffix = "__eq";
+  if (raw.endsWith(explicitEqSuffix)) {
+    return { field: raw.slice(0, -explicitEqSuffix.length), operator: "eq" };
+  }
   for (const operator of LIST_FILTER_OPERATORS.filter((item) => item !== "eq")) {
     const suffix = `__${operator}`;
     if (raw.endsWith(suffix)) {
@@ -155,9 +170,9 @@ function parseFilterKey(key: string): { readonly field: string; readonly operato
   return { field: raw, operator: "eq" };
 }
 
-interface PendingMembershipFilter {
+interface PendingArrayFilter {
   readonly field: string;
-  readonly operator: "in" | "not_in";
+  readonly operator: "in" | "not_in" | "between";
   readonly values: string[];
 }
 

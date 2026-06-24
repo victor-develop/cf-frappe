@@ -82,6 +82,24 @@ describe("QueryService", () => {
     ).resolves.toMatchObject({ data: [{ name: "Urgent Launch" }], total: 1 });
   });
 
+  it("filters list results through inclusive between ranges", async () => {
+    const { documents, queries } = createServices(["e1", "e2", "e3"]);
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "In Range", priority: "High", body: "Launch report", count: 7 })
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Too Low", priority: "Low", body: "Maintenance note", count: 1 })
+    });
+
+    await expect(
+      queries.listDocuments(owner, "Note", { filters: [{ field: "count", operator: "between", value: ["2", "7"] }] })
+    ).resolves.toMatchObject({ data: [{ name: "In Range" }], total: 1 });
+  });
+
   it("filters list results through metadata-validated system fields", async () => {
     const { projections, queries } = createServices();
     await projections.save({
@@ -119,6 +137,18 @@ describe("QueryService", () => {
 
     await expect(
       queries.listDocuments(owner, "Note", { filters: [{ field: "system.version", operator: "gt", value: "1" }] })
+    ).resolves.toMatchObject({ data: [{ name: "New Submitted" }], total: 1 });
+
+    await expect(
+      queries.listDocuments(owner, "Note", {
+        filters: [
+          {
+            field: "system.updatedAt",
+            operator: "between",
+            value: ["2026-01-04T00:00:00.000Z", "2026-01-06T00:00:00.000Z"]
+          }
+        ]
+      })
     ).resolves.toMatchObject({ data: [{ name: "New Submitted" }], total: 1 });
   });
 
@@ -205,6 +235,20 @@ describe("QueryService", () => {
     ).rejects.toMatchObject({
       code: "BAD_REQUEST",
       message: "Filter 'priority' must use a scalar value for eq"
+    });
+
+    await expect(
+      queries.listDocuments(owner, "Note", { filters: [{ field: "count", operator: "between", value: ["1"] }] })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Filter 'count' must include exactly two values for between"
+    });
+
+    await expect(
+      queries.listDocuments(owner, "Note", { filters: [{ field: "count", operator: "between", value: [" ", "7"] }] })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Filter 'count' range values cannot be empty"
     });
   });
 
@@ -712,7 +756,8 @@ describe("QueryService", () => {
           { operator: "gt", label: "greater than" },
           { operator: "gte", label: "greater than or equal" },
           { operator: "lt", label: "less than" },
-          { operator: "lte", label: "less than or equal" }
+          { operator: "lte", label: "less than or equal" },
+          { operator: "between", label: "between" }
         ]
       }),
       expect.objectContaining({
@@ -736,7 +781,8 @@ describe("QueryService", () => {
           { operator: "gt", label: "greater than" },
           { operator: "gte", label: "greater than or equal" },
           { operator: "lt", label: "less than" },
-          { operator: "lte", label: "less than or equal" }
+          { operator: "lte", label: "less than or equal" },
+          { operator: "between", label: "between" }
         ]
       })
     ]));

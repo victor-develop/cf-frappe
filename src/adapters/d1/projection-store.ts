@@ -143,6 +143,12 @@ function listFilterWhere(filters: readonly ListDocumentsFilter[]): ListFilterWhe
         conditions.push(`${expression} <= ?`);
         params.push(sqliteJsonValue(scalarFilterValue(filter)));
         break;
+      case "between": {
+        const [minimum, maximum] = rangeFilterValues(filter);
+        conditions.push(`(${expression} >= ? AND ${expression} <= ?)`);
+        params.push(sqliteJsonValue(minimum), sqliteJsonValue(maximum));
+        break;
+      }
       default:
         throw new Error(`Unsupported list filter operator '${String(operator)}'`);
     }
@@ -187,6 +193,18 @@ function membershipFilterValues(filter: ListDocumentsFilter): readonly JsonPrimi
     throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires one or more values`);
   }
   return filter.value;
+}
+
+function rangeFilterValues(filter: ListDocumentsFilter): readonly [JsonPrimitive, JsonPrimitive] {
+  if (!isFilterValueArray(filter.value) || filter.value.length !== 2) {
+    throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires exactly two values`);
+  }
+  const minimum = filter.value[0];
+  const maximum = filter.value[1];
+  if (minimum === undefined || minimum === null || maximum === undefined || maximum === null) {
+    throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires non-null range values`);
+  }
+  return [minimum, maximum];
 }
 
 function isFilterValueArray(value: ListFilterValue): value is readonly JsonPrimitive[] {

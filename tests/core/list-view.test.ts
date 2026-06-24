@@ -108,7 +108,8 @@ describe("list views", () => {
       "gt",
       "gte",
       "lt",
-      "lte"
+      "lte",
+      "between"
     ]);
     expect(listFilterOperatorsForField(Task.fields[2] ?? failField()).map((item) => item.operator)).toEqual([
       "eq",

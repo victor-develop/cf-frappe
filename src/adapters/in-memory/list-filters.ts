@@ -47,6 +47,13 @@ export function matchesListFilters(
           return false;
         }
         return compareValues(actual, scalarFilterValue(filter)) <= 0;
+      case "between": {
+        if (actual === undefined || actual === null) {
+          return false;
+        }
+        const [minimum, maximum] = rangeFilterValues(filter);
+        return compareValues(actual, minimum) >= 0 && compareValues(actual, maximum) <= 0;
+      }
     }
   });
 }
@@ -77,6 +84,18 @@ function scalarFilterValue(filter: ListDocumentsFilter): JsonPrimitive {
     throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires a scalar value`);
   }
   return filter.value;
+}
+
+function rangeFilterValues(filter: ListDocumentsFilter): readonly [JsonPrimitive, JsonPrimitive] {
+  if (!isFilterValueArray(filter.value) || filter.value.length !== 2) {
+    throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires exactly two values`);
+  }
+  const minimum = filter.value[0];
+  const maximum = filter.value[1];
+  if (minimum === undefined || minimum === null || maximum === undefined || maximum === null) {
+    throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires non-null range values`);
+  }
+  return [minimum, maximum];
 }
 
 function isFilterValueArray(value: ListFilterValue): value is readonly JsonPrimitive[] {

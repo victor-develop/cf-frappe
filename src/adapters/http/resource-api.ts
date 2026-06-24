@@ -27,11 +27,11 @@ import type { UserNotificationService } from "../../application/user-notificatio
 import type { UserPermissionService } from "../../application/user-permission-service.js";
 import type { UserProfileService } from "../../application/user-profile-service.js";
 import { badRequest, permissionDenied } from "../../core/errors.js";
-import { isListFilterOperator, isListMembershipOperator } from "../../core/list-view.js";
+import { isListFilterOperator, isListMembershipOperator, isListRangeOperator } from "../../core/list-view.js";
 import { can } from "../../core/permissions.js";
 import { canReadReport } from "../../core/reports.js";
 import type { ModelRegistry } from "../../core/registry.js";
-import type { Actor, DocumentData, JsonPrimitive, ListDocumentsFilter, ListFilterValue, MutableDocumentData } from "../../core/types.js";
+import type { Actor, DocTypeDefinition, DocumentData, JsonPrimitive, ListDocumentsFilter, ListFilterValue, MutableDocumentData } from "../../core/types.js";
 import { SYSTEM_MANAGER_ROLE } from "../../core/types.js";
 import type { PrintPdfRenderer } from "../../ports/print-pdf-renderer.js";
 import {
@@ -354,11 +354,12 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     const actor = await resolveActor(c.req.raw);
     const url = new URL(c.req.url);
     const limit = parseOptionalInteger(c.req.query("limit"));
-    const savedFilter = await savedFilterFromUrl(options, actor, c.req.param("doctype"), url);
-    const urlFilters = listFiltersFromUrl(url);
+    const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
+    const savedFilter = await savedFilterFromUrl(options, actor, doctype.name, url);
+    const urlFilters = listFiltersFromUrl(url, { fields: listFilterParseFields(doctype) });
     const filters = options.savedFilters?.mergeSavedFilter(savedFilter, urlFilters) ?? urlFilters;
     const order = listOrderFromUrl(url);
-    const csv = await options.queries.exportDocumentsCsv(actor, c.req.param("doctype"), {
+    const csv = await options.queries.exportDocumentsCsv(actor, doctype.name, {
       filters,
       ...order,
       useDefaultFilters: savedFilter ? false : url.searchParams.get("default_filters") !== "0",
@@ -373,11 +374,12 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     const url = new URL(c.req.url);
     const limit = parseOptionalInteger(c.req.query("limit"));
     const offset = parseOptionalInteger(c.req.query("offset"));
-    const savedFilter = await savedFilterFromUrl(options, actor, c.req.param("doctype"), url);
-    const urlFilters = listFiltersFromUrl(url);
+    const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
+    const savedFilter = await savedFilterFromUrl(options, actor, doctype.name, url);
+    const urlFilters = listFiltersFromUrl(url, { fields: listFilterParseFields(doctype) });
     const filters = options.savedFilters?.mergeSavedFilter(savedFilter, urlFilters) ?? urlFilters;
     const order = listOrderFromUrl(url);
-    const { result } = await options.queries.listDocumentsForView(actor, c.req.param("doctype"), {
+    const { result } = await options.queries.listDocumentsForView(actor, doctype.name, {
       filters,
       ...order,
       useDefaultFilters: savedFilter ? false : url.searchParams.get("default_filters") !== "0",
@@ -1011,10 +1013,20 @@ function filterValueValue(value: unknown, operator: NonNullable<ListDocumentsFil
     }
     return value;
   }
+  if (isListRangeOperator(operator)) {
+    if (!Array.isArray(value) || value.length !== 2 || !value.every(isJsonPrimitive)) {
+      throw badRequest("Saved filter range value must be a two-item scalar array");
+    }
+    return value;
+  }
   if (!isJsonPrimitive(value)) {
     throw badRequest("Saved filter value must be scalar");
   }
   return value;
+}
+
+function listFilterParseFields(doctype: DocTypeDefinition): readonly string[] {
+  return doctype.fields.map((field) => field.name);
 }
 
 function permissionsValue(value: unknown): readonly string[] {

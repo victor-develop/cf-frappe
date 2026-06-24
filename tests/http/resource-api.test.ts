@@ -2,6 +2,7 @@ import {
   createRegistry,
   createResourceApi,
   DashboardService,
+  defineDocType,
   defineDashboard,
   defineWorkspace,
   deterministicIds,
@@ -142,6 +143,33 @@ describe("resource api", () => {
     });
   }
 
+  function makeFilterCollisionApp() {
+    const FilterCollision = defineDocType({
+      name: "FilterCollision",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "count__between", type: "integer" }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read", "create"] }]
+    });
+    const registry = createRegistry({ doctypes: [FilterCollision] });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry,
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["collision-1", "collision-2"])
+    });
+    const queries = new QueryService({ registry, projections: store });
+    return createResourceApi({
+      registry,
+      documents,
+      queries,
+      actor: unsafeHeaderActorResolver
+    });
+  }
+
   const userHeaders = {
     "content-type": "application/json",
     "x-cf-frappe-user": "owner@example.com",
@@ -235,7 +263,8 @@ describe("resource api", () => {
               { operator: "gt", label: "greater than" },
               { operator: "gte", label: "greater than or equal" },
               { operator: "lt", label: "less than" },
-              { operator: "lte", label: "less than or equal" }
+              { operator: "lte", label: "less than or equal" },
+              { operator: "between", label: "between" }
             ]
           },
           {
@@ -259,7 +288,8 @@ describe("resource api", () => {
               { operator: "gt", label: "greater than" },
               { operator: "gte", label: "greater than or equal" },
               { operator: "lt", label: "less than" },
-              { operator: "lte", label: "less than or equal" }
+              { operator: "lte", label: "less than or equal" },
+              { operator: "between", label: "between" }
             ]
           }
         ]),
@@ -1277,6 +1307,15 @@ describe("resource api", () => {
       total: 1
     });
 
+    const between = await app.request("/api/resource/Note?filter_count__between=6&filter_count__between=8", {
+      headers: userHeaders
+    });
+    expect(between.status).toBe(200);
+    await expect(between.json()).resolves.toMatchObject({
+      data: [{ name: "HTTP High" }],
+      total: 1
+    });
+
     const explicitEmpty = await app.request("/api/resource/Note?default_filters=0&filter_body=&empty_filter=filter_body", {
       headers: userHeaders
     });
@@ -1324,17 +1363,41 @@ describe("resource api", () => {
     ].join("\n"));
   });
 
+  it("keeps equality filters for fields ending with operator suffixes", async () => {
+    const app = makeFilterCollisionApp();
+    await app.request("/api/resource/FilterCollision", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "Collision Match", count__between: 7 })
+    });
+    await app.request("/api/resource/FilterCollision", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "Collision Miss", count__between: 3 })
+    });
+
+    const response = await app.request("/api/resource/FilterCollision?filter_count__between=7", {
+      headers: userHeaders
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: [{ name: "Collision Match" }],
+      total: 1
+    });
+  });
+
   it("saves and applies resource list filters through the API", async () => {
     const app = makeApp();
     await app.request("/api/resource/Note", {
       method: "POST",
       headers: userHeaders,
-      body: JSON.stringify({ title: "API High", priority: "High", body: "High" })
+      body: JSON.stringify({ title: "API High", priority: "High", body: "High", count: 7 })
     });
     await app.request("/api/resource/Note", {
       method: "POST",
       headers: userHeaders,
-      body: JSON.stringify({ title: "API Low", priority: "Low", body: "Low" })
+      body: JSON.stringify({ title: "API Low", priority: "Low", body: "Low", count: 1 })
     });
 
     const saved = await app.request("/api/resource/Note/saved-filters", {
@@ -1342,7 +1405,10 @@ describe("resource api", () => {
       headers: userHeaders,
       body: JSON.stringify({
         label: "High or low API notes",
-        filters: [{ field: "priority", operator: "in", value: ["High", "Low"] }]
+        filters: [
+          { field: "priority", operator: "in", value: ["High", "Low"] },
+          { field: "count", operator: "between", value: [1, 7] }
+        ]
       })
     });
 
@@ -1395,6 +1461,32 @@ describe("resource api", () => {
     expect(invalidSavedFilter.status).toBe(400);
     await expect(invalidSavedFilter.json()).resolves.toMatchObject({
       error: { code: "BAD_REQUEST", message: "Saved filter membership value must be a non-empty scalar array" }
+    });
+
+    const invalidRangeSavedFilter = await app.request("/api/resource/Note/saved-filters", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({
+        label: "Invalid range",
+        filters: [{ field: "count", operator: "between", value: [1] }]
+      })
+    });
+    expect(invalidRangeSavedFilter.status).toBe(400);
+    await expect(invalidRangeSavedFilter.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Saved filter range value must be a two-item scalar array" }
+    });
+
+    const emptyRangeSavedFilter = await app.request("/api/resource/Note/saved-filters", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({
+        label: "Empty range",
+        filters: [{ field: "count", operator: "between", value: [" ", 8] }]
+      })
+    });
+    expect(emptyRangeSavedFilter.status).toBe(400);
+    await expect(emptyRangeSavedFilter.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Filter 'count' range values cannot be empty" }
     });
   });
 

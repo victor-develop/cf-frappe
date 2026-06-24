@@ -19,7 +19,7 @@ export const DEFAULT_LIST_PAGE_SIZE = 50;
 export const MAX_LIST_PAGE_SIZE = 200;
 export const DEFAULT_LIST_ORDER_BY = "updatedAt";
 export const DEFAULT_LIST_ORDER: ListOrderDirection = "desc";
-export const LIST_FILTER_OPERATORS = ["eq", "ne", "in", "not_in", "contains", "gt", "gte", "lt", "lte"] as const;
+export const LIST_FILTER_OPERATORS = ["eq", "ne", "in", "not_in", "contains", "gt", "gte", "lt", "lte", "between"] as const;
 export const LIST_ORDER_DIRECTIONS = ["asc", "desc"] as const;
 const SYSTEM_LIST_ORDER_OPTIONS = [
   { name: "name", label: "Name" },
@@ -43,7 +43,8 @@ const LIST_FILTER_OPERATOR_LABELS: Record<ListFilterOperator, string> = {
   gt: "greater than",
   gte: "greater than or equal",
   lt: "less than",
-  lte: "less than or equal"
+  lte: "less than or equal",
+  between: "between"
 };
 
 export function isListFilterOperator(operator: unknown): operator is ListFilterOperator {
@@ -52,6 +53,10 @@ export function isListFilterOperator(operator: unknown): operator is ListFilterO
 
 export function isListMembershipOperator(operator: ListFilterOperator): operator is "in" | "not_in" {
   return operator === "in" || operator === "not_in";
+}
+
+export function isListRangeOperator(operator: ListFilterOperator): operator is "between" {
+  return operator === "between";
 }
 
 export function isListOrderDirection(order: unknown): order is ListOrderDirection {
@@ -316,7 +321,7 @@ function supportedListFilterOperatorsForField(field: FieldDefinition): readonly 
     operators.push("contains");
   }
   if (field.type === "integer" || field.type === "number" || field.type === "date" || field.type === "datetime") {
-    operators.push("gt", "gte", "lt", "lte");
+    operators.push("gt", "gte", "lt", "lte", "between");
   }
   return operators;
 }
@@ -409,6 +414,19 @@ function coerceFilterValue(
     }
     return value.map((item) => coerceScalarFilterValue(field, item, errorCode));
   }
+  if (isListRangeOperator(operator)) {
+    if (!isFilterValueArray(value)) {
+      throw new FrameworkError(errorCode, `Filter '${field.name}' must use an array value for ${operator}`, {
+        status: 400
+      });
+    }
+    if (value.length !== 2) {
+      throw new FrameworkError(errorCode, `Filter '${field.name}' must include exactly two values for ${operator}`, {
+        status: 400
+      });
+    }
+    return value.map((item) => coerceRangeFilterValue(field, item, errorCode));
+  }
   if (isFilterValueArray(value)) {
     throw new FrameworkError(errorCode, `Filter '${field.name}' must use a scalar value for ${operator}`, {
       status: 400
@@ -456,6 +474,29 @@ function coerceScalarFilterValue(
     throw new FrameworkError(errorCode, `Filter '${field.name}' must be a boolean`, { status: 400 });
   }
   return typeof value === "string" ? value : String(value);
+}
+
+function coerceRangeFilterValue(
+  field: FieldDefinition,
+  value: JsonPrimitive,
+  errorCode: FrameworkErrorCode
+): JsonPrimitive {
+  if (value === null) {
+    throw new FrameworkError(errorCode, `Filter '${field.name}' range values cannot be null`, { status: 400 });
+  }
+  if (typeof value === "string" && value.trim() === "") {
+    throw new FrameworkError(errorCode, `Filter '${field.name}' range values cannot be empty`, { status: 400 });
+  }
+  if (field.type === "date" || field.type === "datetime") {
+    if (typeof value !== "string") {
+      throw new FrameworkError(errorCode, `Filter '${field.name}' range values must be strings`, { status: 400 });
+    }
+    return value;
+  }
+  if (typeof value === "boolean") {
+    throw new FrameworkError(errorCode, `Filter '${field.name}' range values cannot be boolean`, { status: 400 });
+  }
+  return coerceScalarFilterValue(field, value, errorCode);
 }
 
 function visibleFields(doctype: DocTypeDefinition): readonly FieldDefinition[] {

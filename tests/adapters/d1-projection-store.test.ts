@@ -154,6 +154,29 @@ describe("D1ProjectionStore", () => {
     expect(count?.params).toEqual(["acme", "Note", "submitted", "2026-01-04T00:00:00.000Z", 1]);
   });
 
+  it("filters JSON fields with bound between endpoints", async () => {
+    const db = new FakeD1Database([
+      documentRow({ name: "D1 Low", data: { title: "low", count: 1 } }),
+      documentRow({ name: "D1 Mid", data: { title: "mid", count: 5 } }),
+      documentRow({ name: "D1 High", data: { title: "high", count: 9 } })
+    ]);
+    const store = new D1ProjectionStore(db as unknown as D1Database);
+
+    const result = await store.list({
+      tenantId: "acme",
+      doctype: "Note",
+      filters: [{ field: "count", operator: "between", value: [2, 8] }]
+    });
+
+    expect(result).toMatchObject({ data: [{ name: "D1 Mid" }], total: 1 });
+    const [rows, count] = db.statements;
+    expect(rows?.sql).toContain("(json_extract(data_json, '$.count') >= ? AND json_extract(data_json, '$.count') <= ?)");
+    expect(rows?.sql).not.toContain("2");
+    expect(rows?.sql).not.toContain("8");
+    expect(rows?.params).toEqual(["acme", "Note", 2, 8, 50, 0]);
+    expect(count?.params).toEqual(["acme", "Note", 2, 8]);
+  });
+
   it("orders rows by escaped JSON fields with deterministic fallbacks", async () => {
     const db = new FakeD1Database([
       documentRow({ name: "D1 High", data: { title: "apple", count: 5 } }),

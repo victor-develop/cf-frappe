@@ -101,6 +101,34 @@ describe("Desk app", () => {
     return { app, services };
   }
 
+  function makeFilterCollisionDesk() {
+    const FilterCollision = defineDocType({
+      name: "FilterCollision",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "count__between", type: "integer" }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read", "create"] }]
+    });
+    const registry = createRegistry({ doctypes: [FilterCollision] });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry,
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["collision-1", "collision-2"])
+    });
+    const queries = new QueryService({ registry, projections: store });
+    const app = createDeskApp({
+      registry,
+      documents,
+      queries,
+      actor: () => owner
+    });
+    return { app, documents };
+  }
+
   function makeAccountDesk(actor = owner) {
     const services = createServices(["e1", "e2", "e3", "e4"]);
     const userAccounts = new UserAccountService({
@@ -2395,6 +2423,13 @@ describe("Desk app", () => {
     expect(advancedHtml).toContain('name="filter_count__gte" value="2"');
     expect(advancedHtml).toContain('name="filter_count__lte" value="8"');
 
+    const between = await app.request("/desk/Note?filter_count__between=6&filter_count__between=8");
+    expect(between.status).toBe(200);
+    const betweenHtml = await between.text();
+    expect(betweenHtml).toContain("Desk High");
+    expect(betweenHtml).not.toContain("Desk Low");
+    expect(betweenHtml).not.toContain("Desk Closed High");
+
     const membership = await app.request("/desk/Note?filter_priority__in=High&filter_priority__in=Low");
     expect(membership.status).toBe(200);
     const membershipHtml = await membership.text();
@@ -2440,6 +2475,27 @@ describe("Desk app", () => {
       "Name,title,priority,workflow_state,Version,Updated",
       "Desk Empty Body,Desk Empty Body,Low,Open,1,2026-01-01T00:00:00.000Z"
     ].join("\n"));
+  });
+
+  it("keeps Desk equality filters for fields ending with operator suffixes", async () => {
+    const { app, documents } = makeFilterCollisionDesk();
+    await documents.create({
+      actor: owner,
+      doctype: "FilterCollision",
+      data: { title: "Desk Collision Match", count__between: 7 }
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "FilterCollision",
+      data: { title: "Desk Collision Miss", count__between: 3 }
+    });
+
+    const response = await app.request("/desk/FilterCollision?filter_count__between=7");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Desk Collision Match");
+    expect(html).not.toContain("Desk Collision Miss");
   });
 
   it("renders and submits generated list bulk document deletes", async () => {
