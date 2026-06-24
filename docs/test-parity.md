@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the OIDC provider preset slice:
+As of the realtime document field-edit collaboration slice:
 
 - Vitest files: `92`
-- Vitest cases: `1014`
+- Vitest cases: `1021`
 
 ## Implication
 

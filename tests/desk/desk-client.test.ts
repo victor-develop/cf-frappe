@@ -69,6 +69,14 @@ interface DeskClientRuntime {
     readonly userUrl: (userId: string, options: DeskRealtimeOptions) => string;
     readonly url: (topic: string, options?: DeskRealtimeOptions) => string;
   };
+  readonly collaboration: {
+    readonly fieldEditMessage: (field: string, input?: unknown) => Record<string, unknown>;
+    readonly sendFieldEdit: (
+      subscription: DeskRealtimeSubscription,
+      field: string,
+      input?: unknown
+    ) => Record<string, unknown>;
+  };
   readonly form: {
     readonly current: () => DeskFormRuntime | null;
     readonly on: (doctype: string, handlers: DeskFormHandlers) => void;
@@ -391,8 +399,15 @@ interface DeskBulkFileSelection {
 }
 
 interface DeskRealtimeHandlers {
+  readonly collaboration?: (event: Record<string, unknown>, message: unknown, subscription: DeskRealtimeSubscription) => void;
   readonly connected?: (message: unknown, subscription: DeskRealtimeSubscription) => void;
   readonly event?: (event: Record<string, unknown>, message: unknown, subscription: DeskRealtimeSubscription) => void;
+  readonly fieldEdit?: (
+    payload: Record<string, unknown>,
+    event: Record<string, unknown>,
+    message: unknown,
+    subscription: DeskRealtimeSubscription
+  ) => void;
   readonly malformed?: (error: Error, raw: unknown, message: unknown, subscription: DeskRealtimeSubscription) => void;
   readonly message?: (message: unknown, messageEvent: unknown, subscription: DeskRealtimeSubscription) => void;
   readonly open?: (event: unknown, subscription: DeskRealtimeSubscription) => void;
@@ -429,6 +444,8 @@ interface DeskRealtimeSubscription {
   readonly topic: string;
   readonly url: string;
   readonly close: (code?: number, reason?: string) => void;
+  readonly send: (message: unknown) => unknown;
+  readonly sendFieldEdit: (field: string, input?: unknown) => Record<string, unknown>;
 }
 
 interface DeskFormRuntime {
@@ -2613,6 +2630,156 @@ describe("Desk client runtime", () => {
     expect(sockets[0]?.closed).toEqual({ code: 1000, reason: "done" });
   });
 
+  it("parses realtime collaboration field-edit messages for document subscriptions", () => {
+    const sockets: FakeWebSocket[] = [];
+    const runtime = evaluateDeskClient(fetch, new FakeDocument(), sockets);
+    const seen: string[] = [];
+    const subscription = runtime.realtime.subscribeDocument("Task", "TASK-1", {
+      collaboration: (event, _message, sub) => {
+        seen.push(`collaboration:${String(event.type)}:${sub.topic}`);
+      },
+      fieldEdit: (payload, event, _message, sub) => {
+        seen.push(
+          `field:${String(payload.actorId)}:${String(payload.field)}:${String(payload.editing)}:${String(event.id)}:${sub.url}`
+        );
+      },
+      message: (message) => {
+        seen.push(`message:${String((message as { readonly type?: string }).type)}`);
+      }
+    }, { tenantId: "acme" });
+
+    sockets[0]?.emitMessage(JSON.stringify({
+      type: "cf-frappe.realtime.collaboration",
+      event: {
+        id: "edit-1",
+        type: "DocumentFieldEditIntent",
+        payload: {
+          kind: "DocumentFieldEditIntent",
+          field: "title",
+          editing: true,
+          connectionId: "conn-1",
+          actorId: "support@example.com"
+        }
+      }
+    }));
+
+    expect(seen).toEqual([
+      "message:cf-frappe.realtime.collaboration",
+      "collaboration:DocumentFieldEditIntent:document:acme:Task:TASK-1",
+      `field:support@example.com:title:true:edit-1:${subscription.url}`
+    ]);
+  });
+
+  it("sends transient field-edit collaboration messages over realtime subscriptions", () => {
+    const sockets: FakeWebSocket[] = [];
+    const runtime = evaluateDeskClient(fetch, new FakeDocument(), sockets);
+    const subscription = runtime.realtime.subscribeDocument("Task", "TASK-1", {}, { tenantId: "acme" });
+
+    expect(runtime.collaboration.fieldEditMessage(" title ", { editing: true, value: "Queued" })).toEqual({
+      type: "cf-frappe.collaboration.field_edit",
+      field: "title",
+      editing: true,
+      value: "Queued"
+    });
+    expect(runtime.collaboration.sendFieldEdit(subscription, " title ", { editing: true, value: "Queued" })).toEqual({
+      type: "cf-frappe.collaboration.field_edit",
+      field: "title",
+      editing: true,
+      value: "Queued"
+    });
+    expect(sockets[0]?.sent).toEqual([
+      JSON.stringify({
+        type: "cf-frappe.collaboration.field_edit",
+        field: "title",
+        editing: true,
+        value: "Queued"
+      })
+    ]);
+  });
+
+  it("shows generated document presence panel field-edit activity from collaboration messages", async () => {
+    const sockets: FakeWebSocket[] = [];
+    const panel = new FakePresencePanel({
+      doctype: "Task",
+      documentName: "TASK-1",
+      realtimeRoute: "/rt",
+      tenantId: "acme"
+    });
+
+    evaluateDeskClient(
+      async () =>
+        new Response(JSON.stringify({
+          data: {
+            topic: "document:acme:Task:TASK-1",
+            connections: []
+          }
+        }), {
+          headers: { "content-type": "application/json" }
+        }),
+      new FakeDocument({ presencePanels: [panel] }),
+      sockets
+    );
+    await flushPromises();
+
+    sockets[0]?.emitMessage(JSON.stringify({
+      type: "cf-frappe.realtime.collaboration",
+      event: {
+        id: "edit-1",
+        type: "DocumentFieldEditIntent",
+        payload: {
+          kind: "DocumentFieldEditIntent",
+          field: "title",
+          editing: true,
+          connectionId: "conn-1",
+          actorId: "support@example.com"
+        }
+      }
+    }));
+    expect(panel.fieldEdits.textContent).toBe("support@example.com editing title");
+
+    sockets[0]?.emitMessage(JSON.stringify({
+      type: "cf-frappe.realtime.presence",
+      presence: {
+        action: "leave",
+        topic: "document:acme:Task:TASK-1",
+        connections: []
+      }
+    }));
+    expect(panel.fieldEdits.textContent).toBe("No live field edits.");
+
+    sockets[0]?.emitMessage(JSON.stringify({
+      type: "cf-frappe.realtime.collaboration",
+      event: {
+        id: "edit-2",
+        type: "DocumentFieldEditIntent",
+        payload: {
+          kind: "DocumentFieldEditIntent",
+          field: "title",
+          editing: true,
+          connectionId: "conn-1",
+          actorId: "support@example.com"
+        }
+      }
+    }));
+    expect(panel.fieldEdits.textContent).toBe("support@example.com editing title");
+
+    sockets[0]?.emitMessage(JSON.stringify({
+      type: "cf-frappe.realtime.collaboration",
+      event: {
+        id: "edit-3",
+        type: "DocumentFieldEditIntent",
+        payload: {
+          kind: "DocumentFieldEditIntent",
+          field: "title",
+          editing: false,
+          connectionId: "conn-1",
+          actorId: "support@example.com"
+        }
+      }
+    }));
+    expect(panel.fieldEdits.textContent).toBe("No live field edits.");
+  });
+
   it("builds document realtime subscriptions with canonical encoded topics", () => {
     const sockets: FakeWebSocket[] = [];
     const runtime = evaluateDeskClient(fetch, new FakeDocument(), sockets);
@@ -2651,6 +2818,54 @@ describe("Desk client runtime", () => {
       "open:doctype:acme%3Awest:Task%20Type",
       "error:doctype:acme%3Awest:Task%20Type",
       "close:doctype:acme%3Awest:Task%20Type"
+    ]);
+  });
+
+  it("emits generated form field-edit intent without exposing draft values", () => {
+    const sockets: FakeWebSocket[] = [];
+    const title = new FakeField("title", "Queued");
+    const expectedVersion = new FakeField("expectedVersion", "3", "hidden");
+    const runtime = evaluateDeskClient(
+      fetch,
+      new FakeDocument({
+        form: new FakeForm([title, expectedVersion]),
+        runtimeDataset: {
+          doctype: "Task",
+          documentName: "TASK-1",
+          realtimeRoute: "/rt",
+          scope: "form",
+          tenantId: "acme"
+        }
+      }),
+      sockets
+    );
+
+    expect(runtime.form.current()?.doc).toMatchObject({ title: "Queued" });
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]?.url).toBe("wss://app.example/rt?topic=document%3Aacme%3ATask%3ATASK-1");
+
+    title.emit("focus");
+    title.value = "In Progress";
+    title.emit("input");
+    title.emit("blur");
+    expectedVersion.emit("focus");
+
+    expect(sockets[0]?.sent.map((message) => JSON.parse(message) as unknown)).toEqual([
+      {
+        type: "cf-frappe.collaboration.field_edit",
+        field: "title",
+        editing: true
+      },
+      {
+        type: "cf-frappe.collaboration.field_edit",
+        field: "title",
+        editing: true
+      },
+      {
+        type: "cf-frappe.collaboration.field_edit",
+        field: "title",
+        editing: false
+      }
     ]);
   });
 
@@ -2829,6 +3044,7 @@ async function flushPromises(): Promise<void> {
 
 class FakeWebSocket {
   readonly listeners: Record<string, Array<(event: unknown) => void>> = {};
+  readonly sent: string[] = [];
   closed?: { readonly code?: number; readonly reason?: string };
 
   constructor(readonly url: string, readonly protocols?: string | readonly string[]) {}
@@ -2842,6 +3058,10 @@ class FakeWebSocket {
       ...(code === undefined ? {} : { code }),
       ...(reason === undefined ? {} : { reason })
     };
+  }
+
+  send(message: string): void {
+    this.sent.push(message);
   }
 
   emitMessage(data: unknown): void {
@@ -3444,11 +3664,12 @@ function fakeFormulaOption(value: string): FakeFormulaElement {
 }
 
 class FakePresenceText {
-  textContent = "";
+  constructor(public textContent = "") {}
 }
 
 class FakePresencePanel {
   readonly count = new FakePresenceText();
+  readonly fieldEdits = new FakePresenceText("No live field edits.");
   readonly list = new FakePresenceText();
   readonly update = new FakePresenceText();
 
@@ -3460,6 +3681,9 @@ class FakePresencePanel {
     }
     if (selector === "[data-cf-frappe-presence-list]") {
       return this.list;
+    }
+    if (selector === "[data-cf-frappe-field-edits]") {
+      return this.fieldEdits;
     }
     if (selector === "[data-cf-frappe-document-update]") {
       return this.update;

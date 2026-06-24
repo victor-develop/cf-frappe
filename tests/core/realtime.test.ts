@@ -1,8 +1,11 @@
 import {
   canSubscribeToRealtimeTopic,
+  DOCUMENT_FIELD_EDIT_EVENT_TYPE,
+  DOCUMENT_FIELD_EDIT_MESSAGE_TYPE,
   documentRealtimeTopic,
   doctypeRealtimeTopic,
   parseRealtimeTopic,
+  realtimeEventFromDocumentFieldEdit,
   realtimeEventFromDomainEvent,
   realtimeUserNotificationsFromDomainEvent,
   tenantRealtimeTopic,
@@ -71,6 +74,63 @@ describe("realtime topics", () => {
       tenantId: "acme",
       occurredAt: now
     });
+  });
+
+  it("models transient document field edit intent as a document-scoped realtime event", () => {
+    expect(
+      realtimeEventFromDocumentFieldEdit({
+        id: "edit-1",
+        topic: documentRealtimeTopic("acme", "Task", "TASK-1"),
+        connection: {
+          connectionId: "conn-1",
+          tenantId: "acme",
+          userId: "owner@example.com"
+        },
+        message: {
+          type: DOCUMENT_FIELD_EDIT_MESSAGE_TYPE,
+          field: " title ",
+          editing: true,
+          value: "Draft title"
+        },
+        occurredAt: now
+      })
+    ).toEqual({
+      id: "edit-1",
+      type: DOCUMENT_FIELD_EDIT_EVENT_TYPE,
+      topics: ["document:acme:Task:TASK-1"],
+      tenantId: "acme",
+      occurredAt: now,
+      payload: {
+        kind: DOCUMENT_FIELD_EDIT_EVENT_TYPE,
+        tenantId: "acme",
+        doctype: "Task",
+        name: "TASK-1",
+        field: "title",
+        editing: true,
+        value: "Draft title",
+        connectionId: "conn-1",
+        actorId: "owner@example.com"
+      }
+    });
+
+    expect(
+      realtimeEventFromDocumentFieldEdit({
+        id: "edit-2",
+        topic: doctypeRealtimeTopic("acme", "Task"),
+        connection: { connectionId: "conn-1" },
+        message: { type: DOCUMENT_FIELD_EDIT_MESSAGE_TYPE, field: "title" },
+        occurredAt: now
+      })
+    ).toBeNull();
+    expect(
+      realtimeEventFromDocumentFieldEdit({
+        id: "edit-3",
+        topic: documentRealtimeTopic("acme", "Task", "TASK-1"),
+        connection: { connectionId: "conn-1" },
+        message: { type: DOCUMENT_FIELD_EDIT_MESSAGE_TYPE, field: "" },
+        occurredAt: now
+      })
+    ).toBeNull();
   });
 
   it("builds redacted user notifications only for user-recipient events", () => {

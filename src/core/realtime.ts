@@ -27,6 +27,23 @@ export type RealtimeTopicScope =
   | { readonly kind: "doctype"; readonly tenantId: string; readonly doctype: string }
   | { readonly kind: "document"; readonly tenantId: string; readonly doctype: string; readonly name: string };
 
+export const REALTIME_COLLABORATION_MESSAGE_TYPE = "cf-frappe.realtime.collaboration";
+export const DOCUMENT_FIELD_EDIT_MESSAGE_TYPE = "cf-frappe.collaboration.field_edit";
+export const DOCUMENT_FIELD_EDIT_EVENT_TYPE = "DocumentFieldEditIntent";
+
+export interface RealtimeConnectionIdentity {
+  readonly connectionId: string;
+  readonly tenantId?: string;
+  readonly userId?: string;
+}
+
+export interface DocumentFieldEditMessage {
+  readonly type: typeof DOCUMENT_FIELD_EDIT_MESSAGE_TYPE;
+  readonly field: string;
+  readonly editing?: boolean;
+  readonly value?: JsonValue;
+}
+
 export function tenantRealtimeTopic(tenantId: string): RealtimeTopic {
   return `tenant:${encodeTopicPart(tenantId)}`;
 }
@@ -133,6 +150,41 @@ export function realtimeUserNotificationsFromDomainEvent(event: DomainEvent): re
   }));
 }
 
+export function realtimeEventFromDocumentFieldEdit(input: {
+  readonly id: string;
+  readonly topic: RealtimeTopic;
+  readonly connection: RealtimeConnectionIdentity;
+  readonly message: unknown;
+  readonly occurredAt: string;
+}): RealtimeEvent | null {
+  const scope = parseRealtimeTopic(input.topic);
+  if (!scope || scope.kind !== "document") {
+    return null;
+  }
+  const message = documentFieldEditMessage(input.message);
+  if (!message) {
+    return null;
+  }
+  return {
+    id: input.id,
+    type: DOCUMENT_FIELD_EDIT_EVENT_TYPE,
+    topics: [input.topic],
+    tenantId: scope.tenantId,
+    occurredAt: input.occurredAt,
+    payload: {
+      kind: DOCUMENT_FIELD_EDIT_EVENT_TYPE,
+      tenantId: scope.tenantId,
+      doctype: scope.doctype,
+      name: scope.name,
+      field: message.field,
+      editing: message.editing ?? true,
+      connectionId: input.connection.connectionId,
+      ...(input.connection.userId === undefined ? {} : { actorId: input.connection.userId }),
+      ...(Object.prototype.hasOwnProperty.call(message, "value") ? { value: message.value as JsonValue } : {})
+    }
+  };
+}
+
 function encodeTopicPart(value: string): string {
   return encodeURIComponent(value);
 }
@@ -143,4 +195,62 @@ function decodeTopicPart(value: string): string {
   } catch {
     return "";
   }
+}
+
+function documentFieldEditMessage(value: unknown): DocumentFieldEditMessage | null {
+  if (!isRecord(value) || value.type !== DOCUMENT_FIELD_EDIT_MESSAGE_TYPE) {
+    return null;
+  }
+  const field = typeof value.field === "string" ? value.field.trim() : "";
+  if (field.length === 0 || field.length > 256) {
+    return null;
+  }
+  if (value.editing !== undefined && typeof value.editing !== "boolean") {
+    return null;
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "value") && !isJsonValue(value.value)) {
+    return null;
+  }
+  const message: {
+    type: typeof DOCUMENT_FIELD_EDIT_MESSAGE_TYPE;
+    field: string;
+    editing?: boolean;
+    value?: JsonValue;
+  } = {
+    type: DOCUMENT_FIELD_EDIT_MESSAGE_TYPE,
+    field
+  };
+  if (value.editing !== undefined) {
+    message.editing = value.editing;
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "value")) {
+    message.value = value.value as JsonValue;
+  }
+  if (JSON.stringify(message).length > 16_384) {
+    return null;
+  }
+  return message;
+}
+
+function isJsonValue(value: unknown, depth = 0): value is JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return true;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value);
+  }
+  if (depth > 8) {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    return value.every((item) => isJsonValue(item, depth + 1));
+  }
+  if (!isRecord(value)) {
+    return false;
+  }
+  return Object.values(value).every((item) => isJsonValue(item, depth + 1));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

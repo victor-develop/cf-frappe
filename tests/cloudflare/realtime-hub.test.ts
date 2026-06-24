@@ -3,7 +3,12 @@ import {
   DurableObjectRealtimePublisher,
   type RealtimeHubNamespace
 } from "../../src/cloudflare";
-import type { RealtimeEvent } from "../../src";
+import {
+  DOCUMENT_FIELD_EDIT_EVENT_TYPE,
+  DOCUMENT_FIELD_EDIT_MESSAGE_TYPE,
+  REALTIME_COLLABORATION_MESSAGE_TYPE,
+  type RealtimeEvent
+} from "../../src";
 import { now } from "../helpers";
 
 describe("DurableObjectRealtimePublisher", () => {
@@ -68,6 +73,96 @@ describe("RealtimeHub Durable Object", () => {
     await hub.webSocketMessage(socket, JSON.stringify({ type: "ping" }));
 
     expect(sent).toEqual([JSON.stringify({ type: "pong" })]);
+  });
+
+  it("rebroadcasts document field-edit collaboration messages with server-owned identity", async () => {
+    const originSent: string[] = [];
+    const peerSent: string[] = [];
+    const otherTopicSent: string[] = [];
+    const origin = fakeSocket(originSent, {
+      topic: "document:acme:Task:TASK-1",
+      connectionId: "conn-origin",
+      connectedAt: "2026-06-23T00:00:01.000Z",
+      tenantId: "acme",
+      userId: "owner@example.com"
+    });
+    const peer = fakeSocket(peerSent, {
+      topic: "document:acme:Task:TASK-1",
+      connectionId: "conn-peer",
+      connectedAt: "2026-06-23T00:00:02.000Z",
+      tenantId: "acme",
+      userId: "support@example.com"
+    });
+    const otherTopic = fakeSocket(otherTopicSent, {
+      topic: "document:acme:Task:TASK-2",
+      connectionId: "conn-other",
+      connectedAt: "2026-06-23T00:00:03.000Z",
+      tenantId: "acme",
+      userId: "other@example.com"
+    });
+    vi.stubGlobal("crypto", { randomUUID: () => "edit-event" });
+    const Hub = createRealtimeHubClass();
+    const hub = new Hub(fakeState([origin, peer, otherTopic]), {});
+
+    await hub.webSocketMessage(origin, JSON.stringify({
+      type: DOCUMENT_FIELD_EDIT_MESSAGE_TYPE,
+      field: "title",
+      editing: true,
+      actorId: "spoof@example.com"
+    }));
+
+    expect(originSent).toEqual([]);
+    expect(otherTopicSent).toEqual([]);
+    expect(peerSent).toHaveLength(1);
+    expect(JSON.parse(peerSent[0]!) as unknown).toMatchObject({
+      type: REALTIME_COLLABORATION_MESSAGE_TYPE,
+      event: {
+        id: "collaboration:conn-origin:edit-event",
+        type: DOCUMENT_FIELD_EDIT_EVENT_TYPE,
+        topics: ["document:acme:Task:TASK-1"],
+        tenantId: "acme",
+        payload: {
+          kind: DOCUMENT_FIELD_EDIT_EVENT_TYPE,
+          doctype: "Task",
+          name: "TASK-1",
+          field: "title",
+          editing: true,
+          connectionId: "conn-origin",
+          actorId: "owner@example.com"
+        }
+      }
+    });
+  });
+
+  it("rejects malformed collaboration messages without broadcasting", async () => {
+    const originSent: string[] = [];
+    const peerSent: string[] = [];
+    const origin = fakeSocket(originSent, {
+      topic: "document:acme:Task:TASK-1",
+      connectionId: "conn-origin",
+      connectedAt: "2026-06-23T00:00:01.000Z",
+      tenantId: "acme",
+      userId: "owner@example.com"
+    });
+    const peer = fakeSocket(peerSent, {
+      topic: "document:acme:Task:TASK-1",
+      connectionId: "conn-peer",
+      connectedAt: "2026-06-23T00:00:02.000Z",
+      tenantId: "acme",
+      userId: "support@example.com"
+    });
+    const Hub = createRealtimeHubClass();
+    const hub = new Hub(fakeState([origin, peer]), {});
+
+    await hub.webSocketMessage(origin, JSON.stringify({
+      type: DOCUMENT_FIELD_EDIT_MESSAGE_TYPE,
+      field: ""
+    }));
+
+    expect(peerSent).toEqual([]);
+    expect(originSent).toEqual([
+      JSON.stringify({ type: "error", message: "Invalid collaboration message" })
+    ]);
   });
 
   it("accepts websocket connections with server-owned presence identity", async () => {

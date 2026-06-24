@@ -12,6 +12,8 @@ export function renderDeskClientScript(): string {
   var lockedValueProperty = "__cfFrappeLockedValue";
   var readOnlyProperty = "__cfFrappeReadOnly";
   var softDisabledProperty = "__cfFrappeSoftDisabled";
+  var realtimeCollaborationMessageType = "cf-frappe.realtime.collaboration";
+  var fieldEditMessageType = "cf-frappe.collaboration.field_edit";
 
   function encodePart(value) {
     return encodeURIComponent(String(value));
@@ -1424,6 +1426,7 @@ export function renderDeskClientScript(): string {
     };
     binding.frm = createFrm(binding);
     attachFieldListeners(binding);
+    attachDocumentCollaboration(binding);
     form.addEventListener("submit", function (event) {
       if (binding.submitting) {
         return;
@@ -1527,6 +1530,9 @@ export function renderDeskClientScript(): string {
   function attachFieldListeners(binding) {
     Array.prototype.forEach.call(binding.form.querySelectorAll("[name]"), function (field) {
       var fieldname = field.name;
+      field.addEventListener("focus", function () {
+        sendFormFieldEdit(binding, field, true);
+      });
       field.addEventListener("change", function () {
         if (restoreLockedFieldValue(field)) {
           return;
@@ -1534,6 +1540,7 @@ export function renderDeskClientScript(): string {
         syncFormData(binding);
         binding.frm.dirty();
         triggerFormEvent(binding, fieldname);
+        sendFormFieldEdit(binding, field, true);
       });
       field.addEventListener("input", function () {
         if (restoreLockedFieldValue(field)) {
@@ -1541,8 +1548,38 @@ export function renderDeskClientScript(): string {
         }
         syncFormData(binding);
         binding.frm.dirty();
+        sendFormFieldEdit(binding, field, true);
+      });
+      field.addEventListener("blur", function () {
+        sendFormFieldEdit(binding, field, false);
       });
     });
+  }
+
+  function attachDocumentCollaboration(binding) {
+    var pageContext = binding.context;
+    if (!pageContext.documentName || !pageContext.tenantId || !pageContext.realtimeRoute) {
+      return;
+    }
+    try {
+      binding.collaborationSubscription = realtimeSubscribe(
+        documentTopicFromOptions(pageContext.doctype, pageContext.documentName, {
+          tenantId: pageContext.tenantId,
+          realtimeRoute: pageContext.realtimeRoute
+        }),
+        {},
+        { tenantId: pageContext.tenantId, realtimeRoute: pageContext.realtimeRoute }
+      );
+    } catch (_error) {
+      binding.collaborationSubscription = undefined;
+    }
+  }
+
+  function sendFormFieldEdit(binding, field, editing) {
+    if (!binding.collaborationSubscription || isInternalFormField(field.name)) {
+      return;
+    }
+    binding.collaborationSubscription.sendFieldEdit(field.name, { editing: editing });
   }
 
   function readFormData(form) {
@@ -1794,6 +1831,13 @@ export function renderDeskClientScript(): string {
       close: function (code, reason) {
         socket.close(code, reason);
       },
+      send: function (message) {
+        socket.send(typeof message === "string" ? message : JSON.stringify(message));
+        return message;
+      },
+      sendFieldEdit: function (field, input) {
+        return realtimeSendFieldEdit(socket, field, input);
+      },
       socket: socket,
       topic: topic,
       url: url
@@ -1835,6 +1879,10 @@ export function renderDeskClientScript(): string {
       dispatchRealtimeEvent(parsed.event, parsed, subscription, callbacks);
       return;
     }
+    if (parsed.type === realtimeCollaborationMessageType && parsed.event) {
+      dispatchRealtimeCollaborationEvent(parsed.event, parsed, subscription, callbacks);
+      return;
+    }
     if (parsed.type === "cf-frappe.realtime.replay" && parsed.replay) {
       callRealtimeHandler(callbacks.replay, [parsed.replay, parsed, subscription]);
       var events = Array.isArray(parsed.replay.events) ? parsed.replay.events : [];
@@ -1860,6 +1908,33 @@ export function renderDeskClientScript(): string {
     if (payload && payload.kind === "DocumentUserNotification") {
       callRealtimeHandler(callbacks.notification, [payload, event, message, subscription]);
     }
+  }
+
+  function dispatchRealtimeCollaborationEvent(event, message, subscription, callbacks) {
+    callRealtimeHandler(callbacks.collaboration, [event, message, subscription]);
+    var payload = event && event.payload;
+    if (payload && payload.kind === "DocumentFieldEditIntent") {
+      callRealtimeHandler(callbacks.fieldEdit, [payload, event, message, subscription]);
+    }
+  }
+
+  function realtimeFieldEditMessage(field, input) {
+    var options = isPlainObject(input) ? input : input === undefined ? {} : { value: input };
+    var message = {
+      type: fieldEditMessageType,
+      field: String(field || "").trim(),
+      editing: options.editing === false ? false : true
+    };
+    if (Object.prototype.hasOwnProperty.call(options, "value")) {
+      message.value = options.value;
+    }
+    return message;
+  }
+
+  function realtimeSendFieldEdit(socket, field, input) {
+    var message = realtimeFieldEditMessage(field, input);
+    socket.send(JSON.stringify(message));
+    return message;
   }
 
   function addSocketListener(socket, type, listener) {
@@ -1925,6 +2000,9 @@ export function renderDeskClientScript(): string {
           },
           presence: function (presence) {
             setPresencePanelConnections(panel, "live", presence && presence.connections);
+          },
+          fieldEdit: function (payload) {
+            setPresencePanelFieldEdit(panel, payload);
           }
         },
         options
@@ -1963,6 +2041,7 @@ export function renderDeskClientScript(): string {
   }
 
   function setPresencePanelConnections(panel, state, connections) {
+    prunePresencePanelFieldEdits(panel, connections);
     var labels = presenceConnectionLabels(connections);
     var count = labels.length;
     setPresencePanelState(
@@ -1985,6 +2064,63 @@ export function renderDeskClientScript(): string {
       labels.push(String(label));
     });
     return labels;
+  }
+
+  function setPresencePanelFieldEdit(panel, payload) {
+    if (!payload || !payload.field) {
+      return;
+    }
+    var edits = panel.__cfFrappeFieldEdits || {};
+    var key = String(payload.connectionId || "") + ":" + String(payload.field);
+    if (payload.editing === false) {
+      delete edits[key];
+    } else {
+      edits[key] = {
+        actor: payload.actorId || payload.connectionId || "A collaborator",
+        connectionId: payload.connectionId,
+        field: payload.field
+      };
+    }
+    panel.__cfFrappeFieldEdits = edits;
+    renderPresencePanelFieldEdits(panel);
+  }
+
+  function prunePresencePanelFieldEdits(panel, connections) {
+    var edits = panel.__cfFrappeFieldEdits;
+    if (!edits || !Array.isArray(connections)) {
+      return;
+    }
+    var active = {};
+    connections.forEach(function (connection) {
+      if (connection && connection.connectionId) {
+        active[String(connection.connectionId)] = true;
+      }
+    });
+    var changed = false;
+    Object.keys(edits).forEach(function (editKey) {
+      var edit = edits[editKey];
+      var connectionId = edit && edit.connectionId;
+      if (!connectionId || !active[String(connectionId)]) {
+        delete edits[editKey];
+        changed = true;
+      }
+    });
+    if (changed) {
+      renderPresencePanelFieldEdits(panel);
+    }
+  }
+
+  function renderPresencePanelFieldEdits(panel) {
+    var edits = panel.__cfFrappeFieldEdits || {};
+    var labels = Object.keys(edits).sort().map(function (editKey) {
+      var edit = edits[editKey];
+      return String(edit.actor) + " editing " + String(edit.field);
+    });
+    setPanelText(
+      panel,
+      "[data-cf-frappe-field-edits]",
+      labels.length === 0 ? "No live field edits." : labels.join(", ")
+    );
   }
 
   function setPresencePanelState(panel, state, countText, listText) {
@@ -2387,6 +2523,15 @@ export function renderDeskClientScript(): string {
       },
       url: function (topic, options) {
         return realtimeUrl(topic, options).toString();
+      }
+    }),
+    collaboration: Object.freeze({
+      fieldEditMessage: realtimeFieldEditMessage,
+      sendFieldEdit: function (subscription, field, input) {
+        if (!subscription || typeof subscription.sendFieldEdit !== "function") {
+          return realtimeFieldEditMessage(field, input);
+        }
+        return subscription.sendFieldEdit(field, input);
       }
     }),
     report: Object.freeze({

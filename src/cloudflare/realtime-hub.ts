@@ -1,5 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
-import type { RealtimeEvent, RealtimeTopic } from "../core/realtime.js";
+import {
+  DOCUMENT_FIELD_EDIT_MESSAGE_TYPE,
+  REALTIME_COLLABORATION_MESSAGE_TYPE,
+  realtimeEventFromDocumentFieldEdit,
+  type RealtimeEvent,
+  type RealtimeTopic
+} from "../core/realtime.js";
 import type { RealtimePublisher, RealtimePublishResult } from "../ports/realtime.js";
 
 export interface RealtimeHubRpc {
@@ -187,6 +193,10 @@ export function createRealtimeHubClass(options: RealtimeHubOptions = {}): Realti
         const parsed = JSON.parse(message) as { readonly type?: unknown };
         if (parsed.type === "ping") {
           ws.send(JSON.stringify({ type: "pong" }));
+          return;
+        }
+        if (parsed.type === DOCUMENT_FIELD_EDIT_MESSAGE_TYPE) {
+          this.broadcastCollaboration(ws, parsed);
         }
       } catch {
         ws.send(JSON.stringify({ type: "error", message: "Malformed realtime message" }));
@@ -200,6 +210,51 @@ export function createRealtimeHubClass(options: RealtimeHubOptions = {}): Realti
         excludingConnectionIds: attachment ? [attachment.connectionId] : [],
         excludingSockets: [ws]
       });
+    }
+
+    private broadcastCollaboration(origin: WebSocket, parsed: unknown): void {
+      const attachment = deserializeSocketAttachment(origin);
+      if (!attachment) {
+        origin.send(JSON.stringify({ type: "error", message: "Missing realtime identity" }));
+        return;
+      }
+      const occurredAt = new Date().toISOString();
+      const event = realtimeEventFromDocumentFieldEdit({
+        id: generatedCollaborationEventId(attachment.connectionId, occurredAt),
+        topic: attachment.topic,
+        connection: attachment,
+        message: parsed,
+        occurredAt
+      });
+      if (!event) {
+        origin.send(JSON.stringify({ type: "error", message: "Invalid collaboration message" }));
+        return;
+      }
+      const message = JSON.stringify({ type: REALTIME_COLLABORATION_MESSAGE_TYPE, event });
+      const failedConnectionIds = new Set<string>();
+      const failedSockets = new Set<WebSocket>();
+      for (const socket of this.ctx.getWebSockets()) {
+        if (socket === origin) {
+          continue;
+        }
+        const socketAttachment = deserializeSocketAttachment(socket);
+        if (!socketAttachment || socketAttachment.topic !== attachment.topic) {
+          continue;
+        }
+        try {
+          socket.send(message);
+        } catch {
+          socket.close(1011, "Unable to deliver collaboration event");
+          failedConnectionIds.add(socketAttachment.connectionId);
+          failedSockets.add(socket);
+        }
+      }
+      if (failedConnectionIds.size > 0) {
+        this.broadcastPresence("leave", {
+          excludingConnectionIds: failedConnectionIds,
+          excludingSockets: failedSockets
+        });
+      }
     }
 
     private broadcastPresence(action: "join" | "leave", options: PresenceBroadcastOptions = {}): void {
@@ -493,6 +548,11 @@ function deserializeSocketAttachment(socket: WebSocket): RealtimeSocketAttachmen
 function generatedConnectionId(connectedAt: string): string {
   const randomUuid = (globalThis.crypto as { randomUUID?: () => string } | undefined)?.randomUUID;
   return randomUuid ? randomUuid.call(globalThis.crypto) : `connection:${connectedAt}`;
+}
+
+function generatedCollaborationEventId(connectionId: string, occurredAt: string): string {
+  const randomUuid = (globalThis.crypto as { randomUUID?: () => string } | undefined)?.randomUUID;
+  return `collaboration:${connectionId}:${randomUuid ? randomUuid.call(globalThis.crypto) : occurredAt}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
