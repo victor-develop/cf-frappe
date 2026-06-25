@@ -2575,6 +2575,13 @@ export function renderDeskClientScript(): string {
       if (!binding || binding.context.doctype !== doctype || binding.context.documentName !== documentName || !draft) {
         return;
       }
+      if (typeof draft.payload.baseVersion === "number" && binding.baseVersion !== draft.payload.baseVersion) {
+        if (panel.dataset) {
+          panel.dataset.sharedDraftState = "stale";
+        }
+        setPresencePanelSharedDraftAction(panel, false, false);
+        return;
+      }
       setPresencePanelSharedDraftAction(panel, true, true, "Applying...");
       var fields = applySharedDraftToForm(binding, draft.payload);
       if (fields.length === 0) {
@@ -2626,9 +2633,23 @@ export function renderDeskClientScript(): string {
       actor + " shared draft changes: " + presencePanelFieldSummary(fields) + "."
     );
     var binding = currentFormBinding();
+    var matchingForm = binding && binding.context.doctype === doctype && binding.context.documentName === documentName;
+    if (matchingForm && typeof payload.baseVersion === "number" && binding.baseVersion !== payload.baseVersion) {
+      if (panel.dataset) {
+        panel.dataset.sharedDraftState = "stale";
+      }
+      setPanelText(
+        panel,
+        "[data-cf-frappe-shared-draft]",
+        actor + " shared draft changes for v" + String(payload.baseVersion) +
+          "; current form is v" + String(binding.baseVersion) + "."
+      );
+      setPresencePanelSharedDraftAction(panel, false, false);
+      return;
+    }
     setPresencePanelSharedDraftAction(
       panel,
-      Boolean(binding && binding.context.doctype === doctype && binding.context.documentName === documentName),
+      Boolean(matchingForm),
       false,
       "Apply shared draft"
     );
@@ -2644,7 +2665,7 @@ export function renderDeskClientScript(): string {
       if (!fieldname || isInternalFormField(fieldname)) {
         return;
       }
-      draft[fieldname] = cloneMergeValue(patch[field]);
+      setDocValue(draft, fieldname, cloneMergeValue(patch[field]));
       changed.push(fieldname);
     });
     (Array.isArray(payload && payload.unset) ? payload.unset : []).forEach(function (field) {
@@ -2652,7 +2673,7 @@ export function renderDeskClientScript(): string {
       if (!fieldname || isInternalFormField(fieldname) || changed.indexOf(fieldname) >= 0) {
         return;
       }
-      delete draft[fieldname];
+      unsetDocValue(draft, fieldname);
       changed.push(fieldname);
     });
     if (changed.length === 0) {
@@ -2666,6 +2687,19 @@ export function renderDeskClientScript(): string {
       triggerFormEvent(binding, field);
     });
     return changed;
+  }
+
+  function unsetDocValue(doc, fieldname) {
+    var child = childFieldPath(fieldname);
+    if (child) {
+      var rows = Array.isArray(doc[child.table]) ? doc[child.table] : [];
+      if (rows[child.index]) {
+        delete rows[child.index][child.field];
+      }
+      doc[child.table] = rows;
+      return;
+    }
+    delete doc[fieldname];
   }
 
   function sharedDraftFields(payload) {

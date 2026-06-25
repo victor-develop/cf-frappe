@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the generated shared draft proposal apply slice:
+As of the shared draft stale guard and child-table apply slice:
 
 - Vitest files: `93`
-- Vitest cases: `1048`
+- Vitest cases: `1050`
 
 ## Implication
 

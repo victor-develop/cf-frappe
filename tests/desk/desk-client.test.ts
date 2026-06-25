@@ -3379,6 +3379,140 @@ describe("Desk client runtime", () => {
     expect(calls.filter((call) => call.init.method && call.init.method !== "GET")).toEqual([]);
   });
 
+  it("does not apply stale shared draft proposals from generated presence panels", async () => {
+    const sockets: FakeWebSocket[] = [];
+    const title = new FakeField("title", "Current");
+    const panel = new FakePresencePanel({
+      doctype: "Task",
+      documentName: "TASK-1",
+      documentVersion: "4",
+      realtimeRoute: "/rt",
+      tenantId: "acme"
+    });
+    evaluateDeskClient(
+      async () =>
+        jsonResponse({
+          data: {
+            topic: "document:acme:Task:TASK-1",
+            connections: []
+          }
+        }),
+      new FakeDocument({
+        form: new FakeForm([title, new FakeField("expectedVersion", "4", "hidden")]),
+        presencePanels: [panel],
+        runtimeDataset: {
+          doctype: "Task",
+          documentName: "TASK-1",
+          documentStatus: "draft",
+          documentVersion: "4",
+          realtimeRoute: "/rt",
+          scope: "form",
+          tenantId: "acme"
+        }
+      }),
+      sockets
+    );
+    await flushPromises();
+
+    sockets.at(-1)?.emitMessage(JSON.stringify({
+      type: "cf-frappe.realtime.collaboration",
+      event: {
+        id: "draft-stale",
+        type: "DocumentSharedDraftPatch",
+        payload: {
+          kind: "DocumentSharedDraftPatch",
+          doctype: "Task",
+          name: "TASK-1",
+          baseVersion: 3,
+          patch: { title: "Stale title" },
+          connectionId: "conn-peer",
+          actorId: "support@example.com"
+        }
+      }
+    }));
+
+    expect(panel.dataset.sharedDraftState).toBe("stale");
+    expect(panel.sharedDraft.textContent).toBe("support@example.com shared draft changes for v3; current form is v4.");
+    expect(panel.applyDraft.hidden).toBe(true);
+    panel.applyDraft.click();
+    expect(title.value).toBe("Current");
+  });
+
+  it("applies shared draft child-table cell proposals to generated forms", async () => {
+    const sockets: FakeWebSocket[] = [];
+    const product = new FakeField("items[0].product", "SKU-1");
+    const quantity = new FakeField("items[0].quantity", "2", "number");
+    quantity.dataset.cfFrappeFieldType = "integer";
+    const note = new FakeField("items[0].note", "Keep me");
+    const panel = new FakePresencePanel({
+      doctype: "Sales Invoice",
+      documentName: "INV-1",
+      documentVersion: "7",
+      realtimeRoute: "/rt",
+      tenantId: "acme"
+    });
+    const runtime = evaluateDeskClient(
+      async () =>
+        jsonResponse({
+          data: {
+            topic: "document:acme:Sales%20Invoice:INV-1",
+            connections: []
+          }
+        }),
+      new FakeDocument({
+        form: new FakeForm([
+          product,
+          quantity,
+          note,
+          new FakeField("items[0].__cf_frappe_row_index", "0", "hidden"),
+          new FakeField("expectedVersion", "7", "hidden")
+        ]),
+        presencePanels: [panel],
+        runtimeDataset: {
+          doctype: "Sales Invoice",
+          documentName: "INV-1",
+          documentStatus: "draft",
+          documentVersion: "7",
+          realtimeRoute: "/rt",
+          scope: "form",
+          tenantId: "acme"
+        }
+      }),
+      sockets
+    );
+    await flushPromises();
+
+    sockets.at(-1)?.emitMessage(JSON.stringify({
+      type: "cf-frappe.realtime.collaboration",
+      event: {
+        id: "draft-child",
+        type: "DocumentSharedDraftPatch",
+        payload: {
+          kind: "DocumentSharedDraftPatch",
+          doctype: "Sales Invoice",
+          name: "INV-1",
+          baseVersion: 7,
+          patch: { "items[0].quantity": 5 },
+          unset: ["items[0].note"],
+          connectionId: "conn-peer",
+          actorId: "support@example.com"
+        }
+      }
+    }));
+
+    expect(panel.sharedDraft.textContent).toBe(
+      "support@example.com shared draft changes: items[0].quantity, items[0].note."
+    );
+    panel.applyDraft.click();
+
+    expect(product.value).toBe("SKU-1");
+    expect(quantity.value).toBe("5");
+    expect(note.value).toBe("");
+    expect(runtime.form.current()?.doc).toEqual({
+      items: [{ product: "SKU-1", quantity: 5 }]
+    });
+  });
+
   it("builds document realtime subscriptions with canonical encoded topics", () => {
     const sockets: FakeWebSocket[] = [];
     const runtime = evaluateDeskClient(fetch, new FakeDocument(), sockets);
