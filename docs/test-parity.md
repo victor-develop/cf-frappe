@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the shared draft collaboration patch slice:
+As of the generated shared draft proposal apply slice:
 
 - Vitest files: `93`
-- Vitest cases: `1047`
+- Vitest cases: `1048`
 
 ## Implication
 

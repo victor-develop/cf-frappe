@@ -3299,6 +3299,86 @@ describe("Desk client runtime", () => {
     expect(panel.fieldEdits.textContent).toBe("No live field edits.");
   });
 
+  it("shows and applies shared draft proposals from generated document presence panels", async () => {
+    const sockets: FakeWebSocket[] = [];
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const title = new FakeField("title", "Queued");
+    const body = new FakeField("body", "Base body");
+    const expectedVersion = new FakeField("expectedVersion", "3", "hidden");
+    const form = new FakeForm([title, body, expectedVersion]);
+    const panel = new FakePresencePanel({
+      doctype: "Task",
+      documentName: "TASK-1",
+      documentVersion: "3",
+      realtimeRoute: "/rt",
+      tenantId: "acme"
+    });
+    const runtime = evaluateDeskClient(
+      async (url, init) => {
+        calls.push({ url: String(url), init: init ?? {} });
+        return jsonResponse({
+          data: {
+            topic: "document:acme:Task:TASK-1",
+            connections: []
+          }
+        });
+      },
+      new FakeDocument({
+        form,
+        presencePanels: [panel],
+        runtimeDataset: {
+          doctype: "Task",
+          documentName: "TASK-1",
+          documentStatus: "draft",
+          documentVersion: "3",
+          realtimeRoute: "/rt",
+          scope: "form",
+          tenantId: "acme"
+        }
+      }),
+      sockets
+    );
+    await flushPromises();
+
+    const panelSocket = sockets.at(-1);
+    panelSocket?.emitMessage(JSON.stringify({
+      type: "cf-frappe.realtime.collaboration",
+      event: {
+        id: "draft-1",
+        type: "DocumentSharedDraftPatch",
+        payload: {
+          kind: "DocumentSharedDraftPatch",
+          doctype: "Task",
+          name: "TASK-1",
+          baseVersion: 3,
+          patch: { title: "Peer title" },
+          unset: ["body"],
+          connectionId: "conn-peer",
+          actorId: "support@example.com"
+        }
+      }
+    }));
+
+    expect(panel.dataset.sharedDraftState).toBe("available");
+    expect(panel.dataset.sharedDraftBaseVersion).toBe("3");
+    expect(panel.sharedDraft.textContent).toBe("support@example.com shared draft changes: title, body.");
+    expect(panel.applyDraft.hidden).toBe(false);
+    expect(title.value).toBe("Queued");
+    expect(body.value).toBe("Base body");
+
+    panel.applyDraft.click();
+
+    expect(panel.dataset.sharedDraftState).toBe("applied");
+    expect(panel.sharedDraft.textContent).toBe("Applied shared draft from support@example.com: title, body.");
+    expect(panel.applyDraft.hidden).toBe(true);
+    expect(title.value).toBe("Peer title");
+    expect(body.value).toBe("");
+    expect(expectedVersion.value).toBe("3");
+    expect(form.dataset.dirty).toBe("1");
+    expect(runtime.form.current()?.doc).toEqual({ title: "Peer title" });
+    expect(calls.filter((call) => call.init.method && call.init.method !== "GET")).toEqual([]);
+  });
+
   it("builds document realtime subscriptions with canonical encoded topics", () => {
     const sockets: FakeWebSocket[] = [];
     const runtime = evaluateDeskClient(fetch, new FakeDocument(), sockets);
@@ -4395,10 +4475,12 @@ class FakePresenceButton {
 }
 
 class FakePresencePanel {
+  readonly applyDraft = new FakePresenceButton();
   readonly count = new FakePresenceText();
   readonly fieldEdits = new FakePresenceText("No live field edits.");
   readonly list = new FakePresenceText();
   readonly merge = new FakePresenceButton();
+  readonly sharedDraft = new FakePresenceText("No shared draft proposals.");
   readonly update = new FakePresenceText();
 
   constructor(readonly dataset: Record<string, string>) {}
@@ -4413,11 +4495,17 @@ class FakePresencePanel {
     if (selector === "[data-cf-frappe-field-edits]") {
       return this.fieldEdits;
     }
+    if (selector === "[data-cf-frappe-shared-draft]") {
+      return this.sharedDraft;
+    }
     if (selector === "[data-cf-frappe-document-update]") {
       return this.update;
     }
     if (selector === "[data-cf-frappe-merge-save]") {
       return this.merge;
+    }
+    if (selector === "[data-cf-frappe-apply-shared-draft]") {
+      return this.applyDraft;
     }
     return null;
   }

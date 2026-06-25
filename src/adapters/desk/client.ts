@@ -2394,8 +2394,11 @@ export function renderDeskClientScript(): string {
     var realtimeOptions = Object.assign({ tenantId: tenantId }, realtimeRoute ? { realtimeRoute: realtimeRoute } : {});
     setPresencePanelState(panel, "loading", "Checking active collaborators.", "Checking active collaborators.");
     setPanelText(panel, "[data-cf-frappe-document-update]", "Viewing latest saved version.");
+    setPanelText(panel, "[data-cf-frappe-shared-draft]", "No shared draft proposals.");
     attachPresencePanelMergeSave(panel, doctype, documentName);
+    attachPresencePanelSharedDraftApply(panel, doctype, documentName);
     setPresencePanelMergeAction(panel, false, false);
+    setPresencePanelSharedDraftAction(panel, false, false);
     realtimePresenceDocument(doctype, documentName, realtimeOptions)
       .then(function (snapshot) {
         setPresencePanelConnections(panel, "ready", snapshot && snapshot.connections);
@@ -2427,6 +2430,9 @@ export function renderDeskClientScript(): string {
           },
           fieldEdit: function (payload) {
             setPresencePanelFieldEdit(panel, payload);
+          },
+          sharedDraft: function (payload) {
+            setPresencePanelSharedDraft(panel, payload, doctype, documentName);
           }
         },
         options
@@ -2544,6 +2550,154 @@ export function renderDeskClientScript(): string {
 
   function setPresencePanelMergeAction(panel, visible, disabled, label) {
     var button = panel.querySelector && panel.querySelector("[data-cf-frappe-merge-save]");
+    if (!button) {
+      return;
+    }
+    button.hidden = !visible;
+    button.disabled = Boolean(disabled);
+    if (label !== undefined) {
+      button.textContent = label;
+    }
+  }
+
+  function attachPresencePanelSharedDraftApply(panel, doctype, documentName) {
+    if (panel.__cfFrappeSharedDraftApplyAttached) {
+      return;
+    }
+    var button = panel.querySelector && panel.querySelector("[data-cf-frappe-apply-shared-draft]");
+    if (!button || typeof button.addEventListener !== "function") {
+      return;
+    }
+    panel.__cfFrappeSharedDraftApplyAttached = true;
+    button.addEventListener("click", function () {
+      var binding = currentFormBinding();
+      var draft = panel.__cfFrappeSharedDraft;
+      if (!binding || binding.context.doctype !== doctype || binding.context.documentName !== documentName || !draft) {
+        return;
+      }
+      setPresencePanelSharedDraftAction(panel, true, true, "Applying...");
+      var fields = applySharedDraftToForm(binding, draft.payload);
+      if (fields.length === 0) {
+        if (panel.dataset) {
+          panel.dataset.sharedDraftState = "noop";
+        }
+        setPanelText(panel, "[data-cf-frappe-shared-draft]", "No applicable shared draft changes.");
+        setPresencePanelSharedDraftAction(panel, false, false);
+        return;
+      }
+      if (panel.dataset) {
+        panel.dataset.sharedDraftState = "applied";
+      }
+      setPanelText(
+        panel,
+        "[data-cf-frappe-shared-draft]",
+        "Applied shared draft from " + draft.actor + ": " + presencePanelFieldSummary(fields) + "."
+      );
+      setPresencePanelSharedDraftAction(panel, false, false);
+    });
+  }
+
+  function setPresencePanelSharedDraft(panel, payload, doctype, documentName) {
+    if (!payload || payload.doctype !== doctype || payload.name !== documentName) {
+      return;
+    }
+    var fields = sharedDraftFields(payload);
+    if (fields.length === 0) {
+      return;
+    }
+    var actor = String(payload.actorId || payload.connectionId || "A collaborator");
+    panel.__cfFrappeSharedDraft = {
+      actor: actor,
+      payload: {
+        baseVersion: payload.baseVersion,
+        patch: isPlainObject(payload.patch) ? cloneMergeValue(payload.patch) : {},
+        unset: Array.isArray(payload.unset) ? payload.unset.slice() : []
+      }
+    };
+    if (panel.dataset) {
+      panel.dataset.sharedDraftState = "available";
+      if (typeof payload.baseVersion === "number") {
+        panel.dataset.sharedDraftBaseVersion = String(payload.baseVersion);
+      }
+    }
+    setPanelText(
+      panel,
+      "[data-cf-frappe-shared-draft]",
+      actor + " shared draft changes: " + presencePanelFieldSummary(fields) + "."
+    );
+    var binding = currentFormBinding();
+    setPresencePanelSharedDraftAction(
+      panel,
+      Boolean(binding && binding.context.doctype === doctype && binding.context.documentName === documentName),
+      false,
+      "Apply shared draft"
+    );
+  }
+
+  function applySharedDraftToForm(binding, payload) {
+    syncFormData(binding);
+    var draft = cloneMergeValue(binding.doc);
+    var changed = [];
+    var patch = isPlainObject(payload && payload.patch) ? payload.patch : {};
+    Object.keys(patch).forEach(function (field) {
+      var fieldname = String(field || "").trim();
+      if (!fieldname || isInternalFormField(fieldname)) {
+        return;
+      }
+      draft[fieldname] = cloneMergeValue(patch[field]);
+      changed.push(fieldname);
+    });
+    (Array.isArray(payload && payload.unset) ? payload.unset : []).forEach(function (field) {
+      var fieldname = String(field || "").trim();
+      if (!fieldname || isInternalFormField(fieldname) || changed.indexOf(fieldname) >= 0) {
+        return;
+      }
+      delete draft[fieldname];
+      changed.push(fieldname);
+    });
+    if (changed.length === 0) {
+      return changed;
+    }
+    binding.doc = draft;
+    binding.frm.doc = draft;
+    writeDocumentToForm(binding, draft);
+    binding.frm.dirty();
+    changed.forEach(function (field) {
+      triggerFormEvent(binding, field);
+    });
+    return changed;
+  }
+
+  function sharedDraftFields(payload) {
+    var seen = {};
+    var fields = [];
+    var patch = isPlainObject(payload && payload.patch) ? payload.patch : {};
+    Object.keys(patch).forEach(function (field) {
+      addSharedDraftField(fields, seen, field);
+    });
+    (Array.isArray(payload && payload.unset) ? payload.unset : []).forEach(function (field) {
+      addSharedDraftField(fields, seen, field);
+    });
+    return fields;
+  }
+
+  function addSharedDraftField(fields, seen, field) {
+    var fieldname = String(field || "").trim();
+    if (!fieldname || seen[fieldname]) {
+      return;
+    }
+    seen[fieldname] = true;
+    fields.push(fieldname);
+  }
+
+  function presencePanelFieldSummary(fields) {
+    var visible = fields.slice(0, 5);
+    var suffix = fields.length > visible.length ? " +" + String(fields.length - visible.length) + " more" : "";
+    return visible.join(", ") + suffix;
+  }
+
+  function setPresencePanelSharedDraftAction(panel, visible, disabled, label) {
+    var button = panel.querySelector && panel.querySelector("[data-cf-frappe-apply-shared-draft]");
     if (!button) {
       return;
     }

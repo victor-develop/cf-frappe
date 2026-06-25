@@ -477,8 +477,10 @@ export function renderDocumentPresencePanel(
     </div>
     <p class="presence-list" data-cf-frappe-presence-list>Checking active collaborators.</p>
     <p class="presence-list" data-cf-frappe-field-edits>No live field edits.</p>
+    <p class="presence-list" data-cf-frappe-shared-draft>No shared draft proposals.</p>
     <p class="presence-list" data-cf-frappe-document-update>Viewing latest saved version.</p>
     <button type="button" data-cf-frappe-merge-save hidden>Merge saved changes</button>
+    <button type="button" data-cf-frappe-apply-shared-draft hidden>Apply shared draft</button>
   </section>`;
 }
 
