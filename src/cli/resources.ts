@@ -1,6 +1,9 @@
+import { readFile, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import {
   requestRemoteAdmin,
   requestRemoteAdminPayload,
+  requestRemoteAdminResponse,
   type RemoteAdminIo,
   type RemoteHeaderOption
 } from "./remote-admin.js";
@@ -16,7 +19,10 @@ export type ResourceRemoteAction =
   | "create"
   | "delete"
   | "duplicate"
+  | "export"
   | "get"
+  | "import"
+  | "import-template"
   | "list"
   | "submit"
   | "transition"
@@ -35,10 +41,15 @@ export interface ResourceRemoteCommand {
   readonly command?: string;
   readonly data?: Record<string, unknown>;
   readonly newName?: string;
+  readonly outputPath?: string;
+  readonly path?: string;
+  readonly importMode?: "create" | "update";
   readonly expectedVersion?: number;
+  readonly maxRows?: number;
   readonly documents?: readonly ResourceRemoteSelection[];
   readonly filters?: readonly ResourceRemoteFilter[];
   readonly filterExpression?: Record<string, unknown>;
+  readonly savedFilter?: string;
   readonly limit?: number;
   readonly offset?: number;
   readonly orderBy?: string;
@@ -54,6 +65,10 @@ export interface ResourceRemoteFilter {
 export interface ResourceRemoteSelection {
   readonly name: string;
   readonly expectedVersion?: number;
+}
+
+export interface ResourceRemoteIo extends RemoteAdminIo {
+  readonly cwd?: string;
 }
 
 export class ResourceRemoteError extends Error {
@@ -95,10 +110,78 @@ interface BulkResourceFailureResponse {
   readonly status?: number;
 }
 
+interface DocumentImportResponse {
+  readonly doctype?: string;
+  readonly mode?: "create" | "update";
+  readonly total?: number;
+  readonly succeeded?: readonly DocumentImportSuccessResponse[];
+  readonly failed?: readonly DocumentImportFailureResponse[];
+}
+
+interface DocumentImportSuccessResponse {
+  readonly row: number;
+  readonly action: "create" | "update";
+  readonly name: string;
+}
+
+interface DocumentImportFailureResponse {
+  readonly row: number;
+  readonly action: "create" | "update";
+  readonly name?: string;
+  readonly code?: string;
+  readonly message?: string;
+  readonly status?: number;
+}
+
 export async function runRemoteResourceCommand(
   command: ResourceRemoteCommand,
-  io: RemoteAdminIo = {}
+  io: ResourceRemoteIo = {}
 ): Promise<string> {
+  if (command.action === "export") {
+    const query = listQuery(command);
+    const downloaded = await downloadRemoteResourceCsv(command, io, "export", {
+      method: "GET",
+      path: `/api/resource/${encodeURIComponent(command.doctype)}/export.csv`,
+      ...(query === undefined ? {} : { query })
+    });
+    return formatResourceCsvDownload(
+      command.url,
+      "Downloaded resource CSV export",
+      command.doctype,
+      downloaded.output,
+      downloaded.bytes,
+      downloaded.response
+    );
+  }
+  if (command.action === "import-template") {
+    const downloaded = await downloadRemoteResourceCsv(command, io, "import template", {
+      method: "GET",
+      path: `/api/resource/${encodeURIComponent(command.doctype)}/import-template.csv`
+    });
+    return formatResourceCsvDownload(
+      command.url,
+      "Downloaded resource CSV import template",
+      command.doctype,
+      downloaded.output,
+      downloaded.bytes,
+      downloaded.response
+    );
+  }
+  if (command.action === "import") {
+    const csv = await uploadCsvBody(command, io.cwd);
+    const query = queryParams({
+      ...(command.importMode === undefined ? {} : { mode: command.importMode }),
+      ...(command.maxRows === undefined ? {} : { max_rows: String(command.maxRows) })
+    });
+    const data = await requestRemoteResource<DocumentImportResponse>(command, io, {
+      contentType: "text/csv",
+      method: "POST",
+      path: `/api/resource/${encodeURIComponent(command.doctype)}/import.csv`,
+      rawBody: csv,
+      ...(query === undefined ? {} : { query })
+    });
+    return formatResourceImport(command.url, data);
+  }
   if (command.action === "list") {
     const query = listQuery(command);
     const payload = await requestRemoteResourcePayload<ResourceListResponse>(command, io, {
@@ -201,9 +284,11 @@ export async function runRemoteResourceCommand(
 
 function requestRemoteResource<TData>(
   command: ResourceRemoteCommand,
-  io: RemoteAdminIo,
+  io: ResourceRemoteIo,
   request: {
     readonly body?: Record<string, unknown>;
+    readonly rawBody?: BodyInit;
+    readonly contentType?: string;
     readonly method: "DELETE" | "GET" | "POST" | "PUT";
     readonly path: string;
     readonly query?: URLSearchParams;
@@ -219,7 +304,7 @@ function requestRemoteResource<TData>(
 
 function requestRemoteResourcePayload<TPayload>(
   command: ResourceRemoteCommand,
-  io: RemoteAdminIo,
+  io: ResourceRemoteIo,
   request: {
     readonly method: "GET";
     readonly path: string;
@@ -234,6 +319,45 @@ function requestRemoteResourcePayload<TPayload>(
   });
 }
 
+function requestRemoteResourceResponse(
+  command: ResourceRemoteCommand,
+  io: ResourceRemoteIo,
+  request: {
+    readonly method: "GET";
+    readonly path: string;
+    readonly query?: URLSearchParams;
+  }
+): Promise<Response> {
+  return requestRemoteAdminResponse<ResourceRemoteError>(command, io, request, {
+    accept: "*/*",
+    error: ResourceRemoteError,
+    fetchLabel: "remote resource commands",
+    resourceLabel: "Remote resource",
+    urlLabel: "Remote resource"
+  });
+}
+
+async function downloadRemoteResourceCsv(
+  command: ResourceRemoteCommand,
+  io: ResourceRemoteIo,
+  action: string,
+  request: {
+    readonly method: "GET";
+    readonly path: string;
+    readonly query?: URLSearchParams;
+  }
+): Promise<{ readonly output: string; readonly bytes: number; readonly response: Response }> {
+  const output = downloadOutputPath(command, io.cwd, action);
+  const response = await requestRemoteResourceResponse(command, io, request);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  try {
+    await writeFile(output, bytes);
+  } catch (error) {
+    throw new ResourceRemoteError(`Could not write resource ${action} CSV '${command.outputPath}': ${errorMessage(error)}`);
+  }
+  return { output, bytes: bytes.byteLength, response };
+}
+
 function listQuery(command: ResourceRemoteCommand): URLSearchParams | undefined {
   const params = new URLSearchParams();
   for (const filter of command.filters ?? []) {
@@ -241,6 +365,9 @@ function listQuery(command: ResourceRemoteCommand): URLSearchParams | undefined 
   }
   if (command.filterExpression !== undefined) {
     params.set("filter_expression", JSON.stringify(command.filterExpression));
+  }
+  if (command.savedFilter !== undefined) {
+    params.set("saved_filter", command.savedFilter);
   }
   if (command.limit !== undefined) {
     params.set("limit", String(command.limit));
@@ -256,6 +383,14 @@ function listQuery(command: ResourceRemoteCommand): URLSearchParams | undefined 
   }
   if (command.useDefaultFilters === false) {
     params.set("default_filters", "0");
+  }
+  return params.toString().length === 0 ? undefined : params;
+}
+
+function queryParams(values: Record<string, string>): URLSearchParams | undefined {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(values)) {
+    params.set(key, value);
   }
   return params.toString().length === 0 ? undefined : params;
 }
@@ -280,6 +415,24 @@ function requiredResourceData(command: ResourceRemoteCommand, action: string): R
     throw new ResourceRemoteError(`Resource ${action} requires --data-json`);
   }
   return command.data;
+}
+
+async function uploadCsvBody(command: ResourceRemoteCommand, cwd = process.cwd()): Promise<string> {
+  if (command.path === undefined) {
+    throw new ResourceRemoteError("Resource import requires --path");
+  }
+  try {
+    return await readFile(resolve(cwd, command.path), "utf8");
+  } catch (error) {
+    throw new ResourceRemoteError(`Could not read resource import CSV '${command.path}': ${errorMessage(error)}`);
+  }
+}
+
+function downloadOutputPath(command: ResourceRemoteCommand, cwd = process.cwd(), action = "download"): string {
+  if (command.outputPath === undefined) {
+    throw new ResourceRemoteError(`Resource ${action} requires --output`);
+  }
+  return resolve(cwd, command.outputPath);
 }
 
 function mutationBody(command: ResourceRemoteCommand): Record<string, unknown> {
@@ -363,6 +516,48 @@ function formatBulkResourceCommand(
   ].join("\n");
 }
 
+function formatResourceCsvDownload(
+  baseUrl: string,
+  title: string,
+  doctype: string,
+  outputPath: string,
+  bytes: number,
+  response: Response
+): string {
+  const contentType = response.headers.get("content-type");
+  return [
+    `${title} from ${baseUrl}`,
+    `- ${doctype} -> ${outputPath} bytes ${String(bytes)}${contentType === null ? "" : ` type ${contentType}`}`,
+    ""
+  ].join("\n");
+}
+
+function formatResourceImport(baseUrl: string, result: DocumentImportResponse): string {
+  const succeeded = result.succeeded ?? [];
+  const failed = result.failed ?? [];
+  return [
+    `Imported resource CSV at ${baseUrl}`,
+    `DocType: ${result.doctype ?? "(unknown)"} Mode: ${result.mode ?? "create"} Total: ${String(result.total ?? succeeded.length + failed.length)}`,
+    `Succeeded: ${String(succeeded.length)}`,
+    ...succeeded.map(importSuccessLine),
+    `Failed: ${String(failed.length)}`,
+    ...failed.map(importFailureLine),
+    ""
+  ].join("\n");
+}
+
+function importSuccessLine(success: DocumentImportSuccessResponse): string {
+  return `- row ${String(success.row)} ${success.action} ${success.name}`;
+}
+
+function importFailureLine(failure: DocumentImportFailureResponse): string {
+  const name = failure.name === undefined ? "" : ` ${failure.name}`;
+  const code = failure.code === undefined ? "UNKNOWN" : failure.code;
+  const status = failure.status === undefined ? "" : ` status ${String(failure.status)}`;
+  const message = failure.message === undefined ? "Resource import failed" : failure.message;
+  return `- row ${String(failure.row)} ${failure.action}${name} failed ${code}${status}: ${message}`;
+}
+
 function resourceLines(documents: readonly DocumentSnapshotResponse[]): readonly string[] {
   if (documents.length === 0) {
     return ["- (none)"];
@@ -406,4 +601,8 @@ function bulkResourceTitle(action: ResourceRemoteAction): string {
     return "Submitted resources";
   }
   return "Cancelled resources";
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

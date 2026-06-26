@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the remote resource lifecycle and bulk CLI slice:
+As of the remote resource CSV operator CLI slice:
 
 - Vitest files: `96`
-- Vitest cases: `1149`
+- Vitest cases: `1150`
 
 ## Implication
 

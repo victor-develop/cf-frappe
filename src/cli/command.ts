@@ -157,6 +157,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     if (command.kind === "resources") {
       io.stdout.write(await runRemoteResourceCommand(command, {
+        cwd: io.cwd(),
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -1457,10 +1458,15 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
   let commandName: string | undefined;
   let data: Record<string, unknown> | undefined;
   let newName: string | undefined;
+  let outputPath: string | undefined;
+  let path: string | undefined;
+  let importMode: ResourceRemoteCommand["importMode"] | undefined;
   let expectedVersion: number | undefined;
+  let maxRows: number | undefined;
   const documents: NonNullable<ResourceRemoteCommand["documents"]>[number][] = [];
   const filters: NonNullable<ResourceRemoteCommand["filters"]>[number][] = [];
   let filterExpression: Record<string, unknown> | undefined;
+  let savedFilter: string | undefined;
   let limit: number | undefined;
   let offset: number | undefined;
   let orderBy: string | undefined;
@@ -1599,6 +1605,61 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
       index += 1;
       continue;
     }
+    if (arg === "--output") {
+      if (action !== "export" && action !== "import-template") {
+        return { kind: "invalid", message: `Cannot use --output with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      outputPath = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--path") {
+      if (action !== "import") {
+        return { kind: "invalid", message: `Cannot use --path with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      path = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--mode") {
+      if (action !== "import") {
+        return { kind: "invalid", message: `Cannot use --mode with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      if (value !== "create" && value !== "update") {
+        return { kind: "invalid", message: "Resource import mode must be create or update" };
+      }
+      importMode = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--max-rows") {
+      if (action !== "import") {
+        return { kind: "invalid", message: `Cannot use --max-rows with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parsePositiveInteger(value, "Resource import max rows");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      maxRows = parsed;
+      index += 1;
+      continue;
+    }
     if (arg === "--document") {
       if (!isBulkResourceAction(action)) {
         return { kind: "invalid", message: `Cannot use --document with resources ${action}` };
@@ -1628,7 +1689,7 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--filter") {
-      if (action !== "list") {
+      if (!isResourceListQueryAction(action)) {
         return { kind: "invalid", message: `Cannot use --filter with resources ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1644,7 +1705,7 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--filter-expression-json") {
-      if (action !== "list") {
+      if (!isResourceListQueryAction(action)) {
         return { kind: "invalid", message: `Cannot use --filter-expression-json with resources ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1659,8 +1720,20 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
       index += 1;
       continue;
     }
+    if (arg === "--saved-filter") {
+      if (!isResourceListQueryAction(action)) {
+        return { kind: "invalid", message: `Cannot use --saved-filter with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      savedFilter = value;
+      index += 1;
+      continue;
+    }
     if (arg === "--limit") {
-      if (action !== "list") {
+      if (!isResourceListQueryAction(action)) {
         return { kind: "invalid", message: `Cannot use --limit with resources ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1692,7 +1765,7 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--order-by") {
-      if (action !== "list") {
+      if (!isResourceListQueryAction(action)) {
         return { kind: "invalid", message: `Cannot use --order-by with resources ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1704,7 +1777,7 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--order") {
-      if (action !== "list") {
+      if (!isResourceListQueryAction(action)) {
         return { kind: "invalid", message: `Cannot use --order with resources ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1719,7 +1792,7 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--no-default-filters") {
-      if (action !== "list") {
+      if (!isResourceListQueryAction(action)) {
         return { kind: "invalid", message: `Cannot use --no-default-filters with resources ${action}` };
       }
       useDefaultFilters = false;
@@ -1746,6 +1819,12 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
   if (action === "command" && commandName === undefined) {
     return { kind: "invalid", message: "Resource command requires --command" };
   }
+  if ((action === "export" || action === "import-template") && outputPath === undefined) {
+    return { kind: "invalid", message: `Resource ${action} requires --output` };
+  }
+  if (action === "import" && path === undefined) {
+    return { kind: "invalid", message: "Resource import requires --path" };
+  }
   if (isBulkResourceAction(action) && documents.length === 0) {
     return { kind: "invalid", message: `Resource ${action} requires at least one --document or --document-version` };
   }
@@ -1764,10 +1843,15 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
     ...(commandName === undefined ? {} : { command: commandName }),
     ...(data === undefined ? {} : { data }),
     ...(newName === undefined ? {} : { newName }),
+    ...(outputPath === undefined ? {} : { outputPath }),
+    ...(path === undefined ? {} : { path }),
+    ...(importMode === undefined ? {} : { importMode }),
     ...(expectedVersion === undefined ? {} : { expectedVersion }),
+    ...(maxRows === undefined ? {} : { maxRows }),
     ...(documents.length === 0 ? {} : { documents }),
     ...(filters.length === 0 ? {} : { filters }),
     ...(filterExpression === undefined ? {} : { filterExpression }),
+    ...(savedFilter === undefined ? {} : { savedFilter }),
     ...(limit === undefined ? {} : { limit }),
     ...(offset === undefined ? {} : { offset }),
     ...(orderBy === undefined ? {} : { orderBy }),
@@ -1805,7 +1889,10 @@ function resourceAction(value: string): ResourceRemoteAction | undefined {
     value === "get" ||
     value === "create" ||
     value === "duplicate" ||
+    value === "export" ||
     value === "submit" ||
+    value === "import" ||
+    value === "import-template" ||
     value === "transition" ||
     value === "update" ||
     value === "delete"
@@ -1849,6 +1936,10 @@ function isBulkResourceAction(action: ResourceRemoteAction): boolean {
     action === "bulk-delete" ||
     action === "bulk-submit" ||
     action === "bulk-transition";
+}
+
+function isResourceListQueryAction(action: ResourceRemoteAction): boolean {
+  return action === "list" || action === "export";
 }
 
 function jobAction(value: string): JobRemoteAction | undefined {
@@ -2304,7 +2395,7 @@ function helpText(): string {
     "  cf-frappe jobs schedule-reset --url <origin> --id <scheduleId> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs schedule-save --url <origin> [--id <scheduleId>] --cron <expr> --job <name> [--enabled|--disabled] [--payload-json <json>] [--metadata-json <json>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs schedule-delete --url <origin> --id <scheduleId> [--header <name:value>] [--header-env <name=ENV>]",
-    "  cf-frappe resources list --url <origin> --doctype <doctype> [--filter <field[__operator]=value>] [--filter-expression-json <json>] [--limit <n>] [--offset <n>] [--order-by <field>] [--order <asc|desc>] [--no-default-filters] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources list --url <origin> --doctype <doctype> [--filter <field[__operator]=value>] [--filter-expression-json <json>] [--saved-filter <id>] [--limit <n>] [--offset <n>] [--order-by <field>] [--order <asc|desc>] [--no-default-filters] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources get --url <origin> --doctype <doctype> --name <docname> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources create --url <origin> --doctype <doctype> --data-json <json> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources update --url <origin> --doctype <doctype> --name <docname> --data-json <json> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
@@ -2315,6 +2406,9 @@ function helpText(): string {
     "  cf-frappe resources command --url <origin> --doctype <doctype> --name <docname> --command <name> [--data-json <json>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources duplicate --url <origin> --doctype <doctype> --name <docname> [--data-json <json>] [--new-name <docname>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources amend --url <origin> --doctype <doctype> --name <docname> [--data-json <json>] [--new-name <docname>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources export --url <origin> --doctype <doctype> --output <localPath> [--filter <field[__operator]=value>] [--filter-expression-json <json>] [--saved-filter <id>] [--limit <n>] [--order-by <field>] [--order <asc|desc>] [--no-default-filters] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources import-template --url <origin> --doctype <doctype> --output <localPath> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources import --url <origin> --doctype <doctype> --path <localPath> [--mode <create|update>] [--max-rows <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources bulk-delete --url <origin> --doctype <doctype> (--document <docname>|--document-version <docname:version>)... [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources bulk-submit --url <origin> --doctype <doctype> (--document <docname>|--document-version <docname:version>)... [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources bulk-cancel --url <origin> --doctype <doctype> (--document <docname>|--document-version <docname:version>)... [--header <name:value>] [--header-env <name=ENV>]",

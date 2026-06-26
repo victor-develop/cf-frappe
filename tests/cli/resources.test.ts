@@ -1,6 +1,19 @@
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { parseCliArgs, runCli, type WritableText } from "../../src/cli/command";
 
 describe("cf-frappe CLI remote resources", () => {
+  let tempRoot: string;
+
+  beforeEach(async () => {
+    tempRoot = await mkdtemp(join(tmpdir(), "cf-frappe-resources-cli-"));
+  });
+
+  afterEach(async () => {
+    await rm(tempRoot, { force: true, recursive: true });
+  });
+
   it("parses remote resource CRUD commands", () => {
     expect(parseCliArgs([
       "resources",
@@ -15,6 +28,8 @@ describe("cf-frappe CLI remote resources", () => {
       "priority__ne=Low",
       "--filter-expression-json",
       "{\"kind\":\"group\",\"match\":\"all\",\"filters\":[]}",
+      "--saved-filter",
+      "open-tasks",
       "--limit",
       "10",
       "--offset",
@@ -42,6 +57,7 @@ describe("cf-frappe CLI remote resources", () => {
         { key: "priority__ne", value: "Low" }
       ],
       filterExpression: { kind: "group", match: "all", filters: [] },
+      savedFilter: "open-tasks",
       limit: 10,
       offset: 5,
       orderBy: "priority",
@@ -186,6 +202,88 @@ describe("cf-frappe CLI remote resources", () => {
 
     expect(parseCliArgs([
       "resources",
+      "export",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--filter",
+      "status=Open",
+      "--filter-expression-json",
+      "{\"kind\":\"group\",\"match\":\"all\",\"filters\":[]}",
+      "--saved-filter",
+      "open-tasks",
+      "--limit",
+      "50",
+      "--order-by",
+      "modified",
+      "--order",
+      "desc",
+      "--no-default-filters",
+      "--output",
+      "task-export.csv",
+      "--header-env",
+      "Authorization=CF_FRAPPE_AUTH"
+    ])).toEqual({
+      kind: "resources",
+      action: "export",
+      url: "https://app.example",
+      headers: [{ kind: "env", name: "Authorization", envName: "CF_FRAPPE_AUTH" }],
+      doctype: "Task",
+      filters: [{ key: "status", value: "Open" }],
+      filterExpression: { kind: "group", match: "all", filters: [] },
+      savedFilter: "open-tasks",
+      limit: 50,
+      orderBy: "modified",
+      order: "desc",
+      useDefaultFilters: false,
+      outputPath: "task-export.csv"
+    });
+
+    expect(parseCliArgs([
+      "resources",
+      "import-template",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--output",
+      "task-template.csv"
+    ])).toEqual({
+      kind: "resources",
+      action: "import-template",
+      url: "https://app.example",
+      headers: [],
+      doctype: "Task",
+      outputPath: "task-template.csv"
+    });
+
+    expect(parseCliArgs([
+      "resources",
+      "import",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--path",
+      "task-import.csv",
+      "--mode",
+      "update",
+      "--max-rows",
+      "25"
+    ])).toEqual({
+      kind: "resources",
+      action: "import",
+      url: "https://app.example",
+      headers: [],
+      doctype: "Task",
+      path: "task-import.csv",
+      importMode: "update",
+      maxRows: 25
+    });
+
+    expect(parseCliArgs([
+      "resources",
       "bulk-transition",
       "--url",
       "https://app.example",
@@ -301,6 +399,112 @@ describe("cf-frappe CLI remote resources", () => {
     ])).toEqual({
       kind: "invalid",
       message: "Resource bulk-delete requires at least one --document or --document-version"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "export",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Resource export requires --output"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "import-template",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Resource import-template requires --output"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "import",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Resource import requires --path"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "import",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--path",
+      "tasks.csv",
+      "--mode",
+      "merge"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Resource import mode must be create or update"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "import",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--path",
+      "tasks.csv",
+      "--max-rows",
+      "0"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Resource import max rows must be a positive integer"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "export",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--output",
+      "tasks.csv",
+      "--offset",
+      "10"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Cannot use --offset with resources export"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "list",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--output",
+      "tasks.csv"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Cannot use --output with resources list"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "get",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK-1",
+      "--saved-filter",
+      "open-tasks"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Cannot use --saved-filter with resources get"
     });
     expect(parseCliArgs([
       "resources",
@@ -709,6 +913,129 @@ describe("cf-frappe CLI remote resources", () => {
     expect(bulkDeleteCalls[0]?.body).toBe("{\"documents\":[{\"name\":\"TASK-1\",\"expectedVersion\":2}]}");
   });
 
+  it("exports, downloads import templates, and imports CSV through the generated resource API", async () => {
+    const exportCalls: RemoteCall[] = [];
+    const exportStdout = textBuffer();
+    const exportExit = await runCli(
+      [
+        "resources",
+        "export",
+        "--url",
+        "https://app.example/cf",
+        "--doctype",
+        "Task",
+        "--filter",
+        "status=Open",
+        "--saved-filter",
+        "open-tasks",
+        "--limit",
+        "2",
+        "--order-by",
+        "modified",
+        "--order",
+        "desc",
+        "--no-default-filters",
+        "--output",
+        "tasks.csv",
+        "--header-env",
+        "Authorization=CF_FRAPPE_AUTH"
+      ],
+      {
+        cwd: () => tempRoot,
+        env: (name) => name === "CF_FRAPPE_AUTH" ? "Bearer test-token" : undefined,
+        fetch: fakeTextFetch(exportCalls, "name,status\nTASK-1,Open\n", {
+          "content-type": "text/csv; charset=utf-8"
+        }),
+        stdout: exportStdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(exportExit).toBe(0);
+    expect(exportCalls[0]?.url).toBe(
+      "https://app.example/cf/api/resource/Task/export.csv?filter_status=Open&saved_filter=open-tasks&limit=2&order_by=modified&order=desc&default_filters=0"
+    );
+    expect(exportCalls[0]?.method).toBe("GET");
+    expect(exportCalls[0]?.headers.get("accept")).toBe("*/*");
+    expect(exportCalls[0]?.headers.get("authorization")).toBe("Bearer test-token");
+    await expect(readFile(join(tempRoot, "tasks.csv"), "utf8")).resolves.toBe("name,status\nTASK-1,Open\n");
+    expect(exportStdout.text()).toContain("Downloaded resource CSV export from https://app.example/cf");
+    expect(exportStdout.text()).toContain("Task -> ");
+    expect(exportStdout.text()).toContain("type text/csv; charset=utf-8");
+
+    const templateCalls: RemoteCall[] = [];
+    const templateStdout = textBuffer();
+    const templateExit = await runCli(
+      [
+        "resources",
+        "import-template",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--output",
+        "task-template.csv"
+      ],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeTextFetch(templateCalls, "name,expectedVersion,title\n", {
+          "content-type": "text/csv"
+        }),
+        stdout: templateStdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(templateExit).toBe(0);
+    expect(templateCalls[0]?.url).toBe("https://app.example/api/resource/Task/import-template.csv");
+    await expect(readFile(join(tempRoot, "task-template.csv"), "utf8")).resolves.toBe("name,expectedVersion,title\n");
+    expect(templateStdout.text()).toContain("Downloaded resource CSV import template from https://app.example");
+
+    await writeFile(join(tempRoot, "task-import.csv"), "name,expectedVersion,status\nTASK-1,1,Closed\n");
+    const importCalls: RemoteCall[] = [];
+    const importStdout = textBuffer();
+    const importExit = await runCli(
+      [
+        "resources",
+        "import",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--path",
+        "task-import.csv",
+        "--mode",
+        "update",
+        "--max-rows",
+        "25"
+      ],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetch(importCalls, {
+          data: {
+            doctype: "Task",
+            mode: "update",
+            total: 2,
+            succeeded: [{ row: 2, action: "update", name: "TASK-1" }],
+            failed: [{ row: 3, action: "update", name: "TASK-2", code: "BAD_REQUEST", status: 400, message: "Invalid count" }]
+          }
+        }, 207),
+        stdout: importStdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(importExit).toBe(0);
+    expect(importCalls[0]?.url).toBe("https://app.example/api/resource/Task/import.csv?mode=update&max_rows=25");
+    expect(importCalls[0]?.method).toBe("POST");
+    expect(importCalls[0]?.headers.get("content-type")).toBe("text/csv");
+    expect(importCalls[0]?.body).toBe("name,expectedVersion,status\nTASK-1,1,Closed\n");
+    expect(importStdout.text()).toContain("Imported resource CSV at https://app.example");
+    expect(importStdout.text()).toContain("DocType: Task Mode: update Total: 2");
+    expect(importStdout.text()).toContain("- row 2 update TASK-1");
+    expect(importStdout.text()).toContain("- row 3 update TASK-2 failed BAD_REQUEST status 400: Invalid count");
+  });
+
   it("maps remote resource API errors and missing env headers to CLI failures", async () => {
     const remoteStderr = textBuffer();
     const remoteExit = await runCli(
@@ -776,6 +1103,21 @@ function fakeFetch(calls: RemoteCall[], responseBody: unknown, status = 200): ty
       headers: { "content-type": "application/json" },
       status
     });
+  };
+}
+
+function fakeTextFetch(calls: RemoteCall[], responseBody: string, headers: Record<string, string>, status = 200): typeof fetch {
+  return async (input, init) => {
+    const body = init?.body === undefined || init.body === null
+      ? undefined
+      : await new Response(init.body).text();
+    calls.push({
+      url: String(input),
+      method: init?.method ?? "GET",
+      headers: new Headers(init?.headers),
+      ...(body === undefined ? {} : { body })
+    });
+    return new Response(responseBody, { headers, status });
   };
 }
 

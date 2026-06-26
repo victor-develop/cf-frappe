@@ -394,6 +394,8 @@ The generated API includes:
 - `DELETE /api/workflows/:doctype`
 - `GET /api/realtime/presence`
 - `POST /api/resource/:doctype`
+- `GET /api/resource/:doctype/export.csv`
+- `GET /api/resource/:doctype/import-template.csv`
 - `POST /api/resource/:doctype/import.csv`
 - `POST /api/resource/:doctype/delete`
 - `POST /api/resource/:doctype/bulk-submit`
@@ -641,6 +643,9 @@ npx cf-frappe resources transition --url https://your-worker.example --doctype T
 npx cf-frappe resources command --url https://your-worker.example --doctype Task --name TASK-1 --command raisePriority --data-json '{"priority":"High"}' --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources duplicate --url https://your-worker.example --doctype Task --name TASK-1 --new-name TASK-1-copy --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources bulk-transition --url https://your-worker.example --doctype Task --transition close --document TASK-1 --document-version TASK-2:4 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources export --url https://your-worker.example --doctype Task --filter workflow_state=Open --output ./tasks.csv --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources import-template --url https://your-worker.example --doctype Task --output ./task-import-template.csv --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources import --url https://your-worker.example --doctype Task --path ./tasks.csv --mode update --max-rows 500 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources delete --url https://your-worker.example --doctype Task --name TASK-1 --expected-version 2 --header-env Authorization=CF_FRAPPE_AUTH
 ```
 

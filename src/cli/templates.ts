@@ -309,6 +309,9 @@ npx cf-frappe resources transition --url https://your-worker.example --doctype T
 npx cf-frappe resources command --url https://your-worker.example --doctype Task --name "Follow up" --command raisePriority --data-json '{"priority":"High"}' --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources duplicate --url https://your-worker.example --doctype Task --name "Follow up" --new-name "Follow up copy" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources bulk-transition --url https://your-worker.example --doctype Task --transition close --document "Follow up" --document-version "Review generated Desk workspace:1" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources export --url https://your-worker.example --doctype Task --filter workflow_state=Open --output ./tasks.csv --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources import-template --url https://your-worker.example --doctype Task --output ./task-import-template.csv --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources import --url https://your-worker.example --doctype Task --path ./tasks.csv --mode update --max-rows 500 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources delete --url https://your-worker.example --doctype Task --name "Follow up" --expected-version 2 --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 
