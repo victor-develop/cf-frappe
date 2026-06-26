@@ -123,6 +123,9 @@ interface DeskClientRuntime {
     readonly doctype: (doctype: string) => Promise<unknown>;
     readonly doctypes: () => Promise<unknown>;
     readonly listView: (doctype: string) => Promise<unknown>;
+    readonly printFormat: (format: string) => Promise<unknown>;
+    readonly printFormats: (options?: { readonly doctype?: string }) => Promise<unknown>;
+    readonly report: (report: string) => Promise<unknown>;
     readonly reports: () => Promise<unknown>;
     readonly workspace: (workspace: string) => Promise<unknown>;
     readonly workspaces: () => Promise<unknown>;
@@ -2496,6 +2499,7 @@ describe("Desk client runtime", () => {
     await expect(runtime.meta.doctypes()).resolves.toEqual({ route: "/api/meta/doctypes" });
     await expect(runtime.meta.doctype("Task Type")).resolves.toEqual({ route: "/api/meta/doctypes/Task%20Type" });
     await expect(runtime.meta.reports()).resolves.toEqual({ route: "/api/meta/reports" });
+    await expect(runtime.meta.report("Open Notes")).resolves.toEqual({ route: "/api/meta/reports/Open%20Notes" });
     await expect(runtime.meta.workspaces()).resolves.toEqual({ route: "/api/meta/workspaces" });
     await expect(runtime.meta.workspace("Team Operations")).resolves.toEqual({ route: "/api/meta/workspaces/Team%20Operations" });
 
@@ -2503,6 +2507,7 @@ describe("Desk client runtime", () => {
       "GET /api/meta/doctypes",
       "GET /api/meta/doctypes/Task%20Type",
       "GET /api/meta/reports",
+      "GET /api/meta/reports/Open%20Notes",
       "GET /api/meta/workspaces",
       "GET /api/meta/workspaces/Team%20Operations"
     ]);
@@ -2511,9 +2516,34 @@ describe("Desk client runtime", () => {
       "same-origin",
       "same-origin",
       "same-origin",
+      "same-origin",
       "same-origin"
     ]);
-    expect(calls.map((call) => call.init.body)).toEqual([undefined, undefined, undefined, undefined, undefined]);
+    expect(calls.map((call) => call.init.body)).toEqual([undefined, undefined, undefined, undefined, undefined, undefined]);
+  });
+
+  it("exposes print metadata through the meta namespace", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { route: String(url) } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.meta.printFormats({ doctype: "Task Type" })).resolves.toEqual({
+      route: "/api/meta/print-formats?doctype=Task+Type"
+    });
+    await expect(runtime.meta.printFormat("Task Standard")).resolves.toEqual({
+      route: "/api/meta/print-formats/Task%20Standard"
+    });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/meta/print-formats?doctype=Task+Type",
+      "GET /api/meta/print-formats/Task%20Standard"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin"]);
+    expect(calls.map((call) => call.init.body)).toEqual([undefined, undefined]);
   });
 
   it("wraps print metadata and document routes without browser-side rendering decisions", async () => {

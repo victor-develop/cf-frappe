@@ -3229,6 +3229,15 @@ export function renderDeskClientScript(): string {
       listView: function (doctype) {
         return request("/api/meta/doctypes/" + encodePart(doctype) + "/list-view").then(unwrapData);
       },
+      printFormat: function (format) {
+        return request(printFormatPath(format)).then(unwrapData);
+      },
+      printFormats: function (options) {
+        return request(withQuery(printFormatPath(), printFormatParams(options || {}))).then(unwrapData);
+      },
+      report: function (report) {
+        return request("/api/meta/reports/" + encodePart(report)).then(unwrapData);
+      },
       reports: function () {
         return request("/api/meta/reports").then(unwrapData);
       },
