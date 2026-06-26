@@ -125,6 +125,22 @@ function wranglerJsonc(input: StarterProjectTemplateInput): string {
       }
     ]
   },
+  "queues": {
+    "producers": [
+      {
+        "binding": "JOBS",
+        "queue": "${input.projectName}-jobs"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "${input.projectName}-jobs",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 3
+      }
+    ]
+  },
   "migrations": [
     {
       "tag": "v1",
@@ -243,6 +259,15 @@ The install command saves package metadata, runs the detected package manager (\
 
 After adding app DocType indexes, or changing them with a DocType version bump, generate reviewable D1 migration files with \`npm run d1:generate\`, then apply them locally or remotely with the existing migration scripts.
 
+## Deployment
+
+Create the D1 database and Queue before the first remote deploy:
+
+\`\`\`bash
+npx wrangler d1 create ${input.databaseName}
+npx wrangler queues create ${input.projectName}-jobs
+\`\`\`
+
 Registered data patches can be inspected and run against a deployed Worker through the admin API. Keep secret auth material in environment variables and pass it with \`--header-env\`. Assuming \`CF_FRAPPE_AUTH\` is already exported by your shell secret manager or CI secret store:
 
 \`\`\`bash
@@ -253,6 +278,8 @@ npx cf-frappe data-patches apply --url https://your-worker.example --id tasks.se
 npx cf-frappe data-patches rollback --url https://your-worker.example --id tasks.seed_starter_tasks --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe data-patches retry --url https://your-worker.example --id tasks.seed_starter_tasks --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe data-patches rollback-retry --url https://your-worker.example --id tasks.seed_starter_tasks --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe data-patches enqueue --url https://your-worker.example --id tasks.seed_starter_tasks --idempotency-key patches:starter-seed --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe data-patches rollback-enqueue --url https://your-worker.example --id tasks.seed_starter_tasks --idempotency-key patches:starter-seed-rollback --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe data-patches rollback-retry-enqueue --url https://your-worker.example --id tasks.seed_starter_tasks --idempotency-key patches:rollback-retry-1 --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 
@@ -683,13 +710,19 @@ function workerTs(input: StarterProjectTemplateInput): string {
 
 function signedSessionWorkerTs(): string {
   return `import {
+  createDataPatchApplyJob,
+  createDataPatchRollbackJob,
+  createDataPatchRollbackRetryJob,
+  createJobRegistry,
   signedSessionActorResolver,
   type Actor
 } from "cf-frappe";
 import {
+  CloudflareJobQueue,
   createAggregateCoordinatorClass,
   createCloudFrappeWorker,
-  type CloudFrappeEnv
+  type CloudFrappeEnv,
+  type CloudFrappeRuntimeServices
 } from "cf-frappe/cloudflare";
 import { registry } from "./apps";
 
@@ -705,23 +738,43 @@ export class AggregateCoordinator extends createAggregateCoordinatorClass<Env>({
   registry
 }) {}
 
+const starterJobs = createJobRegistry<CloudFrappeRuntimeServices>({
+  jobs: [
+    createDataPatchApplyJob<CloudFrappeRuntimeServices>(),
+    createDataPatchRollbackJob<CloudFrappeRuntimeServices>(),
+    createDataPatchRollbackRetryJob<CloudFrappeRuntimeServices>()
+  ]
+});
+
 export default createCloudFrappeWorker<Env>({
   registry,
   actor: (request, env) =>
     signedSessionActorResolver({
       secret: env.SESSION_SECRET,
       fallback: () => guestActor
-    })(request)
+    })(request),
+  jobs: {
+    registry: starterJobs,
+    queue: (env) => new CloudflareJobQueue(env.JOBS)
+  }
 });
 `;
 }
 
 function cloudflareAccessWorkerTs(): string {
-  return `import { permissionDenied } from "cf-frappe";
+  return `import {
+  createDataPatchApplyJob,
+  createDataPatchRollbackJob,
+  createDataPatchRollbackRetryJob,
+  createJobRegistry,
+  permissionDenied
+} from "cf-frappe";
 import {
+  CloudflareJobQueue,
   createAggregateCoordinatorClass,
   createCloudFrappeWorker,
-  type CloudFrappeEnv
+  type CloudFrappeEnv,
+  type CloudFrappeRuntimeServices
 } from "cf-frappe/cloudflare";
 import { registry } from "./apps";
 
@@ -731,10 +784,22 @@ export class AggregateCoordinator extends createAggregateCoordinatorClass<Env>({
   registry
 }) {}
 
+const starterJobs = createJobRegistry<CloudFrappeRuntimeServices>({
+  jobs: [
+    createDataPatchApplyJob<CloudFrappeRuntimeServices>(),
+    createDataPatchRollbackJob<CloudFrappeRuntimeServices>(),
+    createDataPatchRollbackRetryJob<CloudFrappeRuntimeServices>()
+  ]
+});
+
 export default createCloudFrappeWorker<Env>({
   registry,
   actor: () => {
     throw permissionDenied("Cloudflare Access JWT is required");
+  },
+  jobs: {
+    registry: starterJobs,
+    queue: (env) => new CloudflareJobQueue(env.JOBS)
   },
   auth: {
     sessionSecret: (env) => env.SESSION_SECRET,
@@ -752,11 +817,20 @@ export default createCloudFrappeWorker<Env>({
 }
 
 function oidcWorkerTs(): string {
-  return `import { oidcGroupsRoleMapper, permissionDenied } from "cf-frappe";
+  return `import {
+  createDataPatchApplyJob,
+  createDataPatchRollbackJob,
+  createDataPatchRollbackRetryJob,
+  createJobRegistry,
+  oidcGroupsRoleMapper,
+  permissionDenied
+} from "cf-frappe";
 import {
+  CloudflareJobQueue,
   createAggregateCoordinatorClass,
   createCloudFrappeWorker,
-  type CloudFrappeEnv
+  type CloudFrappeEnv,
+  type CloudFrappeRuntimeServices
 } from "cf-frappe/cloudflare";
 import { registry } from "./apps";
 
@@ -766,10 +840,22 @@ export class AggregateCoordinator extends createAggregateCoordinatorClass<Env>({
   registry
 }) {}
 
+const starterJobs = createJobRegistry<CloudFrappeRuntimeServices>({
+  jobs: [
+    createDataPatchApplyJob<CloudFrappeRuntimeServices>(),
+    createDataPatchRollbackJob<CloudFrappeRuntimeServices>(),
+    createDataPatchRollbackRetryJob<CloudFrappeRuntimeServices>()
+  ]
+});
+
 export default createCloudFrappeWorker<Env>({
   registry,
   actor: () => {
     throw permissionDenied("OIDC token is required");
+  },
+  jobs: {
+    registry: starterJobs,
+    queue: (env) => new CloudflareJobQueue(env.JOBS)
   },
   auth: {
     sessionSecret: (env) => env.SESSION_SECRET,

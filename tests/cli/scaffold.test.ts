@@ -74,23 +74,30 @@ describe("cf-frappe CLI scaffold", () => {
     const wranglerConfig = JSON.parse(wrangler) as {
       readonly secrets?: { readonly required?: readonly string[] };
       readonly vars?: Record<string, string>;
+      readonly queues?: {
+        readonly producers?: readonly { readonly binding: string; readonly queue: string }[];
+        readonly consumers?: readonly { readonly queue: string; readonly max_batch_size?: number }[];
+      };
     };
     expect(wranglerConfig.secrets?.required).toEqual(["SESSION_SECRET"]);
     expect(wranglerConfig.vars).toBeUndefined();
+    expect(wranglerConfig.queues?.producers).toEqual([{ binding: "JOBS", queue: "demo-app-jobs" }]);
+    expect(wranglerConfig.queues?.consumers).toEqual([
+      { queue: "demo-app-jobs", max_batch_size: 10, max_batch_timeout: 5, max_retries: 3 }
+    ]);
     expect(wrangler).toContain('"new_sqlite_classes": ["AggregateCoordinator"]');
     expect(wrangler).toContain('"directory": "./public"');
-    await expect(readFile(join(target, "src/worker.ts"), "utf8")).resolves.toContain(
-      "signedSessionActorResolver"
-    );
-    await expect(readFile(join(target, "src/worker.ts"), "utf8")).resolves.toContain(
-      'from "cf-frappe/cloudflare"'
-    );
-    await expect(readFile(join(target, "src/worker.ts"), "utf8")).resolves.toContain(
-      "type Env = Cloudflare.Env & CloudFrappeEnv"
-    );
-    await expect(readFile(join(target, "src/worker.ts"), "utf8")).resolves.toContain(
-      'import { registry } from "./apps"'
-    );
+    const worker = await readFile(join(target, "src/worker.ts"), "utf8");
+    expect(worker).toContain("signedSessionActorResolver");
+    expect(worker).toContain('from "cf-frappe/cloudflare"');
+    expect(worker).toContain("type Env = Cloudflare.Env & CloudFrappeEnv");
+    expect(worker).toContain('import { registry } from "./apps"');
+    expect(worker).toContain("createDataPatchApplyJob");
+    expect(worker).toContain("createDataPatchRollbackJob");
+    expect(worker).toContain("createDataPatchRollbackRetryJob");
+    expect(worker).toContain("createJobRegistry<CloudFrappeRuntimeServices>");
+    expect(worker).toContain("new CloudflareJobQueue(env.JOBS)");
+    expect(worker).toContain("jobs: {");
     const taskApp = await readFile(join(target, "src/apps/tasks.ts"), "utf8");
     expect(taskApp).toContain("defineClientScript");
     expect(taskApp).toContain("defineDashboard");
@@ -133,6 +140,15 @@ describe("cf-frappe CLI scaffold", () => {
     );
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "npx cf-frappe data-patches rollback --url https://your-worker.example --id tasks.seed_starter_tasks"
+    );
+    await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
+      "npx wrangler queues create demo-app-jobs"
+    );
+    await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
+      "npx cf-frappe data-patches enqueue --url https://your-worker.example --id tasks.seed_starter_tasks"
+    );
+    await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
+      "npx cf-frappe data-patches rollback-enqueue --url https://your-worker.example --id tasks.seed_starter_tasks"
     );
     await expect(readFile(join(target, "public/assets/task-form.js"), "utf8")).resolves.toContain(
       "window.cfFrappe.form.on"
@@ -191,6 +207,10 @@ describe("cf-frappe CLI scaffold", () => {
     const worker = await readFile(join(target, "src/worker.ts"), "utf8");
     expect(worker).toContain("auth: {");
     expect(worker).toContain("cloudflareAccess");
+    expect(worker).toContain("createDataPatchApplyJob");
+    expect(worker).toContain("createDataPatchRollbackJob");
+    expect(worker).toContain("new CloudflareJobQueue(env.JOBS)");
+    expect(worker).toContain("jobs: {");
     expect(worker).toContain("throw permissionDenied(\"Cloudflare Access JWT is required\")");
     expect(worker).toContain("teamDomain: (env) => env.CF_ACCESS_TEAM_DOMAIN");
     expect(worker).toContain("audience: (env) => env.CF_ACCESS_AUD");
@@ -235,13 +255,18 @@ describe("cf-frappe CLI scaffold", () => {
     const worker = await readFile(join(target, "src/worker.ts"), "utf8");
     expect(worker).toContain("auth: {");
     expect(worker).toContain("oidc: {");
+    expect(worker).toContain("createDataPatchApplyJob");
+    expect(worker).toContain("createDataPatchRollbackJob");
+    expect(worker).toContain("new CloudflareJobQueue(env.JOBS)");
+    expect(worker).toContain("jobs: {");
     expect(worker).toContain("throw permissionDenied(\"OIDC token is required\")");
     expect(worker).toContain("issuer: (env) => env.OIDC_ISSUER");
     expect(worker).toContain("audience: (env) => env.OIDC_AUD");
     expect(worker).toContain("jwksUrl: (env) => env.OIDC_JWKS_URL");
     expect(worker).toContain("provider: \"oidc\"");
     expect(worker).toContain("revalidateSignedSessions: true");
-    expect(worker).toContain("import { oidcGroupsRoleMapper, permissionDenied } from \"cf-frappe\"");
+    expect(worker).toContain("oidcGroupsRoleMapper");
+    expect(worker).toContain("permissionDenied");
     expect(worker).toContain("roles: oidcGroupsRoleMapper()");
     expect(worker).not.toContain("guestActor");
     expect(worker).not.toContain("signedSessionActorResolver");
