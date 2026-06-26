@@ -72,6 +72,12 @@ describe("cf-frappe CLI scaffold", () => {
 
     const wrangler = await readFile(join(target, "wrangler.jsonc"), "utf8");
     const wranglerConfig = JSON.parse(wrangler) as {
+      readonly d1_databases?: readonly {
+        readonly binding: string;
+        readonly database_name: string;
+        readonly database_id: string;
+        readonly migrations_dir: string;
+      }[];
       readonly secrets?: { readonly required?: readonly string[] };
       readonly vars?: Record<string, string>;
       readonly queues?: {
@@ -79,6 +85,14 @@ describe("cf-frappe CLI scaffold", () => {
         readonly consumers?: readonly { readonly queue: string; readonly max_batch_size?: number }[];
       };
     };
+    expect(wranglerConfig.d1_databases).toEqual([
+      {
+        binding: "DB",
+        database_name: "demo-app-db",
+        database_id: "replace-with-d1-database-id",
+        migrations_dir: "migrations"
+      }
+    ]);
     expect(wranglerConfig.secrets?.required).toEqual(["SESSION_SECRET"]);
     expect(wranglerConfig.vars).toBeUndefined();
     expect(wranglerConfig.queues?.producers).toEqual([{ binding: "JOBS", queue: "demo-app-jobs" }]);
@@ -145,6 +159,9 @@ describe("cf-frappe CLI scaffold", () => {
     );
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "npx wrangler queues create demo-app-jobs"
+    );
+    await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
+      "replace-with-d1-database-id"
     );
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "npx cf-frappe data-patches enqueue --url https://your-worker.example --id tasks.seed_starter_tasks"

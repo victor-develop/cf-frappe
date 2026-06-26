@@ -114,6 +114,7 @@ function wranglerJsonc(input: StarterProjectTemplateInput): string {
     {
       "binding": "DB",
       "database_name": ${json(input.databaseName)},
+      "database_id": "replace-with-d1-database-id",
       "migrations_dir": "migrations"
     }
   ],
@@ -311,7 +312,7 @@ npx cf-frappe files delete --url https://your-worker.example --name file_invoice
 npm run d1:create
 \`\`\`
 
-Copy the returned \`database_id\` into \`wrangler.jsonc\`, then set the production session secret with Wrangler's interactive prompt:
+Copy the returned \`database_id\` into the \`replace-with-d1-database-id\` placeholder in \`wrangler.jsonc\`, then set the production session secret with Wrangler's interactive prompt:
 
 \`\`\`bash
 wrangler secret put SESSION_SECRET
