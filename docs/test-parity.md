@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the starter seed rollback slice:
+As of the Desk direct-upload capability slice:
 
 - Vitest files: `95`
-- Vitest cases: `1127`
+- Vitest cases: `1129`
 
 ## Implication
 

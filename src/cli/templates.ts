@@ -84,7 +84,9 @@ function packageJson(input: StarterProjectTemplateInput): string {
         "d1:create": `wrangler d1 create ${input.databaseName}`,
         "d1:migrate:local": `wrangler d1 migrations apply ${input.databaseName} --local`,
         "d1:migrate:remote": `wrangler d1 migrations apply ${input.databaseName} --remote`,
-        "r2:create": `wrangler r2 bucket create ${input.projectName}-files`
+        "r2:create": `wrangler r2 bucket create ${input.projectName}-files`,
+        "queue:create": `wrangler queues create ${input.projectName}-jobs`,
+        "resources:create": "npm run d1:create && npm run r2:create && npm run queue:create"
       },
       dependencies: {
         "cf-frappe": `^${input.cfFrappeVersion}`
@@ -273,10 +275,10 @@ After adding app DocType indexes, or changing them with a DocType version bump, 
 Create the D1 database, R2 file bucket, and Queue before the first remote deploy:
 
 \`\`\`bash
-npx wrangler d1 create ${input.databaseName}
-npx wrangler r2 bucket create ${input.projectName}-files
-npx wrangler queues create ${input.projectName}-jobs
+npm run resources:create
 \`\`\`
+
+Copy the returned D1 \`database_id\` into the \`replace-with-d1-database-id\` placeholder in \`wrangler.jsonc\` before running remote migrations or deploys.
 
 Registered data patches can be inspected and run against a deployed Worker through the admin API. Keep secret auth material in environment variables and pass it with \`--header-env\`. Assuming \`CF_FRAPPE_AUTH\` is already exported by your shell secret manager or CI secret store:
 
@@ -318,12 +320,10 @@ npx cf-frappe files delete --url https://your-worker.example --name file_invoice
 ## Deploy
 
 \`\`\`bash
-npm run d1:create
-npm run r2:create
-npx wrangler queues create ${input.projectName}-jobs
+npm run resources:create
 \`\`\`
 
-Copy the returned \`database_id\` into the \`replace-with-d1-database-id\` placeholder in \`wrangler.jsonc\`, then set the production session secret with Wrangler's interactive prompt:
+Copy the returned D1 \`database_id\` into the \`replace-with-d1-database-id\` placeholder in \`wrangler.jsonc\`, then set the production session secret with Wrangler's interactive prompt:
 
 \`\`\`bash
 wrangler secret put SESSION_SECRET
@@ -597,7 +597,7 @@ const STARTER_TASK_SEED_RECORDS = [
     priority: "Medium",
     workflow_state: "Doing",
     starter_seed_patch: STARTER_TASK_SEED_PATCH_ID,
-    description: "Create D1, apply migrations, and run wrangler deploy."
+    description: "Create D1, R2, and Queue resources, apply migrations, and run wrangler deploy."
   }
 ] as const;
 

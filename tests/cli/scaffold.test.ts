@@ -67,6 +67,10 @@ describe("cf-frappe CLI scaffold", () => {
     expect(packageJson.scripts["d1:generate"]).toBe("node --import tsx ./node_modules/cf-frappe/dist/cli.js migrate generate");
     expect(packageJson.scripts["d1:migrate:local"]).toBe("wrangler d1 migrations apply demo-app-db --local");
     expect(packageJson.scripts["r2:create"]).toBe("wrangler r2 bucket create demo-app-files");
+    expect(packageJson.scripts["queue:create"]).toBe("wrangler queues create demo-app-jobs");
+    expect(packageJson.scripts["resources:create"]).toBe(
+      "npm run d1:create && npm run r2:create && npm run queue:create"
+    );
     expect(packageJson.dependencies["cf-frappe"]).toBe("^0.1.0");
     expect(packageJson.devDependencies["@types/node"]).toBe("^26.0.0");
     expect(packageJson.devDependencies.tsx).toBe("^4.20.6");
@@ -143,6 +147,7 @@ describe("cf-frappe CLI scaffold", () => {
     expect(taskApp).toContain("rollback: {");
     expect(taskApp).toContain("resources.documents.delete");
     expect(taskApp).toContain("metadata: { patchId: STARTER_TASK_SEED_PATCH_ID, rollback: true }");
+    expect(taskApp).toContain("Create D1, R2, and Queue resources");
     expect(taskApp).toContain('kind: "dashboard", target: "Task Dashboard"');
     expect(taskApp).toContain('kind: "admin", target: "roles"');
     const appsIndex = await readFile(join(target, "src/apps/index.ts"), "utf8");
@@ -170,14 +175,11 @@ describe("cf-frappe CLI scaffold", () => {
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "npx cf-frappe data-patches rollback --url https://your-worker.example --id tasks.seed_starter_tasks"
     );
-    await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
-      "npx wrangler queues create demo-app-jobs"
-    );
-    await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
-      "npx wrangler r2 bucket create demo-app-files"
-    );
-    await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
-      "npm run r2:create"
+    const readmeText = await readFile(join(target, "README.md"), "utf8");
+    expect(readmeText).toContain("npm run resources:create");
+    expect(readmeText).toContain(
+      "npm run resources:create\n```" +
+        "\n\nCopy the returned D1 `database_id` into the `replace-with-d1-database-id` placeholder"
     );
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "file manager at `/desk/files`"
