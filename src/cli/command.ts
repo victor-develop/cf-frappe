@@ -1008,7 +1008,8 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
         action !== "download" &&
         action !== "update" &&
         action !== "rendition" &&
-        action !== "rendition-download"
+        action !== "rendition-download" &&
+        action !== "transform-download"
       ) {
         return { kind: "invalid", message: `Cannot use --name with files ${action}` };
       }
@@ -1021,7 +1022,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--output") {
-      if (action !== "download" && action !== "rendition-download") {
+      if (action !== "download" && action !== "rendition-download" && action !== "transform-download") {
         return { kind: "invalid", message: `Cannot use --output with files ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1085,7 +1086,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--width" || arg === "--height" || arg === "--quality") {
-      if (action !== "rendition") {
+      if (!isFileTransformOptionAction(action)) {
         return { kind: "invalid", message: `Cannot use ${arg} with files ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1107,7 +1108,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--fit" || arg === "--format" || arg === "--watermark" || arg === "--watermark-placement" || arg === "--watermark-color" || arg === "--overlay" || arg === "--overlay-placement") {
-      if (action !== "rendition") {
+      if (!isFileTransformOptionAction(action)) {
         return { kind: "invalid", message: `Cannot use ${arg} with files ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1133,7 +1134,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--watermark-opacity" || arg === "--watermark-font-size" || arg === "--overlay-opacity" || arg === "--overlay-width" || arg === "--overlay-height") {
-      if (action !== "rendition") {
+      if (!isFileTransformOptionAction(action)) {
         return { kind: "invalid", message: `Cannot use ${arg} with files ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1315,19 +1316,20 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       action === "download" ||
       action === "update" ||
       action === "rendition" ||
-      action === "rendition-download") &&
+      action === "rendition-download" ||
+      action === "transform-download") &&
     name === undefined
   ) {
     return { kind: "invalid", message: `File ${action} requires --name` };
   }
-  if (action === "download" || action === "rendition-download") {
+  if (action === "download" || action === "rendition-download" || action === "transform-download") {
     if (action === "rendition-download" && renditionId === undefined) {
       return { kind: "invalid", message: "File rendition download requires --rendition-id" };
     }
     if (outputPath === undefined) {
       return {
         kind: "invalid",
-        message: action === "download" ? "File download requires --output" : "File rendition download requires --output"
+        message: fileDownloadOutputMessage(action)
       };
     }
   }
@@ -1371,6 +1373,9 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
   }
   if (action === "rendition" && !hasRenditionOption(width, height, fit, format, quality, watermark, overlay)) {
     return { kind: "invalid", message: "File rendition requires at least one transform option" };
+  }
+  if (action === "transform-download" && !hasRenditionOption(width, height, fit, format, quality, watermark, overlay)) {
+    return { kind: "invalid", message: "File transform download requires at least one transform option" };
   }
   return {
     kind: "files",
@@ -1420,6 +1425,7 @@ function fileAction(value: string): FileRemoteAction | undefined {
     value === "bulk-update" ||
     value === "rendition" ||
     value === "rendition-download" ||
+    value === "transform-download" ||
     value === "upload"
     ? value
     : undefined;
@@ -1443,6 +1449,20 @@ function jobAction(value: string): JobRemoteAction | undefined {
 
 function jobStatus(value: string): JobRemoteCommand["status"] | undefined {
   return value === "running" || value === "succeeded" || value === "failed" ? value : undefined;
+}
+
+function isFileTransformOptionAction(action: FileRemoteAction): boolean {
+  return action === "rendition" || action === "transform-download";
+}
+
+function fileDownloadOutputMessage(action: FileRemoteAction): string {
+  if (action === "rendition-download") {
+    return "File rendition download requires --output";
+  }
+  if (action === "transform-download") {
+    return "File transform download requires --output";
+  }
+  return "File download requires --output";
 }
 
 function isJobScheduleAction(action: JobRemoteAction): boolean {
@@ -1817,6 +1837,7 @@ function helpText(): string {
     "  cf-frappe files bulk-delete --url <origin> (--file <fileName>|--file-version <fileName:version>)... [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files rendition --url <origin> --name <fileName> [--width <n>] [--height <n>] [--fit <mode>] [--format <type>] [--quality <n>] [--watermark <text> [--watermark-placement <place>] [--watermark-opacity <n>] [--watermark-color <hex>] [--watermark-font-size <n>]] [--overlay <fileName> [--overlay-placement <place>] [--overlay-opacity <n>] [--overlay-width <n>] [--overlay-height <n>]] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files rendition-download --url <origin> --name <fileName> --rendition-id <id> --output <localPath> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe files transform-download --url <origin> --name <fileName> --output <localPath> [--width <n>] [--height <n>] [--fit <mode>] [--format <type>] [--quality <n>] [--watermark <text> [--watermark-placement <place>] [--watermark-opacity <n>] [--watermark-color <hex>] [--watermark-font-size <n>]] [--overlay <fileName> [--overlay-placement <place>] [--overlay-opacity <n>] [--overlay-width <n>] [--overlay-height <n>]] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files delete --url <origin> --name <fileName> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe --help",
     "",

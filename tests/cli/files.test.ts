@@ -285,6 +285,69 @@ describe("cf-frappe CLI remote files", () => {
       outputPath: "downloads/avatar.webp"
     });
 
+    expect(parseCliArgs([
+      "files",
+      "transform-download",
+      "--url",
+      "https://app.example",
+      "--name",
+      "file/image",
+      "--output",
+      "downloads/avatar.webp",
+      "--width",
+      "320",
+      "--height",
+      "240",
+      "--fit",
+      "cover",
+      "--format",
+      "webp",
+      "--quality",
+      "82",
+      "--watermark",
+      "Draft Copy",
+      "--watermark-placement",
+      "bottom-right",
+      "--watermark-opacity",
+      "75",
+      "--watermark-color",
+      "#123456",
+      "--watermark-font-size",
+      "24",
+      "--overlay",
+      "file/badge",
+      "--overlay-placement",
+      "top-left",
+      "--overlay-opacity",
+      "60",
+      "--overlay-width",
+      "32",
+      "--overlay-height",
+      "24"
+    ])).toEqual({
+      kind: "files",
+      action: "transform-download",
+      url: "https://app.example",
+      headers: [],
+      name: "file/image",
+      outputPath: "downloads/avatar.webp",
+      width: 320,
+      height: 240,
+      fit: "cover",
+      format: "webp",
+      quality: 82,
+      watermark: "Draft Copy",
+      watermarkPlacement: "bottom-right",
+      watermarkOpacity: 75,
+      watermarkColor: "#123456",
+      watermarkFontSize: 24,
+      overlay: "file/badge",
+      overlayPlacement: "top-left",
+      overlayOpacity: 60,
+      overlayWidth: 32,
+      overlayHeight: 24
+    });
+
     expect(parseCliArgs(["files", "delete", "--url", "https://app.example"])).toEqual({
       kind: "invalid",
       message: "File delete requires --name"
@@ -304,6 +367,18 @@ describe("cf-frappe CLI remote files", () => {
     expect(parseCliArgs(["files", "rendition-download", "--url", "https://app.example", "--name", "file_image", "--rendition-id", "w320"])).toEqual({
       kind: "invalid",
       message: "File rendition download requires --output"
+    });
+    expect(parseCliArgs(["files", "transform-download", "--url", "https://app.example", "--width", "64", "--output", "avatar.webp"])).toEqual({
+      kind: "invalid",
+      message: "File transform-download requires --name"
+    });
+    expect(parseCliArgs(["files", "transform-download", "--url", "https://app.example", "--name", "file_image", "--width", "64"])).toEqual({
+      kind: "invalid",
+      message: "File transform download requires --output"
+    });
+    expect(parseCliArgs(["files", "transform-download", "--url", "https://app.example", "--name", "file_image", "--output", "avatar.webp"])).toEqual({
+      kind: "invalid",
+      message: "File transform download requires at least one transform option"
     });
     expect(parseCliArgs(["files", "list", "--url", "https://app.example", "--output", "invoice.pdf"])).toEqual({
       kind: "invalid",
@@ -1055,6 +1130,114 @@ describe("cf-frappe CLI remote files", () => {
     expect(calls[0]?.headers.get("accept")).toBe("*/*");
     expect(stderr.text()).toContain(
       "Remote file request failed (404): DOCUMENT_NOT_FOUND: File rendition 'missing-rendition' was not found"
+    );
+    await expect(readFile(join(tempRoot, "missing.webp"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("downloads remote file transform content to a local path", async () => {
+    const calls: RemoteCall[] = [];
+    const stdout = textBuffer();
+    const exitCode = await runCli(
+      [
+        "files",
+        "transform-download",
+        "--url",
+        "https://app.example/cf",
+        "--name",
+        "file/image",
+        "--output",
+        "avatar.webp",
+        "--width",
+        "320",
+        "--height",
+        "240",
+        "--fit",
+        "cover",
+        "--format",
+        "webp",
+        "--quality",
+        "82",
+        "--watermark",
+        "Draft Copy",
+        "--watermark-placement",
+        "bottom-right",
+        "--watermark-opacity",
+        "75",
+        "--watermark-color",
+        "#123456",
+        "--watermark-font-size",
+        "24",
+        "--overlay",
+        "file/badge",
+        "--overlay-placement",
+        "top-left",
+        "--overlay-opacity",
+        "60",
+        "--overlay-width",
+        "32",
+        "--overlay-height",
+        "24",
+        "--header-env",
+        "Authorization=CF_FRAPPE_AUTH"
+      ],
+      {
+        cwd: () => tempRoot,
+        env: (name) => name === "CF_FRAPPE_AUTH" ? "Bearer test-token" : undefined,
+        fetch: fakeBinaryFetch(calls, "webp-bytes", {
+          "content-type": "image/webp",
+          etag: '"transform-etag"'
+        }),
+        stdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(calls[0]?.url).toBe(
+      "https://app.example/cf/api/files/file%2Fimage/transform?width=320&height=240&fit=cover&format=webp&quality=82&watermark=Draft+Copy&watermarkPlacement=bottom-right&watermarkOpacity=75&watermarkColor=%23123456&watermarkFontSize=24&overlay=file%2Fbadge&overlayPlacement=top-left&overlayOpacity=60&overlayWidth=32&overlayHeight=24"
+    );
+    expect(calls[0]?.method).toBe("GET");
+    expect(calls[0]?.headers.get("accept")).toBe("*/*");
+    expect(calls[0]?.headers.get("authorization")).toBe("Bearer test-token");
+    await expect(readFile(join(tempRoot, "avatar.webp"), "utf8")).resolves.toBe("webp-bytes");
+    expect(stdout.text()).toContain("Downloaded transformed file from https://app.example/cf");
+    expect(stdout.text()).toContain(`- file/image -> ${join(tempRoot, "avatar.webp")} bytes 10 type image/webp`);
+  });
+
+  it("maps remote file transform download errors without writing output", async () => {
+    const calls: RemoteCall[] = [];
+    const stderr = textBuffer();
+    const exitCode = await runCli(
+      [
+        "files",
+        "transform-download",
+        "--url",
+        "https://app.example",
+        "--name",
+        "file/image",
+        "--output",
+        "missing.webp",
+        "--width",
+        "320"
+      ],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetch(calls, {
+          error: {
+            code: "BAD_REQUEST",
+            message: "File 'file/image' cannot be transformed"
+          }
+        }, 400),
+        stdout: textBuffer(),
+        stderr
+      }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(calls[0]?.url).toBe("https://app.example/api/files/file%2Fimage/transform?width=320");
+    expect(calls[0]?.headers.get("accept")).toBe("*/*");
+    expect(stderr.text()).toContain(
+      "Remote file request failed (400): BAD_REQUEST: File 'file/image' cannot be transformed"
     );
     await expect(readFile(join(tempRoot, "missing.webp"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });

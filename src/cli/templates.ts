@@ -320,6 +320,7 @@ npx cf-frappe files bulk-update --url https://your-worker.example --file file_in
 npx cf-frappe files bulk-delete --url https://your-worker.example --file-version file_invoice:3 --file file_stale --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe files rendition --url https://your-worker.example --name file_image --width 320 --height 240 --fit cover --format webp --watermark Draft --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe files rendition-download --url https://your-worker.example --name file_image --rendition-id w320-h240-fit-cover-f-webp --output ./image-thumb.webp --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe files transform-download --url https://your-worker.example --name file_image --width 320 --height 240 --fit cover --format webp --output ./image-preview.webp --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe files delete --url https://your-worker.example --name file_invoice --expected-version 3 --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 

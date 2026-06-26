@@ -16,6 +16,7 @@ export type FileRemoteAction =
   | "download"
   | "rendition"
   | "rendition-download"
+  | "transform-download"
   | "update"
   | "upload";
 
@@ -193,6 +194,22 @@ export async function runRemoteFileCommand(command: FileRemoteCommand, io: FileR
     }
     return formatRenditionDownload(command.url, name, renditionId, output, bytes.byteLength, response);
   }
+  if (command.action === "transform-download") {
+    const name = requiredFileName(command, "transform download");
+    const output = await downloadOutputPath(command, io.cwd, "transform download");
+    const response = await requestRemoteFileResponse(command, io, {
+      method: "GET",
+      path: `/api/files/${encodeURIComponent(name)}/transform`,
+      query: transformQuery(command)
+    });
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    try {
+      await writeFile(output, bytes);
+    } catch (error) {
+      throw new FileRemoteError(`Could not write download file '${command.outputPath}': ${errorMessage(error)}`);
+    }
+    return formatTransformDownload(command.url, name, output, bytes.byteLength, response);
+  }
   if (command.action === "list") {
     const query = queryParams({
       ...(command.attachedToDoctype === undefined ? {} : { attached_to_doctype: command.attachedToDoctype }),
@@ -334,6 +351,26 @@ function renditionBody(command: FileRemoteCommand): Record<string, unknown> {
     ...watermarkBody(command),
     ...overlayBody(command)
   };
+}
+
+function transformQuery(command: FileRemoteCommand): URLSearchParams {
+  return queryParams({
+    ...(command.width === undefined ? {} : { width: String(command.width) }),
+    ...(command.height === undefined ? {} : { height: String(command.height) }),
+    ...(command.fit === undefined ? {} : { fit: command.fit }),
+    ...(command.format === undefined ? {} : { format: command.format }),
+    ...(command.quality === undefined ? {} : { quality: String(command.quality) }),
+    ...(command.watermark === undefined ? {} : { watermark: command.watermark }),
+    ...(command.watermarkPlacement === undefined ? {} : { watermarkPlacement: command.watermarkPlacement }),
+    ...(command.watermarkOpacity === undefined ? {} : { watermarkOpacity: String(command.watermarkOpacity) }),
+    ...(command.watermarkColor === undefined ? {} : { watermarkColor: command.watermarkColor }),
+    ...(command.watermarkFontSize === undefined ? {} : { watermarkFontSize: String(command.watermarkFontSize) }),
+    ...(command.overlay === undefined ? {} : { overlay: command.overlay }),
+    ...(command.overlayPlacement === undefined ? {} : { overlayPlacement: command.overlayPlacement }),
+    ...(command.overlayOpacity === undefined ? {} : { overlayOpacity: String(command.overlayOpacity) }),
+    ...(command.overlayWidth === undefined ? {} : { overlayWidth: String(command.overlayWidth) }),
+    ...(command.overlayHeight === undefined ? {} : { overlayHeight: String(command.overlayHeight) })
+  }) ?? new URLSearchParams();
 }
 
 function watermarkBody(command: FileRemoteCommand): Record<string, unknown> {
@@ -494,6 +531,21 @@ function formatRenditionDownload(
   return [
     `Downloaded file rendition from ${baseUrl}`,
     `- ${name} rendition ${renditionId} -> ${outputPath} bytes ${String(bytes)}${contentType === null ? "" : ` type ${contentType}`}`,
+    ""
+  ].join("\n");
+}
+
+function formatTransformDownload(
+  baseUrl: string,
+  name: string,
+  outputPath: string,
+  bytes: number,
+  response: Response
+): string {
+  const contentType = response.headers.get("content-type");
+  return [
+    `Downloaded transformed file from ${baseUrl}`,
+    `- ${name} -> ${outputPath} bytes ${String(bytes)}${contentType === null ? "" : ` type ${contentType}`}`,
     ""
   ].join("\n");
 }
