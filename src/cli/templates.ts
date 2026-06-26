@@ -267,10 +267,11 @@ npx cf-frappe jobs schedule-run --url https://your-worker.example --id daily-rep
 npx cf-frappe jobs schedule-save --url https://your-worker.example --id runtime-daily --cron "15 4 * * *" --job reports.daily --enabled --payload-json '{"scope":"runtime"}' --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 
-File operators can inspect filtered file metadata and delete stale File records through the same admin API boundary:
+File operators can inspect filtered file metadata, update attachment/privacy metadata, and delete stale File records through the same admin API boundary:
 
 \`\`\`bash
 npx cf-frappe files list --url https://your-worker.example --filename invoice --limit 20 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe files update --url https://your-worker.example --name file_invoice --public --clear-attachment --expected-version 3 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe files delete --url https://your-worker.example --name file_invoice --expected-version 3 --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 

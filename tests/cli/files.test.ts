@@ -65,6 +65,35 @@ describe("cf-frappe CLI remote files", () => {
       expectedVersion: 3
     });
 
+    expect(parseCliArgs([
+      "files",
+      "update",
+      "--url",
+      "https://app.example",
+      "--name",
+      "file_invoice",
+      "--filename",
+      "renamed.pdf",
+      "--public",
+      "--attached-to-doctype",
+      "Sales Invoice",
+      "--attached-to-name",
+      "SINV-2",
+      "--expected-version",
+      "4"
+    ])).toEqual({
+      kind: "files",
+      action: "update",
+      url: "https://app.example",
+      headers: [],
+      name: "file_invoice",
+      attachedToDoctype: "Sales Invoice",
+      attachedToName: "SINV-2",
+      filename: "renamed.pdf",
+      isPrivate: false,
+      expectedVersion: 4
+    });
+
     expect(parseCliArgs(["files", "delete", "--url", "https://app.example"])).toEqual({
       kind: "invalid",
       message: "File delete requires --name"
@@ -87,6 +116,26 @@ describe("cf-frappe CLI remote files", () => {
     expect(parseCliArgs(["files", "list", "--url", "https://app.example", "--expected-version", "1"])).toEqual({
       kind: "invalid",
       message: "Cannot use --expected-version with files list"
+    });
+    expect(parseCliArgs(["files", "update", "--url", "https://app.example", "--name", "file_invoice"])).toEqual({
+      kind: "invalid",
+      message: "File update requires at least one metadata change"
+    });
+    expect(parseCliArgs([
+      "files",
+      "update",
+      "--url",
+      "https://app.example",
+      "--name",
+      "file_invoice",
+      "--clear-attachment",
+      "--attached-to-doctype",
+      "Task",
+      "--attached-to-name",
+      "TASK-1"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Use only one of --clear-attachment or --attached-to-doctype/--attached-to-name"
     });
   });
 
@@ -199,6 +248,89 @@ describe("cf-frappe CLI remote files", () => {
     expect(calls[0]?.method).toBe("DELETE");
     expect(stdout.text()).toContain("Deleted file at https://app.example");
     expect(stdout.text()).toContain("- invoice.pdf (file/invoice) version 4 status deleted state deleted");
+  });
+
+  it("updates remote file metadata through the admin API", async () => {
+    const calls: RemoteCall[] = [];
+    const stdout = textBuffer();
+    const exitCode = await runCli(
+      [
+        "files",
+        "update",
+        "--url",
+        "https://app.example",
+        "--name",
+        "file/invoice",
+        "--filename",
+        "renamed.pdf",
+        "--public",
+        "--attached-to-doctype",
+        "Sales Invoice",
+        "--attached-to-name",
+        "SINV-2",
+        "--expected-version",
+        "3"
+      ],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(calls, {
+          data: {
+            name: "file/invoice",
+            version: 4,
+            docstatus: "draft",
+            data: {
+              filename: "renamed.pdf",
+              storage_state: "available"
+            }
+          }
+        }),
+        stdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(calls[0]?.url).toBe("https://app.example/api/files/file%2Finvoice");
+    expect(calls[0]?.method).toBe("PATCH");
+    expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({
+      filename: "renamed.pdf",
+      isPrivate: false,
+      attachedTo: { doctype: "Sales Invoice", name: "SINV-2" },
+      expectedVersion: 3
+    });
+    expect(stdout.text()).toContain("Updated file at https://app.example");
+    expect(stdout.text()).toContain("- renamed.pdf (file/invoice) version 4 status draft state available");
+  });
+
+  it("clears remote file attachments with an explicit metadata update", async () => {
+    const calls: RemoteCall[] = [];
+    const exitCode = await runCli(
+      [
+        "files",
+        "update",
+        "--url",
+        "https://app.example",
+        "--name",
+        "file_invoice",
+        "--clear-attachment"
+      ],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(calls, {
+          data: {
+            name: "file_invoice",
+            version: 5,
+            data: { filename: "invoice.pdf" }
+          }
+        }),
+        stdout: textBuffer(),
+        stderr: textBuffer()
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(calls[0]?.method).toBe("PATCH");
+    expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({ attachedTo: null });
   });
 
   it("maps remote file API errors and missing env headers to CLI failures", async () => {

@@ -937,6 +937,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
   let storageState: string | undefined;
   let uploadedBy: string | undefined;
   let expectedVersion: number | undefined;
+  let clearAttachment = false;
 
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];
@@ -982,7 +983,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--name") {
-      if (action !== "delete") {
+      if (action !== "delete" && action !== "update") {
         return { kind: "invalid", message: `Cannot use --name with files ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -994,7 +995,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--expected-version") {
-      if (action !== "delete") {
+      if (action !== "delete" && action !== "update") {
         return { kind: "invalid", message: `Cannot use --expected-version with files ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1010,7 +1011,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--attached-to-doctype") {
-      if (action !== "list") {
+      if (action !== "list" && action !== "update") {
         return { kind: "invalid", message: `Cannot use --attached-to-doctype with files ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1022,7 +1023,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--attached-to-name") {
-      if (action !== "list") {
+      if (action !== "list" && action !== "update") {
         return { kind: "invalid", message: `Cannot use --attached-to-name with files ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1046,7 +1047,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--filename") {
-      if (action !== "list") {
+      if (action !== "list" && action !== "update") {
         return { kind: "invalid", message: `Cannot use --filename with files ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1058,7 +1059,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--private") {
-      if (action !== "list") {
+      if (action !== "list" && action !== "update") {
         return { kind: "invalid", message: `Cannot use --private with files ${action}` };
       }
       if (isPrivate !== undefined) {
@@ -1068,13 +1069,20 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--public") {
-      if (action !== "list") {
+      if (action !== "list" && action !== "update") {
         return { kind: "invalid", message: `Cannot use --public with files ${action}` };
       }
       if (isPrivate !== undefined) {
         return { kind: "invalid", message: "Use only one of --private or --public" };
       }
       isPrivate = false;
+      continue;
+    }
+    if (arg === "--clear-attachment") {
+      if (action !== "update") {
+        return { kind: "invalid", message: `Cannot use --clear-attachment with files ${action}` };
+      }
+      clearAttachment = true;
       continue;
     }
     if (arg === "--limit") {
@@ -1138,8 +1146,20 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
   if ((attachedToDoctype === undefined) !== (attachedToName === undefined)) {
     return { kind: "invalid", message: "Use --attached-to-doctype and --attached-to-name together" };
   }
-  if (action === "delete" && name === undefined) {
-    return { kind: "invalid", message: "File delete requires --name" };
+  if ((action === "delete" || action === "update") && name === undefined) {
+    return { kind: "invalid", message: `File ${action} requires --name` };
+  }
+  if (clearAttachment && (attachedToDoctype !== undefined || attachedToName !== undefined)) {
+    return { kind: "invalid", message: "Use only one of --clear-attachment or --attached-to-doctype/--attached-to-name" };
+  }
+  if (
+    action === "update" &&
+    filename === undefined &&
+    isPrivate === undefined &&
+    !clearAttachment &&
+    attachedToDoctype === undefined
+  ) {
+    return { kind: "invalid", message: "File update requires at least one metadata change" };
   }
   return {
     kind: "files",
@@ -1156,12 +1176,13 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
     ...(scanStatus === undefined ? {} : { scanStatus }),
     ...(storageState === undefined ? {} : { storageState }),
     ...(uploadedBy === undefined ? {} : { uploadedBy }),
-    ...(expectedVersion === undefined ? {} : { expectedVersion })
+    ...(expectedVersion === undefined ? {} : { expectedVersion }),
+    ...(clearAttachment ? { clearAttachment } : {})
   };
 }
 
 function fileAction(value: string): FileRemoteAction | undefined {
-  return value === "list" || value === "delete" ? value : undefined;
+  return value === "list" || value === "delete" || value === "update" ? value : undefined;
 }
 
 function jobAction(value: string): JobRemoteAction | undefined {
@@ -1518,6 +1539,7 @@ function helpText(): string {
     "  cf-frappe jobs schedule-save --url <origin> [--id <scheduleId>] --cron <expr> --job <name> [--enabled|--disabled] [--payload-json <json>] [--metadata-json <json>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs schedule-delete --url <origin> --id <scheduleId> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files list --url <origin> [--filename <text>] [--content-type <type>] [--attached-to-doctype <doctype> --attached-to-name <name>] [--storage-state <state>] [--scan-status <status>] [--uploaded-by <user>] [--private|--public] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe files update --url <origin> --name <fileName> [--filename <text>] [--private|--public] [--attached-to-doctype <doctype> --attached-to-name <name>|--clear-attachment] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files delete --url <origin> --name <fileName> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe --help",
     "",

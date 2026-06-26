@@ -24,7 +24,7 @@ export async function requestRemoteAdmin<TData, TError extends Error>(
   io: RemoteAdminIo,
   request: {
     readonly body?: Record<string, unknown>;
-    readonly method: "DELETE" | "GET" | "POST" | "PUT";
+    readonly method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
     readonly path: string;
     readonly query?: URLSearchParams;
   },

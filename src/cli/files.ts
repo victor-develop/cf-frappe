@@ -1,6 +1,6 @@
 import { requestRemoteAdmin, type RemoteAdminIo, type RemoteHeaderOption } from "./remote-admin.js";
 
-export type FileRemoteAction = "list" | "delete";
+export type FileRemoteAction = "list" | "delete" | "update";
 
 export type FileHeaderOption = RemoteHeaderOption;
 
@@ -20,6 +20,7 @@ export interface FileRemoteCommand {
   readonly storageState?: string;
   readonly uploadedBy?: string;
   readonly expectedVersion?: number;
+  readonly clearAttachment?: boolean;
 }
 
 export type FileRemoteIo = RemoteAdminIo;
@@ -89,6 +90,14 @@ export async function runRemoteFileCommand(command: FileRemoteCommand, io: FileR
     });
     return formatDashboard(command.url, data);
   }
+  if (command.action === "update") {
+    const data = await requestRemoteFile<FileSnapshotResponse>(command, io, {
+      body: updateBody(command),
+      method: "PATCH",
+      path: `/api/files/${encodeURIComponent(requiredFileName(command, "update"))}`
+    });
+    return formatUpdate(command.url, data);
+  }
   const query = queryParams({
     ...(command.expectedVersion === undefined ? {} : { expectedVersion: String(command.expectedVersion) })
   });
@@ -105,7 +114,7 @@ function requestRemoteFile<TData>(
   io: FileRemoteIo,
   request: {
     readonly body?: Record<string, unknown>;
-    readonly method: "DELETE" | "GET";
+    readonly method: "DELETE" | "GET" | "PATCH";
     readonly path: string;
     readonly query?: URLSearchParams;
   }
@@ -126,6 +135,28 @@ function queryParams(values: Record<string, string>): URLSearchParams | undefine
   return params.toString().length === 0 ? undefined : params;
 }
 
+function updateBody(command: FileRemoteCommand): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (command.filename !== undefined) {
+    body.filename = command.filename;
+  }
+  if (command.isPrivate !== undefined) {
+    body.isPrivate = command.isPrivate;
+  }
+  if (command.clearAttachment) {
+    body.attachedTo = null;
+  } else if (command.attachedToDoctype !== undefined || command.attachedToName !== undefined) {
+    body.attachedTo = {
+      doctype: command.attachedToDoctype,
+      name: command.attachedToName
+    };
+  }
+  if (command.expectedVersion !== undefined) {
+    body.expectedVersion = command.expectedVersion;
+  }
+  return body;
+}
+
 function requiredFileName(command: FileRemoteCommand, action: string): string {
   if (command.name === undefined) {
     throw new FileRemoteError(`File ${action} requires --name`);
@@ -141,6 +172,14 @@ function formatDashboard(baseUrl: string, dashboard: FileDashboardResponse): str
     ...fileLines(dashboard.files),
     ""
   ].filter((line): line is string => line !== undefined).join("\n");
+}
+
+function formatUpdate(baseUrl: string, snapshot: FileSnapshotResponse): string {
+  return [
+    `Updated file at ${baseUrl}`,
+    snapshotLine(snapshot),
+    ""
+  ].join("\n");
 }
 
 function formatDelete(baseUrl: string, snapshot: FileSnapshotResponse): string {
