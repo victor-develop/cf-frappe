@@ -1669,6 +1669,10 @@ export function renderNotificationRuleAdmin(state: NotificationRuleAdminState): 
       <td>${escapeHtml(entry.rule.subject ?? "")}</td>
       <td>
         <a class="button" href="${escapeHtml(notificationRuleAdminHref(state.selectedDoctype, entry.rule.name))}">Edit</a>
+        <form method="post" action="/desk/admin/notification-rules/${encodeURIComponent(state.selectedDoctype)}/${encodeURIComponent(entry.rule.name)}/${entry.enabled ? "disable" : "enable"}">
+          <input type="hidden" name="expectedVersion" value="${String(version)}">
+          <button class="button" type="submit">${entry.enabled ? "Disable" : "Enable"}</button>
+        </form>
         <form method="post" action="/desk/admin/notification-rules/${encodeURIComponent(state.selectedDoctype)}/${encodeURIComponent(entry.rule.name)}/clear">
           <input type="hidden" name="expectedVersion" value="${String(version)}">
           <button class="button danger" type="submit">Clear</button>

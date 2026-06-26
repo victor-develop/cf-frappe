@@ -49,7 +49,7 @@ import type { UserPermissionService } from "../../application/user-permission-se
 import type { UserProfileService } from "../../application/user-profile-service.js";
 import type { WorkflowService } from "../../application/workflow-service.js";
 import { DOCUMENT_SHARE_PERMISSIONS, documentSharePermissionsForActor } from "../../core/document-shares.js";
-import { FrameworkError, badRequest } from "../../core/errors.js";
+import { FrameworkError, badRequest, conflict } from "../../core/errors.js";
 import { can } from "../../core/permissions.js";
 import type { ModelRegistry } from "../../core/registry.js";
 import {
@@ -1476,6 +1476,48 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         metadata: requestMetadata(c.req.raw)
       });
       return c.redirect(notificationRuleAdminHref(c.req.param("doctype")), 303);
+    } catch (error) {
+      return renderDeskNotificationRuleFailure(options, actor, notificationRules, c.req.param("doctype"), error);
+    }
+  });
+
+  app.post("/desk/admin/notification-rules/:doctype/:rule/enable", async (c) => {
+    const notificationRules = requireNotificationRules(options);
+    const actor = await options.actor(c.req.raw);
+    notificationRules.authorizeAdministration(actor);
+    try {
+      const form = await parseDeskNotificationRuleClear(c.req.raw);
+      await saveDeskNotificationRuleStatus({
+        notificationRules,
+        actor,
+        doctype: c.req.param("doctype"),
+        ruleName: c.req.param("rule"),
+        enabled: true,
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(notificationRuleAdminHref(c.req.param("doctype"), c.req.param("rule")), 303);
+    } catch (error) {
+      return renderDeskNotificationRuleFailure(options, actor, notificationRules, c.req.param("doctype"), error);
+    }
+  });
+
+  app.post("/desk/admin/notification-rules/:doctype/:rule/disable", async (c) => {
+    const notificationRules = requireNotificationRules(options);
+    const actor = await options.actor(c.req.raw);
+    notificationRules.authorizeAdministration(actor);
+    try {
+      const form = await parseDeskNotificationRuleClear(c.req.raw);
+      await saveDeskNotificationRuleStatus({
+        notificationRules,
+        actor,
+        doctype: c.req.param("doctype"),
+        ruleName: c.req.param("rule"),
+        enabled: false,
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(notificationRuleAdminHref(c.req.param("doctype"), c.req.param("rule")), 303);
     } catch (error) {
       return renderDeskNotificationRuleFailure(options, actor, notificationRules, c.req.param("doctype"), error);
     }
@@ -3480,6 +3522,39 @@ async function renderDeskNotificationRuleFailure(
     error instanceof FrameworkError ? error.status : 500,
     message
   );
+}
+
+async function saveDeskNotificationRuleStatus(options: {
+  readonly notificationRules: NotificationRuleService;
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly ruleName: string;
+  readonly enabled: boolean;
+  readonly expectedVersion?: number;
+  readonly metadata: DocumentData;
+}): Promise<void> {
+  const state = await options.notificationRules.list(options.actor, options.doctype);
+  if (options.expectedVersion !== undefined && state.version !== options.expectedVersion) {
+    throw conflict(`Expected notification rules at version ${options.expectedVersion}, found ${state.version}`);
+  }
+  const entry = state.rules.find((item) => item.rule.name === options.ruleName);
+  if (entry === undefined) {
+    throw new FrameworkError(
+      "DOCUMENT_NOT_FOUND",
+      `Notification rule '${options.ruleName}' was not found`,
+      { status: 404 }
+    );
+  }
+  await options.notificationRules.save({
+    actor: options.actor,
+    doctype: options.doctype,
+    rule: {
+      ...entry.rule,
+      enabled: options.enabled
+    },
+    ...(options.expectedVersion === undefined ? {} : { expectedVersion: options.expectedVersion }),
+    metadata: options.metadata
+  });
 }
 
 async function renderDeskPrintSettingsPage(

@@ -4334,6 +4334,115 @@ describe("Desk app", () => {
     });
   });
 
+  it("toggles notification rules from Desk row actions", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"], tenantId: "acme" };
+    const services = createServices();
+    const notificationRules = new NotificationRuleService({
+      registry: services.registry,
+      events: services.store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["notification-rule-event-1", "notification-rule-event-2", "notification-rule-event-3"])
+    });
+    await notificationRules.save({
+      actor: admin,
+      doctype: "Note",
+      expectedVersion: 0,
+      rule: {
+        name: "Escalations",
+        enabled: false,
+        events: ["DocumentUpdated"],
+        recipients: [{ kind: "user", userId: "manager@example.com" }],
+        channels: ["inbox"]
+      }
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      notificationRules,
+      actor: () => admin
+    });
+
+    const disabledPage = await app.request("/desk/admin/notification-rules?doctype=Note");
+    expect(disabledPage.status).toBe(200);
+    await expect(disabledPage.text()).resolves.toContain(
+      'action="/desk/admin/notification-rules/Note/Escalations/enable"'
+    );
+
+    const enabled = await app.request("/desk/admin/notification-rules/Note/Escalations/enable", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(enabled.status).toBe(303);
+    expect(enabled.headers.get("location")).toBe("/desk/admin/notification-rules?doctype=Note&rule=Escalations");
+    await expect(notificationRules.list(admin, "Note")).resolves.toMatchObject({
+      version: 2,
+      rules: [{ enabled: true, rule: { name: "Escalations", enabled: true } }]
+    });
+
+    const enabledPage = await app.request("/desk/admin/notification-rules?doctype=Note");
+    expect(enabledPage.status).toBe(200);
+    await expect(enabledPage.text()).resolves.toContain(
+      'action="/desk/admin/notification-rules/Note/Escalations/disable"'
+    );
+
+    const disabled = await app.request("/desk/admin/notification-rules/Note/Escalations/disable", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "2" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(disabled.status).toBe(303);
+    await expect(notificationRules.list(admin, "Note")).resolves.toMatchObject({
+      version: 3,
+      rules: [{ enabled: false, rule: { name: "Escalations", enabled: false } }]
+    });
+  });
+
+  it("returns notification rule version conflicts before missing-rule errors on stale row actions", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"], tenantId: "acme" };
+    const services = createServices();
+    const notificationRules = new NotificationRuleService({
+      registry: services.registry,
+      events: services.store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["notification-rule-event-1", "notification-rule-event-2"])
+    });
+    await notificationRules.save({
+      actor: admin,
+      doctype: "Note",
+      expectedVersion: 0,
+      rule: {
+        name: "Stale toggle",
+        enabled: false,
+        events: ["DocumentUpdated"],
+        recipients: [{ kind: "user", userId: "manager@example.com" }]
+      }
+    });
+    await notificationRules.clear({
+      actor: admin,
+      doctype: "Note",
+      ruleName: "Stale toggle",
+      expectedVersion: 1
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      notificationRules,
+      actor: () => admin
+    });
+
+    const stale = await app.request("/desk/admin/notification-rules/Note/Stale%20toggle/enable", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(stale.status).toBe(409);
+    await expect(stale.text()).resolves.toContain("Expected notification rules at version 1, found 2");
+  });
+
   it("renders and mutates field property overrides from the Desk admin surface", async () => {
     const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"] };
     const { app, services } = makeFieldPropertyDesk(admin);
