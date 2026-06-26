@@ -111,6 +111,7 @@ interface DeskClientRuntime {
     readonly current: () => DeskFormRuntime | null;
     readonly on: (doctype: string, handlers: DeskFormHandlers) => void;
   };
+  readonly linkOptions: (doctype: string, field: string, params?: Record<string, unknown>) => Promise<unknown>;
   readonly search: (q: string, options?: { readonly limit?: number; readonly tenant?: string }) => Promise<unknown>;
   readonly msgprint: (message: unknown) => string;
   readonly "throw": (message: unknown) => never;
@@ -123,6 +124,7 @@ interface DeskClientRuntime {
     readonly doctype: (doctype: string) => Promise<unknown>;
     readonly doctypes: () => Promise<unknown>;
     readonly listView: (doctype: string) => Promise<unknown>;
+    readonly linkOptions: (doctype: string, field: string, params?: Record<string, unknown>) => Promise<unknown>;
     readonly printFormat: (format: string) => Promise<unknown>;
     readonly printFormats: (options?: { readonly doctype?: string }) => Promise<unknown>;
     readonly report: (report: string) => Promise<unknown>;
@@ -2485,6 +2487,32 @@ describe("Desk client runtime", () => {
 
     expect(calls[0]?.url).toBe("/api/meta/doctypes/Task%20Type/list-view");
     expect(calls[0]?.init.credentials).toBe("same-origin");
+  });
+
+  it("exposes link field option lookup through metadata helpers", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const result = {
+      doctype: "Task Type",
+      field: "Project Link",
+      target: "Project",
+      options: [{ value: "PROJECT/1", label: "Apollo" }]
+    };
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: result }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.linkOptions("Task Type", "Project Link", { q: "apollo", limit: 20 })).resolves.toEqual(result);
+    await expect(runtime.meta.linkOptions("Task Type", "Project Link", { q: "apollo", limit: 20 })).resolves.toEqual(result);
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/link-options/Task%20Type/Project%20Link?q=apollo&limit=20",
+      "GET /api/link-options/Task%20Type/Project%20Link?q=apollo&limit=20"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin"]);
+    expect(calls.map((call) => call.init.body)).toEqual([undefined, undefined]);
   });
 
   it("wraps metadata APIs for doctypes, reports, and workspaces", async () => {

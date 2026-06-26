@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the print/report metadata alias client helper slice:
+As of the link-option metadata alias client helper slice:
 
 - Vitest files: `94`
-- Vitest cases: `1089`
+- Vitest cases: `1090`
 
 ## Implication
 

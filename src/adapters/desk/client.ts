@@ -267,6 +267,10 @@ export function renderDeskClientScript(): string {
     return withQuery("/api/audit/deleted/" + encodePart(doctype) + "/" + encodePart(name), tenantParams(options || {}));
   }
 
+  function linkOptionsPath(doctype, field, params) {
+    return withQuery("/api/link-options/" + encodePart(doctype) + "/" + encodePart(field), params || {});
+  }
+
   function printDocumentPath(format, name) {
     return "/api/print/" + encodePart(format) + "/" + encodePart(name);
   }
@@ -2998,7 +3002,7 @@ export function renderDeskClientScript(): string {
       }
     }),
     linkOptions: function (doctype, field, params) {
-      return request(withQuery("/api/link-options/" + encodePart(doctype) + "/" + encodePart(field), params || {})).then(unwrapData);
+      return request(linkOptionsPath(doctype, field, params)).then(unwrapData);
     },
     search: function (q, options) {
       return request(withQuery("/api/search", searchParams(q, options || {}))).then(unwrapData);
@@ -3228,6 +3232,9 @@ export function renderDeskClientScript(): string {
       },
       listView: function (doctype) {
         return request("/api/meta/doctypes/" + encodePart(doctype) + "/list-view").then(unwrapData);
+      },
+      linkOptions: function (doctype, field, params) {
+        return request(linkOptionsPath(doctype, field, params)).then(unwrapData);
       },
       printFormat: function (format) {
         return request(printFormatPath(format)).then(unwrapData);
