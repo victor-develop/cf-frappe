@@ -227,6 +227,15 @@ describe("cf-frappe CLI scaffold", () => {
     expect(readmeText).toContain("npx cf-frappe resources import-template --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources import --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources delete --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain(
+      "npx cf-frappe user-permissions list --url https://your-worker.example --user-id teammate@example.com"
+    );
+    expect(readmeText).toContain(
+      "npx cf-frappe user-permissions allow --url https://your-worker.example --user-id teammate@example.com"
+    );
+    expect(readmeText).toContain(
+      "npx cf-frappe user-permissions revoke --url https://your-worker.example --user-id teammate@example.com"
+    );
     expect(readmeText).toContain("npx cf-frappe files get --url https://your-worker.example --name file_invoice");
     expect(readmeText).toContain("npx cf-frappe files upload --url https://your-worker.example --path ./invoice.pdf");
     expect(readmeText).toContain("npx cf-frappe files download --url https://your-worker.example --name file_invoice");

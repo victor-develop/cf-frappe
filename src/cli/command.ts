@@ -57,6 +57,13 @@ import {
   type ResourceRemoteAction,
   type ResourceRemoteCommand
 } from "./resources.js";
+import {
+  UserPermissionRemoteError,
+  runRemoteUserPermissionCommand,
+  type UserPermissionHeaderOption,
+  type UserPermissionRemoteAction,
+  type UserPermissionRemoteCommand
+} from "./user-permissions.js";
 import { scaffoldProject, ScaffoldError } from "./scaffold.js";
 import type { StarterAuthMode } from "./templates.js";
 
@@ -118,6 +125,7 @@ type ParsedCommand =
   | JobRemoteCommand
   | FileRemoteCommand
   | ResourceRemoteCommand
+  | UserPermissionRemoteCommand
   | HelpCommand
   | InvalidCommand;
 
@@ -158,6 +166,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     if (command.kind === "resources") {
       io.stdout.write(await runRemoteResourceCommand(command, {
         cwd: io.cwd(),
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
+    if (command.kind === "user-permissions") {
+      io.stdout.write(await runRemoteUserPermissionCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -242,7 +257,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof DataPatchRemoteError ||
       error instanceof JobRemoteError ||
       error instanceof FileRemoteError ||
-      error instanceof ResourceRemoteError
+      error instanceof ResourceRemoteError ||
+      error instanceof UserPermissionRemoteError
     ) {
       io.stderr.write(`cf-frappe: ${error.message}\n`);
       return 1;
@@ -273,6 +289,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "resources") {
     return parseResourcesArgs(rest);
+  }
+  if (command === "user-permissions") {
+    return parseUserPermissionsArgs(rest);
   }
   if (command === "access") {
     return parseAccessArgs(rest);
@@ -932,6 +951,168 @@ function parseJobsArgs(argv: readonly string[]): ParsedCommand {
     ...(metadata === undefined ? {} : { metadata }),
     ...(scheduleIdempotencyKey === undefined ? {} : { scheduleIdempotencyKey }),
     ...(delaySeconds === undefined ? {} : { delaySeconds })
+  };
+}
+
+function parseUserPermissionsArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = userPermissionAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown user-permissions command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: UserPermissionHeaderOption[] = [];
+  let userId: string | undefined;
+  let tenant: string | undefined;
+  let targetDoctype: string | undefined;
+  let targetName: string | undefined;
+  const applicableDoctypes: string[] = [];
+  let expectedVersion: number | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "User permission");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "User permission");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--user-id") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      userId = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--tenant") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      tenant = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--target-doctype") {
+      if (action === "list") {
+        return { kind: "invalid", message: "Cannot use --target-doctype with user-permissions list" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      targetDoctype = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--target-name") {
+      if (action === "list") {
+        return { kind: "invalid", message: "Cannot use --target-name with user-permissions list" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      targetName = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--applicable-doctype") {
+      if (action === "list") {
+        return { kind: "invalid", message: "Cannot use --applicable-doctype with user-permissions list" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      applicableDoctypes.push(value);
+      index += 1;
+      continue;
+    }
+    if (arg === "--expected-version") {
+      if (action === "list") {
+        return { kind: "invalid", message: "Cannot use --expected-version with user-permissions list" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseNonNegativeInteger(value, "User permission expected version");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      expectedVersion = parsed;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown user-permissions ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if (userId === undefined) {
+    return { kind: "invalid", message: `User permission ${action} requires --user-id` };
+  }
+  if (action !== "list" && targetDoctype === undefined) {
+    return { kind: "invalid", message: `User permission ${action} requires --target-doctype` };
+  }
+  if (action !== "list" && targetName === undefined) {
+    return { kind: "invalid", message: `User permission ${action} requires --target-name` };
+  }
+
+  return {
+    kind: "user-permissions",
+    action,
+    url,
+    headers,
+    userId,
+    ...(tenant === undefined ? {} : { tenant }),
+    ...(targetDoctype === undefined ? {} : { targetDoctype }),
+    ...(targetName === undefined ? {} : { targetName }),
+    ...(applicableDoctypes.length === 0 ? {} : { applicableDoctypes }),
+    ...(expectedVersion === undefined ? {} : { expectedVersion })
   };
 }
 
@@ -2101,6 +2282,10 @@ function fileAction(value: string): FileRemoteAction | undefined {
     : undefined;
 }
 
+function userPermissionAction(value: string): UserPermissionRemoteAction | undefined {
+  return value === "allow" || value === "list" || value === "revoke" ? value : undefined;
+}
+
 function resourceAction(value: string): ResourceRemoteAction | undefined {
   return value === "activity" ||
     value === "amend" ||
@@ -2702,6 +2887,9 @@ function helpText(): string {
     "  cf-frappe resources bulk-submit --url <origin> --doctype <doctype> (--document <docname>|--document-version <docname:version>)... [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources bulk-cancel --url <origin> --doctype <doctype> (--document <docname>|--document-version <docname:version>)... [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources bulk-transition --url <origin> --doctype <doctype> --transition <action> (--document <docname>|--document-version <docname:version>)... [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe user-permissions list --url <origin> --user-id <user> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe user-permissions allow --url <origin> --user-id <user> --target-doctype <doctype> --target-name <docname> [--applicable-doctype <doctype>]... [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe user-permissions revoke --url <origin> --user-id <user> --target-doctype <doctype> --target-name <docname> [--applicable-doctype <doctype>]... [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files list --url <origin> [--filename <text>] [--content-type <type>] [--attached-to-doctype <doctype> --attached-to-name <name>] [--storage-state <state>] [--scan-status <status>] [--uploaded-by <user>] [--private|--public] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files get --url <origin> --name <fileName> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files upload --url <origin> --path <localPath> [--filename <text>] [--content-type <type>] [--private|--public] [--attached-to-doctype <doctype> --attached-to-name <name>] [--header <name:value>] [--header-env <name=ENV>]",
@@ -2724,6 +2912,7 @@ function helpText(): string {
     "  data-patches   Inspect, plan, apply, rollback, or enqueue remote app-declared data patches through the admin API",
     "  jobs   Inspect remote job history, retry failed runs, and manage runtime schedules through the admin API",
     "  resources   Inspect and mutate deployed DocType resources through the generated resource API",
+    "  user-permissions   Inspect and mutate event-sourced linked-record user permission grants",
     "  files   Upload, inspect, update, and delete remote File metadata/content through the admin API",
     "",
     "Use --header-env for secret-bearing auth headers so tokens stay out of shell history.",

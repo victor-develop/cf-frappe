@@ -333,6 +333,14 @@ npx cf-frappe resources import --url https://your-worker.example --doctype Task 
 npx cf-frappe resources delete --url https://your-worker.example --doctype Task --name "Follow up" --expected-version 2 --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 
+Linked-record user permissions use the event-sourced policy API directly:
+
+\`\`\`bash
+npx cf-frappe user-permissions list --url https://your-worker.example --user-id teammate@example.com --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe user-permissions allow --url https://your-worker.example --user-id teammate@example.com --target-doctype Project --target-name Apollo --applicable-doctype Task --expected-version 0 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe user-permissions revoke --url https://your-worker.example --user-id teammate@example.com --target-doctype Project --target-name Apollo --applicable-doctype Task --expected-version 2 --header-env Authorization=CF_FRAPPE_AUTH
+\`\`\`
+
 Background jobs and runtime schedules use the same remote admin style:
 
 \`\`\`bash
