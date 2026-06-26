@@ -298,6 +298,14 @@ npx cf-frappe data-patches rollback-enqueue --url https://your-worker.example --
 npx cf-frappe data-patches rollback-retry-enqueue --url https://your-worker.example --id tasks.seed_starter_tasks --idempotency-key patches:rollback-retry-1 --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 
+Tenant custom field overlays can be inspected and changed without opening Desk:
+
+\`\`\`bash
+npx cf-frappe custom-fields list --url https://your-worker.example --doctype Task --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe custom-fields save --url https://your-worker.example --doctype Task --field-json '{"name":"reviewer","type":"link","label":"Reviewer","linkTo":"User","inFormView":true}' --expected-version 0 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe custom-fields disable --url https://your-worker.example --doctype Task --field reviewer --expected-version 1 --header-env Authorization=CF_FRAPPE_AUTH
+\`\`\`
+
 DocType resources can be inspected and mutated through the generated resource API without opening Desk:
 
 \`\`\`bash
