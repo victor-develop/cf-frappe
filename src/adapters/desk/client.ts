@@ -936,6 +936,71 @@ export function renderDeskClientScript(): string {
     callback();
   }
 
+  function hydrateFileUploadForms() {
+    var forms = document.querySelectorAll("form.file-upload[data-max-file-bytes], form.attachment-upload[data-max-file-bytes]");
+    if (!forms || forms.length === 0) {
+      return;
+    }
+    Array.prototype.forEach.call(forms, hydrateFileUploadForm);
+  }
+
+  function hydrateFileUploadForm(form) {
+    if (!form || form.__cfFrappeFileUploadHydrated) {
+      return;
+    }
+    form.__cfFrappeFileUploadHydrated = true;
+    form.addEventListener("submit", function (event) {
+      var maxFileBytes = uploadFormMaxFileBytes(form);
+      var file = selectedUploadFile(form);
+      if (maxFileBytes === undefined || !file || typeof file.size !== "number" || !Number.isFinite(file.size)) {
+        clearUploadFileValidity(form);
+        return;
+      }
+      if (file.size > maxFileBytes) {
+        var message = "File exceeds " + String(maxFileBytes) + " bytes";
+        if (event && typeof event.preventDefault === "function") {
+          event.preventDefault();
+        }
+        setUploadFileValidity(form, message, true);
+        msgprint(message);
+        return;
+      }
+      clearUploadFileValidity(form);
+    });
+  }
+
+  function uploadFormMaxFileBytes(form) {
+    var raw = form.dataset && form.dataset.maxFileBytes;
+    var parsed = raw === undefined ? NaN : Number(raw);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+  }
+
+  function selectedUploadFile(form) {
+    var input = typeof form.querySelector === "function"
+      ? form.querySelector('input[type="file"][name="file"], input[type="file"]')
+      : null;
+    if (!input || !input.files || input.files.length === 0) {
+      return undefined;
+    }
+    return input.files[0];
+  }
+
+  function setUploadFileValidity(form, message, report) {
+    var input = typeof form.querySelector === "function"
+      ? form.querySelector('input[type="file"][name="file"], input[type="file"]')
+      : null;
+    if (input && typeof input.setCustomValidity === "function") {
+      input.setCustomValidity(message);
+    }
+    if (report && input && typeof input.reportValidity === "function") {
+      input.reportValidity();
+    }
+  }
+
+  function clearUploadFileValidity(form) {
+    setUploadFileValidity(form, "", false);
+  }
+
   function hydrateCompoundFilterBuilders() {
     var builders = document.querySelectorAll("[data-cf-frappe-compound-filter-builder]");
     if (!builders || builders.length === 0) {
@@ -3803,6 +3868,7 @@ export function renderDeskClientScript(): string {
     })
   }));
   ready(currentFormBinding);
+  ready(hydrateFileUploadForms);
   ready(hydrateCompoundFilterBuilders);
   ready(hydrateReportFormulaBuilders);
   ready(hydratePresencePanels);

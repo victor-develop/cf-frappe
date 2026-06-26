@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the workspace new-document shortcut slice:
+As of the Desk upload preflight slice:
 
 - Vitest files: `94`
-- Vitest cases: `1109`
+- Vitest cases: `1111`
 
 ## Implication
 

@@ -1588,6 +1588,44 @@ describe("Desk client runtime", () => {
     expect(calls).toEqual(["/api/files?limit=10"]);
   });
 
+  it("preflights generated Desk upload forms with rendered file size limits", () => {
+    const alerts: string[] = [];
+    const input = new FakeFileUploadInput([{ name: "too-big.txt", size: 5 }]);
+    const form = new FakeFileUploadForm("4", input);
+
+    evaluateDeskClient(fetch, new FakeDocument({ fileUploadForms: [form] }), [], (message) => alerts.push(message));
+
+    expect(form.emitSubmit()).toBe(true);
+    expect(input.validationMessage).toBe("File exceeds 4 bytes");
+    expect(input.reportValidityCount).toBe(1);
+    expect(alerts).toEqual(["File exceeds 4 bytes"]);
+
+    input.files = [{ name: "fits.txt", size: 4 }];
+    expect(form.emitSubmit()).toBe(false);
+    expect(input.validationMessage).toBe("");
+    expect(input.reportValidityCount).toBe(1);
+    expect(alerts).toEqual(["File exceeds 4 bytes"]);
+  });
+
+  it("leaves unverifiable Desk upload sizes to the server authority", () => {
+    const alerts: string[] = [];
+    const invalidLimit = new FakeFileUploadForm("not-a-number", new FakeFileUploadInput([{ name: "large.txt", size: 999 }]));
+    const unknownSize = new FakeFileUploadForm("4", new FakeFileUploadInput([{ name: "stream.bin" }]));
+
+    evaluateDeskClient(
+      fetch,
+      new FakeDocument({ fileUploadForms: [invalidLimit, unknownSize] }),
+      [],
+      (message) => alerts.push(message)
+    );
+
+    expect(invalidLimit.emitSubmit()).toBe(false);
+    expect(unknownSize.emitSubmit()).toBe(false);
+    expect(invalidLimit.input.reportValidityCount).toBe(0);
+    expect(unknownSize.input.reportValidityCount).toBe(0);
+    expect(alerts).toEqual([]);
+  });
+
   it("wraps file upload and direct-upload APIs without hiding upload instructions", async () => {
     const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
     const runtime = evaluateDeskClient(async (url, init) => {
@@ -4885,6 +4923,47 @@ class FakeFieldWrapper {
   hidden = false;
 }
 
+class FakeFileUploadInput {
+  reportValidityCount = 0;
+  validationMessage = "";
+
+  constructor(public files: readonly { readonly name?: string; readonly size?: number }[]) {}
+
+  reportValidity(): boolean {
+    this.reportValidityCount += 1;
+    return this.validationMessage === "";
+  }
+
+  setCustomValidity(message: string): void {
+    this.validationMessage = message;
+  }
+}
+
+class FakeFileUploadForm {
+  readonly dataset: Record<string, string>;
+  readonly listeners: Record<string, Array<(event: FakeSubmitEvent) => void>> = {};
+
+  constructor(maxFileBytes: string, readonly input: FakeFileUploadInput) {
+    this.dataset = { maxFileBytes };
+  }
+
+  addEventListener(type: string, listener: (event: FakeSubmitEvent) => void): void {
+    this.listeners[type] = [...(this.listeners[type] ?? []), listener];
+  }
+
+  emitSubmit(): boolean {
+    let prevented = false;
+    for (const listener of this.listeners.submit ?? []) {
+      listener({ preventDefault: () => (prevented = true) });
+    }
+    return prevented;
+  }
+
+  querySelector(selector: string): FakeFileUploadInput | null {
+    return selector === 'input[type="file"][name="file"], input[type="file"]' ? this.input : null;
+  }
+}
+
 class FakeForm {
   readonly dataset: Record<string, string> = {};
   readonly listeners: Record<string, Array<(event: FakeSubmitEvent) => void>> = {};
@@ -5484,6 +5563,7 @@ class FakeDocument {
   readonly readyState = "complete";
   private readonly form: FakeForm | undefined;
   private readonly compoundFilterBuilders: readonly FakeCompoundFilterBuilder[];
+  private readonly fileUploadForms: readonly FakeFileUploadForm[];
   private readonly formulaBuilders: readonly FakeReportFormulaBuilder[];
   private readonly presencePanels: readonly FakePresencePanel[];
   private readonly runtime: { readonly dataset: Record<string, string> } | undefined;
@@ -5492,6 +5572,7 @@ class FakeDocument {
     options: {
       readonly form?: FakeForm;
       readonly compoundFilterBuilders?: readonly FakeCompoundFilterBuilder[];
+      readonly fileUploadForms?: readonly FakeFileUploadForm[];
       readonly formulaBuilders?: readonly FakeReportFormulaBuilder[];
       readonly presencePanels?: readonly FakePresencePanel[];
       readonly runtimeDataset?: Record<string, string>;
@@ -5499,6 +5580,7 @@ class FakeDocument {
   ) {
     this.form = options.form;
     this.compoundFilterBuilders = options.compoundFilterBuilders ?? [];
+    this.fileUploadForms = options.fileUploadForms ?? [];
     this.formulaBuilders = options.formulaBuilders ?? [];
     this.presencePanels = options.presencePanels ?? [];
     this.runtime = options.runtimeDataset ? { dataset: options.runtimeDataset } : undefined;
@@ -5520,7 +5602,12 @@ class FakeDocument {
     return null;
   }
 
-  querySelectorAll(selector: string): readonly (FakePresencePanel | FakeCompoundFilterBuilder | FakeReportFormulaBuilder)[] {
+  querySelectorAll(
+    selector: string
+  ): readonly (FakePresencePanel | FakeCompoundFilterBuilder | FakeFileUploadForm | FakeReportFormulaBuilder)[] {
+    if (selector === "form.file-upload[data-max-file-bytes], form.attachment-upload[data-max-file-bytes]") {
+      return this.fileUploadForms;
+    }
     if (selector === '[data-cf-frappe-presence="document"]') {
       return this.presencePanels;
     }
