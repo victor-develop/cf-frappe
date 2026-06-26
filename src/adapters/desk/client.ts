@@ -321,6 +321,14 @@ export function renderDeskClientScript(): string {
     return commandBody(typeof input === "string" ? { description: input } : input, options);
   }
 
+  function passwordBody(input, options) {
+    return commandBody(typeof input === "string" ? { password: input } : input, options);
+  }
+
+  function rolesBody(input, options) {
+    return commandBody(Array.isArray(input) ? { roles: input } : input, options);
+  }
+
   function customFieldBody(field, options) {
     var bodyField = isPlainObject(field) ? withoutKeys(field, ["expectedVersion"]) : field;
     return Object.assign({ field: bodyField }, versionBody(options));
@@ -2949,6 +2957,36 @@ export function renderDeskClientScript(): string {
       }
     }),
     accounts: Object.freeze({
+      changePassword: function (userId, input, options) {
+        return request(accountPath(userId, "password", options || {}), {
+          method: "PUT",
+          body: passwordBody(input, options)
+        }).then(unwrapData);
+      },
+      changeRoles: function (userId, input, options) {
+        return request(accountPath(userId, "roles", options || {}), {
+          method: "PUT",
+          body: rolesBody(input, options)
+        }).then(unwrapData);
+      },
+      create: function (userId, input, options) {
+        return request(accountPath(userId, undefined, options || {}), {
+          method: "POST",
+          body: commandBody(input || {}, options)
+        }).then(unwrapData);
+      },
+      disable: function (userId, options) {
+        return request(accountPath(userId, "disable", options || {}), {
+          method: "POST",
+          body: versionBody(options)
+        }).then(unwrapData);
+      },
+      enable: function (userId, options) {
+        return request(accountPath(userId, "enable", options || {}), {
+          method: "POST",
+          body: versionBody(options)
+        }).then(unwrapData);
+      },
       get: function (userId, options) {
         return request(accountPath(userId, undefined, options || {})).then(unwrapData);
       },

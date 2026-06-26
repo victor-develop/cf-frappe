@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the field property and workflow client helper slice:
+As of the account management client helper slice:
 
 - Vitest files: `94`
-- Vitest cases: `1086`
+- Vitest cases: `1087`
 
 ## Implication
 

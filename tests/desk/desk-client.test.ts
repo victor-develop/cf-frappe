@@ -22,6 +22,23 @@ interface DeskClientRuntime {
     readonly requestPasswordReset: (input: Record<string, unknown>) => Promise<unknown>;
   };
   readonly accounts: {
+    readonly changePassword: (
+      userId: string,
+      input: string | Record<string, unknown>,
+      options?: { readonly expectedVersion?: number; readonly tenant?: string }
+    ) => Promise<unknown>;
+    readonly changeRoles: (
+      userId: string,
+      input: readonly string[] | Record<string, unknown>,
+      options?: { readonly expectedVersion?: number; readonly tenant?: string }
+    ) => Promise<unknown>;
+    readonly create: (
+      userId: string,
+      input: Record<string, unknown>,
+      options?: { readonly expectedVersion?: number; readonly tenant?: string }
+    ) => Promise<unknown>;
+    readonly disable: (userId: string, options?: { readonly expectedVersion?: number; readonly tenant?: string }) => Promise<unknown>;
+    readonly enable: (userId: string, options?: { readonly expectedVersion?: number; readonly tenant?: string }) => Promise<unknown>;
     readonly get: (userId: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly syncProvider: (
       userId: string,
@@ -1684,18 +1701,32 @@ describe("Desk client runtime", () => {
     ]);
   });
 
-  it("wraps same-origin account provider sync APIs", async () => {
+  it("wraps same-origin account management APIs", async () => {
     const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
     const runtime = evaluateDeskClient(async (url, init) => {
       calls.push({ url: String(url), init: init ?? {} });
       return new Response(JSON.stringify({ data: { userId: "owner@example.com" } }), {
-        headers: { "content-type": "application/json" }
+        headers: { "content-type": "application/json" },
+        status: (init?.method ?? "GET") === "POST" ? 201 : 200
       });
     });
 
     await expect(runtime.accounts.get("owner@example.com", { tenant: "acme/east" })).resolves.toEqual({
       userId: "owner@example.com"
     });
+    await runtime.accounts.create(
+      "owner@example.com",
+      {
+        password: "initial-secret",
+        email: "owner@example.com",
+        roles: ["User"],
+        enabled: true,
+        expectedVersion: 99
+      },
+      { expectedVersion: 0, tenant: "acme/east" }
+    );
+    await runtime.accounts.changePassword("owner@example.com", "new-secret", { expectedVersion: 1, tenant: "acme/east" });
+    await runtime.accounts.changeRoles("owner@example.com", ["User", "Task Manager"], { expectedVersion: 2, tenant: "acme/east" });
     await runtime.accounts.syncProvider(
       "owner@example.com",
       {
@@ -1707,18 +1738,87 @@ describe("Desk client runtime", () => {
       },
       { expectedVersion: 7, tenant: "acme/east" }
     );
+    await runtime.accounts.disable("owner@example.com", { expectedVersion: 8, tenant: "acme/east" });
+    await runtime.accounts.enable("owner@example.com", { expectedVersion: 9, tenant: "acme/east" });
 
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
       "GET /api/users/owner%40example.com?tenant=acme%2Feast",
-      "POST /api/users/owner%40example.com/provider-sync?tenant=acme%2Feast"
+      "POST /api/users/owner%40example.com?tenant=acme%2Feast",
+      "PUT /api/users/owner%40example.com/password?tenant=acme%2Feast",
+      "PUT /api/users/owner%40example.com/roles?tenant=acme%2Feast",
+      "POST /api/users/owner%40example.com/provider-sync?tenant=acme%2Feast",
+      "POST /api/users/owner%40example.com/disable?tenant=acme%2Feast",
+      "POST /api/users/owner%40example.com/enable?tenant=acme%2Feast"
     ]);
-    expect(calls[1]?.init.body).toBe(JSON.stringify({
-      provider: "cloudflare-access",
-      subject: "access-subject-1",
-      email: "owner@example.com",
-      roles: ["User"],
-      expectedVersion: 7
-    }));
+    expect(calls.map((call) => call.init.credentials)).toEqual([
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin"
+    ]);
+    expect(calls.map((call) => call.init.body)).toEqual([
+      undefined,
+      JSON.stringify({
+        password: "initial-secret",
+        email: "owner@example.com",
+        roles: ["User"],
+        enabled: true,
+        expectedVersion: 0
+      }),
+      JSON.stringify({ password: "new-secret", expectedVersion: 1 }),
+      JSON.stringify({ roles: ["User", "Task Manager"], expectedVersion: 2 }),
+      JSON.stringify({
+        provider: "cloudflare-access",
+        subject: "access-subject-1",
+        email: "owner@example.com",
+        roles: ["User"],
+        expectedVersion: 7
+      }),
+      JSON.stringify({ expectedVersion: 8 }),
+      JSON.stringify({ expectedVersion: 9 })
+    ]);
+    expect(calls.map((call) => new Headers(call.init.headers).get("content-type"))).toEqual([
+      null,
+      "application/json",
+      "application/json",
+      "application/json",
+      "application/json",
+      "application/json",
+      "application/json"
+    ]);
+  });
+
+  it("strips nested account helper versions from object-shaped commands", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { userId: "owner@example.com" } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await runtime.accounts.changePassword(
+      "owner@example.com",
+      { password: "rotated-secret", expectedVersion: 99 },
+      { expectedVersion: 10, tenant: "acme/east" }
+    );
+    await runtime.accounts.changeRoles(
+      "owner@example.com",
+      { roles: ["Support"], expectedVersion: 99, tenant: "body-tenant-is-payload" },
+      { expectedVersion: 11, tenant: "acme/east" }
+    );
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "PUT /api/users/owner%40example.com/password?tenant=acme%2Feast",
+      "PUT /api/users/owner%40example.com/roles?tenant=acme%2Feast"
+    ]);
+    expect(calls.map((call) => call.init.body)).toEqual([
+      JSON.stringify({ password: "rotated-secret", expectedVersion: 10 }),
+      JSON.stringify({ roles: ["Support"], tenant: "body-tenant-is-payload", expectedVersion: 11 })
+    ]);
   });
 
   it("wraps audit search and deleted recovery APIs without browser-side validation", async () => {
