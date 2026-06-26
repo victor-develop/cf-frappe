@@ -10,7 +10,7 @@ import type { BulkDocumentCommandFailure } from "../application/document-service
 import { UserPermissionService } from "../application/user-permission-service.js";
 import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator.js";
 import type { DocTypeDefinition, DomainEvent, DocumentSnapshot } from "../core/types.js";
-import { createDocumentDeliveryHooks } from "../application/realtime.js";
+import { createDocumentDeliveryHooks, type EmailNotificationDeliveryQueue } from "../application/realtime.js";
 import { UserNotificationService } from "../application/user-notification-service.js";
 import type {
   AmendDocumentCommand,
@@ -91,6 +91,10 @@ export interface AggregateCoordinatorOptions<Env extends AggregateCoordinatorEnv
     env: Env,
     services: { readonly events: EventStore; readonly notificationRules: NotificationRuleService }
   ) => EmailNotificationService;
+  readonly emailNotificationDeliveryQueue?: (
+    env: Env,
+    services: { readonly events: EventStore; readonly notificationRules: NotificationRuleService }
+  ) => EmailNotificationDeliveryQueue;
   readonly onHookError?: (error: unknown, event: DomainEvent) => void | Promise<void>;
 }
 
@@ -145,10 +149,14 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
             ...(options.clock ? { clock: options.clock } : {})
       });
       const emailNotifications = options.emailNotifications?.(env, { events, notificationRules });
+      const emailNotificationDeliveryQueue = emailNotifications
+        ? options.emailNotificationDeliveryQueue?.(env, { events, notificationRules })
+        : undefined;
       const deliveryHooks = createDocumentDeliveryHooks({
         ...(options.realtime ? { realtime: options.realtime(env) } : {}),
         ...(notifications ? { notifications } : {}),
-        ...(emailNotifications ? { emailNotifications } : {})
+        ...(emailNotifications ? { emailNotifications } : {}),
+        ...(emailNotificationDeliveryQueue ? { emailNotificationDeliveryQueue } : {})
       });
       this.service = new DocumentService({
         registry: options.registry,
