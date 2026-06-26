@@ -281,6 +281,7 @@ describe("cf-frappe CLI scaffold", () => {
     expect(readmeText).toContain("npx cf-frappe resources delete --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe notification-rules list --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("The starter data patch creates a `Task owner updates` inbox rule");
+    expect(readmeText).toContain("npx cf-frappe notification-rules get --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe notification-rules save --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe notification-rules disable --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe notification-rules enable --url https://your-worker.example --doctype Task");

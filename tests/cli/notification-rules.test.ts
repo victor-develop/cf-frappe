@@ -77,6 +77,27 @@ describe("cf-frappe CLI remote notification rules", () => {
 
     expect(parseCliArgs([
       "notification-rules",
+      "get",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--rule",
+      "Managers on updates",
+      "--tenant",
+      "acme/east"
+    ])).toEqual({
+      kind: "notification-rules",
+      action: "get",
+      url: "https://app.example",
+      headers: [],
+      doctype: "Task",
+      tenant: "acme/east",
+      ruleName: "Managers on updates"
+    });
+
+    expect(parseCliArgs([
+      "notification-rules",
       "disable",
       "--url",
       "https://app.example",
@@ -146,6 +167,21 @@ describe("cf-frappe CLI remote notification rules", () => {
     ])).toEqual({
       kind: "invalid",
       message: "Cannot use --rule with notification-rules list"
+    });
+    expect(parseCliArgs([
+      "notification-rules",
+      "get",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--rule",
+      "Managers",
+      "--expected-version",
+      "1"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Cannot use --expected-version with notification-rules get"
     });
     expect(parseCliArgs([
       "notification-rules",
@@ -338,6 +374,65 @@ describe("cf-frappe CLI remote notification rules", () => {
     expect(stdout.text()).toContain("DocType: Sales Invoice Tenant: acme/east Version: 2 Total: 1");
     expect(stdout.text()).toContain("- Managers on updates enabled channels inbox events DocumentUpdated recipients user:manager@example.com subject \"Invoice changed\"");
     expect(stdout.text()).toContain("{\"name\":\"Managers on updates\"");
+  });
+
+  it("gets one remote notification rule through the generated admin API", async () => {
+    const calls: RemoteCall[] = [];
+    const stdout = textBuffer();
+    const exitCode = await runCli(
+      [
+        "notification-rules",
+        "get",
+        "--url",
+        "https://app.example/cf",
+        "--doctype",
+        "Sales Invoice",
+        "--rule",
+        "Managers/Updates",
+        "--tenant",
+        "acme/east"
+      ],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(calls, {
+          data: {
+            tenantId: "acme/east",
+            doctypeName: "Sales Invoice",
+            version: 4,
+            rules: [
+              {
+                enabled: true,
+                rule: {
+                  name: "Owners",
+                  events: ["DocumentCreated"],
+                  recipients: [{ kind: "documentOwner" }]
+                }
+              },
+              {
+                enabled: false,
+                rule: {
+                  name: "Managers/Updates",
+                  events: ["DocumentUpdated"],
+                  recipients: [{ kind: "user", userId: "manager@example.com" }],
+                  channels: ["email"]
+                }
+              }
+            ]
+          }
+        }),
+        stdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(calls[0]?.url).toBe("https://app.example/cf/api/notification-rules/Sales%20Invoice?tenant=acme%2Feast");
+    expect(calls[0]?.method).toBe("GET");
+    expect(stdout.text()).toContain("Notification rule at https://app.example/cf");
+    expect(stdout.text()).toContain("DocType: Sales Invoice Tenant: acme/east Version: 4 Total: 1");
+    expect(stdout.text()).toContain("- Managers/Updates disabled channels email events DocumentUpdated recipients user:manager@example.com");
+    expect(stdout.text()).toContain("{\"name\":\"Managers/Updates\"");
+    expect(stdout.text()).not.toContain("Owners");
   });
 
   it("saves and clears remote notification rules through the generated admin API", async () => {
@@ -624,6 +719,42 @@ describe("cf-frappe CLI remote notification rules", () => {
 
     expect(exit).toBe(1);
     expect(calls).toHaveLength(1);
+    expect(stderr.text()).toContain("Notification rule 'Missing' was not found in remote state");
+  });
+
+  it("fails remote notification-rule get when the selected rule is absent", async () => {
+    const calls: RemoteCall[] = [];
+    const stderr = textBuffer();
+    const exit = await runCli(
+      [
+        "notification-rules",
+        "get",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--rule",
+        "Missing"
+      ],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(calls, {
+          data: {
+            tenantId: "default",
+            doctypeName: "Task",
+            version: 3,
+            rules: []
+          }
+        }),
+        stdout: textBuffer(),
+        stderr
+      }
+    );
+
+    expect(exit).toBe(1);
+    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+      "GET https://app.example/api/notification-rules/Task"
+    ]);
     expect(stderr.text()).toContain("Notification rule 'Missing' was not found in remote state");
   });
 

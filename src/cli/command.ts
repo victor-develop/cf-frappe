@@ -4017,8 +4017,8 @@ function parseNotificationRulesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--expected-version") {
-      if (action === "list") {
-        return { kind: "invalid", message: "Cannot use --expected-version with notification-rules list" };
+      if (action === "list" || action === "get") {
+        return { kind: "invalid", message: `Cannot use --expected-version with notification-rules ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
       if (typeof value !== "string") {
@@ -5417,7 +5417,7 @@ function userPermissionAction(value: string): UserPermissionRemoteAction | undef
 }
 
 function notificationRuleAction(value: string): NotificationRuleRemoteAction | undefined {
-  return value === "clear" || value === "disable" || value === "enable" || value === "list" || value === "save"
+  return value === "clear" || value === "disable" || value === "enable" || value === "get" || value === "list" || value === "save"
     ? value
     : undefined;
 }
@@ -6061,6 +6061,7 @@ function helpText(): string {
     "  cf-frappe notifications read --url <origin> --id <notificationId> [--user <user>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notifications dismiss --url <origin> --id <notificationId> [--user <user>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notification-rules list --url <origin> --doctype <doctype> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe notification-rules get --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notification-rules save --url <origin> --doctype <doctype> --rule <name> --event <eventKind>... (--recipient-user <user>|--recipient-field <field>|--recipient-owner)... [--channel inbox|email]... [--subject <text>] [--enabled|--disabled] [--exclude-actor|--include-actor] [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notification-rules enable --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notification-rules disable --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",

@@ -1,6 +1,6 @@
 import { requestRemoteAdmin, type RemoteAdminIo, type RemoteHeaderOption } from "./remote-admin.js";
 
-export type NotificationRuleRemoteAction = "clear" | "disable" | "enable" | "list" | "save";
+export type NotificationRuleRemoteAction = "clear" | "disable" | "enable" | "get" | "list" | "save";
 
 export type NotificationRuleHeaderOption = RemoteHeaderOption;
 
@@ -79,6 +79,14 @@ export async function runRemoteNotificationRuleCommand(
       ...(query === undefined ? {} : { query })
     });
     return formatNotificationRules(command.url, data);
+  }
+  if (command.action === "get") {
+    const data = await requestRemoteNotificationRule(command, io, {
+      method: "GET",
+      path: notificationRulesPath(command),
+      ...(query === undefined ? {} : { query })
+    });
+    return formatNotificationRules(command.url, singleRuleState(command, data), "Notification rule");
   }
   if (command.action === "clear") {
     const data = await requestRemoteNotificationRule(command, io, {
@@ -194,6 +202,21 @@ function toggleBody(
       ...(entry.rule.excludeActor === undefined ? {} : { excludeActor: entry.rule.excludeActor })
     },
     expectedVersion: command.expectedVersion ?? state.version ?? 0
+  };
+}
+
+function singleRuleState(
+  command: NotificationRuleRemoteCommand,
+  state: NotificationRuleStateResponse
+): NotificationRuleStateResponse {
+  const ruleName = requiredRuleName(command);
+  const entry = (state.rules ?? []).find((item) => item.rule.name === ruleName);
+  if (entry === undefined) {
+    throw new NotificationRuleRemoteError(`Notification rule '${ruleName}' was not found in remote state`);
+  }
+  return {
+    ...state,
+    rules: [entry]
   };
 }
 

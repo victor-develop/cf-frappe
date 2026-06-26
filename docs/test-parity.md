@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk notification-rule enable/disable client helper slice:
+As of the notification-rule single-read operator helper slice:
 
 - Vitest files: `119`
-- Vitest cases: `1304`
+- Vitest cases: `1308`
 
 ## Implication
 

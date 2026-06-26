@@ -219,6 +219,7 @@ interface DeskClientRuntime {
       rule: string,
       options?: { readonly expectedVersion?: number; readonly tenant?: string }
     ) => Promise<unknown>;
+    readonly get: (doctype: string, rule: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly list: (doctype: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly save: (
       doctype: string,
@@ -2572,6 +2573,54 @@ describe("Desk client runtime", () => {
     ]);
     expect(calls[0]?.init.credentials).toBe("same-origin");
     expect(calls[0]?.init.body).toBeUndefined();
+  });
+
+  it("reads one notification rule from the event-sourced rule state", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(
+        JSON.stringify({
+          data: {
+            version: 3,
+            rules: [
+              { enabled: true, rule: { name: "Owners", events: ["DocumentCreated"] } },
+              { enabled: false, rule: { name: "Managers/Updates", events: ["DocumentUpdated"] } }
+            ]
+          }
+        }),
+        { headers: { "content-type": "application/json" } }
+      );
+    });
+
+    await expect(runtime.notificationRules.get("Task Type", "Managers/Updates", { tenant: "acme/east" })).resolves.toEqual({
+      enabled: false,
+      rule: { name: "Managers/Updates", events: ["DocumentUpdated"] }
+    });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/notification-rules/Task%20Type?tenant=acme%2Feast"
+    ]);
+    expect(calls[0]?.init.credentials).toBe("same-origin");
+    expect(calls[0]?.init.body).toBeUndefined();
+  });
+
+  it("rejects missing notification rule reads without mutating remote state", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { version: 3, rules: [] } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.notificationRules.get("Task Type", "Missing", { tenant: "acme/east" })).rejects.toThrow(
+      "Notification rule 'Missing' was not found in remote state"
+    );
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/notification-rules/Task%20Type?tenant=acme%2Feast"
+    ]);
   });
 
   it("wraps event-sourced role catalog APIs with tenant and version metadata", async () => {

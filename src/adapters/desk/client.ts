@@ -458,12 +458,7 @@ export function renderDeskClientScript(): string {
     if (expectedVersion !== undefined && state && state.version !== undefined && state.version !== expectedVersion) {
       throw new Error("Expected notification rules at version " + String(expectedVersion) + ", found " + String(state.version));
     }
-    var entry = ((state && state.rules) || []).find(function (item) {
-      return item && item.rule && item.rule.name === ruleName;
-    });
-    if (entry === undefined) {
-      throw new Error("Notification rule '" + ruleName + "' was not found in remote state");
-    }
+    var entry = notificationRuleEntry(ruleName, state);
     var rule = entry.rule;
     var bodyRule = {
       events: requiredNotificationRuleEvents(rule, ruleName).slice(),
@@ -483,6 +478,21 @@ export function renderDeskClientScript(): string {
       rule: bodyRule,
       expectedVersion: expectedVersion !== undefined ? expectedVersion : state && state.version !== undefined ? state.version : 0
     };
+  }
+
+  function notificationRuleEntry(ruleName, state) {
+    var entry = ((state && state.rules) || []).find(function (item) {
+      return item && item.rule && item.rule.name === ruleName;
+    });
+    if (entry === undefined) {
+      throw new Error("Notification rule '" + ruleName + "' was not found in remote state");
+    }
+    return entry;
+  }
+
+  async function getNotificationRule(doctype, rule, options) {
+    var state = unwrapData(await request(notificationRulePath(doctype, undefined, options || {})));
+    return notificationRuleEntry(rule, state);
   }
 
   async function toggleNotificationRule(doctype, rule, enabled, options) {
@@ -3676,6 +3686,9 @@ export function renderDeskClientScript(): string {
       },
       enable: function (doctype, rule, options) {
         return toggleNotificationRule(doctype, rule, true, options);
+      },
+      get: function (doctype, rule, options) {
+        return getNotificationRule(doctype, rule, options);
       },
       list: function (doctype, options) {
         return request(notificationRulePath(doctype, undefined, options || {})).then(unwrapData);
