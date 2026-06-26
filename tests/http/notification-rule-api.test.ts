@@ -37,6 +37,7 @@ describe("notification rule api", () => {
             { kind: "user", userId: "manager@example.com" }
           ],
           channels: ["email", "inbox"],
+          condition: { field: "priority", value: "High" },
           subject: "Note changed"
         }
       })
@@ -45,7 +46,17 @@ describe("notification rule api", () => {
     await expect(saved.json()).resolves.toMatchObject({
       data: {
         version: 1,
-        rules: [{ rule: { name: "Managers on updates", channels: ["email", "inbox"], subject: "Note changed" }, enabled: true }]
+        rules: [
+          {
+            rule: {
+              name: "Managers on updates",
+              channels: ["email", "inbox"],
+              condition: { field: "priority", value: "High" },
+              subject: "Note changed"
+            },
+            enabled: true
+          }
+        ]
       }
     });
 
@@ -67,6 +78,7 @@ describe("notification rule api", () => {
                 { kind: "user", userId: "manager@example.com" }
               ],
               channels: ["email", "inbox"],
+              condition: { field: "priority", value: "High" },
               subject: "Note changed"
             }
           }
@@ -141,6 +153,20 @@ describe("notification rule api", () => {
     });
     expect(stale.status).toBe(409);
     await expect(stale.json()).resolves.toMatchObject({ error: { code: "DOCUMENT_CONFLICT" } });
+
+    const invalidCondition = await app.request("/api/notification-rules/Note/BadCondition", {
+      method: "PUT",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        rule: {
+          events: ["DocumentUpdated"],
+          recipients: [{ kind: "user", userId: "manager@example.com" }],
+          condition: { field: "metadata", value: "x" }
+        }
+      })
+    });
+    expect(invalidCondition.status).toBe(400);
+    await expect(invalidCondition.json()).resolves.toMatchObject({ error: { code: "NOTIFICATION_RULE_INVALID" } });
 
     const missing = await app.request("/api/notification-rules/Note/Missing", { headers: adminHeaders });
     expect(missing.status).toBe(404);

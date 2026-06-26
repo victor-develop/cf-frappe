@@ -1,4 +1,5 @@
 import { FrameworkError } from "./errors.js";
+import { matchesListFilterExpression, normalizeListFilterExpression } from "./list-view.js";
 import type {
   DocTypeDefinition,
   DocumentData,
@@ -118,6 +119,9 @@ export function normalizeNotificationRule(
   const events = normalizeEventKinds(rule.events);
   const recipients = normalizeRecipients(doctype, rule.recipients);
   const channels = normalizeChannels(rule.channels);
+  const condition = rule.condition === undefined
+    ? undefined
+    : normalizeListFilterExpression(doctype, rule.condition, { errorCode: "NOTIFICATION_RULE_INVALID" });
   const subject = optionalTrimmedString(rule.subject, "Notification rule subject");
   const enabled = optionalBoolean(rule.enabled, "Notification rule enabled");
   const excludeActor = optionalBoolean(rule.excludeActor, "Notification rule excludeActor");
@@ -127,6 +131,7 @@ export function normalizeNotificationRule(
     events: Object.freeze(events),
     recipients: Object.freeze(recipients),
     ...(channels === undefined ? {} : { channels: Object.freeze(channels) }),
+    ...(condition === undefined ? {} : { condition }),
     ...(subject === undefined ? {} : { subject }),
     ...(excludeActor === undefined ? {} : { excludeActor })
   });
@@ -142,7 +147,7 @@ export function notificationRuleUserNotificationsFromDomainEvent(
   const notifications: DocumentUserNotificationPayload[] = [];
   const seen = new Set<string>();
   for (const rule of context.rules) {
-    if (!ruleMatches(rule, context.event, "inbox")) {
+    if (!ruleMatches(rule, context.event, snapshot, "inbox")) {
       continue;
     }
     for (const recipientId of notificationRecipientsForRule(rule, snapshot)) {
@@ -182,7 +187,7 @@ export function notificationRuleEmailNotificationsFromDomainEvent(
   const notifications: DocumentEmailNotificationPayload[] = [];
   const seen = new Set<string>();
   for (const rule of context.rules) {
-    if (!ruleMatches(rule, context.event, "email")) {
+    if (!ruleMatches(rule, context.event, snapshot, "email")) {
       continue;
     }
     for (const recipientId of notificationRecipientsForRule(rule, snapshot)) {
@@ -368,9 +373,15 @@ function renderRuleEmailText(subject: string, rule: NotificationRuleDefinition, 
   ].join("\n");
 }
 
-function ruleMatches(rule: NotificationRuleDefinition, event: DomainEvent, channel: NotificationRuleChannel): boolean {
+function ruleMatches(
+  rule: NotificationRuleDefinition,
+  event: DomainEvent,
+  snapshot: DocumentSnapshot,
+  channel: NotificationRuleChannel
+): boolean {
   return (rule.enabled ?? true) !== false &&
     rule.events.includes(event.payload.kind as NotificationRuleEventKind) &&
+    matchesListFilterExpression(snapshot, rule.condition) &&
     ruleChannels(rule).includes(channel);
 }
 

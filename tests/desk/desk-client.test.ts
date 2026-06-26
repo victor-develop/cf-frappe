@@ -2452,6 +2452,7 @@ describe("Desk client runtime", () => {
       name: "Managers/Updates",
       events: ["DocumentUpdated"],
       recipients: [{ kind: "user", userId: "manager@example.com" }],
+      condition: { field: "priority", value: "High" },
       expectedVersion: 99
     };
 
@@ -2473,7 +2474,8 @@ describe("Desk client runtime", () => {
       JSON.stringify({
         rule: {
           events: ["DocumentUpdated"],
-          recipients: [{ kind: "user", userId: "manager@example.com" }]
+          recipients: [{ kind: "user", userId: "manager@example.com" }],
+          condition: { field: "priority", value: "High" }
         },
         expectedVersion: 1
       }),
@@ -2496,6 +2498,7 @@ describe("Desk client runtime", () => {
                   name: "Managers/Updates",
                   events: ["DocumentUpdated"],
                   recipients: [{ kind: "user", userId: "manager@example.com" }],
+                  condition: { field: "priority", value: "High" },
                   ...(version === 4 ? { channels: ["email"], subject: "Task changed", excludeActor: false } : {})
                 }
               }
@@ -2533,6 +2536,7 @@ describe("Desk client runtime", () => {
         rule: {
           events: ["DocumentUpdated"],
           recipients: [{ kind: "user", userId: "manager@example.com" }],
+          condition: { field: "priority", value: "High" },
           enabled: true
         },
         expectedVersion: 2
@@ -2543,6 +2547,7 @@ describe("Desk client runtime", () => {
           events: ["DocumentUpdated"],
           recipients: [{ kind: "user", userId: "manager@example.com" }],
           channels: ["email"],
+          condition: { field: "priority", value: "High" },
           enabled: false,
           subject: "Task changed",
           excludeActor: false

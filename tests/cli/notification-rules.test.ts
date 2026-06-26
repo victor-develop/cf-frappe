@@ -49,6 +49,8 @@ describe("cf-frappe CLI remote notification rules", () => {
       "email",
       "--channel",
       "inbox",
+      "--condition-json",
+      "{\"field\":\"priority\",\"value\":\"High\"}",
       "--subject",
       "{{ doctype }} {{ name }} changed",
       "--disabled",
@@ -69,6 +71,7 @@ describe("cf-frappe CLI remote notification rules", () => {
         { kind: "documentOwner" }
       ],
       channels: ["email", "inbox"],
+      condition: { field: "priority", value: "High" },
       subject: "{{ doctype }} {{ name }} changed",
       enabled: false,
       excludeActor: false,
@@ -262,6 +265,40 @@ describe("cf-frappe CLI remote notification rules", () => {
     });
     expect(parseCliArgs([
       "notification-rules",
+      "enable",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--rule",
+      "Managers",
+      "--condition-json",
+      "{\"field\":\"priority\",\"value\":\"High\"}"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Cannot use --condition-json with notification-rules enable"
+    });
+    expect(parseCliArgs([
+      "notification-rules",
+      "save",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--rule",
+      "Managers",
+      "--event",
+      "DocumentUpdated",
+      "--recipient-user",
+      "manager@example.com",
+      "--condition-json",
+      "[]"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Notification rule condition must be a valid JSON object"
+    });
+    expect(parseCliArgs([
+      "notification-rules",
       "disable",
       "--url",
       "https://app.example",
@@ -448,6 +485,8 @@ describe("cf-frappe CLI remote notification rules", () => {
         "--recipient-owner",
         "--channel",
         "email",
+        "--condition-json",
+        "{\"field\":\"priority\",\"operator\":\"in\",\"value\":[\"High\",\"Urgent\"]}",
         "--subject",
         "{{ name }} changed",
         "--enabled",
@@ -474,6 +513,7 @@ describe("cf-frappe CLI remote notification rules", () => {
                     { kind: "documentOwner" }
                   ],
                   channels: ["email"],
+                  condition: { field: "priority", operator: "in", value: ["High", "Urgent"] },
                   subject: "{{ name }} changed",
                   excludeActor: true
                 }
@@ -498,6 +538,7 @@ describe("cf-frappe CLI remote notification rules", () => {
           { kind: "documentOwner" }
         ],
         channels: ["email"],
+        condition: { field: "priority", operator: "in", value: ["High", "Urgent"] },
         enabled: true,
         subject: "{{ name }} changed",
         excludeActor: true
@@ -582,6 +623,7 @@ describe("cf-frappe CLI remote notification rules", () => {
                     events: ["DocumentUpdated"],
                     recipients: [{ kind: "field", field: "owner" }],
                     channels: ["inbox"],
+                    condition: { field: "priority", value: "High" },
                     subject: "Task changed",
                     excludeActor: false
                   }
@@ -613,6 +655,7 @@ describe("cf-frappe CLI remote notification rules", () => {
         events: ["DocumentUpdated"],
         recipients: [{ kind: "field", field: "owner" }],
         channels: ["inbox"],
+        condition: { field: "priority", value: "High" },
         enabled: true,
         subject: "Task changed",
         excludeActor: false
@@ -648,7 +691,8 @@ describe("cf-frappe CLI remote notification rules", () => {
                   rule: {
                     name: "Owner updates",
                     events: ["DocumentUpdated"],
-                    recipients: [{ kind: "documentOwner" }]
+                    recipients: [{ kind: "documentOwner" }],
+                    condition: { field: "system.docstatus", value: "draft" }
                   }
                 }
               ]
@@ -673,6 +717,7 @@ describe("cf-frappe CLI remote notification rules", () => {
       rule: {
         events: ["DocumentUpdated"],
         recipients: [{ kind: "documentOwner" }],
+        condition: { field: "system.docstatus", value: "draft" },
         enabled: false
       },
       expectedVersion: 7

@@ -165,6 +165,7 @@ export interface NotificationRuleDefinition {
   readonly events: readonly NotificationRuleEventKind[];
   readonly recipients: readonly NotificationRuleRecipientDefinition[];
   readonly channels?: readonly NotificationRuleChannel[];
+  readonly condition?: ListFilterExpression;
   readonly subject?: string;
   readonly excludeActor?: boolean;
 }

@@ -64,6 +64,7 @@ describe("notification rules", () => {
         { kind: "user", userId: " support@example.com " }
       ],
       channels: ["email", "inbox"],
+      condition: { field: "priority", value: "High" },
       subject: "  {{ doctype }} {{ name }} changed  ",
       excludeActor: false
     });
@@ -78,6 +79,7 @@ describe("notification rules", () => {
         { kind: "user", userId: "support@example.com" }
       ],
       channels: ["email", "inbox"],
+      condition: { field: "priority", value: "High" },
       subject: "{{ doctype }} {{ name }} changed",
       excludeActor: false
     });
@@ -103,6 +105,14 @@ describe("notification rules", () => {
         channels: ["sms" as never]
       })
     ).toThrow(/channel 'sms' is not supported/);
+    expect(() =>
+      normalizeNotificationRule(noteDocType, {
+        name: "Bad condition",
+        events: ["DocumentUpdated"],
+        recipients: [{ kind: "user", userId: "support@example.com" }],
+        condition: { field: "metadata", value: "x" }
+      })
+    ).toThrow("Filter field 'metadata' is not defined on Note");
   });
 
   it("evaluates matching rules into deduplicated user notification payloads", () => {
@@ -141,6 +151,36 @@ describe("notification rules", () => {
         recipientId: "reviewer@example.com",
         ruleName: "Review alert",
         subject: "owner@example.com changed Note My Note"
+      })
+    ]);
+  });
+
+  it("applies notification rule conditions to post-commit snapshots", () => {
+    const event = documentEvent("evt_update", "DocumentUpdated");
+    const rule = normalizeNotificationRule(noteDocType, {
+      name: "High priority alert",
+      events: ["DocumentUpdated"],
+      recipients: [{ kind: "user", userId: "manager@example.com" }],
+      condition: { field: "priority", value: "High" }
+    });
+
+    expect(
+      notificationRuleUserNotificationsFromDomainEvent({
+        event,
+        snapshot: noteSnapshot({ priority: "Medium" }),
+        rules: [rule]
+      })
+    ).toEqual([]);
+    expect(
+      notificationRuleUserNotificationsFromDomainEvent({
+        event,
+        snapshot: noteSnapshot({ priority: "High" }),
+        rules: [rule]
+      })
+    ).toEqual([
+      expect.objectContaining({
+        recipientId: "manager@example.com",
+        ruleName: "High priority alert"
       })
     ]);
   });

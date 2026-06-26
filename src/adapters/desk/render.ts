@@ -1666,6 +1666,7 @@ export function renderNotificationRuleAdmin(state: NotificationRuleAdminState): 
       <td>${escapeHtml(entry.rule.events.join(", "))}</td>
       <td>${escapeHtml(entry.rule.recipients.map(notificationRuleRecipientLabel).join(", "))}</td>
       <td>${escapeHtml((entry.rule.channels ?? ["inbox"]).join(", "))}</td>
+      <td>${escapeHtml(notificationRuleConditionLabel(entry.rule.condition))}</td>
       <td>${escapeHtml(entry.rule.subject ?? "")}</td>
       <td>
         <a class="button" href="${escapeHtml(notificationRuleAdminHref(state.selectedDoctype, entry.rule.name))}">Edit</a>
@@ -1697,6 +1698,7 @@ export function renderNotificationRuleAdmin(state: NotificationRuleAdminState): 
       <label class="field"><span>Events</span><textarea name="events">${escapeHtml(rule?.events.join("\n") ?? "DocumentUpdated")}</textarea></label>
       <label class="field"><span>Recipients</span><textarea name="recipients">${escapeHtml(rule?.recipients.map(notificationRuleRecipientLabel).join("\n") ?? "field:created_by")}</textarea></label>
       <label class="field"><span>Channels</span><input name="channels" value="${escapeHtml(rule?.channels?.join(",") ?? "")}" placeholder="inbox"></label>
+      <label class="field wide"><span>Condition JSON</span><textarea name="condition" rows="5">${escapeHtml(notificationRuleConditionValue(rule?.condition))}</textarea></label>
       <label class="field"><span>Subject</span><input name="subject" value="${escapeHtml(rule?.subject ?? "")}" placeholder="{{ actor }} updated {{ doctype }} {{ name }}"></label>
       <label class="field"><span>Exclude Actor</span><select name="excludeActor">${renderNotificationRuleBooleanOptions(rule?.excludeActor, "Yes", "No")}</select></label>
     </div>
@@ -1705,8 +1707,8 @@ export function renderNotificationRuleAdmin(state: NotificationRuleAdminState): 
   <section class="panel">
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Name</th><th>Status</th><th>Events</th><th>Recipients</th><th>Channels</th><th>Subject</th><th>Actions</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="7" class="empty">No notification rules configured.</td></tr>`}</tbody>
+        <thead><tr><th>Name</th><th>Status</th><th>Events</th><th>Recipients</th><th>Channels</th><th>Condition</th><th>Subject</th><th>Actions</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="8" class="empty">No notification rules configured.</td></tr>`}</tbody>
       </table>
     </div>
   </section>`;
@@ -1856,6 +1858,14 @@ function notificationRuleRecipientLabel(
     return `field:${recipient.field}`;
   }
   return `user:${recipient.userId}`;
+}
+
+function notificationRuleConditionValue(condition: ListFilterExpression | undefined): string {
+  return condition === undefined ? "" : JSON.stringify(condition, null, 2);
+}
+
+function notificationRuleConditionLabel(condition: ListFilterExpression | undefined): string {
+  return condition === undefined ? "" : JSON.stringify(condition);
 }
 
 function renderWorkflowTransitionLine(

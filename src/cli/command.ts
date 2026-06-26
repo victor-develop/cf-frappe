@@ -3843,6 +3843,7 @@ function parseNotificationRulesArgs(argv: readonly string[]): ParsedCommand {
   const events: string[] = [];
   const recipients: NotificationRuleRecipientOption[] = [];
   const channels: string[] = [];
+  let condition: Record<string, unknown> | undefined;
   let subject: string | undefined;
   let enabled: boolean | undefined;
   let excludeActor: boolean | undefined;
@@ -3994,6 +3995,22 @@ function parseNotificationRulesArgs(argv: readonly string[]): ParsedCommand {
       index += 1;
       continue;
     }
+    if (arg === "--condition-json") {
+      if (action !== "save") {
+        return { kind: "invalid", message: `Cannot use --condition-json with notification-rules ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseJsonObject(value, "Notification rule condition");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      condition = parsed;
+      index += 1;
+      continue;
+    }
     if (arg === "--enabled" || arg === "--disabled") {
       if (action !== "save") {
         return { kind: "invalid", message: `Cannot use ${arg} with notification-rules ${action}` };
@@ -4065,6 +4082,7 @@ function parseNotificationRulesArgs(argv: readonly string[]): ParsedCommand {
     ...(events.length === 0 ? {} : { events }),
     ...(recipients.length === 0 ? {} : { recipients }),
     ...(channels.length === 0 ? {} : { channels }),
+    ...(condition === undefined ? {} : { condition }),
     ...(subject === undefined ? {} : { subject }),
     ...(enabled === undefined ? {} : { enabled }),
     ...(excludeActor === undefined ? {} : { excludeActor }),
@@ -6062,7 +6080,7 @@ function helpText(): string {
     "  cf-frappe notifications dismiss --url <origin> --id <notificationId> [--user <user>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notification-rules list --url <origin> --doctype <doctype> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notification-rules get --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
-    "  cf-frappe notification-rules save --url <origin> --doctype <doctype> --rule <name> --event <eventKind>... (--recipient-user <user>|--recipient-field <field>|--recipient-owner)... [--channel inbox|email]... [--subject <text>] [--enabled|--disabled] [--exclude-actor|--include-actor] [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe notification-rules save --url <origin> --doctype <doctype> --rule <name> --event <eventKind>... (--recipient-user <user>|--recipient-field <field>|--recipient-owner)... [--channel inbox|email]... [--condition-json <json>] [--subject <text>] [--enabled|--disabled] [--exclude-actor|--include-actor] [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notification-rules enable --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notification-rules disable --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notification-rules clear --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",

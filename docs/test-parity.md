@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the notification-rule single-read operator helper slice:
+As of the notification-rule condition slice:
 
 - Vitest files: `119`
-- Vitest cases: `1308`
+- Vitest cases: `1310`
 
 ## Implication
 

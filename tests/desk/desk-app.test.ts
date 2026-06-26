@@ -4126,6 +4126,7 @@ describe("Desk app", () => {
         events: "DocumentUpdated\nDocumentCommentAdded",
         recipients: "field:created_by",
         channels: "inbox",
+        condition: "{\"field\":\"priority\",\"value\":\"High\"}",
         subject: "{{ actor }} updated {{ doctype }} {{ name }}",
         enabled: "true",
         excludeActor: "false",
@@ -4146,6 +4147,7 @@ describe("Desk app", () => {
             events: ["DocumentUpdated", "DocumentCommentAdded"],
             recipients: [{ kind: "field", field: "created_by" }],
             channels: ["inbox"],
+            condition: { field: "priority", value: "High" },
             excludeActor: false
           }
         }
@@ -4172,6 +4174,7 @@ describe("Desk app", () => {
     expect(editHtml).toContain("<textarea name=\"events\">DocumentUpdated\nDocumentCommentAdded</textarea>");
     expect(editHtml).toContain("<textarea name=\"recipients\">field:created_by</textarea>");
     expect(editHtml).toContain('name="channels" value="inbox"');
+    expect(editHtml).toContain("&quot;field&quot;: &quot;priority&quot;");
     expect(editHtml).toContain('name="subject" value="{{ actor }} updated {{ doctype }} {{ name }}"');
     expect(editHtml).toContain('<option value="false" selected>No</option>');
 
@@ -4183,6 +4186,7 @@ describe("Desk app", () => {
         events: "DocumentAssigned",
         recipients: "documentOwner",
         channels: "inbox,email",
+        condition: "{\"field\":\"system.docstatus\",\"value\":\"draft\"}",
         subject: "Assignment changed",
         enabled: "false",
         excludeActor: "true",
@@ -4204,6 +4208,7 @@ describe("Desk app", () => {
             events: ["DocumentAssigned"],
             recipients: [{ kind: "documentOwner" }],
             channels: ["inbox", "email"],
+            condition: { field: "system.docstatus", value: "draft" },
             subject: "Assignment changed",
             enabled: false,
             excludeActor: true
@@ -4247,6 +4252,22 @@ describe("Desk app", () => {
       "Notification rule recipients must use field:&lt;field&gt;, user:&lt;user&gt;, or documentOwner"
     );
     expect(malformedHtml).toContain("Managers on changes");
+
+    const malformedCondition = await app.request("/desk/admin/notification-rules", {
+      method: "POST",
+      body: new URLSearchParams({
+        doctype: "Note",
+        name: "Bad condition",
+        events: "DocumentUpdated",
+        recipients: "documentOwner",
+        channels: "inbox",
+        condition: "[]",
+        expectedVersion: "2"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(malformedCondition.status).toBe(400);
+    await expect(malformedCondition.text()).resolves.toContain("Notification rule condition must be a JSON object");
 
     const cleared = await app.request("/desk/admin/notification-rules/Note/Managers%20on%20changes/clear", {
       method: "POST",
@@ -4300,6 +4321,7 @@ describe("Desk app", () => {
     const html = await edit.text();
     expect(html).toContain('name="channels" value="" placeholder="inbox"');
     expect(html).toContain('<option value="" selected>Default</option>');
+    expect(html).toContain("<textarea name=\"condition\" rows=\"5\"></textarea>");
     expect(html).not.toContain('name="channels" value="inbox"');
 
     const unchanged = await app.request("/desk/admin/notification-rules", {
@@ -4310,6 +4332,7 @@ describe("Desk app", () => {
         events: "DocumentUpdated",
         recipients: "user:manager@example.com",
         channels: "",
+        condition: "",
         subject: "",
         enabled: "",
         excludeActor: "",
@@ -4352,7 +4375,8 @@ describe("Desk app", () => {
         enabled: false,
         events: ["DocumentUpdated"],
         recipients: [{ kind: "user", userId: "manager@example.com" }],
-        channels: ["inbox"]
+        channels: ["inbox"],
+        condition: { field: "priority", value: "High" }
       }
     });
     const app = createDeskApp({
@@ -4378,7 +4402,12 @@ describe("Desk app", () => {
     expect(enabled.headers.get("location")).toBe("/desk/admin/notification-rules?doctype=Note&rule=Escalations");
     await expect(notificationRules.list(admin, "Note")).resolves.toMatchObject({
       version: 2,
-      rules: [{ enabled: true, rule: { name: "Escalations", enabled: true } }]
+      rules: [
+        {
+          enabled: true,
+          rule: { name: "Escalations", enabled: true, condition: { field: "priority", value: "High" } }
+        }
+      ]
     });
 
     const enabledPage = await app.request("/desk/admin/notification-rules?doctype=Note");
@@ -4395,7 +4424,12 @@ describe("Desk app", () => {
     expect(disabled.status).toBe(303);
     await expect(notificationRules.list(admin, "Note")).resolves.toMatchObject({
       version: 3,
-      rules: [{ enabled: false, rule: { name: "Escalations", enabled: false } }]
+      rules: [
+        {
+          enabled: false,
+          rule: { name: "Escalations", enabled: false, condition: { field: "priority", value: "High" } }
+        }
+      ]
     });
   });
 

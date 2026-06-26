@@ -3,8 +3,12 @@ import {
   FrameworkError,
   listFilterControlsForField,
   listFilterOperatorsForField,
+  matchesListFilterExpression,
   normalizeListFilterExpression,
-  resolveListView
+  resolveListView,
+  type DocumentSnapshot,
+  type JsonValue,
+  type ListFilterExpression
 } from "../../src";
 
 describe("list views", () => {
@@ -177,6 +181,57 @@ describe("list views", () => {
     });
   });
 
+  it("matches normalized list filter expressions against document snapshots", () => {
+    const snapshot = listViewSnapshot({
+      title: "Launch TASK_100%",
+      status: "Open",
+      count: 5,
+      done: true
+    });
+    const cases: readonly (readonly [string, ListFilterExpression, boolean])[] = [
+      ["eq", { field: "status", value: "Open" }, true],
+      ["ne", { field: "status", operator: "ne", value: "Closed" }, true],
+      ["ne missing", { field: "missing", operator: "ne", value: "Closed" }, false],
+      ["in", { field: "status", operator: "in", value: ["Open", "Pending"] }, true],
+      ["not_in", { field: "status", operator: "not_in", value: ["Closed"] }, true],
+      ["not_in missing", { field: "missing", operator: "not_in", value: ["Closed"] }, false],
+      ["is set", { field: "title", operator: "is", value: "set" }, true],
+      ["is not set", { field: "missing", operator: "is", value: "not set" }, true],
+      ["contains", { field: "title", operator: "contains", value: "task" }, true],
+      ["like escaped wildcards", { field: "title", operator: "like", value: "launch TASK\\_100\\%" }, true],
+      ["not_like", { field: "title", operator: "not_like", value: "%Draft%" }, true],
+      ["gt", { field: "count", operator: "gt", value: 4 }, true],
+      ["gte system", { field: "system.version", operator: "gte", value: 3 }, true],
+      ["lt", { field: "count", operator: "lt", value: 6 }, true],
+      ["lte", { field: "count", operator: "lte", value: 5 }, true],
+      ["between", { field: "count", operator: "between", value: [2, 5] }, true],
+      ["not_between", { field: "count", operator: "not_between", value: [6, 8] }, true],
+      [
+        "nested any/all",
+        {
+          kind: "group",
+          match: "any",
+          filters: [
+            { field: "status", value: "Closed" },
+            {
+              kind: "group",
+              match: "all",
+              filters: [
+                { field: "done", value: true },
+                { field: "system.docstatus", value: "draft" }
+              ]
+            }
+          ]
+        },
+        true
+      ]
+    ];
+
+    for (const [label, expression, expected] of cases) {
+      expect(matchesListFilterExpression(snapshot, expression), label).toBe(expected);
+    }
+  });
+
   it("bounds compound filter expression depth and node count", () => {
     const Task = defineDocType({
       name: "Task",
@@ -321,4 +376,17 @@ describe("list views", () => {
 
 function failField(): never {
   throw new Error("Expected field");
+}
+
+function listViewSnapshot(data: Record<string, JsonValue>): DocumentSnapshot {
+  return {
+    tenantId: "acme",
+    doctype: "Task",
+    name: "TASK-1",
+    version: 3,
+    docstatus: "draft",
+    data,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-02T00:00:00.000Z"
+  };
 }

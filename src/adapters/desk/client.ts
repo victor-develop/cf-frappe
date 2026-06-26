@@ -467,6 +467,9 @@ export function renderDeskClientScript(): string {
     if (Array.isArray(rule.channels) && rule.channels.length > 0) {
       bodyRule.channels = rule.channels.slice();
     }
+    if (rule.condition !== undefined) {
+      bodyRule.condition = rule.condition;
+    }
     bodyRule.enabled = enabled;
     if (rule.subject !== undefined) {
       bodyRule.subject = rule.subject;

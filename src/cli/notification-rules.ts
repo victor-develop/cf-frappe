@@ -28,6 +28,7 @@ export interface NotificationRuleRemoteCommand {
   readonly events?: readonly string[];
   readonly recipients?: readonly NotificationRuleRecipientOption[];
   readonly channels?: readonly string[];
+  readonly condition?: Record<string, unknown>;
   readonly subject?: string;
   readonly enabled?: boolean;
   readonly excludeActor?: boolean;
@@ -63,6 +64,7 @@ interface NotificationRuleResponse {
   readonly events?: readonly string[];
   readonly recipients?: readonly NotificationRuleRecipientOption[];
   readonly channels?: readonly string[];
+  readonly condition?: Record<string, unknown>;
   readonly subject?: string;
   readonly excludeActor?: boolean;
 }
@@ -165,6 +167,7 @@ function saveBody(command: NotificationRuleRemoteCommand): Record<string, unknow
       events: [...requiredEvents(command)],
       recipients: [...requiredRecipients(command)],
       ...(command.channels === undefined || command.channels.length === 0 ? {} : { channels: [...command.channels] }),
+      ...(command.condition === undefined ? {} : { condition: command.condition }),
       ...(command.enabled === undefined ? {} : { enabled: command.enabled }),
       ...(command.subject === undefined ? {} : { subject: command.subject }),
       ...(command.excludeActor === undefined ? {} : { excludeActor: command.excludeActor })
@@ -197,6 +200,7 @@ function toggleBody(
       events: [...requiredResponseEvents(entry.rule, ruleName)],
       recipients: [...requiredResponseRecipients(entry.rule, ruleName)],
       ...(entry.rule.channels === undefined || entry.rule.channels.length === 0 ? {} : { channels: [...entry.rule.channels] }),
+      ...(entry.rule.condition === undefined ? {} : { condition: entry.rule.condition }),
       enabled,
       ...(entry.rule.subject === undefined ? {} : { subject: entry.rule.subject }),
       ...(entry.rule.excludeActor === undefined ? {} : { excludeActor: entry.rule.excludeActor })

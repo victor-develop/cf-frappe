@@ -4867,6 +4867,7 @@ async function parseDeskNotificationRule(request: Request): Promise<ParsedDeskNo
   const form = await readUrlEncodedDeskForm(request);
   const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
   const channels = notificationRuleChannelsFormValue(form.get("channels"));
+  const condition = notificationRuleConditionFormValue(form);
   const enabled = optionalBooleanSearchParamValue(form, "enabled", "Notification rule enabled");
   const excludeActor = optionalBooleanSearchParamValue(form, "excludeActor", "Notification rule exclude actor");
   const subject = stringSearchParamValue(form, "subject");
@@ -4878,6 +4879,7 @@ async function parseDeskNotificationRule(request: Request): Promise<ParsedDeskNo
       events: notificationRuleEventsFormValue(form.get("events")),
       recipients: notificationRuleRecipientsFormValue(form.get("recipients")),
       ...(channels.length === 0 ? {} : { channels }),
+      ...(condition === undefined ? {} : { condition }),
       ...(subject === undefined ? {} : { subject }),
       ...(excludeActor === undefined ? {} : { excludeActor })
     },
@@ -4970,6 +4972,17 @@ function notificationRuleEventsFormValue(value: FormDataEntryValue | null): read
 
 function notificationRuleChannelsFormValue(value: FormDataEntryValue | null): readonly NotificationRuleChannel[] {
   return lineListFormValue(value) as readonly NotificationRuleChannel[];
+}
+
+function notificationRuleConditionFormValue(form: URLSearchParams): ListFilterExpression | undefined {
+  const value = optionalJsonSearchParamValue(form, "condition", "Notification rule condition");
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as unknown as ListFilterExpression;
+  }
+  throw new FrameworkError("BAD_REQUEST", "Notification rule condition must be a JSON object", { status: 400 });
 }
 
 function notificationRuleRecipientsFormValue(

@@ -10,7 +10,7 @@ import type {
   NotificationRuleRecipientDefinition
 } from "../../core/types.js";
 import type { ActorResolver } from "./actor.js";
-import { readJsonObject, requestMetadata } from "./request.js";
+import { listFilterExpressionFromValue, readJsonObject, requestMetadata } from "./request.js";
 
 export interface NotificationRuleApiOptions {
   readonly notificationRules: NotificationRuleService;
@@ -94,6 +94,7 @@ function ruleValue(name: string, value: JsonValue | undefined): NotificationRule
     events: eventKinds(value.events),
     recipients: recipients(value.recipients),
     ...optionalChannels(value.channels),
+    ...(value.condition === undefined ? {} : { condition: listFilterExpressionFromValue(value.condition, "Notification rule condition") }),
     ...optionalString(value.subject, "rule.subject", "subject"),
     ...optionalBoolean(value.excludeActor, "rule.excludeActor", "excludeActor")
   };
