@@ -579,11 +579,18 @@ export type DocumentEventPayload =
   | {
       readonly kind: "EmailNotificationSent";
       readonly messageId: string;
+      readonly claimId: string;
       readonly providerMessageId?: string;
+    }
+  | {
+      readonly kind: "EmailNotificationDeliveryClaimed";
+      readonly messageId: string;
+      readonly claimId: string;
     }
   | {
       readonly kind: "EmailNotificationFailed";
       readonly messageId: string;
+      readonly claimId: string;
       readonly error: string;
     }
   | {

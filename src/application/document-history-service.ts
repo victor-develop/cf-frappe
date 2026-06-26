@@ -324,6 +324,7 @@ function diffEvent(
     case "NotificationRuleCleared":
     case "EmailNotificationQueued":
     case "EmailNotificationSent":
+    case "EmailNotificationDeliveryClaimed":
     case "EmailNotificationFailed":
     case "EmailNotificationSkipped":
       return [];
@@ -480,6 +481,8 @@ function summarize(payload: DocumentEventPayload): string {
       return `Queued email notification ${payload.messageId}`;
     case "EmailNotificationSent":
       return `Sent email notification ${payload.messageId}`;
+    case "EmailNotificationDeliveryClaimed":
+      return `Claimed email notification delivery ${payload.messageId}`;
     case "EmailNotificationFailed":
       return `Email notification failed ${payload.messageId}`;
     case "EmailNotificationSkipped":

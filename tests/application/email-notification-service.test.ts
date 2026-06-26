@@ -10,7 +10,8 @@ import {
   type EmailSender,
   type EventStore,
   type NewDomainEvent,
-  type NotificationRuleDefinition
+  type NotificationRuleDefinition,
+  type StreamName
 } from "../../src";
 import { now, owner } from "../helpers";
 
@@ -29,7 +30,7 @@ describe("EmailNotificationService", () => {
           return { email: "reviewer@example.com", name: "Reviewer" };
         }
       },
-      ids: deterministicIds(["queued-1", "sent-1"]),
+      ids: deterministicIds(["queued-1", "claim-1", "claimed-1", "sent-1"]),
       clock: fixedClock(now)
     });
 
@@ -78,6 +79,14 @@ describe("EmailNotificationService", () => {
             "X-CF-Frappe-Event": "evt_update",
             "X-CF-Frappe-Rule": "Email owners"
           }
+        }
+      },
+      {
+        id: "evt_claimed-1",
+        payload: {
+          kind: "EmailNotificationDeliveryClaimed",
+          messageId,
+          claimId: "claim_claim-1"
         }
       },
       {
@@ -137,7 +146,7 @@ describe("EmailNotificationService", () => {
       },
       from: { email: "notifications@example.com" },
       notificationRules: ruleProvider("reviewer@example.com"),
-      ids: deterministicIds(["queued-1", "failed-1"]),
+      ids: deterministicIds(["queued-1", "claim-1", "claimed-1", "failed-1"]),
       clock: fixedClock(now)
     });
 
@@ -150,6 +159,7 @@ describe("EmailNotificationService", () => {
     ]);
     await expect(events.readStream(emailOutboxStream("acme", "evt_update:rule:Email%20owners:email:reviewer%40example.com"))).resolves.toMatchObject([
       { payload: { kind: "EmailNotificationQueued" } },
+      { payload: { kind: "EmailNotificationDeliveryClaimed", claimId: "claim_claim-1" } },
       {
         payload: {
           kind: "EmailNotificationFailed",
@@ -176,7 +186,7 @@ describe("EmailNotificationService", () => {
       },
       from: { email: "notifications@example.com" },
       notificationRules: ruleProvider("reviewer@example.com"),
-      ids: deterministicIds(["queued-1", "failed-1", "queued-2", "sent-1"]),
+      ids: deterministicIds(["queued-1", "claim-1", "claimed-1", "failed-1", "claim-2", "claimed-2", "sent-1"]),
       clock: fixedClock(now)
     });
 
@@ -188,8 +198,9 @@ describe("EmailNotificationService", () => {
     ]);
     await expect(events.readStream(emailOutboxStream("acme", "evt_update:rule:Email%20owners:email:reviewer%40example.com"))).resolves.toMatchObject([
       { payload: { kind: "EmailNotificationQueued" } },
+      { payload: { kind: "EmailNotificationDeliveryClaimed", claimId: "claim_claim-1" } },
       { payload: { kind: "EmailNotificationFailed", error: "temporary provider outage" } },
-      { payload: { kind: "EmailNotificationQueued" } },
+      { payload: { kind: "EmailNotificationDeliveryClaimed", claimId: "claim_claim-2" } },
       { payload: { kind: "EmailNotificationSent", providerMessageId: "cf-msg-retry" } }
     ]);
   });
@@ -208,7 +219,7 @@ describe("EmailNotificationService", () => {
           return { email: resolvedEmail };
         }
       },
-      ids: deterministicIds(["queued-1", "sent-1"]),
+      ids: deterministicIds(["queued-1", "claim-1", "claimed-1", "sent-1"]),
       clock: fixedClock(now)
     });
     const messageId = "evt_update:rule:Email%20owners:email:user_123";
@@ -238,7 +249,7 @@ describe("EmailNotificationService", () => {
       sender,
       from: { email: "notifications@example.com" },
       notificationRules: ruleProvider("reviewer@example.com"),
-      ids: deterministicIds(["queued-1", "sent-1"]),
+      ids: deterministicIds(["queued-1", "claim-1", "claimed-1", "sent-1"]),
       clock: fixedClock(now)
     });
     const messageId = "evt_update:rule:Email%20owners:email:reviewer%40example.com";
@@ -248,8 +259,170 @@ describe("EmailNotificationService", () => {
 
     expect(sender.messages).toHaveLength(1);
     await expect(inner.readStream(emailOutboxStream("acme", messageId))).resolves.toMatchObject([
-      { payload: { kind: "EmailNotificationQueued" } }
+      { payload: { kind: "EmailNotificationQueued" } },
+      { payload: { kind: "EmailNotificationDeliveryClaimed", claimId: "claim_claim-1" } }
     ]);
+  });
+
+  it("claims a queued outbox message before provider send so concurrent delivery only sends once", async () => {
+    const inner = new InMemoryEventStore();
+    const race = raceClaimAppendEventStore(inner);
+    const sender = recordingEmailSender("cf-msg-1");
+    const service = new EmailNotificationService({
+      events: race.events,
+      sender,
+      from: { email: "notifications@example.com" },
+      notificationRules: ruleProvider("reviewer@example.com"),
+      ids: deterministicIds(["queued-1", "claim-1", "claimed-1", "claim-2", "claimed-2", "sent-1"]),
+      clock: fixedClock(now)
+    });
+    const messageId = "evt_update:rule:Email%20owners:email:reviewer%40example.com";
+
+    await expect(service.queueFromDomainEvent(documentUpdatedEvent(), noteSnapshot())).resolves.toEqual([]);
+    const first = service.deliverOutboxMessage("acme", messageId);
+    const second = service.deliverOutboxMessage("acme", messageId);
+    await race.waitForClaimRace();
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ status: "sent", providerMessageId: "cf-msg-1" }),
+      undefined
+    ]);
+    expect(sender.messages).toHaveLength(1);
+    await expect(inner.readStream(emailOutboxStream("acme", messageId))).resolves.toMatchObject([
+      { payload: { kind: "EmailNotificationQueued" } },
+      { payload: { kind: "EmailNotificationDeliveryClaimed", claimId: "claim_claim-1" } },
+      { payload: { kind: "EmailNotificationSent", providerMessageId: "cf-msg-1" } }
+    ]);
+  });
+
+  it("reclaims stale delivery claims so crashed workers do not strand retryable messages", async () => {
+    const events = new InMemoryEventStore();
+    const sender = recordingEmailSender("cf-msg-reclaimed");
+    let currentTime = "2026-01-01T00:00:00.000Z";
+    const service = new EmailNotificationService({
+      events,
+      sender,
+      from: { email: "notifications@example.com" },
+      notificationRules: ruleProvider("reviewer@example.com"),
+      claimTimeoutSeconds: 60,
+      ids: deterministicIds(["queued-1", "claim-2", "claimed-2", "sent-1"]),
+      clock: { now: () => currentTime }
+    });
+    const messageId = "evt_update:rule:Email%20owners:email:reviewer%40example.com";
+    const stream = emailOutboxStream("acme", messageId);
+
+    await expect(service.queueFromDomainEvent(documentUpdatedEvent(), noteSnapshot())).resolves.toEqual([]);
+    await events.append(stream, 1, [
+      {
+        id: "evt_claimed-existing",
+        tenantId: "acme",
+        stream,
+        type: "EmailNotificationDeliveryClaimed",
+        doctype: "__EmailOutbox",
+        documentName: messageId,
+        actorId: "system:email-outbox",
+        occurredAt: currentTime,
+        payload: {
+          kind: "EmailNotificationDeliveryClaimed",
+          messageId,
+          claimId: "claim_existing"
+        },
+        metadata: {}
+      }
+    ]);
+
+    await expect(service.deliverOutboxMessage("acme", messageId)).resolves.toBeUndefined();
+    currentTime = "2026-01-01T00:01:00.000Z";
+    await expect(service.deliverOutboxMessage("acme", messageId)).resolves.toMatchObject({
+      status: "sent",
+      providerMessageId: "cf-msg-reclaimed"
+    });
+
+    expect(sender.messages).toHaveLength(1);
+    await expect(events.readStream(stream)).resolves.toMatchObject([
+      { payload: { kind: "EmailNotificationQueued" } },
+      { payload: { kind: "EmailNotificationDeliveryClaimed", claimId: "claim_existing" } },
+      { payload: { kind: "EmailNotificationDeliveryClaimed", claimId: "claim_claim-2" } },
+      { payload: { kind: "EmailNotificationSent", providerMessageId: "cf-msg-reclaimed" } }
+    ]);
+  });
+
+  it("ignores stale claimant failures after a newer claim has already sent the message", async () => {
+    const events = new InMemoryEventStore();
+    const sender = recordingEmailSender("cf-msg-reclaimed");
+    let currentTime = "2026-01-01T00:00:00.000Z";
+    const service = new EmailNotificationService({
+      events,
+      sender,
+      from: { email: "notifications@example.com" },
+      notificationRules: ruleProvider("reviewer@example.com"),
+      claimTimeoutSeconds: 60,
+      ids: deterministicIds(["queued-1", "claim-2", "claimed-2", "sent-1"]),
+      clock: { now: () => currentTime }
+    });
+    const messageId = "evt_update:rule:Email%20owners:email:reviewer%40example.com";
+    const stream = emailOutboxStream("acme", messageId);
+
+    await service.queueFromDomainEvent(documentUpdatedEvent(), noteSnapshot());
+    await events.append(stream, 1, [
+      emailOutboxEvent("evt_claimed-existing", stream, messageId, currentTime, {
+        kind: "EmailNotificationDeliveryClaimed",
+        messageId,
+        claimId: "claim_existing"
+      })
+    ]);
+    currentTime = "2026-01-01T00:01:00.000Z";
+    await expect(service.deliverOutboxMessage("acme", messageId)).resolves.toMatchObject({ status: "sent" });
+    await events.append(stream, 4, [
+      emailOutboxEvent("evt_failed-stale", stream, messageId, "2026-01-01T00:01:01.000Z", {
+        kind: "EmailNotificationFailed",
+        messageId,
+        claimId: "claim_existing",
+        error: "stale worker failure"
+      })
+    ]);
+
+    await expect(service.deliverOutboxMessage("acme", messageId)).resolves.toBeUndefined();
+    expect(sender.messages).toHaveLength(1);
+  });
+
+  it("ignores stale claimant completions while a newer delivery claim is still active", async () => {
+    const events = new InMemoryEventStore();
+    const sender = recordingEmailSender("cf-msg-should-not-send");
+    const service = new EmailNotificationService({
+      events,
+      sender,
+      from: { email: "notifications@example.com" },
+      notificationRules: ruleProvider("reviewer@example.com"),
+      claimTimeoutSeconds: 60,
+      ids: deterministicIds(["queued-1"]),
+      clock: { now: () => "2026-01-01T00:01:30.000Z" }
+    });
+    const messageId = "evt_update:rule:Email%20owners:email:reviewer%40example.com";
+    const stream = emailOutboxStream("acme", messageId);
+
+    await service.queueFromDomainEvent(documentUpdatedEvent(), noteSnapshot());
+    await events.append(stream, 1, [
+      emailOutboxEvent("evt_claimed-old", stream, messageId, "2026-01-01T00:00:00.000Z", {
+        kind: "EmailNotificationDeliveryClaimed",
+        messageId,
+        claimId: "claim_old"
+      }),
+      emailOutboxEvent("evt_claimed-new", stream, messageId, "2026-01-01T00:01:00.000Z", {
+        kind: "EmailNotificationDeliveryClaimed",
+        messageId,
+        claimId: "claim_new"
+      }),
+      emailOutboxEvent("evt_failed-old", stream, messageId, "2026-01-01T00:01:10.000Z", {
+        kind: "EmailNotificationFailed",
+        messageId,
+        claimId: "claim_old",
+        error: "old worker failure"
+      })
+    ]);
+
+    await expect(service.deliverOutboxMessage("acme", messageId)).resolves.toBeUndefined();
+    expect(sender.messages).toHaveLength(0);
   });
 
   it("shards independent email outbox messages by deterministic message id", async () => {
@@ -347,6 +520,68 @@ function failSentAppendEventStore(inner: InMemoryEventStore): EventStore {
       }
       return inner.append(stream, expectedVersion, events);
     }
+  };
+}
+
+function raceClaimAppendEventStore(inner: InMemoryEventStore): {
+  readonly events: EventStore;
+  readonly waitForClaimRace: () => Promise<void>;
+} {
+  let claimAttempts = 0;
+  let firstRelease: (() => void) | undefined;
+  let secondRelease: (() => void) | undefined;
+  let raceReady: (() => void) | undefined;
+  const ready = new Promise<void>((resolve) => {
+    raceReady = resolve;
+  });
+  return {
+    events: {
+      readStream: (stream, options) => inner.readStream(stream, options),
+      currentVersion: (stream) => inner.currentVersion(stream),
+      async append(stream, expectedVersion, events: readonly NewDomainEvent[]) {
+        if (events.some((event) => event.payload.kind === "EmailNotificationDeliveryClaimed")) {
+          claimAttempts += 1;
+          if (claimAttempts === 1) {
+            await new Promise<void>((resolve) => {
+              firstRelease = resolve;
+            });
+          } else if (claimAttempts === 2) {
+            const first = firstRelease;
+            await new Promise<void>((resolve) => {
+              secondRelease = resolve;
+              first?.();
+              queueMicrotask(() => {
+                secondRelease?.();
+                raceReady?.();
+              });
+            });
+          }
+        }
+        return inner.append(stream, expectedVersion, events);
+      }
+    },
+    waitForClaimRace: () => ready
+  };
+}
+
+function emailOutboxEvent(
+  id: string,
+  stream: StreamName,
+  messageId: string,
+  occurredAt: string,
+  payload: NewDomainEvent["payload"]
+): NewDomainEvent {
+  return {
+    id,
+    tenantId: "acme",
+    stream,
+    type: payload.kind,
+    doctype: "__EmailOutbox",
+    documentName: messageId,
+    actorId: "system:email-outbox",
+    occurredAt,
+    payload,
+    metadata: {}
   };
 }
 

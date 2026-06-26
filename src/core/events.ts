@@ -141,6 +141,7 @@ export function foldDocumentFrom(
       case "NotificationRuleCleared":
       case "EmailNotificationQueued":
       case "EmailNotificationSent":
+      case "EmailNotificationDeliveryClaimed":
       case "EmailNotificationFailed":
       case "EmailNotificationSkipped":
         break;
