@@ -38,7 +38,7 @@ import type { JobScheduleService } from "../../application/job-schedule-service.
 import type { PrintService } from "../../application/print-service.js";
 import type { PrintSettingsService } from "../../application/print-settings-service.js";
 import { QueryService } from "../../application/query-service.js";
-import type { ReportService } from "../../application/report-service.js";
+import type { ReportCsvExportOptions, ReportRunOptions, ReportService } from "../../application/report-service.js";
 import type { RoleService } from "../../application/role-service.js";
 import type { SavedListFilterService } from "../../application/saved-list-filter-service.js";
 import type { SavedReportDefinition, SavedReportService } from "../../application/saved-report-service.js";
@@ -108,7 +108,12 @@ import {
   readBoundedText
 } from "../http/request.js";
 import { writeCsvDownloadHeaders, writeCsvExportHeaders, writeReportCsvHeaders } from "../http/report-export.js";
-import { reportFilterExpressionFromValue, reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request.js";
+import {
+  reportFilterExpressionFromUrl,
+  reportFilterExpressionFromValue,
+  reportFiltersFromUrl,
+  reportOrderingFromUrl
+} from "../report-request.js";
 import {
   defaultPrintLayoutFor,
   printPdfResponseBody,
@@ -1413,16 +1418,11 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const savedReports = requireSavedReports(options);
     const actor = await options.actor(c.req.raw);
     const url = new URL(c.req.url);
-    const limit = parseOptionalInteger(url.searchParams.get("limit") ?? undefined);
     const csv = await savedReports.exportCsv({
       actor,
       doctype: c.req.param("doctype"),
       id: c.req.param("id"),
-      options: {
-        filters: reportFiltersFromUrl(url),
-        ...reportOrderingFromUrl(url),
-        ...(limit !== undefined ? { limit } : {})
-      }
+      options: deskReportCsvOptionsFromUrl(url)
     });
     writeReportCsvHeaders(c, csv);
     return c.body(csv.body);
@@ -1441,11 +1441,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       actor,
       doctype: doctype.name,
       id: saved.id,
-      options: {
-        filters: reportFiltersFromUrl(url),
-        ...reportOrderingFromUrl(url),
-        limit: 100
-      }
+      options: deskReportRunOptionsFromUrl(url, 100)
     });
     const layout = await defaultPrintLayoutFor(options.printSettings, actor);
     const pdf = await renderPrintPdfReport({
@@ -1468,11 +1464,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       actor,
       doctype: doctype.name,
       id: saved.id,
-      options: {
-        filters: reportFiltersFromUrl(url),
-        ...reportOrderingFromUrl(url),
-        limit: 100
-      }
+      options: deskReportRunOptionsFromUrl(url, 100)
     });
     const layout = await defaultPrintLayoutFor(options.printSettings, actor);
     return html(renderPrintReport(result, { title: saved.label, ...(layout === undefined ? {} : { layout }) }));
@@ -1502,11 +1494,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       actor,
       doctype: doctype.name,
       id: saved.id,
-      options: {
-        filters: reportFiltersFromUrl(url),
-        ...reportOrderingFromUrl(url),
-        limit: 100
-      }
+      options: deskReportRunOptionsFromUrl(url, 100)
     });
     const base = `/desk/report-builder/${encodeURIComponent(doctype.name)}/${encodeURIComponent(saved.id)}`;
     const printHref = `${base}/print${url.search}`;
@@ -1538,9 +1526,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const url = new URL(c.req.url);
     const result = await options.reports.runReport(actor, c.req.param("report"), {
-      filters: reportFiltersFromUrl(url),
-      ...reportOrderingFromUrl(url),
-      limit: 100
+      ...deskReportRunOptionsFromUrl(url, 100)
     });
     const layout = await defaultPrintLayoutFor(options.printSettings, actor);
     return html(renderPrintReport(result, layout === undefined ? {} : { layout }));
@@ -1556,9 +1542,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const url = new URL(c.req.url);
     const result = await options.reports.runReport(actor, c.req.param("report"), {
-      filters: reportFiltersFromUrl(url),
-      ...reportOrderingFromUrl(url),
-      limit: 100
+      ...deskReportRunOptionsFromUrl(url, 100)
     });
     const layout = await defaultPrintLayoutFor(options.printSettings, actor);
     const pdf = await renderPrintPdfReport({
@@ -1580,9 +1564,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const reports = listReports(options, actor);
     const dashboards = await listDashboards(options, actor);
     const result = await options.reports.runReport(actor, c.req.param("report"), {
-      filters: reportFiltersFromUrl(url),
-      ...reportOrderingFromUrl(url),
-      limit: 100
+      ...deskReportRunOptionsFromUrl(url, 100)
     });
     const exportHref = `/desk/reports/${encodeURIComponent(result.report.name)}/export.csv${url.search}`;
     const printHref = `/desk/reports/${encodeURIComponent(result.report.name)}/print${url.search}`;
@@ -1614,12 +1596,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     }
     const actor = await options.actor(c.req.raw);
     const url = new URL(c.req.url);
-    const limit = parseOptionalInteger(url.searchParams.get("limit") ?? undefined);
-    const csv = await options.reports.exportReportCsv(actor, c.req.param("report"), {
-      filters: reportFiltersFromUrl(url),
-      ...reportOrderingFromUrl(url),
-      ...(limit !== undefined ? { limit } : {})
-    });
+    const csv = await options.reports.exportReportCsv(actor, c.req.param("report"), deskReportCsvOptionsFromUrl(url));
     writeReportCsvHeaders(c, csv);
     return c.body(csv.body);
   });
@@ -2396,6 +2373,30 @@ function deskCsvImportModesFor(actor: Actor, doctype: DocTypeDefinition): readon
     ...(can(actor, doctype, "create") ? (["create"] as const) : []),
     ...(can(actor, doctype, "update") ? (["update"] as const) : [])
   ];
+}
+
+function deskReportCsvOptionsFromUrl(url: URL): ReportCsvExportOptions {
+  const limit = parseOptionalInteger(url.searchParams.get("limit") ?? undefined);
+  const filterExpression = reportFilterExpressionFromUrl(url);
+  return {
+    filters: reportFiltersFromUrl(url),
+    ...(filterExpression === undefined ? {} : { filterExpression }),
+    ...reportOrderingFromUrl(url),
+    ...(limit !== undefined ? { limit } : {})
+  };
+}
+
+function deskReportRunOptionsFromUrl(url: URL, defaultLimit?: number): ReportRunOptions {
+  const limit = parseOptionalInteger(url.searchParams.get("limit") ?? undefined);
+  const offset = parseOptionalInteger(url.searchParams.get("offset") ?? undefined);
+  const filterExpression = reportFilterExpressionFromUrl(url);
+  return {
+    filters: reportFiltersFromUrl(url),
+    ...(filterExpression === undefined ? {} : { filterExpression }),
+    ...reportOrderingFromUrl(url),
+    ...(limit !== undefined ? { limit } : defaultLimit === undefined ? {} : { limit: defaultLimit }),
+    ...(offset !== undefined ? { offset } : {})
+  };
 }
 
 async function renderDeskError(

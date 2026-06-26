@@ -372,6 +372,7 @@ interface DeskClientRuntime {
       documents: readonly DeskBulkDocumentSelection[],
       options?: { readonly returnTo?: string }
     ) => Promise<unknown>;
+    readonly dashboardUrl: (dashboard: string) => string;
     readonly csvUrl: (doctype: string, options?: Record<string, unknown>) => string;
     readonly formUrl: (doctype: string, name: string) => string;
     readonly importCsv: (
@@ -382,6 +383,9 @@ interface DeskClientRuntime {
     readonly importTemplateCsvUrl: (doctype: string) => string;
     readonly listUrl: (doctype: string, options?: Record<string, unknown>) => string;
     readonly newUrl: (doctype: string) => string;
+    readonly reportBuilderUrl: (doctype: string, id?: string, options?: Record<string, unknown>) => string;
+    readonly reportUrl: (report: string, options?: Record<string, unknown>) => string;
+    readonly workspaceUrl: (workspace: string) => string;
   };
   readonly resource: {
     readonly activity: (
@@ -766,6 +770,30 @@ describe("Desk client runtime", () => {
 
     expect(runtime.desk.newUrl("Task Type")).toBe("/desk/Task%20Type/new");
     expect(runtime.desk.formUrl("Task Type", "TASK/1")).toBe("/desk/Task%20Type/TASK%2F1");
+  });
+
+  it("builds Desk workspace, dashboard, and report navigation URLs for client scripts", async () => {
+    const runtime = evaluateDeskClient();
+
+    expect(runtime.desk.workspaceUrl("Team Operations")).toBe("/desk/workspaces/Team%20Operations");
+    expect(runtime.desk.dashboardUrl("Operations/Board")).toBe("/desk/dashboards/Operations%2FBoard");
+    expect(
+      runtime.desk.reportUrl("Open Notes", {
+        filters: { priority: "High" },
+        orderBy: "title",
+        order: "asc",
+        limit: 5,
+        offset: 10
+      })
+    ).toBe("/desk/reports/Open%20Notes?filter_priority=High&order_by=title&order=asc&limit=5&offset=10");
+    expect(runtime.desk.reportBuilderUrl("Task Type")).toBe("/desk/report-builder/Task%20Type");
+    expect(
+      runtime.desk.reportBuilderUrl("Task Type", "report/high-counts", {
+        filters: { priority: "High" },
+        orderBy: "count",
+        order: "desc"
+      })
+    ).toBe("/desk/report-builder/Task%20Type/report%2Fhigh-counts?filter_priority=High&order_by=count&order=desc");
   });
 
   it("wraps Desk CSV imports with list return context for client scripts", async () => {

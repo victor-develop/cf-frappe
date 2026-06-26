@@ -183,6 +183,23 @@ export function renderDeskClientScript(): string {
     return "/desk/" + encodePart(doctype);
   }
 
+  function deskDashboardPath(dashboard) {
+    return "/desk/dashboards/" + encodePart(dashboard);
+  }
+
+  function deskReportBuilderPath(doctype, id, options) {
+    var path = "/desk/report-builder/" + encodePart(doctype) + (id === undefined ? "" : "/" + encodePart(id));
+    return withQuery(path, reportRunParams(options || {}));
+  }
+
+  function deskReportPath(report, options) {
+    return withQuery("/desk/reports/" + encodePart(report), reportRunParams(options || {}));
+  }
+
+  function deskWorkspacePath(workspace) {
+    return "/desk/workspaces/" + encodePart(workspace);
+  }
+
   function resourceActionPath(doctype, name, action) {
     return resourcePath(doctype, name) + "/" + action;
   }
@@ -3505,6 +3522,7 @@ export function renderDeskClientScript(): string {
       msgprint: msgprint
     }),
     desk: Object.freeze({
+      dashboardUrl: deskDashboardPath,
       listUrl: function (doctype, options) {
         return withQuery(deskPath(doctype), resourceListParams(options || {}));
       },
@@ -3517,6 +3535,9 @@ export function renderDeskClientScript(): string {
       importTemplateCsvUrl: function (doctype) {
         return deskPath(doctype) + "/import-template.csv";
       },
+      reportBuilderUrl: deskReportBuilderPath,
+      reportUrl: deskReportPath,
+      workspaceUrl: deskWorkspacePath,
       importCsv: function (doctype, csv, options) {
         return request(deskPath(doctype) + "/import.csv", {
           method: "POST",

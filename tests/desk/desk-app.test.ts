@@ -795,6 +795,23 @@ describe("Desk app", () => {
     expect(html).toContain("/desk/reports/Open%20Notes/export.csv?filter_priority=High&amp;order_by=title&amp;order=desc");
     expect(html).toContain("/desk/reports/Open%20Notes/print?filter_priority=High&amp;order_by=title&amp;order=desc");
 
+    const expression = encodeURIComponent(JSON.stringify({
+      kind: "group",
+      match: "all",
+      filters: [{ filter: "priority", value: "High" }]
+    }));
+    const pagedReport = await app.request(
+      `/desk/reports/Open%20Notes?filter_expression=${expression}&order_by=title&order=desc&limit=1&offset=1`
+    );
+    expect(pagedReport.status).toBe(200);
+    const pagedHtml = await pagedReport.text();
+    expect(pagedHtml).toContain("Alpha Report");
+    expect(pagedHtml).not.toContain("Report Note");
+    expect(pagedHtml).not.toContain("For reporting");
+    expect(pagedHtml).toContain(
+      `/desk/reports/Open%20Notes/export.csv?filter_expression=${expression}&amp;order_by=title&amp;order=desc&amp;limit=1&amp;offset=1`
+    );
+
     const csv = await app.request("/desk/reports/Open%20Notes/export.csv?filter_priority=High&order_by=title&order=desc");
     expect(csv.status).toBe(200);
     expect(csv.headers.get("content-disposition")).toBe('attachment; filename="Open-Notes.csv"');
@@ -802,6 +819,15 @@ describe("Desk app", () => {
     expect(csv.headers.get("x-cf-frappe-exported")).toBe("2");
     expect(csv.headers.get("x-cf-frappe-export-truncated")).toBe("false");
     await expect(csv.text()).resolves.toBe("Title,Priority,Body\nReport Note,High,For reporting\nAlpha Report,High,Earlier title");
+
+    const expressionCsv = await app.request(
+      `/desk/reports/Open%20Notes/export.csv?filter_expression=${expression}&order_by=title&order=desc&limit=1`
+    );
+    expect(expressionCsv.status).toBe(200);
+    expect(expressionCsv.headers.get("x-cf-frappe-export-total")).toBe("2");
+    expect(expressionCsv.headers.get("x-cf-frappe-exported")).toBe("1");
+    expect(expressionCsv.headers.get("x-cf-frappe-export-truncated")).toBe("true");
+    await expect(expressionCsv.text()).resolves.toBe("Title,Priority,Body\nReport Note,High,For reporting");
 
     await services.printSettings.change({
       actor: { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] },
@@ -999,6 +1025,22 @@ describe("Desk app", () => {
     expect(html).toContain("/desk/report-builder/Note/report_saved-report-1/export.csv?filter_priority=High&amp;order_by=count&amp;order=desc");
     expect(html).toContain("/desk/report-builder/Note/report_saved-report-1/print?filter_priority=High&amp;order_by=count&amp;order=desc");
     expect(html).toContain('action="/desk/report-builder/Note/report_saved-report-1/delete"');
+
+    const expression = encodeURIComponent(JSON.stringify({
+      kind: "group",
+      match: "all",
+      filters: [{ filter: "priority", value: "High" }]
+    }));
+    const pagedRun = await app.request(
+      `/desk/report-builder/Note/report_saved-report-1?filter_expression=${expression}&order_by=count&order=desc&limit=1&offset=1`
+    );
+    expect(pagedRun.status).toBe(200);
+    const pagedHtml = await pagedRun.text();
+    expect(pagedHtml).toContain("High Count A");
+    expect(pagedHtml).not.toContain("High Count B");
+    expect(pagedHtml).toContain(
+      `/desk/report-builder/Note/report_saved-report-1/export.csv?filter_expression=${expression}&amp;order_by=count&amp;order=desc&amp;limit=1&amp;offset=1`
+    );
     await expect(services.savedReports.get(owner, "Note", "report_saved-report-1")).resolves.toMatchObject({
       definition: {
         charts: [
@@ -1027,6 +1069,12 @@ describe("Desk app", () => {
     expect(csv.status).toBe(200);
     expect(csv.headers.get("content-disposition")).toBe('attachment; filename="Saved-Report-report_saved-report-1.csv"');
     await expect(csv.text()).resolves.toBe("title,count,Double Count\nHigh Count B,7,14\nHigh Count A,3,6");
+
+    const expressionCsv = await app.request(
+      `/desk/report-builder/Note/report_saved-report-1/export.csv?filter_expression=${expression}&order_by=count&order=desc&limit=1`
+    );
+    expect(expressionCsv.status).toBe(200);
+    await expect(expressionCsv.text()).resolves.toBe("title,count,Double Count\nHigh Count B,7,14");
 
     await services.printSettings.change({
       actor: { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] },
