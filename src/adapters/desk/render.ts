@@ -153,6 +153,7 @@ export interface WorkspacePageView {
 export interface NotificationRuleAdminState {
   readonly doctypes: readonly DocTypeDefinition[];
   readonly selectedDoctype: string;
+  readonly selectedRuleName?: string;
   readonly state?: NotificationRuleState;
   readonly error?: string;
 }
@@ -1656,6 +1657,8 @@ export function renderWorkflowAdmin(state: WorkflowAdminState): string {
 
 export function renderNotificationRuleAdmin(state: NotificationRuleAdminState): string {
   const version = state.state?.version ?? 0;
+  const selectedRule = state.state?.rules.find((entry) => entry.rule.name === state.selectedRuleName);
+  const rule = selectedRule?.rule;
   const rows = state.state?.rules
     .map((entry) => `<tr>
       <td>${escapeHtml(entry.rule.name)}</td>
@@ -1665,6 +1668,7 @@ export function renderNotificationRuleAdmin(state: NotificationRuleAdminState): 
       <td>${escapeHtml((entry.rule.channels ?? ["inbox"]).join(", "))}</td>
       <td>${escapeHtml(entry.rule.subject ?? "")}</td>
       <td>
+        <a class="button" href="${escapeHtml(notificationRuleAdminHref(state.selectedDoctype, entry.rule.name))}">Edit</a>
         <form method="post" action="/desk/admin/notification-rules/${encodeURIComponent(state.selectedDoctype)}/${encodeURIComponent(entry.rule.name)}/clear">
           <input type="hidden" name="expectedVersion" value="${String(version)}">
           <button class="button danger" type="submit">Clear</button>
@@ -1682,15 +1686,15 @@ export function renderNotificationRuleAdmin(state: NotificationRuleAdminState): 
   <form class="panel form" method="post" action="/desk/admin/notification-rules">
     <input type="hidden" name="doctype" value="${escapeHtml(state.selectedDoctype)}">
     <input type="hidden" name="expectedVersion" value="${String(version)}">
-    <div class="form-head"><h2>Notification Rule</h2><p>v${String(version)}</p></div>
+    <div class="form-head"><h2>${selectedRule === undefined ? "Notification Rule" : "Edit Notification Rule"}</h2><p>v${String(version)}</p></div>
     <div class="fields">
-      <label class="field"><span>Name</span><input name="name"></label>
-      <label class="field"><span>Enabled</span><select name="enabled"><option value="true" selected>Enabled</option><option value="false">Disabled</option></select></label>
-      <label class="field"><span>Events</span><textarea name="events">DocumentUpdated</textarea></label>
-      <label class="field"><span>Recipients</span><textarea name="recipients">field:created_by</textarea></label>
-      <label class="field"><span>Channels</span><input name="channels" value="inbox"></label>
-      <label class="field"><span>Subject</span><input name="subject" placeholder="{{ actor }} updated {{ doctype }} {{ name }}"></label>
-      <label class="field"><span>Exclude Actor</span><select name="excludeActor"><option value="true" selected>Yes</option><option value="false">No</option></select></label>
+      <label class="field"><span>Name</span><input name="name" value="${escapeHtml(rule?.name ?? "")}"></label>
+      <label class="field"><span>Enabled</span><select name="enabled">${renderNotificationRuleBooleanOptions(rule?.enabled, "Enabled", "Disabled")}</select></label>
+      <label class="field"><span>Events</span><textarea name="events">${escapeHtml(rule?.events.join("\n") ?? "DocumentUpdated")}</textarea></label>
+      <label class="field"><span>Recipients</span><textarea name="recipients">${escapeHtml(rule?.recipients.map(notificationRuleRecipientLabel).join("\n") ?? "field:created_by")}</textarea></label>
+      <label class="field"><span>Channels</span><input name="channels" value="${escapeHtml(rule?.channels?.join(",") ?? "")}" placeholder="inbox"></label>
+      <label class="field"><span>Subject</span><input name="subject" value="${escapeHtml(rule?.subject ?? "")}" placeholder="{{ actor }} updated {{ doctype }} {{ name }}"></label>
+      <label class="field"><span>Exclude Actor</span><select name="excludeActor">${renderNotificationRuleBooleanOptions(rule?.excludeActor, "Yes", "No")}</select></label>
     </div>
     <div class="actions"><button class="button primary" type="submit">Save Rule</button></div>
   </form>
@@ -1824,6 +1828,18 @@ function renderWorkflowDoctypeOptions(doctypes: readonly DocTypeDefinition[], se
 
 function renderNotificationRuleDoctypeOptions(doctypes: readonly DocTypeDefinition[], selectedDoctype: string): string {
   return renderCustomFieldDoctypeOptions(doctypes, selectedDoctype);
+}
+
+function renderNotificationRuleBooleanOptions(value: boolean | undefined, trueLabel: string, falseLabel: string): string {
+  return [
+    `<option value=""${value === undefined ? " selected" : ""}>Default</option>`,
+    `<option value="true"${value ? " selected" : ""}>${escapeHtml(trueLabel)}</option>`,
+    `<option value="false"${value === false ? " selected" : ""}>${escapeHtml(falseLabel)}</option>`
+  ].join("");
+}
+
+function notificationRuleAdminHref(doctype: string, ruleName: string): string {
+  return `/desk/admin/notification-rules?doctype=${encodeURIComponent(doctype)}&rule=${encodeURIComponent(ruleName)}`;
 }
 
 function notificationRuleRecipientLabel(

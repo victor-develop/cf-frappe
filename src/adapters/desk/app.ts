@@ -704,8 +704,9 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const url = new URL(c.req.url);
     const doctypes = options.queries.listDoctypes(actor);
     const selectedDoctype = url.searchParams.get("doctype")?.trim() || doctypes[0]?.name || "";
+    const selectedRule = url.searchParams.get("rule")?.trim() || undefined;
     const state = selectedDoctype ? await notificationRules.list(actor, selectedDoctype) : undefined;
-    return renderDeskNotificationRulePage(options, actor, selectedDoctype, state);
+    return renderDeskNotificationRulePage(options, actor, selectedDoctype, state, 200, undefined, selectedRule);
   });
 
   app.get("/desk/admin/print-settings", async (c) => {
@@ -1455,7 +1456,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
         metadata: requestMetadata(c.req.raw)
       });
-      return c.redirect(notificationRuleAdminHref(form.doctype), 303);
+      return c.redirect(notificationRuleAdminHref(form.doctype, form.rule.name), 303);
     } catch (error) {
       return renderDeskNotificationRuleFailure(options, actor, notificationRules, form?.doctype ?? "", error);
     }
@@ -3427,7 +3428,8 @@ async function renderDeskNotificationRulePage(
   selectedDoctype: string,
   state: Awaited<ReturnType<NotificationRuleService["list"]>> | undefined,
   status = 200,
-  error?: string
+  error?: string,
+  selectedRuleName?: string
 ): Promise<Response> {
   const doctypes = options.queries.listDoctypes(actor);
   const reports = listReports(options, actor);
@@ -3441,6 +3443,7 @@ async function renderDeskNotificationRulePage(
       body: renderNotificationRuleAdmin({
         doctypes,
         selectedDoctype,
+        ...(selectedRuleName === undefined ? {} : { selectedRuleName }),
         ...(state === undefined ? {} : { state }),
         ...(error === undefined ? {} : { error })
       })
@@ -3533,8 +3536,9 @@ function workflowAdminHref(doctype: string): string {
   return `/desk/admin/workflows?doctype=${encodeURIComponent(doctype)}`;
 }
 
-function notificationRuleAdminHref(doctype: string): string {
-  return `/desk/admin/notification-rules?doctype=${encodeURIComponent(doctype)}`;
+function notificationRuleAdminHref(doctype: string, ruleName?: string): string {
+  const base = `/desk/admin/notification-rules?doctype=${encodeURIComponent(doctype)}`;
+  return ruleName === undefined ? base : `${base}&rule=${encodeURIComponent(ruleName)}`;
 }
 
 async function renderDeskDocumentPage(
