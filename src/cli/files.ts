@@ -14,6 +14,7 @@ export type FileRemoteAction =
   | "list"
   | "delete"
   | "download"
+  | "preview-download"
   | "rendition"
   | "rendition-download"
   | "transform-download"
@@ -165,50 +166,38 @@ export async function runRemoteFileCommand(command: FileRemoteCommand, io: FileR
     return formatUpload(command.url, data);
   }
   if (command.action === "download") {
-    const output = await downloadOutputPath(command, io.cwd);
-    const response = await requestRemoteFileResponse(command, io, {
+    const name = requiredFileName(command, "download");
+    const downloaded = await downloadRemoteFileContent(command, io, "download", {
       method: "GET",
-      path: `/api/files/${encodeURIComponent(requiredFileName(command, "download"))}/content`
+      path: `/api/files/${encodeURIComponent(name)}/content`
     });
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    try {
-      await writeFile(output, bytes);
-    } catch (error) {
-      throw new FileRemoteError(`Could not write download file '${command.outputPath}': ${errorMessage(error)}`);
-    }
-    return formatDownload(command.url, requiredFileName(command, "download"), output, bytes.byteLength, response);
+    return formatDownload(command.url, name, downloaded.output, downloaded.bytes, downloaded.response);
+  }
+  if (command.action === "preview-download") {
+    const name = requiredFileName(command, "preview download");
+    const downloaded = await downloadRemoteFileContent(command, io, "preview download", {
+      method: "GET",
+      path: `/api/files/${encodeURIComponent(name)}/preview`
+    });
+    return formatPreviewDownload(command.url, name, downloaded.output, downloaded.bytes, downloaded.response);
   }
   if (command.action === "rendition-download") {
     const name = requiredFileName(command, "rendition download");
     const renditionId = requiredRenditionId(command);
-    const output = await downloadOutputPath(command, io.cwd, "rendition download");
-    const response = await requestRemoteFileResponse(command, io, {
+    const downloaded = await downloadRemoteFileContent(command, io, "rendition download", {
       method: "GET",
       path: `/api/files/${encodeURIComponent(name)}/renditions/${encodeURIComponent(renditionId)}/content`
     });
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    try {
-      await writeFile(output, bytes);
-    } catch (error) {
-      throw new FileRemoteError(`Could not write download file '${command.outputPath}': ${errorMessage(error)}`);
-    }
-    return formatRenditionDownload(command.url, name, renditionId, output, bytes.byteLength, response);
+    return formatRenditionDownload(command.url, name, renditionId, downloaded.output, downloaded.bytes, downloaded.response);
   }
   if (command.action === "transform-download") {
     const name = requiredFileName(command, "transform download");
-    const output = await downloadOutputPath(command, io.cwd, "transform download");
-    const response = await requestRemoteFileResponse(command, io, {
+    const downloaded = await downloadRemoteFileContent(command, io, "transform download", {
       method: "GET",
       path: `/api/files/${encodeURIComponent(name)}/transform`,
       query: transformQuery(command)
     });
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    try {
-      await writeFile(output, bytes);
-    } catch (error) {
-      throw new FileRemoteError(`Could not write download file '${command.outputPath}': ${errorMessage(error)}`);
-    }
-    return formatTransformDownload(command.url, name, output, bytes.byteLength, response);
+    return formatTransformDownload(command.url, name, downloaded.output, downloaded.bytes, downloaded.response);
   }
   if (command.action === "list") {
     const query = queryParams({
@@ -331,6 +320,27 @@ function requestRemoteFileResponse(
     resourceLabel: "Remote file",
     urlLabel: "Remote file"
   });
+}
+
+async function downloadRemoteFileContent(
+  command: FileRemoteCommand,
+  io: FileRemoteIo,
+  action: string,
+  request: {
+    readonly method: "GET";
+    readonly path: string;
+    readonly query?: URLSearchParams;
+  }
+): Promise<{ readonly output: string; readonly bytes: number; readonly response: Response }> {
+  const output = await downloadOutputPath(command, io.cwd, action);
+  const response = await requestRemoteFileResponse(command, io, request);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  try {
+    await writeFile(output, bytes);
+  } catch (error) {
+    throw new FileRemoteError(`Could not write download file '${command.outputPath}': ${errorMessage(error)}`);
+  }
+  return { output, bytes: bytes.byteLength, response };
 }
 
 function queryParams(values: Record<string, string>): URLSearchParams | undefined {
@@ -514,6 +524,15 @@ function formatDownload(baseUrl: string, name: string, outputPath: string, bytes
   const contentType = response.headers.get("content-type");
   return [
     `Downloaded file from ${baseUrl}`,
+    `- ${name} -> ${outputPath} bytes ${String(bytes)}${contentType === null ? "" : ` type ${contentType}`}`,
+    ""
+  ].join("\n");
+}
+
+function formatPreviewDownload(baseUrl: string, name: string, outputPath: string, bytes: number, response: Response): string {
+  const contentType = response.headers.get("content-type");
+  return [
+    `Downloaded file preview from ${baseUrl}`,
     `- ${name} -> ${outputPath} bytes ${String(bytes)}${contentType === null ? "" : ` type ${contentType}`}`,
     ""
   ].join("\n");

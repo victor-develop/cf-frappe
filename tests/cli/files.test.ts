@@ -287,6 +287,26 @@ describe("cf-frappe CLI remote files", () => {
 
     expect(parseCliArgs([
       "files",
+      "preview-download",
+      "--url",
+      "https://app.example",
+      "--name",
+      "file/invoice",
+      "--output",
+      "downloads/invoice-preview.pdf",
+      "--header-env",
+      "Authorization=CF_FRAPPE_AUTH"
+    ])).toEqual({
+      kind: "files",
+      action: "preview-download",
+      url: "https://app.example",
+      headers: [{ kind: "env", name: "Authorization", envName: "CF_FRAPPE_AUTH" }],
+      name: "file/invoice",
+      outputPath: "downloads/invoice-preview.pdf"
+    });
+
+    expect(parseCliArgs([
+      "files",
       "transform-download",
       "--url",
       "https://app.example",
@@ -359,6 +379,14 @@ describe("cf-frappe CLI remote files", () => {
     expect(parseCliArgs(["files", "download", "--url", "https://app.example", "--name", "file_invoice"])).toEqual({
       kind: "invalid",
       message: "File download requires --output"
+    });
+    expect(parseCliArgs(["files", "preview-download", "--url", "https://app.example", "--output", "invoice.pdf"])).toEqual({
+      kind: "invalid",
+      message: "File preview-download requires --name"
+    });
+    expect(parseCliArgs(["files", "preview-download", "--url", "https://app.example", "--name", "file_invoice"])).toEqual({
+      kind: "invalid",
+      message: "File preview download requires --output"
     });
     expect(parseCliArgs(["files", "rendition-download", "--url", "https://app.example", "--name", "file_image", "--output", "avatar.webp"])).toEqual({
       kind: "invalid",
@@ -702,6 +730,80 @@ describe("cf-frappe CLI remote files", () => {
       "Remote file request failed (404): DOCUMENT_NOT_FOUND: File 'missing' was not found"
     );
     await expect(readFile(join(tempRoot, "missing.txt"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("downloads remote file preview content to a local path", async () => {
+    const calls: RemoteCall[] = [];
+    const stdout = textBuffer();
+    const exitCode = await runCli(
+      [
+        "files",
+        "preview-download",
+        "--url",
+        "https://app.example/cf",
+        "--name",
+        "file/invoice",
+        "--output",
+        "invoice-preview.pdf",
+        "--header-env",
+        "Authorization=CF_FRAPPE_AUTH"
+      ],
+      {
+        cwd: () => tempRoot,
+        env: (name) => name === "CF_FRAPPE_AUTH" ? "Bearer test-token" : undefined,
+        fetch: fakeBinaryFetch(calls, "preview-bytes", {
+          "content-type": "application/pdf",
+          "content-disposition": "inline"
+        }),
+        stdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(calls[0]?.url).toBe("https://app.example/cf/api/files/file%2Finvoice/preview");
+    expect(calls[0]?.method).toBe("GET");
+    expect(calls[0]?.headers.get("accept")).toBe("*/*");
+    expect(calls[0]?.headers.get("authorization")).toBe("Bearer test-token");
+    await expect(readFile(join(tempRoot, "invoice-preview.pdf"), "utf8")).resolves.toBe("preview-bytes");
+    expect(stdout.text()).toContain("Downloaded file preview from https://app.example/cf");
+    expect(stdout.text()).toContain(`- file/invoice -> ${join(tempRoot, "invoice-preview.pdf")} bytes 13 type application/pdf`);
+  });
+
+  it("maps remote file preview download errors without writing output", async () => {
+    const calls: RemoteCall[] = [];
+    const stderr = textBuffer();
+    const exitCode = await runCli(
+      [
+        "files",
+        "preview-download",
+        "--url",
+        "https://app.example",
+        "--name",
+        "file/archive",
+        "--output",
+        "archive.zip"
+      ],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetch(calls, {
+          error: {
+            code: "BAD_REQUEST",
+            message: "File 'file/archive' cannot be previewed"
+          }
+        }, 400),
+        stdout: textBuffer(),
+        stderr
+      }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(calls[0]?.url).toBe("https://app.example/api/files/file%2Farchive/preview");
+    expect(calls[0]?.headers.get("accept")).toBe("*/*");
+    expect(stderr.text()).toContain(
+      "Remote file request failed (400): BAD_REQUEST: File 'file/archive' cannot be previewed"
+    );
+    await expect(readFile(join(tempRoot, "archive.zip"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("deletes one remote file with an optional expected version", async () => {

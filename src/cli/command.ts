@@ -1008,6 +1008,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
         action !== "download" &&
         action !== "update" &&
         action !== "rendition" &&
+        action !== "preview-download" &&
         action !== "rendition-download" &&
         action !== "transform-download"
       ) {
@@ -1022,7 +1023,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--output") {
-      if (action !== "download" && action !== "rendition-download" && action !== "transform-download") {
+      if (!isFileDownloadAction(action)) {
         return { kind: "invalid", message: `Cannot use --output with files ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1316,13 +1317,14 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       action === "download" ||
       action === "update" ||
       action === "rendition" ||
+      action === "preview-download" ||
       action === "rendition-download" ||
       action === "transform-download") &&
     name === undefined
   ) {
     return { kind: "invalid", message: `File ${action} requires --name` };
   }
-  if (action === "download" || action === "rendition-download" || action === "transform-download") {
+  if (isFileDownloadAction(action)) {
     if (action === "rendition-download" && renditionId === undefined) {
       return { kind: "invalid", message: "File rendition download requires --rendition-id" };
     }
@@ -1420,6 +1422,7 @@ function fileAction(value: string): FileRemoteAction | undefined {
   return value === "list" ||
     value === "delete" ||
     value === "download" ||
+    value === "preview-download" ||
     value === "update" ||
     value === "bulk-delete" ||
     value === "bulk-update" ||
@@ -1455,7 +1458,17 @@ function isFileTransformOptionAction(action: FileRemoteAction): boolean {
   return action === "rendition" || action === "transform-download";
 }
 
+function isFileDownloadAction(action: FileRemoteAction): boolean {
+  return action === "download" ||
+    action === "preview-download" ||
+    action === "rendition-download" ||
+    action === "transform-download";
+}
+
 function fileDownloadOutputMessage(action: FileRemoteAction): string {
+  if (action === "preview-download") {
+    return "File preview download requires --output";
+  }
   if (action === "rendition-download") {
     return "File rendition download requires --output";
   }
@@ -1832,6 +1845,7 @@ function helpText(): string {
     "  cf-frappe files list --url <origin> [--filename <text>] [--content-type <type>] [--attached-to-doctype <doctype> --attached-to-name <name>] [--storage-state <state>] [--scan-status <status>] [--uploaded-by <user>] [--private|--public] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files upload --url <origin> --path <localPath> [--filename <text>] [--content-type <type>] [--private|--public] [--attached-to-doctype <doctype> --attached-to-name <name>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files download --url <origin> --name <fileName> --output <localPath> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe files preview-download --url <origin> --name <fileName> --output <localPath> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files update --url <origin> --name <fileName> [--filename <text>] [--private|--public] [--attached-to-doctype <doctype> --attached-to-name <name>|--clear-attachment] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files bulk-update --url <origin> (--file <fileName>|--file-version <fileName:version>)... [--private|--public] [--attached-to-doctype <doctype> --attached-to-name <name>|--clear-attachment] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files bulk-delete --url <origin> (--file <fileName>|--file-version <fileName:version>)... [--header <name:value>] [--header-env <name=ENV>]",

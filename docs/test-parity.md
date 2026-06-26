@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the remote file transform download CLI slice:
+As of the remote file preview download CLI slice:
 
 - Vitest files: `95`
-- Vitest cases: `1137`
+- Vitest cases: `1139`
 
 ## Implication
 
