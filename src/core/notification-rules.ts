@@ -1,6 +1,7 @@
 import { FrameworkError } from "./errors.js";
 import type {
   DocTypeDefinition,
+  DocumentData,
   DocumentSnapshot,
   DomainEvent,
   FieldDefinition,
@@ -40,6 +41,7 @@ export interface NotificationRuleEntry {
   readonly enabled: boolean;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly metadata: DocumentData;
 }
 
 export interface NotificationRuleState {
@@ -93,7 +95,8 @@ export function foldNotificationRules(
         rule: event.payload.rule,
         enabled: event.payload.rule.enabled ?? true,
         createdAt: existing?.createdAt ?? event.occurredAt,
-        updatedAt: event.occurredAt
+        updatedAt: event.occurredAt,
+        metadata: event.metadata
       });
       continue;
     }

@@ -142,7 +142,13 @@ describe("cf-frappe CLI scaffold", () => {
     expect(taskApp).toContain("dataPatches: [StarterTaskSeedData]");
     expect(taskApp).toContain('const STARTER_TASK_SEED_PATCH_ID = "tasks.seed_starter_tasks"');
     expect(taskApp).toContain("id: STARTER_TASK_SEED_PATCH_ID");
-    expect(taskApp).toContain('checksum: "v2"');
+    expect(taskApp).toContain('checksum: "v3"');
+    expect(taskApp).toContain('name: "Task owner updates"');
+    expect(taskApp).toContain('events: ["DocumentUpdated", "DocumentCommentAdded"]');
+    expect(taskApp).toContain('recipients: [{ kind: "field", field: "created_by" }]');
+    expect(taskApp).toContain('channels: ["inbox"]');
+    expect(taskApp).toContain("resources.notificationRules.save");
+    expect(taskApp).toContain("resources.notificationRules.clear");
     expect(taskApp).toContain("resources.queries.listDocuments");
     expect(taskApp).toContain("skipped += 1");
     expect(taskApp).toContain("rollback: {");
@@ -166,6 +172,9 @@ describe("cf-frappe CLI scaffold", () => {
     );
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "`tasks.seed_starter_tasks` data patch"
+    );
+    await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
+      "starter Task owner notification rule"
     );
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "npx cf-frappe data-patches status --url https://your-worker.example"
@@ -266,6 +275,7 @@ describe("cf-frappe CLI scaffold", () => {
     expect(readmeText).toContain("npx cf-frappe resources import --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources delete --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe notification-rules list --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("The starter data patch creates a `Task owner updates` inbox rule");
     expect(readmeText).toContain("npx cf-frappe notification-rules save --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe notification-rules clear --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain(
@@ -497,12 +507,14 @@ import {
   DocumentService,
   DocumentShareService,
   InMemoryDocumentStore,
+  NotificationRuleService,
   QueryService
 } from "${frameworkUrl}";
 
 const registry = createRegistryFromApps([taskApp]);
 const store = new InMemoryDocumentStore();
 const documentShares = new DocumentShareService({ events: store });
+const notificationRules = new NotificationRuleService({ registry, events: store });
 let id = 0;
 const ids = { next: (prefix = "") => \`\${prefix}seed-smoke-\${++id}\` };
 const clock = { now: () => "2026-06-26T00:00:00.000Z" };
@@ -520,10 +532,24 @@ const preexisting = await documents.create({
   }
 });
 
-const resources = { registry, documents, queries };
+const resources = { registry, documents, queries, notificationRules };
 const applyResult = await StarterTaskSeedData.run({ resources });
-if (JSON.stringify(applyResult) !== JSON.stringify({ created: 1, skipped: 1 })) {
+if (JSON.stringify(applyResult) !== JSON.stringify({
+  created: 1,
+  skipped: 1,
+  notificationRuleCreated: 1,
+  notificationRuleSkipped: 0
+})) {
   throw new Error(\`Unexpected apply result: \${JSON.stringify(applyResult)}\`);
+}
+const automationActor = { id: "starter-automation", roles: ["System Manager"], tenantId: "default" };
+const rulesAfterApply = await notificationRules.list(automationActor, "Task");
+const ownerRule = rulesAfterApply.rules.find((entry) => entry.rule.name === "Task owner updates");
+if (ownerRule === undefined || ownerRule.rule.subject !== "{{ doctype }} {{ name }} changed") {
+  throw new Error(\`Expected starter notification rule after apply, got \${JSON.stringify(rulesAfterApply.rules)}\`);
+}
+if (ownerRule.metadata.patchId !== "tasks.seed_starter_tasks") {
+  throw new Error(\`Expected starter notification rule patch metadata, got \${JSON.stringify(ownerRule.metadata)}\`);
 }
 const seededBeforeRollback = await queries.listDocuments(actor, "Task", {
   filters: [{ field: "starter_seed_patch", value: "tasks.seed_starter_tasks" }],
@@ -534,8 +560,41 @@ if (seededBeforeRollback.data.length !== 1) {
 }
 
 const rollbackResult = await StarterTaskSeedData.rollback?.run({ resources });
-if (JSON.stringify(rollbackResult) !== JSON.stringify({ deleted: 1, skipped: 1 })) {
+if (JSON.stringify(rollbackResult) !== JSON.stringify({
+  deleted: 1,
+  skipped: 1,
+  notificationRuleDeleted: 1,
+  notificationRuleSkipped: 0
+})) {
   throw new Error(\`Unexpected rollback result: \${JSON.stringify(rollbackResult)}\`);
+}
+const rulesAfterRollback = await notificationRules.list(automationActor, "Task");
+if (rulesAfterRollback.rules.some((entry) => entry.rule.name === "Task owner updates")) {
+  throw new Error(\`Expected starter notification rule rollback, got \${JSON.stringify(rulesAfterRollback.rules)}\`);
+}
+await notificationRules.save({
+  actor: automationActor,
+  doctype: "Task",
+  rule: {
+    name: "Task owner updates",
+    events: ["DocumentUpdated", "DocumentCommentAdded"],
+    recipients: [{ kind: "field", field: "created_by" }],
+    channels: ["inbox"],
+    subject: "{{ doctype }} {{ name }} changed"
+  }
+});
+const secondRollback = await StarterTaskSeedData.rollback?.run({ resources });
+if (JSON.stringify(secondRollback) !== JSON.stringify({
+  deleted: 0,
+  skipped: 2,
+  notificationRuleDeleted: 0,
+  notificationRuleSkipped: 1
+})) {
+  throw new Error(\`Unexpected second rollback result: \${JSON.stringify(secondRollback)}\`);
+}
+const rulesAfterUserRuleRollback = await notificationRules.list(automationActor, "Task");
+if (!rulesAfterUserRuleRollback.rules.some((entry) => entry.rule.name === "Task owner updates")) {
+  throw new Error("Rollback removed a user-owned matching notification rule");
 }
 const preserved = await queries.getDocument(actor, "Task", preexisting.name);
 if (preserved.data.description !== "User-created record with the same title.") {

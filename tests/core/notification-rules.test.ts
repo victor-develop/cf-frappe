@@ -21,7 +21,7 @@ describe("notification rules", () => {
         kind: "NotificationRuleSaved",
         doctypeName: "Note",
         rule
-      }),
+      }, { source: "seed" }),
       ruleEvent(2, "evt_other", {
         kind: "NotificationRuleSaved",
         doctypeName: "Task",
@@ -39,6 +39,17 @@ describe("notification rules", () => {
       doctypeName: "Note",
       version: 3,
       rules: []
+    });
+    const saved = foldNotificationRules("acme", "Note", [
+      ruleEvent(1, "evt_save", {
+        kind: "NotificationRuleSaved",
+        doctypeName: "Note",
+        rule
+      }, { source: "seed" })
+    ]);
+    expect(saved.rules[0]).toMatchObject({
+      rule: { name: "Managers on updates" },
+      metadata: { source: "seed" }
     });
   });
 
@@ -184,7 +195,8 @@ describe("notification rules", () => {
 function ruleEvent(
   sequence: number,
   id: string,
-  payload: Extract<DomainEvent["payload"], { readonly kind: "NotificationRuleSaved" | "NotificationRuleCleared" }>
+  payload: Extract<DomainEvent["payload"], { readonly kind: "NotificationRuleSaved" | "NotificationRuleCleared" }>,
+  metadata: DomainEvent["metadata"] = {}
 ): DomainEvent {
   return {
     id,
@@ -197,7 +209,7 @@ function ruleEvent(
     actorId: "admin@example.com",
     occurredAt: now,
     payload,
-    metadata: {}
+    metadata
   };
 }
 

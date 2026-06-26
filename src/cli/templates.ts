@@ -256,7 +256,7 @@ npm run d1:migrate:local
 npm run dev
 \`\`\`
 
-Open \`/desk\` for the generated Desk UI, the \`Tasks\` workspace, the \`Task Dashboard\`, and the file manager at \`/desk/files\`; run the \`tasks.seed_starter_tasks\` data patch when you want sample Task records in a fresh environment. Use \`/api/meta/doctypes/Task\` for the metadata API. ${authLocalReadme(input.auth)}
+Open \`/desk\` for the generated Desk UI, the \`Tasks\` workspace, the \`Task Dashboard\`, and the file manager at \`/desk/files\`; run the \`tasks.seed_starter_tasks\` data patch when you want sample Task records and the starter Task owner notification rule in a fresh environment. Use \`/api/meta/doctypes/Task\` for the metadata API. ${authLocalReadme(input.auth)}
 The generated R2 binding supports buffered Desk uploads immediately. Add a \`directUploads\` signer to \`R2FileStorage\` before enabling signed browser direct-upload targets.
 Client scripts live under \`public/assets\`; add them with \`defineClientScript(...)\` in files under \`src/apps\`.
 ${authProviderReadme(input.auth)}
@@ -400,7 +400,7 @@ npx cf-frappe resources import --url https://your-worker.example --doctype Task 
 npx cf-frappe resources delete --url https://your-worker.example --doctype Task --name "Follow up" --expected-version 2 --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 
-Notification inboxes expose the same read/dismiss events as Desk, while rules are managed through the event-sourced automation stream that feeds durable inbox entries. Rules default to the inbox channel and can opt into email when your Worker wires an EmailSender port:
+Notification inboxes expose the same read/dismiss events as Desk, while rules are managed through the event-sourced automation stream that feeds durable inbox entries. The starter data patch creates a \`Task owner updates\` inbox rule when no rule with that name exists. Rules default to the inbox channel and can opt into email when your Worker wires an EmailSender port:
 
 \`\`\`bash
 npx cf-frappe notifications list --url https://your-worker.example --limit 20 --header-env Authorization=CF_FRAPPE_AUTH
@@ -714,6 +714,11 @@ const STARTER_TASK_SEED_ACTOR = {
   roles: ["Task Manager"],
   tenantId: "default"
 };
+const STARTER_TASK_AUTOMATION_ACTOR = {
+  id: "starter-automation",
+  roles: ["System Manager"],
+  tenantId: "default"
+};
 const STARTER_TASK_SEED_RECORDS = [
   {
     title: "Review generated Desk workspace",
@@ -730,14 +735,23 @@ const STARTER_TASK_SEED_RECORDS = [
     description: "Create D1, R2, and Queue resources, apply migrations, and run wrangler deploy."
   }
 ] as const;
+const STARTER_TASK_NOTIFICATION_RULE = {
+  name: "Task owner updates",
+  events: ["DocumentUpdated", "DocumentCommentAdded"],
+  recipients: [{ kind: "field", field: "created_by" }],
+  channels: ["inbox"],
+  subject: "{{ doctype }} {{ name }} changed"
+} as const;
 
 export const StarterTaskSeedData = defineDataPatch<CloudFrappeRuntimeServices>({
   id: STARTER_TASK_SEED_PATCH_ID,
   label: "Seed starter Task records",
-  checksum: "v2",
+  checksum: "v3",
   async run({ resources }) {
     let created = 0;
     let skipped = 0;
+    let notificationRuleCreated = 0;
+    let notificationRuleSkipped = 0;
 
     for (const task of STARTER_TASK_SEED_RECORDS) {
       const existing = await resources.queries.listDocuments(STARTER_TASK_SEED_ACTOR, "Task", {
@@ -757,13 +771,28 @@ export const StarterTaskSeedData = defineDataPatch<CloudFrappeRuntimeServices>({
       created += 1;
     }
 
-    return { created, skipped };
+    const rules = await resources.notificationRules.list(STARTER_TASK_AUTOMATION_ACTOR, "Task");
+    if (rules.rules.some((entry) => entry.rule.name === STARTER_TASK_NOTIFICATION_RULE.name)) {
+      notificationRuleSkipped = 1;
+    } else {
+      await resources.notificationRules.save({
+        actor: STARTER_TASK_AUTOMATION_ACTOR,
+        doctype: "Task",
+        rule: STARTER_TASK_NOTIFICATION_RULE,
+        metadata: { patchId: STARTER_TASK_SEED_PATCH_ID }
+      });
+      notificationRuleCreated = 1;
+    }
+
+    return { created, skipped, notificationRuleCreated, notificationRuleSkipped };
   },
   rollback: {
     label: "Remove starter Task records",
     async run({ resources }) {
       let deleted = 0;
       let skipped = 0;
+      let notificationRuleDeleted = 0;
+      let notificationRuleSkipped = 0;
 
       for (const task of STARTER_TASK_SEED_RECORDS) {
         const existing = await resources.queries.listDocuments(STARTER_TASK_SEED_ACTOR, "Task", {
@@ -787,7 +816,25 @@ export const StarterTaskSeedData = defineDataPatch<CloudFrappeRuntimeServices>({
         deleted += 1;
       }
 
-      return { deleted, skipped };
+      const rules = await resources.notificationRules.list(STARTER_TASK_AUTOMATION_ACTOR, "Task");
+      const rule = rules.rules.find((entry) => entry.rule.name === STARTER_TASK_NOTIFICATION_RULE.name);
+      if (
+        rule !== undefined &&
+        rule.metadata.patchId === STARTER_TASK_SEED_PATCH_ID &&
+        JSON.stringify(rule.rule) === JSON.stringify(STARTER_TASK_NOTIFICATION_RULE)
+      ) {
+        await resources.notificationRules.clear({
+          actor: STARTER_TASK_AUTOMATION_ACTOR,
+          doctype: "Task",
+          ruleName: STARTER_TASK_NOTIFICATION_RULE.name,
+          metadata: { patchId: STARTER_TASK_SEED_PATCH_ID, rollback: true }
+        });
+        notificationRuleDeleted = 1;
+      } else {
+        notificationRuleSkipped = 1;
+      }
+
+      return { deleted, skipped, notificationRuleDeleted, notificationRuleSkipped };
     }
   }
 });
