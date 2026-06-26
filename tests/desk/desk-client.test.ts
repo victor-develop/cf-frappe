@@ -384,7 +384,9 @@ interface DeskClientRuntime {
     ) => Promise<unknown>;
     readonly dashboardUrl: (dashboard: string) => string;
     readonly csvUrl: (doctype: string, options?: Record<string, unknown>) => string;
+    readonly fileContentUrl: (name: string) => string;
     readonly filesUrl: (options?: Record<string, unknown>) => string;
+    readonly filePreviewUrl: (name: string) => string;
     readonly formUrl: (doctype: string, name: string) => string;
     readonly importCsv: (
       doctype: string,
@@ -856,6 +858,8 @@ describe("Desk client runtime", () => {
     ).toBe(
       "/desk/files?attached_to_doctype=Task+Type&attached_to_name=TASK%2F1&content_type=text%2Fplain&filename=brief&is_private=false&limit=5&scan_status=clean&storage_state=available&uploaded_by=owner%40example.com"
     );
+    expect(runtime.desk.fileContentUrl("file/1")).toBe("/desk/files/file%2F1/content");
+    expect(runtime.desk.filePreviewUrl("file/1")).toBe("/desk/files/file%2F1/preview");
     expect(runtime.desk.notificationsUrl({ includeDismissed: true, limit: 10, unread: true, user: "ignored@example.com" }))
       .toBe("/desk/notifications?limit=10&unread=true&include_dismissed=true");
   });

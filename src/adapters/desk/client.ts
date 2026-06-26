@@ -222,6 +222,10 @@ export function renderDeskClientScript(): string {
     return withQuery("/desk/files", fileListParams(options || {}));
   }
 
+  function deskFilePath(name, action) {
+    return "/desk/files/" + encodePart(name) + (action === undefined ? "" : "/" + action);
+  }
+
   function deskNotificationInboxParams(options) {
     var params = {};
     setParam(params, "limit", options && options.limit);
@@ -3606,7 +3610,13 @@ export function renderDeskClientScript(): string {
       adminUsersUrl: deskAdminUsersPath,
       adminWorkflowsUrl: deskAdminWorkflowsPath,
       dashboardUrl: deskDashboardPath,
+      fileContentUrl: function (name) {
+        return deskFilePath(name, "content");
+      },
       filesUrl: deskFilesPath,
+      filePreviewUrl: function (name) {
+        return deskFilePath(name, "preview");
+      },
       listUrl: function (doctype, options) {
         return withQuery(deskPath(doctype), resourceListParams(options || {}));
       },
