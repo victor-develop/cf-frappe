@@ -349,6 +349,77 @@ describe("cf-frappe CLI remote resources", () => {
 
     expect(parseCliArgs([
       "resources",
+      "shares",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK/1"
+    ])).toEqual({
+      kind: "resources",
+      action: "shares",
+      url: "https://app.example",
+      headers: [],
+      doctype: "Task",
+      name: "TASK/1"
+    });
+
+    expect(parseCliArgs([
+      "resources",
+      "share",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK/1",
+      "--user-id",
+      "collab@example.com",
+      "--permission",
+      "read",
+      "--permission",
+      "write",
+      "--expected-version",
+      "2"
+    ])).toEqual({
+      kind: "resources",
+      action: "share",
+      url: "https://app.example",
+      headers: [],
+      doctype: "Task",
+      name: "TASK/1",
+      userId: "collab@example.com",
+      permissions: ["read", "write"],
+      expectedVersion: 2
+    });
+
+    expect(parseCliArgs([
+      "resources",
+      "unshare",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK/1",
+      "--user-id",
+      "collab@example.com",
+      "--expected-version",
+      "3"
+    ])).toEqual({
+      kind: "resources",
+      action: "unshare",
+      url: "https://app.example",
+      headers: [],
+      doctype: "Task",
+      name: "TASK/1",
+      userId: "collab@example.com",
+      expectedVersion: 3
+    });
+
+    expect(parseCliArgs([
+      "resources",
       "bulk-transition",
       "--url",
       "https://app.example",
@@ -620,6 +691,60 @@ describe("cf-frappe CLI remote resources", () => {
     ])).toEqual({
       kind: "invalid",
       message: "Cannot use --saved-filter with resources save-filter"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "share",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK-1"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Resource share requires --user-id"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "unshare",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK-1"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Resource unshare requires --user-id"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "shares",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Resource shares requires --name"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "unshare",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK-1",
+      "--user-id",
+      "collab@example.com",
+      "--permission",
+      "read"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Cannot use --permission with resources unshare"
     });
     expect(parseCliArgs([
       "resources",
@@ -1149,6 +1274,151 @@ describe("cf-frappe CLI remote resources", () => {
     expect(importStdout.text()).toContain("DocType: Task Mode: update Total: 2");
     expect(importStdout.text()).toContain("- row 2 update TASK-1");
     expect(importStdout.text()).toContain("- row 3 update TASK-2 failed BAD_REQUEST status 400: Invalid count");
+  });
+
+  it("lists, shares, and revokes remote resource document shares through the generated resource API", async () => {
+    const listCalls: RemoteCall[] = [];
+    const listStdout = textBuffer();
+    const listExit = await runCli(
+      [
+        "resources",
+        "shares",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task Type",
+        "--name",
+        "TASK/1",
+        "--header-env",
+        "Authorization=CF_FRAPPE_AUTH"
+      ],
+      {
+        cwd: () => tempRoot,
+        env: (name) => name === "CF_FRAPPE_AUTH" ? "Bearer test-token" : undefined,
+        fetch: fakeFetch(listCalls, {
+          data: {
+            version: 2,
+            grants: [
+              { userId: "collab@example.com", permissions: ["read", "update"] },
+              { userId: "reviewer@example.com", permissions: ["read"] }
+            ]
+          }
+        }),
+        stdout: listStdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(listExit).toBe(0);
+    expect(listCalls[0]?.url).toBe("https://app.example/api/resource/Task%20Type/TASK%2F1/shares");
+    expect(listCalls[0]?.method).toBe("GET");
+    expect(listCalls[0]?.headers.get("authorization")).toBe("Bearer test-token");
+    expect(listStdout.text()).toContain("Resource shares Task Type/TASK/1 at https://app.example");
+    expect(listStdout.text()).toContain("Version: 2 Total: 2");
+    expect(listStdout.text()).toContain("- collab@example.com: read, update");
+
+    const shareCalls: RemoteCall[] = [];
+    const shareStdout = textBuffer();
+    const shareExit = await runCli(
+      [
+        "resources",
+        "share",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--name",
+        "TASK-1",
+        "--user-id",
+        "collab@example.com",
+        "--permission",
+        "read",
+        "--permission",
+        "write",
+        "--expected-version",
+        "2"
+      ],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetch(shareCalls, {
+          data: { name: "TASK-1", version: 3, docstatus: "draft", data: { title: "First" } }
+        }, 201),
+        stdout: shareStdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(shareExit).toBe(0);
+    expect(shareCalls[0]?.url).toBe("https://app.example/api/resource/Task/TASK-1/shares");
+    expect(shareCalls[0]?.method).toBe("POST");
+    expect(shareCalls[0]?.body).toBe(JSON.stringify({
+      userId: "collab@example.com",
+      permissions: ["read", "write"],
+      expectedVersion: 2
+    }));
+    expect(shareStdout.text()).toContain("Shared resource Task at https://app.example");
+    expect(shareStdout.text()).toContain("- TASK-1 version 3 status draft");
+
+    const defaultShareCalls: RemoteCall[] = [];
+    const defaultShareExit = await runCli(
+      [
+        "resources",
+        "share",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--name",
+        "TASK-1",
+        "--user-id",
+        "reader@example.com"
+      ],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetch(defaultShareCalls, {
+          data: { name: "TASK-1", version: 4, docstatus: "draft" }
+        }, 201),
+        stdout: textBuffer(),
+        stderr: textBuffer()
+      }
+    );
+
+    expect(defaultShareExit).toBe(0);
+    expect(defaultShareCalls[0]?.body).toBe(JSON.stringify({ userId: "reader@example.com" }));
+
+    const unshareCalls: RemoteCall[] = [];
+    const unshareStdout = textBuffer();
+    const unshareExit = await runCli(
+      [
+        "resources",
+        "unshare",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--name",
+        "TASK/1",
+        "--user-id",
+        "collab@example.com",
+        "--expected-version",
+        "3"
+      ],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetch(unshareCalls, {
+          data: { name: "TASK/1", version: 4, docstatus: "draft" }
+        }),
+        stdout: unshareStdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(unshareExit).toBe(0);
+    expect(unshareCalls[0]?.url).toBe("https://app.example/api/resource/Task/TASK%2F1/shares/collab%40example.com");
+    expect(unshareCalls[0]?.method).toBe("DELETE");
+    expect(unshareCalls[0]?.body).toBe("{\"expectedVersion\":3}");
+    expect(unshareStdout.text()).toContain("Revoked resource share Task at https://app.example");
+    expect(unshareStdout.text()).toContain("- TASK/1 version 4 status draft");
   });
 
   it("lists, saves, and deletes remote saved resource filters through the generated resource API", async () => {

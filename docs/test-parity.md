@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the remote resource saved-filter CLI slice:
+As of the remote resource document share CLI slice:
 
 - Vitest files: `96`
-- Vitest cases: `1151`
+- Vitest cases: `1152`
 
 ## Implication
 

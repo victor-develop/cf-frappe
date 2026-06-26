@@ -1455,6 +1455,8 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
   let doctype: string | undefined;
   let name: string | undefined;
   let filterId: string | undefined;
+  let userId: string | undefined;
+  const permissions: string[] = [];
   let label: string | undefined;
   let transition: string | undefined;
   let commandName: string | undefined;
@@ -1548,6 +1550,30 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
         return value;
       }
       filterId = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--user-id") {
+      if (action !== "share" && action !== "unshare") {
+        return { kind: "invalid", message: `Cannot use --user-id with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      userId = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--permission") {
+      if (action !== "share") {
+        return { kind: "invalid", message: `Cannot use --permission with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      permissions.push(value);
       index += 1;
       continue;
     }
@@ -1836,6 +1862,9 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
   if (isNamedResourceAction(action) && name === undefined) {
     return { kind: "invalid", message: `Resource ${action} requires --name` };
   }
+  if ((action === "share" || action === "unshare") && userId === undefined) {
+    return { kind: "invalid", message: `Resource ${action} requires --user-id` };
+  }
   if ((action === "create" || action === "update") && data === undefined) {
     return { kind: "invalid", message: `Resource ${action} requires --data-json` };
   }
@@ -1872,6 +1901,8 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
     doctype,
     ...(name === undefined ? {} : { name }),
     ...(filterId === undefined ? {} : { filterId }),
+    ...(userId === undefined ? {} : { userId }),
+    ...(permissions.length === 0 ? {} : { permissions }),
     ...(label === undefined ? {} : { label }),
     ...(transition === undefined ? {} : { transition }),
     ...(commandName === undefined ? {} : { command: commandName }),
@@ -1930,7 +1961,10 @@ function resourceAction(value: string): ResourceRemoteAction | undefined {
     value === "delete-filter" ||
     value === "save-filter" ||
     value === "saved-filters" ||
+    value === "share" ||
+    value === "shares" ||
     value === "transition" ||
+    value === "unshare" ||
     value === "update" ||
     value === "delete"
     ? value
@@ -1944,8 +1978,11 @@ function isNamedResourceAction(action: ResourceRemoteAction): boolean {
     action === "delete" ||
     action === "duplicate" ||
     action === "get" ||
+    action === "share" ||
+    action === "shares" ||
     action === "submit" ||
     action === "transition" ||
+    action === "unshare" ||
     action === "update";
 }
 
@@ -1963,8 +2000,10 @@ function isResourceVersionAction(action: ResourceRemoteAction): boolean {
     action === "command" ||
     action === "delete" ||
     action === "duplicate" ||
+    action === "share" ||
     action === "submit" ||
     action === "transition" ||
+    action === "unshare" ||
     action === "update";
 }
 
@@ -2447,6 +2486,9 @@ function helpText(): string {
     "  cf-frappe resources command --url <origin> --doctype <doctype> --name <docname> --command <name> [--data-json <json>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources duplicate --url <origin> --doctype <doctype> --name <docname> [--data-json <json>] [--new-name <docname>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources amend --url <origin> --doctype <doctype> --name <docname> [--data-json <json>] [--new-name <docname>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources shares --url <origin> --doctype <doctype> --name <docname> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources share --url <origin> --doctype <doctype> --name <docname> --user-id <user> [--permission <read|update|share|write>]... [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources unshare --url <origin> --doctype <doctype> --name <docname> --user-id <user> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources saved-filters --url <origin> --doctype <doctype> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources save-filter --url <origin> --doctype <doctype> --label <name> [--filter <field[__operator]=value>] [--filter-expression-json <json>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources delete-filter --url <origin> --doctype <doctype> --filter-id <id> [--header <name:value>] [--header-env <name=ENV>]",

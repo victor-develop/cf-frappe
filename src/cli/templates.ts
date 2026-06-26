@@ -309,6 +309,9 @@ npx cf-frappe resources transition --url https://your-worker.example --doctype T
 npx cf-frappe resources command --url https://your-worker.example --doctype Task --name "Follow up" --command raisePriority --data-json '{"priority":"High"}' --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources duplicate --url https://your-worker.example --doctype Task --name "Follow up" --new-name "Follow up copy" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources bulk-transition --url https://your-worker.example --doctype Task --transition close --document "Follow up" --document-version "Review generated Desk workspace:1" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources shares --url https://your-worker.example --doctype Task --name "Follow up" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources share --url https://your-worker.example --doctype Task --name "Follow up" --user-id teammate@example.com --permission read --permission update --expected-version 2 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources unshare --url https://your-worker.example --doctype Task --name "Follow up" --user-id teammate@example.com --expected-version 3 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources saved-filters --url https://your-worker.example --doctype Task --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources save-filter --url https://your-worker.example --doctype Task --label "Open tasks" --filter workflow_state=Open --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources delete-filter --url https://your-worker.example --doctype Task --filter-id open-tasks --header-env Authorization=CF_FRAPPE_AUTH

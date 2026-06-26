@@ -27,8 +27,11 @@ export type ResourceRemoteAction =
   | "delete-filter"
   | "save-filter"
   | "saved-filters"
+  | "share"
+  | "shares"
   | "submit"
   | "transition"
+  | "unshare"
   | "update";
 
 export type ResourceHeaderOption = RemoteHeaderOption;
@@ -41,6 +44,8 @@ export interface ResourceRemoteCommand {
   readonly doctype: string;
   readonly name?: string;
   readonly filterId?: string;
+  readonly userId?: string;
+  readonly permissions?: readonly string[];
   readonly label?: string;
   readonly transition?: string;
   readonly command?: string;
@@ -158,10 +163,43 @@ interface SavedFilterResponse {
   readonly updatedAt?: string;
 }
 
+interface DocumentShareStateResponse {
+  readonly version?: number;
+  readonly grants?: readonly DocumentShareGrantResponse[];
+}
+
+interface DocumentShareGrantResponse {
+  readonly userId: string;
+  readonly permissions: readonly string[];
+}
+
 export async function runRemoteResourceCommand(
   command: ResourceRemoteCommand,
   io: ResourceRemoteIo = {}
 ): Promise<string> {
+  if (command.action === "shares") {
+    const data = await requestRemoteResource<DocumentShareStateResponse>(command, io, {
+      method: "GET",
+      path: `/api/resource/${encodeURIComponent(command.doctype)}/${encodeURIComponent(requiredResourceName(command, "shares"))}/shares`
+    });
+    return formatDocumentShares(command.url, command.doctype, requiredResourceName(command, "shares"), data);
+  }
+  if (command.action === "share") {
+    const data = await requestRemoteResource<DocumentSnapshotResponse>(command, io, {
+      body: shareBody(command),
+      method: "POST",
+      path: `/api/resource/${encodeURIComponent(command.doctype)}/${encodeURIComponent(requiredResourceName(command, "share"))}/shares`
+    });
+    return formatResourceDetail(command.url, command.doctype, "Shared resource", data);
+  }
+  if (command.action === "unshare") {
+    const data = await requestRemoteResource<DocumentSnapshotResponse>(command, io, {
+      body: versionBody(command),
+      method: "DELETE",
+      path: `/api/resource/${encodeURIComponent(command.doctype)}/${encodeURIComponent(requiredResourceName(command, "unshare"))}/shares/${encodeURIComponent(requiredResourceShareUserId(command))}`
+    });
+    return formatResourceDetail(command.url, command.doctype, "Revoked resource share", data);
+  }
   if (command.action === "saved-filters") {
     const payload = await requestRemoteResourcePayload<SavedFilterListResponse>(command, io, {
       method: "GET",
@@ -506,6 +544,14 @@ function commandBody(command: ResourceRemoteCommand): Record<string, unknown> {
   };
 }
 
+function shareBody(command: ResourceRemoteCommand): Record<string, unknown> {
+  return {
+    userId: requiredResourceShareUserId(command),
+    ...(command.permissions === undefined ? {} : { permissions: command.permissions }),
+    ...versionBody(command)
+  };
+}
+
 function cloneBody(command: ResourceRemoteCommand): Record<string, unknown> {
   return {
     ...(command.data === undefined ? {} : { data: command.data }),
@@ -666,6 +712,21 @@ function formatBulkResourceCommand(
   ].join("\n");
 }
 
+function formatDocumentShares(
+  baseUrl: string,
+  doctype: string,
+  name: string,
+  state: DocumentShareStateResponse
+): string {
+  const grants = state.grants ?? [];
+  return [
+    `Resource shares ${doctype}/${name} at ${baseUrl}`,
+    `Version: ${String(state.version ?? 0)} Total: ${String(grants.length)}`,
+    ...documentShareGrantLines(grants),
+    ""
+  ].join("\n");
+}
+
 function formatSavedFilters(
   baseUrl: string,
   doctype: string,
@@ -764,6 +825,13 @@ function failureLine(failure: BulkResourceFailureResponse): string {
   return `- ${failure.name} failed ${code}${status}: ${message}`;
 }
 
+function documentShareGrantLines(grants: readonly DocumentShareGrantResponse[]): readonly string[] {
+  if (grants.length === 0) {
+    return ["- (none)"];
+  }
+  return grants.map((grant) => `- ${grant.userId}: ${grant.permissions.join(", ")}`);
+}
+
 function savedFilterLines(filters: readonly SavedFilterResponse[]): readonly string[] {
   if (filters.length === 0) {
     return ["- (none)"];
@@ -789,6 +857,13 @@ function requiredResourceCommand(command: ResourceRemoteCommand): string {
     throw new ResourceRemoteError("Resource command requires --command");
   }
   return command.command;
+}
+
+function requiredResourceShareUserId(command: ResourceRemoteCommand): string {
+  if (command.userId === undefined) {
+    throw new ResourceRemoteError(`Resource ${command.action} requires --user-id`);
+  }
+  return command.userId;
 }
 
 function requiredResourceFilterId(command: ResourceRemoteCommand): string {
