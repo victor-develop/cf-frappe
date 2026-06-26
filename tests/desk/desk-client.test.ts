@@ -351,6 +351,16 @@ interface DeskClientRuntime {
     ) => Promise<unknown>;
   };
   readonly desk: {
+    readonly adminCustomFieldsUrl: (doctype?: string) => string;
+    readonly adminDataPatchesUrl: () => string;
+    readonly adminFieldPropertiesUrl: (doctype?: string, field?: string) => string;
+    readonly adminJobsUrl: (options?: Record<string, unknown>) => string;
+    readonly adminJobSchedulesUrl: (options?: Record<string, unknown>) => string;
+    readonly adminPrintSettingsUrl: () => string;
+    readonly adminRolesUrl: () => string;
+    readonly adminUserPermissionsUrl: (options?: Record<string, unknown>) => string;
+    readonly adminUsersUrl: (options?: Record<string, unknown>) => string;
+    readonly adminWorkflowsUrl: (doctype?: string) => string;
     readonly bulkCancel: (
       doctype: string,
       documents: readonly DeskBulkDocumentSelection[],
@@ -817,6 +827,39 @@ describe("Desk client runtime", () => {
     );
     expect(runtime.desk.notificationsUrl({ includeDismissed: true, limit: 10, unread: true, user: "ignored@example.com" }))
       .toBe("/desk/notifications?limit=10&unread=true&include_dismissed=true");
+  });
+
+  it("builds Desk admin navigation URLs for client scripts", async () => {
+    const runtime = evaluateDeskClient();
+
+    expect(runtime.desk.adminUsersUrl({ userId: "owner@example.com" })).toBe("/desk/admin/users?user=owner%40example.com");
+    expect(runtime.desk.adminUsersUrl({ user: "admin@example.com" })).toBe("/desk/admin/users?user=admin%40example.com");
+    expect(runtime.desk.adminRolesUrl()).toBe("/desk/admin/roles");
+    expect(runtime.desk.adminCustomFieldsUrl("Task Type")).toBe("/desk/admin/custom-fields?doctype=Task+Type");
+    expect(runtime.desk.adminFieldPropertiesUrl("Task Type", "due/date")).toBe(
+      "/desk/admin/field-properties?doctype=Task+Type&field=due%2Fdate"
+    );
+    expect(runtime.desk.adminWorkflowsUrl("Task Type")).toBe("/desk/admin/workflows?doctype=Task+Type");
+    expect(runtime.desk.adminPrintSettingsUrl()).toBe("/desk/admin/print-settings");
+    expect(runtime.desk.adminUserPermissionsUrl({ user: "reader@example.com" })).toBe(
+      "/desk/admin/user-permissions?user=reader%40example.com"
+    );
+    expect(runtime.desk.adminUserPermissionsUrl({ userId: "manager@example.com" })).toBe(
+      "/desk/admin/user-permissions?user=manager%40example.com"
+    );
+    expect(runtime.desk.adminDataPatchesUrl()).toBe("/desk/admin/data-patches");
+    expect(runtime.desk.adminJobsUrl({ jobName: "reports.daily", runId: "run/1", status: "failed", limit: 5 })).toBe(
+      "/desk/admin/jobs?job=reports.daily&run_id=run%2F1&status=failed&limit=5"
+    );
+    expect(runtime.desk.adminJobsUrl({ job: "reports.hourly", run_id: "run/2" })).toBe(
+      "/desk/admin/jobs?job=reports.hourly&run_id=run%2F2"
+    );
+    expect(runtime.desk.adminJobSchedulesUrl({ jobName: "reports.daily", cron: "0 2 * * *" })).toBe(
+      "/desk/admin/jobs/schedules?cron=0+2+*+*+*&job=reports.daily"
+    );
+    expect(runtime.desk.adminJobSchedulesUrl({ job: "reports.hourly" })).toBe(
+      "/desk/admin/jobs/schedules?job=reports.hourly"
+    );
   });
 
   it("wraps Desk CSV imports with list return context for client scripts", async () => {

@@ -187,6 +187,37 @@ export function renderDeskClientScript(): string {
     return "/desk/dashboards/" + encodePart(dashboard);
   }
 
+  function deskAdminUsersPath(options) {
+    var params = {};
+    setParam(params, "user", options && (options.userId !== undefined ? options.userId : options.user));
+    return withQuery("/desk/admin/users", params);
+  }
+
+  function deskAdminCustomFieldsPath(doctype) {
+    var params = {};
+    setParam(params, "doctype", doctype);
+    return withQuery("/desk/admin/custom-fields", params);
+  }
+
+  function deskAdminFieldPropertiesPath(doctype, field) {
+    var params = {};
+    setParam(params, "doctype", doctype);
+    setParam(params, "field", field);
+    return withQuery("/desk/admin/field-properties", params);
+  }
+
+  function deskAdminUserPermissionsPath(options) {
+    var params = {};
+    setParam(params, "user", options && (options.userId !== undefined ? options.userId : options.user));
+    return withQuery("/desk/admin/user-permissions", params);
+  }
+
+  function deskAdminWorkflowsPath(doctype) {
+    var params = {};
+    setParam(params, "doctype", doctype);
+    return withQuery("/desk/admin/workflows", params);
+  }
+
   function deskFilesPath(options) {
     return withQuery("/desk/files", fileListParams(options || {}));
   }
@@ -3538,6 +3569,26 @@ export function renderDeskClientScript(): string {
       msgprint: msgprint
     }),
     desk: Object.freeze({
+      adminCustomFieldsUrl: deskAdminCustomFieldsPath,
+      adminDataPatchesUrl: function () {
+        return "/desk/admin/data-patches";
+      },
+      adminFieldPropertiesUrl: deskAdminFieldPropertiesPath,
+      adminJobsUrl: function (options) {
+        return withQuery("/desk/admin/jobs", jobDashboardParams(options || {}));
+      },
+      adminJobSchedulesUrl: function (options) {
+        return withQuery("/desk/admin/jobs/schedules", jobScheduleParams(options || {}));
+      },
+      adminPrintSettingsUrl: function () {
+        return "/desk/admin/print-settings";
+      },
+      adminRolesUrl: function () {
+        return "/desk/admin/roles";
+      },
+      adminUserPermissionsUrl: deskAdminUserPermissionsPath,
+      adminUsersUrl: deskAdminUsersPath,
+      adminWorkflowsUrl: deskAdminWorkflowsPath,
       dashboardUrl: deskDashboardPath,
       filesUrl: deskFilesPath,
       listUrl: function (doctype, options) {
