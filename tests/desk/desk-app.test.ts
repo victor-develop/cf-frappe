@@ -5936,6 +5936,32 @@ describe("Desk app", () => {
     expect(html).not.toContain('formaction="/desk/Note/My%20Note/tags/Urgent/remove"');
   });
 
+  it("hides save and domain command actions from read-only generated edit forms", async () => {
+    const { app, services } = makeDesk(guest);
+    await services.documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    const response = await app.request("/desk/Note/My%20Note");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("My Note");
+    expect(html).toContain("draft");
+    expect(html).not.toContain(">Save</button>");
+    expect(html).not.toContain('formaction="/desk/Note/My%20Note/command/archive"');
+
+    const posted = await app.request("/desk/Note/My%20Note", {
+      method: "POST",
+      body: new URLSearchParams({ title: "My Note", body: "Edited", expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(posted.status).toBe(403);
+    const errorHtml = await posted.text();
+    expect(errorHtml).toContain("cannot update Note/My Note");
+    expect(errorHtml).not.toContain(">Save</button>");
+    expect(errorHtml).not.toContain('formaction="/desk/Note/My%20Note/command/archive"');
+  });
+
   it("renders and submits follower controls from generated edit forms", async () => {
     const { app, services } = makeDesk();
     await services.documents.create({ actor: owner, doctype: "Note", data: data() });
@@ -6087,6 +6113,39 @@ describe("Desk app", () => {
     expect(html).toContain('name="permission" value="read" checked');
     expect(html).toContain('name="permission" value="share"');
     expect(html).not.toContain('name="permission" value="update"');
+  });
+
+  it("renders save and domain command actions for share-derived update actors", async () => {
+    const collaborator = { id: "collab@example.com", roles: ["Guest"], tenantId: "acme" };
+    const { app, services } = makeDesk(collaborator);
+    await services.documents.create({ actor: owner, doctype: "Note", data: data() });
+    await services.documents.share({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      userId: collaborator.id,
+      permissions: ["update"],
+      expectedVersion: 1
+    });
+
+    const response = await app.request("/desk/Note/My%20Note");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain(">Save</button>");
+    expect(html).toContain('formaction="/desk/Note/My%20Note/command/archive"');
+
+    const updated = await app.request("/desk/Note/My%20Note", {
+      method: "POST",
+      body: new URLSearchParams({ title: "My Note", body: "Shared edit", expectedVersion: "2" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(updated.status).toBe(303);
+    await expect(services.queries.getDocument(owner, "Note", "My Note")).resolves.toMatchObject({
+      data: { body: "Shared edit" },
+      version: 3
+    });
   });
 
   it("submits and cancels documents from generated edit forms", async () => {

@@ -163,6 +163,7 @@ import {
   renderWorkspacePage,
   type DeskLayoutOptions,
   type DeskNavLink,
+  type FormDomainCommandAction,
   type FormLifecycleAction,
   type FormLinkOptions,
   type FormTableDefinitions,
@@ -2463,6 +2464,7 @@ async function renderDeskError(
   const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView);
   const linkOptions = await linkOptionsForForm(options, actor, doctype, formView, tableDefinitions);
   const document = name ? await options.queries.getDocument(actor, doctype.name, name).catch(() => undefined) : undefined;
+  const canUpdate = document ? await options.queries.canActOnDocument(actor, doctype, "update", document) : false;
   const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
   return html(
     renderDeskLayoutFor(options, {
@@ -2476,6 +2478,8 @@ async function renderDeskError(
         ...(document ? { document } : {}),
         linkOptions,
         tableDefinitions,
+        canUpdate,
+        ...(document ? { domainCommands: await domainCommandActionsFor(options, actor, doctype, document) } : {}),
         ...(document ? { lifecycleActions: lifecycleActionsFor(actor, doctype, document) } : {}),
         ...(document ? { workflowActions: workflowActionsFor(actor, doctype, document) } : {}),
         ...(document ? { printFormats: listPrintFormats(options, actor, doctype.name) } : {}),
@@ -3416,6 +3420,7 @@ async function renderDeskDocumentPage(
   const canAssign = can(actor, doctype, "assign", document);
   const canTag = can(actor, doctype, "tag", document);
   const canFollow = can(actor, doctype, "follow", document);
+  const canUpdate = await options.queries.canActOnDocument(actor, doctype, "update", document);
   const form = renderFormView(doctype, formView, {
     mode: "update",
     document,
@@ -3423,9 +3428,11 @@ async function renderDeskDocumentPage(
     tableDefinitions,
     lifecycleActions,
     workflowActions,
+    domainCommands: await domainCommandActionsFor(options, actor, doctype, document),
     printFormats,
     printPdfEnabled: options.printPdfRenderer !== undefined,
     clientScripts: options.registry.listClientScripts(doctype.name, "form"),
+    canUpdate,
     canDuplicate: can(actor, doctype, "create"),
     canAmend: document.docstatus === "cancelled" && can(actor, doctype, "create"),
     ...deskRealtimeRouteOption(options)
@@ -3610,6 +3617,30 @@ function workflowActionsFor(
       label: transition.action,
       to: transition.to
     }));
+}
+
+async function domainCommandActionsFor(
+  options: DeskAppOptions,
+  actor: Actor,
+  doctype: DocTypeDefinition,
+  document: DocumentSnapshot
+): Promise<readonly FormDomainCommandAction[]> {
+  const actions = await Promise.all(
+    (doctype.commands ?? []).map(async (command): Promise<FormDomainCommandAction | undefined> => {
+      if (command.internal) {
+        return undefined;
+      }
+      const roleAllowed = command.roles === undefined || command.roles.some((role) => actor.roles.includes(role));
+      if (!roleAllowed) {
+        return undefined;
+      }
+      const permissionAction = command.permissionAction ?? "update";
+      return await options.queries.canActOnDocument(actor, doctype, permissionAction, document)
+        ? { name: command.name }
+        : undefined;
+    })
+  );
+  return actions.filter((action): action is FormDomainCommandAction => action !== undefined);
 }
 
 async function linkOptionsForForm(

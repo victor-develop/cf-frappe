@@ -32,6 +32,7 @@ import {
   type ListOrderDirection,
   type LinkOption,
   type LinkOptionsResult,
+  type PermissionAction,
   type ResolvedFormView,
   type ResolvedListView
 } from "../core/types.js";
@@ -491,6 +492,24 @@ export class QueryService {
     const staticRead = can(actor, doctype, "read", document);
     const sharedRead = staticRead ? false : await this.shareAllows(actor, document, "read");
     if (!staticRead && !sharedRead) {
+      return false;
+    }
+    const grants = await this.userPermissions?.permissionsFor(actor, document.tenantId);
+    return documentMatchesUserPermissions(doctype, document, grants ?? []);
+  }
+
+  async canActOnDocument(
+    actor: Actor,
+    doctype: DocTypeDefinition,
+    action: PermissionAction,
+    document: DocumentSnapshot
+  ): Promise<boolean> {
+    if (document.docstatus === "deleted") {
+      return false;
+    }
+    const staticAllowed = can(actor, doctype, action, document);
+    const sharedAllowed = staticAllowed ? false : await this.shareAllows(actor, document, action);
+    if (!staticAllowed && !sharedAllowed) {
       return false;
     }
     const grants = await this.userPermissions?.permissionsFor(actor, document.tenantId);

@@ -89,6 +89,9 @@ export interface FormWorkflowAction {
   readonly label: string;
   readonly to: string;
 }
+export interface FormDomainCommandAction {
+  readonly name: string;
+}
 
 export interface ListBulkAction {
   readonly id: string;
@@ -2814,10 +2817,12 @@ export function renderFormView(
     readonly tableDefinitions?: FormTableDefinitions;
     readonly lifecycleActions?: readonly FormLifecycleAction[];
     readonly workflowActions?: readonly FormWorkflowAction[];
+    readonly domainCommands?: readonly FormDomainCommandAction[];
     readonly printFormats?: readonly PrintFormatDefinition[];
     readonly printPdfEnabled?: boolean;
     readonly clientScripts?: readonly ClientScriptDefinition[];
     readonly realtimeRoute?: string;
+    readonly canUpdate?: boolean;
     readonly canDuplicate?: boolean;
     readonly canAmend?: boolean;
   }
@@ -2827,8 +2832,8 @@ export function renderFormView(
       ? `/desk/${encodeURIComponent(doctype.name)}`
       : `/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(options.document?.name ?? "")}`;
   const title = options.mode === "create" ? `New ${labelFor(doctype)}` : options.document?.name ?? doctype.name;
-  const canSave = options.mode === "create" || options.document?.docstatus === "draft";
-  const publicCommands = doctype.commands?.filter((command) => !command.internal) ?? [];
+  const canSave = options.mode === "create" || (Boolean(options.canUpdate) && options.document?.docstatus === "draft");
+  const domainCommands = options.domainCommands ?? [];
   const sections = formView.sections
     .map((section) =>
       renderFormSection(
@@ -2841,8 +2846,8 @@ export function renderFormView(
     )
     .join("");
   const commands =
-    options.mode === "update" && options.document?.docstatus === "draft" && publicCommands.length
-      ? `<section class="command-row" aria-label="Commands">${publicCommands
+    options.mode === "update" && options.document?.docstatus === "draft" && domainCommands.length
+      ? `<section class="command-row" aria-label="Commands">${domainCommands
           .map(
             (command) =>
               `<button class="button" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(options.document?.name ?? "")}/command/${encodeURIComponent(command.name)}">${escapeHtml(command.name)}</button>`
