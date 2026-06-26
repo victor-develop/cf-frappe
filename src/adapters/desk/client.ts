@@ -491,7 +491,7 @@ export function renderDeskClientScript(): string {
   }
 
   async function getNotificationRule(doctype, rule, options) {
-    var state = unwrapData(await request(notificationRulePath(doctype, undefined, options || {})));
+    var state = unwrapData(await request(notificationRulePath(doctype, rule, options || {})));
     return notificationRuleEntry(rule, state);
   }
 

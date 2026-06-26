@@ -293,6 +293,19 @@ describe("CloudFrappe Worker routing", () => {
         rules: [{ rule: { name: "Managers", subject: "Note changed" } }]
       }
     });
+
+    const rule = await worker.fetch!(
+      cfRequest("http://localhost/api/notification-rules/Note/Managers"),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(rule.status).toBe(200);
+    await expect(rule.json()).resolves.toMatchObject({
+      data: {
+        rules: [{ rule: { name: "Managers", subject: "Note changed" } }]
+      }
+    });
   });
 
   it("mounts notification rule administration on the Worker Desk", async () => {

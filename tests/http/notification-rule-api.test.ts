@@ -49,6 +49,31 @@ describe("notification rule api", () => {
       }
     });
 
+    const fetched = await app.request("/api/notification-rules/Note/Managers%20on%20updates", { headers: adminHeaders });
+    expect(fetched.status).toBe(200);
+    await expect(fetched.json()).resolves.toMatchObject({
+      data: {
+        tenantId: "acme",
+        doctypeName: "Note",
+        version: 1,
+        rules: [
+          {
+            enabled: true,
+            rule: {
+              name: "Managers on updates",
+              events: ["DocumentUpdated"],
+              recipients: [
+                { kind: "documentOwner" },
+                { kind: "user", userId: "manager@example.com" }
+              ],
+              channels: ["email", "inbox"],
+              subject: "Note changed"
+            }
+          }
+        ]
+      }
+    });
+
     const cleared = await app.request("/api/notification-rules/Note/Managers%20on%20updates", {
       method: "DELETE",
       headers: adminHeaders,
@@ -116,6 +141,12 @@ describe("notification rule api", () => {
     });
     expect(stale.status).toBe(409);
     await expect(stale.json()).resolves.toMatchObject({ error: { code: "DOCUMENT_CONFLICT" } });
+
+    const missing = await app.request("/api/notification-rules/Note/Missing", { headers: adminHeaders });
+    expect(missing.status).toBe(404);
+    await expect(missing.json()).resolves.toMatchObject({
+      error: { code: "NOTIFICATION_RULE_NOT_FOUND", message: "Notification rule 'Missing' was not found" }
+    });
 
     const { app: oversizedApp } = makeNotificationRuleApp(80);
     const oversized = await oversizedApp.request("/api/notification-rules/Note/TooLarge", {

@@ -83,10 +83,10 @@ export async function runRemoteNotificationRuleCommand(
   if (command.action === "get") {
     const data = await requestRemoteNotificationRule(command, io, {
       method: "GET",
-      path: notificationRulesPath(command),
+      path: notificationRulePath(command),
       ...(query === undefined ? {} : { query })
     });
-    return formatNotificationRules(command.url, singleRuleState(command, data), "Notification rule");
+    return formatNotificationRules(command.url, data, "Notification rule");
   }
   if (command.action === "clear") {
     const data = await requestRemoteNotificationRule(command, io, {
@@ -202,21 +202,6 @@ function toggleBody(
       ...(entry.rule.excludeActor === undefined ? {} : { excludeActor: entry.rule.excludeActor })
     },
     expectedVersion: command.expectedVersion ?? state.version ?? 0
-  };
-}
-
-function singleRuleState(
-  command: NotificationRuleRemoteCommand,
-  state: NotificationRuleStateResponse
-): NotificationRuleStateResponse {
-  const ruleName = requiredRuleName(command);
-  const entry = (state.rules ?? []).find((item) => item.rule.name === ruleName);
-  if (entry === undefined) {
-    throw new NotificationRuleRemoteError(`Notification rule '${ruleName}' was not found in remote state`);
-  }
-  return {
-    ...state,
-    rules: [entry]
   };
 }
 

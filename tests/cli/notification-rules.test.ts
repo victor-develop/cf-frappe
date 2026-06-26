@@ -401,14 +401,6 @@ describe("cf-frappe CLI remote notification rules", () => {
             version: 4,
             rules: [
               {
-                enabled: true,
-                rule: {
-                  name: "Owners",
-                  events: ["DocumentCreated"],
-                  recipients: [{ kind: "documentOwner" }]
-                }
-              },
-              {
                 enabled: false,
                 rule: {
                   name: "Managers/Updates",
@@ -426,13 +418,12 @@ describe("cf-frappe CLI remote notification rules", () => {
     );
 
     expect(exitCode).toBe(0);
-    expect(calls[0]?.url).toBe("https://app.example/cf/api/notification-rules/Sales%20Invoice?tenant=acme%2Feast");
+    expect(calls[0]?.url).toBe("https://app.example/cf/api/notification-rules/Sales%20Invoice/Managers%2FUpdates?tenant=acme%2Feast");
     expect(calls[0]?.method).toBe("GET");
     expect(stdout.text()).toContain("Notification rule at https://app.example/cf");
     expect(stdout.text()).toContain("DocType: Sales Invoice Tenant: acme/east Version: 4 Total: 1");
     expect(stdout.text()).toContain("- Managers/Updates disabled channels email events DocumentUpdated recipients user:manager@example.com");
     expect(stdout.text()).toContain("{\"name\":\"Managers/Updates\"");
-    expect(stdout.text()).not.toContain("Owners");
   });
 
   it("saves and clears remote notification rules through the generated admin API", async () => {
@@ -739,13 +730,8 @@ describe("cf-frappe CLI remote notification rules", () => {
       {
         cwd: () => "/workspace",
         fetch: fakeFetch(calls, {
-          data: {
-            tenantId: "default",
-            doctypeName: "Task",
-            version: 3,
-            rules: []
-          }
-        }),
+          error: { code: "NOTIFICATION_RULE_NOT_FOUND", message: "Notification rule 'Missing' was not found" }
+        }, 404),
         stdout: textBuffer(),
         stderr
       }
@@ -753,9 +739,11 @@ describe("cf-frappe CLI remote notification rules", () => {
 
     expect(exit).toBe(1);
     expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
-      "GET https://app.example/api/notification-rules/Task"
+      "GET https://app.example/api/notification-rules/Task/Missing"
     ]);
-    expect(stderr.text()).toContain("Notification rule 'Missing' was not found in remote state");
+    expect(stderr.text()).toContain(
+      "Remote notification rules request failed (404): NOTIFICATION_RULE_NOT_FOUND: Notification rule 'Missing' was not found"
+    );
   });
 
   it("reports remote notification-rule toggle version conflicts before missing-rule errors", async () => {

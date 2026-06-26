@@ -2599,7 +2599,7 @@ describe("Desk client runtime", () => {
     });
 
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
-      "GET /api/notification-rules/Task%20Type?tenant=acme%2Feast"
+      "GET /api/notification-rules/Task%20Type/Managers%2FUpdates?tenant=acme%2Feast"
     ]);
     expect(calls[0]?.init.credentials).toBe("same-origin");
     expect(calls[0]?.init.body).toBeUndefined();
@@ -2619,7 +2619,7 @@ describe("Desk client runtime", () => {
     );
 
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
-      "GET /api/notification-rules/Task%20Type?tenant=acme%2Feast"
+      "GET /api/notification-rules/Task%20Type/Missing?tenant=acme%2Feast"
     ]);
   });
 

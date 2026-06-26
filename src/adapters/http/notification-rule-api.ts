@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { NotificationRuleService } from "../../application/notification-rule-service.js";
-import { badRequest } from "../../core/errors.js";
+import { FrameworkError, badRequest } from "../../core/errors.js";
+import type { NotificationRuleEntry, NotificationRuleState } from "../../core/notification-rules.js";
 import type {
   JsonValue,
   NotificationRuleChannel,
@@ -25,6 +26,12 @@ export function createNotificationRuleApi(options: NotificationRuleApiOptions): 
     const actor = await options.actor(c.req.raw);
     const data = await options.notificationRules.list(actor, c.req.param("doctype"), c.req.query("tenant"));
     return c.json({ data });
+  });
+
+  app.get("/api/notification-rules/:doctype/:rule", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const data = await options.notificationRules.list(actor, c.req.param("doctype"), c.req.query("tenant"));
+    return c.json({ data: singleRuleState(data, c.req.param("rule")) });
   });
 
   app.put("/api/notification-rules/:doctype/:rule", async (c) => {
@@ -60,6 +67,21 @@ export function createNotificationRuleApi(options: NotificationRuleApiOptions): 
   });
 
   return app;
+}
+
+function singleRuleState(state: NotificationRuleState, ruleName: string): NotificationRuleState {
+  return {
+    ...state,
+    rules: [singleRuleEntry(state, ruleName)]
+  };
+}
+
+function singleRuleEntry(state: NotificationRuleState, ruleName: string): NotificationRuleEntry {
+  const entry = state.rules.find((item) => item.rule.name === ruleName);
+  if (entry === undefined) {
+    throw new FrameworkError("NOTIFICATION_RULE_NOT_FOUND", `Notification rule '${ruleName}' was not found`, { status: 404 });
+  }
+  return entry;
 }
 
 function ruleValue(name: string, value: JsonValue | undefined): NotificationRuleDefinition {

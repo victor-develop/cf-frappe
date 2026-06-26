@@ -382,6 +382,7 @@ The generated API includes:
 - `POST /api/notifications/:notificationId/read`
 - `POST /api/notifications/:notificationId/dismiss`
 - `GET /api/notification-rules/:doctype`
+- `GET /api/notification-rules/:doctype/:rule`
 - `PUT /api/notification-rules/:doctype/:rule`
 - `DELETE /api/notification-rules/:doctype/:rule`
 - `GET /api/user-permissions/:userId`
