@@ -3222,6 +3222,9 @@ export function renderDeskClientScript(): string {
       uploadMultipartPart: uploadMultipartPart
     }),
     meta: Object.freeze({
+      customFields: function (doctype, options) {
+        return request(customFieldPath(doctype, undefined, options || {})).then(unwrapData);
+      },
       dashboard: function (dashboard) {
         return request(dashboardMetaPath(dashboard)).then(unwrapData);
       },
@@ -3233,6 +3236,9 @@ export function renderDeskClientScript(): string {
       },
       doctypes: function () {
         return request("/api/meta/doctypes").then(unwrapData);
+      },
+      fieldProperties: function (doctype, options) {
+        return request(fieldPropertyPath(doctype, undefined, options || {})).then(unwrapData);
       },
       listView: function (doctype) {
         return request("/api/meta/doctypes/" + encodePart(doctype) + "/list-view").then(unwrapData);

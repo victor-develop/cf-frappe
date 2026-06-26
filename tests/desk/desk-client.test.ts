@@ -119,10 +119,12 @@ interface DeskClientRuntime {
     readonly msgprint: (message: unknown) => string;
   };
   readonly meta: {
+    readonly customFields: (doctype: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly dashboard: (dashboard: string) => Promise<unknown>;
     readonly dashboards: () => Promise<unknown>;
     readonly doctype: (doctype: string) => Promise<unknown>;
     readonly doctypes: () => Promise<unknown>;
+    readonly fieldProperties: (doctype: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly listView: (doctype: string) => Promise<unknown>;
     readonly linkOptions: (doctype: string, field: string, params?: Record<string, unknown>) => Promise<unknown>;
     readonly profile: (userId: string, options?: { readonly tenant?: string }) => Promise<unknown>;
@@ -2157,6 +2159,47 @@ describe("Desk client runtime", () => {
       "application/json",
       "application/json"
     ]);
+  });
+
+  it("exposes customization overlay reads through the metadata namespace", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const results: Record<string, unknown> = {
+      "/api/custom-fields/Task%20Type?tenant=acme%2Feast": {
+        doctype: "Task Type",
+        version: 2,
+        fields: [{ name: "severity" }]
+      },
+      "/api/field-properties/Task%20Type?tenant=acme%2Feast": {
+        doctype: "Task Type",
+        version: 3,
+        overrides: [{ fieldName: "severity/level" }]
+      }
+    };
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: results[String(url)] }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.meta.customFields("Task Type", { tenant: "acme/east" })).resolves.toEqual({
+      doctype: "Task Type",
+      version: 2,
+      fields: [{ name: "severity" }]
+    });
+    await expect(runtime.meta.fieldProperties("Task Type", { tenant: "acme/east" })).resolves.toEqual({
+      doctype: "Task Type",
+      version: 3,
+      overrides: [{ fieldName: "severity/level" }]
+    });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/custom-fields/Task%20Type?tenant=acme%2Feast",
+      "GET /api/field-properties/Task%20Type?tenant=acme%2Feast"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin"]);
+    expect(calls.map((call) => call.init.body)).toEqual([undefined, undefined]);
+    expect(calls.map((call) => new Headers(call.init.headers).get("content-type"))).toEqual([null, null]);
   });
 
   it("wraps event-sourced workflow definition APIs with tenant and version metadata", async () => {
