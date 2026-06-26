@@ -93,6 +93,23 @@ describe("cf-frappe CLI remote files", () => {
 
     expect(parseCliArgs([
       "files",
+      "get",
+      "--url",
+      "https://app.example",
+      "--name",
+      "file/invoice",
+      "--header-env",
+      "Authorization=CF_FRAPPE_AUTH"
+    ])).toEqual({
+      kind: "files",
+      action: "get",
+      url: "https://app.example",
+      headers: [{ kind: "env", name: "Authorization", envName: "CF_FRAPPE_AUTH" }],
+      name: "file/invoice"
+    });
+
+    expect(parseCliArgs([
+      "files",
       "download",
       "--url",
       "https://app.example",
@@ -372,6 +389,10 @@ describe("cf-frappe CLI remote files", () => {
       kind: "invalid",
       message: "File delete requires --name"
     });
+    expect(parseCliArgs(["files", "get", "--url", "https://app.example"])).toEqual({
+      kind: "invalid",
+      message: "File get requires --name"
+    });
     expect(parseCliArgs(["files", "upload", "--url", "https://app.example"])).toEqual({
       kind: "invalid",
       message: "File upload requires --path"
@@ -580,6 +601,64 @@ describe("cf-frappe CLI remote files", () => {
     expect(stdout.text()).toContain(
       "- invoice.pdf (file_invoice) size 1234 type application/pdf state available scan clean private true attached to Sales Invoice/SINV-1 uploaded by owner@example.com version 3"
     );
+  });
+
+  it("gets one remote file metadata record through the admin API", async () => {
+    const calls: RemoteCall[] = [];
+    const stdout = textBuffer();
+    const exitCode = await runCli(
+      [
+        "files",
+        "get",
+        "--url",
+        "https://app.example/cf",
+        "--name",
+        "file/invoice",
+        "--header-env",
+        "Authorization=CF_FRAPPE_AUTH"
+      ],
+      {
+        cwd: () => "/workspace",
+        env: (name) => name === "CF_FRAPPE_AUTH" ? "Bearer test-token" : undefined,
+        fetch: fakeFetch(calls, {
+          data: {
+            name: "file/invoice",
+            filename: "invoice.pdf",
+            contentType: "application/pdf",
+            size: 1234,
+            isPrivate: true,
+            previewable: true,
+            storageState: "available",
+            scanStatus: "clean",
+            uploadedBy: "owner@example.com",
+            expectedVersion: 4,
+            editable: true,
+            deletable: true,
+            attachedTo: { doctype: "Sales Invoice", name: "SINV-1" },
+            renditions: [
+              {
+                id: "w320-h240-fit-cover-f-webp",
+                status: "available",
+                contentType: "image/webp",
+                size: 23
+              }
+            ]
+          }
+        }),
+        stdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(calls[0]?.url).toBe("https://app.example/cf/api/files/file%2Finvoice");
+    expect(calls[0]?.method).toBe("GET");
+    expect(calls[0]?.headers.get("authorization")).toBe("Bearer test-token");
+    expect(stdout.text()).toContain("File at https://app.example/cf");
+    expect(stdout.text()).toContain(
+      "- invoice.pdf (file/invoice) size 1234 type application/pdf state available scan clean private true preview true attached to Sales Invoice/SINV-1 uploaded by owner@example.com version 4 editable true deletable true"
+    );
+    expect(stdout.text()).toContain("- rendition w320-h240-fit-cover-f-webp status available type image/webp size 23");
   });
 
   it("uploads a local file through the remote file API", async () => {
@@ -1347,7 +1426,7 @@ describe("cf-frappe CLI remote files", () => {
   it("maps remote file API errors and missing env headers to CLI failures", async () => {
     const remoteStderr = textBuffer();
     const remoteExit = await runCli(
-      ["files", "delete", "--url", "https://app.example", "--name", "missing"],
+      ["files", "get", "--url", "https://app.example", "--name", "missing"],
       {
         cwd: () => "/workspace",
         fetch: fakeFetch([], {

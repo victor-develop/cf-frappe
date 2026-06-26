@@ -47,6 +47,68 @@ describe("file api", () => {
     await expect(downloaded.text()).resolves.toBe("hello");
   });
 
+  it("reads single file metadata through /api/files/:name", async () => {
+    const app = makeApp();
+
+    const uploaded = await app.request("/api/files?filename=hello.txt&is_private=false", {
+      method: "POST",
+      headers: userHeaders("owner@example.com", "User"),
+      body: "hello"
+    });
+    expect(uploaded.status).toBe(201);
+
+    const metadata = await app.request("/api/files/file_object", {
+      headers: userHeaders("guest", "Guest")
+    });
+
+    expect(metadata.status).toBe(200);
+    await expect(metadata.json()).resolves.toMatchObject({
+      data: {
+        name: "file_object",
+        filename: "hello.txt",
+        contentType: "text/plain;charset=UTF-8",
+        size: 5,
+        isPrivate: false,
+        previewable: true,
+        storageState: "available",
+        uploadedBy: "owner@example.com",
+        expectedVersion: 1,
+        editable: false,
+        deletable: false
+      }
+    });
+  });
+
+  it("inherits File read permissions for single file metadata reads", async () => {
+    const app = makeApp();
+
+    const uploaded = await app.request("/api/files?filename=private.txt", {
+      method: "POST",
+      headers: userHeaders("owner@example.com", "User"),
+      body: "secret"
+    });
+    expect(uploaded.status).toBe(201);
+
+    const ownerMetadata = await app.request("/api/files/file_object", {
+      headers: userHeaders("owner@example.com", "User")
+    });
+    expect(ownerMetadata.status).toBe(200);
+    await expect(ownerMetadata.json()).resolves.toMatchObject({
+      data: { name: "file_object", filename: "private.txt", isPrivate: true }
+    });
+
+    const guestMetadata = await app.request("/api/files/file_object", {
+      headers: userHeaders("guest", "Guest")
+    });
+    expect(guestMetadata.status).toBe(403);
+    await expect(guestMetadata.json()).resolves.toMatchObject({
+      error: {
+        code: "PERMISSION_DENIED",
+        message: "Actor 'guest' cannot read File/file_object"
+      }
+    });
+  });
+
   it("previews browser-safe files inline through the file API", async () => {
     const app = makeApp(1024, ["create-1", "create-2"], ["object-1", "object-2"]);
     const textUpload = await app.request("/api/files?filename=preview.txt&is_private=false", {

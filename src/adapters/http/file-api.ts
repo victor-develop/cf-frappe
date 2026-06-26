@@ -121,6 +121,12 @@ export function createFileApi(options: FileApiOptions): Hono {
     return c.json({ data: snapshot });
   });
 
+  app.get("/api/files/:name", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const file = await options.files.get(actor, c.req.param("name"));
+    return c.json({ data: file });
+  });
+
   app.get("/api/files/:name/content", async (c) => {
     const actor = await options.actor(c.req.raw);
     const downloaded = await options.files.download({

@@ -313,6 +313,7 @@ File operators can inspect filtered file metadata, update attachment/privacy met
 
 \`\`\`bash
 npx cf-frappe files list --url https://your-worker.example --filename invoice --limit 20 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe files get --url https://your-worker.example --name file_invoice --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe files upload --url https://your-worker.example --path ./invoice.pdf --filename invoice.pdf --content-type application/pdf --private --attached-to-doctype Task --attached-to-name "Review generated Desk workspace" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe files download --url https://your-worker.example --name file_invoice --output ./downloaded-invoice.pdf --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe files preview-download --url https://your-worker.example --name file_invoice --output ./invoice-preview.pdf --header-env Authorization=CF_FRAPPE_AUTH

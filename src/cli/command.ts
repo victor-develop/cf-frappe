@@ -1006,6 +1006,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       if (
         action !== "delete" &&
         action !== "download" &&
+        action !== "get" &&
         action !== "update" &&
         action !== "rendition" &&
         action !== "preview-download" &&
@@ -1315,6 +1316,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
   if (
     (action === "delete" ||
       action === "download" ||
+      action === "get" ||
       action === "update" ||
       action === "rendition" ||
       action === "preview-download" ||
@@ -1422,6 +1424,7 @@ function fileAction(value: string): FileRemoteAction | undefined {
   return value === "list" ||
     value === "delete" ||
     value === "download" ||
+    value === "get" ||
     value === "preview-download" ||
     value === "update" ||
     value === "bulk-delete" ||
@@ -1843,6 +1846,7 @@ function helpText(): string {
     "  cf-frappe jobs schedule-save --url <origin> [--id <scheduleId>] --cron <expr> --job <name> [--enabled|--disabled] [--payload-json <json>] [--metadata-json <json>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs schedule-delete --url <origin> --id <scheduleId> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files list --url <origin> [--filename <text>] [--content-type <type>] [--attached-to-doctype <doctype> --attached-to-name <name>] [--storage-state <state>] [--scan-status <status>] [--uploaded-by <user>] [--private|--public] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe files get --url <origin> --name <fileName> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files upload --url <origin> --path <localPath> [--filename <text>] [--content-type <type>] [--private|--public] [--attached-to-doctype <doctype> --attached-to-name <name>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files download --url <origin> --name <fileName> --output <localPath> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files preview-download --url <origin> --name <fileName> --output <localPath> [--header <name:value>] [--header-env <name=ENV>]",

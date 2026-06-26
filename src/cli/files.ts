@@ -14,6 +14,7 @@ export type FileRemoteAction =
   | "list"
   | "delete"
   | "download"
+  | "get"
   | "preview-download"
   | "rendition"
   | "rendition-download"
@@ -95,10 +96,14 @@ interface FileDashboardEntryResponse {
   readonly uploadedBy?: string;
   readonly uploadedAt?: string;
   readonly expectedVersion?: number;
+  readonly previewable?: boolean;
+  readonly editable?: boolean;
+  readonly deletable?: boolean;
   readonly attachedTo?: {
     readonly doctype?: string;
     readonly name?: string;
   };
+  readonly renditions?: readonly FileRenditionResponse[];
 }
 
 interface FileSnapshotResponse {
@@ -198,6 +203,13 @@ export async function runRemoteFileCommand(command: FileRemoteCommand, io: FileR
       query: transformQuery(command)
     });
     return formatTransformDownload(command.url, name, downloaded.output, downloaded.bytes, downloaded.response);
+  }
+  if (command.action === "get") {
+    const data = await requestRemoteFile<FileDashboardEntryResponse>(command, io, {
+      method: "GET",
+      path: `/api/files/${encodeURIComponent(requiredFileName(command, "get"))}`
+    });
+    return formatFileDetail(command.url, data);
   }
   if (command.action === "list") {
     const query = queryParams({
@@ -504,6 +516,15 @@ function formatDashboard(baseUrl: string, dashboard: FileDashboardResponse): str
   ].filter((line): line is string => line !== undefined).join("\n");
 }
 
+function formatFileDetail(baseUrl: string, file: FileDashboardEntryResponse): string {
+  return [
+    `File at ${baseUrl}`,
+    fileLine(file),
+    ...renditionLines(file.renditions),
+    ""
+  ].join("\n");
+}
+
 function formatUpdate(baseUrl: string, snapshot: FileSnapshotResponse): string {
   return [
     `Updated file at ${baseUrl}`,
@@ -635,10 +656,17 @@ function fileLine(file: FileDashboardEntryResponse): string {
   const state = file.storageState === undefined ? "" : ` state ${file.storageState}`;
   const scan = file.scanStatus === undefined ? "" : ` scan ${file.scanStatus}`;
   const privacy = file.isPrivate === undefined ? "" : ` private ${String(file.isPrivate)}`;
+  const preview = file.previewable === undefined ? "" : ` preview ${String(file.previewable)}`;
   const attached = attachmentLabel(file.attachedTo);
   const uploadedBy = file.uploadedBy === undefined ? "" : ` uploaded by ${file.uploadedBy}`;
   const version = file.expectedVersion === undefined ? "" : ` version ${String(file.expectedVersion)}`;
-  return `- ${filename} (${file.name})${size}${contentType}${state}${scan}${privacy}${attached}${uploadedBy}${version}`;
+  const editable = file.editable === undefined ? "" : ` editable ${String(file.editable)}`;
+  const deletable = file.deletable === undefined ? "" : ` deletable ${String(file.deletable)}`;
+  return `- ${filename} (${file.name})${size}${contentType}${state}${scan}${privacy}${preview}${attached}${uploadedBy}${version}${editable}${deletable}`;
+}
+
+function renditionLines(renditions: readonly FileRenditionResponse[] | undefined): readonly string[] {
+  return renditions === undefined || renditions.length === 0 ? [] : renditions.map(renditionLine);
 }
 
 function snapshotLine(snapshot: FileSnapshotResponse): string {
