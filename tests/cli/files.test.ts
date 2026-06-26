@@ -138,6 +138,66 @@ describe("cf-frappe CLI remote files", () => {
       ]
     });
 
+    expect(parseCliArgs([
+      "files",
+      "rendition",
+      "--url",
+      "https://app.example",
+      "--name",
+      "file/image",
+      "--width",
+      "320",
+      "--height",
+      "240",
+      "--fit",
+      "cover",
+      "--format",
+      "webp",
+      "--quality",
+      "82",
+      "--watermark",
+      "Draft Copy",
+      "--watermark-placement",
+      "bottom-right",
+      "--watermark-opacity",
+      "75",
+      "--watermark-color",
+      "#123456",
+      "--watermark-font-size",
+      "24",
+      "--overlay",
+      "file/badge",
+      "--overlay-placement",
+      "top-left",
+      "--overlay-opacity",
+      "60",
+      "--overlay-width",
+      "32",
+      "--overlay-height",
+      "24"
+    ])).toEqual({
+      kind: "files",
+      action: "rendition",
+      url: "https://app.example",
+      headers: [],
+      name: "file/image",
+      width: 320,
+      height: 240,
+      fit: "cover",
+      format: "webp",
+      quality: 82,
+      watermark: "Draft Copy",
+      watermarkPlacement: "bottom-right",
+      watermarkOpacity: 75,
+      watermarkColor: "#123456",
+      watermarkFontSize: 24,
+      overlay: "file/badge",
+      overlayPlacement: "top-left",
+      overlayOpacity: 60,
+      overlayWidth: 32,
+      overlayHeight: 24
+    });
+
     expect(parseCliArgs(["files", "delete", "--url", "https://app.example"])).toEqual({
       kind: "invalid",
       message: "File delete requires --name"
@@ -196,6 +256,27 @@ describe("cf-frappe CLI remote files", () => {
     ])).toEqual({
       kind: "invalid",
       message: "File version selection must use <fileName>:<expectedVersion>"
+    });
+    expect(parseCliArgs(["files", "rendition", "--url", "https://app.example", "--width", "64"])).toEqual({
+      kind: "invalid",
+      message: "File rendition requires --name"
+    });
+    expect(parseCliArgs(["files", "rendition", "--url", "https://app.example", "--name", "file_image"])).toEqual({
+      kind: "invalid",
+      message: "File rendition requires at least one transform option"
+    });
+    expect(parseCliArgs([
+      "files",
+      "rendition",
+      "--url",
+      "https://app.example",
+      "--name",
+      "file_image",
+      "--watermark-opacity",
+      "75"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Use --watermark before watermark detail options"
     });
     expect(parseCliArgs([
       "files",
@@ -534,6 +615,105 @@ describe("cf-frappe CLI remote files", () => {
     expect(stdout.text()).toContain("- invoice.pdf (file_invoice) version 5 state available");
     expect(stdout.text()).toContain("- quote.pdf (file_quote) version 3 state available");
     expect(stdout.text()).toContain("Failed: 0");
+  });
+
+  it("generates remote file renditions through the admin API", async () => {
+    const calls: RemoteCall[] = [];
+    const stdout = textBuffer();
+    const exitCode = await runCli(
+      [
+        "files",
+        "rendition",
+        "--url",
+        "https://app.example/cf",
+        "--name",
+        "file/image",
+        "--width",
+        "320",
+        "--height",
+        "240",
+        "--fit",
+        "cover",
+        "--format",
+        "webp",
+        "--quality",
+        "82",
+        "--watermark",
+        "Draft Copy",
+        "--watermark-placement",
+        "bottom-right",
+        "--watermark-opacity",
+        "75",
+        "--watermark-color",
+        "#123456",
+        "--watermark-font-size",
+        "24",
+        "--overlay",
+        "file/badge",
+        "--overlay-placement",
+        "top-left",
+        "--overlay-opacity",
+        "60",
+        "--overlay-width",
+        "32",
+        "--overlay-height",
+        "24"
+      ],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(calls, {
+          data: {
+            name: "file/image",
+            version: 4,
+            data: {
+              filename: "avatar.png",
+              storage_state: "available"
+            }
+          },
+          rendition: {
+            id: "w320-h240-fit-cover-f-webp-q82",
+            status: "available",
+            contentType: "image/webp",
+            size: 23
+          },
+          created: true
+        }, 201),
+        stdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(calls[0]?.url).toBe("https://app.example/cf/api/files/file%2Fimage/renditions");
+    expect(calls[0]?.method).toBe("POST");
+    expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({
+      width: 320,
+      height: 240,
+      fit: "cover",
+      format: "webp",
+      quality: 82,
+      watermark: {
+        text: "Draft Copy",
+        placement: "bottom-right",
+        opacity: 75,
+        color: "#123456",
+        fontSize: 24
+      },
+      overlay: {
+        file: "file/badge",
+        placement: "top-left",
+        opacity: 60,
+        width: 32,
+        height: 24
+      }
+    });
+    expect(stdout.text()).toContain("Generated file rendition at https://app.example/cf");
+    expect(stdout.text()).toContain("Created: true");
+    expect(stdout.text()).toContain("- rendition w320-h240-fit-cover-f-webp-q82 status available type image/webp size 23");
+    expect(stdout.text()).toContain("- avatar.png (file/image) version 4 state available");
+    expect(stdout.text()).toContain(
+      "Content: https://app.example/cf/api/files/file%2Fimage/renditions/w320-h240-fit-cover-f-webp-q82/content"
+    );
   });
 
   it("maps remote file API errors and missing env headers to CLI failures", async () => {

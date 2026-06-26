@@ -939,6 +939,21 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
   let uploadedBy: string | undefined;
   let expectedVersion: number | undefined;
   let clearAttachment = false;
+  let width: number | undefined;
+  let height: number | undefined;
+  let fit: string | undefined;
+  let format: string | undefined;
+  let quality: number | undefined;
+  let watermark: string | undefined;
+  let watermarkPlacement: string | undefined;
+  let watermarkOpacity: number | undefined;
+  let watermarkColor: string | undefined;
+  let watermarkFontSize: number | undefined;
+  let overlay: string | undefined;
+  let overlayPlacement: string | undefined;
+  let overlayOpacity: number | undefined;
+  let overlayWidth: number | undefined;
+  let overlayHeight: number | undefined;
 
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];
@@ -984,7 +999,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--name") {
-      if (action !== "delete" && action !== "update") {
+      if (action !== "delete" && action !== "update" && action !== "rendition") {
         return { kind: "invalid", message: `Cannot use --name with files ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1020,6 +1035,80 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
         return { kind: "invalid", message: parsed };
       }
       files.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--width" || arg === "--height" || arg === "--quality") {
+      if (action !== "rendition") {
+        return { kind: "invalid", message: `Cannot use ${arg} with files ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parsePositiveInteger(value, fileTransformIntegerLabel(arg));
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      if (arg === "--width") {
+        width = parsed;
+      } else if (arg === "--height") {
+        height = parsed;
+      } else {
+        quality = parsed;
+      }
+      index += 1;
+      continue;
+    }
+    if (arg === "--fit" || arg === "--format" || arg === "--watermark" || arg === "--watermark-placement" || arg === "--watermark-color" || arg === "--overlay" || arg === "--overlay-placement") {
+      if (action !== "rendition") {
+        return { kind: "invalid", message: `Cannot use ${arg} with files ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      if (arg === "--fit") {
+        fit = value;
+      } else if (arg === "--format") {
+        format = value;
+      } else if (arg === "--watermark") {
+        watermark = value;
+      } else if (arg === "--watermark-placement") {
+        watermarkPlacement = value;
+      } else if (arg === "--watermark-color") {
+        watermarkColor = value;
+      } else if (arg === "--overlay") {
+        overlay = value;
+      } else {
+        overlayPlacement = value;
+      }
+      index += 1;
+      continue;
+    }
+    if (arg === "--watermark-opacity" || arg === "--watermark-font-size" || arg === "--overlay-opacity" || arg === "--overlay-width" || arg === "--overlay-height") {
+      if (action !== "rendition") {
+        return { kind: "invalid", message: `Cannot use ${arg} with files ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parsePositiveInteger(value, fileTransformIntegerLabel(arg));
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      if (arg === "--watermark-opacity") {
+        watermarkOpacity = parsed;
+      } else if (arg === "--watermark-font-size") {
+        watermarkFontSize = parsed;
+      } else if (arg === "--overlay-opacity") {
+        overlayOpacity = parsed;
+      } else if (arg === "--overlay-width") {
+        overlayWidth = parsed;
+      } else {
+        overlayHeight = parsed;
+      }
       index += 1;
       continue;
     }
@@ -1175,7 +1264,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
   if ((attachedToDoctype === undefined) !== (attachedToName === undefined)) {
     return { kind: "invalid", message: "Use --attached-to-doctype and --attached-to-name together" };
   }
-  if ((action === "delete" || action === "update") && name === undefined) {
+  if ((action === "delete" || action === "update" || action === "rendition") && name === undefined) {
     return { kind: "invalid", message: `File ${action} requires --name` };
   }
   if ((action === "bulk-delete" || action === "bulk-update") && files.length === 0) {
@@ -1197,6 +1286,25 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
   ) {
     return { kind: "invalid", message: `File ${action} requires at least one metadata change` };
   }
+  if (watermark === undefined && (
+    watermarkPlacement !== undefined ||
+    watermarkOpacity !== undefined ||
+    watermarkColor !== undefined ||
+    watermarkFontSize !== undefined
+  )) {
+    return { kind: "invalid", message: "Use --watermark before watermark detail options" };
+  }
+  if (overlay === undefined && (
+    overlayPlacement !== undefined ||
+    overlayOpacity !== undefined ||
+    overlayWidth !== undefined ||
+    overlayHeight !== undefined
+  )) {
+    return { kind: "invalid", message: "Use --overlay before overlay detail options" };
+  }
+  if (action === "rendition" && !hasRenditionOption(width, height, fit, format, quality, watermark, overlay)) {
+    return { kind: "invalid", message: "File rendition requires at least one transform option" };
+  }
   return {
     kind: "files",
     action,
@@ -1214,12 +1322,32 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
     ...(storageState === undefined ? {} : { storageState }),
     ...(uploadedBy === undefined ? {} : { uploadedBy }),
     ...(expectedVersion === undefined ? {} : { expectedVersion }),
-    ...(clearAttachment ? { clearAttachment } : {})
+    ...(clearAttachment ? { clearAttachment } : {}),
+    ...(width === undefined ? {} : { width }),
+    ...(height === undefined ? {} : { height }),
+    ...(fit === undefined ? {} : { fit }),
+    ...(format === undefined ? {} : { format }),
+    ...(quality === undefined ? {} : { quality }),
+    ...(watermark === undefined ? {} : { watermark }),
+    ...(watermarkPlacement === undefined ? {} : { watermarkPlacement }),
+    ...(watermarkOpacity === undefined ? {} : { watermarkOpacity }),
+    ...(watermarkColor === undefined ? {} : { watermarkColor }),
+    ...(watermarkFontSize === undefined ? {} : { watermarkFontSize }),
+    ...(overlay === undefined ? {} : { overlay }),
+    ...(overlayPlacement === undefined ? {} : { overlayPlacement }),
+    ...(overlayOpacity === undefined ? {} : { overlayOpacity }),
+    ...(overlayWidth === undefined ? {} : { overlayWidth }),
+    ...(overlayHeight === undefined ? {} : { overlayHeight })
   };
 }
 
 function fileAction(value: string): FileRemoteAction | undefined {
-  return value === "list" || value === "delete" || value === "update" || value === "bulk-delete" || value === "bulk-update"
+  return value === "list" ||
+    value === "delete" ||
+    value === "update" ||
+    value === "bulk-delete" ||
+    value === "bulk-update" ||
+    value === "rendition"
     ? value
     : undefined;
 }
@@ -1344,6 +1472,14 @@ function duplicateFileSelection(files: readonly NonNullable<FileRemoteCommand["f
     seen.add(file.name);
   }
   return undefined;
+}
+
+function fileTransformIntegerLabel(option: string): string {
+  return `File rendition ${option.slice(2).replaceAll("-", " ")}`;
+}
+
+function hasRenditionOption(...values: readonly (number | string | undefined)[]): boolean {
+  return values.some((value) => value !== undefined);
 }
 
 function parseNonNegativeInteger(value: string, label: string): number | string {
@@ -1604,6 +1740,7 @@ function helpText(): string {
     "  cf-frappe files update --url <origin> --name <fileName> [--filename <text>] [--private|--public] [--attached-to-doctype <doctype> --attached-to-name <name>|--clear-attachment] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files bulk-update --url <origin> (--file <fileName>|--file-version <fileName:version>)... [--private|--public] [--attached-to-doctype <doctype> --attached-to-name <name>|--clear-attachment] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files bulk-delete --url <origin> (--file <fileName>|--file-version <fileName:version>)... [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe files rendition --url <origin> --name <fileName> [--width <n>] [--height <n>] [--fit <mode>] [--format <type>] [--quality <n>] [--watermark <text> [--watermark-placement <place>] [--watermark-opacity <n>] [--watermark-color <hex>] [--watermark-font-size <n>]] [--overlay <fileName> [--overlay-placement <place>] [--overlay-opacity <n>] [--overlay-width <n>] [--overlay-height <n>]] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files delete --url <origin> --name <fileName> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe --help",
     "",

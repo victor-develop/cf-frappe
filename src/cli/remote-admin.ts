@@ -35,6 +35,30 @@ export async function requestRemoteAdmin<TData, TError extends Error>(
     readonly urlLabel: string;
   }
 ): Promise<TData> {
+  const payload = await requestRemoteAdminPayload<Record<string, unknown>, TError>(target, io, request, options);
+  const data = payload.data;
+  if (!isRecord(data)) {
+    throw new options.error(`${options.resourceLabel} response did not include a data object`);
+  }
+  return data as TData;
+}
+
+export async function requestRemoteAdminPayload<TPayload, TError extends Error>(
+  target: { readonly url: string; readonly headers: readonly RemoteHeaderOption[] },
+  io: RemoteAdminIo,
+  request: {
+    readonly body?: Record<string, unknown>;
+    readonly method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
+    readonly path: string;
+    readonly query?: URLSearchParams;
+  },
+  options: {
+    readonly error: RemoteAdminErrorConstructor<TError>;
+    readonly fetchLabel: string;
+    readonly resourceLabel: string;
+    readonly urlLabel: string;
+  }
+): Promise<TPayload> {
   const runFetch = io.fetch ?? globalThis.fetch;
   if (typeof runFetch !== "function") {
     throw new options.error(`No fetch implementation is available for ${options.fetchLabel}`);
@@ -56,11 +80,7 @@ export async function requestRemoteAdmin<TData, TError extends Error>(
       `${options.resourceLabel} request failed (${response.status}): ${remoteErrorMessage(payload)}`
     );
   }
-  const data = payload.data;
-  if (!isRecord(data)) {
-    throw new options.error(`${options.resourceLabel} response did not include a data object`);
-  }
-  return data as TData;
+  return payload as TPayload;
 }
 
 function resolveRemoteHeaders<TError extends Error>(

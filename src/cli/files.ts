@@ -1,6 +1,6 @@
-import { requestRemoteAdmin, type RemoteAdminIo, type RemoteHeaderOption } from "./remote-admin.js";
+import { requestRemoteAdmin, requestRemoteAdminPayload, type RemoteAdminIo, type RemoteHeaderOption } from "./remote-admin.js";
 
-export type FileRemoteAction = "bulk-delete" | "bulk-update" | "list" | "delete" | "update";
+export type FileRemoteAction = "bulk-delete" | "bulk-update" | "list" | "delete" | "rendition" | "update";
 
 export type FileHeaderOption = RemoteHeaderOption;
 
@@ -22,6 +22,21 @@ export interface FileRemoteCommand {
   readonly uploadedBy?: string;
   readonly expectedVersion?: number;
   readonly clearAttachment?: boolean;
+  readonly width?: number;
+  readonly height?: number;
+  readonly fit?: string;
+  readonly format?: string;
+  readonly quality?: number;
+  readonly watermark?: string;
+  readonly watermarkPlacement?: string;
+  readonly watermarkOpacity?: number;
+  readonly watermarkColor?: string;
+  readonly watermarkFontSize?: number;
+  readonly overlay?: string;
+  readonly overlayPlacement?: string;
+  readonly overlayOpacity?: number;
+  readonly overlayWidth?: number;
+  readonly overlayHeight?: number;
 }
 
 export interface FileRemoteSelection {
@@ -94,6 +109,19 @@ interface BulkFileFailureResponse {
   readonly status?: number;
 }
 
+interface FileRenditionCommandResponse {
+  readonly data: FileSnapshotResponse;
+  readonly rendition?: FileRenditionResponse;
+  readonly created?: boolean;
+}
+
+interface FileRenditionResponse {
+  readonly id?: string;
+  readonly status?: string;
+  readonly contentType?: string;
+  readonly size?: number;
+}
+
 export async function runRemoteFileCommand(command: FileRemoteCommand, io: FileRemoteIo = {}): Promise<string> {
   if (command.action === "list") {
     const query = queryParams({
@@ -138,6 +166,14 @@ export async function runRemoteFileCommand(command: FileRemoteCommand, io: FileR
     });
     return formatBulkDelete(command.url, data);
   }
+  if (command.action === "rendition") {
+    const payload = await requestRemoteFilePayload<FileRenditionCommandResponse>(command, io, {
+      body: renditionBody(command),
+      method: "POST",
+      path: `/api/files/${encodeURIComponent(requiredFileName(command, "rendition"))}/renditions`
+    });
+    return formatRendition(command.url, payload);
+  }
   const query = queryParams({
     ...(command.expectedVersion === undefined ? {} : { expectedVersion: String(command.expectedVersion) })
   });
@@ -167,12 +203,72 @@ function requestRemoteFile<TData>(
   });
 }
 
+function requestRemoteFilePayload<TPayload>(
+  command: FileRemoteCommand,
+  io: FileRemoteIo,
+  request: {
+    readonly body?: Record<string, unknown>;
+    readonly method: "DELETE" | "GET" | "PATCH" | "POST";
+    readonly path: string;
+    readonly query?: URLSearchParams;
+  }
+): Promise<TPayload> {
+  return requestRemoteAdminPayload<TPayload, FileRemoteError>(command, io, request, {
+    error: FileRemoteError,
+    fetchLabel: "remote file commands",
+    resourceLabel: "Remote file",
+    urlLabel: "Remote file"
+  });
+}
+
 function queryParams(values: Record<string, string>): URLSearchParams | undefined {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(values)) {
     params.set(key, value);
   }
   return params.toString().length === 0 ? undefined : params;
+}
+
+function renditionBody(command: FileRemoteCommand): Record<string, unknown> {
+  return {
+    ...(command.width === undefined ? {} : { width: command.width }),
+    ...(command.height === undefined ? {} : { height: command.height }),
+    ...(command.fit === undefined ? {} : { fit: command.fit }),
+    ...(command.format === undefined ? {} : { format: command.format }),
+    ...(command.quality === undefined ? {} : { quality: command.quality }),
+    ...watermarkBody(command),
+    ...overlayBody(command)
+  };
+}
+
+function watermarkBody(command: FileRemoteCommand): Record<string, unknown> {
+  if (command.watermark === undefined) {
+    return {};
+  }
+  return {
+    watermark: {
+      text: command.watermark,
+      ...(command.watermarkPlacement === undefined ? {} : { placement: command.watermarkPlacement }),
+      ...(command.watermarkOpacity === undefined ? {} : { opacity: command.watermarkOpacity }),
+      ...(command.watermarkColor === undefined ? {} : { color: command.watermarkColor }),
+      ...(command.watermarkFontSize === undefined ? {} : { fontSize: command.watermarkFontSize })
+    }
+  };
+}
+
+function overlayBody(command: FileRemoteCommand): Record<string, unknown> {
+  if (command.overlay === undefined) {
+    return {};
+  }
+  return {
+    overlay: {
+      file: command.overlay,
+      ...(command.overlayPlacement === undefined ? {} : { placement: command.overlayPlacement }),
+      ...(command.overlayOpacity === undefined ? {} : { opacity: command.overlayOpacity }),
+      ...(command.overlayWidth === undefined ? {} : { width: command.overlayWidth }),
+      ...(command.overlayHeight === undefined ? {} : { height: command.overlayHeight })
+    }
+  };
 }
 
 function bulkFilesBody(command: FileRemoteCommand): Record<string, unknown> {
@@ -250,6 +346,21 @@ function formatBulkDelete(baseUrl: string, result: BulkFileCommandResponse): str
   return formatBulkCommand(baseUrl, "Deleted files", result.deleted ?? [], result.failed);
 }
 
+function formatRendition(baseUrl: string, payload: FileRenditionCommandResponse): string {
+  const rendition = payload.rendition ?? {};
+  const contentUrl = rendition.id === undefined
+    ? undefined
+    : `${baseUrl.replace(/\/+$/, "")}/api/files/${encodeURIComponent(payload.data.name)}/renditions/${encodeURIComponent(rendition.id)}/content`;
+  return [
+    `Generated file rendition at ${baseUrl}`,
+    `Created: ${String(payload.created ?? false)}`,
+    renditionLine(rendition),
+    snapshotLine(payload.data),
+    contentUrl === undefined ? undefined : `Content: ${contentUrl}`,
+    ""
+  ].filter((line): line is string => line !== undefined).join("\n");
+}
+
 function formatBulkCommand(
   baseUrl: string,
   title: string,
@@ -264,6 +375,14 @@ function formatBulkCommand(
     ...failed.map(failureLine),
     ""
   ].join("\n");
+}
+
+function renditionLine(rendition: FileRenditionResponse): string {
+  const id = rendition.id ?? "(unknown)";
+  const status = rendition.status === undefined ? "" : ` status ${rendition.status}`;
+  const contentType = rendition.contentType === undefined ? "" : ` type ${rendition.contentType}`;
+  const size = rendition.size === undefined ? "" : ` size ${String(rendition.size)}`;
+  return `- rendition ${id}${status}${contentType}${size}`;
 }
 
 function formatDelete(baseUrl: string, snapshot: FileSnapshotResponse): string {

@@ -274,6 +274,7 @@ npx cf-frappe files list --url https://your-worker.example --filename invoice --
 npx cf-frappe files update --url https://your-worker.example --name file_invoice --public --clear-attachment --expected-version 3 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe files bulk-update --url https://your-worker.example --file file_invoice --file-version file_quote:2 --private --attached-to-doctype Sales\\ Invoice --attached-to-name SINV-1 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe files bulk-delete --url https://your-worker.example --file-version file_invoice:3 --file file_stale --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe files rendition --url https://your-worker.example --name file_image --width 320 --height 240 --fit cover --format webp --watermark Draft --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe files delete --url https://your-worker.example --name file_invoice --expected-version 3 --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 
