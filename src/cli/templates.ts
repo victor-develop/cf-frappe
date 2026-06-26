@@ -312,6 +312,17 @@ npx cf-frappe workflows save --url https://your-worker.example --doctype Task --
 npx cf-frappe workflows clear --url https://your-worker.example --doctype Task --expected-version 1 --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 
+Role catalogs can be inspected and changed through the same event-sourced admin boundary:
+
+\`\`\`bash
+npx cf-frappe roles list --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe roles get --url https://your-worker.example --role "Task Manager" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe roles create --url https://your-worker.example --role "Task Reviewer" --description "Reviews task queue changes" --expected-version 0 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe roles describe --url https://your-worker.example --role "Task Reviewer" --description "Reviews and triages task queue changes" --expected-version 1 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe roles disable --url https://your-worker.example --role "Task Reviewer" --expected-version 2 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe roles enable --url https://your-worker.example --role "Task Reviewer" --expected-version 3 --header-env Authorization=CF_FRAPPE_AUTH
+\`\`\`
+
 DocType resources can be inspected and mutated through the generated resource API without opening Desk:
 
 \`\`\`bash

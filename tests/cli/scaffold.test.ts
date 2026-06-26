@@ -206,6 +206,12 @@ describe("cf-frappe CLI scaffold", () => {
     expect(readmeText).toContain("npx cf-frappe workflows get --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe workflows save --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe workflows clear --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe roles list --url https://your-worker.example");
+    expect(readmeText).toContain('npx cf-frappe roles get --url https://your-worker.example --role "Task Manager"');
+    expect(readmeText).toContain('npx cf-frappe roles create --url https://your-worker.example --role "Task Reviewer"');
+    expect(readmeText).toContain('npx cf-frappe roles describe --url https://your-worker.example --role "Task Reviewer"');
+    expect(readmeText).toContain('npx cf-frappe roles disable --url https://your-worker.example --role "Task Reviewer"');
+    expect(readmeText).toContain('npx cf-frappe roles enable --url https://your-worker.example --role "Task Reviewer"');
     expect(readmeText).toContain("npx cf-frappe resources list --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources get --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources create --url https://your-worker.example --doctype Task");
