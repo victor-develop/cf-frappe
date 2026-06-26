@@ -3261,6 +3261,9 @@ export function renderDeskClientScript(): string {
       roles: function (options) {
         return request(rolesPath(options || {})).then(unwrapData);
       },
+      workflow: function (doctype, options) {
+        return request(workflowPath(doctype, options || {})).then(unwrapData);
+      },
       workspace: function (workspace) {
         return request("/api/meta/workspaces/" + encodePart(workspace)).then(unwrapData);
       },

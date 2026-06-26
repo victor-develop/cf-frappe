@@ -132,6 +132,7 @@ interface DeskClientRuntime {
     readonly reports: () => Promise<unknown>;
     readonly role: (role: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly roles: (options?: { readonly tenant?: string }) => Promise<unknown>;
+    readonly workflow: (doctype: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly workspace: (workspace: string) => Promise<unknown>;
     readonly workspaces: () => Promise<unknown>;
   };
@@ -2201,6 +2202,25 @@ describe("Desk client runtime", () => {
       "application/json",
       "application/json"
     ]);
+  });
+
+  it("exposes workflow definition reads through the metadata namespace", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const result = { tenantId: "acme/east", doctypeName: "Task Type", version: 4, workflow: { initialState: "Open" } };
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: result }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.meta.workflow("Task Type", { tenant: "acme/east" })).resolves.toEqual(result);
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/workflows/Task%20Type?tenant=acme%2Feast"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin"]);
+    expect(calls.map((call) => call.init.body)).toEqual([undefined]);
   });
 
   it("wraps event-sourced user permission APIs with tenant and version metadata", async () => {
