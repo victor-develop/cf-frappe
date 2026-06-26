@@ -234,13 +234,29 @@ export function renderDeskClientScript(): string {
     return withQuery("/desk/notifications", deskNotificationInboxParams(options || {}));
   }
 
+  function deskPrintPath(format, name) {
+    return "/desk/print/" + encodePart(format) + "/" + encodePart(name);
+  }
+
+  function deskPrintPdfPath(format, name) {
+    return deskPrintPath(format, name) + "/pdf";
+  }
+
   function deskReportBuilderPath(doctype, id, options) {
     var path = "/desk/report-builder/" + encodePart(doctype) + (id === undefined ? "" : "/" + encodePart(id));
     return withQuery(path, reportRunParams(options || {}));
   }
 
+  function deskReportBuilderPdfPath(doctype, id, options) {
+    return withQuery("/desk/report-builder/" + encodePart(doctype) + "/" + encodePart(id) + "/pdf", reportRunParams(options || {}));
+  }
+
   function deskReportPath(report, options) {
     return withQuery("/desk/reports/" + encodePart(report), reportRunParams(options || {}));
+  }
+
+  function deskReportPdfPath(report, options) {
+    return withQuery("/desk/reports/" + encodePart(report) + "/pdf", reportRunParams(options || {}));
   }
 
   function deskWorkspacePath(workspace) {
@@ -3604,7 +3620,11 @@ export function renderDeskClientScript(): string {
         return deskPath(doctype) + "/import-template.csv";
       },
       notificationsUrl: deskNotificationsPath,
+      printPdfUrl: deskPrintPdfPath,
+      printUrl: deskPrintPath,
       reportBuilderUrl: deskReportBuilderPath,
+      reportBuilderPdfUrl: deskReportBuilderPdfPath,
+      reportPdfUrl: deskReportPdfPath,
       reportUrl: deskReportPath,
       workspaceUrl: deskWorkspacePath,
       importCsv: function (doctype, csv, options) {

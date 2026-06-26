@@ -395,7 +395,11 @@ interface DeskClientRuntime {
     readonly listUrl: (doctype: string, options?: Record<string, unknown>) => string;
     readonly newUrl: (doctype: string) => string;
     readonly notificationsUrl: (options?: Record<string, unknown>) => string;
+    readonly printPdfUrl: (format: string, name: string) => string;
+    readonly printUrl: (format: string, name: string) => string;
+    readonly reportBuilderPdfUrl: (doctype: string, id: string, options?: Record<string, unknown>) => string;
     readonly reportBuilderUrl: (doctype: string, id?: string, options?: Record<string, unknown>) => string;
+    readonly reportPdfUrl: (report: string, options?: Record<string, unknown>) => string;
     readonly reportUrl: (report: string, options?: Record<string, unknown>) => string;
     readonly workspaceUrl: (workspace: string) => string;
   };
@@ -806,6 +810,33 @@ describe("Desk client runtime", () => {
         order: "desc"
       })
     ).toBe("/desk/report-builder/Task%20Type/report%2Fhigh-counts?filter_priority=High&order_by=count&order=desc");
+    expect(runtime.desk.printUrl("Task Standard", "TASK/1")).toBe("/desk/print/Task%20Standard/TASK%2F1");
+    expect(runtime.desk.printPdfUrl("Task Standard", "TASK/1")).toBe("/desk/print/Task%20Standard/TASK%2F1/pdf");
+    expect(
+      runtime.desk.reportPdfUrl("Open Notes", {
+        filters: { priority: "High" },
+        orderBy: "title",
+        order: "asc",
+        limit: 5,
+        offset: 10
+      })
+    ).toBe("/desk/reports/Open%20Notes/pdf?filter_priority=High&order_by=title&order=asc&limit=5&offset=10");
+    expect(
+      runtime.desk.reportBuilderPdfUrl("Task Type", "report/high-counts", {
+        filters: { priority: "High" },
+        orderBy: "count",
+        order: "desc"
+      })
+    ).toBe("/desk/report-builder/Task%20Type/report%2Fhigh-counts/pdf?filter_priority=High&order_by=count&order=desc");
+    expect(
+      runtime.desk.reportPdfUrl("Open Notes", {
+        filters: { count_range: [6, 8] },
+        filterExpression: { all: [{ filter: "priority", operator: "eq", value: "High" }] },
+        orderBy: "count"
+      })
+    ).toBe(
+      "/desk/reports/Open%20Notes/pdf?filter_count_range=6&filter_count_range=8&filter_expression=%7B%22all%22%3A%5B%7B%22filter%22%3A%22priority%22%2C%22operator%22%3A%22eq%22%2C%22value%22%3A%22High%22%7D%5D%7D&order_by=count"
+    );
   });
 
   it("builds Desk file manager and notification inbox URLs for client scripts", async () => {

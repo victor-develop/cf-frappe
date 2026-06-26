@@ -20,7 +20,7 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk admin navigation URL helper slice:
+As of the Desk print navigation URL helper slice:
 
 - Vitest files: `94`
 - Vitest cases: `1100`
