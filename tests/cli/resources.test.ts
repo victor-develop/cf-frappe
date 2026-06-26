@@ -420,6 +420,117 @@ describe("cf-frappe CLI remote resources", () => {
 
     expect(parseCliArgs([
       "resources",
+      "timeline",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK/1",
+      "--limit",
+      "25",
+      "--before-sequence",
+      "99"
+    ])).toEqual({
+      kind: "resources",
+      action: "timeline",
+      url: "https://app.example",
+      headers: [],
+      doctype: "Task",
+      name: "TASK/1",
+      limit: 25,
+      beforeSequence: 99
+    });
+
+    expect(parseCliArgs([
+      "resources",
+      "comment",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK/1",
+      "--text",
+      "Looks good",
+      "--expected-version",
+      "4"
+    ])).toEqual({
+      kind: "resources",
+      action: "comment",
+      url: "https://app.example",
+      headers: [],
+      doctype: "Task",
+      name: "TASK/1",
+      text: "Looks good",
+      expectedVersion: 4
+    });
+
+    expect(parseCliArgs([
+      "resources",
+      "assign",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK/1",
+      "--assignee",
+      "ops@example.com"
+    ])).toEqual({
+      kind: "resources",
+      action: "assign",
+      url: "https://app.example",
+      headers: [],
+      doctype: "Task",
+      name: "TASK/1",
+      assignee: "ops@example.com"
+    });
+
+    expect(parseCliArgs([
+      "resources",
+      "tag",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK/1",
+      "--tag",
+      "Needs Review"
+    ])).toEqual({
+      kind: "resources",
+      action: "tag",
+      url: "https://app.example",
+      headers: [],
+      doctype: "Task",
+      name: "TASK/1",
+      tag: "Needs Review"
+    });
+
+    expect(parseCliArgs([
+      "resources",
+      "follow",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK/1",
+      "--follower",
+      "amy+ops@example.com"
+    ])).toEqual({
+      kind: "resources",
+      action: "follow",
+      url: "https://app.example",
+      headers: [],
+      doctype: "Task",
+      name: "TASK/1",
+      follower: "amy+ops@example.com"
+    });
+
+    expect(parseCliArgs([
+      "resources",
       "bulk-transition",
       "--url",
       "https://app.example",
@@ -758,6 +869,88 @@ describe("cf-frappe CLI remote resources", () => {
     ])).toEqual({
       kind: "invalid",
       message: "Resource version selection must use <docname>:<expectedVersion>"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "timeline",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK-1",
+      "--before-sequence",
+      "0"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Resource timeline before sequence must be a positive integer"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "assign",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK-1"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Resource assign requires --assignee"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "untag",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK-1"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Resource untag requires --tag"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "unfollow",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK-1"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Resource unfollow requires --follower"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "comment",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK-1"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Resource comment requires --text"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "tags",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK-1",
+      "--tag",
+      "Urgent"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Cannot use --tag with resources tags"
     });
   });
 
@@ -1274,6 +1467,336 @@ describe("cf-frappe CLI remote resources", () => {
     expect(importStdout.text()).toContain("DocType: Task Mode: update Total: 2");
     expect(importStdout.text()).toContain("- row 2 update TASK-1");
     expect(importStdout.text()).toContain("- row 3 update TASK-2 failed BAD_REQUEST status 400: Invalid count");
+  });
+
+  it("reads and mutates remote document timeline collaboration through the generated resource API", async () => {
+    const timelineCalls: RemoteCall[] = [];
+    const timelineStdout = textBuffer();
+    const timelineExit = await runCli(
+      [
+        "resources",
+        "timeline",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task Type",
+        "--name",
+        "TASK/1",
+        "--limit",
+        "2",
+        "--before-sequence",
+        "9",
+        "--header-env",
+        "Authorization=CF_FRAPPE_AUTH"
+      ],
+      {
+        cwd: () => tempRoot,
+        env: (name) => name === "CF_FRAPPE_AUTH" ? "Bearer test-token" : undefined,
+        fetch: fakeFetch(timelineCalls, {
+          data: {
+            doctype: "Task Type",
+            name: "TASK/1",
+            version: 7,
+            limit: 2,
+            beforeSequence: 9,
+            nextBeforeSequence: 5,
+            entries: [
+              {
+                sequence: 6,
+                kind: "DocumentUpdated",
+                actorId: "owner@example.com",
+                summary: "Updated status",
+                changes: [{ field: "status", oldValue: "Open", newValue: "Closed" }]
+              }
+            ]
+          }
+        }),
+        stdout: timelineStdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(timelineExit).toBe(0);
+    expect(timelineCalls[0]?.url).toBe(
+      "https://app.example/api/resource/Task%20Type/TASK%2F1/timeline?limit=2&before_sequence=9"
+    );
+    expect(timelineCalls[0]?.method).toBe("GET");
+    expect(timelineCalls[0]?.headers.get("authorization")).toBe("Bearer test-token");
+    expect(timelineStdout.text()).toContain("Resource timeline Task Type/TASK/1 at https://app.example");
+    expect(timelineStdout.text()).toContain("Version: 7 Entries: 1 Next before: 5");
+    expect(timelineStdout.text()).toContain("- #6 DocumentUpdated actor owner@example.com Updated status");
+    expect(timelineStdout.text()).toContain("  - status: \"Open\" -> \"Closed\"");
+
+    const commentCalls: RemoteCall[] = [];
+    const commentExit = await runCli(
+      [
+        "resources",
+        "comment",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--name",
+        "TASK-1",
+        "--text",
+        "Needs one more look",
+        "--expected-version",
+        "7"
+      ],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetch(commentCalls, {
+          data: { name: "TASK-1", version: 8, docstatus: "draft" }
+        }, 201),
+        stdout: textBuffer(),
+        stderr: textBuffer()
+      }
+    );
+
+    expect(commentExit).toBe(0);
+    expect(commentCalls[0]?.url).toBe("https://app.example/api/resource/Task/TASK-1/comments");
+    expect(commentCalls[0]?.method).toBe("POST");
+    expect(commentCalls[0]?.body).toBe(JSON.stringify({ text: "Needs one more look", expectedVersion: 7 }));
+
+    const assignmentCalls: RemoteCall[] = [];
+    const assignmentStdout = textBuffer();
+    const assignmentExit = await runCli(
+      ["resources", "assignments", "--url", "https://app.example", "--doctype", "Task", "--name", "TASK-1"],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetch(assignmentCalls, { data: { version: 8, assignees: ["ops@example.com"] } }),
+        stdout: assignmentStdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(assignmentExit).toBe(0);
+    expect(assignmentCalls[0]?.url).toBe("https://app.example/api/resource/Task/TASK-1/assignments");
+    expect(assignmentStdout.text()).toContain("Resource assignments Task/TASK-1 at https://app.example");
+    expect(assignmentStdout.text()).toContain("- ops@example.com");
+
+    const assignCalls: RemoteCall[] = [];
+    const assignExit = await runCli(
+      [
+        "resources",
+        "assign",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--name",
+        "TASK-1",
+        "--assignee",
+        "ops@example.com",
+        "--expected-version",
+        "8"
+      ],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetch(assignCalls, { data: { name: "TASK-1", version: 9, docstatus: "draft" } }, 201),
+        stdout: textBuffer(),
+        stderr: textBuffer()
+      }
+    );
+
+    expect(assignExit).toBe(0);
+    expect(assignCalls[0]?.url).toBe("https://app.example/api/resource/Task/TASK-1/assignments");
+    expect(assignCalls[0]?.body).toBe(JSON.stringify({ assignee: "ops@example.com", expectedVersion: 8 }));
+
+    const unassignCalls: RemoteCall[] = [];
+    const unassignExit = await runCli(
+      [
+        "resources",
+        "unassign",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--name",
+        "TASK-1",
+        "--assignee",
+        "ops@example.com"
+      ],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetch(unassignCalls, { data: { name: "TASK-1", version: 10, docstatus: "draft" } }),
+        stdout: textBuffer(),
+        stderr: textBuffer()
+      }
+    );
+
+    expect(unassignExit).toBe(0);
+    expect(unassignCalls[0]?.url).toBe("https://app.example/api/resource/Task/TASK-1/assignments/ops%40example.com");
+    expect(unassignCalls[0]?.method).toBe("DELETE");
+    expect(unassignCalls[0]?.body).toBe("{}");
+
+    const tagCalls: RemoteCall[] = [];
+    const tagStdout = textBuffer();
+    const tagExit = await runCli(
+      ["resources", "tags", "--url", "https://app.example", "--doctype", "Task", "--name", "TASK-1"],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetch(tagCalls, { data: { version: 10, tags: ["Needs Review"] } }),
+        stdout: tagStdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(tagExit).toBe(0);
+    expect(tagCalls[0]?.url).toBe("https://app.example/api/resource/Task/TASK-1/tags");
+    expect(tagStdout.text()).toContain("Resource tags Task/TASK-1 at https://app.example");
+    expect(tagStdout.text()).toContain("- Needs Review");
+
+    const addTagCalls: RemoteCall[] = [];
+    const addTagExit = await runCli(
+      [
+        "resources",
+        "tag",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--name",
+        "TASK-1",
+        "--tag",
+        "Needs Review",
+        "--expected-version",
+        "10"
+      ],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetch(addTagCalls, { data: { name: "TASK-1", version: 11, docstatus: "draft" } }, 201),
+        stdout: textBuffer(),
+        stderr: textBuffer()
+      }
+    );
+
+    expect(addTagExit).toBe(0);
+    expect(addTagCalls[0]?.url).toBe("https://app.example/api/resource/Task/TASK-1/tags");
+    expect(addTagCalls[0]?.body).toBe(JSON.stringify({ tag: "Needs Review", expectedVersion: 10 }));
+
+    const untagCalls: RemoteCall[] = [];
+    const untagExit = await runCli(
+      [
+        "resources",
+        "untag",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--name",
+        "TASK-1",
+        "--tag",
+        "Needs Review"
+      ],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetch(untagCalls, { data: { name: "TASK-1", version: 12, docstatus: "draft" } }),
+        stdout: textBuffer(),
+        stderr: textBuffer()
+      }
+    );
+
+    expect(untagExit).toBe(0);
+    expect(untagCalls[0]?.url).toBe("https://app.example/api/resource/Task/TASK-1/tags/Needs%20Review");
+    expect(untagCalls[0]?.method).toBe("DELETE");
+
+    const followerCalls: RemoteCall[] = [];
+    const followerStdout = textBuffer();
+    const followerExit = await runCli(
+      ["resources", "followers", "--url", "https://app.example", "--doctype", "Task", "--name", "TASK-1"],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetch(followerCalls, { data: { version: 12, followers: ["owner@example.com"] } }),
+        stdout: followerStdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(followerExit).toBe(0);
+    expect(followerCalls[0]?.url).toBe("https://app.example/api/resource/Task/TASK-1/followers");
+    expect(followerStdout.text()).toContain("Resource followers Task/TASK-1 at https://app.example");
+    expect(followerStdout.text()).toContain("- owner@example.com");
+
+    const followCalls: RemoteCall[] = [];
+    const followExit = await runCli(
+      [
+        "resources",
+        "follow",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--name",
+        "TASK-1",
+        "--expected-version",
+        "12"
+      ],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetch(followCalls, { data: { name: "TASK-1", version: 13, docstatus: "draft" } }, 201),
+        stdout: textBuffer(),
+        stderr: textBuffer()
+      }
+    );
+
+    expect(followExit).toBe(0);
+    expect(followCalls[0]?.url).toBe("https://app.example/api/resource/Task/TASK-1/followers");
+    expect(followCalls[0]?.body).toBe(JSON.stringify({ expectedVersion: 12 }));
+
+    const explicitFollowCalls: RemoteCall[] = [];
+    const explicitFollowExit = await runCli(
+      [
+        "resources",
+        "follow",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--name",
+        "TASK-1",
+        "--follower",
+        "amy+ops@example.com"
+      ],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetch(explicitFollowCalls, { data: { name: "TASK-1", version: 14, docstatus: "draft" } }, 201),
+        stdout: textBuffer(),
+        stderr: textBuffer()
+      }
+    );
+
+    expect(explicitFollowExit).toBe(0);
+    expect(explicitFollowCalls[0]?.body).toBe(JSON.stringify({ follower: "amy+ops@example.com" }));
+
+    const unfollowCalls: RemoteCall[] = [];
+    const unfollowExit = await runCli(
+      [
+        "resources",
+        "unfollow",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--name",
+        "TASK-1",
+        "--follower",
+        "amy+ops@example.com",
+        "--expected-version",
+        "14"
+      ],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetch(unfollowCalls, { data: { name: "TASK-1", version: 15, docstatus: "draft" } }),
+        stdout: textBuffer(),
+        stderr: textBuffer()
+      }
+    );
+
+    expect(unfollowExit).toBe(0);
+    expect(unfollowCalls[0]?.url).toBe("https://app.example/api/resource/Task/TASK-1/followers/amy%2Bops%40example.com");
+    expect(unfollowCalls[0]?.method).toBe("DELETE");
+    expect(unfollowCalls[0]?.body).toBe(JSON.stringify({ expectedVersion: 14 }));
   });
 
   it("lists, shares, and revokes remote resource document shares through the generated resource API", async () => {

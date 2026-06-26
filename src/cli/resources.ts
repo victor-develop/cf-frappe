@@ -10,16 +10,21 @@ import {
 
 export type ResourceRemoteAction =
   | "amend"
+  | "assign"
+  | "assignments"
   | "bulk-cancel"
   | "bulk-delete"
   | "bulk-submit"
   | "bulk-transition"
   | "cancel"
+  | "comment"
   | "command"
   | "create"
   | "delete"
   | "duplicate"
   | "export"
+  | "follow"
+  | "followers"
   | "get"
   | "import"
   | "import-template"
@@ -30,8 +35,14 @@ export type ResourceRemoteAction =
   | "share"
   | "shares"
   | "submit"
+  | "tag"
+  | "tags"
+  | "timeline"
   | "transition"
+  | "unassign"
   | "unshare"
+  | "unfollow"
+  | "untag"
   | "update";
 
 export type ResourceHeaderOption = RemoteHeaderOption;
@@ -45,6 +56,10 @@ export interface ResourceRemoteCommand {
   readonly name?: string;
   readonly filterId?: string;
   readonly userId?: string;
+  readonly assignee?: string;
+  readonly tag?: string;
+  readonly follower?: string;
+  readonly text?: string;
   readonly permissions?: readonly string[];
   readonly label?: string;
   readonly transition?: string;
@@ -61,6 +76,7 @@ export interface ResourceRemoteCommand {
   readonly filterExpression?: Record<string, unknown>;
   readonly savedFilter?: string;
   readonly limit?: number;
+  readonly beforeSequence?: number;
   readonly offset?: number;
   readonly orderBy?: string;
   readonly order?: "asc" | "desc";
@@ -173,14 +189,142 @@ interface DocumentShareGrantResponse {
   readonly permissions: readonly string[];
 }
 
+interface DocumentTimelineResponse {
+  readonly doctype?: string;
+  readonly name?: string;
+  readonly version?: number;
+  readonly limit?: number;
+  readonly beforeSequence?: number;
+  readonly nextBeforeSequence?: number;
+  readonly entries?: readonly DocumentTimelineEntryResponse[];
+}
+
+interface DocumentTimelineEntryResponse {
+  readonly sequence?: number;
+  readonly kind?: string;
+  readonly type?: string;
+  readonly actorId?: string;
+  readonly timestamp?: string;
+  readonly summary?: string;
+  readonly changes?: readonly DocumentTimelineChangeResponse[];
+  readonly payload?: Record<string, unknown>;
+}
+
+interface DocumentTimelineChangeResponse {
+  readonly field?: string;
+  readonly oldValue?: unknown;
+  readonly newValue?: unknown;
+}
+
+interface DocumentAssignmentsResponse {
+  readonly version?: number;
+  readonly assignees?: readonly string[];
+}
+
+interface DocumentTagsResponse {
+  readonly version?: number;
+  readonly tags?: readonly string[];
+}
+
+interface DocumentFollowersResponse {
+  readonly version?: number;
+  readonly followers?: readonly string[];
+}
+
 export async function runRemoteResourceCommand(
   command: ResourceRemoteCommand,
   io: ResourceRemoteIo = {}
 ): Promise<string> {
+  if (command.action === "timeline") {
+    const query = timelineQuery(command);
+    const data = await requestRemoteResource<DocumentTimelineResponse>(command, io, {
+      method: "GET",
+      path: resourceMemberPath(command, "timeline"),
+      ...(query === undefined ? {} : { query })
+    });
+    return formatDocumentTimeline(command.url, command.doctype, requiredResourceName(command, "timeline"), data);
+  }
+  if (command.action === "assignments") {
+    const data = await requestRemoteResource<DocumentAssignmentsResponse>(command, io, {
+      method: "GET",
+      path: resourceMemberPath(command, "assignments")
+    });
+    return formatStringSet(command.url, command.doctype, requiredResourceName(command, "assignments"), "assignments", data.version, data.assignees ?? []);
+  }
+  if (command.action === "assign") {
+    const data = await requestRemoteResource<DocumentSnapshotResponse>(command, io, {
+      body: assignmentBody(command),
+      method: "POST",
+      path: resourceMemberPath(command, "assignments")
+    });
+    return formatResourceDetail(command.url, command.doctype, "Assigned resource", data);
+  }
+  if (command.action === "unassign") {
+    const data = await requestRemoteResource<DocumentSnapshotResponse>(command, io, {
+      body: versionBody(command),
+      method: "DELETE",
+      path: `${resourceMemberPath(command, "assignments")}/${encodeURIComponent(requiredResourceAssignee(command))}`
+    });
+    return formatResourceDetail(command.url, command.doctype, "Unassigned resource", data);
+  }
+  if (command.action === "tags") {
+    const data = await requestRemoteResource<DocumentTagsResponse>(command, io, {
+      method: "GET",
+      path: resourceMemberPath(command, "tags")
+    });
+    return formatStringSet(command.url, command.doctype, requiredResourceName(command, "tags"), "tags", data.version, data.tags ?? []);
+  }
+  if (command.action === "tag") {
+    const data = await requestRemoteResource<DocumentSnapshotResponse>(command, io, {
+      body: tagBody(command),
+      method: "POST",
+      path: resourceMemberPath(command, "tags")
+    });
+    return formatResourceDetail(command.url, command.doctype, "Tagged resource", data);
+  }
+  if (command.action === "untag") {
+    const data = await requestRemoteResource<DocumentSnapshotResponse>(command, io, {
+      body: versionBody(command),
+      method: "DELETE",
+      path: `${resourceMemberPath(command, "tags")}/${encodeURIComponent(requiredResourceTag(command))}`
+    });
+    return formatResourceDetail(command.url, command.doctype, "Untagged resource", data);
+  }
+  if (command.action === "followers") {
+    const data = await requestRemoteResource<DocumentFollowersResponse>(command, io, {
+      method: "GET",
+      path: resourceMemberPath(command, "followers")
+    });
+    return formatStringSet(command.url, command.doctype, requiredResourceName(command, "followers"), "followers", data.version, data.followers ?? []);
+  }
+  if (command.action === "follow") {
+    const data = await requestRemoteResource<DocumentSnapshotResponse>(command, io, {
+      body: followBody(command),
+      method: "POST",
+      path: resourceMemberPath(command, "followers")
+    });
+    return formatResourceDetail(command.url, command.doctype, "Followed resource", data);
+  }
+  if (command.action === "unfollow") {
+    const data = await requestRemoteResource<DocumentSnapshotResponse>(command, io, {
+      body: versionBody(command),
+      method: "DELETE",
+      path: `${resourceMemberPath(command, "followers")}/${encodeURIComponent(requiredResourceFollower(command))}`
+    });
+    return formatResourceDetail(command.url, command.doctype, "Unfollowed resource", data);
+  }
+  if (command.action === "comment") {
+    const data = await requestRemoteResource<DocumentSnapshotResponse>(command, io, {
+      body: commentBody(command),
+      method: "POST",
+      path: resourceMemberPath(command, "comments")
+    });
+    return formatResourceDetail(command.url, command.doctype, "Commented resource", data);
+  }
   if (command.action === "shares") {
     const data = await requestRemoteResource<DocumentShareStateResponse>(command, io, {
       method: "GET",
-      path: `/api/resource/${encodeURIComponent(command.doctype)}/${encodeURIComponent(requiredResourceName(command, "shares"))}/shares`
+      path: resourceMemberPath(command, "shares")
     });
     return formatDocumentShares(command.url, command.doctype, requiredResourceName(command, "shares"), data);
   }
@@ -477,12 +621,23 @@ function listQuery(command: ResourceRemoteCommand): URLSearchParams | undefined 
   return params.toString().length === 0 ? undefined : params;
 }
 
+function timelineQuery(command: ResourceRemoteCommand): URLSearchParams | undefined {
+  return queryParams({
+    ...(command.limit === undefined ? {} : { limit: String(command.limit) }),
+    ...(command.beforeSequence === undefined ? {} : { before_sequence: String(command.beforeSequence) })
+  });
+}
+
 function queryParams(values: Record<string, string>): URLSearchParams | undefined {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(values)) {
     params.set(key, value);
   }
   return params.toString().length === 0 ? undefined : params;
+}
+
+function resourceMemberPath(command: ResourceRemoteCommand, member: string): string {
+  return `/api/resource/${encodeURIComponent(command.doctype)}/${encodeURIComponent(requiredResourceName(command, command.action))}/${member}`;
 }
 
 function appendFilterParam(params: URLSearchParams, filter: ResourceRemoteFilter): void {
@@ -548,6 +703,34 @@ function shareBody(command: ResourceRemoteCommand): Record<string, unknown> {
   return {
     userId: requiredResourceShareUserId(command),
     ...(command.permissions === undefined ? {} : { permissions: command.permissions }),
+    ...versionBody(command)
+  };
+}
+
+function assignmentBody(command: ResourceRemoteCommand): Record<string, unknown> {
+  return {
+    assignee: requiredResourceAssignee(command),
+    ...versionBody(command)
+  };
+}
+
+function tagBody(command: ResourceRemoteCommand): Record<string, unknown> {
+  return {
+    tag: requiredResourceTag(command),
+    ...versionBody(command)
+  };
+}
+
+function followBody(command: ResourceRemoteCommand): Record<string, unknown> {
+  return {
+    ...(command.follower === undefined ? {} : { follower: command.follower }),
+    ...versionBody(command)
+  };
+}
+
+function commentBody(command: ResourceRemoteCommand): Record<string, unknown> {
+  return {
+    text: requiredResourceCommentText(command),
     ...versionBody(command)
   };
 }
@@ -727,6 +910,38 @@ function formatDocumentShares(
   ].join("\n");
 }
 
+function formatDocumentTimeline(
+  baseUrl: string,
+  doctype: string,
+  name: string,
+  timeline: DocumentTimelineResponse
+): string {
+  const entries = timeline.entries ?? [];
+  const next = timeline.nextBeforeSequence === undefined ? "" : ` Next before: ${String(timeline.nextBeforeSequence)}`;
+  return [
+    `Resource timeline ${doctype}/${name} at ${baseUrl}`,
+    `Version: ${String(timeline.version ?? 0)} Entries: ${String(entries.length)}${next}`,
+    ...timelineEntryLines(entries),
+    ""
+  ].join("\n");
+}
+
+function formatStringSet(
+  baseUrl: string,
+  doctype: string,
+  name: string,
+  label: string,
+  version: number | undefined,
+  values: readonly string[]
+): string {
+  return [
+    `Resource ${label} ${doctype}/${name} at ${baseUrl}`,
+    `Version: ${String(version ?? 0)} Total: ${String(values.length)}`,
+    ...stringSetLines(values),
+    ""
+  ].join("\n");
+}
+
 function formatSavedFilters(
   baseUrl: string,
   doctype: string,
@@ -832,6 +1047,39 @@ function documentShareGrantLines(grants: readonly DocumentShareGrantResponse[]):
   return grants.map((grant) => `- ${grant.userId}: ${grant.permissions.join(", ")}`);
 }
 
+function timelineEntryLines(entries: readonly DocumentTimelineEntryResponse[]): readonly string[] {
+  if (entries.length === 0) {
+    return ["- (none)"];
+  }
+  return entries.flatMap((entry) => [
+    timelineEntryLine(entry),
+    ...timelineChangeLines(entry.changes ?? []),
+    JSON.stringify(entry)
+  ]);
+}
+
+function timelineEntryLine(entry: DocumentTimelineEntryResponse): string {
+  const sequence = entry.sequence === undefined ? "?" : String(entry.sequence);
+  const kind = entry.kind ?? entry.type ?? "(unknown)";
+  const actor = entry.actorId === undefined ? "" : ` actor ${entry.actorId}`;
+  const summary = entry.summary === undefined ? "" : ` ${entry.summary}`;
+  return `- #${sequence} ${kind}${actor}${summary}`;
+}
+
+function timelineChangeLines(changes: readonly DocumentTimelineChangeResponse[]): readonly string[] {
+  return changes.map((change) => {
+    const field = change.field ?? "(unknown)";
+    return `  - ${field}: ${JSON.stringify(change.oldValue)} -> ${JSON.stringify(change.newValue)}`;
+  });
+}
+
+function stringSetLines(values: readonly string[]): readonly string[] {
+  if (values.length === 0) {
+    return ["- (none)"];
+  }
+  return values.map((value) => `- ${value}`);
+}
+
 function savedFilterLines(filters: readonly SavedFilterResponse[]): readonly string[] {
   if (filters.length === 0) {
     return ["- (none)"];
@@ -864,6 +1112,34 @@ function requiredResourceShareUserId(command: ResourceRemoteCommand): string {
     throw new ResourceRemoteError(`Resource ${command.action} requires --user-id`);
   }
   return command.userId;
+}
+
+function requiredResourceAssignee(command: ResourceRemoteCommand): string {
+  if (command.assignee === undefined) {
+    throw new ResourceRemoteError(`Resource ${command.action} requires --assignee`);
+  }
+  return command.assignee;
+}
+
+function requiredResourceTag(command: ResourceRemoteCommand): string {
+  if (command.tag === undefined) {
+    throw new ResourceRemoteError(`Resource ${command.action} requires --tag`);
+  }
+  return command.tag;
+}
+
+function requiredResourceFollower(command: ResourceRemoteCommand): string {
+  if (command.follower === undefined) {
+    throw new ResourceRemoteError(`Resource ${command.action} requires --follower`);
+  }
+  return command.follower;
+}
+
+function requiredResourceCommentText(command: ResourceRemoteCommand): string {
+  if (command.text === undefined) {
+    throw new ResourceRemoteError("Resource comment requires --text");
+  }
+  return command.text;
 }
 
 function requiredResourceFilterId(command: ResourceRemoteCommand): string {

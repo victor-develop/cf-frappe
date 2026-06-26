@@ -205,6 +205,17 @@ describe("cf-frappe CLI scaffold", () => {
     expect(readmeText).toContain("npx cf-frappe resources command --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources duplicate --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources bulk-transition --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe resources timeline --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe resources comment --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe resources assignments --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe resources assign --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe resources unassign --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe resources tags --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe resources tag --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe resources untag --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe resources followers --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe resources follow --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe resources unfollow --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources shares --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources share --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources unshare --url https://your-worker.example --doctype Task");

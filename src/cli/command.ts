@@ -1456,6 +1456,10 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
   let name: string | undefined;
   let filterId: string | undefined;
   let userId: string | undefined;
+  let assignee: string | undefined;
+  let tag: string | undefined;
+  let follower: string | undefined;
+  let text: string | undefined;
   const permissions: string[] = [];
   let label: string | undefined;
   let transition: string | undefined;
@@ -1472,6 +1476,7 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
   let filterExpression: Record<string, unknown> | undefined;
   let savedFilter: string | undefined;
   let limit: number | undefined;
+  let beforeSequence: number | undefined;
   let offset: number | undefined;
   let orderBy: string | undefined;
   let order: ResourceRemoteCommand["order"] | undefined;
@@ -1562,6 +1567,54 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
         return value;
       }
       userId = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--assignee") {
+      if (action !== "assign" && action !== "unassign") {
+        return { kind: "invalid", message: `Cannot use --assignee with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      assignee = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--tag") {
+      if (action !== "tag" && action !== "untag") {
+        return { kind: "invalid", message: `Cannot use --tag with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      tag = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--follower") {
+      if (action !== "follow" && action !== "unfollow") {
+        return { kind: "invalid", message: `Cannot use --follower with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      follower = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--text") {
+      if (action !== "comment") {
+        return { kind: "invalid", message: `Cannot use --text with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      text = value;
       index += 1;
       continue;
     }
@@ -1785,7 +1838,7 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--limit") {
-      if (!isResourceListQueryAction(action)) {
+      if (!isResourceListQueryAction(action) && action !== "timeline") {
         return { kind: "invalid", message: `Cannot use --limit with resources ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1797,6 +1850,22 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
         return { kind: "invalid", message: parsed };
       }
       limit = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--before-sequence") {
+      if (action !== "timeline") {
+        return { kind: "invalid", message: `Cannot use --before-sequence with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parsePositiveInteger(value, "Resource timeline before sequence");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      beforeSequence = parsed;
       index += 1;
       continue;
     }
@@ -1865,6 +1934,18 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
   if ((action === "share" || action === "unshare") && userId === undefined) {
     return { kind: "invalid", message: `Resource ${action} requires --user-id` };
   }
+  if ((action === "assign" || action === "unassign") && assignee === undefined) {
+    return { kind: "invalid", message: `Resource ${action} requires --assignee` };
+  }
+  if ((action === "tag" || action === "untag") && tag === undefined) {
+    return { kind: "invalid", message: `Resource ${action} requires --tag` };
+  }
+  if (action === "unfollow" && follower === undefined) {
+    return { kind: "invalid", message: "Resource unfollow requires --follower" };
+  }
+  if (action === "comment" && text === undefined) {
+    return { kind: "invalid", message: "Resource comment requires --text" };
+  }
   if ((action === "create" || action === "update") && data === undefined) {
     return { kind: "invalid", message: `Resource ${action} requires --data-json` };
   }
@@ -1902,6 +1983,10 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
     ...(name === undefined ? {} : { name }),
     ...(filterId === undefined ? {} : { filterId }),
     ...(userId === undefined ? {} : { userId }),
+    ...(assignee === undefined ? {} : { assignee }),
+    ...(tag === undefined ? {} : { tag }),
+    ...(follower === undefined ? {} : { follower }),
+    ...(text === undefined ? {} : { text }),
     ...(permissions.length === 0 ? {} : { permissions }),
     ...(label === undefined ? {} : { label }),
     ...(transition === undefined ? {} : { transition }),
@@ -1918,6 +2003,7 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
     ...(filterExpression === undefined ? {} : { filterExpression }),
     ...(savedFilter === undefined ? {} : { savedFilter }),
     ...(limit === undefined ? {} : { limit }),
+    ...(beforeSequence === undefined ? {} : { beforeSequence }),
     ...(offset === undefined ? {} : { offset }),
     ...(orderBy === undefined ? {} : { orderBy }),
     ...(order === undefined ? {} : { order }),
@@ -1944,17 +2030,22 @@ function fileAction(value: string): FileRemoteAction | undefined {
 
 function resourceAction(value: string): ResourceRemoteAction | undefined {
   return value === "amend" ||
+    value === "assign" ||
+    value === "assignments" ||
     value === "bulk-cancel" ||
     value === "bulk-delete" ||
     value === "bulk-submit" ||
     value === "bulk-transition" ||
     value === "cancel" ||
+    value === "comment" ||
     value === "command" ||
     value === "list" ||
     value === "get" ||
     value === "create" ||
     value === "duplicate" ||
     value === "export" ||
+    value === "follow" ||
+    value === "followers" ||
     value === "submit" ||
     value === "import" ||
     value === "import-template" ||
@@ -1963,8 +2054,14 @@ function resourceAction(value: string): ResourceRemoteAction | undefined {
     value === "saved-filters" ||
     value === "share" ||
     value === "shares" ||
+    value === "tag" ||
+    value === "tags" ||
+    value === "timeline" ||
     value === "transition" ||
+    value === "unassign" ||
+    value === "unfollow" ||
     value === "unshare" ||
+    value === "untag" ||
     value === "update" ||
     value === "delete"
     ? value
@@ -1973,16 +2070,27 @@ function resourceAction(value: string): ResourceRemoteAction | undefined {
 
 function isNamedResourceAction(action: ResourceRemoteAction): boolean {
   return action === "amend" ||
+    action === "assign" ||
+    action === "assignments" ||
     action === "cancel" ||
+    action === "comment" ||
     action === "command" ||
     action === "delete" ||
     action === "duplicate" ||
+    action === "follow" ||
+    action === "followers" ||
     action === "get" ||
     action === "share" ||
     action === "shares" ||
     action === "submit" ||
+    action === "tag" ||
+    action === "tags" ||
+    action === "timeline" ||
     action === "transition" ||
+    action === "unassign" ||
+    action === "unfollow" ||
     action === "unshare" ||
+    action === "untag" ||
     action === "update";
 }
 
@@ -1996,14 +2104,21 @@ function isResourceDataAction(action: ResourceRemoteAction): boolean {
 
 function isResourceVersionAction(action: ResourceRemoteAction): boolean {
   return action === "amend" ||
+    action === "assign" ||
     action === "cancel" ||
+    action === "comment" ||
     action === "command" ||
     action === "delete" ||
     action === "duplicate" ||
+    action === "follow" ||
     action === "share" ||
     action === "submit" ||
+    action === "tag" ||
     action === "transition" ||
+    action === "unassign" ||
+    action === "unfollow" ||
     action === "unshare" ||
+    action === "untag" ||
     action === "update";
 }
 
@@ -2486,6 +2601,17 @@ function helpText(): string {
     "  cf-frappe resources command --url <origin> --doctype <doctype> --name <docname> --command <name> [--data-json <json>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources duplicate --url <origin> --doctype <doctype> --name <docname> [--data-json <json>] [--new-name <docname>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources amend --url <origin> --doctype <doctype> --name <docname> [--data-json <json>] [--new-name <docname>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources timeline --url <origin> --doctype <doctype> --name <docname> [--limit <n>] [--before-sequence <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources comment --url <origin> --doctype <doctype> --name <docname> --text <text> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources assignments --url <origin> --doctype <doctype> --name <docname> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources assign --url <origin> --doctype <doctype> --name <docname> --assignee <user> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources unassign --url <origin> --doctype <doctype> --name <docname> --assignee <user> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources tags --url <origin> --doctype <doctype> --name <docname> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources tag --url <origin> --doctype <doctype> --name <docname> --tag <tag> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources untag --url <origin> --doctype <doctype> --name <docname> --tag <tag> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources followers --url <origin> --doctype <doctype> --name <docname> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources follow --url <origin> --doctype <doctype> --name <docname> [--follower <user>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources unfollow --url <origin> --doctype <doctype> --name <docname> --follower <user> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources shares --url <origin> --doctype <doctype> --name <docname> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources share --url <origin> --doctype <doctype> --name <docname> --user-id <user> [--permission <read|update|share|write>]... [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources unshare --url <origin> --doctype <doctype> --name <docname> --user-id <user> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",

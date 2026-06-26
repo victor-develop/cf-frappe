@@ -309,6 +309,17 @@ npx cf-frappe resources transition --url https://your-worker.example --doctype T
 npx cf-frappe resources command --url https://your-worker.example --doctype Task --name "Follow up" --command raisePriority --data-json '{"priority":"High"}' --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources duplicate --url https://your-worker.example --doctype Task --name "Follow up" --new-name "Follow up copy" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources bulk-transition --url https://your-worker.example --doctype Task --transition close --document "Follow up" --document-version "Review generated Desk workspace:1" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources timeline --url https://your-worker.example --doctype Task --name "Follow up" --limit 25 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources comment --url https://your-worker.example --doctype Task --name "Follow up" --text "Needs one more look" --expected-version 3 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources assignments --url https://your-worker.example --doctype Task --name "Follow up" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources assign --url https://your-worker.example --doctype Task --name "Follow up" --assignee teammate@example.com --expected-version 4 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources unassign --url https://your-worker.example --doctype Task --name "Follow up" --assignee teammate@example.com --expected-version 5 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources tags --url https://your-worker.example --doctype Task --name "Follow up" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources tag --url https://your-worker.example --doctype Task --name "Follow up" --tag urgent --expected-version 6 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources untag --url https://your-worker.example --doctype Task --name "Follow up" --tag urgent --expected-version 7 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources followers --url https://your-worker.example --doctype Task --name "Follow up" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources follow --url https://your-worker.example --doctype Task --name "Follow up" --expected-version 8 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources unfollow --url https://your-worker.example --doctype Task --name "Follow up" --follower teammate@example.com --expected-version 9 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources shares --url https://your-worker.example --doctype Task --name "Follow up" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources share --url https://your-worker.example --doctype Task --name "Follow up" --user-id teammate@example.com --permission read --permission update --expected-version 2 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources unshare --url https://your-worker.example --doctype Task --name "Follow up" --user-id teammate@example.com --expected-version 3 --header-env Authorization=CF_FRAPPE_AUTH
