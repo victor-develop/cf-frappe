@@ -80,6 +80,13 @@ import {
   type ResourceRemoteCommand
 } from "./resources.js";
 import {
+  ProfileRemoteError,
+  runRemoteProfileCommand,
+  type ProfileHeaderOption,
+  type ProfileRemoteAction,
+  type ProfileRemoteCommand
+} from "./profiles.js";
+import {
   RoleRemoteError,
   runRemoteRoleCommand,
   type RoleHeaderOption,
@@ -171,6 +178,7 @@ type ParsedCommand =
   | NotificationRuleRemoteCommand
   | FileRemoteCommand
   | ResourceRemoteCommand
+  | ProfileRemoteCommand
   | RoleRemoteCommand
   | UserRemoteCommand
   | UserPermissionRemoteCommand
@@ -236,6 +244,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     if (command.kind === "resources") {
       io.stdout.write(await runRemoteResourceCommand(command, {
         cwd: io.cwd(),
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
+    if (command.kind === "profiles") {
+      io.stdout.write(await runRemoteProfileCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -352,6 +367,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof NotificationRuleRemoteError ||
       error instanceof FileRemoteError ||
       error instanceof ResourceRemoteError ||
+      error instanceof ProfileRemoteError ||
       error instanceof RoleRemoteError ||
       error instanceof UserRemoteError ||
       error instanceof UserPermissionRemoteError ||
@@ -395,6 +411,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "resources") {
     return parseResourcesArgs(rest);
+  }
+  if (command === "profiles") {
+    return parseProfilesArgs(rest);
   }
   if (command === "roles") {
     return parseRolesArgs(rest);
@@ -1423,6 +1442,144 @@ function parseUsersArgs(argv: readonly string[]): ParsedCommand {
     ...(provider === undefined ? {} : { provider }),
     ...(subject === undefined ? {} : { subject }),
     ...(emailVerified === undefined ? {} : { emailVerified }),
+    ...(expectedVersion === undefined ? {} : { expectedVersion })
+  };
+}
+
+function parseProfilesArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = profileAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown profiles command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: ProfileHeaderOption[] = [];
+  let userId: string | undefined;
+  let tenant: string | undefined;
+  let profile: Record<string, unknown> | undefined;
+  let expectedVersion: number | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "Profile");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "Profile");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--user-id") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      userId = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--tenant") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      tenant = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--profile-json") {
+      if (action !== "update") {
+        return { kind: "invalid", message: "Cannot use --profile-json with profiles get" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseJsonObject(value, "Profile update");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      if (Object.hasOwn(parsed, "expectedVersion")) {
+        return { kind: "invalid", message: "Profile update --profile-json cannot include expectedVersion; use --expected-version" };
+      }
+      profile = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--expected-version") {
+      if (action === "get") {
+        return { kind: "invalid", message: "Cannot use --expected-version with profiles get" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseNonNegativeInteger(value, "Profile expected version");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      expectedVersion = parsed;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown profiles ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if (userId === undefined) {
+    return { kind: "invalid", message: `Profile ${action} requires --user-id` };
+  }
+  if (action === "update" && profile === undefined) {
+    return { kind: "invalid", message: "Profile update requires --profile-json" };
+  }
+
+  return {
+    kind: "profiles",
+    action,
+    url,
+    headers,
+    userId,
+    ...(tenant === undefined ? {} : { tenant }),
+    ...(profile === undefined ? {} : { profile }),
     ...(expectedVersion === undefined ? {} : { expectedVersion })
   };
 }
@@ -3481,6 +3638,10 @@ function userAction(value: string): UserRemoteAction | undefined {
     : undefined;
 }
 
+function profileAction(value: string): ProfileRemoteAction | undefined {
+  return value === "get" || value === "update" ? value : undefined;
+}
+
 function resourceAction(value: string): ResourceRemoteAction | undefined {
   return value === "activity" ||
     value === "amend" ||
@@ -3682,7 +3843,7 @@ function parseJsonObject(value: string, label: string): Record<string, unknown> 
 function parseLiteralHeader(
   value: string,
   label: string
-): CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
+): CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | ProfileHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
   const separator = value.indexOf(":");
   if (separator < 1) {
     return `${label} header must use 'Name: value' syntax`;
@@ -3701,7 +3862,7 @@ function parseLiteralHeader(
 function parseEnvHeader(
   value: string,
   label: string
-): CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
+): CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | ProfileHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
   const separator = value.indexOf("=");
   if (separator < 1) {
     return `${label} environment header must use 'Name=ENV_VAR' syntax`;
@@ -4071,6 +4232,8 @@ function helpText(): string {
     "  cf-frappe users provider-sync --url <origin> --user-id <user> --provider <provider> --subject <subject> [--email <email>] [--role <role>]... [--enabled|--disabled] [--email-verified|--email-unverified] [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe users enable --url <origin> --user-id <user> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe users disable --url <origin> --user-id <user> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe profiles get --url <origin> --user-id <user> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe profiles update --url <origin> --user-id <user> --profile-json <json> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources list --url <origin> --doctype <doctype> [--filter <field[__operator]=value>] [--filter-expression-json <json>] [--saved-filter <id>] [--limit <n>] [--offset <n>] [--order-by <field>] [--order <asc|desc>] [--no-default-filters] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources get --url <origin> --doctype <doctype> --name <docname> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources create --url <origin> --doctype <doctype> --data-json <json> [--header <name:value>] [--header-env <name=ENV>]",

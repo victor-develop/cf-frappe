@@ -221,6 +221,8 @@ describe("cf-frappe CLI scaffold", () => {
     expect(readmeText).toContain("npx cf-frappe users provider-sync --url https://your-worker.example --user-id teammate@example.com");
     expect(readmeText).toContain("npx cf-frappe users disable --url https://your-worker.example --user-id teammate@example.com");
     expect(readmeText).toContain("npx cf-frappe users enable --url https://your-worker.example --user-id teammate@example.com");
+    expect(readmeText).toContain("npx cf-frappe profiles get --url https://your-worker.example --user-id teammate@example.com");
+    expect(readmeText).toContain("npx cf-frappe profiles update --url https://your-worker.example --user-id teammate@example.com");
     expect(readmeText).toContain("npx cf-frappe resources list --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources get --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources create --url https://your-worker.example --doctype Task");
