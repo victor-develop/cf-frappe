@@ -142,6 +142,13 @@ import {
   type WorkflowRemoteAction,
   type WorkflowRemoteCommand
 } from "./workflows.js";
+import {
+  WorkspaceRemoteError,
+  runRemoteWorkspaceCommand,
+  type WorkspaceHeaderOption,
+  type WorkspaceRemoteAction,
+  type WorkspaceRemoteCommand
+} from "./workspaces.js";
 import { scaffoldProject, ScaffoldError } from "./scaffold.js";
 import type { StarterAuthMode } from "./templates.js";
 
@@ -215,6 +222,7 @@ type ParsedCommand =
   | UserRemoteCommand
   | UserPermissionRemoteCommand
   | WorkflowRemoteCommand
+  | WorkspaceRemoteCommand
   | HelpCommand
   | InvalidCommand;
 
@@ -344,6 +352,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       }));
       return 0;
     }
+    if (command.kind === "workspaces") {
+      io.stdout.write(await runRemoteWorkspaceCommand(command, {
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
     if (command.kind === "access-setup") {
       io.stdout.write(await runCloudflareAccessSetupCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
@@ -435,7 +450,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof RoleRemoteError ||
       error instanceof UserRemoteError ||
       error instanceof UserPermissionRemoteError ||
-      error instanceof WorkflowRemoteError
+      error instanceof WorkflowRemoteError ||
+      error instanceof WorkspaceRemoteError
     ) {
       io.stderr.write(`cf-frappe: ${error.message}\n`);
       return 1;
@@ -502,6 +518,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "workflows") {
     return parseWorkflowsArgs(rest);
+  }
+  if (command === "workspaces") {
+    return parseWorkspacesArgs(rest);
   }
   if (command === "access") {
     return parseAccessArgs(rest);
@@ -2350,6 +2369,98 @@ function dataPatchAction(value: string): DataPatchRemoteAction | undefined {
 
 function dashboardAction(value: string): DashboardRemoteAction | undefined {
   return value === "list" || value === "get" || value === "run" ? value : undefined;
+}
+
+function parseWorkspacesArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = workspaceAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown workspaces command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: WorkspaceHeaderOption[] = [];
+  let workspace: string | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "Workspace");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "Workspace");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--workspace") {
+      if (action === "list") {
+        return { kind: "invalid", message: "Cannot use --workspace with workspaces list" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      workspace = value;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown workspaces ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if (action !== "list" && workspace === undefined) {
+    return { kind: "invalid", message: `Workspace ${action} requires --workspace` };
+  }
+
+  return {
+    kind: "workspaces",
+    action,
+    url,
+    headers,
+    ...(workspace === undefined ? {} : { workspace })
+  };
+}
+
+function workspaceAction(value: string): WorkspaceRemoteAction | undefined {
+  return value === "list" || value === "get" ? value : undefined;
 }
 
 function isSingleDataPatchAction(action: DataPatchRemoteAction): boolean {
@@ -4816,6 +4927,8 @@ function helpText(): string {
     "  cf-frappe dashboards list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe dashboards get --url <origin> --dashboard <dashboard> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe dashboards run --url <origin> --dashboard <dashboard> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe workspaces list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe workspaces get --url <origin> --workspace <workspace> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs list --url <origin> [--job <name>] [--run-id <id>] [--status <running|succeeded|failed>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs get --url <origin> --idempotency-key <key> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs retry --url <origin> --idempotency-key <key> [--header <name:value>] [--header-env <name=ENV>]",

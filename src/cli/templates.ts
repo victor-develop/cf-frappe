@@ -313,6 +313,8 @@ npx cf-frappe workflows clear --url https://your-worker.example --doctype Task -
 npx cf-frappe dashboards list --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe dashboards get --url https://your-worker.example --dashboard "Task Dashboard" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe dashboards run --url https://your-worker.example --dashboard "Task Dashboard" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe workspaces list --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe workspaces get --url https://your-worker.example --workspace Tasks --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe print-formats list --url https://your-worker.example --doctype Task --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe print-formats get --url https://your-worker.example --format "Task Standard" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe print-formats letterheads --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
