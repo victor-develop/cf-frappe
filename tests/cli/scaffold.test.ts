@@ -207,6 +207,7 @@ describe("cf-frappe CLI scaffold", () => {
     expect(readmeText).toContain("npx cf-frappe resources bulk-transition --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources timeline --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources comment --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe resources activity --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources assignments --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources assign --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources unassign --url https://your-worker.example --doctype Task");

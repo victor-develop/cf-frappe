@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the remote resource collaboration CLI slice:
+As of the remote resource activity CLI slice:
 
 - Vitest files: `96`
-- Vitest cases: `1153`
+- Vitest cases: `1154`
 
 ## Implication
 

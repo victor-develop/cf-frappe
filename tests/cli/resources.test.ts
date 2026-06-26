@@ -468,6 +468,42 @@ describe("cf-frappe CLI remote resources", () => {
 
     expect(parseCliArgs([
       "resources",
+      "activity",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK/1",
+      "--subject",
+      "Follow-up sent",
+      "--activity-type",
+      "email",
+      "--detail",
+      "Sent to customer@example.com",
+      "--channel",
+      "email",
+      "--external-id",
+      "msg/123",
+      "--expected-version",
+      "5"
+    ])).toEqual({
+      kind: "resources",
+      action: "activity",
+      url: "https://app.example",
+      headers: [],
+      doctype: "Task",
+      name: "TASK/1",
+      subject: "Follow-up sent",
+      activityType: "email",
+      detail: "Sent to customer@example.com",
+      channel: "email",
+      externalId: "msg/123",
+      expectedVersion: 5
+    });
+
+    expect(parseCliArgs([
+      "resources",
       "assign",
       "--url",
       "https://app.example",
@@ -936,6 +972,34 @@ describe("cf-frappe CLI remote resources", () => {
     ])).toEqual({
       kind: "invalid",
       message: "Resource comment requires --text"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "activity",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK-1"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Resource activity requires --subject"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "comment",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK-1",
+      "--activity-type",
+      "email"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Cannot use --activity-type with resources comment"
     });
     expect(parseCliArgs([
       "resources",
@@ -1797,6 +1861,89 @@ describe("cf-frappe CLI remote resources", () => {
     expect(unfollowCalls[0]?.url).toBe("https://app.example/api/resource/Task/TASK-1/followers/amy%2Bops%40example.com");
     expect(unfollowCalls[0]?.method).toBe("DELETE");
     expect(unfollowCalls[0]?.body).toBe(JSON.stringify({ expectedVersion: 14 }));
+  });
+
+  it("records remote document activity through the generated resource API", async () => {
+    const activityCalls: RemoteCall[] = [];
+    const activityStdout = textBuffer();
+    const activityExit = await runCli(
+      [
+        "resources",
+        "activity",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task Type",
+        "--name",
+        "TASK/1",
+        "--subject",
+        "Follow-up sent",
+        "--activity-type",
+        "email",
+        "--detail",
+        "Sent to customer@example.com",
+        "--channel",
+        "email",
+        "--external-id",
+        "msg/123",
+        "--expected-version",
+        "15",
+        "--header-env",
+        "Authorization=CF_FRAPPE_AUTH"
+      ],
+      {
+        cwd: () => tempRoot,
+        env: (name) => name === "CF_FRAPPE_AUTH" ? "Bearer test-token" : undefined,
+        fetch: fakeFetch(activityCalls, {
+          data: { name: "TASK/1", version: 16, docstatus: "draft", data: { title: "First" } }
+        }, 201),
+        stdout: activityStdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(activityExit).toBe(0);
+    expect(activityCalls[0]?.url).toBe("https://app.example/api/resource/Task%20Type/TASK%2F1/activities");
+    expect(activityCalls[0]?.method).toBe("POST");
+    expect(activityCalls[0]?.headers.get("authorization")).toBe("Bearer test-token");
+    expect(activityCalls[0]?.body).toBe(JSON.stringify({
+      subject: "Follow-up sent",
+      activityType: "email",
+      detail: "Sent to customer@example.com",
+      channel: "email",
+      externalId: "msg/123",
+      expectedVersion: 15
+    }));
+    expect(activityStdout.text()).toContain("Recorded resource activity Task Type at https://app.example");
+    expect(activityStdout.text()).toContain("- TASK/1 version 16 status draft");
+
+    const minimalCalls: RemoteCall[] = [];
+    const minimalExit = await runCli(
+      [
+        "resources",
+        "activity",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--name",
+        "TASK-2",
+        "--subject",
+        "Viewed in review"
+      ],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetch(minimalCalls, {
+          data: { name: "TASK-2", version: 3, docstatus: "draft" }
+        }, 201),
+        stdout: textBuffer(),
+        stderr: textBuffer()
+      }
+    );
+
+    expect(minimalExit).toBe(0);
+    expect(minimalCalls[0]?.url).toBe("https://app.example/api/resource/Task/TASK-2/activities");
+    expect(minimalCalls[0]?.body).toBe(JSON.stringify({ subject: "Viewed in review" }));
   });
 
   it("lists, shares, and revokes remote resource document shares through the generated resource API", async () => {

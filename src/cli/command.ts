@@ -1460,6 +1460,11 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
   let tag: string | undefined;
   let follower: string | undefined;
   let text: string | undefined;
+  let subject: string | undefined;
+  let activityType: string | undefined;
+  let detail: string | undefined;
+  let channel: string | undefined;
+  let externalId: string | undefined;
   const permissions: string[] = [];
   let label: string | undefined;
   let transition: string | undefined;
@@ -1615,6 +1620,66 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
         return value;
       }
       text = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--subject") {
+      if (action !== "activity") {
+        return { kind: "invalid", message: `Cannot use --subject with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      subject = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--activity-type") {
+      if (action !== "activity") {
+        return { kind: "invalid", message: `Cannot use --activity-type with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      activityType = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--detail") {
+      if (action !== "activity") {
+        return { kind: "invalid", message: `Cannot use --detail with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      detail = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--channel") {
+      if (action !== "activity") {
+        return { kind: "invalid", message: `Cannot use --channel with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      channel = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--external-id") {
+      if (action !== "activity") {
+        return { kind: "invalid", message: `Cannot use --external-id with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      externalId = value;
       index += 1;
       continue;
     }
@@ -1946,6 +2011,9 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
   if (action === "comment" && text === undefined) {
     return { kind: "invalid", message: "Resource comment requires --text" };
   }
+  if (action === "activity" && subject === undefined) {
+    return { kind: "invalid", message: "Resource activity requires --subject" };
+  }
   if ((action === "create" || action === "update") && data === undefined) {
     return { kind: "invalid", message: `Resource ${action} requires --data-json` };
   }
@@ -1987,6 +2055,11 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
     ...(tag === undefined ? {} : { tag }),
     ...(follower === undefined ? {} : { follower }),
     ...(text === undefined ? {} : { text }),
+    ...(subject === undefined ? {} : { subject }),
+    ...(activityType === undefined ? {} : { activityType }),
+    ...(detail === undefined ? {} : { detail }),
+    ...(channel === undefined ? {} : { channel }),
+    ...(externalId === undefined ? {} : { externalId }),
     ...(permissions.length === 0 ? {} : { permissions }),
     ...(label === undefined ? {} : { label }),
     ...(transition === undefined ? {} : { transition }),
@@ -2029,7 +2102,8 @@ function fileAction(value: string): FileRemoteAction | undefined {
 }
 
 function resourceAction(value: string): ResourceRemoteAction | undefined {
-  return value === "amend" ||
+  return value === "activity" ||
+    value === "amend" ||
     value === "assign" ||
     value === "assignments" ||
     value === "bulk-cancel" ||
@@ -2069,7 +2143,8 @@ function resourceAction(value: string): ResourceRemoteAction | undefined {
 }
 
 function isNamedResourceAction(action: ResourceRemoteAction): boolean {
-  return action === "amend" ||
+  return action === "activity" ||
+    action === "amend" ||
     action === "assign" ||
     action === "assignments" ||
     action === "cancel" ||
@@ -2103,7 +2178,8 @@ function isResourceDataAction(action: ResourceRemoteAction): boolean {
 }
 
 function isResourceVersionAction(action: ResourceRemoteAction): boolean {
-  return action === "amend" ||
+  return action === "activity" ||
+    action === "amend" ||
     action === "assign" ||
     action === "cancel" ||
     action === "comment" ||
@@ -2603,6 +2679,7 @@ function helpText(): string {
     "  cf-frappe resources amend --url <origin> --doctype <doctype> --name <docname> [--data-json <json>] [--new-name <docname>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources timeline --url <origin> --doctype <doctype> --name <docname> [--limit <n>] [--before-sequence <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources comment --url <origin> --doctype <doctype> --name <docname> --text <text> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources activity --url <origin> --doctype <doctype> --name <docname> --subject <subject> [--activity-type <type>] [--detail <detail>] [--channel <channel>] [--external-id <id>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources assignments --url <origin> --doctype <doctype> --name <docname> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources assign --url <origin> --doctype <doctype> --name <docname> --assignee <user> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources unassign --url <origin> --doctype <doctype> --name <docname> --assignee <user> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",

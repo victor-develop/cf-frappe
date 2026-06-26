@@ -311,6 +311,7 @@ npx cf-frappe resources duplicate --url https://your-worker.example --doctype Ta
 npx cf-frappe resources bulk-transition --url https://your-worker.example --doctype Task --transition close --document "Follow up" --document-version "Review generated Desk workspace:1" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources timeline --url https://your-worker.example --doctype Task --name "Follow up" --limit 25 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources comment --url https://your-worker.example --doctype Task --name "Follow up" --text "Needs one more look" --expected-version 3 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources activity --url https://your-worker.example --doctype Task --name "Follow up" --subject "Follow-up sent" --activity-type email --detail "Sent to customer@example.com" --channel email --external-id msg-123 --expected-version 4 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources assignments --url https://your-worker.example --doctype Task --name "Follow up" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources assign --url https://your-worker.example --doctype Task --name "Follow up" --assignee teammate@example.com --expected-version 4 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources unassign --url https://your-worker.example --doctype Task --name "Follow up" --assignee teammate@example.com --expected-version 5 --header-env Authorization=CF_FRAPPE_AUTH

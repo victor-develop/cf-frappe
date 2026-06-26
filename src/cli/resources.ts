@@ -9,6 +9,7 @@ import {
 } from "./remote-admin.js";
 
 export type ResourceRemoteAction =
+  | "activity"
   | "amend"
   | "assign"
   | "assignments"
@@ -60,6 +61,11 @@ export interface ResourceRemoteCommand {
   readonly tag?: string;
   readonly follower?: string;
   readonly text?: string;
+  readonly subject?: string;
+  readonly activityType?: string;
+  readonly detail?: string;
+  readonly channel?: string;
+  readonly externalId?: string;
   readonly permissions?: readonly string[];
   readonly label?: string;
   readonly transition?: string;
@@ -235,6 +241,14 @@ export async function runRemoteResourceCommand(
   command: ResourceRemoteCommand,
   io: ResourceRemoteIo = {}
 ): Promise<string> {
+  if (command.action === "activity") {
+    const data = await requestRemoteResource<DocumentSnapshotResponse>(command, io, {
+      body: activityBody(command),
+      method: "POST",
+      path: resourceMemberPath(command, "activities")
+    });
+    return formatResourceDetail(command.url, command.doctype, "Recorded resource activity", data);
+  }
   if (command.action === "timeline") {
     const query = timelineQuery(command);
     const data = await requestRemoteResource<DocumentTimelineResponse>(command, io, {
@@ -735,6 +749,17 @@ function commentBody(command: ResourceRemoteCommand): Record<string, unknown> {
   };
 }
 
+function activityBody(command: ResourceRemoteCommand): Record<string, unknown> {
+  return {
+    subject: requiredResourceActivitySubject(command),
+    ...(command.activityType === undefined ? {} : { activityType: command.activityType }),
+    ...(command.detail === undefined ? {} : { detail: command.detail }),
+    ...(command.channel === undefined ? {} : { channel: command.channel }),
+    ...(command.externalId === undefined ? {} : { externalId: command.externalId }),
+    ...versionBody(command)
+  };
+}
+
 function cloneBody(command: ResourceRemoteCommand): Record<string, unknown> {
   return {
     ...(command.data === undefined ? {} : { data: command.data }),
@@ -1140,6 +1165,13 @@ function requiredResourceCommentText(command: ResourceRemoteCommand): string {
     throw new ResourceRemoteError("Resource comment requires --text");
   }
   return command.text;
+}
+
+function requiredResourceActivitySubject(command: ResourceRemoteCommand): string {
+  if (command.subject === undefined) {
+    throw new ResourceRemoteError("Resource activity requires --subject");
+  }
+  return command.subject;
 }
 
 function requiredResourceFilterId(command: ResourceRemoteCommand): string {
