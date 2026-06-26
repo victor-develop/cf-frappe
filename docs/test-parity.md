@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the remote link-options CLI slice:
+As of the remote DocType metadata CLI slice:
 
-- Vitest files: `113`
-- Vitest cases: `1247`
+- Vitest files: `114`
+- Vitest cases: `1253`
 
 ## Implication
 

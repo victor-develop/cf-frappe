@@ -58,6 +58,13 @@ import {
   type DashboardRemoteCommand
 } from "./dashboards.js";
 import {
+  DocTypeRemoteError,
+  runRemoteDocTypeCommand,
+  type DocTypeHeaderOption,
+  type DocTypeRemoteAction,
+  type DocTypeRemoteCommand
+} from "./doctypes.js";
+import {
   FieldPropertyRemoteError,
   runRemoteFieldPropertyCommand,
   type FieldPropertyHeaderOption,
@@ -237,6 +244,7 @@ type ParsedCommand =
   | CustomFieldRemoteCommand
   | DataPatchRemoteCommand
   | DashboardRemoteCommand
+  | DocTypeRemoteCommand
   | FieldPropertyRemoteCommand
   | JobRemoteCommand
   | LinkOptionRemoteCommand
@@ -292,6 +300,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     if (command.kind === "dashboards") {
       io.stdout.write(await runRemoteDashboardCommand(command, {
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
+    if (command.kind === "doctypes") {
+      io.stdout.write(await runRemoteDocTypeCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -498,6 +513,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof CustomFieldRemoteError ||
       error instanceof DataPatchRemoteError ||
       error instanceof DashboardRemoteError ||
+      error instanceof DocTypeRemoteError ||
       error instanceof FieldPropertyRemoteError ||
       error instanceof JobRemoteError ||
       error instanceof LinkOptionRemoteError ||
@@ -545,6 +561,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "dashboards") {
     return parseDashboardsArgs(rest);
+  }
+  if (command === "doctypes") {
+    return parseDoctypesArgs(rest);
   }
   if (command === "field-properties") {
     return parseFieldPropertiesArgs(rest);
@@ -2828,6 +2847,101 @@ function parseSearchArgs(argv: readonly string[]): ParsedCommand {
     ...(limit === undefined ? {} : { limit }),
     ...(tenant === undefined ? {} : { tenant })
   };
+}
+
+function parseDoctypesArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = doctypeAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown doctypes command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: DocTypeHeaderOption[] = [];
+  let doctype: string | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "DocTypes");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "DocTypes");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--doctype") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      doctype = value;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown doctypes ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if (action === "list" && doctype !== undefined) {
+    return { kind: "invalid", message: "Cannot use --doctype with doctypes list" };
+  }
+  if (action !== "list" && doctype === undefined) {
+    return { kind: "invalid", message: `DocType ${action} requires --doctype` };
+  }
+
+  return {
+    kind: "doctypes",
+    action,
+    url,
+    headers,
+    ...(doctype === undefined ? {} : { doctype })
+  };
+}
+
+function doctypeAction(value: string): DocTypeRemoteAction | undefined {
+  if (value === "get" || value === "list" || value === "list-view") {
+    return value;
+  }
+  return undefined;
 }
 
 function parseLinkOptionsArgs(argv: readonly string[]): ParsedCommand {
@@ -5696,6 +5810,9 @@ function helpText(): string {
     "  cf-frappe dashboards list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe dashboards get --url <origin> --dashboard <dashboard> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe dashboards run --url <origin> --dashboard <dashboard> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe doctypes list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe doctypes get --url <origin> --doctype <doctype> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe doctypes list-view --url <origin> --doctype <doctype> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe workspaces list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe workspaces get --url <origin> --workspace <workspace> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe reports list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
