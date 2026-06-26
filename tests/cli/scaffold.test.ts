@@ -201,6 +201,10 @@ describe("cf-frappe CLI scaffold", () => {
     expect(readmeText).toContain("npx cf-frappe resources get --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources create --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources update --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe resources transition --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe resources command --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe resources duplicate --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe resources bulk-transition --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources delete --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe files get --url https://your-worker.example --name file_invoice");
     expect(readmeText).toContain("npx cf-frappe files upload --url https://your-worker.example --path ./invoice.pdf");

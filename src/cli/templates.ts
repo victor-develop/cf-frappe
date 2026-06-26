@@ -305,6 +305,10 @@ npx cf-frappe resources list --url https://your-worker.example --doctype Task --
 npx cf-frappe resources get --url https://your-worker.example --doctype Task --name "Review generated Desk workspace" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources create --url https://your-worker.example --doctype Task --data-json '{"title":"Follow up","priority":"Medium","workflow_state":"Open"}' --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources update --url https://your-worker.example --doctype Task --name "Follow up" --data-json '{"workflow_state":"Doing"}' --expected-version 1 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources transition --url https://your-worker.example --doctype Task --name "Follow up" --transition close --expected-version 2 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources command --url https://your-worker.example --doctype Task --name "Follow up" --command raisePriority --data-json '{"priority":"High"}' --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources duplicate --url https://your-worker.example --doctype Task --name "Follow up" --new-name "Follow up copy" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources bulk-transition --url https://your-worker.example --doctype Task --transition close --document "Follow up" --document-version "Review generated Desk workspace:1" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources delete --url https://your-worker.example --doctype Task --name "Follow up" --expected-version 2 --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 

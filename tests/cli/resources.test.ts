@@ -108,6 +108,107 @@ describe("cf-frappe CLI remote resources", () => {
       data: { status: "Closed" },
       expectedVersion: 3
     });
+
+    expect(parseCliArgs([
+      "resources",
+      "transition",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK-1",
+      "--transition",
+      "close",
+      "--expected-version",
+      "4"
+    ])).toEqual({
+      kind: "resources",
+      action: "transition",
+      url: "https://app.example",
+      headers: [],
+      doctype: "Task",
+      name: "TASK-1",
+      transition: "close",
+      expectedVersion: 4
+    });
+
+    expect(parseCliArgs([
+      "resources",
+      "command",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK-1",
+      "--command",
+      "raisePriority",
+      "--data-json",
+      "{\"priority\":\"High\"}",
+      "--expected-version",
+      "5"
+    ])).toEqual({
+      kind: "resources",
+      action: "command",
+      url: "https://app.example",
+      headers: [],
+      doctype: "Task",
+      name: "TASK-1",
+      command: "raisePriority",
+      data: { priority: "High" },
+      expectedVersion: 5
+    });
+
+    expect(parseCliArgs([
+      "resources",
+      "duplicate",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK-1",
+      "--new-name",
+      "TASK-1 Copy",
+      "--data-json",
+      "{\"title\":\"Copied\"}"
+    ])).toEqual({
+      kind: "resources",
+      action: "duplicate",
+      url: "https://app.example",
+      headers: [],
+      doctype: "Task",
+      name: "TASK-1",
+      data: { title: "Copied" },
+      newName: "TASK-1 Copy"
+    });
+
+    expect(parseCliArgs([
+      "resources",
+      "bulk-transition",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--transition",
+      "close",
+      "--document",
+      "TASK-1",
+      "--document-version",
+      "TASK/2:7"
+    ])).toEqual({
+      kind: "resources",
+      action: "bulk-transition",
+      url: "https://app.example",
+      headers: [],
+      doctype: "Task",
+      transition: "close",
+      documents: [
+        { name: "TASK-1" },
+        { name: "TASK/2", expectedVersion: 7 }
+      ]
+    });
   });
 
   it("rejects invalid remote resource options before fetching", () => {
@@ -163,6 +264,56 @@ describe("cf-frappe CLI remote resources", () => {
     ])).toEqual({
       kind: "invalid",
       message: "Resource list order must be asc or desc"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "transition",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK-1"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Resource transition requires --transition"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "command",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--name",
+      "TASK-1"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Resource command requires --command"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "bulk-delete",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Resource bulk-delete requires at least one --document or --document-version"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "bulk-submit",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--document-version",
+      "TASK-1"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Resource version selection must use <docname>:<expectedVersion>"
     });
   });
 
@@ -323,6 +474,239 @@ describe("cf-frappe CLI remote resources", () => {
     expect(deleteCalls[0]?.url).toBe("https://app.example/api/resource/Task/TASK-1");
     expect(deleteCalls[0]?.method).toBe("DELETE");
     expect(deleteCalls[0]?.body).toBe("{\"expectedVersion\":2}");
+  });
+
+  it("runs lifecycle, workflow, and custom commands through the generated resource API", async () => {
+    const submitCalls: RemoteCall[] = [];
+    const submitExit = await runCli(
+      [
+        "resources",
+        "submit",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--name",
+        "TASK/001",
+        "--expected-version",
+        "2"
+      ],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(submitCalls, {
+          data: { name: "TASK/001", version: 3, docstatus: "submitted", data: { title: "First" } }
+        }),
+        stdout: textBuffer(),
+        stderr: textBuffer()
+      }
+    );
+
+    expect(submitExit).toBe(0);
+    expect(submitCalls[0]?.url).toBe("https://app.example/api/resource/Task/TASK%2F001/submit");
+    expect(submitCalls[0]?.method).toBe("POST");
+    expect(submitCalls[0]?.body).toBe("{\"expectedVersion\":2}");
+
+    const transitionCalls: RemoteCall[] = [];
+    const transitionStdout = textBuffer();
+    const transitionExit = await runCli(
+      [
+        "resources",
+        "transition",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task Type",
+        "--name",
+        "TASK-1",
+        "--transition",
+        "close now"
+      ],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(transitionCalls, {
+          data: { name: "TASK-1", version: 4, docstatus: "submitted", data: { workflow_state: "Closed" } }
+        }),
+        stdout: transitionStdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(transitionExit).toBe(0);
+    expect(transitionCalls[0]?.url).toBe("https://app.example/api/resource/Task%20Type/TASK-1/transition/close%20now");
+    expect(transitionCalls[0]?.body).toBe("{}");
+    expect(transitionStdout.text()).toContain("Transitioned resource Task Type at https://app.example");
+
+    const commandCalls: RemoteCall[] = [];
+    const commandExit = await runCli(
+      [
+        "resources",
+        "command",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--name",
+        "TASK-1",
+        "--command",
+        "raisePriority",
+        "--data-json",
+        "{\"priority\":\"High\"}",
+        "--expected-version",
+        "4"
+      ],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(commandCalls, {
+          data: { name: "TASK-1", version: 5, docstatus: "submitted", data: { priority: "High" } }
+        }),
+        stdout: textBuffer(),
+        stderr: textBuffer()
+      }
+    );
+
+    expect(commandExit).toBe(0);
+    expect(commandCalls[0]?.url).toBe("https://app.example/api/resource/Task/TASK-1/command/raisePriority");
+    expect(commandCalls[0]?.body).toBe("{\"priority\":\"High\",\"expectedVersion\":4}");
+
+    const cancelCalls: RemoteCall[] = [];
+    const cancelExit = await runCli(
+      ["resources", "cancel", "--url", "https://app.example", "--doctype", "Task", "--name", "TASK-1"],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(cancelCalls, {
+          data: { name: "TASK-1", version: 6, docstatus: "cancelled", data: { title: "First" } }
+        }),
+        stdout: textBuffer(),
+        stderr: textBuffer()
+      }
+    );
+
+    expect(cancelExit).toBe(0);
+    expect(cancelCalls[0]?.url).toBe("https://app.example/api/resource/Task/TASK-1/cancel");
+    expect(cancelCalls[0]?.body).toBe("{}");
+  });
+
+  it("duplicates, amends, and bulk-runs remote DocType resources through the generated resource API", async () => {
+    const duplicateCalls: RemoteCall[] = [];
+    const duplicateStdout = textBuffer();
+    const duplicateExit = await runCli(
+      [
+        "resources",
+        "duplicate",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--name",
+        "TASK-1",
+        "--new-name",
+        "TASK-1 Copy",
+        "--data-json",
+        "{\"title\":\"Copied\"}",
+        "--expected-version",
+        "1"
+      ],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(duplicateCalls, {
+          data: { name: "TASK-1 Copy", version: 1, docstatus: "draft", data: { title: "Copied" } }
+        }, 201),
+        stdout: duplicateStdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(duplicateExit).toBe(0);
+    expect(duplicateCalls[0]?.url).toBe("https://app.example/api/resource/Task/TASK-1/duplicate");
+    expect(duplicateCalls[0]?.body).toBe("{\"data\":{\"title\":\"Copied\"},\"newName\":\"TASK-1 Copy\",\"expectedVersion\":1}");
+    expect(duplicateStdout.text()).toContain("Duplicated resource Task at https://app.example");
+
+    const amendCalls: RemoteCall[] = [];
+    const amendExit = await runCli(
+      [
+        "resources",
+        "amend",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--name",
+        "TASK-1",
+        "--new-name",
+        "TASK-1 Rev 1"
+      ],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(amendCalls, {
+          data: { name: "TASK-1 Rev 1", version: 1, docstatus: "draft", data: { amended_from: "TASK-1" } }
+        }, 201),
+        stdout: textBuffer(),
+        stderr: textBuffer()
+      }
+    );
+
+    expect(amendExit).toBe(0);
+    expect(amendCalls[0]?.url).toBe("https://app.example/api/resource/Task/TASK-1/amend");
+    expect(amendCalls[0]?.body).toBe("{\"newName\":\"TASK-1 Rev 1\"}");
+
+    const bulkCalls: RemoteCall[] = [];
+    const bulkStdout = textBuffer();
+    const bulkExit = await runCli(
+      [
+        "resources",
+        "bulk-transition",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--transition",
+        "close",
+        "--document",
+        "TASK-1",
+        "--document-version",
+        "TASK/2:7"
+      ],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(bulkCalls, {
+          data: {
+            succeeded: [
+              { name: "TASK-1", snapshot: { name: "TASK-1", version: 2, docstatus: "draft", data: { workflow_state: "Closed" } } }
+            ],
+            failed: [{ name: "TASK/2", code: "DOCUMENT_CONFLICT", status: 409, message: "Stale version" }]
+          }
+        }),
+        stdout: bulkStdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(bulkExit).toBe(0);
+    expect(bulkCalls[0]?.url).toBe("https://app.example/api/resource/Task/bulk-transition/close");
+    expect(bulkCalls[0]?.body).toBe("{\"documents\":[{\"name\":\"TASK-1\"},{\"name\":\"TASK/2\",\"expectedVersion\":7}]}");
+    expect(bulkStdout.text()).toContain("Transitioned resources at https://app.example");
+    expect(bulkStdout.text()).toContain("Succeeded: 1");
+    expect(bulkStdout.text()).toContain("- TASK/2 failed DOCUMENT_CONFLICT status 409: Stale version");
+
+    const bulkDeleteCalls: RemoteCall[] = [];
+    const bulkDeleteExit = await runCli(
+      ["resources", "bulk-delete", "--url", "https://app.example", "--doctype", "Task", "--document-version", "TASK-1:2"],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(bulkDeleteCalls, {
+          data: {
+            deleted: [{ name: "TASK-1", snapshot: { name: "TASK-1", version: 3, docstatus: "deleted" } }],
+            failed: []
+          }
+        }),
+        stdout: textBuffer(),
+        stderr: textBuffer()
+      }
+    );
+
+    expect(bulkDeleteExit).toBe(0);
+    expect(bulkDeleteCalls[0]?.url).toBe("https://app.example/api/resource/Task/delete");
+    expect(bulkDeleteCalls[0]?.body).toBe("{\"documents\":[{\"name\":\"TASK-1\",\"expectedVersion\":2}]}");
   });
 
   it("maps remote resource API errors and missing env headers to CLI failures", async () => {

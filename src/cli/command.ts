@@ -1453,8 +1453,12 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
   const headers: ResourceHeaderOption[] = [];
   let doctype: string | undefined;
   let name: string | undefined;
+  let transition: string | undefined;
+  let commandName: string | undefined;
   let data: Record<string, unknown> | undefined;
+  let newName: string | undefined;
   let expectedVersion: number | undefined;
+  const documents: NonNullable<ResourceRemoteCommand["documents"]>[number][] = [];
   const filters: NonNullable<ResourceRemoteCommand["filters"]>[number][] = [];
   let filterExpression: Record<string, unknown> | undefined;
   let limit: number | undefined;
@@ -1516,7 +1520,7 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--name") {
-      if (action !== "delete" && action !== "get" && action !== "update") {
+      if (!isNamedResourceAction(action)) {
         return { kind: "invalid", message: `Cannot use --name with resources ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1528,7 +1532,7 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--data-json") {
-      if (action !== "create" && action !== "update") {
+      if (!isResourceDataAction(action)) {
         return { kind: "invalid", message: `Cannot use --data-json with resources ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1543,8 +1547,44 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
       index += 1;
       continue;
     }
+    if (arg === "--new-name") {
+      if (action !== "duplicate" && action !== "amend") {
+        return { kind: "invalid", message: `Cannot use --new-name with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      newName = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--transition") {
+      if (action !== "transition" && action !== "bulk-transition") {
+        return { kind: "invalid", message: `Cannot use --transition with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      transition = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--command") {
+      if (action !== "command") {
+        return { kind: "invalid", message: `Cannot use --command with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      commandName = value;
+      index += 1;
+      continue;
+    }
     if (arg === "--expected-version") {
-      if (action !== "delete" && action !== "update") {
+      if (!isResourceVersionAction(action)) {
         return { kind: "invalid", message: `Cannot use --expected-version with resources ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1556,6 +1596,34 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
         return { kind: "invalid", message: parsed };
       }
       expectedVersion = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--document") {
+      if (!isBulkResourceAction(action)) {
+        return { kind: "invalid", message: `Cannot use --document with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      documents.push({ name: value });
+      index += 1;
+      continue;
+    }
+    if (arg === "--document-version") {
+      if (!isBulkResourceAction(action)) {
+        return { kind: "invalid", message: `Cannot use --document-version with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseResourceSelectionWithVersion(value);
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      documents.push(parsed);
       index += 1;
       continue;
     }
@@ -1666,11 +1734,24 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
   if (doctype === undefined) {
     return { kind: "invalid", message: "Resource command requires --doctype" };
   }
-  if ((action === "delete" || action === "get" || action === "update") && name === undefined) {
+  if (isNamedResourceAction(action) && name === undefined) {
     return { kind: "invalid", message: `Resource ${action} requires --name` };
   }
   if ((action === "create" || action === "update") && data === undefined) {
     return { kind: "invalid", message: `Resource ${action} requires --data-json` };
+  }
+  if ((action === "transition" || action === "bulk-transition") && transition === undefined) {
+    return { kind: "invalid", message: `Resource ${action} requires --transition` };
+  }
+  if (action === "command" && commandName === undefined) {
+    return { kind: "invalid", message: "Resource command requires --command" };
+  }
+  if (isBulkResourceAction(action) && documents.length === 0) {
+    return { kind: "invalid", message: `Resource ${action} requires at least one --document or --document-version` };
+  }
+  const duplicateDocument = duplicateResourceSelection(documents);
+  if (duplicateDocument !== undefined) {
+    return { kind: "invalid", message: `Duplicate resource selection '${duplicateDocument}'` };
   }
   return {
     kind: "resources",
@@ -1679,8 +1760,12 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
     headers,
     doctype,
     ...(name === undefined ? {} : { name }),
+    ...(transition === undefined ? {} : { transition }),
+    ...(commandName === undefined ? {} : { command: commandName }),
     ...(data === undefined ? {} : { data }),
+    ...(newName === undefined ? {} : { newName }),
     ...(expectedVersion === undefined ? {} : { expectedVersion }),
+    ...(documents.length === 0 ? {} : { documents }),
     ...(filters.length === 0 ? {} : { filters }),
     ...(filterExpression === undefined ? {} : { filterExpression }),
     ...(limit === undefined ? {} : { limit }),
@@ -1709,13 +1794,61 @@ function fileAction(value: string): FileRemoteAction | undefined {
 }
 
 function resourceAction(value: string): ResourceRemoteAction | undefined {
-  return value === "list" ||
+  return value === "amend" ||
+    value === "bulk-cancel" ||
+    value === "bulk-delete" ||
+    value === "bulk-submit" ||
+    value === "bulk-transition" ||
+    value === "cancel" ||
+    value === "command" ||
+    value === "list" ||
     value === "get" ||
     value === "create" ||
+    value === "duplicate" ||
+    value === "submit" ||
+    value === "transition" ||
     value === "update" ||
     value === "delete"
     ? value
     : undefined;
+}
+
+function isNamedResourceAction(action: ResourceRemoteAction): boolean {
+  return action === "amend" ||
+    action === "cancel" ||
+    action === "command" ||
+    action === "delete" ||
+    action === "duplicate" ||
+    action === "get" ||
+    action === "submit" ||
+    action === "transition" ||
+    action === "update";
+}
+
+function isResourceDataAction(action: ResourceRemoteAction): boolean {
+  return action === "amend" ||
+    action === "command" ||
+    action === "create" ||
+    action === "duplicate" ||
+    action === "update";
+}
+
+function isResourceVersionAction(action: ResourceRemoteAction): boolean {
+  return action === "amend" ||
+    action === "cancel" ||
+    action === "command" ||
+    action === "delete" ||
+    action === "duplicate" ||
+    action === "submit" ||
+    action === "transition" ||
+    action === "update";
+}
+
+function isBulkResourceAction(action: ResourceRemoteAction): boolean {
+  return action === "bulk-cancel" ||
+    action === "bulk-delete" ||
+    action === "bulk-submit" ||
+    action === "bulk-transition";
 }
 
 function jobAction(value: string): JobRemoteAction | undefined {
@@ -1869,6 +2002,33 @@ function parseResourceFilter(value: string): NonNullable<ResourceRemoteCommand["
     return "Resource filter field must be non-empty and omit the filter_ prefix";
   }
   return { key, value: value.slice(separator + 1).trim() };
+}
+
+function parseResourceSelectionWithVersion(
+  value: string
+): NonNullable<ResourceRemoteCommand["documents"]>[number] | string {
+  const separator = value.lastIndexOf(":");
+  if (separator <= 0 || separator === value.length - 1) {
+    return "Resource version selection must use <docname>:<expectedVersion>";
+  }
+  const expectedVersion = parsePositiveInteger(value.slice(separator + 1), "Resource expected version");
+  if (typeof expectedVersion === "string") {
+    return expectedVersion;
+  }
+  return { name: value.slice(0, separator), expectedVersion };
+}
+
+function duplicateResourceSelection(
+  documents: readonly NonNullable<ResourceRemoteCommand["documents"]>[number][]
+): string | undefined {
+  const seen = new Set<string>();
+  for (const document of documents) {
+    if (seen.has(document.name)) {
+      return document.name;
+    }
+    seen.add(document.name);
+  }
+  return undefined;
 }
 
 function duplicateFileSelection(files: readonly NonNullable<FileRemoteCommand["files"]>[number][]): string | undefined {
@@ -2149,6 +2309,16 @@ function helpText(): string {
     "  cf-frappe resources create --url <origin> --doctype <doctype> --data-json <json> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources update --url <origin> --doctype <doctype> --name <docname> --data-json <json> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources delete --url <origin> --doctype <doctype> --name <docname> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources submit --url <origin> --doctype <doctype> --name <docname> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources cancel --url <origin> --doctype <doctype> --name <docname> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources transition --url <origin> --doctype <doctype> --name <docname> --transition <action> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources command --url <origin> --doctype <doctype> --name <docname> --command <name> [--data-json <json>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources duplicate --url <origin> --doctype <doctype> --name <docname> [--data-json <json>] [--new-name <docname>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources amend --url <origin> --doctype <doctype> --name <docname> [--data-json <json>] [--new-name <docname>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources bulk-delete --url <origin> --doctype <doctype> (--document <docname>|--document-version <docname:version>)... [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources bulk-submit --url <origin> --doctype <doctype> (--document <docname>|--document-version <docname:version>)... [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources bulk-cancel --url <origin> --doctype <doctype> (--document <docname>|--document-version <docname:version>)... [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources bulk-transition --url <origin> --doctype <doctype> --transition <action> (--document <docname>|--document-version <docname:version>)... [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files list --url <origin> [--filename <text>] [--content-type <type>] [--attached-to-doctype <doctype> --attached-to-name <name>] [--storage-state <state>] [--scan-status <status>] [--uploaded-by <user>] [--private|--public] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files get --url <origin> --name <fileName> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files upload --url <origin> --path <localPath> [--filename <text>] [--content-type <type>] [--private|--public] [--attached-to-doctype <doctype> --attached-to-name <name>] [--header <name:value>] [--header-env <name=ENV>]",
