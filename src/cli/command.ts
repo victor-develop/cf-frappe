@@ -1454,6 +1454,8 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
   const headers: ResourceHeaderOption[] = [];
   let doctype: string | undefined;
   let name: string | undefined;
+  let filterId: string | undefined;
+  let label: string | undefined;
   let transition: string | undefined;
   let commandName: string | undefined;
   let data: Record<string, unknown> | undefined;
@@ -1534,6 +1536,30 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
         return value;
       }
       name = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--filter-id") {
+      if (action !== "delete-filter") {
+        return { kind: "invalid", message: `Cannot use --filter-id with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      filterId = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--label") {
+      if (action !== "save-filter") {
+        return { kind: "invalid", message: `Cannot use --label with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      label = value;
       index += 1;
       continue;
     }
@@ -1689,7 +1715,7 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--filter") {
-      if (!isResourceListQueryAction(action)) {
+      if (!isResourceFilterInputAction(action)) {
         return { kind: "invalid", message: `Cannot use --filter with resources ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1705,7 +1731,7 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--filter-expression-json") {
-      if (!isResourceListQueryAction(action)) {
+      if (!isResourceFilterInputAction(action)) {
         return { kind: "invalid", message: `Cannot use --filter-expression-json with resources ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1819,6 +1845,12 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
   if (action === "command" && commandName === undefined) {
     return { kind: "invalid", message: "Resource command requires --command" };
   }
+  if (action === "delete-filter" && filterId === undefined) {
+    return { kind: "invalid", message: "Resource delete-filter requires --filter-id" };
+  }
+  if (action === "save-filter" && label === undefined) {
+    return { kind: "invalid", message: "Resource save-filter requires --label" };
+  }
   if ((action === "export" || action === "import-template") && outputPath === undefined) {
     return { kind: "invalid", message: `Resource ${action} requires --output` };
   }
@@ -1839,6 +1871,8 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
     headers,
     doctype,
     ...(name === undefined ? {} : { name }),
+    ...(filterId === undefined ? {} : { filterId }),
+    ...(label === undefined ? {} : { label }),
     ...(transition === undefined ? {} : { transition }),
     ...(commandName === undefined ? {} : { command: commandName }),
     ...(data === undefined ? {} : { data }),
@@ -1893,6 +1927,9 @@ function resourceAction(value: string): ResourceRemoteAction | undefined {
     value === "submit" ||
     value === "import" ||
     value === "import-template" ||
+    value === "delete-filter" ||
+    value === "save-filter" ||
+    value === "saved-filters" ||
     value === "transition" ||
     value === "update" ||
     value === "delete"
@@ -1940,6 +1977,10 @@ function isBulkResourceAction(action: ResourceRemoteAction): boolean {
 
 function isResourceListQueryAction(action: ResourceRemoteAction): boolean {
   return action === "list" || action === "export";
+}
+
+function isResourceFilterInputAction(action: ResourceRemoteAction): boolean {
+  return action === "list" || action === "export" || action === "save-filter";
 }
 
 function jobAction(value: string): JobRemoteAction | undefined {
@@ -2406,6 +2447,9 @@ function helpText(): string {
     "  cf-frappe resources command --url <origin> --doctype <doctype> --name <docname> --command <name> [--data-json <json>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources duplicate --url <origin> --doctype <doctype> --name <docname> [--data-json <json>] [--new-name <docname>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources amend --url <origin> --doctype <doctype> --name <docname> [--data-json <json>] [--new-name <docname>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources saved-filters --url <origin> --doctype <doctype> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources save-filter --url <origin> --doctype <doctype> --label <name> [--filter <field[__operator]=value>] [--filter-expression-json <json>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources delete-filter --url <origin> --doctype <doctype> --filter-id <id> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources export --url <origin> --doctype <doctype> --output <localPath> [--filter <field[__operator]=value>] [--filter-expression-json <json>] [--saved-filter <id>] [--limit <n>] [--order-by <field>] [--order <asc|desc>] [--no-default-filters] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources import-template --url <origin> --doctype <doctype> --output <localPath> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources import --url <origin> --doctype <doctype> --path <localPath> [--mode <create|update>] [--max-rows <n>] [--header <name:value>] [--header-env <name=ENV>]",

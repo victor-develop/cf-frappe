@@ -284,6 +284,71 @@ describe("cf-frappe CLI remote resources", () => {
 
     expect(parseCliArgs([
       "resources",
+      "saved-filters",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task"
+    ])).toEqual({
+      kind: "resources",
+      action: "saved-filters",
+      url: "https://app.example",
+      headers: [],
+      doctype: "Task"
+    });
+
+    expect(parseCliArgs([
+      "resources",
+      "save-filter",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--label",
+      "Open tasks",
+      "--filter",
+      "status=Open",
+      "--filter",
+      "priority__in=High",
+      "--filter",
+      "priority__in=Medium",
+      "--filter-expression-json",
+      "{\"kind\":\"group\",\"match\":\"all\",\"filters\":[{\"field\":\"status\",\"value\":\"Open\"}]}"
+    ])).toEqual({
+      kind: "resources",
+      action: "save-filter",
+      url: "https://app.example",
+      headers: [],
+      doctype: "Task",
+      label: "Open tasks",
+      filters: [
+        { key: "status", value: "Open" },
+        { key: "priority__in", value: "High" },
+        { key: "priority__in", value: "Medium" }
+      ],
+      filterExpression: { kind: "group", match: "all", filters: [{ field: "status", value: "Open" }] }
+    });
+
+    expect(parseCliArgs([
+      "resources",
+      "delete-filter",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--filter-id",
+      "filter/1"
+    ])).toEqual({
+      kind: "resources",
+      action: "delete-filter",
+      url: "https://app.example",
+      headers: [],
+      doctype: "Task",
+      filterId: "filter/1"
+    });
+
+    expect(parseCliArgs([
+      "resources",
       "bulk-transition",
       "--url",
       "https://app.example",
@@ -505,6 +570,56 @@ describe("cf-frappe CLI remote resources", () => {
     ])).toEqual({
       kind: "invalid",
       message: "Cannot use --saved-filter with resources get"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "save-filter",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Resource save-filter requires --label"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "delete-filter",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Resource delete-filter requires --filter-id"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "saved-filters",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--filter",
+      "status=Open"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Cannot use --filter with resources saved-filters"
+    });
+    expect(parseCliArgs([
+      "resources",
+      "save-filter",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--label",
+      "Open tasks",
+      "--saved-filter",
+      "existing"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Cannot use --saved-filter with resources save-filter"
     });
     expect(parseCliArgs([
       "resources",
@@ -1036,6 +1151,194 @@ describe("cf-frappe CLI remote resources", () => {
     expect(importStdout.text()).toContain("- row 3 update TASK-2 failed BAD_REQUEST status 400: Invalid count");
   });
 
+  it("lists, saves, and deletes remote saved resource filters through the generated resource API", async () => {
+    const listCalls: RemoteCall[] = [];
+    const listStdout = textBuffer();
+    const listExit = await runCli(
+      [
+        "resources",
+        "saved-filters",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task Type",
+        "--header-env",
+        "Authorization=CF_FRAPPE_AUTH"
+      ],
+      {
+        cwd: () => tempRoot,
+        env: (name) => name === "CF_FRAPPE_AUTH" ? "Bearer test-token" : undefined,
+        fetch: fakeFetch(listCalls, {
+          data: [
+            {
+              id: "open",
+              label: "Open tasks",
+              ownerId: "owner@example.com",
+              filters: [{ field: "status", value: "Open" }],
+              updatedAt: "2026-06-26T01:00:00.000Z"
+            }
+          ]
+        }),
+        stdout: listStdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(listExit).toBe(0);
+    expect(listCalls[0]?.url).toBe("https://app.example/api/resource/Task%20Type/saved-filters");
+    expect(listCalls[0]?.method).toBe("GET");
+    expect(listCalls[0]?.headers.get("authorization")).toBe("Bearer test-token");
+    expect(listStdout.text()).toContain("Saved resource filters Task Type at https://app.example");
+    expect(listStdout.text()).toContain("- open Open tasks owner owner@example.com updated 2026-06-26T01:00:00.000Z");
+
+    const saveCalls: RemoteCall[] = [];
+    const saveStdout = textBuffer();
+    const saveExit = await runCli(
+      [
+        "resources",
+        "save-filter",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--label",
+        "Open important tasks",
+        "--filter",
+        "status=Open",
+        "--filter",
+        "priority__in=High",
+        "--filter",
+        "priority__in=Medium",
+        "--filter",
+        "count__between=1",
+        "--filter",
+        "count__between=7",
+        "--filter-expression-json",
+        "{\"kind\":\"group\",\"match\":\"all\",\"filters\":[{\"field\":\"status\",\"value\":\"Open\"}]}"
+      ],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetchSequence(saveCalls, [
+          {
+            body: {
+              data: {
+                name: "Task",
+                fields: [
+                  { name: "status" },
+                  { name: "priority" },
+                  { name: "count" }
+                ]
+              }
+            }
+          },
+          {
+            body: {
+              data: {
+                id: "filter/1",
+                label: "Open important tasks",
+                ownerId: "owner@example.com",
+                filters: [{ field: "status", value: "Open" }]
+              }
+            },
+            status: 201
+          }
+        ]),
+        stdout: saveStdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(saveExit).toBe(0);
+    expect(saveCalls[0]?.url).toBe("https://app.example/api/meta/doctypes/Task");
+    expect(saveCalls[0]?.method).toBe("GET");
+    expect(saveCalls[1]?.url).toBe("https://app.example/api/resource/Task/saved-filters");
+    expect(saveCalls[1]?.method).toBe("POST");
+    expect(saveCalls[1]?.body).toBe(JSON.stringify({
+      label: "Open important tasks",
+      filters: [
+        { field: "status", value: "Open" },
+        { field: "priority", operator: "in", value: ["High", "Medium"] },
+        { field: "count", operator: "between", value: ["1", "7"] }
+      ],
+      filterExpression: { kind: "group", match: "all", filters: [{ field: "status", value: "Open" }] }
+    }));
+    expect(saveStdout.text()).toContain("Saved resource filter Task at https://app.example");
+    expect(saveStdout.text()).toContain("- filter/1 Open important tasks owner owner@example.com");
+
+    const collisionCalls: RemoteCall[] = [];
+    const collisionExit = await runCli(
+      [
+        "resources",
+        "save-filter",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "FilterCollision",
+        "--label",
+        "Collision fields",
+        "--filter",
+        "count__between=7"
+      ],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetchSequence(collisionCalls, [
+          {
+            body: {
+              data: {
+                name: "FilterCollision",
+                fields: [{ name: "count__between" }]
+              }
+            }
+          },
+          {
+            body: {
+              data: {
+                id: "collision",
+                label: "Collision fields"
+              }
+            },
+            status: 201
+          }
+        ]),
+        stdout: textBuffer(),
+        stderr: textBuffer()
+      }
+    );
+
+    expect(collisionExit).toBe(0);
+    expect(collisionCalls[1]?.body).toBe(JSON.stringify({
+      label: "Collision fields",
+      filters: [{ field: "count__between", value: "7" }]
+    }));
+
+    const deleteCalls: RemoteCall[] = [];
+    const deleteStdout = textBuffer();
+    const deleteExit = await runCli(
+      [
+        "resources",
+        "delete-filter",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--filter-id",
+        "filter/1"
+      ],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeEmptyFetch(deleteCalls, 204),
+        stdout: deleteStdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(deleteExit).toBe(0);
+    expect(deleteCalls[0]?.url).toBe("https://app.example/api/resource/Task/saved-filters/filter%2F1");
+    expect(deleteCalls[0]?.method).toBe("DELETE");
+    expect(deleteStdout.text()).toContain("Deleted resource filter Task at https://app.example");
+    expect(deleteStdout.text()).toContain("- filter/1");
+  });
+
   it("maps remote resource API errors and missing env headers to CLI failures", async () => {
     const remoteStderr = textBuffer();
     const remoteExit = await runCli(
@@ -1106,6 +1409,30 @@ function fakeFetch(calls: RemoteCall[], responseBody: unknown, status = 200): ty
   };
 }
 
+function fakeFetchSequence(
+  calls: RemoteCall[],
+  responses: readonly { readonly body: unknown; readonly status?: number }[]
+): typeof fetch {
+  let index = 0;
+  return async (input, init) => {
+    const body = init?.body === undefined || init.body === null
+      ? undefined
+      : await new Response(init.body).text();
+    calls.push({
+      url: String(input),
+      method: init?.method ?? "GET",
+      headers: new Headers(init?.headers),
+      ...(body === undefined ? {} : { body })
+    });
+    const response = responses[index] ?? responses[responses.length - 1];
+    index += 1;
+    return new Response(JSON.stringify(response?.body ?? {}), {
+      headers: { "content-type": "application/json" },
+      status: response?.status ?? 200
+    });
+  };
+}
+
 function fakeTextFetch(calls: RemoteCall[], responseBody: string, headers: Record<string, string>, status = 200): typeof fetch {
   return async (input, init) => {
     const body = init?.body === undefined || init.body === null
@@ -1118,6 +1445,21 @@ function fakeTextFetch(calls: RemoteCall[], responseBody: string, headers: Recor
       ...(body === undefined ? {} : { body })
     });
     return new Response(responseBody, { headers, status });
+  };
+}
+
+function fakeEmptyFetch(calls: RemoteCall[], status = 204): typeof fetch {
+  return async (input, init) => {
+    const body = init?.body === undefined || init.body === null
+      ? undefined
+      : await new Response(init.body).text();
+    calls.push({
+      url: String(input),
+      method: init?.method ?? "GET",
+      headers: new Headers(init?.headers),
+      ...(body === undefined ? {} : { body })
+    });
+    return new Response(null, { status });
   };
 }
 

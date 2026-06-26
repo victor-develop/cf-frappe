@@ -24,6 +24,9 @@ export type ResourceRemoteAction =
   | "import"
   | "import-template"
   | "list"
+  | "delete-filter"
+  | "save-filter"
+  | "saved-filters"
   | "submit"
   | "transition"
   | "update";
@@ -37,6 +40,8 @@ export interface ResourceRemoteCommand {
   readonly headers: readonly ResourceHeaderOption[];
   readonly doctype: string;
   readonly name?: string;
+  readonly filterId?: string;
+  readonly label?: string;
   readonly transition?: string;
   readonly command?: string;
   readonly data?: Record<string, unknown>;
@@ -83,6 +88,10 @@ interface DocumentSnapshotResponse {
   readonly version?: number;
   readonly docstatus?: string;
   readonly data?: Record<string, unknown>;
+}
+
+interface DocTypeMetadataResponse {
+  readonly fields?: readonly { readonly name?: string }[];
 }
 
 interface ResourceListResponse {
@@ -133,10 +142,53 @@ interface DocumentImportFailureResponse {
   readonly status?: number;
 }
 
+interface SavedFilterListResponse {
+  readonly data: readonly SavedFilterResponse[];
+}
+
+interface SavedFilterResponse {
+  readonly tenantId?: string;
+  readonly doctype?: string;
+  readonly id: string;
+  readonly label: string;
+  readonly ownerId?: string;
+  readonly filters?: readonly Record<string, unknown>[];
+  readonly filterExpression?: Record<string, unknown>;
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+}
+
 export async function runRemoteResourceCommand(
   command: ResourceRemoteCommand,
   io: ResourceRemoteIo = {}
 ): Promise<string> {
+  if (command.action === "saved-filters") {
+    const payload = await requestRemoteResourcePayload<SavedFilterListResponse>(command, io, {
+      method: "GET",
+      path: `/api/resource/${encodeURIComponent(command.doctype)}/saved-filters`
+    });
+    return formatSavedFilters(command.url, command.doctype, payload.data);
+  }
+  if (command.action === "save-filter") {
+    const metadata = await requestRemoteResource<DocTypeMetadataResponse>(command, io, {
+      method: "GET",
+      path: `/api/meta/doctypes/${encodeURIComponent(command.doctype)}`
+    });
+    const data = await requestRemoteResource<SavedFilterResponse>(command, io, {
+      body: savedFilterBody(command, metadata),
+      method: "POST",
+      path: `/api/resource/${encodeURIComponent(command.doctype)}/saved-filters`
+    });
+    return formatSavedFilter(command.url, command.doctype, "Saved resource filter", data);
+  }
+  if (command.action === "delete-filter") {
+    const filterId = requiredResourceFilterId(command);
+    await requestRemoteResourceResponse(command, io, {
+      method: "DELETE",
+      path: `/api/resource/${encodeURIComponent(command.doctype)}/saved-filters/${encodeURIComponent(filterId)}`
+    });
+    return formatDeletedSavedFilter(command.url, command.doctype, filterId);
+  }
   if (command.action === "export") {
     const query = listQuery(command);
     const downloaded = await downloadRemoteResourceCsv(command, io, "export", {
@@ -323,7 +375,7 @@ function requestRemoteResourceResponse(
   command: ResourceRemoteCommand,
   io: ResourceRemoteIo,
   request: {
-    readonly method: "GET";
+    readonly method: "DELETE" | "GET";
     readonly path: string;
     readonly query?: URLSearchParams;
   }
@@ -462,6 +514,104 @@ function cloneBody(command: ResourceRemoteCommand): Record<string, unknown> {
   };
 }
 
+function savedFilterBody(command: ResourceRemoteCommand, metadata: DocTypeMetadataResponse): Record<string, unknown> {
+  return {
+    label: requiredResourceFilterLabel(command),
+    filters: savedFilterInputFilters(command.filters ?? [], metadataFields(metadata)),
+    ...(command.filterExpression === undefined ? {} : { filterExpression: command.filterExpression })
+  };
+}
+
+function savedFilterInputFilters(
+  filters: readonly ResourceRemoteFilter[],
+  fields: ReadonlySet<string>
+): readonly Record<string, unknown>[] {
+  const result: Record<string, unknown>[] = [];
+  const arrayFilters = new Map<string, { readonly field: string; readonly operator: ListFilterArrayOperator; readonly values: string[] }>();
+  for (const filter of filters) {
+    const parsed = parseSavedFilterKey(filter.key, fields);
+    if (isListFilterArrayOperator(parsed.operator)) {
+      const existing = arrayFilters.get(filter.key);
+      if (existing !== undefined) {
+        existing.values.push(filter.value);
+        continue;
+      }
+      const pending = { field: parsed.field, operator: parsed.operator, values: [filter.value] };
+      arrayFilters.set(filter.key, pending);
+      result.push({ field: pending.field, operator: pending.operator, value: pending.values });
+      continue;
+    }
+    result.push({
+      field: parsed.field,
+      ...(parsed.operator === "eq" ? {} : { operator: parsed.operator }),
+      value: filter.value
+    });
+  }
+  return result;
+}
+
+type ListFilterOperator =
+  | "eq"
+  | "ne"
+  | "contains"
+  | "gt"
+  | "gte"
+  | "lt"
+  | "lte"
+  | "is"
+  | "like"
+  | "not_like"
+  | "in"
+  | "not_in"
+  | "between"
+  | "not_between";
+
+type ListFilterArrayOperator = "in" | "not_in" | "between" | "not_between";
+
+const LIST_FILTER_OPERATORS: readonly ListFilterOperator[] = [
+  "eq",
+  "ne",
+  "contains",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "is",
+  "like",
+  "not_like",
+  "in",
+  "not_in",
+  "between",
+  "not_between"
+];
+
+function metadataFields(metadata: DocTypeMetadataResponse): ReadonlySet<string> {
+  return new Set((metadata.fields ?? []).flatMap((field) => typeof field.name === "string" ? [field.name] : []));
+}
+
+function parseSavedFilterKey(
+  key: string,
+  fields: ReadonlySet<string>
+): { readonly field: string; readonly operator: ListFilterOperator } {
+  if (fields.has(key)) {
+    return { field: key, operator: "eq" };
+  }
+  if (key.endsWith("__eq")) {
+    return { field: key.slice(0, -"__eq".length), operator: "eq" };
+  }
+  for (const operator of LIST_FILTER_OPERATORS.filter((item) => item !== "eq")) {
+    const suffix = `__${operator}`;
+    if (key.endsWith(suffix)) {
+      return { field: key.slice(0, -suffix.length), operator };
+    }
+  }
+  return { field: key, operator: "eq" };
+}
+
+function isListFilterArrayOperator(operator: ListFilterOperator): operator is ListFilterArrayOperator {
+  return operator === "in" || operator === "not_in" || operator === "between" || operator === "not_between";
+}
+
 function bulkBody(command: ResourceRemoteCommand): Record<string, unknown> {
   return { documents: command.documents ?? [] };
 }
@@ -512,6 +662,41 @@ function formatBulkResourceCommand(
     ...succeeded.map((item) => resourceLine(item.snapshot)),
     `Failed: ${String(result.failed.length)}`,
     ...result.failed.map(failureLine),
+    ""
+  ].join("\n");
+}
+
+function formatSavedFilters(
+  baseUrl: string,
+  doctype: string,
+  filters: readonly SavedFilterResponse[]
+): string {
+  return [
+    `Saved resource filters ${doctype} at ${baseUrl}`,
+    `Total: ${String(filters.length)}`,
+    ...savedFilterLines(filters),
+    ""
+  ].join("\n");
+}
+
+function formatSavedFilter(
+  baseUrl: string,
+  doctype: string,
+  title: string,
+  filter: SavedFilterResponse
+): string {
+  return [
+    `${title} ${doctype} at ${baseUrl}`,
+    savedFilterLine(filter),
+    JSON.stringify(filter),
+    ""
+  ].join("\n");
+}
+
+function formatDeletedSavedFilter(baseUrl: string, doctype: string, filterId: string): string {
+  return [
+    `Deleted resource filter ${doctype} at ${baseUrl}`,
+    `- ${filterId}`,
     ""
   ].join("\n");
 }
@@ -579,6 +764,19 @@ function failureLine(failure: BulkResourceFailureResponse): string {
   return `- ${failure.name} failed ${code}${status}: ${message}`;
 }
 
+function savedFilterLines(filters: readonly SavedFilterResponse[]): readonly string[] {
+  if (filters.length === 0) {
+    return ["- (none)"];
+  }
+  return filters.flatMap((filter) => [savedFilterLine(filter), JSON.stringify(filter)]);
+}
+
+function savedFilterLine(filter: SavedFilterResponse): string {
+  const owner = filter.ownerId === undefined ? "" : ` owner ${filter.ownerId}`;
+  const updated = filter.updatedAt === undefined ? "" : ` updated ${filter.updatedAt}`;
+  return `- ${filter.id} ${filter.label}${owner}${updated}`;
+}
+
 function requiredResourceTransition(command: ResourceRemoteCommand): string {
   if (command.transition === undefined) {
     throw new ResourceRemoteError(`Resource ${command.action} requires --transition`);
@@ -591,6 +789,20 @@ function requiredResourceCommand(command: ResourceRemoteCommand): string {
     throw new ResourceRemoteError("Resource command requires --command");
   }
   return command.command;
+}
+
+function requiredResourceFilterId(command: ResourceRemoteCommand): string {
+  if (command.filterId === undefined) {
+    throw new ResourceRemoteError(`Resource ${command.action} requires --filter-id`);
+  }
+  return command.filterId;
+}
+
+function requiredResourceFilterLabel(command: ResourceRemoteCommand): string {
+  if (command.label === undefined) {
+    throw new ResourceRemoteError("Resource save-filter requires --label");
+  }
+  return command.label;
 }
 
 function bulkResourceTitle(action: ResourceRemoteAction): string {
