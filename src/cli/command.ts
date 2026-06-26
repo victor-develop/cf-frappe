@@ -141,6 +141,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     if (command.kind === "files") {
       io.stdout.write(await runRemoteFileCommand(command, {
+        cwd: io.cwd(),
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -927,6 +928,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
   let url: string | undefined;
   const headers: FileHeaderOption[] = [];
   let name: string | undefined;
+  let path: string | undefined;
   const files: NonNullable<FileRemoteCommand["files"]>[number][] = [];
   let attachedToDoctype: string | undefined;
   let attachedToName: string | undefined;
@@ -1007,6 +1009,18 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
         return value;
       }
       name = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--path") {
+      if (action !== "upload") {
+        return { kind: "invalid", message: `Cannot use --path with files ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      path = value;
       index += 1;
       continue;
     }
@@ -1129,7 +1143,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--attached-to-doctype") {
-      if (action !== "list" && action !== "update" && action !== "bulk-update") {
+      if (action !== "list" && action !== "update" && action !== "bulk-update" && action !== "upload") {
         return { kind: "invalid", message: `Cannot use --attached-to-doctype with files ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1141,7 +1155,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--attached-to-name") {
-      if (action !== "list" && action !== "update" && action !== "bulk-update") {
+      if (action !== "list" && action !== "update" && action !== "bulk-update" && action !== "upload") {
         return { kind: "invalid", message: `Cannot use --attached-to-name with files ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1153,7 +1167,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--content-type") {
-      if (action !== "list") {
+      if (action !== "list" && action !== "upload") {
         return { kind: "invalid", message: `Cannot use --content-type with files ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1165,7 +1179,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--filename") {
-      if (action !== "list" && action !== "update") {
+      if (action !== "list" && action !== "update" && action !== "upload") {
         return { kind: "invalid", message: `Cannot use --filename with files ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1177,7 +1191,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--private") {
-      if (action !== "list" && action !== "update" && action !== "bulk-update") {
+      if (action !== "list" && action !== "update" && action !== "bulk-update" && action !== "upload") {
         return { kind: "invalid", message: `Cannot use --private with files ${action}` };
       }
       if (isPrivate !== undefined) {
@@ -1187,7 +1201,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--public") {
-      if (action !== "list" && action !== "update" && action !== "bulk-update") {
+      if (action !== "list" && action !== "update" && action !== "bulk-update" && action !== "upload") {
         return { kind: "invalid", message: `Cannot use --public with files ${action}` };
       }
       if (isPrivate !== undefined) {
@@ -1267,6 +1281,9 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
   if ((action === "delete" || action === "update" || action === "rendition") && name === undefined) {
     return { kind: "invalid", message: `File ${action} requires --name` };
   }
+  if (action === "upload" && path === undefined) {
+    return { kind: "invalid", message: "File upload requires --path" };
+  }
   if ((action === "bulk-delete" || action === "bulk-update") && files.length === 0) {
     return { kind: "invalid", message: `File ${action} requires at least one --file or --file-version` };
   }
@@ -1311,6 +1328,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
     url,
     headers,
     ...(name === undefined ? {} : { name }),
+    ...(path === undefined ? {} : { path }),
     ...(files.length === 0 ? {} : { files }),
     ...(attachedToDoctype === undefined ? {} : { attachedToDoctype }),
     ...(attachedToName === undefined ? {} : { attachedToName }),
@@ -1347,7 +1365,8 @@ function fileAction(value: string): FileRemoteAction | undefined {
     value === "update" ||
     value === "bulk-delete" ||
     value === "bulk-update" ||
-    value === "rendition"
+    value === "rendition" ||
+    value === "upload"
     ? value
     : undefined;
 }
@@ -1737,6 +1756,7 @@ function helpText(): string {
     "  cf-frappe jobs schedule-save --url <origin> [--id <scheduleId>] --cron <expr> --job <name> [--enabled|--disabled] [--payload-json <json>] [--metadata-json <json>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs schedule-delete --url <origin> --id <scheduleId> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files list --url <origin> [--filename <text>] [--content-type <type>] [--attached-to-doctype <doctype> --attached-to-name <name>] [--storage-state <state>] [--scan-status <status>] [--uploaded-by <user>] [--private|--public] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe files upload --url <origin> --path <localPath> [--filename <text>] [--content-type <type>] [--private|--public] [--attached-to-doctype <doctype> --attached-to-name <name>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files update --url <origin> --name <fileName> [--filename <text>] [--private|--public] [--attached-to-doctype <doctype> --attached-to-name <name>|--clear-attachment] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files bulk-update --url <origin> (--file <fileName>|--file-version <fileName:version>)... [--private|--public] [--attached-to-doctype <doctype> --attached-to-name <name>|--clear-attachment] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files bulk-delete --url <origin> (--file <fileName>|--file-version <fileName:version>)... [--header <name:value>] [--header-env <name=ENV>]",
@@ -1751,7 +1771,7 @@ function helpText(): string {
     "  access   Plan or create Cloudflare Access application and policy resources for a starter app",
     "  data-patches   Inspect, plan, apply, rollback, or enqueue remote app-declared data patches through the admin API",
     "  jobs   Inspect remote job history, retry failed runs, and manage runtime schedules through the admin API",
-    "  files   Inspect, update, and delete remote File metadata/content through the admin API",
+    "  files   Upload, inspect, update, and delete remote File metadata/content through the admin API",
     "",
     "Use --header-env for secret-bearing auth headers so tokens stay out of shell history.",
     ""

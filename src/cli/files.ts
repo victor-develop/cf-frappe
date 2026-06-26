@@ -1,6 +1,8 @@
+import { readFile } from "node:fs/promises";
+import { basename, resolve } from "node:path";
 import { requestRemoteAdmin, requestRemoteAdminPayload, type RemoteAdminIo, type RemoteHeaderOption } from "./remote-admin.js";
 
-export type FileRemoteAction = "bulk-delete" | "bulk-update" | "list" | "delete" | "rendition" | "update";
+export type FileRemoteAction = "bulk-delete" | "bulk-update" | "list" | "delete" | "rendition" | "update" | "upload";
 
 export type FileHeaderOption = RemoteHeaderOption;
 
@@ -10,6 +12,7 @@ export interface FileRemoteCommand {
   readonly url: string;
   readonly headers: readonly FileHeaderOption[];
   readonly name?: string;
+  readonly path?: string;
   readonly files?: readonly FileRemoteSelection[];
   readonly attachedToDoctype?: string;
   readonly attachedToName?: string;
@@ -44,7 +47,9 @@ export interface FileRemoteSelection {
   readonly expectedVersion?: number;
 }
 
-export type FileRemoteIo = RemoteAdminIo;
+export interface FileRemoteIo extends RemoteAdminIo {
+  readonly cwd?: string;
+}
 
 export class FileRemoteError extends Error {
   constructor(message: string) {
@@ -123,6 +128,24 @@ interface FileRenditionResponse {
 }
 
 export async function runRemoteFileCommand(command: FileRemoteCommand, io: FileRemoteIo = {}): Promise<string> {
+  if (command.action === "upload") {
+    const contentType = command.contentType ?? "application/octet-stream";
+    const file = await uploadFileBody(command, io.cwd);
+    const query = queryParams({
+      filename: command.filename ?? basename(file.path),
+      ...(command.isPrivate === undefined ? {} : { is_private: String(command.isPrivate) }),
+      ...(command.attachedToDoctype === undefined ? {} : { attached_to_doctype: command.attachedToDoctype }),
+      ...(command.attachedToName === undefined ? {} : { attached_to_name: command.attachedToName })
+    });
+    const data = await requestRemoteFile<FileSnapshotResponse>(command, io, {
+      contentType,
+      method: "POST",
+      path: "/api/files",
+      rawBody: file.body,
+      ...(query === undefined ? {} : { query })
+    });
+    return formatUpload(command.url, data);
+  }
   if (command.action === "list") {
     const query = queryParams({
       ...(command.attachedToDoctype === undefined ? {} : { attached_to_doctype: command.attachedToDoctype }),
@@ -190,6 +213,8 @@ function requestRemoteFile<TData>(
   io: FileRemoteIo,
   request: {
     readonly body?: Record<string, unknown>;
+    readonly rawBody?: BodyInit;
+    readonly contentType?: string;
     readonly method: "DELETE" | "GET" | "PATCH" | "POST";
     readonly path: string;
     readonly query?: URLSearchParams;
@@ -208,6 +233,8 @@ function requestRemoteFilePayload<TPayload>(
   io: FileRemoteIo,
   request: {
     readonly body?: Record<string, unknown>;
+    readonly rawBody?: BodyInit;
+    readonly contentType?: string;
     readonly method: "DELETE" | "GET" | "PATCH" | "POST";
     readonly path: string;
     readonly query?: URLSearchParams;
@@ -320,6 +347,24 @@ function requiredFileName(command: FileRemoteCommand, action: string): string {
   return command.name;
 }
 
+async function uploadFileBody(command: FileRemoteCommand, cwd = process.cwd()): Promise<{ readonly body: Blob; readonly path: string }> {
+  if (command.path === undefined) {
+    throw new FileRemoteError("File upload requires --path");
+  }
+  const path = resolve(cwd, command.path);
+  let bytes: Uint8Array;
+  try {
+    bytes = await readFile(path);
+  } catch (error) {
+    throw new FileRemoteError(`Could not read upload file '${command.path}': ${errorMessage(error)}`);
+  }
+  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  return {
+    path,
+    body: new Blob([buffer], { type: command.contentType ?? "application/octet-stream" })
+  };
+}
+
 function formatDashboard(baseUrl: string, dashboard: FileDashboardResponse): string {
   return [
     `Files at ${baseUrl}`,
@@ -333,6 +378,14 @@ function formatDashboard(baseUrl: string, dashboard: FileDashboardResponse): str
 function formatUpdate(baseUrl: string, snapshot: FileSnapshotResponse): string {
   return [
     `Updated file at ${baseUrl}`,
+    snapshotLine(snapshot),
+    ""
+  ].join("\n");
+}
+
+function formatUpload(baseUrl: string, snapshot: FileSnapshotResponse): string {
+  return [
+    `Uploaded file at ${baseUrl}`,
     snapshotLine(snapshot),
     ""
   ].join("\n");
@@ -430,4 +483,8 @@ function attachmentLabel(attachedTo: FileDashboardEntryResponse["attachedTo"]): 
     return "";
   }
   return ` attached to ${attachedTo.doctype}/${attachedTo.name}`;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

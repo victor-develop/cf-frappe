@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk direct-upload capability slice:
+As of the remote file upload CLI slice:
 
 - Vitest files: `95`
-- Vitest cases: `1129`
+- Vitest cases: `1131`
 
 ## Implication
 

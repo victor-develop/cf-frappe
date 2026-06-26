@@ -1,6 +1,19 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { parseCliArgs, runCli, type WritableText } from "../../src/cli/command";
 
 describe("cf-frappe CLI remote files", () => {
+  let tempRoot: string;
+
+  beforeEach(async () => {
+    tempRoot = await mkdtemp(join(tmpdir(), "cf-frappe-files-cli-"));
+  });
+
+  afterEach(async () => {
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
   it("parses remote file list and delete commands", () => {
     expect(parseCliArgs([
       "files",
@@ -45,6 +58,37 @@ describe("cf-frappe CLI remote files", () => {
       scanStatus: "clean",
       storageState: "available",
       uploadedBy: "owner@example.com"
+    });
+
+    expect(parseCliArgs([
+      "files",
+      "upload",
+      "--url",
+      "https://app.example",
+      "--path",
+      "fixtures/invoice.pdf",
+      "--filename",
+      "invoice.pdf",
+      "--content-type",
+      "application/pdf",
+      "--public",
+      "--attached-to-doctype",
+      "Sales Invoice",
+      "--attached-to-name",
+      "SINV-2",
+      "--header-env",
+      "Authorization=CF_FRAPPE_AUTH"
+    ])).toEqual({
+      kind: "files",
+      action: "upload",
+      url: "https://app.example",
+      headers: [{ kind: "env", name: "Authorization", envName: "CF_FRAPPE_AUTH" }],
+      path: "fixtures/invoice.pdf",
+      attachedToDoctype: "Sales Invoice",
+      attachedToName: "SINV-2",
+      contentType: "application/pdf",
+      filename: "invoice.pdf",
+      isPrivate: false
     });
 
     expect(parseCliArgs([
@@ -201,6 +245,14 @@ describe("cf-frappe CLI remote files", () => {
     expect(parseCliArgs(["files", "delete", "--url", "https://app.example"])).toEqual({
       kind: "invalid",
       message: "File delete requires --name"
+    });
+    expect(parseCliArgs(["files", "upload", "--url", "https://app.example"])).toEqual({
+      kind: "invalid",
+      message: "File upload requires --path"
+    });
+    expect(parseCliArgs(["files", "list", "--url", "https://app.example", "--path", "invoice.pdf"])).toEqual({
+      kind: "invalid",
+      message: "Cannot use --path with files list"
     });
     expect(parseCliArgs([
       "files",
@@ -366,6 +418,85 @@ describe("cf-frappe CLI remote files", () => {
     expect(stdout.text()).toContain(
       "- invoice.pdf (file_invoice) size 1234 type application/pdf state available scan clean private true attached to Sales Invoice/SINV-1 uploaded by owner@example.com version 3"
     );
+  });
+
+  it("uploads a local file through the remote file API", async () => {
+    await writeFile(join(tempRoot, "invoice.pdf"), "invoice-bytes");
+    const calls: RemoteCall[] = [];
+    const stdout = textBuffer();
+    const exitCode = await runCli(
+      [
+        "files",
+        "upload",
+        "--url",
+        "https://app.example/cf",
+        "--path",
+        "invoice.pdf",
+        "--filename",
+        "invoice.pdf",
+        "--content-type",
+        "application/pdf",
+        "--public",
+        "--attached-to-doctype",
+        "Sales Invoice",
+        "--attached-to-name",
+        "SINV-1",
+        "--header-env",
+        "Authorization=CF_FRAPPE_AUTH"
+      ],
+      {
+        cwd: () => tempRoot,
+        env: (name) => name === "CF_FRAPPE_AUTH" ? "Bearer test-token" : undefined,
+        fetch: fakeFetch(calls, {
+          data: {
+            name: "file_invoice",
+            version: 1,
+            docstatus: "draft",
+            data: {
+              filename: "invoice.pdf",
+              storage_state: "available"
+            }
+          }
+        }, 201),
+        stdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(calls[0]?.url).toBe(
+      "https://app.example/cf/api/files?filename=invoice.pdf&is_private=false&attached_to_doctype=Sales+Invoice&attached_to_name=SINV-1"
+    );
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.headers.get("authorization")).toBe("Bearer test-token");
+    expect(calls[0]?.headers.get("content-type")).toBe("application/pdf");
+    expect(calls[0]?.body).toBe("invoice-bytes");
+    expect(stdout.text()).toContain("Uploaded file at https://app.example/cf");
+    expect(stdout.text()).toContain("- invoice.pdf (file_invoice) version 1 status draft state available");
+  });
+
+  it("defaults remote upload filename and content type from the local path when omitted", async () => {
+    await writeFile(join(tempRoot, "avatar.bin"), "avatar-bytes");
+    const calls: RemoteCall[] = [];
+    const exitCode = await runCli(
+      ["files", "upload", "--url", "https://app.example", "--path", "avatar.bin"],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetch(calls, {
+          data: {
+            name: "file_avatar",
+            data: { filename: "avatar.bin" }
+          }
+        }, 201),
+        stdout: textBuffer(),
+        stderr: textBuffer()
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(calls[0]?.url).toBe("https://app.example/api/files?filename=avatar.bin");
+    expect(calls[0]?.headers.get("content-type")).toBe("application/octet-stream");
+    expect(calls[0]?.body).toBe("avatar-bytes");
   });
 
   it("deletes one remote file with an optional expected version", async () => {
@@ -754,6 +885,20 @@ describe("cf-frappe CLI remote files", () => {
     expect(envExit).toBe(1);
     expect(envStderr.text()).toContain("Environment variable 'CF_FRAPPE_AUTH' is not set for header 'Authorization'");
     expect(calls).toEqual([]);
+
+    const missingFileStderr = textBuffer();
+    const missingFileExit = await runCli(
+      ["files", "upload", "--url", "https://app.example", "--path", "missing.pdf"],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetch([], {}),
+        stdout: textBuffer(),
+        stderr: missingFileStderr
+      }
+    );
+
+    expect(missingFileExit).toBe(1);
+    expect(missingFileStderr.text()).toContain("Could not read upload file 'missing.pdf'");
   });
 });
 
@@ -766,11 +911,14 @@ interface RemoteCall {
 
 function fakeFetch(calls: RemoteCall[], responseBody: unknown, status = 200): typeof fetch {
   return async (input, init) => {
+    const body = init?.body === undefined || init.body === null
+      ? undefined
+      : await new Response(init.body).text();
     calls.push({
       url: String(input),
       method: init?.method ?? "GET",
       headers: new Headers(init?.headers),
-      ...(typeof init?.body === "string" ? { body: init.body } : {})
+      ...(body === undefined ? {} : { body })
     });
     return new Response(JSON.stringify(responseBody), {
       headers: { "content-type": "application/json" },

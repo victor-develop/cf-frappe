@@ -24,6 +24,8 @@ export async function requestRemoteAdmin<TData, TError extends Error>(
   io: RemoteAdminIo,
   request: {
     readonly body?: Record<string, unknown>;
+    readonly rawBody?: BodyInit;
+    readonly contentType?: string;
     readonly method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
     readonly path: string;
     readonly query?: URLSearchParams;
@@ -48,6 +50,8 @@ export async function requestRemoteAdminPayload<TPayload, TError extends Error>(
   io: RemoteAdminIo,
   request: {
     readonly body?: Record<string, unknown>;
+    readonly rawBody?: BodyInit;
+    readonly contentType?: string;
     readonly method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
     readonly path: string;
     readonly query?: URLSearchParams;
@@ -72,6 +76,12 @@ export async function requestRemoteAdminPayload<TPayload, TError extends Error>(
   if (request.body !== undefined) {
     headers.set("content-type", "application/json");
     init.body = JSON.stringify(request.body);
+  }
+  if (request.rawBody !== undefined) {
+    if (request.contentType !== undefined) {
+      headers.set("content-type", request.contentType);
+    }
+    init.body = request.rawBody;
   }
   const response = await runFetch(remoteAdminApiUrl(target.url, request.path, request.query, options), init);
   const payload = await readRemoteJsonResponse(response, options);

@@ -197,6 +197,9 @@ describe("cf-frappe CLI scaffold", () => {
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "npx cf-frappe data-patches rollback-enqueue --url https://your-worker.example --id tasks.seed_starter_tasks"
     );
+    await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
+      "npx cf-frappe files upload --url https://your-worker.example --path ./invoice.pdf"
+    );
     await expect(readFile(join(target, "public/assets/task-form.js"), "utf8")).resolves.toContain(
       "window.cfFrappe.form.on"
     );
