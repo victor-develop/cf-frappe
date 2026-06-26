@@ -482,6 +482,39 @@ describe("Desk app", () => {
     expect(html).toContain("DocType");
   });
 
+  it("renders global search through the query service boundary", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Desk Launch Plan", body: "Coordinate the release" })
+    });
+
+    const empty = await app.request("/desk/search");
+    expect(empty.status).toBe(200);
+    const emptyHtml = await empty.text();
+    expect(emptyHtml).toContain('action="/desk/search"');
+    expect(emptyHtml).toContain("Enter a search query.");
+    expect(emptyHtml).toContain("Global Search");
+
+    const escaped = await app.request("/desk/search?q=%22%3E%3Cscript%3E&tenant=acme%22%3E");
+    expect(escaped.status).toBe(200);
+    const escapedHtml = await escaped.text();
+    expect(escapedHtml).toContain('value="&quot;&gt;&lt;script&gt;"');
+    expect(escapedHtml).toContain('name="tenant" value="acme&quot;&gt;"');
+    expect(escapedHtml).not.toContain('value=""><script>');
+
+    const response = await app.request("/desk/search?q=launch&limit=5");
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('value="launch"');
+    expect(html).toContain("/desk/Note/Desk%20Launch%20Plan");
+    expect(html).toContain("Desk Launch Plan");
+    expect(html).toContain("<td>Note</td>");
+    expect(html).toContain("<td>name</td>");
+    expect(html).toContain("1 matches");
+  });
+
   it("renders metadata-defined workspaces with permissioned shortcuts", async () => {
     const registry = createRegistry({
       doctypes: [noteDocType],

@@ -6,6 +6,7 @@ import {
   type DocumentSnapshot,
   type FieldDefinition,
   type FieldType,
+  type GlobalSearchResult,
   type ListFilterControlDefinition,
   type JsonValue,
   type LinkOption,
@@ -103,6 +104,7 @@ export interface DeskLayoutOptions {
   readonly active?: string;
   readonly activeReport?: string;
   readonly activeDashboard?: string;
+  readonly activeSearch?: boolean;
   readonly activeAdmin?: string;
   readonly activeWorkspace?: string;
   readonly showFiles?: boolean;
@@ -195,6 +197,7 @@ export function renderDeskLayout(options: DeskLayoutOptions): string {
     <a class="brand" href="/desk">cf-frappe</a>
     <nav>
       ${workspaceNav ? `<p class="nav-heading">Workspaces</p>${workspaceNav}` : ""}
+      <p class="nav-heading">Search</p><a class="nav-link${options.activeSearch ? " is-active" : ""}" href="/desk/search">Global Search</a>
       ${nav ? `<p class="nav-heading">DocTypes</p>${nav}` : ""}
       ${reportNav ? `<p class="nav-heading">Reports</p>${reportNav}` : ""}
       ${dashboardNav ? `<p class="nav-heading">Dashboards</p>${dashboardNav}` : ""}
@@ -252,6 +255,51 @@ export function renderDeskHome(
     </div>
   </section>
   ${renderReportList(reports)}`;
+}
+
+export function renderGlobalSearchPage(state: {
+  readonly query: string;
+  readonly limit?: number;
+  readonly tenant?: string;
+  readonly result?: GlobalSearchResult;
+}): string {
+  const limit = state.limit ?? state.result?.limit ?? 20;
+  const hiddenTenant =
+    state.tenant === undefined ? "" : `<input type="hidden" name="tenant" value="${escapeHtml(state.tenant)}">`;
+  const rows = (state.result?.data ?? [])
+    .map(
+      (item) => `<tr>
+        <td><a href="${escapeHtml(item.route)}">${escapeHtml(item.label)}</a></td>
+        <td>${escapeHtml(item.doctype)}</td>
+        <td>${escapeHtml(item.name)}</td>
+        <td>${escapeHtml(item.matchedField)}</td>
+        <td>${escapeHtml(item.matchedText)}</td>
+        <td>${escapeHtml(item.updatedAt)}</td>
+      </tr>`
+    )
+    .join("");
+  const emptyMessage = state.query ? "No documents matched." : "Enter a search query.";
+  const summary =
+    state.result === undefined
+      ? ""
+      : `<section class="toolbar"><span class="muted">${String(state.result.total)} matches</span></section>`;
+  return `<form class="panel form list-filters" method="get" action="/desk/search">
+    ${hiddenTenant}
+    <div class="fields">
+      <label class="field wide"><span>Search</span><input name="q" value="${escapeHtml(state.query)}"></label>
+      <label class="field"><span>Limit</span><input name="limit" type="number" min="1" max="100" value="${String(limit)}"></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Search</button></div>
+  </form>
+  ${summary}
+  <section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Document</th><th>DocType</th><th>Name</th><th>Matched Field</th><th>Matched Text</th><th>Updated</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="6" class="empty">${emptyMessage}</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>`;
 }
 
 export function renderWorkspacePage(view: WorkspacePageView): string {

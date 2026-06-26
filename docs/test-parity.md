@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk file content navigation URL helper slice:
+As of the Desk global search page slice:
 
 - Vitest files: `94`
-- Vitest cases: `1100`
+- Vitest cases: `1101`
 
 ## Implication
 

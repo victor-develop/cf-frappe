@@ -403,6 +403,7 @@ interface DeskClientRuntime {
     readonly reportBuilderUrl: (doctype: string, id?: string, options?: Record<string, unknown>) => string;
     readonly reportPdfUrl: (report: string, options?: Record<string, unknown>) => string;
     readonly reportUrl: (report: string, options?: Record<string, unknown>) => string;
+    readonly searchUrl: (q: string, options?: Record<string, unknown>) => string;
     readonly workspaceUrl: (workspace: string) => string;
   };
   readonly resource: {
@@ -862,6 +863,9 @@ describe("Desk client runtime", () => {
     expect(runtime.desk.filePreviewUrl("file/1")).toBe("/desk/files/file%2F1/preview");
     expect(runtime.desk.notificationsUrl({ includeDismissed: true, limit: 10, unread: true, user: "ignored@example.com" }))
       .toBe("/desk/notifications?limit=10&unread=true&include_dismissed=true");
+    expect(runtime.desk.searchUrl("launch plan", { limit: 5, tenant: "acme/east" })).toBe(
+      "/desk/search?q=launch+plan&limit=5&tenant=acme%2Feast"
+    );
   });
 
   it("builds Desk admin navigation URLs for client scripts", async () => {

@@ -238,6 +238,10 @@ export function renderDeskClientScript(): string {
     return withQuery("/desk/notifications", deskNotificationInboxParams(options || {}));
   }
 
+  function deskSearchPath(q, options) {
+    return withQuery("/desk/search", searchParams(q, options || {}));
+  }
+
   function deskPrintPath(format, name) {
     return "/desk/print/" + encodePart(format) + "/" + encodePart(name);
   }
@@ -3636,6 +3640,7 @@ export function renderDeskClientScript(): string {
       reportBuilderPdfUrl: deskReportBuilderPdfPath,
       reportPdfUrl: deskReportPdfPath,
       reportUrl: deskReportPath,
+      searchUrl: deskSearchPath,
       workspaceUrl: deskWorkspacePath,
       importCsv: function (doctype, csv, options) {
         return request(deskPath(doctype) + "/import.csv", {

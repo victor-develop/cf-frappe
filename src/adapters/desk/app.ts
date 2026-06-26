@@ -145,6 +145,7 @@ import {
   renderDocumentPresencePanel,
   renderDocumentTimeline,
   renderFormView,
+  renderGlobalSearchPage,
   renderJobAdmin,
   renderJobScheduleAdmin,
   renderListView,
@@ -303,6 +304,45 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         showNotifications: true,
         showFiles: options.files !== undefined,
         body: renderUserNotificationInbox(inbox)
+      })
+    );
+  });
+
+  app.get("/desk/search", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const url = new URL(c.req.url);
+    const query = url.searchParams.get("q")?.trim() ?? "";
+    const limit = parseOptionalInteger(url.searchParams.get("limit") ?? undefined);
+    const tenant = url.searchParams.get("tenant")?.trim() || undefined;
+    const result = query
+      ? await options.queries.search(actor, {
+          q: query,
+          ...(limit === undefined ? {} : { limit }),
+          ...(tenant === undefined ? {} : { tenantId: tenant })
+        })
+      : undefined;
+    const doctypes = options.queries.listDoctypes(actor);
+    const reports = listReports(options, actor);
+    const dashboards = await listDashboards(options, actor);
+    const workspaces = listWorkspaces(options, actor);
+    const searchPage = renderGlobalSearchPage({
+      query,
+      ...(limit === undefined ? {} : { limit }),
+      ...(tenant === undefined ? {} : { tenant }),
+      ...(result === undefined ? {} : { result })
+    });
+    return html(
+      renderDeskLayoutFor(options, {
+        title: "Search",
+        adminLinks: adminLinksFor(options, actor),
+        doctypes,
+        reports,
+        dashboards,
+        workspaces,
+        activeSearch: true,
+        showNotifications: options.notifications !== undefined,
+        showFiles: options.files !== undefined,
+        body: searchPage
       })
     );
   });
