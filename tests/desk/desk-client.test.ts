@@ -248,6 +248,29 @@ interface DeskClientRuntime {
       options?: { readonly expectedVersion?: number; readonly tenant?: string }
     ) => Promise<unknown>;
   };
+  readonly fieldProperties: {
+    readonly clear: (
+      doctype: string,
+      field: string,
+      options?: { readonly expectedVersion?: number; readonly tenant?: string }
+    ) => Promise<unknown>;
+    readonly list: (doctype: string, options?: { readonly tenant?: string }) => Promise<unknown>;
+    readonly save: (
+      doctype: string,
+      field: string,
+      overrides: Record<string, unknown>,
+      options?: { readonly expectedVersion?: number; readonly tenant?: string }
+    ) => Promise<unknown>;
+  };
+  readonly workflows: {
+    readonly clear: (doctype: string, options?: { readonly expectedVersion?: number; readonly tenant?: string }) => Promise<unknown>;
+    readonly get: (doctype: string, options?: { readonly tenant?: string }) => Promise<unknown>;
+    readonly save: (
+      doctype: string,
+      workflow: Record<string, unknown>,
+      options?: { readonly expectedVersion?: number; readonly tenant?: string }
+    ) => Promise<unknown>;
+  };
   readonly files: {
     readonly bulkDelete: (files: readonly DeskBulkFileSelection[]) => Promise<unknown>;
     readonly bulkUpdateMetadata: (
@@ -1916,6 +1939,96 @@ describe("Desk client runtime", () => {
       undefined,
       JSON.stringify({ field: expectedField, expectedVersion: 1 }),
       JSON.stringify({ expectedVersion: 2 })
+    ]);
+  });
+
+  it("wraps event-sourced field property APIs with tenant and version metadata", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { doctype: "Task Type", version: 3, overrides: [{ fieldName: "severity/level" }] } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+    const expectedOverrides = {
+      label: "Severity Level",
+      required: true,
+      inListFilter: true,
+      defaultValue: "High"
+    };
+    const overrides = {
+      ...expectedOverrides,
+      expectedVersion: 99
+    };
+
+    await expect(runtime.fieldProperties.list("Task Type", { tenant: "acme/east" })).resolves.toEqual({
+      doctype: "Task Type",
+      version: 3,
+      overrides: [{ fieldName: "severity/level" }]
+    });
+    await runtime.fieldProperties.save("Task Type", "severity/level", overrides, { expectedVersion: 1, tenant: "acme/east" });
+    await runtime.fieldProperties.clear("Task Type", "severity/level", { expectedVersion: 2, tenant: "acme/east" });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/field-properties/Task%20Type?tenant=acme%2Feast",
+      "PUT /api/field-properties/Task%20Type/severity%2Flevel?tenant=acme%2Feast",
+      "DELETE /api/field-properties/Task%20Type/severity%2Flevel?tenant=acme%2Feast"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin"]);
+    expect(calls.map((call) => call.init.body)).toEqual([
+      undefined,
+      JSON.stringify({ overrides: expectedOverrides, expectedVersion: 1 }),
+      JSON.stringify({ expectedVersion: 2 })
+    ]);
+    expect(calls.map((call) => new Headers(call.init.headers).get("content-type"))).toEqual([
+      null,
+      "application/json",
+      "application/json"
+    ]);
+  });
+
+  it("wraps event-sourced workflow definition APIs with tenant and version metadata", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { doctype: "Task Type", version: 4, workflow: { initialState: "Open" } } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+    const expectedWorkflow = {
+      stateField: "status",
+      initialState: "Open",
+      states: ["Open", "Closed"],
+      transitions: [{ action: "Close", from: "Open", to: "Closed", roles: ["Support Manager"] }]
+    };
+    const workflow = {
+      ...expectedWorkflow,
+      expectedVersion: 99
+    };
+
+    await expect(runtime.workflows.get("Task Type", { tenant: "acme/east" })).resolves.toEqual({
+      doctype: "Task Type",
+      version: 4,
+      workflow: { initialState: "Open" }
+    });
+    await runtime.workflows.save("Task Type", workflow, { expectedVersion: 1, tenant: "acme/east" });
+    await runtime.workflows.clear("Task Type", { expectedVersion: 2, tenant: "acme/east" });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/workflows/Task%20Type?tenant=acme%2Feast",
+      "PUT /api/workflows/Task%20Type?tenant=acme%2Feast",
+      "DELETE /api/workflows/Task%20Type?tenant=acme%2Feast"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin"]);
+    expect(calls.map((call) => call.init.body)).toEqual([
+      undefined,
+      JSON.stringify({ workflow: expectedWorkflow, expectedVersion: 1 }),
+      JSON.stringify({ expectedVersion: 2 })
+    ]);
+    expect(calls.map((call) => new Headers(call.init.headers).get("content-type"))).toEqual([
+      null,
+      "application/json",
+      "application/json"
     ]);
   });
 

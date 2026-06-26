@@ -223,6 +223,14 @@ export function renderDeskClientScript(): string {
     return withQuery("/api/custom-fields/" + encodePart(doctype) + (field === undefined ? "" : "/" + encodePart(field)), tenantParams(options || {}));
   }
 
+  function fieldPropertyPath(doctype, field, options) {
+    return withQuery("/api/field-properties/" + encodePart(doctype) + (field === undefined ? "" : "/" + encodePart(field)), tenantParams(options || {}));
+  }
+
+  function workflowPath(doctype, options) {
+    return withQuery("/api/workflows/" + encodePart(doctype), tenantParams(options || {}));
+  }
+
   function userPermissionPath(userId, options) {
     return withQuery("/api/user-permissions/" + encodePart(userId), tenantParams(options || {}));
   }
@@ -321,6 +329,16 @@ export function renderDeskClientScript(): string {
   function notificationRuleBody(rule, options) {
     var bodyRule = isPlainObject(rule) ? withoutKeys(rule, ["name", "expectedVersion"]) : rule;
     return Object.assign({ rule: bodyRule }, versionBody(options));
+  }
+
+  function fieldPropertyBody(overrides, options) {
+    var bodyOverrides = isPlainObject(overrides) ? withoutKeys(overrides, ["expectedVersion"]) : overrides;
+    return Object.assign({ overrides: bodyOverrides }, versionBody(options));
+  }
+
+  function workflowBody(workflow, options) {
+    var bodyWorkflow = isPlainObject(workflow) ? withoutKeys(workflow, ["expectedVersion"]) : workflow;
+    return Object.assign({ workflow: bodyWorkflow }, versionBody(options));
   }
 
   function userPermissionBody(grant, options) {
@@ -2956,6 +2974,28 @@ export function renderDeskClientScript(): string {
       },
       save: function (doctype, field, options) {
         return request(customFieldPath(doctype, undefined, options || {}), { method: "POST", body: customFieldBody(field, options) }).then(unwrapData);
+      }
+    }),
+    fieldProperties: Object.freeze({
+      clear: function (doctype, field, options) {
+        return request(fieldPropertyPath(doctype, field, options || {}), { method: "DELETE", body: versionBody(options) }).then(unwrapData);
+      },
+      list: function (doctype, options) {
+        return request(fieldPropertyPath(doctype, undefined, options || {})).then(unwrapData);
+      },
+      save: function (doctype, field, overrides, options) {
+        return request(fieldPropertyPath(doctype, field, options || {}), { method: "PUT", body: fieldPropertyBody(overrides, options) }).then(unwrapData);
+      }
+    }),
+    workflows: Object.freeze({
+      clear: function (doctype, options) {
+        return request(workflowPath(doctype, options || {}), { method: "DELETE", body: versionBody(options) }).then(unwrapData);
+      },
+      get: function (doctype, options) {
+        return request(workflowPath(doctype, options || {})).then(unwrapData);
+      },
+      save: function (doctype, workflow, options) {
+        return request(workflowPath(doctype, options || {}), { method: "PUT", body: workflowBody(workflow, options) }).then(unwrapData);
       }
     }),
     userPermissions: Object.freeze({
