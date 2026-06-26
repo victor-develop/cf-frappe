@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseCliArgs, runCli, type WritableText } from "../../src/cli/command";
@@ -89,6 +89,26 @@ describe("cf-frappe CLI remote files", () => {
       contentType: "application/pdf",
       filename: "invoice.pdf",
       isPrivate: false
+    });
+
+    expect(parseCliArgs([
+      "files",
+      "download",
+      "--url",
+      "https://app.example",
+      "--name",
+      "file/invoice",
+      "--output",
+      "downloads/invoice.pdf",
+      "--header-env",
+      "Authorization=CF_FRAPPE_AUTH"
+    ])).toEqual({
+      kind: "files",
+      action: "download",
+      url: "https://app.example",
+      headers: [{ kind: "env", name: "Authorization", envName: "CF_FRAPPE_AUTH" }],
+      name: "file/invoice",
+      outputPath: "downloads/invoice.pdf"
     });
 
     expect(parseCliArgs([
@@ -249,6 +269,14 @@ describe("cf-frappe CLI remote files", () => {
     expect(parseCliArgs(["files", "upload", "--url", "https://app.example"])).toEqual({
       kind: "invalid",
       message: "File upload requires --path"
+    });
+    expect(parseCliArgs(["files", "download", "--url", "https://app.example", "--name", "file_invoice"])).toEqual({
+      kind: "invalid",
+      message: "File download requires --output"
+    });
+    expect(parseCliArgs(["files", "list", "--url", "https://app.example", "--output", "invoice.pdf"])).toEqual({
+      kind: "invalid",
+      message: "Cannot use --output with files list"
     });
     expect(parseCliArgs(["files", "list", "--url", "https://app.example", "--path", "invoice.pdf"])).toEqual({
       kind: "invalid",
@@ -497,6 +525,77 @@ describe("cf-frappe CLI remote files", () => {
     expect(calls[0]?.url).toBe("https://app.example/api/files?filename=avatar.bin");
     expect(calls[0]?.headers.get("content-type")).toBe("application/octet-stream");
     expect(calls[0]?.body).toBe("avatar-bytes");
+  });
+
+  it("downloads remote file content to a local path", async () => {
+    const calls: RemoteCall[] = [];
+    const stdout = textBuffer();
+    const exitCode = await runCli(
+      [
+        "files",
+        "download",
+        "--url",
+        "https://app.example/cf",
+        "--name",
+        "file/invoice",
+        "--output",
+        "invoice.pdf",
+        "--header-env",
+        "Authorization=CF_FRAPPE_AUTH"
+      ],
+      {
+        cwd: () => tempRoot,
+        env: (name) => name === "CF_FRAPPE_AUTH" ? "Bearer test-token" : undefined,
+        fetch: fakeBinaryFetch(calls, "invoice-bytes", {
+          "content-type": "application/pdf",
+          etag: '"invoice-etag"'
+        }),
+        stdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(calls[0]?.url).toBe("https://app.example/cf/api/files/file%2Finvoice/content");
+    expect(calls[0]?.method).toBe("GET");
+    expect(calls[0]?.headers.get("accept")).toBe("*/*");
+    expect(calls[0]?.headers.get("authorization")).toBe("Bearer test-token");
+    await expect(readFile(join(tempRoot, "invoice.pdf"), "utf8")).resolves.toBe("invoice-bytes");
+    expect(stdout.text()).toContain("Downloaded file from https://app.example/cf");
+    expect(stdout.text()).toContain(`- file/invoice -> ${join(tempRoot, "invoice.pdf")} bytes 13 type application/pdf`);
+  });
+
+  it("maps remote file download errors without writing output", async () => {
+    const stderr = textBuffer();
+    const exitCode = await runCli(
+      [
+        "files",
+        "download",
+        "--url",
+        "https://app.example",
+        "--name",
+        "missing",
+        "--output",
+        "missing.txt"
+      ],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetch([], {
+          error: {
+            code: "DOCUMENT_NOT_FOUND",
+            message: "File 'missing' was not found"
+          }
+        }, 404),
+        stdout: textBuffer(),
+        stderr
+      }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr.text()).toContain(
+      "Remote file request failed (404): DOCUMENT_NOT_FOUND: File 'missing' was not found"
+    );
+    await expect(readFile(join(tempRoot, "missing.txt"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("deletes one remote file with an optional expected version", async () => {
@@ -924,6 +1023,17 @@ function fakeFetch(calls: RemoteCall[], responseBody: unknown, status = 200): ty
       headers: { "content-type": "application/json" },
       status
     });
+  };
+}
+
+function fakeBinaryFetch(calls: RemoteCall[], body: BodyInit, headers: HeadersInit = {}, status = 200): typeof fetch {
+  return async (input, init) => {
+    calls.push({
+      url: String(input),
+      method: init?.method ?? "GET",
+      headers: new Headers(init?.headers)
+    });
+    return new Response(body, { headers, status });
   };
 }
 

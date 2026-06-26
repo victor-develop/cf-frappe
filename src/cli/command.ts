@@ -928,6 +928,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
   let url: string | undefined;
   const headers: FileHeaderOption[] = [];
   let name: string | undefined;
+  let outputPath: string | undefined;
   let path: string | undefined;
   const files: NonNullable<FileRemoteCommand["files"]>[number][] = [];
   let attachedToDoctype: string | undefined;
@@ -1001,7 +1002,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--name") {
-      if (action !== "delete" && action !== "update" && action !== "rendition") {
+      if (action !== "delete" && action !== "download" && action !== "update" && action !== "rendition") {
         return { kind: "invalid", message: `Cannot use --name with files ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1009,6 +1010,18 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
         return value;
       }
       name = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--output") {
+      if (action !== "download") {
+        return { kind: "invalid", message: `Cannot use --output with files ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      outputPath = value;
       index += 1;
       continue;
     }
@@ -1278,8 +1291,11 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
   if ((attachedToDoctype === undefined) !== (attachedToName === undefined)) {
     return { kind: "invalid", message: "Use --attached-to-doctype and --attached-to-name together" };
   }
-  if ((action === "delete" || action === "update" || action === "rendition") && name === undefined) {
+  if ((action === "delete" || action === "download" || action === "update" || action === "rendition") && name === undefined) {
     return { kind: "invalid", message: `File ${action} requires --name` };
+  }
+  if (action === "download" && outputPath === undefined) {
+    return { kind: "invalid", message: "File download requires --output" };
   }
   if (action === "upload" && path === undefined) {
     return { kind: "invalid", message: "File upload requires --path" };
@@ -1328,6 +1344,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
     url,
     headers,
     ...(name === undefined ? {} : { name }),
+    ...(outputPath === undefined ? {} : { outputPath }),
     ...(path === undefined ? {} : { path }),
     ...(files.length === 0 ? {} : { files }),
     ...(attachedToDoctype === undefined ? {} : { attachedToDoctype }),
@@ -1362,6 +1379,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
 function fileAction(value: string): FileRemoteAction | undefined {
   return value === "list" ||
     value === "delete" ||
+    value === "download" ||
     value === "update" ||
     value === "bulk-delete" ||
     value === "bulk-update" ||
@@ -1757,6 +1775,7 @@ function helpText(): string {
     "  cf-frappe jobs schedule-delete --url <origin> --id <scheduleId> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files list --url <origin> [--filename <text>] [--content-type <type>] [--attached-to-doctype <doctype> --attached-to-name <name>] [--storage-state <state>] [--scan-status <status>] [--uploaded-by <user>] [--private|--public] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files upload --url <origin> --path <localPath> [--filename <text>] [--content-type <type>] [--private|--public] [--attached-to-doctype <doctype> --attached-to-name <name>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe files download --url <origin> --name <fileName> --output <localPath> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files update --url <origin> --name <fileName> [--filename <text>] [--private|--public] [--attached-to-doctype <doctype> --attached-to-name <name>|--clear-attachment] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files bulk-update --url <origin> (--file <fileName>|--file-version <fileName:version>)... [--private|--public] [--attached-to-doctype <doctype> --attached-to-name <name>|--clear-attachment] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files bulk-delete --url <origin> (--file <fileName>|--file-version <fileName:version>)... [--header <name:value>] [--header-env <name=ENV>]",

@@ -63,12 +63,36 @@ export async function requestRemoteAdminPayload<TPayload, TError extends Error>(
     readonly urlLabel: string;
   }
 ): Promise<TPayload> {
+  const response = await requestRemoteAdminResponse(target, io, request, options);
+  const payload = await readRemoteJsonResponse(response, options);
+  return payload as TPayload;
+}
+
+export async function requestRemoteAdminResponse<TError extends Error>(
+  target: { readonly url: string; readonly headers: readonly RemoteHeaderOption[] },
+  io: RemoteAdminIo,
+  request: {
+    readonly body?: Record<string, unknown>;
+    readonly rawBody?: BodyInit;
+    readonly contentType?: string;
+    readonly method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
+    readonly path: string;
+    readonly query?: URLSearchParams;
+  },
+  options: {
+    readonly error: RemoteAdminErrorConstructor<TError>;
+    readonly fetchLabel: string;
+    readonly resourceLabel: string;
+    readonly urlLabel: string;
+    readonly accept?: string;
+  }
+): Promise<Response> {
   const runFetch = io.fetch ?? globalThis.fetch;
   if (typeof runFetch !== "function") {
     throw new options.error(`No fetch implementation is available for ${options.fetchLabel}`);
   }
   const headers = resolveRemoteHeaders(target.headers, io.env, options.error);
-  headers.set("accept", "application/json");
+  headers.set("accept", options.accept ?? "application/json");
   const init: RequestInit = {
     method: request.method,
     headers
@@ -84,13 +108,13 @@ export async function requestRemoteAdminPayload<TPayload, TError extends Error>(
     init.body = request.rawBody;
   }
   const response = await runFetch(remoteAdminApiUrl(target.url, request.path, request.query, options), init);
-  const payload = await readRemoteJsonResponse(response, options);
   if (!response.ok) {
+    const payload = await readRemoteJsonResponse(response, options);
     throw new options.error(
       `${options.resourceLabel} request failed (${response.status}): ${remoteErrorMessage(payload)}`
     );
   }
-  return payload as TPayload;
+  return response;
 }
 
 function resolveRemoteHeaders<TError extends Error>(

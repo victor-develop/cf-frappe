@@ -1,8 +1,14 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
-import { requestRemoteAdmin, requestRemoteAdminPayload, type RemoteAdminIo, type RemoteHeaderOption } from "./remote-admin.js";
+import {
+  requestRemoteAdmin,
+  requestRemoteAdminPayload,
+  requestRemoteAdminResponse,
+  type RemoteAdminIo,
+  type RemoteHeaderOption
+} from "./remote-admin.js";
 
-export type FileRemoteAction = "bulk-delete" | "bulk-update" | "list" | "delete" | "rendition" | "update" | "upload";
+export type FileRemoteAction = "bulk-delete" | "bulk-update" | "list" | "delete" | "download" | "rendition" | "update" | "upload";
 
 export type FileHeaderOption = RemoteHeaderOption;
 
@@ -12,6 +18,7 @@ export interface FileRemoteCommand {
   readonly url: string;
   readonly headers: readonly FileHeaderOption[];
   readonly name?: string;
+  readonly outputPath?: string;
   readonly path?: string;
   readonly files?: readonly FileRemoteSelection[];
   readonly attachedToDoctype?: string;
@@ -146,6 +153,20 @@ export async function runRemoteFileCommand(command: FileRemoteCommand, io: FileR
     });
     return formatUpload(command.url, data);
   }
+  if (command.action === "download") {
+    const output = await downloadOutputPath(command, io.cwd);
+    const response = await requestRemoteFileResponse(command, io, {
+      method: "GET",
+      path: `/api/files/${encodeURIComponent(requiredFileName(command, "download"))}/content`
+    });
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    try {
+      await writeFile(output, bytes);
+    } catch (error) {
+      throw new FileRemoteError(`Could not write download file '${command.outputPath}': ${errorMessage(error)}`);
+    }
+    return formatDownload(command.url, requiredFileName(command, "download"), output, bytes.byteLength, response);
+  }
   if (command.action === "list") {
     const query = queryParams({
       ...(command.attachedToDoctype === undefined ? {} : { attached_to_doctype: command.attachedToDoctype }),
@@ -241,6 +262,27 @@ function requestRemoteFilePayload<TPayload>(
   }
 ): Promise<TPayload> {
   return requestRemoteAdminPayload<TPayload, FileRemoteError>(command, io, request, {
+    error: FileRemoteError,
+    fetchLabel: "remote file commands",
+    resourceLabel: "Remote file",
+    urlLabel: "Remote file"
+  });
+}
+
+function requestRemoteFileResponse(
+  command: FileRemoteCommand,
+  io: FileRemoteIo,
+  request: {
+    readonly body?: Record<string, unknown>;
+    readonly rawBody?: BodyInit;
+    readonly contentType?: string;
+    readonly method: "DELETE" | "GET" | "PATCH" | "POST";
+    readonly path: string;
+    readonly query?: URLSearchParams;
+  }
+): Promise<Response> {
+  return requestRemoteAdminResponse<FileRemoteError>(command, io, request, {
+    accept: "*/*",
     error: FileRemoteError,
     fetchLabel: "remote file commands",
     resourceLabel: "Remote file",
@@ -365,6 +407,13 @@ async function uploadFileBody(command: FileRemoteCommand, cwd = process.cwd()): 
   };
 }
 
+async function downloadOutputPath(command: FileRemoteCommand, cwd = process.cwd()): Promise<string> {
+  if (command.outputPath === undefined) {
+    throw new FileRemoteError("File download requires --output");
+  }
+  return resolve(cwd, command.outputPath);
+}
+
 function formatDashboard(baseUrl: string, dashboard: FileDashboardResponse): string {
   return [
     `Files at ${baseUrl}`,
@@ -387,6 +436,15 @@ function formatUpload(baseUrl: string, snapshot: FileSnapshotResponse): string {
   return [
     `Uploaded file at ${baseUrl}`,
     snapshotLine(snapshot),
+    ""
+  ].join("\n");
+}
+
+function formatDownload(baseUrl: string, name: string, outputPath: string, bytes: number, response: Response): string {
+  const contentType = response.headers.get("content-type");
+  return [
+    `Downloaded file from ${baseUrl}`,
+    `- ${name} -> ${outputPath} bytes ${String(bytes)}${contentType === null ? "" : ` type ${contentType}`}`,
     ""
   ].join("\n");
 }
