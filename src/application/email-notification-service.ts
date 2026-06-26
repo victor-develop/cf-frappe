@@ -71,6 +71,18 @@ export type DocumentEmailNotificationDelivery =
       readonly reason: string;
     };
 
+export type DocumentEmailNotificationQueueResult =
+  | {
+      readonly status: "queued";
+      readonly messageId: string;
+      readonly eventId: string;
+      readonly ruleName: string;
+      readonly recipientId: string;
+      readonly to: string;
+      readonly subject: string;
+    }
+  | Extract<DocumentEmailNotificationDelivery, { readonly status: "skipped" }>;
+
 interface QueuedEmailMessage {
   readonly messageId: string;
   readonly sourceEventId: string;
@@ -143,16 +155,20 @@ export class EmailNotificationService {
   async queueFromDomainEvent(
     event: DomainEvent,
     snapshot?: DocumentSnapshot | null
-  ): Promise<readonly DocumentEmailNotificationDelivery[]> {
+  ): Promise<readonly DocumentEmailNotificationQueueResult[]> {
     const rules = await this.notificationRules.notificationRulesFor(event.tenantId, event.doctype, {
       occurredAt: event.occurredAt
     });
     const notifications = documentEmailNotificationsFromRules(event, snapshot ?? null, rules);
-    const queued: DocumentEmailNotificationDelivery[] = [];
+    const queued: DocumentEmailNotificationQueueResult[] = [];
     for (const notification of notifications) {
       const messageId = emailNotificationMessageId(notification.eventId, notification.ruleName, notification.recipientId);
       const current = (await this.state(event.tenantId, messageId)).messages.get(messageId);
       if (current !== undefined) {
+        const replayable = queueResultFromOutboxRecord(current);
+        if (replayable !== undefined) {
+          queued.push(replayable);
+        }
         continue;
       }
       const to = await this.recipients.emailForUser(notification.tenantId, notification.recipientId);
@@ -194,6 +210,15 @@ export class EmailNotificationService {
           "X-CF-Frappe-Rule": notification.ruleName
         }
       });
+      queued.push({
+        status: "queued",
+        messageId,
+        eventId: notification.eventId,
+        ruleName: notification.ruleName,
+        recipientId: notification.recipientId,
+        to: to.email,
+        subject: notification.subject
+      });
     }
     return queued;
   }
@@ -203,7 +228,7 @@ export class EmailNotificationService {
     snapshot?: DocumentSnapshot | null
   ): Promise<readonly DocumentEmailNotificationDelivery[]> {
     const queued = await this.queueFromDomainEvent(event, snapshot);
-    const skipped = queued.filter((delivery) => delivery.status === "skipped");
+    const skipped = queued.filter(isSkippedDelivery);
     const rules = await this.notificationRules.notificationRulesFor(event.tenantId, event.doctype, {
       occurredAt: event.occurredAt
     });
@@ -382,6 +407,39 @@ export class EmailNotificationService {
     ]);
     return event!;
   }
+}
+
+function isSkippedDelivery(
+  delivery: DocumentEmailNotificationQueueResult
+): delivery is Extract<DocumentEmailNotificationDelivery, { readonly status: "skipped" }> {
+  return delivery.status === "skipped";
+}
+
+function queueResultFromOutboxRecord(
+  record: EmailOutboxRecordEntry
+): DocumentEmailNotificationQueueResult | undefined {
+  if (record.status === "sent") {
+    return undefined;
+  }
+  if (record.status === "skipped") {
+    return {
+      status: "skipped",
+      messageId: record.messageId,
+      eventId: record.sourceEventId,
+      ruleName: record.ruleName,
+      recipientId: record.recipientId,
+      reason: record.reason ?? `No deliverable email address for user '${record.recipientId}'`
+    };
+  }
+  return {
+    status: "queued",
+    messageId: record.messageId,
+    eventId: record.sourceEventId,
+    ruleName: record.ruleName,
+    recipientId: record.recipientId,
+    to: record.to.email,
+    subject: record.subject
+  };
 }
 
 export const fallbackEmailRecipientResolver: EmailRecipientResolver = {

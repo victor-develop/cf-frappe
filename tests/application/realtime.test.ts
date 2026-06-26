@@ -1,14 +1,20 @@
 import {
   createDocumentDeliveryHooks,
+  createDocumentQueuedEmailNotificationHooks,
   createDocumentRealtimeHooks,
+  createEmailNotificationDeliveryJob,
+  createJobRegistry,
   EmailNotificationService,
+  EmailNotificationDeliveryQueueService,
+  EMAIL_NOTIFICATION_DELIVERY_JOB_NAME,
   type EmailMessage,
   InMemoryEventStore,
+  InMemoryJobQueue,
   InMemoryRealtimePublisher
 } from "../../src";
-import { UserNotificationService, deterministicIds } from "../../src";
-import { createServices, data, owner } from "../helpers";
-import type { RealtimePublishResult } from "../../src";
+import { UserNotificationService, deterministicIds, fixedClock, JobDispatcher } from "../../src";
+import { createServices, data, now, owner } from "../helpers";
+import type { AfterCommitContext, RealtimePublishResult } from "../../src";
 
 describe("document realtime hooks", () => {
   it("publishes committed domain events to realtime topics", async () => {
@@ -153,6 +159,260 @@ describe("document realtime hooks", () => {
         to: [{ email: "support@example.com" }],
         subject: "Note Email Delivery assigned"
       })
+    ]);
+  });
+
+  it("can queue email notification delivery jobs from the shared after-commit hook", async () => {
+    const events = new InMemoryEventStore();
+    const messages: EmailMessage[] = [];
+    const emailNotifications = new EmailNotificationService({
+      events,
+      from: { email: "notifications@example.com" },
+      sender: {
+        async send(message) {
+          messages.push(message);
+          return {};
+        }
+      },
+      notificationRules: {
+        async notificationRulesFor() {
+          return [
+            {
+              name: "Email assignees",
+              events: ["DocumentAssigned"],
+              recipients: [{ kind: "user", userId: "support@example.com" }],
+              channels: ["email"],
+              subject: "{{ doctype }} {{ name }} assigned"
+            }
+          ];
+        }
+      }
+    });
+    const queue = new InMemoryJobQueue();
+    const dispatcher = new JobDispatcher({
+      registry: createJobRegistry({ jobs: [createEmailNotificationDeliveryJob()] }),
+      queue,
+      clock: fixedClock(now),
+      ids: deterministicIds(["email-delivery-1"])
+    });
+    const deliveryQueue = new EmailNotificationDeliveryQueueService({ dispatcher });
+    const hooks = createDocumentDeliveryHooks({
+      emailNotifications,
+      emailNotificationDeliveryQueue: deliveryQueue
+    });
+    const services = createServices(["create-1", "assign-1"], {
+      afterCommit: async (context) => {
+        await hooks.afterCommit?.(context);
+      }
+    });
+
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Queued Email" }) });
+    await services.documents.assign({
+      actor: owner,
+      doctype: "Note",
+      name: "Queued Email",
+      assignee: "support@example.com",
+      expectedVersion: 1
+    });
+
+    expect(messages).toEqual([]);
+    expect(queue.queued()).toEqual([
+      expect.objectContaining({
+        message: expect.objectContaining({
+          tenantId: "acme",
+          jobName: EMAIL_NOTIFICATION_DELIVERY_JOB_NAME,
+          runId: "job_email-delivery-1",
+          payload: {
+            messageId: "evt_assign-1:rule:Email%20assignees:email:support%40example.com"
+          },
+          metadata: expect.objectContaining({
+            dispatchSource: "email-notifications",
+            sourceEventId: "evt_assign-1",
+            sourceEventType: "NoteAssigned",
+            sourcePayloadKind: "DocumentAssigned",
+            ruleName: "Email assignees",
+            recipientId: "support@example.com"
+          })
+        })
+      })
+    ]);
+  });
+
+  it("can replay queued email delivery when enqueue fails after recording the outbox intent", async () => {
+    const events = new InMemoryEventStore();
+    const messages: EmailMessage[] = [];
+    const emailNotifications = new EmailNotificationService({
+      events,
+      from: { email: "notifications@example.com" },
+      sender: {
+        async send(message) {
+          messages.push(message);
+          return {};
+        }
+      },
+      notificationRules: {
+        async notificationRulesFor() {
+          return [
+            {
+              name: "Email assignees",
+              events: ["DocumentAssigned"],
+              recipients: [{ kind: "user", userId: "support@example.com" }],
+              channels: ["email"]
+            }
+          ];
+        }
+      },
+      ids: deterministicIds(["email-outbox-1"])
+    });
+    const enqueued: Array<{ readonly tenantId: string; readonly messageId: string }> = [];
+    let enqueueAttempts = 0;
+    const hooks = createDocumentDeliveryHooks({
+      emailNotifications,
+      emailNotificationDeliveryQueue: {
+        async enqueue(tenantId, messageId) {
+          enqueueAttempts += 1;
+          if (enqueueAttempts === 1) {
+            throw new Error("queue unavailable");
+          }
+          enqueued.push({ tenantId, messageId });
+        }
+      }
+    });
+    const contexts: AfterCommitContext[] = [];
+    const hookErrors: string[] = [];
+    const services = createServices(["create-1", "assign-1"], {
+      afterCommit: async (context) => {
+        contexts.push(context);
+        await hooks.afterCommit?.(context);
+      },
+      onHookError: (error) => {
+        hookErrors.push(error instanceof Error ? error.message : String(error));
+      }
+    });
+
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Replay Queue Hook" }) });
+    await services.documents.assign({
+      actor: owner,
+      doctype: "Note",
+      name: "Replay Queue Hook",
+      assignee: "support@example.com",
+      expectedVersion: 1
+    });
+
+    expect(hookErrors).toEqual(["queue unavailable"]);
+    expect(messages).toEqual([]);
+    expect(enqueued).toEqual([]);
+
+    const assignContext = contexts.find((context) => context.event.payload.kind === "DocumentAssigned");
+    expect(assignContext).toBeDefined();
+    await hooks.afterCommit?.(assignContext!);
+
+    expect(messages).toEqual([]);
+    expect(enqueued).toEqual([
+      {
+        tenantId: "acme",
+        messageId: "evt_assign-1:rule:Email%20assignees:email:support%40example.com"
+      }
+    ]);
+  });
+
+  it("does not enqueue queued email jobs for skipped recipients", async () => {
+    const events = new InMemoryEventStore();
+    const messages: EmailMessage[] = [];
+    const emailNotifications = new EmailNotificationService({
+      events,
+      from: { email: "notifications@example.com" },
+      sender: {
+        async send(message) {
+          messages.push(message);
+          return {};
+        }
+      },
+      notificationRules: {
+        async notificationRulesFor() {
+          return [
+            {
+              name: "Email assignees",
+              events: ["DocumentAssigned"],
+              recipients: [{ kind: "user", userId: "support-user" }],
+              channels: ["email"]
+            }
+          ];
+        }
+      },
+      recipients: { async emailForUser() { return undefined; } },
+      ids: deterministicIds(["email-skipped-1"])
+    });
+    const enqueued: Array<{ readonly tenantId: string; readonly messageId: string }> = [];
+    const hooks = createDocumentQueuedEmailNotificationHooks(emailNotifications, {
+      async enqueue(tenantId, messageId) {
+        enqueued.push({ tenantId, messageId });
+      }
+    });
+    const services = createServices(["create-1", "assign-1"], {
+      afterCommit: async (context) => {
+        await hooks.afterCommit?.(context);
+      }
+    });
+
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Skipped Queue Hook" }) });
+    await services.documents.assign({
+      actor: owner,
+      doctype: "Note",
+      name: "Skipped Queue Hook",
+      assignee: "support-user",
+      expectedVersion: 1
+    });
+
+    expect(messages).toEqual([]);
+    expect(enqueued).toEqual([]);
+  });
+
+  it("exposes a direct queued email hook for apps that assemble delivery hooks themselves", async () => {
+    const events = new InMemoryEventStore();
+    const emailNotifications = new EmailNotificationService({
+      events,
+      from: { email: "notifications@example.com" },
+      sender: { async send() { return {}; } },
+      notificationRules: {
+        async notificationRulesFor() {
+          return [
+            {
+              name: "Email assignees",
+              events: ["DocumentAssigned"],
+              recipients: [{ kind: "user", userId: "support@example.com" }],
+              channels: ["email"]
+            }
+          ];
+        }
+      }
+    });
+    const enqueued: Array<{ readonly tenantId: string; readonly messageId: string }> = [];
+    const hooks = createDocumentQueuedEmailNotificationHooks(emailNotifications, {
+      async enqueue(tenantId, messageId) {
+        enqueued.push({ tenantId, messageId });
+      }
+    });
+    const services = createServices(["create-1", "assign-1"], {
+      afterCommit: async (context) => {
+        await hooks.afterCommit?.(context);
+      }
+    });
+
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Direct Queue Hook" }) });
+    await services.documents.assign({
+      actor: owner,
+      doctype: "Note",
+      name: "Direct Queue Hook",
+      assignee: "support@example.com",
+      expectedVersion: 1
+    });
+
+    expect(enqueued).toEqual([
+      {
+        tenantId: "acme",
+        messageId: "evt_assign-1:rule:Email%20assignees:email:support%40example.com"
+      }
     ]);
   });
 });

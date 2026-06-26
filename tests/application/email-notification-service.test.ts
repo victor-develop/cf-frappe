@@ -224,7 +224,9 @@ describe("EmailNotificationService", () => {
     });
     const messageId = "evt_update:rule:Email%20owners:email:user_123";
 
-    await expect(service.queueFromDomainEvent(documentUpdatedEvent(), noteSnapshot())).resolves.toEqual([]);
+    await expect(service.queueFromDomainEvent(documentUpdatedEvent(), noteSnapshot())).resolves.toEqual([
+      queuedDelivery(messageId, "user_123", "old-reviewer@example.com")
+    ]);
     resolvedEmail = "new-reviewer@example.com";
     await expect(service.deliverOutboxMessage("acme", messageId)).resolves.toMatchObject({
       status: "sent",
@@ -238,6 +240,47 @@ describe("EmailNotificationService", () => {
         subject: "Note My Note changed"
       })
     ]);
+  });
+
+  it("returns existing unsent outbox messages as queue candidates for replay", async () => {
+    const events = new InMemoryEventStore();
+    const service = new EmailNotificationService({
+      events,
+      sender: recordingEmailSender(),
+      from: { email: "notifications@example.com" },
+      notificationRules: ruleProvider("reviewer@example.com"),
+      ids: deterministicIds(["queued-1"]),
+      clock: fixedClock(now)
+    });
+    const messageId = "evt_update:rule:Email%20owners:email:reviewer%40example.com";
+
+    await expect(service.queueFromDomainEvent(documentUpdatedEvent(), noteSnapshot())).resolves.toEqual([
+      queuedDelivery(messageId)
+    ]);
+    await expect(service.queueFromDomainEvent(documentUpdatedEvent(), noteSnapshot())).resolves.toEqual([
+      queuedDelivery(messageId)
+    ]);
+    await expect(events.readStream(emailOutboxStream("acme", messageId))).resolves.toMatchObject([
+      { payload: { kind: "EmailNotificationQueued", messageId } }
+    ]);
+  });
+
+  it("does not return sent outbox messages as queue candidates on replay", async () => {
+    const events = new InMemoryEventStore();
+    const service = new EmailNotificationService({
+      events,
+      sender: recordingEmailSender("cf-msg-1"),
+      from: { email: "notifications@example.com" },
+      notificationRules: ruleProvider("reviewer@example.com"),
+      ids: deterministicIds(["queued-1", "claim-1", "claimed-1", "sent-1"]),
+      clock: fixedClock(now)
+    });
+    const messageId = "evt_update:rule:Email%20owners:email:reviewer%40example.com";
+
+    await expect(service.deliverFromDomainEvent(documentUpdatedEvent(), noteSnapshot())).resolves.toEqual([
+      expect.objectContaining({ status: "sent", messageId })
+    ]);
+    await expect(service.queueFromDomainEvent(documentUpdatedEvent(), noteSnapshot())).resolves.toEqual([]);
   });
 
   it("does not record provider failure when sent-state persistence fails after provider success", async () => {
@@ -278,7 +321,9 @@ describe("EmailNotificationService", () => {
     });
     const messageId = "evt_update:rule:Email%20owners:email:reviewer%40example.com";
 
-    await expect(service.queueFromDomainEvent(documentUpdatedEvent(), noteSnapshot())).resolves.toEqual([]);
+    await expect(service.queueFromDomainEvent(documentUpdatedEvent(), noteSnapshot())).resolves.toEqual([
+      queuedDelivery(messageId)
+    ]);
     const first = service.deliverOutboxMessage("acme", messageId);
     const second = service.deliverOutboxMessage("acme", messageId);
     await race.waitForClaimRace();
@@ -311,7 +356,9 @@ describe("EmailNotificationService", () => {
     const messageId = "evt_update:rule:Email%20owners:email:reviewer%40example.com";
     const stream = emailOutboxStream("acme", messageId);
 
-    await expect(service.queueFromDomainEvent(documentUpdatedEvent(), noteSnapshot())).resolves.toEqual([]);
+    await expect(service.queueFromDomainEvent(documentUpdatedEvent(), noteSnapshot())).resolves.toEqual([
+      queuedDelivery(messageId)
+    ]);
     await events.append(stream, 1, [
       {
         id: "evt_claimed-existing",
@@ -451,10 +498,12 @@ describe("EmailNotificationService", () => {
       clock: fixedClock(now)
     });
 
-    await expect(service.queueFromDomainEvent(documentUpdatedEvent(), noteSnapshot())).resolves.toEqual([]);
-
     const firstMessageId = "evt_update:rule:Email%20owners:email:owner-a%40example.com";
     const secondMessageId = "evt_update:rule:Email%20owners:email:owner-b%40example.com";
+    await expect(service.queueFromDomainEvent(documentUpdatedEvent(), noteSnapshot())).resolves.toEqual([
+      queuedDelivery(firstMessageId, "owner-a@example.com", "owner-a@example.com"),
+      queuedDelivery(secondMessageId, "owner-b@example.com", "owner-b@example.com")
+    ]);
     await expect(events.readStream(emailOutboxStream("acme", firstMessageId))).resolves.toMatchObject([
       {
         sequence: 1,
@@ -582,6 +631,22 @@ function emailOutboxEvent(
     occurredAt,
     payload,
     metadata: {}
+  };
+}
+
+function queuedDelivery(
+  messageId: string,
+  recipientId = "reviewer@example.com",
+  to = "reviewer@example.com"
+) {
+  return {
+    status: "queued",
+    messageId,
+    eventId: "evt_update",
+    ruleName: "Email owners",
+    recipientId,
+    to,
+    subject: "Note My Note changed"
   };
 }
 
