@@ -541,6 +541,37 @@ export function renderDeskClientScript(): string {
     return headers;
   }
 
+  function fileUploadLimit(options) {
+    var raw = options && (options.maxUploadBytes !== undefined ? options.maxUploadBytes : options.max_upload_bytes);
+    var parsed = raw === undefined ? NaN : Number(raw);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+  }
+
+  function preflightKnownUploadSize(size, options) {
+    var maxUploadBytes = fileUploadLimit(options || {});
+    if (maxUploadBytes === undefined || typeof size !== "number" || !Number.isFinite(size)) {
+      return;
+    }
+    if (size > maxUploadBytes) {
+      throw new Error("File exceeds " + String(maxUploadBytes) + " bytes");
+    }
+  }
+
+  function uploadBodySize(body) {
+    return body && typeof body.size === "number" && Number.isFinite(body.size) ? body.size : undefined;
+  }
+
+  function directUploadRequestBody(input) {
+    var body = Object.assign({}, input || {});
+    delete body.maxUploadBytes;
+    delete body.max_upload_bytes;
+    return body;
+  }
+
+  function uploadReservationRequestBody(input) {
+    return directUploadRequestBody(input);
+  }
+
   function fileTransformParams(options) {
     var params = {};
     setParam(params, "width", options && options.width);
@@ -671,8 +702,9 @@ export function renderDeskClientScript(): string {
     }
   }
 
-  function prepareMultipartUpload(input) {
-    return request("/api/files/multipart-upload", { method: "POST", body: input || {} });
+  async function prepareMultipartUpload(input) {
+    preflightKnownUploadSize(input && input.size, input || {});
+    return request("/api/files/multipart-upload", { method: "POST", body: uploadReservationRequestBody(input || {}) });
   }
 
   function uploadMultipartPart(name, partNumber, body, options) {
@@ -705,6 +737,7 @@ export function renderDeskClientScript(): string {
     var input = multipartReservationBody(body, options || {});
     var chunkSize = multipartChunkSize(options || {});
     var size = input.size;
+    preflightKnownUploadSize(size, options || {});
     var totalParts = assertMultipartUploadPlan(size, chunkSize);
     var prepared = await prepareMultipartUpload(input);
     var fileName = prepared && prepared.data && prepared.data.name;
@@ -3365,8 +3398,9 @@ export function renderDeskClientScript(): string {
       list: function (options) {
         return request(withQuery("/api/files", fileListParams(options || {}))).then(unwrapData);
       },
-      prepareDirectUpload: function (input) {
-        return request("/api/files/direct-upload", { method: "POST", body: input || {} });
+      prepareDirectUpload: async function (input) {
+        preflightKnownUploadSize(input && input.size, input || {});
+        return request("/api/files/direct-upload", { method: "POST", body: directUploadRequestBody(input || {}) });
       },
       prepareMultipartUpload: prepareMultipartUpload,
       previewUrl: function (name) {
@@ -3381,7 +3415,8 @@ export function renderDeskClientScript(): string {
       updateMetadata: function (name, input, options) {
         return request(filePath(name), { method: "PATCH", body: commandBody(input, options) }).then(unwrapData);
       },
-      upload: function (body, options) {
+      upload: async function (body, options) {
+        preflightKnownUploadSize(uploadBodySize(body), options || {});
         return request(withQuery("/api/files", fileUploadParams(options || {})), {
           method: "POST",
           body: body,

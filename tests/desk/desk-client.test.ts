@@ -1652,6 +1652,7 @@ describe("Desk client runtime", () => {
         expiresInSeconds: 60,
         filename: "hello.txt",
         isPrivate: true,
+        maxUploadBytes: 4096,
         size: 5
       })
     ).resolves.toEqual({ data: { name: "file_upload" }, object: { etag: "etag" }, upload: { url: "https://upload.example" } });
@@ -1737,6 +1738,86 @@ describe("Desk client runtime", () => {
         height: 24
       }
     }));
+  });
+
+  it("preflights programmatic file helpers with dashboard upload limits", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return jsonResponse({ data: { name: "should-not-upload" } }, 201);
+    });
+
+    await expect(
+      runtime.files.upload(new Blob(["hello"], { type: "text/plain" }), {
+        filename: "too-big.txt",
+        maxUploadBytes: 4
+      })
+    ).rejects.toThrow("File exceeds 4 bytes");
+    await expect(
+      runtime.files.prepareDirectUpload({
+        filename: "too-big.txt",
+        maxUploadBytes: 4,
+        size: 5
+      })
+    ).rejects.toThrow("File exceeds 4 bytes");
+    await expect(
+      runtime.files.uploadMultipart(new Blob(["hello"], { type: "text/plain" }), {
+        filename: "too-big.txt",
+        maxUploadBytes: 4
+      })
+    ).rejects.toThrow("File exceeds 4 bytes");
+    await expect(
+      runtime.files.prepareMultipartUpload({
+        filename: "too-big.txt",
+        maxUploadBytes: 4,
+        size: 5
+      })
+    ).rejects.toThrow("File exceeds 4 bytes");
+
+    expect(calls).toEqual([]);
+  });
+
+  it("keeps programmatic upload limits client-local when the size is accepted or unknown", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return jsonResponse({ data: { name: "file_upload" }, upload: { url: "https://upload.example" } }, 201);
+    });
+
+    await expect(
+      runtime.files.prepareDirectUpload({
+        contentType: "text/plain",
+        filename: "fits.txt",
+        maxUploadBytes: 5,
+        max_upload_bytes: 1,
+        size: 5
+      })
+    ).resolves.toEqual({ data: { name: "file_upload" }, upload: { url: "https://upload.example" } });
+    await expect(
+      runtime.files.prepareDirectUpload({
+        filename: "server-decides.bin",
+        maxUploadBytes: 5
+      })
+    ).resolves.toEqual({ data: { name: "file_upload" }, upload: { url: "https://upload.example" } });
+    await expect(
+      runtime.files.prepareMultipartUpload({
+        contentType: "text/plain",
+        filename: "fits-large.txt",
+        maxUploadBytes: 6,
+        size: 6
+      })
+    ).resolves.toEqual({ data: { name: "file_upload" }, upload: { url: "https://upload.example" } });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "POST /api/files/direct-upload",
+      "POST /api/files/direct-upload",
+      "POST /api/files/multipart-upload"
+    ]);
+    expect(calls.map((call) => call.init.body)).toEqual([
+      JSON.stringify({ contentType: "text/plain", filename: "fits.txt", size: 5 }),
+      JSON.stringify({ filename: "server-decides.bin" }),
+      JSON.stringify({ contentType: "text/plain", filename: "fits-large.txt", size: 6 })
+    ]);
   });
 
   it("orchestrates multipart file uploads with chunk progress", async () => {
