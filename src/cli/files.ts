@@ -1,6 +1,6 @@
 import { requestRemoteAdmin, type RemoteAdminIo, type RemoteHeaderOption } from "./remote-admin.js";
 
-export type FileRemoteAction = "list" | "delete" | "update";
+export type FileRemoteAction = "bulk-delete" | "bulk-update" | "list" | "delete" | "update";
 
 export type FileHeaderOption = RemoteHeaderOption;
 
@@ -10,6 +10,7 @@ export interface FileRemoteCommand {
   readonly url: string;
   readonly headers: readonly FileHeaderOption[];
   readonly name?: string;
+  readonly files?: readonly FileRemoteSelection[];
   readonly attachedToDoctype?: string;
   readonly attachedToName?: string;
   readonly contentType?: string;
@@ -21,6 +22,11 @@ export interface FileRemoteCommand {
   readonly uploadedBy?: string;
   readonly expectedVersion?: number;
   readonly clearAttachment?: boolean;
+}
+
+export interface FileRemoteSelection {
+  readonly name: string;
+  readonly expectedVersion?: number;
 }
 
 export type FileRemoteIo = RemoteAdminIo;
@@ -70,6 +76,24 @@ interface FileSnapshotResponse {
   };
 }
 
+interface BulkFileCommandResponse {
+  readonly deleted?: readonly BulkFileSuccessResponse[];
+  readonly updated?: readonly BulkFileSuccessResponse[];
+  readonly failed: readonly BulkFileFailureResponse[];
+}
+
+interface BulkFileSuccessResponse {
+  readonly name: string;
+  readonly snapshot: FileSnapshotResponse;
+}
+
+interface BulkFileFailureResponse {
+  readonly name: string;
+  readonly code?: string;
+  readonly message?: string;
+  readonly status?: number;
+}
+
 export async function runRemoteFileCommand(command: FileRemoteCommand, io: FileRemoteIo = {}): Promise<string> {
   if (command.action === "list") {
     const query = queryParams({
@@ -98,6 +122,22 @@ export async function runRemoteFileCommand(command: FileRemoteCommand, io: FileR
     });
     return formatUpdate(command.url, data);
   }
+  if (command.action === "bulk-update") {
+    const data = await requestRemoteFile<BulkFileCommandResponse>(command, io, {
+      body: bulkMetadataBody(command),
+      method: "POST",
+      path: "/api/files/bulk-metadata"
+    });
+    return formatBulkUpdate(command.url, data);
+  }
+  if (command.action === "bulk-delete") {
+    const data = await requestRemoteFile<BulkFileCommandResponse>(command, io, {
+      body: bulkFilesBody(command),
+      method: "POST",
+      path: "/api/files/delete"
+    });
+    return formatBulkDelete(command.url, data);
+  }
   const query = queryParams({
     ...(command.expectedVersion === undefined ? {} : { expectedVersion: String(command.expectedVersion) })
   });
@@ -114,7 +154,7 @@ function requestRemoteFile<TData>(
   io: FileRemoteIo,
   request: {
     readonly body?: Record<string, unknown>;
-    readonly method: "DELETE" | "GET" | "PATCH";
+    readonly method: "DELETE" | "GET" | "PATCH" | "POST";
     readonly path: string;
     readonly query?: URLSearchParams;
   }
@@ -133,6 +173,26 @@ function queryParams(values: Record<string, string>): URLSearchParams | undefine
     params.set(key, value);
   }
   return params.toString().length === 0 ? undefined : params;
+}
+
+function bulkFilesBody(command: FileRemoteCommand): Record<string, unknown> {
+  return { files: command.files ?? [] };
+}
+
+function bulkMetadataBody(command: FileRemoteCommand): Record<string, unknown> {
+  const body = bulkFilesBody(command);
+  if (command.isPrivate !== undefined) {
+    body.isPrivate = command.isPrivate;
+  }
+  if (command.clearAttachment) {
+    body.attachedTo = null;
+  } else if (command.attachedToDoctype !== undefined || command.attachedToName !== undefined) {
+    body.attachedTo = {
+      doctype: command.attachedToDoctype,
+      name: command.attachedToName
+    };
+  }
+  return body;
 }
 
 function updateBody(command: FileRemoteCommand): Record<string, unknown> {
@@ -182,6 +242,30 @@ function formatUpdate(baseUrl: string, snapshot: FileSnapshotResponse): string {
   ].join("\n");
 }
 
+function formatBulkUpdate(baseUrl: string, result: BulkFileCommandResponse): string {
+  return formatBulkCommand(baseUrl, "Updated files", result.updated ?? [], result.failed);
+}
+
+function formatBulkDelete(baseUrl: string, result: BulkFileCommandResponse): string {
+  return formatBulkCommand(baseUrl, "Deleted files", result.deleted ?? [], result.failed);
+}
+
+function formatBulkCommand(
+  baseUrl: string,
+  title: string,
+  succeeded: readonly BulkFileSuccessResponse[],
+  failed: readonly BulkFileFailureResponse[]
+): string {
+  return [
+    `${title} at ${baseUrl}`,
+    `Succeeded: ${String(succeeded.length)}`,
+    ...succeeded.map((item) => snapshotLine(item.snapshot)),
+    `Failed: ${String(failed.length)}`,
+    ...failed.map(failureLine),
+    ""
+  ].join("\n");
+}
+
 function formatDelete(baseUrl: string, snapshot: FileSnapshotResponse): string {
   return [
     `Deleted file at ${baseUrl}`,
@@ -213,6 +297,13 @@ function snapshotLine(snapshot: FileSnapshotResponse): string {
   const status = snapshot.docstatus === undefined ? "" : ` status ${snapshot.docstatus}`;
   const state = snapshot.data?.storage_state === undefined ? "" : ` state ${snapshot.data.storage_state}`;
   return `- ${filename} (${snapshot.name})${version}${status}${state}`;
+}
+
+function failureLine(failure: BulkFileFailureResponse): string {
+  const status = failure.status === undefined ? "" : ` status ${String(failure.status)}`;
+  const code = failure.code === undefined ? "UNKNOWN" : failure.code;
+  const message = failure.message === undefined ? "File operation failed" : failure.message;
+  return `- ${failure.name} failed ${code}${status}: ${message}`;
 }
 
 function attachmentLabel(attachedTo: FileDashboardEntryResponse["attachedTo"]): string {

@@ -927,6 +927,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
   let url: string | undefined;
   const headers: FileHeaderOption[] = [];
   let name: string | undefined;
+  const files: NonNullable<FileRemoteCommand["files"]>[number][] = [];
   let attachedToDoctype: string | undefined;
   let attachedToName: string | undefined;
   let contentType: string | undefined;
@@ -994,6 +995,34 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       index += 1;
       continue;
     }
+    if (arg === "--file") {
+      if (action !== "bulk-delete" && action !== "bulk-update") {
+        return { kind: "invalid", message: `Cannot use --file with files ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      files.push({ name: value });
+      index += 1;
+      continue;
+    }
+    if (arg === "--file-version") {
+      if (action !== "bulk-delete" && action !== "bulk-update") {
+        return { kind: "invalid", message: `Cannot use --file-version with files ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseFileSelectionWithVersion(value);
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      files.push(parsed);
+      index += 1;
+      continue;
+    }
     if (arg === "--expected-version") {
       if (action !== "delete" && action !== "update") {
         return { kind: "invalid", message: `Cannot use --expected-version with files ${action}` };
@@ -1011,7 +1040,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--attached-to-doctype") {
-      if (action !== "list" && action !== "update") {
+      if (action !== "list" && action !== "update" && action !== "bulk-update") {
         return { kind: "invalid", message: `Cannot use --attached-to-doctype with files ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1023,7 +1052,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--attached-to-name") {
-      if (action !== "list" && action !== "update") {
+      if (action !== "list" && action !== "update" && action !== "bulk-update") {
         return { kind: "invalid", message: `Cannot use --attached-to-name with files ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1059,7 +1088,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--private") {
-      if (action !== "list" && action !== "update") {
+      if (action !== "list" && action !== "update" && action !== "bulk-update") {
         return { kind: "invalid", message: `Cannot use --private with files ${action}` };
       }
       if (isPrivate !== undefined) {
@@ -1069,7 +1098,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--public") {
-      if (action !== "list" && action !== "update") {
+      if (action !== "list" && action !== "update" && action !== "bulk-update") {
         return { kind: "invalid", message: `Cannot use --public with files ${action}` };
       }
       if (isPrivate !== undefined) {
@@ -1079,7 +1108,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--clear-attachment") {
-      if (action !== "update") {
+      if (action !== "update" && action !== "bulk-update") {
         return { kind: "invalid", message: `Cannot use --clear-attachment with files ${action}` };
       }
       clearAttachment = true;
@@ -1149,17 +1178,24 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
   if ((action === "delete" || action === "update") && name === undefined) {
     return { kind: "invalid", message: `File ${action} requires --name` };
   }
+  if ((action === "bulk-delete" || action === "bulk-update") && files.length === 0) {
+    return { kind: "invalid", message: `File ${action} requires at least one --file or --file-version` };
+  }
+  const duplicateFile = duplicateFileSelection(files);
+  if (duplicateFile !== undefined) {
+    return { kind: "invalid", message: `Duplicate file selection '${duplicateFile}'` };
+  }
   if (clearAttachment && (attachedToDoctype !== undefined || attachedToName !== undefined)) {
     return { kind: "invalid", message: "Use only one of --clear-attachment or --attached-to-doctype/--attached-to-name" };
   }
   if (
-    action === "update" &&
+    (action === "update" || action === "bulk-update") &&
     filename === undefined &&
     isPrivate === undefined &&
     !clearAttachment &&
     attachedToDoctype === undefined
   ) {
-    return { kind: "invalid", message: "File update requires at least one metadata change" };
+    return { kind: "invalid", message: `File ${action} requires at least one metadata change` };
   }
   return {
     kind: "files",
@@ -1167,6 +1203,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
     url,
     headers,
     ...(name === undefined ? {} : { name }),
+    ...(files.length === 0 ? {} : { files }),
     ...(attachedToDoctype === undefined ? {} : { attachedToDoctype }),
     ...(attachedToName === undefined ? {} : { attachedToName }),
     ...(contentType === undefined ? {} : { contentType }),
@@ -1182,7 +1219,9 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
 }
 
 function fileAction(value: string): FileRemoteAction | undefined {
-  return value === "list" || value === "delete" || value === "update" ? value : undefined;
+  return value === "list" || value === "delete" || value === "update" || value === "bulk-delete" || value === "bulk-update"
+    ? value
+    : undefined;
 }
 
 function jobAction(value: string): JobRemoteAction | undefined {
@@ -1282,6 +1321,29 @@ function parseEnvHeader(value: string, label: string): DataPatchHeaderOption | J
 function parsePositiveInteger(value: string, label: string): number | string {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : `${label} must be a positive integer`;
+}
+
+function parseFileSelectionWithVersion(value: string): NonNullable<FileRemoteCommand["files"]>[number] | string {
+  const separator = value.lastIndexOf(":");
+  if (separator <= 0 || separator === value.length - 1) {
+    return "File version selection must use <fileName>:<expectedVersion>";
+  }
+  const expectedVersion = parsePositiveInteger(value.slice(separator + 1), "File expected version");
+  if (typeof expectedVersion === "string") {
+    return expectedVersion;
+  }
+  return { name: value.slice(0, separator), expectedVersion };
+}
+
+function duplicateFileSelection(files: readonly NonNullable<FileRemoteCommand["files"]>[number][]): string | undefined {
+  const seen = new Set<string>();
+  for (const file of files) {
+    if (seen.has(file.name)) {
+      return file.name;
+    }
+    seen.add(file.name);
+  }
+  return undefined;
 }
 
 function parseNonNegativeInteger(value: string, label: string): number | string {
@@ -1540,6 +1602,8 @@ function helpText(): string {
     "  cf-frappe jobs schedule-delete --url <origin> --id <scheduleId> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files list --url <origin> [--filename <text>] [--content-type <type>] [--attached-to-doctype <doctype> --attached-to-name <name>] [--storage-state <state>] [--scan-status <status>] [--uploaded-by <user>] [--private|--public] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files update --url <origin> --name <fileName> [--filename <text>] [--private|--public] [--attached-to-doctype <doctype> --attached-to-name <name>|--clear-attachment] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe files bulk-update --url <origin> (--file <fileName>|--file-version <fileName:version>)... [--private|--public] [--attached-to-doctype <doctype> --attached-to-name <name>|--clear-attachment] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe files bulk-delete --url <origin> (--file <fileName>|--file-version <fileName:version>)... [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files delete --url <origin> --name <fileName> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe --help",
     "",
@@ -1550,7 +1614,7 @@ function helpText(): string {
     "  access   Plan or create Cloudflare Access application and policy resources for a starter app",
     "  data-patches   Inspect, plan, apply, rollback, or enqueue remote app-declared data patches through the admin API",
     "  jobs   Inspect remote job history, retry failed runs, and manage runtime schedules through the admin API",
-    "  files   Inspect and delete remote File metadata/content through the admin API",
+    "  files   Inspect, update, and delete remote File metadata/content through the admin API",
     "",
     "Use --header-env for secret-bearing auth headers so tokens stay out of shell history.",
     ""

@@ -94,6 +94,50 @@ describe("cf-frappe CLI remote files", () => {
       expectedVersion: 4
     });
 
+    expect(parseCliArgs([
+      "files",
+      "bulk-update",
+      "--url",
+      "https://app.example",
+      "--file",
+      "file_invoice",
+      "--file-version",
+      "file/quote:7",
+      "--private",
+      "--clear-attachment"
+    ])).toEqual({
+      kind: "files",
+      action: "bulk-update",
+      url: "https://app.example",
+      headers: [],
+      files: [
+        { name: "file_invoice" },
+        { name: "file/quote", expectedVersion: 7 }
+      ],
+      isPrivate: true,
+      clearAttachment: true
+    });
+
+    expect(parseCliArgs([
+      "files",
+      "bulk-delete",
+      "--url",
+      "https://app.example",
+      "--file",
+      "file_invoice",
+      "--file-version",
+      "file_quote:2"
+    ])).toEqual({
+      kind: "files",
+      action: "bulk-delete",
+      url: "https://app.example",
+      headers: [],
+      files: [
+        { name: "file_invoice" },
+        { name: "file_quote", expectedVersion: 2 }
+      ]
+    });
+
     expect(parseCliArgs(["files", "delete", "--url", "https://app.example"])).toEqual({
       kind: "invalid",
       message: "File delete requires --name"
@@ -120,6 +164,38 @@ describe("cf-frappe CLI remote files", () => {
     expect(parseCliArgs(["files", "update", "--url", "https://app.example", "--name", "file_invoice"])).toEqual({
       kind: "invalid",
       message: "File update requires at least one metadata change"
+    });
+    expect(parseCliArgs(["files", "bulk-delete", "--url", "https://app.example"])).toEqual({
+      kind: "invalid",
+      message: "File bulk-delete requires at least one --file or --file-version"
+    });
+    expect(parseCliArgs(["files", "bulk-update", "--url", "https://app.example", "--file", "file_invoice"])).toEqual({
+      kind: "invalid",
+      message: "File bulk-update requires at least one metadata change"
+    });
+    expect(parseCliArgs([
+      "files",
+      "bulk-delete",
+      "--url",
+      "https://app.example",
+      "--file",
+      "file_invoice",
+      "--file-version",
+      "file_invoice:2"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Duplicate file selection 'file_invoice'"
+    });
+    expect(parseCliArgs([
+      "files",
+      "bulk-delete",
+      "--url",
+      "https://app.example",
+      "--file-version",
+      "file_invoice"
+    ])).toEqual({
+      kind: "invalid",
+      message: "File version selection must use <fileName>:<expectedVersion>"
     });
     expect(parseCliArgs([
       "files",
@@ -331,6 +407,133 @@ describe("cf-frappe CLI remote files", () => {
     expect(exitCode).toBe(0);
     expect(calls[0]?.method).toBe("PATCH");
     expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({ attachedTo: null });
+  });
+
+  it("bulk deletes remote files through the admin API", async () => {
+    const calls: RemoteCall[] = [];
+    const stdout = textBuffer();
+    const exitCode = await runCli(
+      [
+        "files",
+        "bulk-delete",
+        "--url",
+        "https://app.example",
+        "--file-version",
+        "file_invoice:3",
+        "--file",
+        "file_stale"
+      ],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(calls, {
+          data: {
+            deleted: [
+              {
+                name: "file_invoice",
+                snapshot: {
+                  name: "file_invoice",
+                  version: 4,
+                  docstatus: "deleted",
+                  data: { filename: "invoice.pdf", storage_state: "deleted" }
+                }
+              }
+            ],
+            failed: [
+              {
+                name: "file_stale",
+                code: "DOCUMENT_CONFLICT",
+                status: 409,
+                message: "Expected version 9, found 1"
+              }
+            ]
+          }
+        }),
+        stdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(calls[0]?.url).toBe("https://app.example/api/files/delete");
+    expect(calls[0]?.method).toBe("POST");
+    expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({
+      files: [
+        { name: "file_invoice", expectedVersion: 3 },
+        { name: "file_stale" }
+      ]
+    });
+    expect(stdout.text()).toContain("Deleted files at https://app.example");
+    expect(stdout.text()).toContain("Succeeded: 1");
+    expect(stdout.text()).toContain("- invoice.pdf (file_invoice) version 4 status deleted state deleted");
+    expect(stdout.text()).toContain("Failed: 1");
+    expect(stdout.text()).toContain("- file_stale failed DOCUMENT_CONFLICT status 409: Expected version 9, found 1");
+  });
+
+  it("bulk updates remote file metadata through the admin API", async () => {
+    const calls: RemoteCall[] = [];
+    const stdout = textBuffer();
+    const exitCode = await runCli(
+      [
+        "files",
+        "bulk-update",
+        "--url",
+        "https://app.example",
+        "--file",
+        "file_invoice",
+        "--file-version",
+        "file_quote:2",
+        "--public",
+        "--attached-to-doctype",
+        "Sales Invoice",
+        "--attached-to-name",
+        "SINV-1"
+      ],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(calls, {
+          data: {
+            updated: [
+              {
+                name: "file_invoice",
+                snapshot: {
+                  name: "file_invoice",
+                  version: 5,
+                  data: { filename: "invoice.pdf", storage_state: "available" }
+                }
+              },
+              {
+                name: "file_quote",
+                snapshot: {
+                  name: "file_quote",
+                  version: 3,
+                  data: { filename: "quote.pdf", storage_state: "available" }
+                }
+              }
+            ],
+            failed: []
+          }
+        }),
+        stdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(calls[0]?.url).toBe("https://app.example/api/files/bulk-metadata");
+    expect(calls[0]?.method).toBe("POST");
+    expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({
+      files: [
+        { name: "file_invoice" },
+        { name: "file_quote", expectedVersion: 2 }
+      ],
+      isPrivate: false,
+      attachedTo: { doctype: "Sales Invoice", name: "SINV-1" }
+    });
+    expect(stdout.text()).toContain("Updated files at https://app.example");
+    expect(stdout.text()).toContain("Succeeded: 2");
+    expect(stdout.text()).toContain("- invoice.pdf (file_invoice) version 5 state available");
+    expect(stdout.text()).toContain("- quote.pdf (file_quote) version 3 state available");
+    expect(stdout.text()).toContain("Failed: 0");
   });
 
   it("maps remote file API errors and missing env headers to CLI failures", async () => {
