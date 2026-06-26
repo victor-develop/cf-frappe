@@ -15,6 +15,7 @@ export * from "./application/document-history-service.js";
 export * from "./application/document-import-service.js";
 export * from "./application/document-share-service.js";
 export * from "./application/email-notification-service.js";
+export * from "./application/email-notification-jobs.js";
 export * from "./application/file-service.js";
 export * from "./application/field-property-service.js";
 export * from "./application/job-dispatcher.js";

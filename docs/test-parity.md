@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the notification email delivery claim slice:
+As of the notification email delivery job slice:
 
-- Vitest files: `118`
-- Vitest cases: `1278`
+- Vitest files: `119`
+- Vitest cases: `1285`
 
 ## Implication
 
