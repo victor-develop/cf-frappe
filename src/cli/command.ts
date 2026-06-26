@@ -44,6 +44,13 @@ import {
   type DataPatchRemoteCommand
 } from "./data-patches.js";
 import {
+  FieldPropertyRemoteError,
+  runRemoteFieldPropertyCommand,
+  type FieldPropertyHeaderOption,
+  type FieldPropertyRemoteAction,
+  type FieldPropertyRemoteCommand
+} from "./field-properties.js";
+import {
   JobRemoteError,
   runRemoteJobCommand,
   type JobHeaderOption,
@@ -138,6 +145,7 @@ type ParsedCommand =
   | CloudflareAccessSetupCommand
   | CustomFieldRemoteCommand
   | DataPatchRemoteCommand
+  | FieldPropertyRemoteCommand
   | JobRemoteCommand
   | NotificationRuleRemoteCommand
   | FileRemoteCommand
@@ -167,6 +175,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     if (command.kind === "data-patches") {
       io.stdout.write(await runRemoteDataPatchCommand(command, {
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
+    if (command.kind === "field-properties") {
+      io.stdout.write(await runRemoteFieldPropertyCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -287,6 +302,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof CloudflareAccessSetupError ||
       error instanceof CustomFieldRemoteError ||
       error instanceof DataPatchRemoteError ||
+      error instanceof FieldPropertyRemoteError ||
       error instanceof JobRemoteError ||
       error instanceof NotificationRuleRemoteError ||
       error instanceof FileRemoteError ||
@@ -316,6 +332,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "data-patches") {
     return parseDataPatchesArgs(rest);
+  }
+  if (command === "field-properties") {
+    return parseFieldPropertiesArgs(rest);
   }
   if (command === "jobs") {
     return parseJobsArgs(rest);
@@ -685,6 +704,161 @@ function parseCustomFieldsArgs(argv: readonly string[]): ParsedCommand {
     ...(tenant === undefined ? {} : { tenant }),
     ...(fieldName === undefined ? {} : { fieldName }),
     ...(field === undefined ? {} : { field }),
+    ...(expectedVersion === undefined ? {} : { expectedVersion })
+  };
+}
+
+function parseFieldPropertiesArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = fieldPropertyAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown field-properties command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: FieldPropertyHeaderOption[] = [];
+  let doctype: string | undefined;
+  let tenant: string | undefined;
+  let fieldName: string | undefined;
+  let overrides: Record<string, unknown> | undefined;
+  let expectedVersion: number | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "Field property");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "Field property");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--doctype") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      doctype = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--tenant") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      tenant = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--field") {
+      if (action === "list") {
+        return { kind: "invalid", message: "Cannot use --field with field-properties list" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      fieldName = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--overrides-json") {
+      if (action !== "save") {
+        return { kind: "invalid", message: `Cannot use --overrides-json with field-properties ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseJsonObject(value, "Field property overrides");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      overrides = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--expected-version") {
+      if (action === "list") {
+        return { kind: "invalid", message: "Cannot use --expected-version with field-properties list" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseNonNegativeInteger(value, "Field property expected version");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      expectedVersion = parsed;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown field-properties ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if (doctype === undefined) {
+    return { kind: "invalid", message: `Field property ${action} requires --doctype` };
+  }
+  if (action === "save" && fieldName === undefined) {
+    return { kind: "invalid", message: "Field property save requires --field" };
+  }
+  if (action === "save" && overrides === undefined) {
+    return { kind: "invalid", message: "Field property save requires --overrides-json" };
+  }
+  if (action === "clear" && fieldName === undefined) {
+    return { kind: "invalid", message: "Field property clear requires --field" };
+  }
+
+  return {
+    kind: "field-properties",
+    action,
+    url,
+    headers,
+    doctype,
+    ...(tenant === undefined ? {} : { tenant }),
+    ...(fieldName === undefined ? {} : { fieldName }),
+    ...(overrides === undefined ? {} : { overrides }),
     ...(expectedVersion === undefined ? {} : { expectedVersion })
   };
 }
@@ -2704,6 +2878,10 @@ function customFieldAction(value: string): CustomFieldRemoteAction | undefined {
   return value === "disable" || value === "list" || value === "save" ? value : undefined;
 }
 
+function fieldPropertyAction(value: string): FieldPropertyRemoteAction | undefined {
+  return value === "clear" || value === "list" || value === "save" ? value : undefined;
+}
+
 function userPermissionAction(value: string): UserPermissionRemoteAction | undefined {
   return value === "allow" || value === "list" || value === "revoke" ? value : undefined;
 }
@@ -2913,7 +3091,7 @@ function parseJsonObject(value: string, label: string): Record<string, unknown> 
 function parseLiteralHeader(
   value: string,
   label: string
-): CustomFieldHeaderOption | DataPatchHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | string {
+): CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | string {
   const separator = value.indexOf(":");
   if (separator < 1) {
     return `${label} header must use 'Name: value' syntax`;
@@ -2932,7 +3110,7 @@ function parseLiteralHeader(
 function parseEnvHeader(
   value: string,
   label: string
-): CustomFieldHeaderOption | DataPatchHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | string {
+): CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | string {
   const separator = value.indexOf("=");
   if (separator < 1) {
     return `${label} environment header must use 'Name=ENV_VAR' syntax`;
@@ -3259,6 +3437,9 @@ function helpText(): string {
     "  cf-frappe custom-fields list --url <origin> --doctype <doctype> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe custom-fields save --url <origin> --doctype <doctype> --field-json <json> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe custom-fields disable --url <origin> --doctype <doctype> --field <fieldname> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe field-properties list --url <origin> --doctype <doctype> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe field-properties save --url <origin> --doctype <doctype> --field <fieldname> --overrides-json <json> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe field-properties clear --url <origin> --doctype <doctype> --field <fieldname> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches status --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches plan --url <origin> [--id <patchId>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches rollback-plan --url <origin> [--id <patchId>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
@@ -3342,6 +3523,7 @@ function helpText(): string {
     "  migrate generate   Write reviewable D1 migration files from app metadata",
     "  access   Plan or create Cloudflare Access application and policy resources for a starter app",
     "  custom-fields   Inspect and mutate event-sourced tenant custom field overlays through the admin API",
+    "  field-properties   Inspect and mutate event-sourced tenant field property overrides through the admin API",
     "  data-patches   Inspect, plan, apply, rollback, or enqueue remote app-declared data patches through the admin API",
     "  jobs   Inspect remote job history, retry failed runs, and manage runtime schedules through the admin API",
     "  notification-rules   Inspect and mutate event-sourced document notification rules through the admin API",
