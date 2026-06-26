@@ -3171,6 +3171,23 @@ export function renderDeskClientScript(): string {
         return binding ? triggerFormEvent(binding, eventName) : undefined;
       }
     }),
+    history: Object.freeze({
+      assignments: function (doctype, name) {
+        return request(resourceActionPath(doctype, name, "assignments")).then(unwrapData);
+      },
+      followers: function (doctype, name) {
+        return request(resourceActionPath(doctype, name, "followers")).then(unwrapData);
+      },
+      shares: function (doctype, name) {
+        return request(resourceActionPath(doctype, name, "shares")).then(unwrapData);
+      },
+      tags: function (doctype, name) {
+        return request(resourceActionPath(doctype, name, "tags")).then(unwrapData);
+      },
+      timeline: function (doctype, name, options) {
+        return request(withQuery(resourceActionPath(doctype, name, "timeline"), timelineParams(options || {}))).then(unwrapData);
+      }
+    }),
     files: Object.freeze({
       bulkDelete: function (files) {
         return request("/api/files/delete", { method: "POST", body: bulkFilesBody(files) }).then(unwrapData);

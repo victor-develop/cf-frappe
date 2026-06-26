@@ -111,6 +111,17 @@ interface DeskClientRuntime {
     readonly current: () => DeskFormRuntime | null;
     readonly on: (doctype: string, handlers: DeskFormHandlers) => void;
   };
+  readonly history: {
+    readonly assignments: (doctype: string, name: string) => Promise<unknown>;
+    readonly followers: (doctype: string, name: string) => Promise<unknown>;
+    readonly shares: (doctype: string, name: string) => Promise<unknown>;
+    readonly tags: (doctype: string, name: string) => Promise<unknown>;
+    readonly timeline: (
+      doctype: string,
+      name: string,
+      options?: { readonly beforeSequence?: number; readonly before_sequence?: number; readonly limit?: number }
+    ) => Promise<unknown>;
+  };
   readonly linkOptions: (doctype: string, field: string, params?: Record<string, unknown>) => Promise<unknown>;
   readonly search: (q: string, options?: { readonly limit?: number; readonly tenant?: string }) => Promise<unknown>;
   readonly msgprint: (message: unknown) => string;
@@ -2621,6 +2632,42 @@ describe("Desk client runtime", () => {
       undefined,
       JSON.stringify({ baseVersion: 17, patch: { title: "Merged title" }, unset: ["obsolete"] })
     ]);
+  });
+
+  it("exposes document history reads through a dedicated namespace", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { ok: true, url: String(url) } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    const results = [
+      await runtime.history.timeline("Task Type", "TASK/1", { limit: 10, beforeSequence: 42 }),
+      await runtime.history.assignments("Task Type", "TASK/1"),
+      await runtime.history.tags("Task Type", "TASK/1"),
+      await runtime.history.followers("Task Type", "TASK/1"),
+      await runtime.history.shares("Task Type", "TASK/1")
+    ];
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/resource/Task%20Type/TASK%2F1/timeline?limit=10&before_sequence=42",
+      "GET /api/resource/Task%20Type/TASK%2F1/assignments",
+      "GET /api/resource/Task%20Type/TASK%2F1/tags",
+      "GET /api/resource/Task%20Type/TASK%2F1/followers",
+      "GET /api/resource/Task%20Type/TASK%2F1/shares"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual([
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin"
+    ]);
+    expect(calls.map((call) => call.init.body)).toEqual([undefined, undefined, undefined, undefined, undefined]);
+    expect(calls.map((call) => new Headers(call.init.headers).get("content-type"))).toEqual([null, null, null, null, null]);
+    expect(results).toEqual(calls.map((call) => ({ ok: true, url: call.url })));
   });
 
   it("fetches resolved list-view metadata for browser filter builders", async () => {
