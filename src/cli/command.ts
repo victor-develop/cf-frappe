@@ -50,6 +50,13 @@ import {
   type FileRemoteAction,
   type FileRemoteCommand
 } from "./files.js";
+import {
+  ResourceRemoteError,
+  runRemoteResourceCommand,
+  type ResourceHeaderOption,
+  type ResourceRemoteAction,
+  type ResourceRemoteCommand
+} from "./resources.js";
 import { scaffoldProject, ScaffoldError } from "./scaffold.js";
 import type { StarterAuthMode } from "./templates.js";
 
@@ -110,6 +117,7 @@ type ParsedCommand =
   | DataPatchRemoteCommand
   | JobRemoteCommand
   | FileRemoteCommand
+  | ResourceRemoteCommand
   | HelpCommand
   | InvalidCommand;
 
@@ -142,6 +150,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     if (command.kind === "files") {
       io.stdout.write(await runRemoteFileCommand(command, {
         cwd: io.cwd(),
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
+    if (command.kind === "resources") {
+      io.stdout.write(await runRemoteResourceCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -225,7 +240,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof CloudflareAccessSetupError ||
       error instanceof DataPatchRemoteError ||
       error instanceof JobRemoteError ||
-      error instanceof FileRemoteError
+      error instanceof FileRemoteError ||
+      error instanceof ResourceRemoteError
     ) {
       io.stderr.write(`cf-frappe: ${error.message}\n`);
       return 1;
@@ -253,6 +269,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "files") {
     return parseFilesArgs(rest);
+  }
+  if (command === "resources") {
+    return parseResourcesArgs(rest);
   }
   if (command === "access") {
     return parseAccessArgs(rest);
@@ -1420,6 +1439,258 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
   };
 }
 
+function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = resourceAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown resources command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: ResourceHeaderOption[] = [];
+  let doctype: string | undefined;
+  let name: string | undefined;
+  let data: Record<string, unknown> | undefined;
+  let expectedVersion: number | undefined;
+  const filters: NonNullable<ResourceRemoteCommand["filters"]>[number][] = [];
+  let filterExpression: Record<string, unknown> | undefined;
+  let limit: number | undefined;
+  let offset: number | undefined;
+  let orderBy: string | undefined;
+  let order: ResourceRemoteCommand["order"] | undefined;
+  let useDefaultFilters: boolean | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "Resource");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "Resource");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--doctype") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      doctype = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--name") {
+      if (action !== "delete" && action !== "get" && action !== "update") {
+        return { kind: "invalid", message: `Cannot use --name with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      name = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--data-json") {
+      if (action !== "create" && action !== "update") {
+        return { kind: "invalid", message: `Cannot use --data-json with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseJsonObject(value, "Resource data");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      data = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--expected-version") {
+      if (action !== "delete" && action !== "update") {
+        return { kind: "invalid", message: `Cannot use --expected-version with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parsePositiveInteger(value, "Resource expected version");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      expectedVersion = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--filter") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --filter with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseResourceFilter(value);
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      filters.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--filter-expression-json") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --filter-expression-json with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseJsonObject(value, "Resource filter expression");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      filterExpression = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--limit") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --limit with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parsePositiveInteger(value, "Resource list limit");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      limit = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--offset") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --offset with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseNonNegativeInteger(value, "Resource list offset");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      offset = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--order-by") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --order-by with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      orderBy = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--order") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --order with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      if (value !== "asc" && value !== "desc") {
+        return { kind: "invalid", message: "Resource list order must be asc or desc" };
+      }
+      order = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--no-default-filters") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --no-default-filters with resources ${action}` };
+      }
+      useDefaultFilters = false;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown resources ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if (doctype === undefined) {
+    return { kind: "invalid", message: "Resource command requires --doctype" };
+  }
+  if ((action === "delete" || action === "get" || action === "update") && name === undefined) {
+    return { kind: "invalid", message: `Resource ${action} requires --name` };
+  }
+  if ((action === "create" || action === "update") && data === undefined) {
+    return { kind: "invalid", message: `Resource ${action} requires --data-json` };
+  }
+  return {
+    kind: "resources",
+    action,
+    url,
+    headers,
+    doctype,
+    ...(name === undefined ? {} : { name }),
+    ...(data === undefined ? {} : { data }),
+    ...(expectedVersion === undefined ? {} : { expectedVersion }),
+    ...(filters.length === 0 ? {} : { filters }),
+    ...(filterExpression === undefined ? {} : { filterExpression }),
+    ...(limit === undefined ? {} : { limit }),
+    ...(offset === undefined ? {} : { offset }),
+    ...(orderBy === undefined ? {} : { orderBy }),
+    ...(order === undefined ? {} : { order }),
+    ...(useDefaultFilters === undefined ? {} : { useDefaultFilters })
+  };
+}
+
 function fileAction(value: string): FileRemoteAction | undefined {
   return value === "list" ||
     value === "delete" ||
@@ -1433,6 +1704,16 @@ function fileAction(value: string): FileRemoteAction | undefined {
     value === "rendition-download" ||
     value === "transform-download" ||
     value === "upload"
+    ? value
+    : undefined;
+}
+
+function resourceAction(value: string): ResourceRemoteAction | undefined {
+  return value === "list" ||
+    value === "get" ||
+    value === "create" ||
+    value === "update" ||
+    value === "delete"
     ? value
     : undefined;
 }
@@ -1523,7 +1804,10 @@ function parseJsonObject(value: string, label: string): Record<string, unknown> 
   return `${label} must be a valid JSON object`;
 }
 
-function parseLiteralHeader(value: string, label: string): DataPatchHeaderOption | JobHeaderOption | FileHeaderOption | string {
+function parseLiteralHeader(
+  value: string,
+  label: string
+): DataPatchHeaderOption | JobHeaderOption | FileHeaderOption | ResourceHeaderOption | string {
   const separator = value.indexOf(":");
   if (separator < 1) {
     return `${label} header must use 'Name: value' syntax`;
@@ -1539,7 +1823,10 @@ function parseLiteralHeader(value: string, label: string): DataPatchHeaderOption
   return { kind: "literal", name, value: headerValue };
 }
 
-function parseEnvHeader(value: string, label: string): DataPatchHeaderOption | JobHeaderOption | FileHeaderOption | string {
+function parseEnvHeader(
+  value: string,
+  label: string
+): DataPatchHeaderOption | JobHeaderOption | FileHeaderOption | ResourceHeaderOption | string {
   const separator = value.indexOf("=");
   if (separator < 1) {
     return `${label} environment header must use 'Name=ENV_VAR' syntax`;
@@ -1570,6 +1857,18 @@ function parseFileSelectionWithVersion(value: string): NonNullable<FileRemoteCom
     return expectedVersion;
   }
   return { name: value.slice(0, separator), expectedVersion };
+}
+
+function parseResourceFilter(value: string): NonNullable<ResourceRemoteCommand["filters"]>[number] | string {
+  const separator = value.indexOf("=");
+  if (separator < 1) {
+    return "Resource filter must use <field[__operator]>=<value>";
+  }
+  const key = value.slice(0, separator).trim();
+  if (key.length === 0 || key.startsWith("filter_")) {
+    return "Resource filter field must be non-empty and omit the filter_ prefix";
+  }
+  return { key, value: value.slice(separator + 1).trim() };
 }
 
 function duplicateFileSelection(files: readonly NonNullable<FileRemoteCommand["files"]>[number][]): string | undefined {
@@ -1845,6 +2144,11 @@ function helpText(): string {
     "  cf-frappe jobs schedule-reset --url <origin> --id <scheduleId> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs schedule-save --url <origin> [--id <scheduleId>] --cron <expr> --job <name> [--enabled|--disabled] [--payload-json <json>] [--metadata-json <json>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs schedule-delete --url <origin> --id <scheduleId> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources list --url <origin> --doctype <doctype> [--filter <field[__operator]=value>] [--filter-expression-json <json>] [--limit <n>] [--offset <n>] [--order-by <field>] [--order <asc|desc>] [--no-default-filters] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources get --url <origin> --doctype <doctype> --name <docname> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources create --url <origin> --doctype <doctype> --data-json <json> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources update --url <origin> --doctype <doctype> --name <docname> --data-json <json> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources delete --url <origin> --doctype <doctype> --name <docname> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files list --url <origin> [--filename <text>] [--content-type <type>] [--attached-to-doctype <doctype> --attached-to-name <name>] [--storage-state <state>] [--scan-status <status>] [--uploaded-by <user>] [--private|--public] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files get --url <origin> --name <fileName> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files upload --url <origin> --path <localPath> [--filename <text>] [--content-type <type>] [--private|--public] [--attached-to-doctype <doctype> --attached-to-name <name>] [--header <name:value>] [--header-env <name=ENV>]",
@@ -1866,6 +2170,7 @@ function helpText(): string {
     "  access   Plan or create Cloudflare Access application and policy resources for a starter app",
     "  data-patches   Inspect, plan, apply, rollback, or enqueue remote app-declared data patches through the admin API",
     "  jobs   Inspect remote job history, retry failed runs, and manage runtime schedules through the admin API",
+    "  resources   Inspect and mutate deployed DocType resources through the generated resource API",
     "  files   Upload, inspect, update, and delete remote File metadata/content through the admin API",
     "",
     "Use --header-env for secret-bearing auth headers so tokens stay out of shell history.",

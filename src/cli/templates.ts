@@ -298,6 +298,16 @@ npx cf-frappe data-patches rollback-enqueue --url https://your-worker.example --
 npx cf-frappe data-patches rollback-retry-enqueue --url https://your-worker.example --id tasks.seed_starter_tasks --idempotency-key patches:rollback-retry-1 --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 
+DocType resources can be inspected and mutated through the generated resource API without opening Desk:
+
+\`\`\`bash
+npx cf-frappe resources list --url https://your-worker.example --doctype Task --filter workflow_state=Open --limit 20 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources get --url https://your-worker.example --doctype Task --name "Review generated Desk workspace" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources create --url https://your-worker.example --doctype Task --data-json '{"title":"Follow up","priority":"Medium","workflow_state":"Open"}' --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources update --url https://your-worker.example --doctype Task --name "Follow up" --data-json '{"workflow_state":"Doing"}' --expected-version 1 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources delete --url https://your-worker.example --doctype Task --name "Follow up" --expected-version 2 --header-env Authorization=CF_FRAPPE_AUTH
+\`\`\`
+
 Background jobs and runtime schedules use the same remote admin style:
 
 \`\`\`bash

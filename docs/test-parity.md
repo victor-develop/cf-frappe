@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the remote file metadata get CLI slice:
+As of the remote resource CRUD CLI slice:
 
-- Vitest files: `95`
-- Vitest cases: `1142`
+- Vitest files: `96`
+- Vitest cases: `1147`
 
 ## Implication
 

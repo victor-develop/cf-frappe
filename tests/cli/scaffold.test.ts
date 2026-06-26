@@ -197,6 +197,11 @@ describe("cf-frappe CLI scaffold", () => {
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "npx cf-frappe data-patches rollback-enqueue --url https://your-worker.example --id tasks.seed_starter_tasks"
     );
+    expect(readmeText).toContain("npx cf-frappe resources list --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe resources get --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe resources create --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe resources update --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe resources delete --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe files get --url https://your-worker.example --name file_invoice");
     expect(readmeText).toContain("npx cf-frappe files upload --url https://your-worker.example --path ./invoice.pdf");
     expect(readmeText).toContain("npx cf-frappe files download --url https://your-worker.example --name file_invoice");
