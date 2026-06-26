@@ -137,6 +137,12 @@ import {
   type RoleRemoteCommand
 } from "./roles.js";
 import {
+  SearchRemoteError,
+  runRemoteSearchCommand,
+  type SearchHeaderOption,
+  type SearchRemoteCommand
+} from "./search.js";
+import {
   UserRemoteError,
   runRemoteUserCommand,
   type UserHeaderOption,
@@ -236,6 +242,7 @@ type ParsedCommand =
   | PrintFormatRemoteCommand
   | PrintSettingsRemoteCommand
   | RoleRemoteCommand
+  | SearchRemoteCommand
   | UserRemoteCommand
   | UserPermissionRemoteCommand
   | WorkflowRemoteCommand
@@ -362,6 +369,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       }));
       return 0;
     }
+    if (command.kind === "search") {
+      io.stdout.write(await runRemoteSearchCommand(command, {
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
     if (command.kind === "users") {
       io.stdout.write(await runRemoteUserCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
@@ -481,6 +495,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof PrintFormatRemoteError ||
       error instanceof PrintSettingsRemoteError ||
       error instanceof RoleRemoteError ||
+      error instanceof SearchRemoteError ||
       error instanceof UserRemoteError ||
       error instanceof UserPermissionRemoteError ||
       error instanceof WorkflowRemoteError ||
@@ -548,6 +563,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "roles") {
     return parseRolesArgs(rest);
+  }
+  if (command === "search") {
+    return parseSearchArgs(rest);
   }
   if (command === "users") {
     return parseUsersArgs(rest);
@@ -2691,6 +2709,106 @@ function parseReportsArgs(argv: readonly string[]): ParsedCommand {
     ...(order === undefined ? {} : { order }),
     ...(limit === undefined ? {} : { limit }),
     ...(offset === undefined ? {} : { offset })
+  };
+}
+
+function parseSearchArgs(argv: readonly string[]): ParsedCommand {
+  let url: string | undefined;
+  const headers: SearchHeaderOption[] = [];
+  let query: string | undefined;
+  let limit: number | undefined;
+  let tenant: string | undefined;
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(argv, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(argv, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "Search");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(argv, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "Search");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--query" || arg === "-q") {
+      const value = parseRequiredOption(argv, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      query = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--limit") {
+      const value = parseRequiredOption(argv, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseNonNegativeInteger(value, "Search limit");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      limit = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--tenant") {
+      const value = parseRequiredOption(argv, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      tenant = value;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown search option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if (query === undefined) {
+    return { kind: "invalid", message: "Search requires --query" };
+  }
+  return {
+    kind: "search",
+    url,
+    headers,
+    query,
+    ...(limit === undefined ? {} : { limit }),
+    ...(tenant === undefined ? {} : { tenant })
   };
 }
 
@@ -5459,6 +5577,7 @@ function helpText(): string {
     "  cf-frappe report-builder delete --url <origin> --doctype <doctype> --id <id> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe report-builder run --url <origin> --doctype <doctype> --id <id> [--filter <name=value>] [--filter-expression-json <json>] [--order-by <column>] [--order <asc|desc>] [--limit <n>] [--offset <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe report-builder export --url <origin> --doctype <doctype> --id <id> [--filter <name=value>] [--filter-expression-json <json>] [--order-by <column>] [--order <asc|desc>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe search --url <origin> --query <text> [--tenant <tenant>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs list --url <origin> [--job <name>] [--run-id <id>] [--status <running|succeeded|failed>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs get --url <origin> --idempotency-key <key> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs retry --url <origin> --idempotency-key <key> [--header <name:value>] [--header-env <name=ENV>]",

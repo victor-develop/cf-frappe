@@ -317,6 +317,7 @@ npx cf-frappe reports export --url https://your-worker.example --report "Open Ta
 npx cf-frappe report-builder list --url https://your-worker.example --doctype Task --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe report-builder create --url https://your-worker.example --doctype Task --label "My Task Report" --definition-json '{"columns":[{"name":"title"},{"name":"priority"}],"orderBy":"priority","order":"asc"}' --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe report-builder run --url https://your-worker.example --doctype Task --id <saved-report-id-from-create-or-list> --filter priority=High --limit 20 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe search --url https://your-worker.example --query launch --limit 10 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe dashboards list --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe dashboards get --url https://your-worker.example --dashboard "Task Dashboard" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe dashboards run --url https://your-worker.example --dashboard "Task Dashboard" --header-env Authorization=CF_FRAPPE_AUTH
