@@ -685,6 +685,15 @@ export function renderDeskClientScript(): string {
     return input;
   }
 
+  function directReservationBody(body, options) {
+    var input = multipartReservationBody(body, options || {});
+    var maxUploadBytes = options && (options.maxUploadBytes !== undefined ? options.maxUploadBytes : options.max_upload_bytes);
+    if (maxUploadBytes !== undefined) {
+      input.maxUploadBytes = maxUploadBytes;
+    }
+    return input;
+  }
+
   function multipartPartBody(body, start, end) {
     if (body && typeof body.slice === "function") {
       return body.slice(start, end);
@@ -705,6 +714,36 @@ export function renderDeskClientScript(): string {
   async function prepareMultipartUpload(input) {
     preflightKnownUploadSize(input && input.size, input || {});
     return request("/api/files/multipart-upload", { method: "POST", body: uploadReservationRequestBody(input || {}) });
+  }
+
+  async function prepareDirectUpload(input) {
+    preflightKnownUploadSize(input && input.size, input || {});
+    return request("/api/files/direct-upload", { method: "POST", body: directUploadRequestBody(input || {}) });
+  }
+
+  function completeDirectUpload(name, options) {
+    return request(filePath(name, "complete-upload"), { method: "POST", body: versionBody(options) }).then(unwrapData);
+  }
+
+  async function uploadDirectFile(body, options) {
+    var prepared = await prepareDirectUpload(directReservationBody(body, options || {}));
+    var file = prepared && prepared.data;
+    var upload = prepared && prepared.upload;
+    if (!file || !file.name || !upload || !upload.url) {
+      throw new Error("Direct upload reservation did not return upload instructions");
+    }
+    var uploadResponse = await fetch(upload.url, {
+      method: upload.method || "PUT",
+      headers: upload.headers || {},
+      body: body
+    });
+    if (!uploadResponse.ok) {
+      throwResponseError(uploadResponse, await readResponsePayload(uploadResponse));
+    }
+    return {
+      data: await completeDirectUpload(file.name, { expectedVersion: file.version }),
+      upload: upload
+    };
   }
 
   function uploadMultipartPart(name, partNumber, body, options) {
@@ -3382,9 +3421,7 @@ export function renderDeskClientScript(): string {
         return request("/api/files/bulk-metadata", { method: "POST", body: bulkFilesBody(files, input) }).then(unwrapData);
       },
       abortMultipartUpload: abortMultipartUpload,
-      completeDirectUpload: function (name, options) {
-        return request(filePath(name, "complete-upload"), { method: "POST", body: versionBody(options) }).then(unwrapData);
-      },
+      completeDirectUpload: completeDirectUpload,
       completeMultipartUpload: completeMultipartUpload,
       contentUrl: function (name) {
         return filePath(name, "content");
@@ -3398,10 +3435,7 @@ export function renderDeskClientScript(): string {
       list: function (options) {
         return request(withQuery("/api/files", fileListParams(options || {}))).then(unwrapData);
       },
-      prepareDirectUpload: async function (input) {
-        preflightKnownUploadSize(input && input.size, input || {});
-        return request("/api/files/direct-upload", { method: "POST", body: directUploadRequestBody(input || {}) });
-      },
+      prepareDirectUpload: prepareDirectUpload,
       prepareMultipartUpload: prepareMultipartUpload,
       previewUrl: function (name) {
         return filePath(name, "preview");
@@ -3423,6 +3457,7 @@ export function renderDeskClientScript(): string {
           headers: fileUploadHeaders(options || {})
         });
       },
+      uploadDirect: uploadDirectFile,
       uploadMultipart: uploadMultipartFile,
       uploadMultipartPart: uploadMultipartPart
     }),

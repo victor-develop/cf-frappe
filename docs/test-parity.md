@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the programmatic upload preflight slice:
+As of the direct upload helper slice:
 
 - Vitest files: `94`
-- Vitest cases: `1113`
+- Vitest cases: `1115`
 
 ## Implication
 

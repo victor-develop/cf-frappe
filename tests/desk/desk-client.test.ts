@@ -342,6 +342,7 @@ interface DeskClientRuntime {
       options?: { readonly expectedVersion?: number }
     ) => Promise<unknown>;
     readonly upload: (body: Blob, options: Record<string, unknown>) => Promise<unknown>;
+    readonly uploadDirect: (body: Blob, options: Record<string, unknown>) => Promise<unknown>;
     readonly uploadMultipart: (body: Blob, options: Record<string, unknown>) => Promise<unknown>;
     readonly uploadMultipartPart: (
       name: string,
@@ -1817,6 +1818,86 @@ describe("Desk client runtime", () => {
       JSON.stringify({ contentType: "text/plain", filename: "fits.txt", size: 5 }),
       JSON.stringify({ filename: "server-decides.bin" }),
       JSON.stringify({ contentType: "text/plain", filename: "fits-large.txt", size: 6 })
+    ]);
+  });
+
+  it("orchestrates direct uploads through signed storage instructions", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      if (String(url) === "/api/files/direct-upload") {
+        return jsonResponse({
+          data: { name: "file_direct", version: 1 },
+          upload: {
+            method: "PUT",
+            url: "https://upload.example/file-direct",
+            headers: { "content-type": "text/plain", "x-upload-token": "signed" }
+          }
+        }, 201);
+      }
+      if (String(url) === "https://upload.example/file-direct") {
+        return new Response("");
+      }
+      return jsonResponse({ data: { name: "file_direct", version: 2, data: { storage_state: "available" } } });
+    });
+    const body = new Blob(["hello"], { type: "text/plain" });
+
+    await expect(
+      runtime.files.uploadDirect(body, {
+        attachedTo: { doctype: "Task", name: "TASK-1" },
+        filename: "hello.txt",
+        isPrivate: false,
+        maxUploadBytes: 5
+      })
+    ).resolves.toEqual({
+      data: { name: "file_direct", version: 2, data: { storage_state: "available" } },
+      upload: {
+        method: "PUT",
+        url: "https://upload.example/file-direct",
+        headers: { "content-type": "text/plain", "x-upload-token": "signed" }
+      }
+    });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "POST /api/files/direct-upload",
+      "PUT https://upload.example/file-direct",
+      "POST /api/files/file_direct/complete-upload"
+    ]);
+    expect(calls[0]?.init.body).toBe(JSON.stringify({
+      filename: "hello.txt",
+      size: 5,
+      contentType: "text/plain",
+      attached_to_doctype: "Task",
+      attached_to_name: "TASK-1",
+      isPrivate: false
+    }));
+    expect(calls[1]?.init.body).toBe(body);
+    expect(calls[1]?.init.credentials).toBeUndefined();
+    expect(calls[1]?.init.headers).toEqual({ "content-type": "text/plain", "x-upload-token": "signed" });
+    expect(calls[2]?.init.body).toBe(JSON.stringify({ expectedVersion: 1 }));
+  });
+
+  it("does not complete direct uploads when signed storage upload fails", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      if (String(url) === "/api/files/direct-upload") {
+        return jsonResponse({
+          data: { name: "file_direct", version: 1 },
+          upload: { method: "PUT", url: "https://upload.example/file-direct", headers: {} }
+        }, 201);
+      }
+      return new Response("storage rejected", { status: 403, statusText: "Forbidden" });
+    });
+
+    await expect(
+      runtime.files.uploadDirect(new Blob(["hello"], { type: "text/plain" }), {
+        filename: "hello.txt"
+      })
+    ).rejects.toThrow("Forbidden");
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "POST /api/files/direct-upload",
+      "PUT https://upload.example/file-direct"
     ]);
   });
 
