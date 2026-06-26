@@ -133,6 +133,16 @@ export function foldDocumentFrom(
       case "JobScheduleDeleted":
       case "CustomFieldSaved":
       case "CustomFieldDisabled":
+      case "FieldPropertyOverrideSaved":
+      case "FieldPropertyOverrideCleared":
+      case "WorkflowDefinitionSaved":
+      case "WorkflowDefinitionCleared":
+      case "NotificationRuleSaved":
+      case "NotificationRuleCleared":
+      case "EmailNotificationQueued":
+      case "EmailNotificationSent":
+      case "EmailNotificationFailed":
+      case "EmailNotificationSkipped":
         break;
     }
   }

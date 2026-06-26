@@ -322,6 +322,10 @@ function diffEvent(
     case "WorkflowDefinitionCleared":
     case "NotificationRuleSaved":
     case "NotificationRuleCleared":
+    case "EmailNotificationQueued":
+    case "EmailNotificationSent":
+    case "EmailNotificationFailed":
+    case "EmailNotificationSkipped":
       return [];
   }
 }
@@ -472,6 +476,14 @@ function summarize(payload: DocumentEventPayload): string {
       return `Saved notification rule ${payload.doctypeName}.${payload.rule.name}`;
     case "NotificationRuleCleared":
       return `Cleared notification rule ${payload.doctypeName}.${payload.ruleName}`;
+    case "EmailNotificationQueued":
+      return `Queued email notification ${payload.messageId}`;
+    case "EmailNotificationSent":
+      return `Sent email notification ${payload.messageId}`;
+    case "EmailNotificationFailed":
+      return `Email notification failed ${payload.messageId}`;
+    case "EmailNotificationSkipped":
+      return `Skipped email notification ${payload.messageId}`;
     case "WorkflowTransitioned":
       return workflowSummary(payload);
     case "DomainCommandApplied":

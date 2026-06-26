@@ -36,6 +36,7 @@ describe("notification rule api", () => {
             { kind: "documentOwner" },
             { kind: "user", userId: "manager@example.com" }
           ],
+          channels: ["email", "inbox"],
           subject: "Note changed"
         }
       })
@@ -44,7 +45,7 @@ describe("notification rule api", () => {
     await expect(saved.json()).resolves.toMatchObject({
       data: {
         version: 1,
-        rules: [{ rule: { name: "Managers on updates", subject: "Note changed" }, enabled: true }]
+        rules: [{ rule: { name: "Managers on updates", channels: ["email", "inbox"], subject: "Note changed" }, enabled: true }]
       }
     });
 

@@ -3842,6 +3842,7 @@ function parseNotificationRulesArgs(argv: readonly string[]): ParsedCommand {
   let ruleName: string | undefined;
   const events: string[] = [];
   const recipients: NotificationRuleRecipientOption[] = [];
+  const channels: string[] = [];
   let subject: string | undefined;
   let enabled: boolean | undefined;
   let excludeActor: boolean | undefined;
@@ -3963,6 +3964,24 @@ function parseNotificationRulesArgs(argv: readonly string[]): ParsedCommand {
       recipients.push({ kind: "documentOwner" });
       continue;
     }
+    if (arg === "--channel") {
+      if (action !== "save") {
+        return { kind: "invalid", message: `Cannot use --channel with notification-rules ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      if (value !== "inbox" && value !== "email") {
+        return { kind: "invalid", message: `Notification rule channel '${value}' is not supported` };
+      }
+      if (channels.includes(value)) {
+        return { kind: "invalid", message: `Notification rule save cannot repeat --channel ${value}` };
+      }
+      channels.push(value);
+      index += 1;
+      continue;
+    }
     if (arg === "--subject") {
       if (action !== "save") {
         return { kind: "invalid", message: `Cannot use --subject with notification-rules ${action}` };
@@ -4045,6 +4064,7 @@ function parseNotificationRulesArgs(argv: readonly string[]): ParsedCommand {
     ...(ruleName === undefined ? {} : { ruleName }),
     ...(events.length === 0 ? {} : { events }),
     ...(recipients.length === 0 ? {} : { recipients }),
+    ...(channels.length === 0 ? {} : { channels }),
     ...(subject === undefined ? {} : { subject }),
     ...(enabled === undefined ? {} : { enabled }),
     ...(excludeActor === undefined ? {} : { excludeActor }),
@@ -6039,7 +6059,7 @@ function helpText(): string {
     "  cf-frappe notifications read --url <origin> --id <notificationId> [--user <user>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notifications dismiss --url <origin> --id <notificationId> [--user <user>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notification-rules list --url <origin> --doctype <doctype> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
-    "  cf-frappe notification-rules save --url <origin> --doctype <doctype> --rule <name> --event <eventKind>... (--recipient-user <user>|--recipient-field <field>|--recipient-owner)... [--subject <text>] [--enabled|--disabled] [--exclude-actor|--include-actor] [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe notification-rules save --url <origin> --doctype <doctype> --rule <name> --event <eventKind>... (--recipient-user <user>|--recipient-field <field>|--recipient-owner)... [--channel inbox|email]... [--subject <text>] [--enabled|--disabled] [--exclude-actor|--include-actor] [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notification-rules clear --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe workflows get --url <origin> --doctype <doctype> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe workflows save --url <origin> --doctype <doctype> --workflow-json <json> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",

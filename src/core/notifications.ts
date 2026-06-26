@@ -7,8 +7,10 @@ import type {
   TenantId
 } from "./types.js";
 import {
+  notificationRuleEmailNotificationsFromDomainEvent,
   notificationRuleUserNotificationsFromDomainEvent
 } from "./notification-rules.js";
+import type { DocumentEmailNotificationPayload } from "./notification-rules.js";
 
 export interface DocumentUserNotificationPayload {
   readonly kind: "DocumentUserNotification";
@@ -46,6 +48,14 @@ export function documentUserNotificationsFromRules(
   rules: readonly NotificationRuleDefinition[]
 ): readonly DocumentUserNotificationPayload[] {
   return notificationRuleUserNotificationsFromDomainEvent({ event, snapshot, rules });
+}
+
+export function documentEmailNotificationsFromRules(
+  event: DomainEvent,
+  snapshot: Parameters<typeof notificationRuleEmailNotificationsFromDomainEvent>[0]["snapshot"],
+  rules: readonly NotificationRuleDefinition[]
+): readonly DocumentEmailNotificationPayload[] {
+  return notificationRuleEmailNotificationsFromDomainEvent({ event, snapshot, rules });
 }
 
 function documentUserNotificationRecipients(event: DomainEvent): readonly string[] {

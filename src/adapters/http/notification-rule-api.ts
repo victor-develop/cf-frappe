@@ -3,6 +3,7 @@ import type { NotificationRuleService } from "../../application/notification-rul
 import { badRequest } from "../../core/errors.js";
 import type {
   JsonValue,
+  NotificationRuleChannel,
   NotificationRuleDefinition,
   NotificationRuleEventKind,
   NotificationRuleRecipientDefinition
@@ -70,6 +71,7 @@ function ruleValue(name: string, value: JsonValue | undefined): NotificationRule
     ...optionalBoolean(value.enabled, "rule.enabled", "enabled"),
     events: eventKinds(value.events),
     recipients: recipients(value.recipients),
+    ...optionalChannels(value.channels),
     ...optionalString(value.subject, "rule.subject", "subject"),
     ...optionalBoolean(value.excludeActor, "rule.excludeActor", "excludeActor")
   };
@@ -80,6 +82,16 @@ function eventKinds(value: JsonValue | undefined): readonly NotificationRuleEven
     throw badRequest("rule.events must be an array of strings");
   }
   return value as readonly NotificationRuleEventKind[];
+}
+
+function optionalChannels(value: JsonValue | undefined): { readonly channels?: readonly NotificationRuleChannel[] } {
+  if (value === undefined) {
+    return {};
+  }
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    throw badRequest("rule.channels must be an array of strings");
+  }
+  return { channels: value as readonly NotificationRuleChannel[] };
 }
 
 function recipients(value: JsonValue | undefined): readonly NotificationRuleRecipientDefinition[] {

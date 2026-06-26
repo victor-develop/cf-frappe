@@ -5,6 +5,7 @@ import { DocumentService, bulkDocumentFailure } from "../application/document-se
 import { FieldPropertyService } from "../application/field-property-service.js";
 import { NotificationRuleService } from "../application/notification-rule-service.js";
 import { WorkflowService } from "../application/workflow-service.js";
+import type { EmailNotificationService } from "../application/email-notification-service.js";
 import type { BulkDocumentCommandFailure } from "../application/document-service.js";
 import { UserPermissionService } from "../application/user-permission-service.js";
 import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator.js";
@@ -37,6 +38,7 @@ import type { ExecuteDomainCommand } from "../application/document-service.js";
 import { D1DocumentStore, D1EventStore } from "../adapters/d1/index.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { Clock } from "../ports/clock.js";
+import type { EventStore } from "../ports/event-store.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 import type { RealtimePublisher } from "../ports/realtime.js";
 
@@ -85,6 +87,10 @@ export interface AggregateCoordinatorOptions<Env extends AggregateCoordinatorEnv
   readonly ids?: IdGenerator;
   readonly realtime?: (env: Env) => RealtimePublisher;
   readonly notifications?: boolean;
+  readonly emailNotifications?: (
+    env: Env,
+    services: { readonly events: EventStore; readonly notificationRules: NotificationRuleService }
+  ) => EmailNotificationService;
   readonly onHookError?: (error: unknown, event: DomainEvent) => void | Promise<void>;
 }
 
@@ -138,9 +144,11 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
             notificationRules,
             ...(options.clock ? { clock: options.clock } : {})
       });
+      const emailNotifications = options.emailNotifications?.(env, { events, notificationRules });
       const deliveryHooks = createDocumentDeliveryHooks({
         ...(options.realtime ? { realtime: options.realtime(env) } : {}),
-        ...(notifications ? { notifications } : {})
+        ...(notifications ? { notifications } : {}),
+        ...(emailNotifications ? { emailNotifications } : {})
       });
       this.service = new DocumentService({
         registry: options.registry,

@@ -1,6 +1,8 @@
 import {
   createDocumentDeliveryHooks,
   createDocumentRealtimeHooks,
+  EmailNotificationService,
+  type EmailMessage,
   InMemoryEventStore,
   InMemoryRealtimePublisher
 } from "../../src";
@@ -101,5 +103,56 @@ describe("document realtime hooks", () => {
     await expect(notifications.inbox({ id: "support@example.com", roles: ["User"], tenantId: "acme" })).resolves.toMatchObject({
       notifications: [{ id: "evt_assign-1:user:support%40example.com", documentName: "Delivery" }]
     });
+  });
+
+  it("runs email notification delivery from the shared after-commit hook", async () => {
+    const events = new InMemoryEventStore();
+    const messages: EmailMessage[] = [];
+    const emailNotifications = new EmailNotificationService({
+      events,
+      from: { email: "notifications@example.com" },
+      sender: {
+        async send(message) {
+          messages.push(message);
+          return {};
+        }
+      },
+      notificationRules: {
+        async notificationRulesFor() {
+          return [
+            {
+              name: "Email assignees",
+              events: ["DocumentAssigned"],
+              recipients: [{ kind: "user", userId: "support@example.com" }],
+              channels: ["email"],
+              subject: "{{ doctype }} {{ name }} assigned"
+            }
+          ];
+        }
+      }
+    });
+    const hooks = createDocumentDeliveryHooks({ emailNotifications });
+    const services = createServices(["create-1", "assign-1"], {
+      afterCommit: async (context) => {
+        await hooks.afterCommit?.(context);
+      }
+    });
+
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Email Delivery" }) });
+    await services.documents.assign({
+      actor: owner,
+      doctype: "Note",
+      name: "Email Delivery",
+      assignee: "support@example.com",
+      expectedVersion: 1
+    });
+
+    expect(messages).toEqual([
+      expect.objectContaining({
+        from: { email: "notifications@example.com" },
+        to: [{ email: "support@example.com" }],
+        subject: "Note Email Delivery assigned"
+      })
+    ]);
   });
 });

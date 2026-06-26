@@ -157,11 +157,14 @@ export type NotificationRuleRecipientDefinition =
       readonly kind: "documentOwner";
     };
 
+export type NotificationRuleChannel = "email" | "inbox";
+
 export interface NotificationRuleDefinition {
   readonly name: string;
   readonly enabled?: boolean;
   readonly events: readonly NotificationRuleEventKind[];
   readonly recipients: readonly NotificationRuleRecipientDefinition[];
+  readonly channels?: readonly NotificationRuleChannel[];
   readonly subject?: string;
   readonly excludeActor?: boolean;
 }
@@ -552,6 +555,46 @@ export type DocumentEventPayload =
       readonly kind: "NotificationRuleCleared";
       readonly doctypeName: DocTypeName;
       readonly ruleName: string;
+    }
+  | {
+      readonly kind: "EmailNotificationQueued";
+      readonly messageId: string;
+      readonly sourceEventId: string;
+      readonly sourceEventType: string;
+      readonly payloadKind: string;
+      readonly ruleName: string;
+      readonly recipientId: string;
+      readonly from: {
+        readonly email: string;
+        readonly name?: string;
+      };
+      readonly to: {
+        readonly email: string;
+        readonly name?: string;
+      };
+      readonly subject: string;
+      readonly text: string;
+      readonly headers?: Readonly<Record<string, string>>;
+    }
+  | {
+      readonly kind: "EmailNotificationSent";
+      readonly messageId: string;
+      readonly providerMessageId?: string;
+    }
+  | {
+      readonly kind: "EmailNotificationFailed";
+      readonly messageId: string;
+      readonly error: string;
+    }
+  | {
+      readonly kind: "EmailNotificationSkipped";
+      readonly messageId: string;
+      readonly sourceEventId: string;
+      readonly sourceEventType: string;
+      readonly payloadKind: string;
+      readonly ruleName: string;
+      readonly recipientId: string;
+      readonly reason: string;
     }
   | {
       readonly kind: "WorkflowTransitioned";

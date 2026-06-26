@@ -27,6 +27,7 @@ export interface NotificationRuleRemoteCommand {
   readonly ruleName?: string;
   readonly events?: readonly string[];
   readonly recipients?: readonly NotificationRuleRecipientOption[];
+  readonly channels?: readonly string[];
   readonly subject?: string;
   readonly enabled?: boolean;
   readonly excludeActor?: boolean;
@@ -61,6 +62,7 @@ interface NotificationRuleResponse {
   readonly enabled?: boolean;
   readonly events?: readonly string[];
   readonly recipients?: readonly NotificationRuleRecipientOption[];
+  readonly channels?: readonly string[];
   readonly subject?: string;
   readonly excludeActor?: boolean;
 }
@@ -136,6 +138,7 @@ function saveBody(command: NotificationRuleRemoteCommand): Record<string, unknow
     rule: {
       events: [...requiredEvents(command)],
       recipients: [...requiredRecipients(command)],
+      ...(command.channels === undefined || command.channels.length === 0 ? {} : { channels: [...command.channels] }),
       ...(command.enabled === undefined ? {} : { enabled: command.enabled }),
       ...(command.subject === undefined ? {} : { subject: command.subject }),
       ...(command.excludeActor === undefined ? {} : { excludeActor: command.excludeActor })
@@ -174,11 +177,12 @@ function ruleLines(rules: readonly NotificationRuleEntryResponse[]): readonly st
 function ruleLine(entry: NotificationRuleEntryResponse): string {
   const rule = entry.rule;
   const events = rule.events === undefined || rule.events.length === 0 ? "(none)" : rule.events.join(", ");
+  const channels = rule.channels === undefined || rule.channels.length === 0 ? "inbox" : rule.channels.join(", ");
   const recipients = rule.recipients === undefined || rule.recipients.length === 0
     ? "(none)"
     : rule.recipients.map(recipientLabel).join(", ");
   const subject = rule.subject === undefined ? "" : ` subject "${rule.subject}"`;
-  return `- ${rule.name} ${entry.enabled ?? rule.enabled ?? true ? "enabled" : "disabled"} events ${events} recipients ${recipients}${subject}`;
+  return `- ${rule.name} ${entry.enabled ?? rule.enabled ?? true ? "enabled" : "disabled"} channels ${channels} events ${events} recipients ${recipients}${subject}`;
 }
 
 function recipientLabel(recipient: NotificationRuleRecipientOption): string {

@@ -45,6 +45,10 @@ describe("cf-frappe CLI remote notification rules", () => {
       "--recipient-field",
       "owner",
       "--recipient-owner",
+      "--channel",
+      "email",
+      "--channel",
+      "inbox",
       "--subject",
       "{{ doctype }} {{ name }} changed",
       "--disabled",
@@ -64,6 +68,7 @@ describe("cf-frappe CLI remote notification rules", () => {
         { kind: "field", field: "owner" },
         { kind: "documentOwner" }
       ],
+      channels: ["email", "inbox"],
       subject: "{{ doctype }} {{ name }} changed",
       enabled: false,
       excludeActor: false,
@@ -212,6 +217,25 @@ describe("cf-frappe CLI remote notification rules", () => {
       kind: "invalid",
       message: "Notification rule expected version must be a non-negative integer"
     });
+    expect(parseCliArgs([
+      "notification-rules",
+      "save",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--rule",
+      "Managers",
+      "--event",
+      "DocumentUpdated",
+      "--recipient-user",
+      "manager@example.com",
+      "--channel",
+      "sms"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Notification rule channel 'sms' is not supported"
+    });
   });
 
   it("lists remote notification rules through the generated admin API", async () => {
@@ -264,7 +288,7 @@ describe("cf-frappe CLI remote notification rules", () => {
     expect(calls[0]?.headers.get("authorization")).toBe("Bearer test-token");
     expect(stdout.text()).toContain("Notification rules at https://app.example/cf");
     expect(stdout.text()).toContain("DocType: Sales Invoice Tenant: acme/east Version: 2 Total: 1");
-    expect(stdout.text()).toContain("- Managers on updates enabled events DocumentUpdated recipients user:manager@example.com subject \"Invoice changed\"");
+    expect(stdout.text()).toContain("- Managers on updates enabled channels inbox events DocumentUpdated recipients user:manager@example.com subject \"Invoice changed\"");
     expect(stdout.text()).toContain("{\"name\":\"Managers on updates\"");
   });
 
@@ -288,6 +312,8 @@ describe("cf-frappe CLI remote notification rules", () => {
         "--recipient-field",
         "owner",
         "--recipient-owner",
+        "--channel",
+        "email",
         "--subject",
         "{{ name }} changed",
         "--enabled",
@@ -313,6 +339,7 @@ describe("cf-frappe CLI remote notification rules", () => {
                     { kind: "field", field: "owner" },
                     { kind: "documentOwner" }
                   ],
+                  channels: ["email"],
                   subject: "{{ name }} changed",
                   excludeActor: true
                 }
@@ -336,6 +363,7 @@ describe("cf-frappe CLI remote notification rules", () => {
           { kind: "field", field: "owner" },
           { kind: "documentOwner" }
         ],
+        channels: ["email"],
         enabled: true,
         subject: "{{ name }} changed",
         excludeActor: true

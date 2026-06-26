@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the remote print document download CLI slice:
+As of the notification email delivery slice:
 
-- Vitest files: `115`
-- Vitest cases: `1262`
+- Vitest files: `118`
+- Vitest cases: `1274`
 
 ## Implication
 

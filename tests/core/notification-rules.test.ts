@@ -1,6 +1,7 @@
 import {
   foldNotificationRules,
   normalizeNotificationRule,
+  notificationRuleEmailNotificationsFromDomainEvent,
   notificationRuleUserNotificationsFromDomainEvent,
   type DomainEvent,
   type DocumentSnapshot,
@@ -51,6 +52,7 @@ describe("notification rules", () => {
         { kind: "field", field: "created_by" },
         { kind: "user", userId: " support@example.com " }
       ],
+      channels: ["email", "inbox"],
       subject: "  {{ doctype }} {{ name }} changed  ",
       excludeActor: false
     });
@@ -64,6 +66,7 @@ describe("notification rules", () => {
         { kind: "field", field: "created_by" },
         { kind: "user", userId: "support@example.com" }
       ],
+      channels: ["email", "inbox"],
       subject: "{{ doctype }} {{ name }} changed",
       excludeActor: false
     });
@@ -81,6 +84,14 @@ describe("notification rules", () => {
         recipients: [{ kind: "field", field: "count" }]
       })
     ).toThrow(/must store user ids/);
+    expect(() =>
+      normalizeNotificationRule(noteDocType, {
+        name: "Bad channel",
+        events: ["DocumentUpdated"],
+        recipients: [{ kind: "user", userId: "support@example.com" }],
+        channels: ["sms" as never]
+      })
+    ).toThrow(/channel 'sms' is not supported/);
   });
 
   it("evaluates matching rules into deduplicated user notification payloads", () => {
@@ -120,6 +131,52 @@ describe("notification rules", () => {
         ruleName: "Review alert",
         subject: "owner@example.com changed Note My Note"
       })
+    ]);
+  });
+
+  it("evaluates email-channel rules into deduplicated email payloads without inbox payloads", () => {
+    const event = documentEvent("evt_update", "DocumentUpdated");
+    const snapshot = noteSnapshot({ created_by: owner.id, reviewer: "reviewer@example.com" });
+    const rule = normalizeNotificationRule(
+      {
+        ...noteDocType,
+        fields: [...noteDocType.fields, { name: "reviewer", type: "text" }]
+      },
+      {
+        name: "Email review alert",
+        events: ["DocumentUpdated"],
+        recipients: [
+          { kind: "field", field: "reviewer" },
+          { kind: "user", userId: "reviewer@example.com" }
+        ],
+        channels: ["email"],
+        subject: "{{ actor }} changed {{ doctype }} {{ name }}"
+      }
+    );
+
+    expect(notificationRuleUserNotificationsFromDomainEvent({ event, snapshot, rules: [rule] })).toEqual([]);
+    expect(notificationRuleEmailNotificationsFromDomainEvent({ event, snapshot, rules: [rule] })).toEqual([
+      {
+        kind: "DocumentEmailNotification",
+        eventId: "evt_update",
+        eventType: "NoteUpdated",
+        payloadKind: "DocumentUpdated",
+        tenantId: "acme",
+        doctype: "Note",
+        documentName: "My Note",
+        actorId: owner.id,
+        recipientId: "reviewer@example.com",
+        subject: "owner@example.com changed Note My Note",
+        text: [
+          "owner@example.com changed Note My Note",
+          "",
+          "Document: Note My Note",
+          "Event: DocumentUpdated",
+          "Actor: owner@example.com",
+          "Rule: Email review alert"
+        ].join("\n"),
+        ruleName: "Email review alert"
+      }
     ]);
   });
 });

@@ -67,6 +67,10 @@ const DOCUMENT_EVENT_KINDS = new Set<DocumentEventPayload["kind"]>([
   "WorkflowDefinitionCleared",
   "NotificationRuleSaved",
   "NotificationRuleCleared",
+  "EmailNotificationQueued",
+  "EmailNotificationSent",
+  "EmailNotificationFailed",
+  "EmailNotificationSkipped",
   "WorkflowTransitioned",
   "DomainCommandApplied"
 ]);

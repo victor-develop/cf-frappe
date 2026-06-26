@@ -1,9 +1,11 @@
 import type { DocumentHooks } from "../core/registry.js";
 import { realtimeEventFromDomainEvent, realtimeUserNotificationsFromDomainEvent } from "../core/realtime.js";
 import type { RealtimePublisher } from "../ports/realtime.js";
+import type { EmailNotificationService } from "./email-notification-service.js";
 import type { UserNotificationService } from "./user-notification-service.js";
 
 export interface DocumentDeliveryHookOptions {
+  readonly emailNotifications?: EmailNotificationService;
   readonly realtime?: RealtimePublisher;
   readonly notifications?: UserNotificationService;
 }
@@ -26,7 +28,10 @@ export function createDocumentDeliveryHooks(options: DocumentDeliveryHookOptions
   const realtimeAfterCommit = options.realtime
     ? createDocumentRealtimeHooks(options.realtime).afterCommit
     : undefined;
-  if (!notificationAfterCommit && !realtimeAfterCommit) {
+  const emailAfterCommit = options.emailNotifications
+    ? createDocumentEmailNotificationHooks(options.emailNotifications).afterCommit
+    : undefined;
+  if (!notificationAfterCommit && !realtimeAfterCommit && !emailAfterCommit) {
     return {};
   }
   return {
@@ -42,6 +47,11 @@ export function createDocumentDeliveryHooks(options: DocumentDeliveryHookOptions
       } catch (error) {
         firstError ??= error;
       }
+      try {
+        await emailAfterCommit?.(context);
+      } catch (error) {
+        firstError ??= error;
+      }
       if (firstError) {
         throw firstError;
       }
@@ -53,6 +63,14 @@ export function createDocumentNotificationHooks(notifications: UserNotificationS
   return {
     async afterCommit({ event, snapshot }) {
       await notifications.recordFromDomainEvent(event, snapshot);
+    }
+  };
+}
+
+export function createDocumentEmailNotificationHooks(emailNotifications: EmailNotificationService): DocumentHooks {
+  return {
+    async afterCommit({ event, snapshot }) {
+      await emailNotifications.sendFromDomainEvent(event, snapshot);
     }
   };
 }

@@ -5,6 +5,7 @@ import type {
   DomainEvent,
   FieldDefinition,
   JsonValue,
+  NotificationRuleChannel,
   NotificationRuleDefinition,
   NotificationRuleEventKind,
   NotificationRuleRecipientDefinition,
@@ -54,6 +55,21 @@ export interface NotificationRuleEvaluationContext {
   readonly rules: readonly NotificationRuleDefinition[];
 }
 
+export interface DocumentEmailNotificationPayload {
+  readonly kind: "DocumentEmailNotification";
+  readonly eventId: string;
+  readonly eventType: string;
+  readonly payloadKind: DomainEvent["payload"]["kind"];
+  readonly tenantId: TenantId;
+  readonly doctype: string;
+  readonly documentName: string;
+  readonly actorId: string;
+  readonly recipientId: string;
+  readonly subject: string;
+  readonly text: string;
+  readonly ruleName: string;
+}
+
 export function foldNotificationRules(
   tenantId: TenantId,
   doctypeName: string,
@@ -98,6 +114,7 @@ export function normalizeNotificationRule(
   const name = normalizeRequiredString(rule.name, "Notification rule name");
   const events = normalizeEventKinds(rule.events);
   const recipients = normalizeRecipients(doctype, rule.recipients);
+  const channels = normalizeChannels(rule.channels);
   const subject = optionalTrimmedString(rule.subject, "Notification rule subject");
   const enabled = optionalBoolean(rule.enabled, "Notification rule enabled");
   const excludeActor = optionalBoolean(rule.excludeActor, "Notification rule excludeActor");
@@ -106,6 +123,7 @@ export function normalizeNotificationRule(
     ...(enabled === undefined ? {} : { enabled }),
     events: Object.freeze(events),
     recipients: Object.freeze(recipients),
+    ...(channels === undefined ? {} : { channels: Object.freeze(channels) }),
     ...(subject === undefined ? {} : { subject }),
     ...(excludeActor === undefined ? {} : { excludeActor })
   });
@@ -121,7 +139,7 @@ export function notificationRuleUserNotificationsFromDomainEvent(
   const notifications: DocumentUserNotificationPayload[] = [];
   const seen = new Set<string>();
   for (const rule of context.rules) {
-    if ((rule.enabled ?? true) === false || !rule.events.includes(context.event.payload.kind)) {
+    if (!ruleMatches(rule, context.event, "inbox")) {
       continue;
     }
     for (const recipientId of notificationRecipientsForRule(rule, snapshot)) {
@@ -151,6 +169,48 @@ export function notificationRuleUserNotificationsFromDomainEvent(
   return Object.freeze(notifications);
 }
 
+export function notificationRuleEmailNotificationsFromDomainEvent(
+  context: NotificationRuleEvaluationContext
+): readonly DocumentEmailNotificationPayload[] {
+  const snapshot = context.snapshot;
+  if (snapshot === null || !isNotificationRuleEventKind(context.event.payload.kind)) {
+    return [];
+  }
+  const notifications: DocumentEmailNotificationPayload[] = [];
+  const seen = new Set<string>();
+  for (const rule of context.rules) {
+    if (!ruleMatches(rule, context.event, "email")) {
+      continue;
+    }
+    for (const recipientId of notificationRecipientsForRule(rule, snapshot)) {
+      if ((rule.excludeActor ?? true) && recipientId === context.event.actorId) {
+        continue;
+      }
+      const key = `${rule.name}\u0000${recipientId}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      const subject = renderRuleSubject(rule, context.event, snapshot);
+      notifications.push({
+        kind: "DocumentEmailNotification",
+        eventId: context.event.id,
+        eventType: context.event.type,
+        payloadKind: context.event.payload.kind,
+        tenantId: context.event.tenantId,
+        doctype: context.event.doctype,
+        documentName: context.event.documentName,
+        actorId: context.event.actorId,
+        recipientId,
+        subject,
+        text: renderRuleEmailText(subject, rule, context.event),
+        ruleName: rule.name
+      });
+    }
+  }
+  return Object.freeze(notifications);
+}
+
 function normalizeEventKinds(values: readonly NotificationRuleEventKind[]): readonly NotificationRuleEventKind[] {
   if (!Array.isArray(values) || values.length === 0) {
     throw invalid("Notification rule events must contain at least one event kind");
@@ -168,6 +228,28 @@ function normalizeEventKinds(values: readonly NotificationRuleEventKind[]): read
     normalized.push(value);
   }
   return normalized;
+}
+
+function normalizeChannels(values: readonly NotificationRuleChannel[] | undefined): readonly NotificationRuleChannel[] | undefined {
+  if (values === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(values) || values.length === 0) {
+    throw invalid("Notification rule channels must contain at least one channel");
+  }
+  const channels: NotificationRuleChannel[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (value !== "inbox" && value !== "email") {
+      throw invalid(`Notification rule channel '${String(value)}' is not supported`);
+    }
+    if (seen.has(value)) {
+      throw invalid(`Notification rule channels contain duplicate '${value}'`);
+    }
+    seen.add(value);
+    channels.push(value);
+  }
+  return channels;
 }
 
 function normalizeRecipients(
@@ -270,6 +352,27 @@ function renderRuleSubject(
     ? snapshot.data.title.trim()
     : event.documentName;
   return `${event.actorId} triggered ${rule.name} for ${event.doctype} ${title}`;
+}
+
+function renderRuleEmailText(subject: string, rule: NotificationRuleDefinition, event: DomainEvent): string {
+  return [
+    subject,
+    "",
+    `Document: ${event.doctype} ${event.documentName}`,
+    `Event: ${event.payload.kind}`,
+    `Actor: ${event.actorId}`,
+    `Rule: ${rule.name}`
+  ].join("\n");
+}
+
+function ruleMatches(rule: NotificationRuleDefinition, event: DomainEvent, channel: NotificationRuleChannel): boolean {
+  return (rule.enabled ?? true) !== false &&
+    rule.events.includes(event.payload.kind as NotificationRuleEventKind) &&
+    ruleChannels(rule).includes(channel);
+}
+
+function ruleChannels(rule: NotificationRuleDefinition): readonly NotificationRuleChannel[] {
+  return rule.channels ?? ["inbox"];
 }
 
 function isNotificationRuleEventKind(value: string): value is NotificationRuleEventKind {
