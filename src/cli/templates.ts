@@ -323,6 +323,20 @@ npx cf-frappe roles disable --url https://your-worker.example --role "Task Revie
 npx cf-frappe roles enable --url https://your-worker.example --role "Task Reviewer" --expected-version 3 --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 
+User accounts can be inspected and changed remotely without putting passwords in shell history. Keep generated passwords in environment variables or your CI secret store:
+
+\`\`\`bash
+read -rsp "New user password: " CF_FRAPPE_NEW_USER_PASSWORD
+export CF_FRAPPE_NEW_USER_PASSWORD
+npx cf-frappe users get --url https://your-worker.example --user-id teammate@example.com --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe users create --url https://your-worker.example --user-id teammate@example.com --email teammate@example.com --password-env CF_FRAPPE_NEW_USER_PASSWORD --role User --expected-version 0 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe users roles --url https://your-worker.example --user-id teammate@example.com --role User --role "Task Manager" --expected-version 1 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe users password --url https://your-worker.example --user-id teammate@example.com --password-env CF_FRAPPE_NEW_USER_PASSWORD --expected-version 2 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe users provider-sync --url https://your-worker.example --user-id teammate@example.com --provider oidc --subject oidc-subject-123 --email teammate@example.com --role User --email-verified --expected-version 3 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe users disable --url https://your-worker.example --user-id teammate@example.com --expected-version 4 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe users enable --url https://your-worker.example --user-id teammate@example.com --expected-version 5 --header-env Authorization=CF_FRAPPE_AUTH
+\`\`\`
+
 DocType resources can be inspected and mutated through the generated resource API without opening Desk:
 
 \`\`\`bash

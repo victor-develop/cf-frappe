@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the remote role catalog CLI slice:
+As of the remote user account CLI slice:
 
-- Vitest files: `102`
-- Vitest cases: `1184`
+- Vitest files: `103`
+- Vitest cases: `1189`
 
 ## Implication
 

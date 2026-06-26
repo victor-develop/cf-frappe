@@ -212,6 +212,15 @@ describe("cf-frappe CLI scaffold", () => {
     expect(readmeText).toContain('npx cf-frappe roles describe --url https://your-worker.example --role "Task Reviewer"');
     expect(readmeText).toContain('npx cf-frappe roles disable --url https://your-worker.example --role "Task Reviewer"');
     expect(readmeText).toContain('npx cf-frappe roles enable --url https://your-worker.example --role "Task Reviewer"');
+    expect(readmeText).toContain('read -rsp "New user password: " CF_FRAPPE_NEW_USER_PASSWORD');
+    expect(readmeText).toContain("export CF_FRAPPE_NEW_USER_PASSWORD");
+    expect(readmeText).toContain("npx cf-frappe users get --url https://your-worker.example --user-id teammate@example.com");
+    expect(readmeText).toContain("npx cf-frappe users create --url https://your-worker.example --user-id teammate@example.com");
+    expect(readmeText).toContain("npx cf-frappe users roles --url https://your-worker.example --user-id teammate@example.com");
+    expect(readmeText).toContain("npx cf-frappe users password --url https://your-worker.example --user-id teammate@example.com");
+    expect(readmeText).toContain("npx cf-frappe users provider-sync --url https://your-worker.example --user-id teammate@example.com");
+    expect(readmeText).toContain("npx cf-frappe users disable --url https://your-worker.example --user-id teammate@example.com");
+    expect(readmeText).toContain("npx cf-frappe users enable --url https://your-worker.example --user-id teammate@example.com");
     expect(readmeText).toContain("npx cf-frappe resources list --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources get --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources create --url https://your-worker.example --doctype Task");

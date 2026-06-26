@@ -87,6 +87,13 @@ import {
   type RoleRemoteCommand
 } from "./roles.js";
 import {
+  UserRemoteError,
+  runRemoteUserCommand,
+  type UserHeaderOption,
+  type UserRemoteAction,
+  type UserRemoteCommand
+} from "./users.js";
+import {
   UserPermissionRemoteError,
   runRemoteUserPermissionCommand,
   type UserPermissionHeaderOption,
@@ -165,6 +172,7 @@ type ParsedCommand =
   | FileRemoteCommand
   | ResourceRemoteCommand
   | RoleRemoteCommand
+  | UserRemoteCommand
   | UserPermissionRemoteCommand
   | WorkflowRemoteCommand
   | HelpCommand
@@ -235,6 +243,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     if (command.kind === "roles") {
       io.stdout.write(await runRemoteRoleCommand(command, {
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
+    if (command.kind === "users") {
+      io.stdout.write(await runRemoteUserCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -338,6 +353,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof FileRemoteError ||
       error instanceof ResourceRemoteError ||
       error instanceof RoleRemoteError ||
+      error instanceof UserRemoteError ||
       error instanceof UserPermissionRemoteError ||
       error instanceof WorkflowRemoteError
     ) {
@@ -382,6 +398,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "roles") {
     return parseRolesArgs(rest);
+  }
+  if (command === "users") {
+    return parseUsersArgs(rest);
   }
   if (command === "user-permissions") {
     return parseUserPermissionsArgs(rest);
@@ -1179,6 +1198,231 @@ function parseRolesArgs(argv: readonly string[]): ParsedCommand {
     ...(tenant === undefined ? {} : { tenant }),
     ...(description === undefined ? {} : { description }),
     ...(enabled === undefined ? {} : { enabled }),
+    ...(expectedVersion === undefined ? {} : { expectedVersion })
+  };
+}
+
+function parseUsersArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = userAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown users command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: UserHeaderOption[] = [];
+  let userId: string | undefined;
+  let tenant: string | undefined;
+  let email: string | undefined;
+  let passwordEnv: string | undefined;
+  const roles: string[] = [];
+  let enabled: boolean | undefined;
+  let provider: string | undefined;
+  let subject: string | undefined;
+  let emailVerified: boolean | undefined;
+  let expectedVersion: number | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "User");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "User");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--user-id") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      userId = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--tenant") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      tenant = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--email") {
+      if (action !== "create" && action !== "provider-sync") {
+        return { kind: "invalid", message: `Cannot use --email with users ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      email = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--password-env") {
+      if (action !== "create" && action !== "password") {
+        return { kind: "invalid", message: `Cannot use --password-env with users ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
+        return { kind: "invalid", message: `User password env var '${value}' is invalid` };
+      }
+      passwordEnv = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--role") {
+      if (action !== "create" && action !== "roles" && action !== "provider-sync") {
+        return { kind: "invalid", message: `Cannot use --role with users ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      roles.push(value);
+      index += 1;
+      continue;
+    }
+    if (arg === "--enabled" || arg === "--disabled") {
+      if (action !== "create" && action !== "provider-sync") {
+        return { kind: "invalid", message: `Cannot use ${arg} with users ${action}` };
+      }
+      const nextEnabled = arg === "--enabled";
+      if (enabled !== undefined && enabled !== nextEnabled) {
+        return { kind: "invalid", message: `User ${action} cannot use both --enabled and --disabled` };
+      }
+      enabled = nextEnabled;
+      continue;
+    }
+    if (arg === "--provider") {
+      if (action !== "provider-sync") {
+        return { kind: "invalid", message: `Cannot use --provider with users ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      provider = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--subject") {
+      if (action !== "provider-sync") {
+        return { kind: "invalid", message: `Cannot use --subject with users ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      subject = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--email-verified" || arg === "--email-unverified") {
+      if (action !== "provider-sync") {
+        return { kind: "invalid", message: `Cannot use ${arg} with users ${action}` };
+      }
+      const nextEmailVerified = arg === "--email-verified";
+      if (emailVerified !== undefined && emailVerified !== nextEmailVerified) {
+        return { kind: "invalid", message: "User provider-sync cannot use both --email-verified and --email-unverified" };
+      }
+      emailVerified = nextEmailVerified;
+      continue;
+    }
+    if (arg === "--expected-version") {
+      if (action === "get") {
+        return { kind: "invalid", message: "Cannot use --expected-version with users get" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseNonNegativeInteger(value, "User expected version");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      expectedVersion = parsed;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown users ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if (userId === undefined) {
+    return { kind: "invalid", message: `User ${action} requires --user-id` };
+  }
+  if ((action === "create" || action === "password") && passwordEnv === undefined) {
+    return { kind: "invalid", message: `User ${action} requires --password-env` };
+  }
+  if ((action === "create" || action === "roles") && roles.length === 0) {
+    return { kind: "invalid", message: `User ${action} requires at least one --role` };
+  }
+  if (action === "provider-sync" && provider === undefined) {
+    return { kind: "invalid", message: "User provider-sync requires --provider" };
+  }
+  if (action === "provider-sync" && subject === undefined) {
+    return { kind: "invalid", message: "User provider-sync requires --subject" };
+  }
+
+  return {
+    kind: "users",
+    action,
+    url,
+    headers,
+    userId,
+    ...(tenant === undefined ? {} : { tenant }),
+    ...(email === undefined ? {} : { email }),
+    ...(passwordEnv === undefined ? {} : { passwordEnv }),
+    ...(roles.length === 0 ? {} : { roles }),
+    ...(enabled === undefined ? {} : { enabled }),
+    ...(provider === undefined ? {} : { provider }),
+    ...(subject === undefined ? {} : { subject }),
+    ...(emailVerified === undefined ? {} : { emailVerified }),
     ...(expectedVersion === undefined ? {} : { expectedVersion })
   };
 }
@@ -3225,6 +3469,18 @@ function roleAction(value: string): RoleRemoteAction | undefined {
     : undefined;
 }
 
+function userAction(value: string): UserRemoteAction | undefined {
+  return value === "create" ||
+    value === "disable" ||
+    value === "enable" ||
+    value === "get" ||
+    value === "password" ||
+    value === "provider-sync" ||
+    value === "roles"
+    ? value
+    : undefined;
+}
+
 function resourceAction(value: string): ResourceRemoteAction | undefined {
   return value === "activity" ||
     value === "amend" ||
@@ -3426,7 +3682,7 @@ function parseJsonObject(value: string, label: string): Record<string, unknown> 
 function parseLiteralHeader(
   value: string,
   label: string
-): CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | RoleHeaderOption | WorkflowHeaderOption | string {
+): CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
   const separator = value.indexOf(":");
   if (separator < 1) {
     return `${label} header must use 'Name: value' syntax`;
@@ -3445,7 +3701,7 @@ function parseLiteralHeader(
 function parseEnvHeader(
   value: string,
   label: string
-): CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | RoleHeaderOption | WorkflowHeaderOption | string {
+): CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
   const separator = value.indexOf("=");
   if (separator < 1) {
     return `${label} environment header must use 'Name=ENV_VAR' syntax`;
@@ -3808,6 +4064,13 @@ function helpText(): string {
     "  cf-frappe roles describe --url <origin> --role <role> --description <text> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe roles enable --url <origin> --role <role> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe roles disable --url <origin> --role <role> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe users get --url <origin> --user-id <user> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe users create --url <origin> --user-id <user> --password-env <ENV> --role <role>... [--email <email>] [--enabled|--disabled] [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe users password --url <origin> --user-id <user> --password-env <ENV> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe users roles --url <origin> --user-id <user> --role <role>... [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe users provider-sync --url <origin> --user-id <user> --provider <provider> --subject <subject> [--email <email>] [--role <role>]... [--enabled|--disabled] [--email-verified|--email-unverified] [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe users enable --url <origin> --user-id <user> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe users disable --url <origin> --user-id <user> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources list --url <origin> --doctype <doctype> [--filter <field[__operator]=value>] [--filter-expression-json <json>] [--saved-filter <id>] [--limit <n>] [--offset <n>] [--order-by <field>] [--order <asc|desc>] [--no-default-filters] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources get --url <origin> --doctype <doctype> --name <docname> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources create --url <origin> --doctype <doctype> --data-json <json> [--header <name:value>] [--header-env <name=ENV>]",
@@ -3873,11 +4136,12 @@ function helpText(): string {
     "  notification-rules   Inspect and mutate event-sourced document notification rules through the admin API",
     "  workflows   Inspect and mutate event-sourced tenant workflow definitions through the admin API",
     "  roles   Inspect and mutate event-sourced tenant role catalogs through the admin API",
+    "  users   Inspect and mutate event-sourced user accounts through the admin API",
     "  resources   Inspect and mutate deployed DocType resources through the generated resource API",
     "  user-permissions   Inspect and mutate event-sourced linked-record user permission grants",
     "  files   Upload, inspect, update, and delete remote File metadata/content through the admin API",
     "",
-    "Use --header-env for secret-bearing auth headers so tokens stay out of shell history.",
+    "Use --header-env for secret-bearing auth headers and --password-env for user passwords so secrets stay out of shell history.",
     ""
   ].join("\n");
 }
