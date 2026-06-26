@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the remote report CLI slice:
+As of the remote report-builder CLI slice:
 
-- Vitest files: `110`
-- Vitest cases: `1231`
+- Vitest files: `111`
+- Vitest cases: `1237`
 
 ## Implication
 

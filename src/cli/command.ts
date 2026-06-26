@@ -94,6 +94,13 @@ import {
   type ResourceRemoteCommand
 } from "./resources.js";
 import {
+  ReportBuilderRemoteError,
+  runRemoteReportBuilderCommand,
+  type ReportBuilderHeaderOption,
+  type ReportBuilderRemoteAction,
+  type ReportBuilderRemoteCommand
+} from "./report-builder.js";
+import {
   ReportRemoteError,
   runRemoteReportCommand,
   type ReportFilterOption,
@@ -223,6 +230,7 @@ type ParsedCommand =
   | NotificationRuleRemoteCommand
   | FileRemoteCommand
   | ResourceRemoteCommand
+  | ReportBuilderRemoteCommand
   | ReportRemoteCommand
   | ProfileRemoteCommand
   | PrintFormatRemoteCommand
@@ -307,6 +315,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     if (command.kind === "resources") {
       io.stdout.write(await runRemoteResourceCommand(command, {
         cwd: io.cwd(),
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
+    if (command.kind === "report-builder") {
+      io.stdout.write(await runRemoteReportBuilderCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -460,6 +475,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof NotificationRuleRemoteError ||
       error instanceof FileRemoteError ||
       error instanceof ResourceRemoteError ||
+      error instanceof ReportBuilderRemoteError ||
       error instanceof ReportRemoteError ||
       error instanceof ProfileRemoteError ||
       error instanceof PrintFormatRemoteError ||
@@ -514,6 +530,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "resources") {
     return parseResourcesArgs(rest);
+  }
+  if (command === "report-builder") {
+    return parseReportBuilderArgs(rest);
   }
   if (command === "reports") {
     return parseReportsArgs(rest);
@@ -2673,6 +2692,270 @@ function parseReportsArgs(argv: readonly string[]): ParsedCommand {
     ...(limit === undefined ? {} : { limit }),
     ...(offset === undefined ? {} : { offset })
   };
+}
+
+function parseReportBuilderArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = reportBuilderAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown report-builder command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: ReportBuilderHeaderOption[] = [];
+  const filters: ReportFilterOption[] = [];
+  let filterExpression: Record<string, unknown> | undefined;
+  let doctype: string | undefined;
+  let id: string | undefined;
+  let label: string | undefined;
+  let definition: Record<string, unknown> | undefined;
+  let orderBy: string | undefined;
+  let order: "asc" | "desc" | undefined;
+  let limit: number | undefined;
+  let offset: number | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "Report builder");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "Report builder");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--doctype") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      doctype = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--id") {
+      if (action === "list" || action === "create") {
+        return { kind: "invalid", message: `Cannot use --id with report-builder ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      id = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--label") {
+      if (!isReportBuilderWriteAction(action)) {
+        return { kind: "invalid", message: `Can only use --label with report-builder create/update` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      label = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--definition-json") {
+      if (!isReportBuilderWriteAction(action)) {
+        return { kind: "invalid", message: `Can only use --definition-json with report-builder create/update` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseJsonObject(value, "Report builder definition");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      definition = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--filter") {
+      if (!isReportBuilderQueryAction(action)) {
+        return { kind: "invalid", message: "Can only use --filter with report-builder run/export" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseReportFilter(value);
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      filters.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--filter-expression-json") {
+      if (!isReportBuilderQueryAction(action)) {
+        return { kind: "invalid", message: "Can only use --filter-expression-json with report-builder run/export" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseJsonObject(value, "Report builder filter expression");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      filterExpression = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--order-by") {
+      if (!isReportBuilderQueryAction(action)) {
+        return { kind: "invalid", message: "Can only use --order-by with report-builder run/export" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      orderBy = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--order") {
+      if (!isReportBuilderQueryAction(action)) {
+        return { kind: "invalid", message: "Can only use --order with report-builder run/export" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = reportOrder(value);
+      if (parsed === undefined) {
+        return { kind: "invalid", message: "Report order must be asc or desc" };
+      }
+      order = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--limit") {
+      if (!isReportBuilderQueryAction(action)) {
+        return { kind: "invalid", message: "Can only use --limit with report-builder run/export" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseNonNegativeInteger(value, "Report builder limit");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      limit = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--offset") {
+      if (action !== "run") {
+        return { kind: "invalid", message: "Can only use --offset with report-builder run" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseNonNegativeInteger(value, "Report builder offset");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      offset = parsed;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown report-builder ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if (doctype === undefined) {
+    return { kind: "invalid", message: `Report builder ${action} requires --doctype` };
+  }
+  if (action !== "list" && action !== "create" && id === undefined) {
+    return { kind: "invalid", message: `Report builder ${action} requires --id` };
+  }
+  if (isReportBuilderWriteAction(action) && label === undefined) {
+    return { kind: "invalid", message: `Report builder ${action} requires --label` };
+  }
+  if (isReportBuilderWriteAction(action) && definition === undefined) {
+    return { kind: "invalid", message: `Report builder ${action} requires --definition-json` };
+  }
+
+  return {
+    kind: "report-builder",
+    action,
+    url,
+    headers,
+    filters,
+    doctype,
+    ...(id === undefined ? {} : { id }),
+    ...(label === undefined ? {} : { label }),
+    ...(definition === undefined ? {} : { definition }),
+    ...(filterExpression === undefined ? {} : { filterExpression }),
+    ...(orderBy === undefined ? {} : { orderBy }),
+    ...(order === undefined ? {} : { order }),
+    ...(limit === undefined ? {} : { limit }),
+    ...(offset === undefined ? {} : { offset })
+  };
+}
+
+function reportBuilderAction(value: string): ReportBuilderRemoteAction | undefined {
+  return value === "list" ||
+    value === "get" ||
+    value === "create" ||
+    value === "update" ||
+    value === "delete" ||
+    value === "run" ||
+    value === "export"
+    ? value
+    : undefined;
+}
+
+function isReportBuilderWriteAction(action: ReportBuilderRemoteAction): boolean {
+  return action === "create" || action === "update";
+}
+
+function isReportBuilderQueryAction(action: ReportBuilderRemoteAction): boolean {
+  return action === "run" || action === "export";
 }
 
 function reportAction(value: string): ReportRemoteAction | undefined {
@@ -5169,6 +5452,13 @@ function helpText(): string {
     "  cf-frappe reports get --url <origin> --report <report> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe reports run --url <origin> --report <report> [--filter <name=value>] [--filter-expression-json <json>] [--order-by <column>] [--order <asc|desc>] [--limit <n>] [--offset <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe reports export --url <origin> --report <report> [--filter <name=value>] [--filter-expression-json <json>] [--order-by <column>] [--order <asc|desc>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe report-builder list --url <origin> --doctype <doctype> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe report-builder get --url <origin> --doctype <doctype> --id <id> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe report-builder create --url <origin> --doctype <doctype> --label <label> --definition-json <json> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe report-builder update --url <origin> --doctype <doctype> --id <id> --label <label> --definition-json <json> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe report-builder delete --url <origin> --doctype <doctype> --id <id> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe report-builder run --url <origin> --doctype <doctype> --id <id> [--filter <name=value>] [--filter-expression-json <json>] [--order-by <column>] [--order <asc|desc>] [--limit <n>] [--offset <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe report-builder export --url <origin> --doctype <doctype> --id <id> [--filter <name=value>] [--filter-expression-json <json>] [--order-by <column>] [--order <asc|desc>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs list --url <origin> [--job <name>] [--run-id <id>] [--status <running|succeeded|failed>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs get --url <origin> --idempotency-key <key> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs retry --url <origin> --idempotency-key <key> [--header <name:value>] [--header-env <name=ENV>]",

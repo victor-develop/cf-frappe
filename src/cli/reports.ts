@@ -14,6 +14,15 @@ export interface ReportFilterOption {
   readonly value: string;
 }
 
+export interface RemoteReportQueryOptions {
+  readonly filters: readonly ReportFilterOption[];
+  readonly filterExpression?: Record<string, unknown>;
+  readonly limit?: number;
+  readonly offset?: number;
+  readonly order?: "asc" | "desc";
+  readonly orderBy?: string;
+}
+
 export interface ReportRemoteCommand {
   readonly kind: "reports";
   readonly action: ReportRemoteAction;
@@ -53,7 +62,7 @@ interface ReportResponse {
   readonly permissionAction?: string;
 }
 
-interface ReportRunResponse {
+export interface ReportRunResponse {
   readonly report?: ReportResponse;
   readonly columns?: readonly unknown[];
   readonly filters?: readonly unknown[];
@@ -107,7 +116,7 @@ export async function runRemoteReportCommand(
     return formatReport(command.url, objectData<ReportResponse>(data.data, "report"));
   }
   if (command.action === "export") {
-    const query = reportQuery(command);
+    const query = remoteReportQuery(command, { includeOffset: false });
     const response = await requestRemoteReportResponse(command, io, {
       method: "GET",
       path: `/api/report/${encodeURIComponent(requiredReport(command))}/export.csv`,
@@ -115,7 +124,7 @@ export async function runRemoteReportCommand(
     }, { accept: "text/csv" });
     return response.text();
   }
-  const query = reportQuery(command);
+  const query = remoteReportQuery(command, { includeOffset: true });
   const data = await requestRemoteReportPayload(command, io, {
     method: "GET",
     path: `/api/report/${encodeURIComponent(requiredReport(command))}/run`,
@@ -160,25 +169,28 @@ function requestRemoteReportResponse(
   });
 }
 
-function reportQuery(command: ReportRemoteCommand): URLSearchParams | undefined {
+export function remoteReportQuery(
+  options: RemoteReportQueryOptions,
+  behavior: { readonly includeOffset: boolean }
+): URLSearchParams | undefined {
   const query = new URLSearchParams();
-  for (const filter of command.filters) {
+  for (const filter of options.filters) {
     query.append(`filter_${filter.name}`, filter.value);
   }
-  if (command.filterExpression !== undefined) {
-    query.set("filter_expression", JSON.stringify(command.filterExpression));
+  if (options.filterExpression !== undefined) {
+    query.set("filter_expression", JSON.stringify(options.filterExpression));
   }
-  if (command.orderBy !== undefined) {
-    query.set("order_by", command.orderBy);
+  if (options.orderBy !== undefined) {
+    query.set("order_by", options.orderBy);
   }
-  if (command.order !== undefined) {
-    query.set("order", command.order);
+  if (options.order !== undefined) {
+    query.set("order", options.order);
   }
-  if (command.limit !== undefined) {
-    query.set("limit", String(command.limit));
+  if (options.limit !== undefined) {
+    query.set("limit", String(options.limit));
   }
-  if (command.action !== "export" && command.offset !== undefined) {
-    query.set("offset", String(command.offset));
+  if (behavior.includeOffset && options.offset !== undefined) {
+    query.set("offset", String(options.offset));
   }
   return query.size === 0 ? undefined : query;
 }
@@ -209,13 +221,13 @@ function formatReport(baseUrl: string, report: ReportResponse): string {
   ].join("\n");
 }
 
-function formatReportRun(baseUrl: string, result: ReportRunResponse): string {
+export function formatReportRun(baseUrl: string, result: ReportRunResponse, heading = "Report run"): string {
   const rows = result.rows ?? [];
   const summary = result.summary ?? [];
   const groups = result.groups ?? [];
   const charts = result.charts ?? [];
   return [
-    `Report run at ${baseUrl}`,
+    `${heading} at ${baseUrl}`,
     reportLine(result.report ?? {}),
     `Rows: ${String(rows.length)} of ${String(result.total ?? rows.length)} limit=${String(result.limit ?? rows.length)} offset=${String(result.offset ?? 0)}`,
     `Columns: ${String(result.columns?.length ?? 0)}`,
