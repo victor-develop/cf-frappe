@@ -147,6 +147,9 @@ describe("cf-frappe CLI scaffold", () => {
     expect(taskApp).toContain('events: ["DocumentUpdated", "DocumentCommentAdded"]');
     expect(taskApp).toContain('recipients: [{ kind: "field", field: "created_by" }]');
     expect(taskApp).toContain('channels: ["inbox"]');
+    expect(taskApp).toContain("function starterTaskNotificationRuleMatches");
+    expect(taskApp).toContain("function sameStarterRecipient");
+    expect(taskApp).not.toContain("JSON.stringify(rule.rule)");
     expect(taskApp).toContain("resources.notificationRules.save");
     expect(taskApp).toContain("resources.notificationRules.clear");
     expect(taskApp).toContain("resources.queries.listDocuments");
@@ -595,6 +598,48 @@ if (JSON.stringify(secondRollback) !== JSON.stringify({
 const rulesAfterUserRuleRollback = await notificationRules.list(automationActor, "Task");
 if (!rulesAfterUserRuleRollback.rules.some((entry) => entry.rule.name === "Task owner updates")) {
   throw new Error("Rollback removed a user-owned matching notification rule");
+}
+await notificationRules.clear({
+  actor: automationActor,
+  doctype: "Task",
+  ruleName: "Task owner updates"
+});
+await notificationRules.save({
+  actor: automationActor,
+  doctype: "Task",
+  rule: {
+    name: "Task owner updates",
+    events: ["DocumentUpdated", "DocumentCommentAdded"],
+    recipients: [{ kind: "field", field: "created_by" }],
+    channels: ["inbox"],
+    subject: "{{ doctype }} {{ name }} changed"
+  },
+  metadata: { patchId: "tasks.seed_starter_tasks" }
+});
+await notificationRules.save({
+  actor: automationActor,
+  doctype: "Task",
+  rule: {
+    name: "Task owner updates",
+    events: ["DocumentUpdated", "DocumentCommentAdded"],
+    recipients: [{ kind: "field", field: "created_by" }],
+    channels: ["inbox"],
+    subject: "User edited subject"
+  }
+});
+const editedRollback = await StarterTaskSeedData.rollback?.run({ resources });
+if (JSON.stringify(editedRollback) !== JSON.stringify({
+  deleted: 0,
+  skipped: 2,
+  notificationRuleDeleted: 0,
+  notificationRuleSkipped: 1
+})) {
+  throw new Error(\`Unexpected edited rollback result: \${JSON.stringify(editedRollback)}\`);
+}
+const rulesAfterEditedRollback = await notificationRules.list(automationActor, "Task");
+const editedRule = rulesAfterEditedRollback.rules.find((entry) => entry.rule.name === "Task owner updates");
+if (editedRule?.rule.subject !== "User edited subject") {
+  throw new Error(\`Rollback removed or changed an edited starter rule: \${JSON.stringify(rulesAfterEditedRollback.rules)}\`);
 }
 const preserved = await queries.getDocument(actor, "Task", preexisting.name);
 if (preserved.data.description !== "User-created record with the same title.") {

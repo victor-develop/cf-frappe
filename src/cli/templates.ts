@@ -743,6 +743,31 @@ const STARTER_TASK_NOTIFICATION_RULE = {
   subject: "{{ doctype }} {{ name }} changed"
 } as const;
 
+function starterTaskNotificationRuleMatches(rule: {
+  readonly name: string;
+  readonly events: readonly string[];
+  readonly recipients: readonly { readonly kind: string; readonly field?: string }[];
+  readonly channels?: readonly string[];
+  readonly subject?: string;
+}): boolean {
+  return rule.name === STARTER_TASK_NOTIFICATION_RULE.name &&
+    rule.subject === STARTER_TASK_NOTIFICATION_RULE.subject &&
+    rule.events.length === STARTER_TASK_NOTIFICATION_RULE.events.length &&
+    rule.events.every((event, index) => event === STARTER_TASK_NOTIFICATION_RULE.events[index]) &&
+    rule.channels !== undefined &&
+    rule.channels.length === STARTER_TASK_NOTIFICATION_RULE.channels.length &&
+    rule.channels.every((channel, index) => channel === STARTER_TASK_NOTIFICATION_RULE.channels[index]) &&
+    rule.recipients.length === STARTER_TASK_NOTIFICATION_RULE.recipients.length &&
+    rule.recipients.every((recipient, index) => sameStarterRecipient(recipient, STARTER_TASK_NOTIFICATION_RULE.recipients[index]));
+}
+
+function sameStarterRecipient(
+  left: { readonly kind: string; readonly field?: string },
+  right: { readonly kind: string; readonly field?: string } | undefined
+): boolean {
+  return right !== undefined && left.kind === right.kind && left.field === right.field;
+}
+
 export const StarterTaskSeedData = defineDataPatch<CloudFrappeRuntimeServices>({
   id: STARTER_TASK_SEED_PATCH_ID,
   label: "Seed starter Task records",
@@ -821,7 +846,7 @@ export const StarterTaskSeedData = defineDataPatch<CloudFrappeRuntimeServices>({
       if (
         rule !== undefined &&
         rule.metadata.patchId === STARTER_TASK_SEED_PATCH_ID &&
-        JSON.stringify(rule.rule) === JSON.stringify(STARTER_TASK_NOTIFICATION_RULE)
+        starterTaskNotificationRuleMatches(rule.rule)
       ) {
         await resources.notificationRules.clear({
           actor: STARTER_TASK_AUTOMATION_ACTOR,
