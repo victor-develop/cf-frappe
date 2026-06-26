@@ -337,6 +337,8 @@ npx cf-frappe users disable --url https://your-worker.example --user-id teammate
 npx cf-frappe users enable --url https://your-worker.example --user-id teammate@example.com --expected-version 5 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe profiles get --url https://your-worker.example --user-id teammate@example.com --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe profiles update --url https://your-worker.example --user-id teammate@example.com --profile-json '{"fullName":"Teammate Example","deskTheme":"dark"}' --expected-version 0 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe audit events --url https://your-worker.example --doctype Task --name "Review generated Desk workspace" --kind DocumentUpdated --limit 25 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe audit deleted --url https://your-worker.example --doctype Task --name "Review generated Desk workspace" --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 
 DocType resources can be inspected and mutated through the generated resource API without opening Desk:

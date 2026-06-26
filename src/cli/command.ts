@@ -30,6 +30,13 @@ import {
   type CloudflareAccessSetupScope
 } from "./access-setup.js";
 import {
+  AuditRemoteError,
+  runRemoteAuditCommand,
+  type AuditHeaderOption,
+  type AuditRemoteAction,
+  type AuditRemoteCommand
+} from "./audit.js";
+import {
   CustomFieldRemoteError,
   runRemoteCustomFieldCommand,
   type CustomFieldHeaderOption,
@@ -171,6 +178,7 @@ type ParsedCommand =
   | InstallCommand
   | MigrateGenerateCommand
   | CloudflareAccessSetupCommand
+  | AuditRemoteCommand
   | CustomFieldRemoteCommand
   | DataPatchRemoteCommand
   | FieldPropertyRemoteCommand
@@ -198,6 +206,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   }
 
   try {
+    if (command.kind === "audit") {
+      io.stdout.write(await runRemoteAuditCommand(command, {
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
     if (command.kind === "custom-fields") {
       io.stdout.write(await runRemoteCustomFieldCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
@@ -360,6 +375,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof PackageJsonError ||
       error instanceof PackageManagerError ||
       error instanceof CloudflareAccessSetupError ||
+      error instanceof AuditRemoteError ||
       error instanceof CustomFieldRemoteError ||
       error instanceof DataPatchRemoteError ||
       error instanceof FieldPropertyRemoteError ||
@@ -387,6 +403,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "install") {
     return parseInstallArgs(rest);
+  }
+  if (command === "audit") {
+    return parseAuditArgs(rest);
   }
   if (command === "migrate") {
     return parseMigrateArgs(rest);
@@ -434,6 +453,190 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
     return { kind: "invalid", message: `Unknown command '${command}'` };
   }
   return parseInitArgs(rest);
+}
+
+function parseAuditArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = auditAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown audit command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: AuditHeaderOption[] = [];
+  let tenant: string | undefined;
+  let doctype: string | undefined;
+  let name: string | undefined;
+  let actorId: string | undefined;
+  let eventKind: string | undefined;
+  let since: string | undefined;
+  let until: string | undefined;
+  let limit: number | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "Audit");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "Audit");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--tenant") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      tenant = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--doctype") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      doctype = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--name") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      name = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--actor-id") {
+      if (action !== "events") {
+        return { kind: "invalid", message: "Cannot use --actor-id with audit deleted" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      actorId = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--kind") {
+      if (action !== "events") {
+        return { kind: "invalid", message: "Cannot use --kind with audit deleted" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      eventKind = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--since") {
+      if (action !== "events") {
+        return { kind: "invalid", message: "Cannot use --since with audit deleted" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      since = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--until") {
+      if (action !== "events") {
+        return { kind: "invalid", message: "Cannot use --until with audit deleted" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      until = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--limit") {
+      if (action !== "events") {
+        return { kind: "invalid", message: "Cannot use --limit with audit deleted" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parsePositiveInteger(value, "Audit limit");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      limit = parsed;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown audit ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if (action === "deleted" && doctype === undefined) {
+    return { kind: "invalid", message: "Audit deleted requires --doctype" };
+  }
+  if (action === "deleted" && name === undefined) {
+    return { kind: "invalid", message: "Audit deleted requires --name" };
+  }
+
+  return {
+    kind: "audit",
+    action,
+    url,
+    headers,
+    ...(tenant === undefined ? {} : { tenant }),
+    ...(doctype === undefined ? {} : { doctype }),
+    ...(name === undefined ? {} : { name }),
+    ...(actorId === undefined ? {} : { actorId }),
+    ...(eventKind === undefined ? {} : { eventKind }),
+    ...(since === undefined ? {} : { since }),
+    ...(until === undefined ? {} : { until }),
+    ...(limit === undefined ? {} : { limit })
+  };
 }
 
 function parseAccessArgs(argv: readonly string[]): ParsedCommand {
@@ -3599,6 +3802,10 @@ function customFieldAction(value: string): CustomFieldRemoteAction | undefined {
   return value === "disable" || value === "list" || value === "save" ? value : undefined;
 }
 
+function auditAction(value: string): AuditRemoteAction | undefined {
+  return value === "deleted" || value === "events" ? value : undefined;
+}
+
 function fieldPropertyAction(value: string): FieldPropertyRemoteAction | undefined {
   return value === "clear" || value === "list" || value === "save" ? value : undefined;
 }
@@ -3843,7 +4050,7 @@ function parseJsonObject(value: string, label: string): Record<string, unknown> 
 function parseLiteralHeader(
   value: string,
   label: string
-): CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | ProfileHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
+): AuditHeaderOption | CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | ProfileHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
   const separator = value.indexOf(":");
   if (separator < 1) {
     return `${label} header must use 'Name: value' syntax`;
@@ -3862,7 +4069,7 @@ function parseLiteralHeader(
 function parseEnvHeader(
   value: string,
   label: string
-): CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | ProfileHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
+): AuditHeaderOption | CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | ProfileHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
   const separator = value.indexOf("=");
   if (separator < 1) {
     return `${label} environment header must use 'Name=ENV_VAR' syntax`;
@@ -4186,6 +4393,8 @@ function helpText(): string {
     "  cf-frappe migrate generate [--registry <path>] [--migrations <dir>] [--no-core]",
     "  cf-frappe access plan (--account-id <id>|--zone-id <id>) --team-domain <team.cloudflareaccess.com> --name <appName> --domain <host[/path]> (--email <user>|--email-domain <domain>|--group <id>|--everyone) [--policy-name <name>] [--allowed-idp <id>] [--session-duration <duration>]",
     "  cf-frappe access apply (--account-id <id>|--zone-id <id>) --team-domain <team.cloudflareaccess.com> --name <appName> --domain <host[/path]> (--email <user>|--email-domain <domain>|--group <id>|--everyone) --api-token-env <ENV> [--policy-name <name>] [--allowed-idp <id>] [--session-duration <duration>]",
+    "  cf-frappe audit events --url <origin> [--tenant <tenant>] [--doctype <doctype>] [--name <docname>] [--actor-id <actor>] [--kind <eventKind>] [--since <timestamp>] [--until <timestamp>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe audit deleted --url <origin> --doctype <doctype> --name <docname> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe custom-fields list --url <origin> --doctype <doctype> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe custom-fields save --url <origin> --doctype <doctype> --field-json <json> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe custom-fields disable --url <origin> --doctype <doctype> --field <fieldname> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
