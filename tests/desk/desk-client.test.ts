@@ -129,6 +129,8 @@ interface DeskClientRuntime {
     readonly printFormats: (options?: { readonly doctype?: string }) => Promise<unknown>;
     readonly report: (report: string) => Promise<unknown>;
     readonly reports: () => Promise<unknown>;
+    readonly role: (role: string, options?: { readonly tenant?: string }) => Promise<unknown>;
+    readonly roles: (options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly workspace: (workspace: string) => Promise<unknown>;
     readonly workspaces: () => Promise<unknown>;
   };
@@ -2026,6 +2028,27 @@ describe("Desk client runtime", () => {
       JSON.stringify({ expectedVersion: 2 }),
       JSON.stringify({ expectedVersion: 3 })
     ]);
+  });
+
+  it("exposes role catalog reads through the metadata namespace", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const result = { version: 4, roles: [{ name: "Support Lead" }] };
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: result }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.meta.roles({ tenant: "acme/east" })).resolves.toEqual(result);
+    await expect(runtime.meta.role("Support Lead", { tenant: "acme/east" })).resolves.toEqual(result);
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/roles?tenant=acme%2Feast",
+      "GET /api/roles/Support%20Lead?tenant=acme%2Feast"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin"]);
+    expect(calls.map((call) => call.init.body)).toEqual([undefined, undefined]);
   });
 
   it("wraps event-sourced custom field APIs with tenant and version metadata", async () => {

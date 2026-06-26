@@ -211,6 +211,10 @@ export function renderDeskClientScript(): string {
     return withQuery("/api/notification-rules/" + encodePart(doctype) + (rule === undefined ? "" : "/" + encodePart(rule)), tenantParams(options || {}));
   }
 
+  function rolesPath(options) {
+    return withQuery("/api/roles", tenantParams(options || {}));
+  }
+
   function rolePath(role, options) {
     return withQuery("/api/roles/" + encodePart(role), tenantParams(options || {}));
   }
@@ -3248,6 +3252,12 @@ export function renderDeskClientScript(): string {
       reports: function () {
         return request("/api/meta/reports").then(unwrapData);
       },
+      role: function (role, options) {
+        return request(rolePath(role, options || {})).then(unwrapData);
+      },
+      roles: function (options) {
+        return request(rolesPath(options || {})).then(unwrapData);
+      },
       workspace: function (workspace) {
         return request("/api/meta/workspaces/" + encodePart(workspace)).then(unwrapData);
       },
@@ -3450,7 +3460,7 @@ export function renderDeskClientScript(): string {
         return request(rolePath(role, options || {})).then(unwrapData);
       },
       list: function (options) {
-        return request(withQuery("/api/roles", tenantParams(options || {}))).then(unwrapData);
+        return request(rolesPath(options || {})).then(unwrapData);
       }
     }),
     request: request,
