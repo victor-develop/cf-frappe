@@ -3240,6 +3240,9 @@ export function renderDeskClientScript(): string {
       linkOptions: function (doctype, field, params) {
         return request(linkOptionsPath(doctype, field, params)).then(unwrapData);
       },
+      profile: function (userId, options) {
+        return request(profilePath(userId, options || {})).then(unwrapData);
+      },
       printFormat: function (format) {
         return request(printFormatPath(format)).then(unwrapData);
       },

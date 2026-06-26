@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the role metadata alias client helper slice:
+As of the profile metadata alias client helper slice:
 
 - Vitest files: `94`
-- Vitest cases: `1091`
+- Vitest cases: `1092`
 
 ## Implication
 
