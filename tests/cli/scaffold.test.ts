@@ -94,11 +94,17 @@ describe("cf-frappe CLI scaffold", () => {
     const taskApp = await readFile(join(target, "src/apps/tasks.ts"), "utf8");
     expect(taskApp).toContain("defineClientScript");
     expect(taskApp).toContain("defineDashboard");
+    expect(taskApp).toContain("defineDataPatch");
     expect(taskApp).toContain("defineWorkspace");
+    expect(taskApp).toContain('import type { CloudFrappeRuntimeServices } from "cf-frappe/cloudflare"');
     expect(taskApp).toContain("export const TaskDashboard");
     expect(taskApp).toContain("export const TaskWorkspace");
+    expect(taskApp).toContain("export const StarterTaskSeedData");
     expect(taskApp).toContain("dashboards: [TaskDashboard]");
     expect(taskApp).toContain("workspaces: [TaskWorkspace]");
+    expect(taskApp).toContain("dataPatches: [StarterTaskSeedData]");
+    expect(taskApp).toContain('id: "tasks.seed_starter_tasks"');
+    expect(taskApp).toContain('metadata: { patchId: "tasks.seed_starter_tasks" }');
     expect(taskApp).toContain('kind: "dashboard", target: "Task Dashboard"');
     expect(taskApp).toContain('kind: "admin", target: "roles"');
     await expect(readFile(join(target, "src/apps/index.ts"), "utf8")).resolves.toContain(
@@ -111,7 +117,13 @@ describe("cf-frappe CLI scaffold", () => {
       "the `Tasks` workspace, and the `Task Dashboard`"
     );
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
+      "`tasks.seed_starter_tasks` data patch"
+    );
+    await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "npx cf-frappe data-patches status --url https://your-worker.example"
+    );
+    await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
+      "npx cf-frappe data-patches apply --url https://your-worker.example --id tasks.seed_starter_tasks"
     );
     await expect(readFile(join(target, "public/assets/task-form.js"), "utf8")).resolves.toContain(
       "window.cfFrappe.form.on"

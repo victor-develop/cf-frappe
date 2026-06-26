@@ -9,7 +9,7 @@ import type { ReportDefinition } from "./reports.js";
 import type { DocTypeDefinition } from "./types.js";
 import type { WorkspaceDefinition } from "./workspace.js";
 
-export interface FrameworkAppDefinition {
+export interface FrameworkAppDefinition<TDataPatchResources = unknown> {
   readonly name: string;
   readonly label?: string;
   readonly version?: string;
@@ -22,7 +22,7 @@ export interface FrameworkAppDefinition {
   readonly dashboards?: readonly DashboardDefinition[];
   readonly workspaces?: readonly WorkspaceDefinition[];
   readonly clientScripts?: readonly ClientScriptDefinition[];
-  readonly dataPatches?: readonly DataPatchDefinition[];
+  readonly dataPatches?: readonly DataPatchDefinition<TDataPatchResources>[];
   readonly hooks?: Readonly<Record<string, readonly DocumentHooks[]>>;
 }
 
@@ -34,7 +34,9 @@ export interface InstalledAppDefinition {
   readonly dependencies: readonly string[];
 }
 
-export function defineApp(input: FrameworkAppDefinition): FrameworkAppDefinition {
+export function defineApp<TDataPatchResources = unknown>(
+  input: FrameworkAppDefinition<TDataPatchResources>
+): FrameworkAppDefinition<TDataPatchResources> {
   assertAppName(input.name);
   assertAppNames(input.dependencies ?? []);
   return Object.freeze({
@@ -53,11 +55,15 @@ export function defineApp(input: FrameworkAppDefinition): FrameworkAppDefinition
   });
 }
 
-export function createRegistryFromApps(apps: readonly FrameworkAppDefinition[]): ModelRegistry {
+export function createRegistryFromApps<TDataPatchResources = unknown>(
+  apps: readonly FrameworkAppDefinition<TDataPatchResources>[]
+): ModelRegistry {
   return createRegistry(registryOptionsFromApps(apps));
 }
 
-export function registryOptionsFromApps(apps: readonly FrameworkAppDefinition[]): RegistryOptions {
+export function registryOptionsFromApps<TDataPatchResources = unknown>(
+  apps: readonly FrameworkAppDefinition<TDataPatchResources>[]
+): RegistryOptions {
   const orderedApps = resolveAppInstallOrder(apps);
   const hooks: Record<string, DocumentHooks[]> = {};
   for (const app of orderedApps) {
@@ -74,16 +80,20 @@ export function registryOptionsFromApps(apps: readonly FrameworkAppDefinition[])
     dashboards: orderedApps.flatMap((app) => app.dashboards ?? []),
     workspaces: orderedApps.flatMap((app) => app.workspaces ?? []),
     clientScripts: orderedApps.flatMap((app) => app.clientScripts ?? []),
-    dataPatches: orderedApps.flatMap((app) => app.dataPatches ?? []),
+    dataPatches: orderedApps.flatMap((app) => app.dataPatches ?? []) as readonly DataPatchDefinition[],
     hooks
   };
 }
 
-export function resolveAppInstallOrder(apps: readonly FrameworkAppDefinition[]): readonly FrameworkAppDefinition[] {
+export function resolveAppInstallOrder<TDataPatchResources = unknown>(
+  apps: readonly FrameworkAppDefinition<TDataPatchResources>[]
+): readonly FrameworkAppDefinition<TDataPatchResources>[] {
   return resolveAppDependencyOrder(apps);
 }
 
-function installedAppFromDefinition(app: FrameworkAppDefinition): InstalledAppDefinition {
+function installedAppFromDefinition<TDataPatchResources>(
+  app: FrameworkAppDefinition<TDataPatchResources>
+): InstalledAppDefinition {
   return Object.freeze({
     name: app.name,
     ...(app.label === undefined ? {} : { label: app.label }),

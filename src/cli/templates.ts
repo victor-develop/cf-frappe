@@ -227,7 +227,7 @@ npm run d1:migrate:local
 npm run dev
 \`\`\`
 
-Open \`/desk\` for the generated Desk UI, the \`Tasks\` workspace, and the \`Task Dashboard\`; use \`/api/meta/doctypes/Task\` for the metadata API. ${authLocalReadme(input.auth)}
+Open \`/desk\` for the generated Desk UI, the \`Tasks\` workspace, and the \`Task Dashboard\`; run the \`tasks.seed_starter_tasks\` data patch when you want sample Task records in a fresh environment. Use \`/api/meta/doctypes/Task\` for the metadata API. ${authLocalReadme(input.auth)}
 Client scripts live under \`public/assets\`; add them with \`defineClientScript(...)\` in files under \`src/apps\`.
 ${authProviderReadme(input.auth)}
 
@@ -247,13 +247,10 @@ Registered data patches can be inspected and run against a deployed Worker throu
 
 \`\`\`bash
 npx cf-frappe data-patches status --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
-npx cf-frappe data-patches plan --url https://your-worker.example --id crm.customer_status_v1 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe data-patches plan --url https://your-worker.example --id tasks.seed_starter_tasks --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe data-patches rollback-plan --url https://your-worker.example --limit 2 --header-env Authorization=CF_FRAPPE_AUTH
-npx cf-frappe data-patches apply --url https://your-worker.example --id crm.customer_status_v1 --header-env Authorization=CF_FRAPPE_AUTH
-npx cf-frappe data-patches rollback --url https://your-worker.example --id crm.customer_status_v1 --header-env Authorization=CF_FRAPPE_AUTH
-npx cf-frappe data-patches retry --url https://your-worker.example --id crm.customer_status_v1 --header-env Authorization=CF_FRAPPE_AUTH
-npx cf-frappe data-patches rollback-retry --url https://your-worker.example --id crm.customer_status_v1 --header-env Authorization=CF_FRAPPE_AUTH
-npx cf-frappe data-patches rollback-retry-enqueue --url https://your-worker.example --id crm.customer_status_v1 --idempotency-key patches:rollback-retry-1 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe data-patches apply --url https://your-worker.example --id tasks.seed_starter_tasks --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe data-patches retry --url https://your-worker.example --id tasks.seed_starter_tasks --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 
 Background jobs and runtime schedules use the same remote admin style:
@@ -359,7 +356,8 @@ For OIDC deployments, replace the placeholder \`OIDC_ISSUER\`, \`OIDC_AUD\`, and
 }
 
 function taskAppTs(): string {
-  return `import { defineApp, defineClientScript, defineDashboard, defineDocType, definePrintFormat, defineReport, defineWorkspace } from "cf-frappe";
+  return `import { defineApp, defineClientScript, defineDashboard, defineDataPatch, defineDocType, definePrintFormat, defineReport, defineWorkspace } from "cf-frappe";
+import type { CloudFrappeRuntimeServices } from "cf-frappe/cloudflare";
 
 export const Task = defineDocType({
   name: "Task",
@@ -531,6 +529,44 @@ export const TaskWorkspace = defineWorkspace({
   ]
 });
 
+export const StarterTaskSeedData = defineDataPatch<CloudFrappeRuntimeServices>({
+  id: "tasks.seed_starter_tasks",
+  label: "Seed starter Task records",
+  checksum: "v1",
+  async run({ resources }) {
+    const actor = {
+      id: "starter-seed",
+      roles: ["Task Manager"],
+      tenantId: "default"
+    };
+    const tasks = [
+      {
+        title: "Review generated Desk workspace",
+        priority: "High",
+        workflow_state: "Open",
+        description: "Open /desk and explore the Tasks workspace, report, and dashboard."
+      },
+      {
+        title: "Deploy to Cloudflare Workers",
+        priority: "Medium",
+        workflow_state: "Doing",
+        description: "Create D1, apply migrations, and run wrangler deploy."
+      }
+    ];
+
+    for (const task of tasks) {
+      await resources.documents.create({
+        actor,
+        doctype: "Task",
+        data: task,
+        metadata: { patchId: "tasks.seed_starter_tasks" }
+      });
+    }
+
+    return { created: tasks.length };
+  }
+});
+
 export const TaskFormScript = defineClientScript({
   name: "task-form",
   doctype: "Task",
@@ -548,6 +584,7 @@ export const taskApp = defineApp({
   reports: [OpenTasks],
   dashboards: [TaskDashboard],
   workspaces: [TaskWorkspace],
+  dataPatches: [StarterTaskSeedData],
   clientScripts: [TaskFormScript],
   hooks: {
     Task: [
