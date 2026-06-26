@@ -1,4 +1,5 @@
 import {
+  createEmailNotificationDeliveryJob,
   createJobRegistry,
   JobExecutor,
   permanentJobError,
@@ -47,6 +48,44 @@ describe("processCloudflareJobBatch", () => {
 
     expect(ok.actions).toEqual([{ kind: "ack" }]);
     expect(flaky.actions).toEqual([{ kind: "retry", delaySeconds: 45 }]);
+  });
+
+  it("retries failed notification email delivery jobs through Cloudflare Queue", async () => {
+    const message = queueMessage(
+      {
+        ...jobMessage("cf-frappe.email-notifications.deliver"),
+        tenantId: "acme",
+        payload: { messageId: "evt_update:rule:Email%20owners:email:user_123" }
+      },
+      { id: "email-delivery", attempts: 1 }
+    );
+    const registry = createJobRegistry({
+      jobs: [createEmailNotificationDeliveryJob()]
+    });
+
+    await processCloudflareJobBatch(batch([message]), {
+      executor: new JobExecutor({
+        registry,
+        resources: {
+          emailNotifications: {
+            async deliverOutboxMessage() {
+              return {
+                status: "failed",
+                messageId: "evt_update:rule:Email%20owners:email:user_123",
+                eventId: "evt_update",
+                ruleName: "Email owners",
+                recipientId: "user_123",
+                to: "reviewer@example.com",
+                subject: "Note My Note changed",
+                error: "Cloudflare Email temporarily unavailable"
+              };
+            }
+          }
+        }
+      })
+    });
+
+    expect(message.actions).toEqual([{ kind: "retry", delaySeconds: 30 }]);
   });
 
   it("processes queue messages through worker-pool concurrency lanes", async () => {
