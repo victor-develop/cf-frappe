@@ -94,6 +94,14 @@ import {
   type ResourceRemoteCommand
 } from "./resources.js";
 import {
+  ReportRemoteError,
+  runRemoteReportCommand,
+  type ReportFilterOption,
+  type ReportHeaderOption,
+  type ReportRemoteAction,
+  type ReportRemoteCommand
+} from "./reports.js";
+import {
   ProfileRemoteError,
   runRemoteProfileCommand,
   type ProfileHeaderOption,
@@ -215,6 +223,7 @@ type ParsedCommand =
   | NotificationRuleRemoteCommand
   | FileRemoteCommand
   | ResourceRemoteCommand
+  | ReportRemoteCommand
   | ProfileRemoteCommand
   | PrintFormatRemoteCommand
   | PrintSettingsRemoteCommand
@@ -298,6 +307,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     if (command.kind === "resources") {
       io.stdout.write(await runRemoteResourceCommand(command, {
         cwd: io.cwd(),
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
+    if (command.kind === "reports") {
+      io.stdout.write(await runRemoteReportCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -444,6 +460,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof NotificationRuleRemoteError ||
       error instanceof FileRemoteError ||
       error instanceof ResourceRemoteError ||
+      error instanceof ReportRemoteError ||
       error instanceof ProfileRemoteError ||
       error instanceof PrintFormatRemoteError ||
       error instanceof PrintSettingsRemoteError ||
@@ -497,6 +514,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "resources") {
     return parseResourcesArgs(rest);
+  }
+  if (command === "reports") {
+    return parseReportsArgs(rest);
   }
   if (command === "profiles") {
     return parseProfilesArgs(rest);
@@ -2461,6 +2481,222 @@ function parseWorkspacesArgs(argv: readonly string[]): ParsedCommand {
 
 function workspaceAction(value: string): WorkspaceRemoteAction | undefined {
   return value === "list" || value === "get" ? value : undefined;
+}
+
+function parseReportsArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = reportAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown reports command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: ReportHeaderOption[] = [];
+  const filters: ReportFilterOption[] = [];
+  let filterExpression: Record<string, unknown> | undefined;
+  let report: string | undefined;
+  let orderBy: string | undefined;
+  let order: "asc" | "desc" | undefined;
+  let limit: number | undefined;
+  let offset: number | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "Report");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "Report");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--report") {
+      if (action === "list") {
+        return { kind: "invalid", message: "Cannot use --report with reports list" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      report = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--filter") {
+      if (!isReportQueryAction(action)) {
+        return { kind: "invalid", message: "Can only use --filter with reports run/export" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseReportFilter(value);
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      filters.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--filter-expression-json") {
+      if (!isReportQueryAction(action)) {
+        return { kind: "invalid", message: "Can only use --filter-expression-json with reports run/export" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseJsonObject(value, "Report filter expression");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      filterExpression = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--order-by") {
+      if (!isReportQueryAction(action)) {
+        return { kind: "invalid", message: "Can only use --order-by with reports run/export" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      orderBy = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--order") {
+      if (!isReportQueryAction(action)) {
+        return { kind: "invalid", message: "Can only use --order with reports run/export" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = reportOrder(value);
+      if (parsed === undefined) {
+        return { kind: "invalid", message: "Report order must be asc or desc" };
+      }
+      order = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--limit") {
+      if (!isReportQueryAction(action)) {
+        return { kind: "invalid", message: "Can only use --limit with reports run/export" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseNonNegativeInteger(value, "Report limit");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      limit = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--offset") {
+      if (action !== "run") {
+        return { kind: "invalid", message: "Can only use --offset with reports run" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseNonNegativeInteger(value, "Report offset");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      offset = parsed;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown reports ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if (action !== "list" && report === undefined) {
+    return { kind: "invalid", message: `Report ${action} requires --report` };
+  }
+
+  return {
+    kind: "reports",
+    action,
+    url,
+    headers,
+    filters,
+    ...(filterExpression === undefined ? {} : { filterExpression }),
+    ...(report === undefined ? {} : { report }),
+    ...(orderBy === undefined ? {} : { orderBy }),
+    ...(order === undefined ? {} : { order }),
+    ...(limit === undefined ? {} : { limit }),
+    ...(offset === undefined ? {} : { offset })
+  };
+}
+
+function reportAction(value: string): ReportRemoteAction | undefined {
+  return value === "list" || value === "get" || value === "run" || value === "export" ? value : undefined;
+}
+
+function reportOrder(value: string): "asc" | "desc" | undefined {
+  return value === "asc" || value === "desc" ? value : undefined;
+}
+
+function isReportQueryAction(action: ReportRemoteAction): boolean {
+  return action === "run" || action === "export";
+}
+
+function parseReportFilter(value: string): ReportFilterOption | string {
+  const separator = value.indexOf("=");
+  if (separator < 1) {
+    return "Report filter must use <filter>=<value>";
+  }
+  const name = value.slice(0, separator).trim();
+  if (name.length === 0 || name.startsWith("filter_") || name === "expression") {
+    return "Report filter name must be non-empty and omit the filter_ prefix";
+  }
+  return { name, value: value.slice(separator + 1).trim() };
 }
 
 function isSingleDataPatchAction(action: DataPatchRemoteAction): boolean {
@@ -4929,6 +5165,10 @@ function helpText(): string {
     "  cf-frappe dashboards run --url <origin> --dashboard <dashboard> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe workspaces list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe workspaces get --url <origin> --workspace <workspace> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe reports list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe reports get --url <origin> --report <report> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe reports run --url <origin> --report <report> [--filter <name=value>] [--filter-expression-json <json>] [--order-by <column>] [--order <asc|desc>] [--limit <n>] [--offset <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe reports export --url <origin> --report <report> [--filter <name=value>] [--filter-expression-json <json>] [--order-by <column>] [--order <asc|desc>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs list --url <origin> [--job <name>] [--run-id <id>] [--status <running|succeeded|failed>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs get --url <origin> --idempotency-key <key> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs retry --url <origin> --idempotency-key <key> [--header <name:value>] [--header-env <name=ENV>]",
