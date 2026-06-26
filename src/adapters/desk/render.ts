@@ -409,8 +409,9 @@ export function renderFileManager(
   const hasBulkMetadata = dashboard.files.some((file) => file.editable);
   const hasBulkActions = hasBulkDelete || hasBulkMetadata;
   const uploadError = options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : "";
+  const uploadMode = dashboard.directUpload ? ' data-upload-mode="direct"' : "";
   const uploadForm = dashboard.canUpload
-    ? `<form class="panel form file-upload" method="post" action="/desk/files" enctype="multipart/form-data" data-max-file-bytes="${String(dashboard.maxUploadBytes)}" data-upload-mode="direct">
+    ? `<form class="panel form file-upload" method="post" action="/desk/files" enctype="multipart/form-data" data-max-file-bytes="${String(dashboard.maxUploadBytes)}"${uploadMode}>
         <div class="form-head">
           <h2>Upload File</h2>
         </div>
@@ -480,8 +481,9 @@ export function renderFileAttachmentPanel(
 ): string {
   const documentHref = `/desk/${encodeURIComponent(doctype)}/${encodeURIComponent(documentName)}`;
   const uploadError = options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : "";
+  const uploadMode = dashboard.directUpload ? ' data-upload-mode="direct"' : "";
   const uploadForm = dashboard.canUpload
-    ? `<form class="form attachment-upload" method="post" action="${escapeHtml(documentHref)}/files" enctype="multipart/form-data" data-max-file-bytes="${String(dashboard.maxUploadBytes)}" data-upload-mode="direct" data-attached-to-doctype="${escapeHtml(doctype)}" data-attached-to-name="${escapeHtml(documentName)}">
+    ? `<form class="form attachment-upload" method="post" action="${escapeHtml(documentHref)}/files" enctype="multipart/form-data" data-max-file-bytes="${String(dashboard.maxUploadBytes)}"${uploadMode} data-attached-to-doctype="${escapeHtml(doctype)}" data-attached-to-name="${escapeHtml(documentName)}">
         ${uploadError}
         <div class="fields">
           <label class="field"><span>File</span><input name="file" type="file" required></label>

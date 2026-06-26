@@ -252,6 +252,7 @@ npm run dev
 \`\`\`
 
 Open \`/desk\` for the generated Desk UI, the \`Tasks\` workspace, the \`Task Dashboard\`, and the file manager at \`/desk/files\`; run the \`tasks.seed_starter_tasks\` data patch when you want sample Task records in a fresh environment. Use \`/api/meta/doctypes/Task\` for the metadata API. ${authLocalReadme(input.auth)}
+The generated R2 binding supports buffered Desk uploads immediately. Add a \`directUploads\` signer to \`R2FileStorage\` before enabling signed browser direct-upload targets.
 Client scripts live under \`public/assets\`; add them with \`defineClientScript(...)\` in files under \`src/apps\`.
 ${authProviderReadme(input.auth)}
 

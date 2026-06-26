@@ -94,7 +94,8 @@ describe("R2FileStorage", () => {
       }
     });
 
-    const upload = await storage.createDirectUpload({
+    expect(storage.createDirectUpload).toBeDefined();
+    const upload = await storage.createDirectUpload!({
       key: "acme/files/file_1-browser.pdf",
       contentType: "application/pdf",
       filename: "browser.pdf",
@@ -122,19 +123,8 @@ describe("R2FileStorage", () => {
     });
   });
 
-  it("requires an injected signer for direct R2 upload targets", async () => {
-    await expect(
-      new R2FileStorage(fakeBucket({})).createDirectUpload({
-        key: "acme/files/file_1-browser.pdf",
-        contentType: "application/pdf",
-        filename: "browser.pdf",
-        size: 12,
-        expiresAt: "2026-01-01T00:15:00.000Z"
-      })
-    ).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-      message: "R2 direct uploads require a direct upload signer"
-    });
+  it("omits direct upload capability until a signer is injected", () => {
+    expect(new R2FileStorage(fakeBucket({})).createDirectUpload).toBeUndefined();
   });
 
   it("creates R2 multipart uploads with content metadata", async () => {

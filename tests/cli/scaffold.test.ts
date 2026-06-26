@@ -183,6 +183,9 @@ describe("cf-frappe CLI scaffold", () => {
       "file manager at `/desk/files`"
     );
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
+      "buffered Desk uploads immediately"
+    );
+    await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "replace-with-d1-database-id"
     );
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(

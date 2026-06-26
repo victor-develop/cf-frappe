@@ -314,6 +314,7 @@ export interface FileDashboardEntry {
 
 export interface FileDashboard {
   readonly canUpload: boolean;
+  readonly directUpload: boolean;
   readonly maxUploadBytes: number;
   readonly files: readonly FileDashboardEntry[];
   readonly limit: number;
@@ -816,6 +817,7 @@ export class FileService {
     } while (files.length < limit && offset < total);
     return {
       canUpload: can(actor, doctype, "create"),
+      directUpload: typeof this.storage.createDirectUpload === "function",
       maxUploadBytes: this.maxFileBytes,
       files: files.slice(0, limit),
       limit,

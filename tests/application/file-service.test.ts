@@ -235,6 +235,37 @@ describe("FileService", () => {
     });
   });
 
+  it("reports direct upload capability from the storage port", async () => {
+    const directServices = createFileServices();
+    await expect(directServices.files.dashboard(owner)).resolves.toMatchObject({
+      directUpload: true
+    });
+
+    const registry = createRegistry({ doctypes: [fileDocType] });
+    const store = new InMemoryDocumentStore();
+    const storage = new BufferedOnlyFileStorage(new InMemoryFileStorage());
+    const documents = new DocumentService({
+      registry,
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["create"])
+    });
+    const queries = new QueryService({ registry, projections: store });
+    const bufferedFiles = new FileService({
+      registry,
+      documents,
+      queries,
+      storage,
+      clock: fixedClock(now),
+      ids: deterministicIds(["object"])
+    });
+
+    await expect(bufferedFiles.dashboard(owner)).resolves.toMatchObject({
+      canUpload: true,
+      directUpload: false
+    });
+  });
+
   it("marks only available browser-safe file content as previewable", async () => {
     const services = createFileServices(
       ["create-1", "create-2", "create-3", "create-4"],
@@ -2319,6 +2350,30 @@ class FailingDeleteStorage implements FileStorage {
 
   async delete(): Promise<void> {
     throw new Error("delete failed");
+  }
+}
+
+class BufferedOnlyFileStorage implements FileStorage {
+  readonly multipartUploads: NonNullable<FileStorage["multipartUploads"]>;
+
+  constructor(private readonly storage: FileStorage & { readonly multipartUploads: NonNullable<FileStorage["multipartUploads"]> }) {
+    this.multipartUploads = storage.multipartUploads;
+  }
+
+  put(command: PutFileObjectCommand) {
+    return this.storage.put(command);
+  }
+
+  head(key: string) {
+    return this.storage.head(key);
+  }
+
+  get(key: string) {
+    return this.storage.get(key);
+  }
+
+  delete(key: string) {
+    return this.storage.delete(key);
   }
 }
 

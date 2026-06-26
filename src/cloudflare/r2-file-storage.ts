@@ -14,7 +14,7 @@ import {
   type UploadMultipartFilePartCommand
 } from "../ports/file-storage.js";
 import { ensureMultipartPartNumber, sortedUploadedMultipartParts } from "../ports/multipart-file-storage.js";
-import { badRequest, FrameworkError, notFound } from "../core/errors.js";
+import { FrameworkError, notFound } from "../core/errors.js";
 import type { DocumentData, JsonValue } from "../core/types.js";
 
 export interface R2DirectUploadSigner {
@@ -27,12 +27,15 @@ export interface R2FileStorageOptions {
 
 export class R2FileStorage implements FileStorage {
   private readonly bucket: R2Bucket;
-  private readonly directUploads: R2DirectUploadSigner | undefined;
+  readonly createDirectUpload?: (command: CreateDirectFileUploadCommand) => Promise<DirectFileUpload>;
   readonly multipartUploads: MultipartFileStorage = this;
 
   constructor(bucket: R2Bucket, options: R2FileStorageOptions = {}) {
     this.bucket = bucket;
-    this.directUploads = options.directUploads;
+    const directUploads = options.directUploads;
+    if (directUploads) {
+      this.createDirectUpload = (command) => directUploads.createUpload(command);
+    }
   }
 
   async put(command: PutFileObjectCommand): Promise<FileObjectMetadata> {
@@ -60,13 +63,6 @@ export class R2FileStorage implements FileStorage {
       metadata: metadataFromR2Object(object),
       body: object.body as ReadableStream<Uint8Array>
     };
-  }
-
-  async createDirectUpload(command: CreateDirectFileUploadCommand): Promise<DirectFileUpload> {
-    if (!this.directUploads) {
-      throw badRequest("R2 direct uploads require a direct upload signer");
-    }
-    return await this.directUploads.createUpload(command);
   }
 
   async createMultipartUpload(command: CreateMultipartFileUploadCommand): Promise<MultipartFileUpload> {

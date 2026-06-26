@@ -45,7 +45,9 @@ import {
   UserProfileService,
   WorkflowService,
   type DocTypeDefinition,
+  type FileStorage,
   type PrintPdfRenderer,
+  type PutFileObjectCommand,
   type RenderPrintPdfCommand,
   type RenderedPrintPdf,
   type PasswordHasher
@@ -73,6 +75,30 @@ class RecordingPrintPdfRenderer implements PrintPdfRenderer {
   async render(command: RenderPrintPdfCommand): Promise<RenderedPrintPdf> {
     this.calls.push(command);
     return this.result;
+  }
+}
+
+class BufferedOnlyFileStorage implements FileStorage {
+  readonly multipartUploads: NonNullable<FileStorage["multipartUploads"]>;
+
+  constructor(private readonly storage: FileStorage & { readonly multipartUploads: NonNullable<FileStorage["multipartUploads"]> }) {
+    this.multipartUploads = storage.multipartUploads;
+  }
+
+  put(command: PutFileObjectCommand) {
+    return this.storage.put(command);
+  }
+
+  head(key: string) {
+    return this.storage.head(key);
+  }
+
+  get(key: string) {
+    return this.storage.get(key);
+  }
+
+  delete(key: string) {
+    return this.storage.delete(key);
   }
 }
 
@@ -438,11 +464,13 @@ describe("Desk app", () => {
       readonly ids?: readonly string[];
       readonly fileIds?: readonly string[];
       readonly doctypes?: readonly DocTypeDefinition[];
+      readonly directUploads?: boolean;
     } = {}
   ) {
     const registry = createRegistry({ doctypes: options.doctypes ?? [fileDocType] });
     const store = new InMemoryDocumentStore();
     const storage = new InMemoryFileStorage();
+    const fileStorage = options.directUploads === false ? new BufferedOnlyFileStorage(storage) : storage;
     const documents = new DocumentService({
       registry,
       store,
@@ -454,7 +482,7 @@ describe("Desk app", () => {
       registry,
       documents,
       queries,
-      storage,
+      storage: fileStorage,
       clock: fixedClock(now),
       ids: deterministicIds(options.fileIds ?? ["object"]),
       ...(options.maxFileBytes === undefined ? {} : { maxFileBytes: options.maxFileBytes })
@@ -2413,6 +2441,32 @@ describe("Desk app", () => {
     });
     expect(deleted.status).toBe(303);
     expect(storage.has("acme/files/file_object-hello.txt")).toBe(false);
+  });
+
+  it("renders buffered Desk file forms when storage cannot create direct upload targets", async () => {
+    const { app, documents } = makeFileDesk(owner, {
+      directUploads: false,
+      doctypes: [noteDocType, fileDocType],
+      ids: ["note-create"]
+    });
+
+    const response = await app.request("/desk/files");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('class="panel form file-upload"');
+    expect(html).toContain('method="post"');
+    expect(html).toContain('enctype="multipart/form-data"');
+    expect(html).toContain('data-max-file-bytes="26214400"');
+    expect(html).not.toContain('data-upload-mode="direct"');
+
+    await documents.create({ actor: owner, doctype: "Note", data: data() });
+    const documentResponse = await app.request("/desk/Note/My%20Note");
+    expect(documentResponse.status).toBe(200);
+    const documentHtml = await documentResponse.text();
+    expect(documentHtml).toContain('class="form attachment-upload"');
+    expect(documentHtml).toContain('data-attached-to-doctype="Note"');
+    expect(documentHtml).not.toContain('data-upload-mode="direct"');
   });
 
   it("reports Desk bulk file delete failures while preserving successful deletes", async () => {
