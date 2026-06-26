@@ -96,7 +96,9 @@ describe("cf-frappe CLI scaffold", () => {
     expect(worker).toContain("createDataPatchRollbackJob");
     expect(worker).toContain("createDataPatchRollbackRetryJob");
     expect(worker).toContain("createJobRegistry<CloudFrappeRuntimeServices>");
+    expect(worker).toContain("D1JobExecutionLog");
     expect(worker).toContain("new CloudflareJobQueue(env.JOBS)");
+    expect(worker).toContain("executionLog: (env) => new D1JobExecutionLog(env.DB)");
     expect(worker).toContain("jobs: {");
     const taskApp = await readFile(join(target, "src/apps/tasks.ts"), "utf8");
     expect(taskApp).toContain("defineClientScript");
@@ -209,7 +211,9 @@ describe("cf-frappe CLI scaffold", () => {
     expect(worker).toContain("cloudflareAccess");
     expect(worker).toContain("createDataPatchApplyJob");
     expect(worker).toContain("createDataPatchRollbackJob");
+    expect(worker).toContain("D1JobExecutionLog");
     expect(worker).toContain("new CloudflareJobQueue(env.JOBS)");
+    expect(worker).toContain("executionLog: (env) => new D1JobExecutionLog(env.DB)");
     expect(worker).toContain("jobs: {");
     expect(worker).toContain("throw permissionDenied(\"Cloudflare Access JWT is required\")");
     expect(worker).toContain("teamDomain: (env) => env.CF_ACCESS_TEAM_DOMAIN");
@@ -257,7 +261,9 @@ describe("cf-frappe CLI scaffold", () => {
     expect(worker).toContain("oidc: {");
     expect(worker).toContain("createDataPatchApplyJob");
     expect(worker).toContain("createDataPatchRollbackJob");
+    expect(worker).toContain("D1JobExecutionLog");
     expect(worker).toContain("new CloudflareJobQueue(env.JOBS)");
+    expect(worker).toContain("executionLog: (env) => new D1JobExecutionLog(env.DB)");
     expect(worker).toContain("jobs: {");
     expect(worker).toContain("throw permissionDenied(\"OIDC token is required\")");
     expect(worker).toContain("issuer: (env) => env.OIDC_ISSUER");

@@ -714,6 +714,7 @@ function signedSessionWorkerTs(): string {
   createDataPatchRollbackJob,
   createDataPatchRollbackRetryJob,
   createJobRegistry,
+  D1JobExecutionLog,
   signedSessionActorResolver,
   type Actor
 } from "cf-frappe";
@@ -755,7 +756,8 @@ export default createCloudFrappeWorker<Env>({
     })(request),
   jobs: {
     registry: starterJobs,
-    queue: (env) => new CloudflareJobQueue(env.JOBS)
+    queue: (env) => new CloudflareJobQueue(env.JOBS),
+    executionLog: (env) => new D1JobExecutionLog(env.DB)
   }
 });
 `;
@@ -767,6 +769,7 @@ function cloudflareAccessWorkerTs(): string {
   createDataPatchRollbackJob,
   createDataPatchRollbackRetryJob,
   createJobRegistry,
+  D1JobExecutionLog,
   permissionDenied
 } from "cf-frappe";
 import {
@@ -799,7 +802,8 @@ export default createCloudFrappeWorker<Env>({
   },
   jobs: {
     registry: starterJobs,
-    queue: (env) => new CloudflareJobQueue(env.JOBS)
+    queue: (env) => new CloudflareJobQueue(env.JOBS),
+    executionLog: (env) => new D1JobExecutionLog(env.DB)
   },
   auth: {
     sessionSecret: (env) => env.SESSION_SECRET,
@@ -822,6 +826,7 @@ function oidcWorkerTs(): string {
   createDataPatchRollbackJob,
   createDataPatchRollbackRetryJob,
   createJobRegistry,
+  D1JobExecutionLog,
   oidcGroupsRoleMapper,
   permissionDenied
 } from "cf-frappe";
@@ -855,7 +860,8 @@ export default createCloudFrappeWorker<Env>({
   },
   jobs: {
     registry: starterJobs,
-    queue: (env) => new CloudflareJobQueue(env.JOBS)
+    queue: (env) => new CloudflareJobQueue(env.JOBS),
+    executionLog: (env) => new D1JobExecutionLog(env.DB)
   },
   auth: {
     sessionSecret: (env) => env.SESSION_SECRET,

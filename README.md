@@ -39,7 +39,7 @@ The current slice is a working kernel:
 - event-sourced per-user notification inboxes plus tenant notification rules for document commit events, with generated HTTP management, Desk browser helpers, and Desk read/dismiss workflows
 - Durable Object realtime topics for tenant, DocType, document, redacted per-user notifications, permissioned presence snapshots, transient field-edit intent, field-level merge planning, deterministic stale-save merge apply, generated realtime-updated Desk presence panels with stale-document warnings and live field-edit indicators, and bounded durable replay
 - composable app manifests for packaging DocTypes, reports, print formats, hooks, and idempotent data patches/backfills
-- installable `cf-frappe init` starter scaffold with a Task DocType/report/print/workspace/dashboard app plus idempotent rollbackable seed data patch, Queue-backed data-patch jobs, signed-session, Cloudflare Access, or OIDC account-sync auth modes plus `cf-frappe access` setup automation, `cf-frappe install` package-manager, dependency metadata, app-registry wiring, migration generation, and remote data-patch/job/file operator commands for new Cloudflare apps
+- installable `cf-frappe init` starter scaffold with a Task DocType/report/print/workspace/dashboard app plus idempotent rollbackable seed data patch, Queue-backed data-patch jobs with D1 execution history, signed-session, Cloudflare Access, or OIDC account-sync auth modes plus `cf-frappe access` setup automation, `cf-frappe install` package-manager, dependency metadata, app-registry wiring, migration generation, and remote data-patch/job/file operator commands for new Cloudflare apps
 - a runnable `Task` example under `examples/todos`
 
 ## Why
@@ -79,7 +79,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | Migrations/patches | metadata-planned D1 migrations plus app-declared data patches with applied and rollback journals, event-level field unsets for rename/remove backfills, rollback planning/execution, and CLI-driven remote status/plan/rollback-plan/apply/rollback/enqueue/rollback-enqueue/retry/rollback-retry/rollback-retry-enqueue |
 | Concurrency boundary | Durable Object command coordinator per aggregate stream |
 | Apps | `defineApp(...)` manifests composed through `createRegistryFromApps(...)` |
-| App starter | `cf-frappe init` scaffold with Worker, D1, Durable Object, Queue binding/consumer, a Task DocType/report/print/workspace/dashboard app plus idempotent rollbackable seed data patch, signed-session, Cloudflare Access, or OIDC account-sync wiring, `cf-frappe access` setup automation, `cf-frappe install` package-manager/dependency/registry wiring, and `cf-frappe data-patches` / `cf-frappe jobs` / `cf-frappe files` remote operations |
+| App starter | `cf-frappe init` scaffold with Worker, D1, Durable Object, Queue binding/consumer, D1 job execution history, a Task DocType/report/print/workspace/dashboard app plus idempotent rollbackable seed data patch, signed-session, Cloudflare Access, or OIDC account-sync wiring, `cf-frappe access` setup automation, `cf-frappe install` package-manager/dependency/registry wiring, and `cf-frappe data-patches` / `cf-frappe jobs` / `cf-frappe files` remote operations |
 
 See [docs/frappe-assessment.md](docs/frappe-assessment.md) for the assessment and parity map.
 See [docs/test-parity.md](docs/test-parity.md) for the current upstream Frappe test-count target.
