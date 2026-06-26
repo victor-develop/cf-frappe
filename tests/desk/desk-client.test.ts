@@ -1627,6 +1627,99 @@ describe("Desk client runtime", () => {
     expect(alerts).toEqual([]);
   });
 
+  it("progressively direct-uploads generated Desk file forms", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const alerts: string[] = [];
+    const file = Object.assign(new Blob(["hello"], { type: "text/plain" }), { name: "hello.txt" });
+    const form = new FakeFileUploadForm("5", new FakeFileUploadInput([file]), {
+      dataset: { uploadMode: "direct" },
+      fields: [
+        new FakeField("attached_to_doctype", "Task"),
+        new FakeField("attached_to_name", "TASK-1"),
+        new FakeField("is_private", "", "checkbox")
+      ]
+    });
+    form.field("is_private").checked = true;
+
+    evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      if (String(url) === "/api/files/direct-upload") {
+        return jsonResponse({
+          data: { name: "file_form", version: 1 },
+          upload: {
+            method: "PUT",
+            url: "https://upload.example/file-form",
+            headers: { "content-type": "text/plain", "x-upload-token": "signed" }
+          }
+        }, 201);
+      }
+      if (String(url) === "https://upload.example/file-form") {
+        return new Response("");
+      }
+      return jsonResponse({ data: { name: "file_form", version: 2, data: { storage_state: "available" } } });
+    }, new FakeDocument({ fileUploadForms: [form] }), [], (message) => alerts.push(message));
+
+    expect(form.emitSubmit()).toBe(true);
+    expect(form.emitSubmit()).toBe(true);
+    await flushPromises();
+
+    expect(alerts).toEqual([]);
+    expect(form.input.validationMessage).toBe("");
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "POST /api/files/direct-upload",
+      "PUT https://upload.example/file-form",
+      "POST /api/files/file_form/complete-upload"
+    ]);
+    expect(calls[0]?.init.body).toBe(JSON.stringify({
+      filename: "hello.txt",
+      size: 5,
+      contentType: "text/plain",
+      attached_to_doctype: "Task",
+      attached_to_name: "TASK-1",
+      isPrivate: true
+    }));
+    expect(calls[1]?.init.body).toBe(file);
+    expect(calls[1]?.init.credentials).toBeUndefined();
+    expect(calls[1]?.init.headers).toEqual({ "content-type": "text/plain", "x-upload-token": "signed" });
+    expect(calls[2]?.init.body).toBe(JSON.stringify({ expectedVersion: 1 }));
+  });
+
+  it("keeps direct-upload Desk forms on the page when signed storage rejects", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const alerts: string[] = [];
+    const file = Object.assign(new Blob(["hello"], { type: "text/plain" }), { name: "hello.txt" });
+    const form = new FakeFileUploadForm("5", new FakeFileUploadInput([file]), {
+      dataset: {
+        attachedToDoctype: "Task",
+        attachedToName: "TASK-1",
+        uploadMode: "direct"
+      },
+      fields: [new FakeField("is_private", "", "checkbox")]
+    });
+
+    evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      if (String(url) === "/api/files/direct-upload") {
+        return jsonResponse({
+          data: { name: "file_form", version: 1 },
+          upload: { method: "PUT", url: "https://upload.example/file-form", headers: {} }
+        }, 201);
+      }
+      return new Response("storage rejected", { status: 403, statusText: "Forbidden" });
+    }, new FakeDocument({ fileUploadForms: [form] }), [], (message) => alerts.push(message));
+
+    expect(form.emitSubmit()).toBe(true);
+    await flushPromises();
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "POST /api/files/direct-upload",
+      "PUT https://upload.example/file-form"
+    ]);
+    expect(form.input.validationMessage).toBe("Forbidden");
+    expect(form.input.reportValidityCount).toBe(1);
+    expect(alerts).toEqual(["Forbidden"]);
+  });
+
   it("wraps file upload and direct-upload APIs without hiding upload instructions", async () => {
     const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
     const runtime = evaluateDeskClient(async (url, init) => {
@@ -5089,7 +5182,7 @@ class FakeFileUploadInput {
   reportValidityCount = 0;
   validationMessage = "";
 
-  constructor(public files: readonly { readonly name?: string; readonly size?: number }[]) {}
+  constructor(public files: readonly { readonly name?: string; readonly size?: number; readonly type?: string }[]) {}
 
   reportValidity(): boolean {
     this.reportValidityCount += 1;
@@ -5103,10 +5196,19 @@ class FakeFileUploadInput {
 
 class FakeFileUploadForm {
   readonly dataset: Record<string, string>;
+  private readonly fields: readonly FakeField[];
   readonly listeners: Record<string, Array<(event: FakeSubmitEvent) => void>> = {};
 
-  constructor(maxFileBytes: string, readonly input: FakeFileUploadInput) {
-    this.dataset = { maxFileBytes };
+  constructor(
+    maxFileBytes: string,
+    readonly input: FakeFileUploadInput,
+    options: {
+      readonly dataset?: Record<string, string>;
+      readonly fields?: readonly FakeField[];
+    } = {}
+  ) {
+    this.dataset = { maxFileBytes, ...(options.dataset ?? {}) };
+    this.fields = options.fields ?? [];
   }
 
   addEventListener(type: string, listener: (event: FakeSubmitEvent) => void): void {
@@ -5121,8 +5223,23 @@ class FakeFileUploadForm {
     return prevented;
   }
 
-  querySelector(selector: string): FakeFileUploadInput | null {
-    return selector === 'input[type="file"][name="file"], input[type="file"]' ? this.input : null;
+  field(name: string): FakeField {
+    const field = this.fields.find((candidate) => candidate.name === name);
+    if (!field) {
+      throw new Error(`Missing fake file upload field '${name}'`);
+    }
+    return field;
+  }
+
+  querySelector(selector: string): FakeFileUploadInput | FakeField | null {
+    if (selector === 'input[type="file"][name="file"], input[type="file"]') {
+      return this.input;
+    }
+    const nameMatch = selector.match(/^\[name="([^"]+)"\]$/);
+    if (nameMatch) {
+      return this.fields.find((field) => field.name === nameMatch[1]) ?? null;
+    }
+    return null;
   }
 }
 

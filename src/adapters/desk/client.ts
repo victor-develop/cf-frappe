@@ -1021,14 +1021,14 @@ export function renderDeskClientScript(): string {
       return;
     }
     form.__cfFrappeFileUploadHydrated = true;
-    form.addEventListener("submit", function (event) {
+    form.addEventListener("submit", async function (event) {
       var maxFileBytes = uploadFormMaxFileBytes(form);
       var file = selectedUploadFile(form);
-      if (maxFileBytes === undefined || !file || typeof file.size !== "number" || !Number.isFinite(file.size)) {
+      if (!file) {
         clearUploadFileValidity(form);
         return;
       }
-      if (file.size > maxFileBytes) {
+      if (maxFileBytes !== undefined && typeof file.size === "number" && Number.isFinite(file.size) && file.size > maxFileBytes) {
         var message = "File exceeds " + String(maxFileBytes) + " bytes";
         if (event && typeof event.preventDefault === "function") {
           event.preventDefault();
@@ -1038,6 +1038,29 @@ export function renderDeskClientScript(): string {
         return;
       }
       clearUploadFileValidity(form);
+      if (!form.dataset || form.dataset.uploadMode !== "direct") {
+        return;
+      }
+      if (event && typeof event.preventDefault === "function") {
+        event.preventDefault();
+      }
+      if (form.__cfFrappeFileUploadInFlight) {
+        return;
+      }
+      form.__cfFrappeFileUploadInFlight = true;
+      try {
+        await uploadDirectFile(file, uploadFormDirectOptions(form, file, maxFileBytes));
+        clearUploadFileValidity(form);
+        if (window.location) {
+          window.location.href = uploadFormSuccessUrl(form);
+        }
+      } catch (error) {
+        var errorMessage = error && error.message ? error.message : String(error);
+        setUploadFileValidity(form, errorMessage, true);
+        msgprint(errorMessage);
+      } finally {
+        form.__cfFrappeFileUploadInFlight = false;
+      }
     });
   }
 
@@ -1055,6 +1078,51 @@ export function renderDeskClientScript(): string {
       return undefined;
     }
     return input.files[0];
+  }
+
+  function uploadFormControl(form, name) {
+    return typeof form.querySelector === "function" ? form.querySelector('[name="' + name + '"]') : null;
+  }
+
+  function uploadFormValue(form, name) {
+    var control = uploadFormControl(form, name);
+    if (!control || control.value === undefined || control.value === null || String(control.value) === "") {
+      return undefined;
+    }
+    return control.value;
+  }
+
+  function uploadFormChecked(form, name) {
+    var control = uploadFormControl(form, name);
+    return control ? Boolean(control.checked) : undefined;
+  }
+
+  function uploadFormDirectOptions(form, file, maxFileBytes) {
+    var options = {
+      filename: file && file.name ? file.name : uploadFormValue(form, "filename"),
+      contentType: file && file.type ? file.type : undefined
+    };
+    var attachedToDoctype = form.dataset && form.dataset.attachedToDoctype
+      ? form.dataset.attachedToDoctype
+      : uploadFormValue(form, "attached_to_doctype");
+    var attachedToName = form.dataset && form.dataset.attachedToName
+      ? form.dataset.attachedToName
+      : uploadFormValue(form, "attached_to_name");
+    if (attachedToDoctype || attachedToName) {
+      options.attachedTo = { doctype: attachedToDoctype, name: attachedToName };
+    }
+    var isPrivate = uploadFormChecked(form, "is_private");
+    if (isPrivate !== undefined) {
+      options.isPrivate = isPrivate;
+    }
+    if (maxFileBytes !== undefined) {
+      options.maxUploadBytes = maxFileBytes;
+    }
+    return options;
+  }
+
+  function uploadFormSuccessUrl(form) {
+    return form.dataset && form.dataset.successUrl ? form.dataset.successUrl : window.location.href;
   }
 
   function setUploadFileValidity(form, message, report) {

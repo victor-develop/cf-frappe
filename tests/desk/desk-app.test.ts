@@ -2301,6 +2301,8 @@ describe("Desk app", () => {
     expect(html).toContain("hello.txt");
     expect(html).toContain("public.json");
     expect(html).toContain("inline.html");
+    expect(html).toContain('class="panel form file-upload"');
+    expect(html).toContain('data-upload-mode="direct"');
     expect(html).toContain("/desk/files/file_object/content");
     expect(html).toContain("/desk/files/file_object/preview");
     expect(html).toContain("/desk/files/file_html/content");
@@ -2511,6 +2513,9 @@ describe("Desk app", () => {
     const emptyHtml = await emptyForm.text();
     expect(emptyHtml).toContain("Attachments");
     expect(emptyHtml).toContain('action="/desk/Note/My%20Note/files"');
+    expect(emptyHtml).toContain('data-upload-mode="direct"');
+    expect(emptyHtml).toContain('data-attached-to-doctype="Note"');
+    expect(emptyHtml).toContain('data-attached-to-name="My Note"');
     expect(emptyHtml).toContain("No files attached.");
 
     const uploadForm = new FormData();

@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the direct upload helper slice:
+As of the generated direct-upload Desk form slice:
 
 - Vitest files: `94`
-- Vitest cases: `1115`
+- Vitest cases: `1117`
 
 ## Implication
 
