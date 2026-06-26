@@ -136,6 +136,41 @@ describe("Desk app", () => {
     return { app, documents };
   }
 
+  function makeImportPermissionDesk(actor: { readonly id: string; readonly roles: readonly string[]; readonly tenantId: string }) {
+    const ImportPermissionNote = defineDocType({
+      name: "ImportPermissionNote",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "body", type: "longText" }
+      ],
+      listView: {
+        columns: ["title"],
+        filterFields: ["title"]
+      },
+      permissions: [
+        { roles: ["Import Creator"], actions: ["read", "create"] },
+        { roles: ["Import Updater"], actions: ["read", "update"] }
+      ]
+    });
+    const registry = createRegistry({ doctypes: [ImportPermissionNote] });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry,
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["import-permission-1", "import-permission-2"])
+    });
+    const queries = new QueryService({ registry, projections: store });
+    const app = createDeskApp({
+      registry,
+      documents,
+      queries,
+      actor: () => actor
+    });
+    return { app, documents, queries };
+  }
+
   function makeAccountDesk(actor = owner) {
     const services = createServices(["e1", "e2", "e3", "e4"]);
     const userAccounts = new UserAccountService({
@@ -2508,6 +2543,154 @@ describe("Desk app", () => {
     expect(html).toContain('class="fields cols-1"');
     expect(html).toContain('class="fields cols-2"');
     expect(html).toContain("Create");
+  });
+
+  it("renders generated CSV import controls for actors who can create or update documents", async () => {
+    const { app } = makeDesk(owner);
+
+    const list = await app.request("/desk/Note");
+
+    expect(list.status).toBe(200);
+    const html = await list.text();
+    expect(html).toContain('action="/desk/Note/import.csv"');
+    expect(html).toContain('name="mode"');
+    expect(html).toContain('<option value="create" selected>Create</option>');
+    expect(html).toContain('<option value="update">Update</option>');
+    expect(html).toContain('name="csv"');
+    expect(html).toContain("Import CSV");
+  });
+
+  it("renders only generated CSV import modes allowed for the actor", async () => {
+    const createOnly = { id: "creator@example.com", roles: ["Import Creator"], tenantId: "acme" };
+    const updateOnly = { id: "updater@example.com", roles: ["Import Updater"], tenantId: "acme" };
+    const { app: createApp } = makeImportPermissionDesk(createOnly);
+    const { app: updateApp } = makeImportPermissionDesk(updateOnly);
+
+    const createList = await createApp.request("/desk/ImportPermissionNote");
+    const updateList = await updateApp.request("/desk/ImportPermissionNote");
+
+    expect(createList.status).toBe(200);
+    const createHtml = await createList.text();
+    expect(createHtml).toContain('action="/desk/ImportPermissionNote/import.csv"');
+    expect(createHtml).toContain('<option value="create" selected>Create</option>');
+    expect(createHtml).not.toContain('<option value="update"');
+
+    expect(updateList.status).toBe(200);
+    const updateHtml = await updateList.text();
+    expect(updateHtml).toContain('action="/desk/ImportPermissionNote/import.csv"');
+    expect(updateHtml).toContain('<option value="update" selected>Update</option>');
+    expect(updateHtml).not.toContain('<option value="create"');
+  });
+
+  it("hides generated CSV import controls from read-only actors", async () => {
+    const { app, services } = makeDesk(guest);
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Readable Note" }) });
+
+    const list = await app.request("/desk/Note");
+
+    expect(list.status).toBe(200);
+    const html = await list.text();
+    expect(html).toContain("Readable Note");
+    expect(html).not.toContain("/desk/Note/import.csv");
+    expect(html).not.toContain("Import CSV");
+  });
+
+  it("rejects direct generated CSV import posts from read-only actors", async () => {
+    const { app, services } = makeDesk(guest);
+
+    const response = await app.request("/desk/Note/import.csv", {
+      method: "POST",
+      body: new URLSearchParams({
+        csv: ["title,priority,body", "Guest Import,Medium,No write access"].join("\n")
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.text()).resolves.toContain("Actor &#39;guest&#39; cannot create Note");
+    await expect(services.queries.listDocuments(owner, "Note")).resolves.toMatchObject({ total: 0 });
+  });
+
+  it("imports generated list CSV posts through the document command boundary", async () => {
+    const { app, services } = makeDesk(owner, {});
+
+    const response = await app.request("/desk/Note/import.csv", {
+      method: "POST",
+      body: new URLSearchParams({
+        mode: "create",
+        csv: ["title,priority,count,body", "Desk Import One,Medium,2,First body", "Desk Import Two,Low,5,Second body"].join("\n")
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Imported 2 of 2 Note rows.");
+    expect(html).toContain("Desk Import One");
+    expect(html).toContain("Desk Import Two");
+    await expect(services.queries.getDocument(owner, "Note", "Desk Import One")).resolves.toMatchObject({
+      version: 1,
+      data: expect.objectContaining({ count: 2, created_by: owner.id })
+    });
+    await expect(services.events.readStream("acme:Note:Desk%20Import%20One")).resolves.toMatchObject([
+      { metadata: { method: "POST", url: "http://localhost/desk/Note/import.csv" } }
+    ]);
+  });
+
+  it("updates generated list CSV posts through the document command boundary", async () => {
+    const { app, services } = makeDesk(owner);
+    await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Desk Import Target", priority: "Low", count: 1 })
+    });
+
+    const response = await app.request("/desk/Note/import.csv", {
+      method: "POST",
+      body: new URLSearchParams({
+        mode: "update",
+        csv: ["name,expectedVersion,priority,count,body", "Desk Import Target,1,High,4,Updated by import"].join("\n")
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Imported 1 of 1 Note rows.");
+    expect(html).toContain('<option value="update" selected>Update</option>');
+    await expect(services.queries.getDocument(owner, "Note", "Desk Import Target")).resolves.toMatchObject({
+      version: 2,
+      data: expect.objectContaining({ priority: "High", count: 4, body: "Updated by import" })
+    });
+    await expect(services.events.readStream("acme:Note:Desk%20Import%20Target")).resolves.toMatchObject([
+      expect.anything(),
+      { metadata: { method: "POST", url: "http://localhost/desk/Note/import.csv" } }
+    ]);
+  });
+
+  it("reports generated list CSV import failures while preserving successful rows", async () => {
+    const { app, services } = makeDesk(owner);
+
+    const response = await app.request("/desk/Note/import.csv", {
+      method: "POST",
+      body: new URLSearchParams({
+        csv: ["title,priority,body", "No,Medium,Too short", "Desk Partial Import,Medium,Created"].join("\n")
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Imported 1 of 2 Note rows.");
+    expect(html).toContain("Row 2");
+    expect(html).toContain("Validation failed");
+    expect(html).toContain("Desk Partial Import");
+    await expect(services.queries.getDocument(owner, "Note", "Desk Partial Import")).resolves.toMatchObject({
+      version: 1
+    });
+    await expect(services.queries.getDocument(owner, "Note", "No")).rejects.toMatchObject({
+      code: "DOCUMENT_NOT_FOUND"
+    });
   });
 
   it("renders model-declared client scripts for list and form pages", async () => {

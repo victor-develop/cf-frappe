@@ -38,6 +38,7 @@ import type {
   DocumentTags,
   DocumentTimeline
 } from "../../application/document-history-service.js";
+import type { DocumentImportMode, DocumentImportResult } from "../../application/document-import-service.js";
 import type { CustomFieldState } from "../../core/custom-fields.js";
 import type { FieldPropertyOverrideState } from "../../core/field-property-overrides.js";
 import type { WorkflowDefinitionState } from "../../core/workflow.js";
@@ -2437,6 +2438,8 @@ export function renderListView(
     readonly clientScripts?: readonly ClientScriptDefinition[];
     readonly realtimeRoute?: string;
     readonly bulkActions?: readonly ListBulkAction[];
+    readonly importModes?: readonly DocumentImportMode[];
+    readonly importResult?: DocumentImportResult;
   } = {}
 ): string {
   const fields = listView.columns;
@@ -2460,6 +2463,7 @@ export function renderListView(
   const savedFilterPanel = renderSavedFilters(doctype, options.savedFilters ?? [], options.selectedSavedFilterId);
   const header = fields.map((field) => `<th>${escapeHtml(field.label ?? field.name)}</th>`).join("");
   const bulkActions = options.bulkActions ?? [];
+  const importModes = options.importModes ?? [];
   const selectableNames = new Set(bulkActions.flatMap((action) => action.names));
   const hasBulkActions = selectableNames.size > 0;
   const bulkActionFormId = "bulk-document-action";
@@ -2483,6 +2487,7 @@ export function renderListView(
     ${options.exportHref ? `<a class="button" href="${escapeHtml(options.exportHref)}">Export CSV</a>` : ""}
     ${hasBulkActions ? `<form id="${bulkActionFormId}" method="post" action="${escapeHtml(bulkActions[0]?.action ?? "")}"></form>${bulkActions.map((action) => renderListBulkActionButton(action, bulkActionFormId)).join("")}` : ""}
   </section>
+  ${importModes.length > 0 ? renderListImportPanel(doctype, importModes, options.importResult) : ""}
   ${savedFilterPanel}
   ${filterForm || compoundFilterForm || orderForm ? `<form class="panel form list-filters" method="get"><div class="fields">${filterForm}${compoundFilterForm}${orderForm}${savedFilterControl}</div><div class="actions"><button class="button primary" type="submit">Filter</button>${saveFilterButton}<a class="button" href="/desk/${encodeURIComponent(doctype.name)}?default_filters=0">Clear</a></div></form>` : ""}
   <section class="panel">
@@ -2494,6 +2499,40 @@ export function renderListView(
     </div>
   </section>
   ${renderClientScripts(doctype.name, "list", options.clientScripts ?? [], undefined, undefined, options.realtimeRoute)}`;
+}
+
+function renderListImportPanel(
+  doctype: DocTypeDefinition,
+  modes: readonly DocumentImportMode[],
+  result: DocumentImportResult | undefined
+): string {
+  const action = `/desk/${encodeURIComponent(doctype.name)}/import.csv`;
+  const selectedMode = result?.mode ?? modes[0];
+  const modeOptions = modes
+    .map((mode) => `<option value="${mode}"${selectedMode === mode ? " selected" : ""}>${mode === "create" ? "Create" : "Update"}</option>`)
+    .join("");
+  return `<section class="panel list-import">
+    ${result ? renderListImportResult(result) : ""}
+    <form class="form" method="post" action="${action}">
+      <div class="fields">
+        <label class="field" for="import-mode"><span>Import Mode</span><select id="import-mode" name="mode">
+          ${modeOptions}
+        </select></label>
+        <label class="field wide" for="import-csv"><span>CSV</span><textarea id="import-csv" name="csv" rows="6" required></textarea></label>
+      </div>
+      <div class="actions"><button class="button" type="submit">Import CSV</button></div>
+    </form>
+  </section>`;
+}
+
+function renderListImportResult(result: DocumentImportResult): string {
+  const failureRows = result.failed
+    .map((failure) => `<li>Row ${String(failure.row)}${failure.name ? ` (${escapeHtml(failure.name)})` : ""}: ${escapeHtml(failure.message)}</li>`)
+    .join("");
+  return `<div class="${result.failed.length > 0 ? "error" : "notice"}" role="status">
+    Imported ${String(result.succeeded.length)} of ${String(result.total)} ${escapeHtml(result.doctype)} rows.
+    ${failureRows ? `<ul class="import-failures">${failureRows}</ul>` : ""}
+  </div>`;
 }
 
 function renderCompoundFilterBuilder(

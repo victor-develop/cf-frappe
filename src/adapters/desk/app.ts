@@ -17,6 +17,7 @@ import type {
 import type { DocumentShareService } from "../../application/document-share-service.js";
 import type { DocumentCommandExecutor } from "../../application/document-service.js";
 import type { DocumentHistoryService } from "../../application/document-history-service.js";
+import { DocumentImportService, type DocumentImportMode, type DocumentImportResult } from "../../application/document-import-service.js";
 import type { FieldPropertyService } from "../../application/field-property-service.js";
 import type {
   FileDashboard,
@@ -193,6 +194,11 @@ interface ParsedDeskReportChartControls {
 interface ParsedDeskPrintSettings {
   readonly expectedVersion?: number;
   readonly settings: PrintSettingsInput;
+}
+
+interface ParsedDeskCsvImport {
+  readonly mode?: DocumentImportMode;
+  readonly csv: string;
 }
 
 export interface DeskAppOptions {
@@ -1662,52 +1668,41 @@ export function createDeskApp(options: DeskAppOptions): Hono {
 
   app.get("/desk/:doctype", async (c) => {
     const actor = await options.actor(c.req.raw);
-    const url = new URL(c.req.url);
+    return renderDeskListPage(options, actor, c.req.param("doctype"), new URL(c.req.url));
+  });
+
+  app.post("/desk/:doctype/import.csv", async (c) => {
+    const actor = await options.actor(c.req.raw);
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
-    const doctypes = await listDeskDoctypes(options, actor);
-    const reports = listReports(options, actor);
-    const filters = listFiltersFromUrl(url, { fields: listFilterParseFields(doctype) });
-    const urlFilterExpression = listFilterExpressionFromUrl(url);
-    const order = listOrderFromUrl(url);
-    const savedFilterId = url.searchParams.get("saved_filter") ?? undefined;
-    const savedFilter = savedFilterId && options.savedFilters
-      ? await options.savedFilters.get(actor, doctype.name, savedFilterId)
-      : undefined;
-    const filterInput = options.savedFilters?.mergeSavedFilterInputs(savedFilter, filters, urlFilterExpression) ?? {
-      filters,
-      ...(urlFilterExpression === undefined ? {} : { filterExpression: urlFilterExpression })
-    };
-    const limit = parseOptionalInteger(url.searchParams.get("limit") ?? undefined);
-    const offset = parseOptionalInteger(url.searchParams.get("offset") ?? undefined);
-    const { listView, filters: effectiveFilters, filterExpression, result } = await options.queries.listDocumentsForView(actor, doctype.name, {
-      filters: filterInput.filters,
-      ...(filterInput.filterExpression === undefined ? {} : { filterExpression: filterInput.filterExpression }),
-      ...order,
-      useDefaultFilters: savedFilter ? false : url.searchParams.get("default_filters") !== "0",
-      ...(limit !== undefined ? { limit } : {}),
-      ...(offset !== undefined ? { offset } : {})
-    });
-    const savedFilters = await options.savedFilters?.list(actor, doctype.name);
-    const bulkActions = listBulkActionsFor(actor, doctype, result.data);
-    const exportHref = `/desk/${encodeURIComponent(doctype.name)}/export.csv${url.search}`;
-    return html(
-      renderDeskLayoutFor(options, {
-        title: doctype.label ?? doctype.name,
-        adminLinks: adminLinksFor(options, actor),
-        active: doctype.name,
-        doctypes,
-        reports,
-        body: renderListView(doctype, listView, result.data, effectiveFilters, {
-          ...(filterExpression === undefined ? {} : { filterExpression }),
-          ...(savedFilters ? { savedFilters } : {}),
-          ...(savedFilter ? { selectedSavedFilterId: savedFilter.id } : {}),
-          exportHref,
-          clientScripts: options.registry.listClientScripts(doctype.name, "list"),
-          bulkActions,
-          ...deskRealtimeRouteOption(options)
-        })
-      })
-    );
+    try {
+      const form = await parseDeskCsvImport(c.req.raw);
+      const action = form.mode ?? "create";
+      if (!can(actor, doctype, action)) {
+        throw new FrameworkError("PERMISSION_DENIED", `Actor '${actor.id}' cannot ${action} ${doctype.name}`, {
+          status: 403
+        });
+      }
+      const importer = new DocumentImportService({
+        documents: options.documents,
+        queries: options.queries
+      });
+      const importResult = await importer.importCsv({
+        actor,
+        doctype: doctype.name,
+        csv: form.csv,
+        ...(form.mode === undefined ? {} : { mode: form.mode }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return renderDeskListPage(
+        options,
+        actor,
+        doctype.name,
+        new URL(`/desk/${encodeURIComponent(doctype.name)}`, c.req.url),
+        { importResult }
+      );
+    } catch (error) {
+      return renderDeskFailure(options, c.req.raw, error);
+    }
   });
 
   app.post("/desk/:doctype/saved-filters", async (c) => {
@@ -2313,6 +2308,71 @@ async function renderDeskFailure(options: DeskAppOptions, request: Request, erro
     }),
     status
   );
+}
+
+async function renderDeskListPage(
+  options: DeskAppOptions,
+  actor: Actor,
+  doctypeName: string,
+  url: URL,
+  result: { readonly importResult?: DocumentImportResult } = {}
+): Promise<Response> {
+  const doctype = await options.queries.getEffectiveMeta(actor, doctypeName);
+  const doctypes = await listDeskDoctypes(options, actor);
+  const reports = listReports(options, actor);
+  const filters = listFiltersFromUrl(url, { fields: listFilterParseFields(doctype) });
+  const urlFilterExpression = listFilterExpressionFromUrl(url);
+  const order = listOrderFromUrl(url);
+  const savedFilterId = url.searchParams.get("saved_filter") ?? undefined;
+  const savedFilter = savedFilterId && options.savedFilters
+    ? await options.savedFilters.get(actor, doctype.name, savedFilterId)
+    : undefined;
+  const filterInput = options.savedFilters?.mergeSavedFilterInputs(savedFilter, filters, urlFilterExpression) ?? {
+    filters,
+    ...(urlFilterExpression === undefined ? {} : { filterExpression: urlFilterExpression })
+  };
+  const limit = parseOptionalInteger(url.searchParams.get("limit") ?? undefined);
+  const offset = parseOptionalInteger(url.searchParams.get("offset") ?? undefined);
+  const { listView, filters: effectiveFilters, filterExpression, result: listResult } =
+    await options.queries.listDocumentsForView(actor, doctype.name, {
+      filters: filterInput.filters,
+      ...(filterInput.filterExpression === undefined ? {} : { filterExpression: filterInput.filterExpression }),
+      ...order,
+      useDefaultFilters: savedFilter ? false : url.searchParams.get("default_filters") !== "0",
+      ...(limit !== undefined ? { limit } : {}),
+      ...(offset !== undefined ? { offset } : {})
+    });
+  const savedFilters = await options.savedFilters?.list(actor, doctype.name);
+  const bulkActions = listBulkActionsFor(actor, doctype, listResult.data);
+  const importModes = deskCsvImportModesFor(actor, doctype);
+  const exportHref = `/desk/${encodeURIComponent(doctype.name)}/export.csv${url.search}`;
+  return html(
+    renderDeskLayoutFor(options, {
+      title: doctype.label ?? doctype.name,
+      adminLinks: adminLinksFor(options, actor),
+      active: doctype.name,
+      doctypes,
+      reports,
+      body: renderListView(doctype, listView, listResult.data, effectiveFilters, {
+        ...(filterExpression === undefined ? {} : { filterExpression }),
+        ...(savedFilters ? { savedFilters } : {}),
+        ...(savedFilter ? { selectedSavedFilterId: savedFilter.id } : {}),
+        exportHref,
+        clientScripts: options.registry.listClientScripts(doctype.name, "list"),
+        bulkActions,
+        importModes,
+        ...(result.importResult === undefined ? {} : { importResult: result.importResult }),
+        ...deskRealtimeRouteOption(options)
+      })
+    })
+  );
+}
+
+function deskCsvImportModesFor(actor: Actor, doctype: DocTypeDefinition): readonly DocumentImportMode[] {
+  return [
+    ...(can(actor, doctype, "create") ? (["create"] as const) : []),
+    ...(can(actor, doctype, "update") ? (["update"] as const) : [])
+  ];
 }
 
 async function renderDeskError(
@@ -3978,6 +4038,29 @@ async function parseDeskBulkDocumentAction(request: Request): Promise<ParsedDesk
       ...deskBulkExpectedVersion(form, name)
     }))
   };
+}
+
+async function parseDeskCsvImport(request: Request): Promise<ParsedDeskCsvImport> {
+  const form = await readUrlEncodedDeskForm(request);
+  const csv = form.get("csv");
+  if (typeof csv !== "string" || csv.trim() === "") {
+    throw new FrameworkError("BAD_REQUEST", "CSV import content is required", { status: 400 });
+  }
+  const mode = deskCsvImportMode(form.get("mode") ?? undefined);
+  return {
+    ...(mode === undefined ? {} : { mode }),
+    csv
+  };
+}
+
+function deskCsvImportMode(value: string | undefined): DocumentImportMode | undefined {
+  if (value === undefined || value === "" || value === "create") {
+    return undefined;
+  }
+  if (value === "update") {
+    return "update";
+  }
+  throw new FrameworkError("BAD_REQUEST", "CSV import mode must be create or update", { status: 400 });
 }
 
 function deskBulkExpectedVersion(form: URLSearchParams, name: string): { readonly expectedVersion?: number } {
