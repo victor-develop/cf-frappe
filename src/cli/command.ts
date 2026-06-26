@@ -101,6 +101,13 @@ import {
   type PrintSettingsRemoteCommand
 } from "./print-settings.js";
 import {
+  PrintFormatRemoteError,
+  runRemotePrintFormatCommand,
+  type PrintFormatHeaderOption,
+  type PrintFormatRemoteAction,
+  type PrintFormatRemoteCommand
+} from "./print-formats.js";
+import {
   RoleRemoteError,
   runRemoteRoleCommand,
   type RoleHeaderOption,
@@ -194,6 +201,7 @@ type ParsedCommand =
   | FileRemoteCommand
   | ResourceRemoteCommand
   | ProfileRemoteCommand
+  | PrintFormatRemoteCommand
   | PrintSettingsRemoteCommand
   | RoleRemoteCommand
   | UserRemoteCommand
@@ -274,6 +282,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     if (command.kind === "profiles") {
       io.stdout.write(await runRemoteProfileCommand(command, {
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
+    if (command.kind === "print-formats") {
+      io.stdout.write(await runRemotePrintFormatCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -399,6 +414,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof FileRemoteError ||
       error instanceof ResourceRemoteError ||
       error instanceof ProfileRemoteError ||
+      error instanceof PrintFormatRemoteError ||
       error instanceof PrintSettingsRemoteError ||
       error instanceof RoleRemoteError ||
       error instanceof UserRemoteError ||
@@ -449,6 +465,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "profiles") {
     return parseProfilesArgs(rest);
+  }
+  if (command === "print-formats") {
+    return parsePrintFormatsArgs(rest);
   }
   if (command === "print-settings") {
     return parsePrintSettingsArgs(rest);
@@ -1803,6 +1822,125 @@ function parseProfilesArgs(argv: readonly string[]): ParsedCommand {
     ...(tenant === undefined ? {} : { tenant }),
     ...(profile === undefined ? {} : { profile }),
     ...(expectedVersion === undefined ? {} : { expectedVersion })
+  };
+}
+
+function parsePrintFormatsArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = printFormatAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown print-formats command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: PrintFormatHeaderOption[] = [];
+  let doctype: string | undefined;
+  let format: string | undefined;
+  let letterhead: string | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "Print formats");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "Print formats");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--doctype") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --doctype with print-formats ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      doctype = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--format") {
+      if (action !== "get") {
+        return { kind: "invalid", message: `Cannot use --format with print-formats ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      format = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--letterhead") {
+      if (action !== "letterhead") {
+        return { kind: "invalid", message: `Cannot use --letterhead with print-formats ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      letterhead = value;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown print-formats ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if (action === "get" && format === undefined) {
+    return { kind: "invalid", message: "Print format get requires --format" };
+  }
+  if (action === "letterhead" && letterhead === undefined) {
+    return { kind: "invalid", message: "Print format letterhead requires --letterhead" };
+  }
+
+  return {
+    kind: "print-formats",
+    action,
+    url,
+    headers,
+    ...(doctype === undefined ? {} : { doctype }),
+    ...(format === undefined ? {} : { format }),
+    ...(letterhead === undefined ? {} : { letterhead })
   };
 }
 
@@ -3992,6 +4130,12 @@ function profileAction(value: string): ProfileRemoteAction | undefined {
   return value === "get" || value === "update" ? value : undefined;
 }
 
+function printFormatAction(value: string): PrintFormatRemoteAction | undefined {
+  return value === "list" || value === "get" || value === "letterheads" || value === "letterhead"
+    ? value
+    : undefined;
+}
+
 function printSettingsAction(value: string): PrintSettingsRemoteAction | undefined {
   return value === "get" || value === "update" ? value : undefined;
 }
@@ -4197,7 +4341,7 @@ function parseJsonObject(value: string, label: string): Record<string, unknown> 
 function parseLiteralHeader(
   value: string,
   label: string
-): AuditHeaderOption | CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | ProfileHeaderOption | PrintSettingsHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
+): AuditHeaderOption | CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | ProfileHeaderOption | PrintFormatHeaderOption | PrintSettingsHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
   const separator = value.indexOf(":");
   if (separator < 1) {
     return `${label} header must use 'Name: value' syntax`;
@@ -4216,7 +4360,7 @@ function parseLiteralHeader(
 function parseEnvHeader(
   value: string,
   label: string
-): AuditHeaderOption | CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | ProfileHeaderOption | PrintSettingsHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
+): AuditHeaderOption | CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | ProfileHeaderOption | PrintFormatHeaderOption | PrintSettingsHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
   const separator = value.indexOf("=");
   if (separator < 1) {
     return `${label} environment header must use 'Name=ENV_VAR' syntax`;
@@ -4590,6 +4734,10 @@ function helpText(): string {
     "  cf-frappe users disable --url <origin> --user-id <user> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe profiles get --url <origin> --user-id <user> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe profiles update --url <origin> --user-id <user> --profile-json <json> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe print-formats list --url <origin> [--doctype <doctype>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe print-formats get --url <origin> --format <format> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe print-formats letterheads --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe print-formats letterhead --url <origin> --letterhead <letterhead> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe print-settings get --url <origin> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe print-settings update --url <origin> --settings-json <json> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources list --url <origin> --doctype <doctype> [--filter <field[__operator]=value>] [--filter-expression-json <json>] [--saved-filter <id>] [--limit <n>] [--offset <n>] [--order-by <field>] [--order <asc|desc>] [--no-default-filters] [--header <name:value>] [--header-env <name=ENV>]",

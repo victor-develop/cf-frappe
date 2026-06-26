@@ -59,6 +59,43 @@ describe("print api", () => {
     });
   });
 
+  it("lists and reads print letterhead metadata through the print service boundary", async () => {
+    const { app, services } = makeApp();
+    services.registry.registerPrintLetterhead(
+      definePrintLetterhead({
+        name: "Company Letterhead",
+        label: "Company",
+        headerHtml: "<strong>ACME</strong>",
+        footerHtml: "<small>Registered office</small>"
+      })
+    );
+    services.registry.registerPrintLetterhead(
+      definePrintLetterhead({
+        name: "Managers Only",
+        headerHtml: "<strong>Managers</strong>",
+        roles: ["Task Manager"]
+      })
+    );
+
+    const list = await app.request("/api/meta/print-letterheads", { headers: userHeaders });
+    const item = await app.request("/api/meta/print-letterheads/Company%20Letterhead", { headers: userHeaders });
+    const denied = await app.request("/api/meta/print-letterheads/Managers%20Only", { headers: userHeaders });
+
+    expect(list.status).toBe(200);
+    await expect(list.json()).resolves.toMatchObject({
+      data: [{ name: "Company Letterhead", label: "Company" }]
+    });
+    expect(item.status).toBe(200);
+    await expect(item.json()).resolves.toMatchObject({
+      data: {
+        name: "Company Letterhead",
+        headerHtml: "<strong>ACME</strong>",
+        footerHtml: "<small>Registered office</small>"
+      }
+    });
+    expect(denied.status).toBe(403);
+  });
+
   it("renders a printable document as HTML", async () => {
     const { app, services } = makeApp();
     await services.documents.create({

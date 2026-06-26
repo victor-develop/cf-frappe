@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the remote print settings CLI slice:
+As of the remote print metadata CLI slice:
 
-- Vitest files: `106`
-- Vitest cases: `1204`
+- Vitest files: `107`
+- Vitest cases: `1213`
 
 ## Implication
 

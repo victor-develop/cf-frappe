@@ -30,6 +30,16 @@ export function createPrintApi(options: PrintApiOptions): Hono {
     return c.json({ data: options.prints.getPrintFormat(actor, c.req.param("format")) });
   });
 
+  app.get("/api/meta/print-letterheads", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    return c.json({ data: options.prints.listPrintLetterheads(actor) });
+  });
+
+  app.get("/api/meta/print-letterheads/:letterhead", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    return c.json({ data: options.prints.getPrintLetterhead(actor, c.req.param("letterhead")) });
+  });
+
   app.get("/api/print-settings", async (c) => {
     if (!options.printSettings) {
       throw badRequest("Print settings are not configured");

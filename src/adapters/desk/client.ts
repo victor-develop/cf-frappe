@@ -375,6 +375,10 @@ export function renderDeskClientScript(): string {
     return "/api/meta/print-formats" + (format === undefined ? "" : "/" + encodePart(format));
   }
 
+  function printLetterheadPath(letterhead) {
+    return "/api/meta/print-letterheads" + (letterhead === undefined ? "" : "/" + encodePart(letterhead));
+  }
+
   function printSettingsPath(options) {
     return withQuery("/api/print-settings", tenantParams(options || {}));
   }
@@ -3566,6 +3570,12 @@ export function renderDeskClientScript(): string {
       printFormats: function (options) {
         return request(withQuery(printFormatPath(), printFormatParams(options || {}))).then(unwrapData);
       },
+      printLetterhead: function (letterhead) {
+        return request(printLetterheadPath(letterhead)).then(unwrapData);
+      },
+      printLetterheads: function () {
+        return request(printLetterheadPath()).then(unwrapData);
+      },
       report: function (report) {
         return request("/api/meta/reports/" + encodePart(report)).then(unwrapData);
       },
@@ -3627,6 +3637,12 @@ export function renderDeskClientScript(): string {
       },
       formats: function (options) {
         return request(withQuery(printFormatPath(), printFormatParams(options || {}))).then(unwrapData);
+      },
+      letterhead: function (letterhead) {
+        return request(printLetterheadPath(letterhead)).then(unwrapData);
+      },
+      letterheads: function () {
+        return request(printLetterheadPath()).then(unwrapData);
       },
       html: function (format, name) {
         return request(printDocumentPath(format, name));

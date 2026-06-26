@@ -142,6 +142,8 @@ interface DeskClientRuntime {
     readonly profile: (userId: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly printFormat: (format: string) => Promise<unknown>;
     readonly printFormats: (options?: { readonly doctype?: string }) => Promise<unknown>;
+    readonly printLetterhead: (letterhead: string) => Promise<unknown>;
+    readonly printLetterheads: () => Promise<unknown>;
     readonly report: (report: string) => Promise<unknown>;
     readonly reports: () => Promise<unknown>;
     readonly role: (role: string, options?: { readonly tenant?: string }) => Promise<unknown>;
@@ -154,6 +156,8 @@ interface DeskClientRuntime {
   readonly print: {
     readonly format: (format: string) => Promise<unknown>;
     readonly formats: (options?: { readonly doctype?: string }) => Promise<unknown>;
+    readonly letterhead: (letterhead: string) => Promise<unknown>;
+    readonly letterheads: () => Promise<unknown>;
     readonly html: (format: string, name: string) => Promise<unknown>;
     readonly pdf: (format: string, name: string) => Promise<ArrayBuffer>;
     readonly pdfUrl: (format: string, name: string) => string;
@@ -3241,6 +3245,10 @@ describe("Desk client runtime", () => {
 
     await expect(runtime.print.formats({ doctype: "Task Type" })).resolves.toEqual({ ok: true });
     await expect(runtime.print.format("Task Standard")).resolves.toEqual({ ok: true });
+    await expect(runtime.print.letterheads()).resolves.toEqual({ ok: true });
+    await expect(runtime.print.letterhead("Company Letterhead")).resolves.toEqual({ ok: true });
+    await expect(runtime.meta.printLetterheads()).resolves.toEqual({ ok: true });
+    await expect(runtime.meta.printLetterhead("Company Letterhead")).resolves.toEqual({ ok: true });
     await expect(runtime.print.html("Task Standard", "TASK/1")).resolves.toBe("<!doctype html><title>Printable</title>");
     await expect(runtime.print.pdf("Task Standard", "TASK/1")).resolves.toEqual(pdf.buffer);
     await expect(runtime.print.settings({ tenant: "acme" })).resolves.toEqual({ ok: true });
@@ -3253,6 +3261,10 @@ describe("Desk client runtime", () => {
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
       "GET /api/meta/print-formats?doctype=Task+Type",
       "GET /api/meta/print-formats/Task%20Standard",
+      "GET /api/meta/print-letterheads",
+      "GET /api/meta/print-letterheads/Company%20Letterhead",
+      "GET /api/meta/print-letterheads",
+      "GET /api/meta/print-letterheads/Company%20Letterhead",
       "GET /api/print/Task%20Standard/TASK%2F1",
       "GET /api/print/Task%20Standard/TASK%2F1/pdf",
       "GET /api/print-settings?tenant=acme",
@@ -3264,9 +3276,17 @@ describe("Desk client runtime", () => {
       "same-origin",
       "same-origin",
       "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin",
       "same-origin"
     ]);
     expect(calls.map((call) => call.init.body)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
       undefined,
       undefined,
       undefined,

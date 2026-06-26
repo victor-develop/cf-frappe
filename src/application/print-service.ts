@@ -68,6 +68,14 @@ export class PrintService {
       .filter((letterhead) => canReadPrintLetterhead(actor, letterhead));
   }
 
+  getPrintLetterhead(actor: Actor, letterheadName: string): PrintLetterheadDefinition {
+    const letterhead = this.registry.getPrintLetterhead(letterheadName);
+    if (!canReadPrintLetterhead(actor, letterhead)) {
+      throw permissionDenied(`Actor '${actor.id}' cannot read print letterhead '${letterhead.name}'`);
+    }
+    return letterhead;
+  }
+
   async printDocument(actor: Actor, formatName: string, name: string): Promise<PrintDocumentView> {
     const format = this.getPrintFormat(actor, formatName);
     const document = await this.queries.getDocument(actor, format.doctype, name);
@@ -98,13 +106,6 @@ export class PrintService {
     return canReadPrintLetterhead(actor, this.registry.getPrintLetterhead(letterheadName));
   }
 
-  private getPrintLetterhead(actor: Actor, letterheadName: string): PrintLetterheadDefinition {
-    const letterhead = this.registry.getPrintLetterhead(letterheadName);
-    if (!canReadPrintLetterhead(actor, letterhead)) {
-      throw permissionDenied(`Actor '${actor.id}' cannot read print letterhead '${letterhead.name}'`);
-    }
-    return letterhead;
-  }
 }
 
 function printSectionView(section: PrintSectionDefinition, document: DocumentSnapshot): PrintSectionView {
