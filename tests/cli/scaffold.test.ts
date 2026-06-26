@@ -66,6 +66,7 @@ describe("cf-frappe CLI scaffold", () => {
     expect(packageJson.scripts["cf:types"]).toBe("wrangler types");
     expect(packageJson.scripts["d1:generate"]).toBe("node --import tsx ./node_modules/cf-frappe/dist/cli.js migrate generate");
     expect(packageJson.scripts["d1:migrate:local"]).toBe("wrangler d1 migrations apply demo-app-db --local");
+    expect(packageJson.scripts["r2:create"]).toBe("wrangler r2 bucket create demo-app-files");
     expect(packageJson.dependencies["cf-frappe"]).toBe("^0.1.0");
     expect(packageJson.devDependencies["@types/node"]).toBe("^26.0.0");
     expect(packageJson.devDependencies.tsx).toBe("^4.20.6");
@@ -77,6 +78,10 @@ describe("cf-frappe CLI scaffold", () => {
         readonly database_name: string;
         readonly database_id: string;
         readonly migrations_dir: string;
+      }[];
+      readonly r2_buckets?: readonly {
+        readonly binding: string;
+        readonly bucket_name: string;
       }[];
       readonly secrets?: { readonly required?: readonly string[] };
       readonly vars?: Record<string, string>;
@@ -93,6 +98,7 @@ describe("cf-frappe CLI scaffold", () => {
         migrations_dir: "migrations"
       }
     ]);
+    expect(wranglerConfig.r2_buckets).toEqual([{ binding: "FILES", bucket_name: "demo-app-files" }]);
     expect(wranglerConfig.secrets?.required).toEqual(["SESSION_SECRET"]);
     expect(wranglerConfig.vars).toBeUndefined();
     expect(wranglerConfig.queues?.producers).toEqual([{ binding: "JOBS", queue: "demo-app-jobs" }]);
@@ -111,8 +117,11 @@ describe("cf-frappe CLI scaffold", () => {
     expect(worker).toContain("createDataPatchRollbackRetryJob");
     expect(worker).toContain("createJobRegistry<CloudFrappeRuntimeServices>");
     expect(worker).toContain("D1JobExecutionLog");
+    expect(worker).toContain("R2FileStorage");
     expect(worker).toContain("new CloudflareJobQueue(env.JOBS)");
     expect(worker).toContain("executionLog: (env) => new D1JobExecutionLog(env.DB)");
+    expect(worker).toContain("storage: (env) => new R2FileStorage(env.FILES)");
+    expect(worker).toContain("files: {");
     expect(worker).toContain("jobs: {");
     const taskApp = await readFile(join(target, "src/apps/tasks.ts"), "utf8");
     expect(taskApp).toContain("defineClientScript");
@@ -136,14 +145,18 @@ describe("cf-frappe CLI scaffold", () => {
     expect(taskApp).toContain("metadata: { patchId: STARTER_TASK_SEED_PATCH_ID, rollback: true }");
     expect(taskApp).toContain('kind: "dashboard", target: "Task Dashboard"');
     expect(taskApp).toContain('kind: "admin", target: "roles"');
-    await expect(readFile(join(target, "src/apps/index.ts"), "utf8")).resolves.toContain(
-      "/* cf-frappe app imports:start */"
-    );
+    const appsIndex = await readFile(join(target, "src/apps/index.ts"), "utf8");
+    expect(appsIndex).toContain("defineApp");
+    expect(appsIndex).toContain("fileDocType");
+    expect(appsIndex).toContain('name: "cf-frappe-core"');
+    expect(appsIndex).toContain("doctypes: [fileDocType]");
+    expect(appsIndex).toContain("coreApp,");
+    expect(appsIndex).toContain("/* cf-frappe app imports:start */");
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "npx cf-frappe install @acme/cf-frappe-crm"
     );
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
-      "the `Tasks` workspace, and the `Task Dashboard`"
+      "the `Tasks` workspace, the `Task Dashboard`, and the file manager at `/desk/files`"
     );
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "`tasks.seed_starter_tasks` data patch"
@@ -159,6 +172,15 @@ describe("cf-frappe CLI scaffold", () => {
     );
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "npx wrangler queues create demo-app-jobs"
+    );
+    await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
+      "npx wrangler r2 bucket create demo-app-files"
+    );
+    await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
+      "npm run r2:create"
+    );
+    await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
+      "file manager at `/desk/files`"
     );
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "replace-with-d1-database-id"
@@ -229,9 +251,12 @@ describe("cf-frappe CLI scaffold", () => {
     expect(worker).toContain("createDataPatchApplyJob");
     expect(worker).toContain("createDataPatchRollbackJob");
     expect(worker).toContain("D1JobExecutionLog");
+    expect(worker).toContain("R2FileStorage");
     expect(worker).toContain("new CloudflareJobQueue(env.JOBS)");
     expect(worker).toContain("executionLog: (env) => new D1JobExecutionLog(env.DB)");
+    expect(worker).toContain("storage: (env) => new R2FileStorage(env.FILES)");
     expect(worker).toContain("jobs: {");
+    expect(worker).toContain("files: {");
     expect(worker).toContain("throw permissionDenied(\"Cloudflare Access JWT is required\")");
     expect(worker).toContain("teamDomain: (env) => env.CF_ACCESS_TEAM_DOMAIN");
     expect(worker).toContain("audience: (env) => env.CF_ACCESS_AUD");
@@ -279,9 +304,12 @@ describe("cf-frappe CLI scaffold", () => {
     expect(worker).toContain("createDataPatchApplyJob");
     expect(worker).toContain("createDataPatchRollbackJob");
     expect(worker).toContain("D1JobExecutionLog");
+    expect(worker).toContain("R2FileStorage");
     expect(worker).toContain("new CloudflareJobQueue(env.JOBS)");
     expect(worker).toContain("executionLog: (env) => new D1JobExecutionLog(env.DB)");
+    expect(worker).toContain("storage: (env) => new R2FileStorage(env.FILES)");
     expect(worker).toContain("jobs: {");
+    expect(worker).toContain("files: {");
     expect(worker).toContain("throw permissionDenied(\"OIDC token is required\")");
     expect(worker).toContain("issuer: (env) => env.OIDC_ISSUER");
     expect(worker).toContain("audience: (env) => env.OIDC_AUD");

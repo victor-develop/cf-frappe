@@ -83,7 +83,8 @@ function packageJson(input: StarterProjectTemplateInput): string {
         "d1:generate": "node --import tsx ./node_modules/cf-frappe/dist/cli.js migrate generate",
         "d1:create": `wrangler d1 create ${input.databaseName}`,
         "d1:migrate:local": `wrangler d1 migrations apply ${input.databaseName} --local`,
-        "d1:migrate:remote": `wrangler d1 migrations apply ${input.databaseName} --remote`
+        "d1:migrate:remote": `wrangler d1 migrations apply ${input.databaseName} --remote`,
+        "r2:create": `wrangler r2 bucket create ${input.projectName}-files`
       },
       dependencies: {
         "cf-frappe": `^${input.cfFrappeVersion}`
@@ -116,6 +117,12 @@ function wranglerJsonc(input: StarterProjectTemplateInput): string {
       "database_name": ${json(input.databaseName)},
       "database_id": "replace-with-d1-database-id",
       "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "FILES",
+      "bucket_name": "${input.projectName}-files"
     }
   ],
   "durable_objects": {
@@ -231,7 +238,7 @@ function devVarsExample(input: StarterProjectTemplateInput): string {
 function readme(input: StarterProjectTemplateInput): string {
   return `# ${input.projectName}
 
-Cloudflare-native cf-frappe starter app with D1 projections, a Durable Object command coordinator, metadata-defined DocTypes, and ${authReadmeSummary(input.auth)}.
+Cloudflare-native cf-frappe starter app with D1 projections, R2-backed file attachments, a Durable Object command coordinator, metadata-defined DocTypes, and ${authReadmeSummary(input.auth)}.
 
 ## Local Development
 
@@ -244,7 +251,7 @@ npm run d1:migrate:local
 npm run dev
 \`\`\`
 
-Open \`/desk\` for the generated Desk UI, the \`Tasks\` workspace, and the \`Task Dashboard\`; run the \`tasks.seed_starter_tasks\` data patch when you want sample Task records in a fresh environment. Use \`/api/meta/doctypes/Task\` for the metadata API. ${authLocalReadme(input.auth)}
+Open \`/desk\` for the generated Desk UI, the \`Tasks\` workspace, the \`Task Dashboard\`, and the file manager at \`/desk/files\`; run the \`tasks.seed_starter_tasks\` data patch when you want sample Task records in a fresh environment. Use \`/api/meta/doctypes/Task\` for the metadata API. ${authLocalReadme(input.auth)}
 Client scripts live under \`public/assets\`; add them with \`defineClientScript(...)\` in files under \`src/apps\`.
 ${authProviderReadme(input.auth)}
 
@@ -262,10 +269,11 @@ After adding app DocType indexes, or changing them with a DocType version bump, 
 
 ## Deployment
 
-Create the D1 database and Queue before the first remote deploy:
+Create the D1 database, R2 file bucket, and Queue before the first remote deploy:
 
 \`\`\`bash
 npx wrangler d1 create ${input.databaseName}
+npx wrangler r2 bucket create ${input.projectName}-files
 npx wrangler queues create ${input.projectName}-jobs
 \`\`\`
 
@@ -310,6 +318,8 @@ npx cf-frappe files delete --url https://your-worker.example --name file_invoice
 
 \`\`\`bash
 npm run d1:create
+npm run r2:create
+npx wrangler queues create ${input.projectName}-jobs
 \`\`\`
 
 Copy the returned \`database_id\` into the \`replace-with-d1-database-id\` placeholder in \`wrangler.jsonc\`, then set the production session secret with Wrangler's interactive prompt:
@@ -684,12 +694,19 @@ export const taskApp = defineApp({
 }
 
 function appsIndexTs(): string {
-  return `import { createRegistryFromApps } from "cf-frappe";
+  return `import { createRegistryFromApps, defineApp, fileDocType } from "cf-frappe";
 /* cf-frappe app imports:start */
 import { taskApp } from "./tasks";
 /* cf-frappe app imports:end */
 
+const coreApp = defineApp({
+  name: "cf-frappe-core",
+  label: "cf-frappe Core",
+  doctypes: [fileDocType]
+});
+
 export const installedApps = [
+  coreApp,
   /* cf-frappe apps:start */
   taskApp,
   /* cf-frappe apps:end */
@@ -723,6 +740,7 @@ import {
   CloudflareJobQueue,
   createAggregateCoordinatorClass,
   createCloudFrappeWorker,
+  R2FileStorage,
   type CloudFrappeEnv,
   type CloudFrappeRuntimeServices
 } from "cf-frappe/cloudflare";
@@ -759,6 +777,9 @@ export default createCloudFrappeWorker<Env>({
     registry: starterJobs,
     queue: (env) => new CloudflareJobQueue(env.JOBS),
     executionLog: (env) => new D1JobExecutionLog(env.DB)
+  },
+  files: {
+    storage: (env) => new R2FileStorage(env.FILES)
   }
 });
 `;
@@ -777,6 +798,7 @@ import {
   CloudflareJobQueue,
   createAggregateCoordinatorClass,
   createCloudFrappeWorker,
+  R2FileStorage,
   type CloudFrappeEnv,
   type CloudFrappeRuntimeServices
 } from "cf-frappe/cloudflare";
@@ -805,6 +827,9 @@ export default createCloudFrappeWorker<Env>({
     registry: starterJobs,
     queue: (env) => new CloudflareJobQueue(env.JOBS),
     executionLog: (env) => new D1JobExecutionLog(env.DB)
+  },
+  files: {
+    storage: (env) => new R2FileStorage(env.FILES)
   },
   auth: {
     sessionSecret: (env) => env.SESSION_SECRET,
@@ -835,6 +860,7 @@ import {
   CloudflareJobQueue,
   createAggregateCoordinatorClass,
   createCloudFrappeWorker,
+  R2FileStorage,
   type CloudFrappeEnv,
   type CloudFrappeRuntimeServices
 } from "cf-frappe/cloudflare";
@@ -863,6 +889,9 @@ export default createCloudFrappeWorker<Env>({
     registry: starterJobs,
     queue: (env) => new CloudflareJobQueue(env.JOBS),
     executionLog: (env) => new D1JobExecutionLog(env.DB)
+  },
+  files: {
+    storage: (env) => new R2FileStorage(env.FILES)
   },
   auth: {
     sessionSecret: (env) => env.SESSION_SECRET,
