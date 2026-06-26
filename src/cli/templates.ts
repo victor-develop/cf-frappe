@@ -227,7 +227,7 @@ npm run d1:migrate:local
 npm run dev
 \`\`\`
 
-Open \`/desk\` for the generated Desk UI or \`/api/meta/doctypes/Task\` for the metadata API. ${authLocalReadme(input.auth)}
+Open \`/desk\` for the generated Desk UI, the \`Tasks\` workspace, and the \`Task Dashboard\`; use \`/api/meta/doctypes/Task\` for the metadata API. ${authLocalReadme(input.auth)}
 Client scripts live under \`public/assets\`; add them with \`defineClientScript(...)\` in files under \`src/apps\`.
 ${authProviderReadme(input.auth)}
 
@@ -359,7 +359,7 @@ For OIDC deployments, replace the placeholder \`OIDC_ISSUER\`, \`OIDC_AUD\`, and
 }
 
 function taskAppTs(): string {
-  return `import { defineApp, defineClientScript, defineDocType, definePrintFormat, defineReport } from "cf-frappe";
+  return `import { defineApp, defineClientScript, defineDashboard, defineDocType, definePrintFormat, defineReport, defineWorkspace } from "cf-frappe";
 
 export const Task = defineDocType({
   name: "Task",
@@ -470,6 +470,67 @@ export const TaskPrint = definePrintFormat({
   roles: ["Guest", "User", "Task Manager"]
 });
 
+export const TaskDashboard = defineDashboard({
+  name: "Task Dashboard",
+  label: "Task Dashboard",
+  module: "Desk",
+  description: "Operational snapshot for the starter Task queue.",
+  roles: ["Guest", "User", "Task Manager"],
+  cards: [
+    {
+      name: "open_tasks",
+      label: "Open Tasks",
+      indicatorRules: [
+        { operator: "eq", value: 0, indicator: "green" },
+        { operator: "gt", value: 0, indicator: "orange" }
+      ],
+      source: {
+        kind: "documentCount",
+        doctype: "Task",
+        filters: [{ field: "workflow_state", value: "Open" }]
+      }
+    },
+    {
+      name: "doing_tasks",
+      label: "Doing",
+      indicator: "blue",
+      source: {
+        kind: "documentCount",
+        doctype: "Task",
+        filters: [{ field: "workflow_state", value: "Doing" }]
+      }
+    }
+  ]
+});
+
+export const TaskWorkspace = defineWorkspace({
+  name: "Tasks",
+  label: "Tasks",
+  module: "Desk",
+  description: "Starter task desk with list, create, report, dashboard, file, and admin shortcuts.",
+  roles: ["Guest", "User", "Task Manager"],
+  sections: [
+    {
+      name: "tasks",
+      label: "Tasks",
+      shortcuts: [
+        { name: "all-tasks", label: "All Tasks", kind: "doctype", target: "Task" },
+        { name: "new-task", label: "New Task", kind: "newDoc", target: "Task", roles: ["User", "Task Manager"] },
+        { name: "open-tasks", label: "Open Tasks Report", kind: "report", target: "Open Tasks" },
+        { name: "task-dashboard", label: "Task Dashboard", kind: "dashboard", target: "Task Dashboard" }
+      ]
+    },
+    {
+      name: "operations",
+      label: "Operations",
+      shortcuts: [
+        { name: "files", label: "Files", kind: "file", roles: ["User", "Task Manager"] },
+        { name: "roles", label: "Roles", kind: "admin", target: "roles", roles: ["Task Manager"] }
+      ]
+    }
+  ]
+});
+
 export const TaskFormScript = defineClientScript({
   name: "task-form",
   doctype: "Task",
@@ -485,6 +546,8 @@ export const taskApp = defineApp({
   doctypes: [Task],
   printFormats: [TaskPrint],
   reports: [OpenTasks],
+  dashboards: [TaskDashboard],
+  workspaces: [TaskWorkspace],
   clientScripts: [TaskFormScript],
   hooks: {
     Task: [

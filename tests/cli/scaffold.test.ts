@@ -91,14 +91,24 @@ describe("cf-frappe CLI scaffold", () => {
     await expect(readFile(join(target, "src/worker.ts"), "utf8")).resolves.toContain(
       'import { registry } from "./apps"'
     );
-    await expect(readFile(join(target, "src/apps/tasks.ts"), "utf8")).resolves.toContain(
-      "defineClientScript"
-    );
+    const taskApp = await readFile(join(target, "src/apps/tasks.ts"), "utf8");
+    expect(taskApp).toContain("defineClientScript");
+    expect(taskApp).toContain("defineDashboard");
+    expect(taskApp).toContain("defineWorkspace");
+    expect(taskApp).toContain("export const TaskDashboard");
+    expect(taskApp).toContain("export const TaskWorkspace");
+    expect(taskApp).toContain("dashboards: [TaskDashboard]");
+    expect(taskApp).toContain("workspaces: [TaskWorkspace]");
+    expect(taskApp).toContain('kind: "dashboard", target: "Task Dashboard"');
+    expect(taskApp).toContain('kind: "admin", target: "roles"');
     await expect(readFile(join(target, "src/apps/index.ts"), "utf8")).resolves.toContain(
       "/* cf-frappe app imports:start */"
     );
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "npx cf-frappe install @acme/cf-frappe-crm"
+    );
+    await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
+      "the `Tasks` workspace, and the `Task Dashboard`"
     );
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "npx cf-frappe data-patches status --url https://your-worker.example"
