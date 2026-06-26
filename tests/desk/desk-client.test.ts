@@ -373,6 +373,7 @@ interface DeskClientRuntime {
       options?: { readonly returnTo?: string }
     ) => Promise<unknown>;
     readonly csvUrl: (doctype: string, options?: Record<string, unknown>) => string;
+    readonly formUrl: (doctype: string, name: string) => string;
     readonly importCsv: (
       doctype: string,
       csv: string,
@@ -380,6 +381,7 @@ interface DeskClientRuntime {
     ) => Promise<unknown>;
     readonly importTemplateCsvUrl: (doctype: string) => string;
     readonly listUrl: (doctype: string, options?: Record<string, unknown>) => string;
+    readonly newUrl: (doctype: string) => string;
   };
   readonly resource: {
     readonly activity: (
@@ -757,6 +759,13 @@ describe("Desk client runtime", () => {
       })
     ).toBe("/desk/Task%20Type/export.csv?order=asc&limit=25&order_by=count&filter_title=Launch");
     expect(runtime.desk.importTemplateCsvUrl("Task Type")).toBe("/desk/Task%20Type/import-template.csv");
+  });
+
+  it("builds Desk form navigation URLs for client scripts", async () => {
+    const runtime = evaluateDeskClient();
+
+    expect(runtime.desk.newUrl("Task Type")).toBe("/desk/Task%20Type/new");
+    expect(runtime.desk.formUrl("Task Type", "TASK/1")).toBe("/desk/Task%20Type/TASK%2F1");
   });
 
   it("wraps Desk CSV imports with list return context for client scripts", async () => {

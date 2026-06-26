@@ -3511,6 +3511,9 @@ export function renderDeskClientScript(): string {
       csvUrl: function (doctype, options) {
         return withQuery(deskPath(doctype) + "/export.csv", resourceExportParams(options || {}));
       },
+      formUrl: function (doctype, name) {
+        return deskPath(doctype) + "/" + encodePart(name);
+      },
       importTemplateCsvUrl: function (doctype) {
         return deskPath(doctype) + "/import-template.csv";
       },
@@ -3548,6 +3551,9 @@ export function renderDeskClientScript(): string {
           headers: { "content-type": "application/x-www-form-urlencoded; charset=utf-8" },
           body: deskBulkDocumentsBody(doctype, documents, options || {})
         });
+      },
+      newUrl: function (doctype) {
+        return deskPath(doctype) + "/new";
       }
     }),
     resource: Object.freeze({

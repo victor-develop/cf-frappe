@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document history read client helper slice:
+As of the Desk navigation URL helper slice:
 
 - Vitest files: `94`
-- Vitest cases: `1096`
+- Vitest cases: `1097`
 
 ## Implication
 
