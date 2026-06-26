@@ -7,8 +7,10 @@ import {
   planD1Migrations,
   renderD1MigrationFile
 } from "../adapters/d1/schema-planner.js";
+import { fileDocType } from "../core/file-doctype.js";
 import type { DocTypeDefinition } from "../core/types.js";
 
+const STARTER_FILE_INDEX_MIGRATION_ID = "doctype_file_v1_indexes";
 const STARTER_TASK_INDEX_MIGRATION_ID = "doctype_task_v1_indexes";
 const STARTER_TASK_DOCTYPE: DocTypeDefinition = {
   name: "Task",
@@ -19,7 +21,7 @@ const STARTER_TASK_DOCTYPE: DocTypeDefinition = {
   ],
   indexes: [["priority"], ["workflow_state", "priority"]]
 };
-const STARTER_MIGRATIONS = planD1Migrations([STARTER_TASK_DOCTYPE]);
+const STARTER_MIGRATIONS = planD1Migrations([fileDocType, STARTER_TASK_DOCTYPE]);
 
 export interface StarterProjectTemplateInput {
   readonly projectName: string;
@@ -64,7 +66,8 @@ export function starterProjectFiles(input: StarterProjectTemplateInput): readonl
       path: "migrations/0005_cf_frappe_data_patch_rollbacks.sql",
       contents: starterMigrationSql(D1_DATA_PATCH_ROLLBACK_MIGRATION_ID)
     },
-    { path: "migrations/0006_doctype_task_v1_indexes.sql", contents: starterMigrationSql(STARTER_TASK_INDEX_MIGRATION_ID) }
+    { path: "migrations/0006_doctype_file_v1_indexes.sql", contents: starterMigrationSql(STARTER_FILE_INDEX_MIGRATION_ID) },
+    { path: "migrations/0007_doctype_task_v1_indexes.sql", contents: starterMigrationSql(STARTER_TASK_INDEX_MIGRATION_ID) }
   ];
 }
 
