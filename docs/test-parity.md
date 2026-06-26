@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the generated Desk CSV client helper slice:
+As of the generated Desk bulk action context slice:
 
 - Vitest files: `94`
-- Vitest cases: `1080`
+- Vitest cases: `1084`
 
 ## Implication
 

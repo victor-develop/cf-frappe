@@ -2739,6 +2739,23 @@ describe("Desk app", () => {
     await expect(services.events.readStream("acme:Note:Wrong%20DocType%20Return")).resolves.toEqual([]);
   });
 
+  it("rejects malformed CSV import return targets before writing events", async () => {
+    const { app, services } = makeDesk(owner);
+
+    const response = await app.request("/desk/Note/import.csv", {
+      method: "POST",
+      body: new URLSearchParams({
+        returnTo: "http://%",
+        csv: ["title,priority,body", "Malformed Return,Medium,Blocked"].join("\n")
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toContain("CSV import returnTo must target the current Desk list");
+    await expect(services.events.readStream("acme:Note:Malformed%20Return")).resolves.toEqual([]);
+  });
+
   it("updates generated list CSV posts through the document command boundary", async () => {
     const { app, services } = makeDesk(owner);
     await services.documents.create({
@@ -3210,25 +3227,29 @@ describe("Desk app", () => {
     await services.documents.create({
       actor: manager,
       doctype: "Note",
-      data: data({ title: "Desk Bulk Selected" })
+      data: data({ title: "Desk Bulk Selected", priority: "High" })
     });
     await services.documents.create({
       actor: manager,
       doctype: "Note",
-      data: data({ title: "Desk Bulk Keep" })
+      data: data({ title: "Desk Bulk Keep", priority: "Low" })
     });
 
-    const list = await app.request("/desk/Note");
+    const list = await app.request("/desk/Note?default_filters=0&filter_priority=High&order_by=title&order=asc");
 
     expect(list.status).toBe(200);
     const html = await list.text();
     expect(html).toContain('formaction="/desk/Note/bulk-delete"');
+    expect(html).toContain(
+      'name="returnTo" value="/desk/Note?default_filters=0&amp;filter_priority=High&amp;order_by=title&amp;order=asc"'
+    );
     expect(html).toContain('name="document" type="checkbox" value="Desk Bulk Selected"');
     expect(html).toContain('name="expectedVersion:Desk Bulk Selected" type="hidden" value="1"');
 
     const deleted = await app.request("/desk/Note/bulk-delete", {
       method: "POST",
       body: new URLSearchParams({
+        returnTo: "/desk/Note?default_filters=0&filter_priority=High&order_by=title&order=asc",
         document: "Desk Bulk Selected",
         "expectedVersion:Desk Bulk Selected": "1"
       }),
@@ -3236,7 +3257,9 @@ describe("Desk app", () => {
     });
 
     expect(deleted.status).toBe(303);
-    expect(deleted.headers.get("location")).toBe("/desk/Note");
+    expect(deleted.headers.get("location")).toBe(
+      "/desk/Note?default_filters=0&filter_priority=High&order_by=title&order=asc"
+    );
 
     const after = await app.request("/desk/Note");
     const afterHtml = await after.text();
@@ -3271,6 +3294,56 @@ describe("Desk app", () => {
     expect(transitioned.status).toBe(303);
     await expect(services.queries.getDocument(owner, "Note", "Desk Bulk Transition")).resolves.toMatchObject({
       data: { workflow_state: "Closed" }
+    });
+  });
+
+  it("rejects generated list bulk action return targets outside the current Desk list", async () => {
+    const { app, services } = makeDesk(manager);
+    await services.documents.create({
+      actor: manager,
+      doctype: "Note",
+      data: data({ title: "Desk Bulk Bad Return" })
+    });
+
+    const response = await app.request("/desk/Note/bulk-delete", {
+      method: "POST",
+      body: new URLSearchParams({
+        returnTo: "/desk/admin/jobs",
+        document: "Desk Bulk Bad Return",
+        "expectedVersion:Desk Bulk Bad Return": "1"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toContain("Desk bulk action returnTo must target the current Desk list");
+    await expect(services.queries.getDocument(manager, "Note", "Desk Bulk Bad Return")).resolves.toMatchObject({
+      docstatus: "draft"
+    });
+  });
+
+  it("rejects malformed generated list bulk action return targets before deleting documents", async () => {
+    const { app, services } = makeDesk(manager);
+    await services.documents.create({
+      actor: manager,
+      doctype: "Note",
+      data: data({ title: "Desk Bulk Malformed Return" })
+    });
+
+    const response = await app.request("/desk/Note/bulk-delete", {
+      method: "POST",
+      body: new URLSearchParams({
+        returnTo: "http://%",
+        document: "Desk Bulk Malformed Return",
+        "expectedVersion:Desk Bulk Malformed Return": "1"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toContain("Desk bulk action returnTo must target the current Desk list");
+    await expect(services.queries.getDocument(manager, "Note", "Desk Bulk Malformed Return")).resolves.toMatchObject({
+      docstatus: "draft"
     });
   });
 

@@ -2438,6 +2438,7 @@ export function renderListView(
     readonly clientScripts?: readonly ClientScriptDefinition[];
     readonly realtimeRoute?: string;
     readonly bulkActions?: readonly ListBulkAction[];
+    readonly bulkReturnHref?: string;
     readonly importModes?: readonly DocumentImportMode[];
     readonly importReturnHref?: string;
     readonly importResult?: DocumentImportResult;
@@ -2486,7 +2487,7 @@ export function renderListView(
   return `<section class="toolbar">
     <a class="button primary" href="/desk/${encodeURIComponent(doctype.name)}/new">New ${escapeHtml(labelFor(doctype))}</a>
     ${options.exportHref ? `<a class="button" href="${escapeHtml(options.exportHref)}">Export CSV</a>` : ""}
-    ${hasBulkActions ? `<form id="${bulkActionFormId}" method="post" action="${escapeHtml(bulkActions[0]?.action ?? "")}"></form>${bulkActions.map((action) => renderListBulkActionButton(action, bulkActionFormId)).join("")}` : ""}
+    ${hasBulkActions ? `<form id="${bulkActionFormId}" method="post" action="${escapeHtml(bulkActions[0]?.action ?? "")}">${options.bulkReturnHref ? `<input type="hidden" name="returnTo" value="${escapeHtml(options.bulkReturnHref)}">` : ""}</form>${bulkActions.map((action) => renderListBulkActionButton(action, bulkActionFormId)).join("")}` : ""}
   </section>
   ${importModes.length > 0 ? renderListImportPanel(doctype, importModes, options.importResult, options.importReturnHref) : ""}
   ${savedFilterPanel}

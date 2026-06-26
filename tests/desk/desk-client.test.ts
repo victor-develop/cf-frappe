@@ -285,6 +285,27 @@ interface DeskClientRuntime {
     ) => Promise<unknown>;
   };
   readonly desk: {
+    readonly bulkCancel: (
+      doctype: string,
+      documents: readonly DeskBulkDocumentSelection[],
+      options?: { readonly returnTo?: string }
+    ) => Promise<unknown>;
+    readonly bulkDelete: (
+      doctype: string,
+      documents: readonly DeskBulkDocumentSelection[],
+      options?: { readonly returnTo?: string }
+    ) => Promise<unknown>;
+    readonly bulkSubmit: (
+      doctype: string,
+      documents: readonly DeskBulkDocumentSelection[],
+      options?: { readonly returnTo?: string }
+    ) => Promise<unknown>;
+    readonly bulkTransition: (
+      doctype: string,
+      action: string,
+      documents: readonly DeskBulkDocumentSelection[],
+      options?: { readonly returnTo?: string }
+    ) => Promise<unknown>;
     readonly csvUrl: (doctype: string, options?: Record<string, unknown>) => string;
     readonly importCsv: (
       doctype: string,
@@ -718,6 +739,52 @@ describe("Desk client runtime", () => {
     expect(String(calls[0]?.init.body)).toBe(
       "returnTo=%2Fdesk%2FTask%2520Type%3Fdefault_filters%3D0&csv=title%0AImported"
     );
+  });
+
+  it("wraps Desk selected-document bulk actions with list return context", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(
+      async (url, init) => {
+        calls.push({ url: String(url), init: init ?? {} });
+        return new Response("<!doctype html><p>Done</p>", {
+          headers: { "content-type": "text/html" }
+        });
+      },
+      new FakeDocument(),
+      [],
+      undefined,
+      "https://app.example/desk/Task%20Type?filter_priority=High&order_by=count"
+    );
+    const documents = [
+      { name: "TASK/1", expectedVersion: 2 },
+      { name: "TASK-2" }
+    ];
+
+    await runtime.desk.bulkDelete("Task Type", documents);
+    await runtime.desk.bulkSubmit("Task Type", documents);
+    await runtime.desk.bulkCancel("Task Type", documents);
+    await runtime.desk.bulkTransition("Task Type", "close now", documents, {
+      returnTo: "/desk/Task%20Type?default_filters=0"
+    });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "POST /desk/Task%20Type/bulk-delete",
+      "POST /desk/Task%20Type/bulk-submit",
+      "POST /desk/Task%20Type/bulk-cancel",
+      "POST /desk/Task%20Type/bulk-transition/close%20now"
+    ]);
+    expect(calls.map((call) => new Headers(call.init.headers).get("content-type"))).toEqual([
+      "application/x-www-form-urlencoded; charset=utf-8",
+      "application/x-www-form-urlencoded; charset=utf-8",
+      "application/x-www-form-urlencoded; charset=utf-8",
+      "application/x-www-form-urlencoded; charset=utf-8"
+    ]);
+    expect(calls.map((call) => String(call.init.body))).toEqual([
+      "returnTo=%2Fdesk%2FTask%2520Type%3Ffilter_priority%3DHigh%26order_by%3Dcount&document=TASK%2F1&expectedVersion%3ATASK%2F1=2&document=TASK-2",
+      "returnTo=%2Fdesk%2FTask%2520Type%3Ffilter_priority%3DHigh%26order_by%3Dcount&document=TASK%2F1&expectedVersion%3ATASK%2F1=2&document=TASK-2",
+      "returnTo=%2Fdesk%2FTask%2520Type%3Ffilter_priority%3DHigh%26order_by%3Dcount&document=TASK%2F1&expectedVersion%3ATASK%2F1=2&document=TASK-2",
+      "returnTo=%2Fdesk%2FTask%2520Type%3Fdefault_filters%3D0&document=TASK%2F1&expectedVersion%3ATASK%2F1=2&document=TASK-2"
+    ]);
   });
 
   it("maps resource compound filter expressions to query parameters", async () => {

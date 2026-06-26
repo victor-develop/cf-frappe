@@ -1764,7 +1764,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
     try {
-      const form = await parseDeskBulkDocumentAction(c.req.raw);
+      const form = await parseDeskBulkDocumentAction(c.req.raw, doctype.name);
       const result = await options.documents.bulkDelete({
         actor,
         doctype: doctype.name,
@@ -1778,7 +1778,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
           new FrameworkError("BAD_REQUEST", bulkDocumentDeleteFailureMessage(result.failed.length), { status: 400 })
         );
       }
-      return c.redirect(`/desk/${encodeURIComponent(doctype.name)}`, 303);
+      return c.redirect(deskListRedirectUrl(c.req.url, doctype.name, form.returnUrl), 303);
     } catch (error) {
       return renderDeskFailure(options, c.req.raw, error);
     }
@@ -1788,7 +1788,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
     try {
-      const form = await parseDeskBulkDocumentAction(c.req.raw);
+      const form = await parseDeskBulkDocumentAction(c.req.raw, doctype.name);
       const result = await options.documents.bulkSubmit({
         actor,
         doctype: doctype.name,
@@ -1804,7 +1804,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
           })
         );
       }
-      return c.redirect(`/desk/${encodeURIComponent(doctype.name)}`, 303);
+      return c.redirect(deskListRedirectUrl(c.req.url, doctype.name, form.returnUrl), 303);
     } catch (error) {
       return renderDeskFailure(options, c.req.raw, error);
     }
@@ -1814,7 +1814,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
     try {
-      const form = await parseDeskBulkDocumentAction(c.req.raw);
+      const form = await parseDeskBulkDocumentAction(c.req.raw, doctype.name);
       const result = await options.documents.bulkCancel({
         actor,
         doctype: doctype.name,
@@ -1830,7 +1830,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
           })
         );
       }
-      return c.redirect(`/desk/${encodeURIComponent(doctype.name)}`, 303);
+      return c.redirect(deskListRedirectUrl(c.req.url, doctype.name, form.returnUrl), 303);
     } catch (error) {
       return renderDeskFailure(options, c.req.raw, error);
     }
@@ -1840,7 +1840,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
     try {
-      const form = await parseDeskBulkDocumentAction(c.req.raw);
+      const form = await parseDeskBulkDocumentAction(c.req.raw, doctype.name);
       const result = await options.documents.bulkTransition({
         actor,
         doctype: doctype.name,
@@ -1857,7 +1857,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
           })
         );
       }
-      return c.redirect(`/desk/${encodeURIComponent(doctype.name)}`, 303);
+      return c.redirect(deskListRedirectUrl(c.req.url, doctype.name, form.returnUrl), 303);
     } catch (error) {
       return renderDeskFailure(options, c.req.raw, error);
     }
@@ -2366,7 +2366,7 @@ async function renderDeskListPage(
   const bulkActions = listBulkActionsFor(actor, doctype, listResult.data);
   const importModes = deskCsvImportModesFor(actor, doctype);
   const exportHref = `/desk/${encodeURIComponent(doctype.name)}/export.csv${url.search}`;
-  const importReturnHref = `/desk/${encodeURIComponent(doctype.name)}${url.search}`;
+  const listReturnHref = `/desk/${encodeURIComponent(doctype.name)}${url.search}`;
   return html(
     renderDeskLayoutFor(options, {
       title: doctype.label ?? doctype.name,
@@ -2381,8 +2381,9 @@ async function renderDeskListPage(
         exportHref,
         clientScripts: options.registry.listClientScripts(doctype.name, "list"),
         bulkActions,
+        bulkReturnHref: listReturnHref,
         importModes,
-        importReturnHref,
+        importReturnHref: listReturnHref,
         ...(result.importResult === undefined ? {} : { importResult: result.importResult }),
         ...deskRealtimeRouteOption(options)
       })
@@ -3799,6 +3800,7 @@ interface ParsedDeskBulkDocumentAction {
     readonly name: string;
     readonly expectedVersion?: number;
   }[];
+  readonly returnUrl?: URL;
 }
 
 interface ParsedDeskDataPatchApply {
@@ -4052,9 +4054,16 @@ async function parseDeskBulkFileMetadata(request: Request): Promise<ParsedDeskBu
   };
 }
 
-async function parseDeskBulkDocumentAction(request: Request): Promise<ParsedDeskBulkDocumentAction> {
+async function parseDeskBulkDocumentAction(request: Request, doctypeName: string): Promise<ParsedDeskBulkDocumentAction> {
   const form = await readUrlEncodedDeskForm(request);
+  const returnUrl = deskListReturnUrl(
+    form.get("returnTo") ?? undefined,
+    request.url,
+    doctypeName,
+    "Desk bulk action returnTo must target the current Desk list"
+  );
   return {
+    ...(returnUrl === undefined ? {} : { returnUrl }),
     documents: form.getAll("document").map((name) => ({
       name,
       ...deskBulkExpectedVersion(form, name)
@@ -4078,16 +4087,36 @@ async function parseDeskCsvImport(request: Request, doctypeName: string): Promis
 }
 
 function deskCsvImportReturnUrl(value: string | undefined, requestUrl: string, doctypeName: string): URL | undefined {
+  return deskListReturnUrl(value, requestUrl, doctypeName, "CSV import returnTo must target the current Desk list");
+}
+
+function deskListReturnUrl(
+  value: string | undefined,
+  requestUrl: string,
+  doctypeName: string,
+  failureMessage: string
+): URL | undefined {
   if (value === undefined || value.trim() === "") {
     return undefined;
   }
   const base = new URL(requestUrl);
-  const url = new URL(value, base);
+  let url: URL;
+  try {
+    url = new URL(value, base);
+  } catch (_error) {
+    throw new FrameworkError("BAD_REQUEST", failureMessage, { status: 400 });
+  }
   const expectedPath = `/desk/${encodeURIComponent(doctypeName)}`;
   if (url.origin !== base.origin || url.pathname !== expectedPath) {
-    throw new FrameworkError("BAD_REQUEST", "CSV import returnTo must target the current Desk list", { status: 400 });
+    throw new FrameworkError("BAD_REQUEST", failureMessage, { status: 400 });
   }
   return url;
+}
+
+function deskListRedirectUrl(requestUrl: string, doctypeName: string, returnUrl: URL | undefined): string {
+  return returnUrl === undefined
+    ? new URL(`/desk/${encodeURIComponent(doctypeName)}`, requestUrl).pathname
+    : `${returnUrl.pathname}${returnUrl.search}`;
 }
 
 function deskCsvImportMode(value: string | undefined): DocumentImportMode | undefined {

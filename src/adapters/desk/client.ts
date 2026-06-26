@@ -692,6 +692,22 @@ export function renderDeskClientScript(): string {
     return body;
   }
 
+  function deskBulkDocumentsBody(doctype, documents, options) {
+    var body = new URLSearchParams();
+    var returnTo = options && options.returnTo !== undefined ? options.returnTo : currentDeskListReturnTo(doctype);
+    setFormParam(body, "returnTo", returnTo);
+    (documents || []).forEach(function (document) {
+      var name = typeof document === "string" ? document : document && document.name;
+      if (name === undefined || name === null) {
+        return;
+      }
+      body.append("document", String(name));
+      var expectedVersion = typeof document === "string" ? undefined : document.expectedVersion;
+      setFormParam(body, "expectedVersion:" + String(name), expectedVersion);
+    });
+    return body;
+  }
+
   function jobDashboardParams(options) {
     var params = {};
     setParam(params, "job", options && (options.jobName !== undefined ? options.jobName : options.job));
@@ -3358,6 +3374,34 @@ export function renderDeskClientScript(): string {
           method: "POST",
           headers: { "content-type": "application/x-www-form-urlencoded; charset=utf-8" },
           body: deskImportBody(doctype, csv, options || {})
+        });
+      },
+      bulkDelete: function (doctype, documents, options) {
+        return request(deskPath(doctype) + "/bulk-delete", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded; charset=utf-8" },
+          body: deskBulkDocumentsBody(doctype, documents, options || {})
+        });
+      },
+      bulkSubmit: function (doctype, documents, options) {
+        return request(deskPath(doctype) + "/bulk-submit", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded; charset=utf-8" },
+          body: deskBulkDocumentsBody(doctype, documents, options || {})
+        });
+      },
+      bulkCancel: function (doctype, documents, options) {
+        return request(deskPath(doctype) + "/bulk-cancel", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded; charset=utf-8" },
+          body: deskBulkDocumentsBody(doctype, documents, options || {})
+        });
+      },
+      bulkTransition: function (doctype, action, documents, options) {
+        return request(deskPath(doctype) + "/bulk-transition/" + encodePart(action), {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded; charset=utf-8" },
+          body: deskBulkDocumentsBody(doctype, documents, options || {})
         });
       }
     }),
