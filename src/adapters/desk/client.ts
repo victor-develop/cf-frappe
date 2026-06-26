@@ -179,6 +179,10 @@ export function renderDeskClientScript(): string {
     return "/api/resource/" + encodePart(doctype) + (name === undefined ? "" : "/" + encodePart(name));
   }
 
+  function deskPath(doctype) {
+    return "/desk/" + encodePart(doctype);
+  }
+
   function resourceActionPath(doctype, name, action) {
     return resourcePath(doctype, name) + "/" + action;
   }
@@ -342,6 +346,12 @@ export function renderDeskClientScript(): string {
   function setParam(params, key, value) {
     if (value !== undefined && value !== null) {
       params[key] = value;
+    }
+  }
+
+  function setFormParam(params, key, value) {
+    if (value !== undefined && value !== null) {
+      params.set(key, String(value));
     }
   }
 
@@ -662,6 +672,24 @@ export function renderDeskClientScript(): string {
     setParam(params, "limit", options && options.limit);
     setParam(params, "tenant", options && options.tenant);
     return params;
+  }
+
+  function currentDeskListReturnTo(doctype) {
+    try {
+      var current = new URL(root.location.href);
+      return current.pathname === deskPath(doctype) ? current.pathname + current.search : undefined;
+    } catch (_error) {
+      return undefined;
+    }
+  }
+
+  function deskImportBody(doctype, csv, options) {
+    var body = new URLSearchParams();
+    var returnTo = options && options.returnTo !== undefined ? options.returnTo : currentDeskListReturnTo(doctype);
+    setFormParam(body, "mode", options && options.mode);
+    setFormParam(body, "returnTo", returnTo);
+    body.set("csv", csv || "");
+    return body;
   }
 
   function jobDashboardParams(options) {
@@ -3314,6 +3342,24 @@ export function renderDeskClientScript(): string {
     throw: throwMessage,
     ui: Object.freeze({
       msgprint: msgprint
+    }),
+    desk: Object.freeze({
+      listUrl: function (doctype, options) {
+        return withQuery(deskPath(doctype), resourceListParams(options || {}));
+      },
+      csvUrl: function (doctype, options) {
+        return withQuery(deskPath(doctype) + "/export.csv", resourceExportParams(options || {}));
+      },
+      importTemplateCsvUrl: function (doctype) {
+        return deskPath(doctype) + "/import-template.csv";
+      },
+      importCsv: function (doctype, csv, options) {
+        return request(deskPath(doctype) + "/import.csv", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded; charset=utf-8" },
+          body: deskImportBody(doctype, csv, options || {})
+        });
+      }
     }),
     resource: Object.freeze({
       activity: function (doctype, name, input, options) {

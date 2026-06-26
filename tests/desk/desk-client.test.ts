@@ -284,6 +284,16 @@ interface DeskClientRuntime {
       options?: { readonly size?: number }
     ) => Promise<unknown>;
   };
+  readonly desk: {
+    readonly csvUrl: (doctype: string, options?: Record<string, unknown>) => string;
+    readonly importCsv: (
+      doctype: string,
+      csv: string,
+      options?: { readonly mode?: "create" | "update"; readonly returnTo?: string }
+    ) => Promise<unknown>;
+    readonly importTemplateCsvUrl: (doctype: string) => string;
+    readonly listUrl: (doctype: string, options?: Record<string, unknown>) => string;
+  };
   readonly resource: {
     readonly activity: (
       doctype: string,
@@ -628,6 +638,86 @@ describe("Desk client runtime", () => {
       }
     });
     expect(new Headers(calls[0]?.init.headers).get("content-type")).toBe("text/csv; charset=utf-8");
+  });
+
+  it("builds Desk list and CSV URLs for client scripts", async () => {
+    const runtime = evaluateDeskClient();
+    const filterExpression = { match: "all", filters: [{ field: "priority", operator: "eq", value: "High" }] };
+
+    expect(
+      runtime.desk.listUrl("Task Type", {
+        orderBy: "count",
+        order: "asc",
+        limit: 25,
+        offset: 50,
+        default_filters: 0,
+        filters: {
+          priority: { ne: "Low" },
+          title: "Launch"
+        },
+        filterExpression
+      })
+    ).toBe(
+      '/desk/Task%20Type?order=asc&limit=25&offset=50&default_filters=0&order_by=count&filter_expression=%7B%22match%22%3A%22all%22%2C%22filters%22%3A%5B%7B%22field%22%3A%22priority%22%2C%22operator%22%3A%22eq%22%2C%22value%22%3A%22High%22%7D%5D%7D&filter_priority__ne=Low&filter_title=Launch'
+    );
+    expect(
+      runtime.desk.csvUrl("Task Type", {
+        orderBy: "count",
+        order: "asc",
+        limit: 25,
+        offset: 50,
+        filters: { title: "Launch" }
+      })
+    ).toBe("/desk/Task%20Type/export.csv?order=asc&limit=25&order_by=count&filter_title=Launch");
+    expect(runtime.desk.importTemplateCsvUrl("Task Type")).toBe("/desk/Task%20Type/import-template.csv");
+  });
+
+  it("wraps Desk CSV imports with list return context for client scripts", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(
+      async (url, init) => {
+        calls.push({ url: String(url), init: init ?? {} });
+        return new Response("<!doctype html><p>Imported</p>", {
+          headers: { "content-type": "text/html" }
+        });
+      },
+      new FakeDocument(),
+      [],
+      undefined,
+      "https://app.example/desk/Task%20Type?filter_priority=High&order_by=count&order=asc"
+    );
+
+    await expect(runtime.desk.importCsv("Task Type", "title\nImported", { mode: "update" })).resolves.toContain(
+      "Imported"
+    );
+
+    expect(calls[0]?.url).toBe("/desk/Task%20Type/import.csv");
+    expect(calls[0]?.init.method).toBe("POST");
+    expect(new Headers(calls[0]?.init.headers).get("content-type")).toBe(
+      "application/x-www-form-urlencoded; charset=utf-8"
+    );
+    expect(String(calls[0]?.init.body)).toBe(
+      "mode=update&returnTo=%2Fdesk%2FTask%2520Type%3Ffilter_priority%3DHigh%26order_by%3Dcount%26order%3Dasc&csv=title%0AImported"
+    );
+  });
+
+  it("lets Desk CSV imports use an explicit return target outside list pages", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response("Imported", {
+        headers: { "content-type": "text/html" }
+      });
+    });
+
+    await runtime.desk.importCsv("Task Type", "title\nImported", {
+      returnTo: "/desk/Task%20Type?default_filters=0"
+    });
+
+    expect(calls[0]?.url).toBe("/desk/Task%20Type/import.csv");
+    expect(String(calls[0]?.init.body)).toBe(
+      "returnTo=%2Fdesk%2FTask%2520Type%3Fdefault_filters%3D0&csv=title%0AImported"
+    );
   });
 
   it("maps resource compound filter expressions to query parameters", async () => {
@@ -3957,11 +4047,12 @@ function evaluateDeskClient(
   fetchImpl: typeof fetch = fetch,
   documentImpl: unknown = new FakeDocument(),
   sockets: FakeWebSocket[] = [],
-  alertImpl?: (message: string) => void
+  alertImpl?: (message: string) => void,
+  locationHref = "https://app.example/desk/Task/TASK-1"
 ): DeskClientRuntime {
   const fakeWindow = {
     ...(alertImpl === undefined ? {} : { alert: alertImpl }),
-    location: { href: "https://app.example/desk/Task/TASK-1" }
+    location: { href: locationHref }
   } as { alert?: (message: string) => void; cfFrappe?: DeskClientRuntime; location: { href: string } };
 
   new Function(
