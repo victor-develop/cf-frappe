@@ -51,6 +51,13 @@ import {
   type DataPatchRemoteCommand
 } from "./data-patches.js";
 import {
+  DashboardRemoteError,
+  runRemoteDashboardCommand,
+  type DashboardHeaderOption,
+  type DashboardRemoteAction,
+  type DashboardRemoteCommand
+} from "./dashboards.js";
+import {
   FieldPropertyRemoteError,
   runRemoteFieldPropertyCommand,
   type FieldPropertyHeaderOption,
@@ -195,6 +202,7 @@ type ParsedCommand =
   | AuditRemoteCommand
   | CustomFieldRemoteCommand
   | DataPatchRemoteCommand
+  | DashboardRemoteCommand
   | FieldPropertyRemoteCommand
   | JobRemoteCommand
   | NotificationRuleRemoteCommand
@@ -238,6 +246,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     if (command.kind === "data-patches") {
       io.stdout.write(await runRemoteDataPatchCommand(command, {
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
+    if (command.kind === "dashboards") {
+      io.stdout.write(await runRemoteDashboardCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -408,6 +423,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof AuditRemoteError ||
       error instanceof CustomFieldRemoteError ||
       error instanceof DataPatchRemoteError ||
+      error instanceof DashboardRemoteError ||
       error instanceof FieldPropertyRemoteError ||
       error instanceof JobRemoteError ||
       error instanceof NotificationRuleRemoteError ||
@@ -447,6 +463,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "data-patches") {
     return parseDataPatchesArgs(rest);
+  }
+  if (command === "dashboards") {
+    return parseDashboardsArgs(rest);
   }
   if (command === "field-properties") {
     return parseFieldPropertiesArgs(rest);
@@ -2226,6 +2245,94 @@ function parseDataPatchesArgs(argv: readonly string[]): ParsedCommand {
   };
 }
 
+function parseDashboardsArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = dashboardAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown dashboards command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: DashboardHeaderOption[] = [];
+  let dashboard: string | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "Dashboard");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "Dashboard");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--dashboard") {
+      if (action === "list") {
+        return { kind: "invalid", message: "Cannot use --dashboard with dashboards list" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      dashboard = value;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown dashboards ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if (action !== "list" && dashboard === undefined) {
+    return { kind: "invalid", message: `Dashboard ${action} requires --dashboard` };
+  }
+
+  return {
+    kind: "dashboards",
+    action,
+    url,
+    headers,
+    ...(dashboard === undefined ? {} : { dashboard })
+  };
+}
+
 function dataPatchAction(value: string): DataPatchRemoteAction | undefined {
   return value === "status" ||
     value === "plan" ||
@@ -2239,6 +2346,10 @@ function dataPatchAction(value: string): DataPatchRemoteAction | undefined {
     value === "rollback-retry-enqueue"
     ? value
     : undefined;
+}
+
+function dashboardAction(value: string): DashboardRemoteAction | undefined {
+  return value === "list" || value === "get" || value === "run" ? value : undefined;
 }
 
 function isSingleDataPatchAction(action: DataPatchRemoteAction): boolean {
@@ -4341,7 +4452,7 @@ function parseJsonObject(value: string, label: string): Record<string, unknown> 
 function parseLiteralHeader(
   value: string,
   label: string
-): AuditHeaderOption | CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | ProfileHeaderOption | PrintFormatHeaderOption | PrintSettingsHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
+): AuditHeaderOption | CustomFieldHeaderOption | DataPatchHeaderOption | DashboardHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | ProfileHeaderOption | PrintFormatHeaderOption | PrintSettingsHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
   const separator = value.indexOf(":");
   if (separator < 1) {
     return `${label} header must use 'Name: value' syntax`;
@@ -4360,7 +4471,7 @@ function parseLiteralHeader(
 function parseEnvHeader(
   value: string,
   label: string
-): AuditHeaderOption | CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | ProfileHeaderOption | PrintFormatHeaderOption | PrintSettingsHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
+): AuditHeaderOption | CustomFieldHeaderOption | DataPatchHeaderOption | DashboardHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | ProfileHeaderOption | PrintFormatHeaderOption | PrintSettingsHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
   const separator = value.indexOf("=");
   if (separator < 1) {
     return `${label} environment header must use 'Name=ENV_VAR' syntax`;
@@ -4702,6 +4813,9 @@ function helpText(): string {
     "  cf-frappe data-patches enqueue --url <origin> [--id <patchId>] [--limit <n>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches rollback-enqueue --url <origin> [--id <patchId>] [--limit <n>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe data-patches rollback-retry-enqueue --url <origin> --id <patchId> [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe dashboards list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe dashboards get --url <origin> --dashboard <dashboard> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe dashboards run --url <origin> --dashboard <dashboard> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs list --url <origin> [--job <name>] [--run-id <id>] [--status <running|succeeded|failed>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs get --url <origin> --idempotency-key <key> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs retry --url <origin> --idempotency-key <key> [--header <name:value>] [--header-env <name=ENV>]",

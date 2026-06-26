@@ -310,6 +310,9 @@ npx cf-frappe field-properties clear --url https://your-worker.example --doctype
 npx cf-frappe workflows get --url https://your-worker.example --doctype Task --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe workflows save --url https://your-worker.example --doctype Task --workflow-json '{"initialState":"Open","states":["Open","Doing","Done"],"transitions":[{"action":"start","from":"Open","to":"Doing"},{"action":"finish","from":"Doing","to":"Done"}]}' --expected-version 0 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe workflows clear --url https://your-worker.example --doctype Task --expected-version 1 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe dashboards list --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe dashboards get --url https://your-worker.example --dashboard "Task Dashboard" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe dashboards run --url https://your-worker.example --dashboard "Task Dashboard" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe print-formats list --url https://your-worker.example --doctype Task --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe print-formats get --url https://your-worker.example --format "Task Standard" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe print-formats letterheads --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
