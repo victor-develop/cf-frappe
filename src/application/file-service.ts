@@ -313,6 +313,7 @@ export interface FileDashboardEntry {
 }
 
 export interface FileDashboard {
+  readonly canUpload: boolean;
   readonly files: readonly FileDashboardEntry[];
   readonly limit: number;
   readonly filters: {
@@ -809,6 +810,7 @@ export class FileService {
       offset += batchLimit;
     } while (files.length < limit && offset < total);
     return {
+      canUpload: can(actor, doctype, "create"),
       files: files.slice(0, limit),
       limit,
       filters

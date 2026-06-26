@@ -2643,6 +2643,61 @@ describe("Desk app", () => {
     expect(services.storage.has("acme/files/file_object-private.txt")).toBe(true);
   });
 
+  it("hides Desk file upload controls from actors without File create permission", async () => {
+    const services = makeFileDesk(owner, {
+      doctypes: [noteDocType, fileDocType],
+      ids: ["note-create"],
+      fileIds: ["blocked-manager", "blocked-attachment"]
+    });
+    await services.documents.create({ actor: owner, doctype: "Note", data: data() });
+    const guestApp = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      files: services.files,
+      actor: () => guest
+    });
+
+    const manager = await guestApp.request("/desk/files");
+    expect(manager.status).toBe(200);
+    const managerHtml = await manager.text();
+    expect(managerHtml).not.toContain('class="panel form file-upload"');
+    expect(managerHtml).not.toContain('action="/desk/files" enctype="multipart/form-data"');
+
+    const managerUpload = new FormData();
+    managerUpload.append("file", new Blob(["blocked"], { type: "text/plain" }), "blocked.txt");
+    const managerPosted = await guestApp.request("/desk/files", {
+      method: "POST",
+      headers: { "content-length": "512" },
+      body: managerUpload
+    });
+    expect(managerPosted.status).toBe(403);
+    const managerError = await managerPosted.text();
+    expect(managerError).toContain("cannot create File");
+    expect(managerError).not.toContain('class="panel form file-upload"');
+
+    const document = await guestApp.request("/desk/Note/My%20Note");
+    expect(document.status).toBe(200);
+    const documentHtml = await document.text();
+    expect(documentHtml).toContain("Attachments");
+    expect(documentHtml).not.toContain('class="form attachment-upload"');
+    expect(documentHtml).not.toContain('action="/desk/Note/My%20Note/files"');
+
+    const attachmentUpload = new FormData();
+    attachmentUpload.append("file", new Blob(["blocked"], { type: "text/plain" }), "blocked.txt");
+    const attachmentPosted = await guestApp.request("/desk/Note/My%20Note/files", {
+      method: "POST",
+      headers: { "content-length": "512" },
+      body: attachmentUpload
+    });
+    expect(attachmentPosted.status).toBe(403);
+    const attachmentError = await attachmentPosted.text();
+    expect(attachmentError).toContain("cannot create File");
+    expect(attachmentError).not.toContain('class="form attachment-upload"');
+    expect(services.storage.has("acme/files/file_blocked-manager-blocked.txt")).toBe(false);
+    expect(services.storage.has("acme/files/file_blocked-attachment-blocked.txt")).toBe(false);
+  });
+
   it("renders list and create form pages", async () => {
     const { app, services } = makeDesk();
     await services.documents.create({ actor: owner, doctype: "Note", data: data() });

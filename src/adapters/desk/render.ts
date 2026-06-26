@@ -408,6 +408,22 @@ export function renderFileManager(
   const hasBulkDelete = dashboard.files.some((file) => file.deletable);
   const hasBulkMetadata = dashboard.files.some((file) => file.editable);
   const hasBulkActions = hasBulkDelete || hasBulkMetadata;
+  const uploadError = options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : "";
+  const uploadForm = dashboard.canUpload
+    ? `<form class="panel form file-upload" method="post" action="/desk/files" enctype="multipart/form-data">
+        <div class="form-head">
+          <h2>Upload File</h2>
+        </div>
+        ${uploadError}
+        <div class="fields">
+          <label class="field"><span>File</span><input name="file" type="file" required></label>
+          <label class="field"><span>Attached To DocType</span><input name="attached_to_doctype" value="${escapeHtml(dashboard.filters.attachedToDoctype ?? "")}"></label>
+          <label class="field"><span>Attached To Name</span><input name="attached_to_name" value="${escapeHtml(dashboard.filters.attachedToName ?? "")}"></label>
+          <label class="field checkbox-field"><span>Private</span><input name="is_private" type="checkbox" value="1" checked></label>
+        </div>
+        <div class="actions"><button class="button primary" type="submit">Upload</button></div>
+      </form>`
+    : uploadError;
   const rows = dashboard.files
     .map((file) => {
       const attachedTo = attachmentLabel(file);
@@ -425,19 +441,7 @@ export function renderFileManager(
       </tr>`;
     })
     .join("");
-  return `<form class="panel form file-upload" method="post" action="/desk/files" enctype="multipart/form-data">
-    <div class="form-head">
-      <h2>Upload File</h2>
-    </div>
-    ${options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : ""}
-    <div class="fields">
-      <label class="field"><span>File</span><input name="file" type="file" required></label>
-      <label class="field"><span>Attached To DocType</span><input name="attached_to_doctype" value="${escapeHtml(dashboard.filters.attachedToDoctype ?? "")}"></label>
-      <label class="field"><span>Attached To Name</span><input name="attached_to_name" value="${escapeHtml(dashboard.filters.attachedToName ?? "")}"></label>
-      <label class="field checkbox-field"><span>Private</span><input name="is_private" type="checkbox" value="1" checked></label>
-    </div>
-    <div class="actions"><button class="button primary" type="submit">Upload</button></div>
-  </form>
+  return `${uploadForm}
   <form class="panel form list-filters" method="get" action="/desk/files">
     <div class="fields">
       <label class="field"><span>Attached To DocType</span><input name="attached_to_doctype" value="${escapeHtml(dashboard.filters.attachedToDoctype ?? "")}"></label>
@@ -474,6 +478,18 @@ export function renderFileAttachmentPanel(
   dashboard: FileDashboard,
   options: { readonly error?: string } = {}
 ): string {
+  const documentHref = `/desk/${encodeURIComponent(doctype)}/${encodeURIComponent(documentName)}`;
+  const uploadError = options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : "";
+  const uploadForm = dashboard.canUpload
+    ? `<form class="form attachment-upload" method="post" action="${escapeHtml(documentHref)}/files" enctype="multipart/form-data">
+        ${uploadError}
+        <div class="fields">
+          <label class="field"><span>File</span><input name="file" type="file" required></label>
+          <label class="field checkbox-field"><span>Private</span><input name="is_private" type="checkbox" value="1" checked></label>
+        </div>
+        <div class="actions"><button class="button primary" type="submit">Upload</button></div>
+      </form>`
+    : uploadError;
   const rows = dashboard.files
     .map(
       (file) => `<tr>
@@ -487,21 +503,13 @@ export function renderFileAttachmentPanel(
       </tr>`
     )
     .join("");
-  const documentHref = `/desk/${encodeURIComponent(doctype)}/${encodeURIComponent(documentName)}`;
   const managerHref = `/desk/files?attached_to_doctype=${encodeURIComponent(doctype)}&attached_to_name=${encodeURIComponent(documentName)}`;
   return `<section class="panel attachments" aria-labelledby="document-attachments">
     <div class="attachment-head">
       <h2 id="document-attachments">Attachments</h2>
       <a class="button" href="${escapeHtml(managerHref)}">Open file manager</a>
     </div>
-    <form class="form attachment-upload" method="post" action="${escapeHtml(documentHref)}/files" enctype="multipart/form-data">
-      ${options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : ""}
-      <div class="fields">
-        <label class="field"><span>File</span><input name="file" type="file" required></label>
-        <label class="field checkbox-field"><span>Private</span><input name="is_private" type="checkbox" value="1" checked></label>
-      </div>
-      <div class="actions"><button class="button primary" type="submit">Upload</button></div>
-    </form>
+    ${uploadForm}
     <div class="table-wrap">
       <table>
         <thead><tr><th>Filename</th><th>Content Type</th><th>Size</th><th>Private</th><th>Uploaded By</th><th>Uploaded At</th><th>Action</th></tr></thead>

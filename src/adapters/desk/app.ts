@@ -2856,6 +2856,7 @@ function optionalBooleanQuery(value: string | undefined): boolean | undefined {
 
 function emptyFileDashboard(query: FileDashboardQuery): FileDashboard {
   return {
+    canUpload: false,
     files: [],
     limit: query.limit === undefined || query.limit < 1 || query.limit > 200 ? 50 : query.limit,
     filters: fileDashboardFiltersFromQuery(query)
