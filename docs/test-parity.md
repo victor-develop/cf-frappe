@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the remote notification-rule enable/disable CLI conflict slice:
+As of the Desk notification-rule enable/disable client helper slice:
 
 - Vitest files: `119`
-- Vitest cases: `1302`
+- Vitest cases: `1304`
 
 ## Implication
 

@@ -439,6 +439,61 @@ export function renderDeskClientScript(): string {
     return Object.assign({ rule: bodyRule }, versionBody(options));
   }
 
+  function requiredNotificationRuleEvents(rule, ruleName) {
+    if (!Array.isArray(rule.events) || rule.events.length === 0) {
+      throw new Error("Notification rule '" + ruleName + "' cannot be toggled because it has no events");
+    }
+    return rule.events;
+  }
+
+  function requiredNotificationRuleRecipients(rule, ruleName) {
+    if (!Array.isArray(rule.recipients) || rule.recipients.length === 0) {
+      throw new Error("Notification rule '" + ruleName + "' cannot be toggled because it has no recipients");
+    }
+    return rule.recipients;
+  }
+
+  function notificationRuleToggleBody(ruleName, state, enabled, options) {
+    var expectedVersion = options && options.expectedVersion;
+    if (expectedVersion !== undefined && state && state.version !== undefined && state.version !== expectedVersion) {
+      throw new Error("Expected notification rules at version " + String(expectedVersion) + ", found " + String(state.version));
+    }
+    var entry = ((state && state.rules) || []).find(function (item) {
+      return item && item.rule && item.rule.name === ruleName;
+    });
+    if (entry === undefined) {
+      throw new Error("Notification rule '" + ruleName + "' was not found in remote state");
+    }
+    var rule = entry.rule;
+    var bodyRule = {
+      events: requiredNotificationRuleEvents(rule, ruleName).slice(),
+      recipients: requiredNotificationRuleRecipients(rule, ruleName).slice()
+    };
+    if (Array.isArray(rule.channels) && rule.channels.length > 0) {
+      bodyRule.channels = rule.channels.slice();
+    }
+    bodyRule.enabled = enabled;
+    if (rule.subject !== undefined) {
+      bodyRule.subject = rule.subject;
+    }
+    if (rule.excludeActor !== undefined) {
+      bodyRule.excludeActor = rule.excludeActor;
+    }
+    return {
+      rule: bodyRule,
+      expectedVersion: expectedVersion !== undefined ? expectedVersion : state && state.version !== undefined ? state.version : 0
+    };
+  }
+
+  async function toggleNotificationRule(doctype, rule, enabled, options) {
+    var commandOptions = options || {};
+    var state = unwrapData(await request(notificationRulePath(doctype, undefined, commandOptions)));
+    return request(notificationRulePath(doctype, rule, commandOptions), {
+      method: "PUT",
+      body: notificationRuleToggleBody(rule, state, enabled, commandOptions)
+    }).then(unwrapData);
+  }
+
   function fieldPropertyBody(overrides, options) {
     var bodyOverrides = isPlainObject(overrides) ? withoutKeys(overrides, ["expectedVersion"]) : overrides;
     return Object.assign({ overrides: bodyOverrides }, versionBody(options));
@@ -3615,6 +3670,12 @@ export function renderDeskClientScript(): string {
     notificationRules: Object.freeze({
       clear: function (doctype, rule, options) {
         return request(notificationRulePath(doctype, rule, options || {}), { method: "DELETE", body: versionBody(options) }).then(unwrapData);
+      },
+      disable: function (doctype, rule, options) {
+        return toggleNotificationRule(doctype, rule, false, options);
+      },
+      enable: function (doctype, rule, options) {
+        return toggleNotificationRule(doctype, rule, true, options);
       },
       list: function (doctype, options) {
         return request(notificationRulePath(doctype, undefined, options || {})).then(unwrapData);

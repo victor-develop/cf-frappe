@@ -209,6 +209,16 @@ interface DeskClientRuntime {
       rule: string,
       options?: { readonly expectedVersion?: number; readonly tenant?: string }
     ) => Promise<unknown>;
+    readonly disable: (
+      doctype: string,
+      rule: string,
+      options?: { readonly expectedVersion?: number; readonly tenant?: string }
+    ) => Promise<unknown>;
+    readonly enable: (
+      doctype: string,
+      rule: string,
+      options?: { readonly expectedVersion?: number; readonly tenant?: string }
+    ) => Promise<unknown>;
     readonly list: (doctype: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly save: (
       doctype: string,
@@ -2468,6 +2478,100 @@ describe("Desk client runtime", () => {
       }),
       JSON.stringify({ expectedVersion: 2 })
     ]);
+  });
+
+  it("wraps notification rule enable and disable as event-sourced remote saves", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      const version = calls.length <= 2 ? 2 : 4;
+      return new Response(
+        JSON.stringify({
+          data: {
+            version,
+            rules: [
+              {
+                rule: {
+                  name: "Managers/Updates",
+                  events: ["DocumentUpdated"],
+                  recipients: [{ kind: "user", userId: "manager@example.com" }],
+                  ...(version === 4 ? { channels: ["email"], subject: "Task changed", excludeActor: false } : {})
+                }
+              }
+            ]
+          }
+        }),
+        {
+          headers: { "content-type": "application/json" },
+          status: (init?.method ?? "GET") === "PUT" ? 201 : 200
+        }
+      );
+    });
+
+    await runtime.notificationRules.enable("Task Type", "Managers/Updates", { tenant: "acme/east" });
+    await runtime.notificationRules.disable("Task Type", "Managers/Updates", {
+      expectedVersion: 4,
+      tenant: "acme/east"
+    });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/notification-rules/Task%20Type?tenant=acme%2Feast",
+      "PUT /api/notification-rules/Task%20Type/Managers%2FUpdates?tenant=acme%2Feast",
+      "GET /api/notification-rules/Task%20Type?tenant=acme%2Feast",
+      "PUT /api/notification-rules/Task%20Type/Managers%2FUpdates?tenant=acme%2Feast"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual([
+      "same-origin",
+      "same-origin",
+      "same-origin",
+      "same-origin"
+    ]);
+    expect(calls.map((call) => call.init.body)).toEqual([
+      undefined,
+      JSON.stringify({
+        rule: {
+          events: ["DocumentUpdated"],
+          recipients: [{ kind: "user", userId: "manager@example.com" }],
+          enabled: true
+        },
+        expectedVersion: 2
+      }),
+      undefined,
+      JSON.stringify({
+        rule: {
+          events: ["DocumentUpdated"],
+          recipients: [{ kind: "user", userId: "manager@example.com" }],
+          channels: ["email"],
+          enabled: false,
+          subject: "Task changed",
+          excludeActor: false
+        },
+        expectedVersion: 4
+      })
+    ]);
+  });
+
+  it("checks notification rule expectedVersion before missing-rule lookup", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { version: 5, rules: [] } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(
+      runtime.notificationRules.enable("Task Type", "Missing Rule", {
+        expectedVersion: 4,
+        tenant: "acme/east"
+      })
+    ).rejects.toThrow("Expected notification rules at version 4, found 5");
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/notification-rules/Task%20Type?tenant=acme%2Feast"
+    ]);
+    expect(calls[0]?.init.credentials).toBe("same-origin");
+    expect(calls[0]?.init.body).toBeUndefined();
   });
 
   it("wraps event-sourced role catalog APIs with tenant and version metadata", async () => {
