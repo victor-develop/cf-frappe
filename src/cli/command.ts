@@ -394,6 +394,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     if (command.kind === "print-formats") {
       io.stdout.write(await runRemotePrintFormatCommand(command, {
+        cwd: io.cwd(),
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -1990,6 +1991,8 @@ function parsePrintFormatsArgs(argv: readonly string[]): ParsedCommand {
   const headers: PrintFormatHeaderOption[] = [];
   let doctype: string | undefined;
   let format: string | undefined;
+  let name: string | undefined;
+  let outputPath: string | undefined;
   let letterhead: string | undefined;
 
   for (let index = 0; index < rest.length; index += 1) {
@@ -2048,7 +2051,7 @@ function parsePrintFormatsArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--format") {
-      if (action !== "get") {
+      if (action !== "get" && action !== "html" && action !== "pdf") {
         return { kind: "invalid", message: `Cannot use --format with print-formats ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -2056,6 +2059,30 @@ function parsePrintFormatsArgs(argv: readonly string[]): ParsedCommand {
         return value;
       }
       format = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--name") {
+      if (action !== "html" && action !== "pdf") {
+        return { kind: "invalid", message: `Cannot use --name with print-formats ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      name = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--output") {
+      if (action !== "html" && action !== "pdf") {
+        return { kind: "invalid", message: `Cannot use --output with print-formats ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      outputPath = value;
       index += 1;
       continue;
     }
@@ -2077,8 +2104,14 @@ function parsePrintFormatsArgs(argv: readonly string[]): ParsedCommand {
   if (url === undefined) {
     return { kind: "invalid", message: "Missing value for --url" };
   }
-  if (action === "get" && format === undefined) {
-    return { kind: "invalid", message: "Print format get requires --format" };
+  if ((action === "get" || action === "html" || action === "pdf") && format === undefined) {
+    return { kind: "invalid", message: `Print format ${action} requires --format` };
+  }
+  if ((action === "html" || action === "pdf") && name === undefined) {
+    return { kind: "invalid", message: `Print format ${action} requires --name` };
+  }
+  if ((action === "html" || action === "pdf") && outputPath === undefined) {
+    return { kind: "invalid", message: `Print format ${action} requires --output` };
   }
   if (action === "letterhead" && letterhead === undefined) {
     return { kind: "invalid", message: "Print format letterhead requires --letterhead" };
@@ -2091,6 +2124,8 @@ function parsePrintFormatsArgs(argv: readonly string[]): ParsedCommand {
     headers,
     ...(doctype === undefined ? {} : { doctype }),
     ...(format === undefined ? {} : { format }),
+    ...(name === undefined ? {} : { name }),
+    ...(outputPath === undefined ? {} : { outputPath }),
     ...(letterhead === undefined ? {} : { letterhead })
   };
 }
@@ -5397,7 +5432,7 @@ function profileAction(value: string): ProfileRemoteAction | undefined {
 }
 
 function printFormatAction(value: string): PrintFormatRemoteAction | undefined {
-  return value === "list" || value === "get" || value === "letterheads" || value === "letterhead"
+  return value === "list" || value === "get" || value === "html" || value === "pdf" || value === "letterheads" || value === "letterhead"
     ? value
     : undefined;
 }
@@ -6026,6 +6061,8 @@ function helpText(): string {
     "  cf-frappe profiles update --url <origin> --user-id <user> --profile-json <json> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe print-formats list --url <origin> [--doctype <doctype>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe print-formats get --url <origin> --format <format> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe print-formats html --url <origin> --format <format> --name <docname> --output <localPath> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe print-formats pdf --url <origin> --format <format> --name <docname> --output <localPath> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe print-formats letterheads --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe print-formats letterhead --url <origin> --letterhead <letterhead> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe print-settings get --url <origin> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",

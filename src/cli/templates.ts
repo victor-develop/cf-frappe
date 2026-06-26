@@ -329,6 +329,8 @@ npx cf-frappe workspaces list --url https://your-worker.example --header-env Aut
 npx cf-frappe workspaces get --url https://your-worker.example --workspace Tasks --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe print-formats list --url https://your-worker.example --doctype Task --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe print-formats get --url https://your-worker.example --format "Task Standard" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe print-formats html --url https://your-worker.example --format "Task Standard" --name "Review generated Desk workspace" --output ./task.html --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe print-formats pdf --url https://your-worker.example --format "Task Standard" --name "Review generated Desk workspace" --output ./task.pdf --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe print-formats letterheads --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe print-settings get --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe print-settings update --url https://your-worker.example --settings-json '{"defaultLayout":{"pageSize":"Letter","orientation":"portrait","margins":{"topMm":12,"rightMm":11,"bottomMm":13,"leftMm":11},"font":{"family":"Inter","sizePt":10}}}' --expected-version 0 --header-env Authorization=CF_FRAPPE_AUTH

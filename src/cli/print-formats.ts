@@ -1,6 +1,13 @@
-import { requestRemoteAdminPayload, type RemoteAdminIo, type RemoteHeaderOption } from "./remote-admin.js";
+import { writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import {
+  requestRemoteAdminPayload,
+  requestRemoteAdminResponse,
+  type RemoteAdminIo,
+  type RemoteHeaderOption
+} from "./remote-admin.js";
 
-export type PrintFormatRemoteAction = "get" | "letterhead" | "letterheads" | "list";
+export type PrintFormatRemoteAction = "get" | "html" | "letterhead" | "letterheads" | "list" | "pdf";
 
 export type PrintFormatHeaderOption = RemoteHeaderOption;
 
@@ -11,10 +18,14 @@ export interface PrintFormatRemoteCommand {
   readonly headers: readonly PrintFormatHeaderOption[];
   readonly doctype?: string;
   readonly format?: string;
+  readonly name?: string;
+  readonly outputPath?: string;
   readonly letterhead?: string;
 }
 
-export type PrintFormatRemoteIo = RemoteAdminIo;
+export interface PrintFormatRemoteIo extends RemoteAdminIo {
+  readonly cwd?: string;
+}
 
 export class PrintFormatRemoteError extends Error {
   constructor(message: string) {
@@ -53,6 +64,10 @@ export async function runRemotePrintFormatCommand(
   command: PrintFormatRemoteCommand,
   io: PrintFormatRemoteIo = {}
 ): Promise<string> {
+  if (command.action === "html" || command.action === "pdf") {
+    const downloaded = await downloadRemotePrintDocument(command, io);
+    return formatPrintDocumentDownload(command.url, command, downloaded.output, downloaded.bytes, downloaded.response);
+  }
   if (command.action === "list") {
     const query = formatQuery(command);
     const data = await requestRemotePrintMetadata(command, io, {
@@ -81,6 +96,43 @@ export async function runRemotePrintFormatCommand(
     path: `/api/meta/print-letterheads/${encodeURIComponent(requiredLetterhead(command))}`
   });
   return formatPrintLetterhead(command.url, objectData<PrintLetterheadResponse>(data.data, "print letterhead"));
+}
+
+function requestRemotePrintDocumentResponse(
+  command: PrintFormatRemoteCommand,
+  io: PrintFormatRemoteIo,
+  request: {
+    readonly method: "GET";
+    readonly path: string;
+  }
+): Promise<Response> {
+  return requestRemoteAdminResponse<PrintFormatRemoteError>(command, io, request, {
+    accept: command.action === "pdf" ? "application/pdf" : "text/html",
+    error: PrintFormatRemoteError,
+    fetchLabel: "remote print document commands",
+    resourceLabel: "Remote print document",
+    urlLabel: "Remote print document"
+  });
+}
+
+async function downloadRemotePrintDocument(
+  command: PrintFormatRemoteCommand,
+  io: PrintFormatRemoteIo
+): Promise<{ readonly output: string; readonly bytes: number; readonly response: Response }> {
+  const format = requiredFormat(command);
+  const name = requiredName(command);
+  const output = outputPath(command, io.cwd);
+  const response = await requestRemotePrintDocumentResponse(command, io, {
+    method: "GET",
+    path: `/api/print/${encodeURIComponent(format)}/${encodeURIComponent(name)}${command.action === "pdf" ? "/pdf" : ""}`
+  });
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  try {
+    await writeFile(output, bytes);
+  } catch (error) {
+    throw new PrintFormatRemoteError(`Could not write print ${command.action} file '${command.outputPath}': ${errorMessage(error)}`);
+  }
+  return { output, bytes: bytes.byteLength, response };
 }
 
 function requestRemotePrintMetadata(
@@ -169,6 +221,21 @@ function formatPrintLetterhead(baseUrl: string, letterhead: PrintLetterheadRespo
   ].join("\n");
 }
 
+function formatPrintDocumentDownload(
+  baseUrl: string,
+  command: PrintFormatRemoteCommand,
+  outputPath: string,
+  bytes: number,
+  response: Response
+): string {
+  const contentType = response.headers.get("content-type");
+  return [
+    `Downloaded print ${command.action.toUpperCase()} from ${baseUrl}`,
+    `- ${requiredFormat(command)}/${requiredName(command)} -> ${outputPath} bytes ${String(bytes)}${contentType === null ? "" : ` type ${contentType}`}`,
+    ""
+  ].join("\n");
+}
+
 function printLetterheadLines(letterheads: readonly PrintLetterheadResponse[]): readonly string[] {
   if (letterheads.length === 0) {
     return ["- (none)"];
@@ -197,9 +264,23 @@ function objectData<T>(data: unknown, label: string): T {
 
 function requiredFormat(command: PrintFormatRemoteCommand): string {
   if (command.format === undefined) {
-    throw new PrintFormatRemoteError("Print format get requires --format");
+    throw new PrintFormatRemoteError(`Print format ${command.action} requires --format`);
   }
   return command.format;
+}
+
+function requiredName(command: PrintFormatRemoteCommand): string {
+  if (command.name === undefined) {
+    throw new PrintFormatRemoteError(`Print format ${command.action} requires --name`);
+  }
+  return command.name;
+}
+
+function outputPath(command: PrintFormatRemoteCommand, cwd = process.cwd()): string {
+  if (command.outputPath === undefined) {
+    throw new PrintFormatRemoteError(`Print format ${command.action} requires --output`);
+  }
+  return resolve(cwd, command.outputPath);
 }
 
 function requiredLetterhead(command: PrintFormatRemoteCommand): string {
@@ -211,4 +292,8 @@ function requiredLetterhead(command: PrintFormatRemoteCommand): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
