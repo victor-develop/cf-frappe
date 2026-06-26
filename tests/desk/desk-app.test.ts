@@ -594,6 +594,7 @@ describe("Desk app", () => {
                 { name: "open-notes", label: "Open Notes", kind: "report", target: "Open Notes" },
                 { name: "ops-dashboard", kind: "dashboard", target: "Operations Dashboard" },
                 { name: "management-dashboard", kind: "dashboard", target: "Management Dashboard" },
+                { name: "inbox", label: "Inbox", kind: "notifications" },
                 { name: "manager-only", label: "Manager Only", kind: "doctype", target: "Note", roles: ["Task Manager"] }
               ]
             }
@@ -642,8 +643,22 @@ describe("Desk app", () => {
     expect(html).toContain('href="/desk/reports/Open%20Notes"');
     expect(html).toContain('href="/desk/dashboards/Operations%20Dashboard"');
     expect(html).toContain("Ops Dashboard");
+    expect(html).not.toContain('href="/desk/notifications"');
     expect(html).not.toContain("Management Dashboard");
     expect(html).not.toContain("Manager Only");
+
+    const appWithNotifications = createDeskApp({
+      registry,
+      documents,
+      queries,
+      reports,
+      dashboards,
+      notifications: new UserNotificationService({ events: store }),
+      actor: () => owner
+    });
+    const notificationsWorkspace = await appWithNotifications.request("/desk/workspaces/Operations");
+    expect(notificationsWorkspace.status).toBe(200);
+    await expect(notificationsWorkspace.text()).resolves.toContain('href="/desk/notifications"');
 
     const createOnlyNew = await app.request("/desk/CreateOnlyLog/new");
     expect(createOnlyNew.status).toBe(200);

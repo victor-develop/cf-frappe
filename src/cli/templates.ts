@@ -684,7 +684,7 @@ export const TaskWorkspace = defineWorkspace({
   name: "Tasks",
   label: "Tasks",
   module: "Desk",
-  description: "Starter task desk with list, create, report, dashboard, file, and admin shortcuts.",
+  description: "Starter task desk with list, create, report, dashboard, file, notification, and admin shortcuts.",
   roles: ["Guest", "User", "Task Manager"],
   sections: [
     {
@@ -702,6 +702,7 @@ export const TaskWorkspace = defineWorkspace({
       label: "Operations",
       shortcuts: [
         { name: "files", label: "Files", kind: "file", roles: ["User", "Task Manager"] },
+        { name: "notifications", label: "Notifications", kind: "notifications", roles: ["User", "Task Manager"] },
         { name: "roles", label: "Roles", kind: "admin", target: "roles", roles: ["Task Manager"] }
       ]
     }
