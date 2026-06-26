@@ -93,6 +93,13 @@ import {
   type NotificationRuleRemoteCommand
 } from "./notification-rules.js";
 import {
+  NotificationRemoteError,
+  runRemoteNotificationCommand,
+  type NotificationHeaderOption,
+  type NotificationRemoteAction,
+  type NotificationRemoteCommand
+} from "./notifications.js";
+import {
   FileRemoteError,
   runRemoteFileCommand,
   type FileHeaderOption,
@@ -248,6 +255,7 @@ type ParsedCommand =
   | FieldPropertyRemoteCommand
   | JobRemoteCommand
   | LinkOptionRemoteCommand
+  | NotificationRemoteCommand
   | NotificationRuleRemoteCommand
   | FileRemoteCommand
   | ResourceRemoteCommand
@@ -328,6 +336,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     if (command.kind === "link-options") {
       io.stdout.write(await runRemoteLinkOptionCommand(command, {
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
+    if (command.kind === "notifications") {
+      io.stdout.write(await runRemoteNotificationCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -517,6 +532,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof FieldPropertyRemoteError ||
       error instanceof JobRemoteError ||
       error instanceof LinkOptionRemoteError ||
+      error instanceof NotificationRemoteError ||
       error instanceof NotificationRuleRemoteError ||
       error instanceof FileRemoteError ||
       error instanceof ResourceRemoteError ||
@@ -573,6 +589,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "link-options") {
     return parseLinkOptionsArgs(rest);
+  }
+  if (command === "notifications") {
+    return parseNotificationsArgs(rest);
   }
   if (command === "notification-rules") {
     return parseNotificationRulesArgs(rest);
@@ -3056,6 +3075,148 @@ function parseLinkOptionsArgs(argv: readonly string[]): ParsedCommand {
     ...(query === undefined ? {} : { query }),
     ...(limit === undefined ? {} : { limit })
   };
+}
+
+function parseNotificationsArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = notificationAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown notifications command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: NotificationHeaderOption[] = [];
+  let id: string | undefined;
+  let user: string | undefined;
+  let limit: number | undefined;
+  let unreadOnly: boolean | undefined;
+  let includeDismissed: boolean | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "Notification");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "Notification");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--id") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      id = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--user") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      user = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--limit") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --limit with notifications ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parsePositiveInteger(value, "Notification inbox limit");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      limit = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--unread") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --unread with notifications ${action}` };
+      }
+      unreadOnly = true;
+      continue;
+    }
+    if (arg === "--include-dismissed") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --include-dismissed with notifications ${action}` };
+      }
+      includeDismissed = true;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown notifications ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if (action === "list" && id !== undefined) {
+    return { kind: "invalid", message: "Cannot use --id with notifications list" };
+  }
+  if (action !== "list" && id === undefined) {
+    return { kind: "invalid", message: `Notification ${action} requires --id` };
+  }
+
+  return {
+    kind: "notifications",
+    action,
+    url,
+    headers,
+    ...(id === undefined ? {} : { id }),
+    ...(user === undefined ? {} : { user }),
+    ...(limit === undefined ? {} : { limit }),
+    ...(unreadOnly === undefined ? {} : { unreadOnly }),
+    ...(includeDismissed === undefined ? {} : { includeDismissed })
+  };
+}
+
+function notificationAction(value: string): NotificationRemoteAction | undefined {
+  if (value === "dismiss" || value === "list" || value === "read") {
+    return value;
+  }
+  return undefined;
 }
 
 function parseReportBuilderArgs(argv: readonly string[]): ParsedCommand {
@@ -5839,6 +6000,9 @@ function helpText(): string {
     "  cf-frappe jobs schedule-reset --url <origin> --id <scheduleId> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs schedule-save --url <origin> [--id <scheduleId>] --cron <expr> --job <name> [--enabled|--disabled] [--payload-json <json>] [--metadata-json <json>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs schedule-delete --url <origin> --id <scheduleId> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe notifications list --url <origin> [--user <user>] [--limit <n>] [--unread] [--include-dismissed] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe notifications read --url <origin> --id <notificationId> [--user <user>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe notifications dismiss --url <origin> --id <notificationId> [--user <user>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notification-rules list --url <origin> --doctype <doctype> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notification-rules save --url <origin> --doctype <doctype> --rule <name> --event <eventKind>... (--recipient-user <user>|--recipient-field <field>|--recipient-owner)... [--subject <text>] [--enabled|--disabled] [--exclude-actor|--include-actor] [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notification-rules clear --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",

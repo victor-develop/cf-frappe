@@ -398,9 +398,12 @@ npx cf-frappe resources import --url https://your-worker.example --doctype Task 
 npx cf-frappe resources delete --url https://your-worker.example --doctype Task --name "Follow up" --expected-version 2 --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 
-Notification rules can be managed through the same event-sourced automation stream that feeds durable inbox entries:
+Notification inboxes expose the same read/dismiss events as Desk, while rules are managed through the event-sourced automation stream that feeds durable inbox entries:
 
 \`\`\`bash
+npx cf-frappe notifications list --url https://your-worker.example --limit 20 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe notifications read --url https://your-worker.example --id <notification-id-from-list> --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe notifications dismiss --url https://your-worker.example --id <notification-id-from-list> --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe notification-rules list --url https://your-worker.example --doctype Task --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe notification-rules save --url https://your-worker.example --doctype Task --rule "Task updates" --event DocumentUpdated --event DocumentCommentAdded --recipient-field owner --recipient-user manager@example.com --subject "{{ name }} changed" --expected-version 0 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe notification-rules clear --url https://your-worker.example --doctype Task --rule "Task updates" --expected-version 1 --header-env Authorization=CF_FRAPPE_AUTH
