@@ -756,6 +756,7 @@ describe("file api", () => {
     expect(ownerList.status).toBe(200);
     await expect(ownerList.json()).resolves.toMatchObject({
       data: {
+        canUpload: true,
         limit: 10,
         filters: {
           attachedToDoctype: "File",
@@ -823,6 +824,7 @@ describe("file api", () => {
     const guestBody = await guestList.json() as { data: { files: readonly unknown[] } };
     expect(guestBody).toMatchObject({
       data: {
+        canUpload: false,
         files: [
           {
             filename: "public.txt",

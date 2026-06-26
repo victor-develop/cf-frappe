@@ -1574,6 +1574,20 @@ describe("Desk client runtime", () => {
     ]);
   });
 
+  it("preserves file dashboard upload capabilities for client scripts", async () => {
+    const calls: string[] = [];
+    const dashboard = { canUpload: false, files: [], limit: 10, filters: {} };
+    const runtime = evaluateDeskClient(async (url) => {
+      calls.push(String(url));
+      return new Response(JSON.stringify({ data: dashboard }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.files.list({ limit: 10 })).resolves.toEqual(dashboard);
+    expect(calls).toEqual(["/api/files?limit=10"]);
+  });
+
   it("wraps file upload and direct-upload APIs without hiding upload instructions", async () => {
     const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
     const runtime = evaluateDeskClient(async (url, init) => {

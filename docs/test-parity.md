@@ -23,7 +23,7 @@ Observed counts:
 As of the workspace new-document shortcut slice:
 
 - Vitest files: `94`
-- Vitest cases: `1105`
+- Vitest cases: `1106`
 
 ## Implication
 
