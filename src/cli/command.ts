@@ -5417,7 +5417,9 @@ function userPermissionAction(value: string): UserPermissionRemoteAction | undef
 }
 
 function notificationRuleAction(value: string): NotificationRuleRemoteAction | undefined {
-  return value === "clear" || value === "list" || value === "save" ? value : undefined;
+  return value === "clear" || value === "disable" || value === "enable" || value === "list" || value === "save"
+    ? value
+    : undefined;
 }
 
 function workflowAction(value: string): WorkflowRemoteAction | undefined {
@@ -6060,6 +6062,8 @@ function helpText(): string {
     "  cf-frappe notifications dismiss --url <origin> --id <notificationId> [--user <user>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notification-rules list --url <origin> --doctype <doctype> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notification-rules save --url <origin> --doctype <doctype> --rule <name> --event <eventKind>... (--recipient-user <user>|--recipient-field <field>|--recipient-owner)... [--channel inbox|email]... [--subject <text>] [--enabled|--disabled] [--exclude-actor|--include-actor] [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe notification-rules enable --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe notification-rules disable --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notification-rules clear --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe workflows get --url <origin> --doctype <doctype> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe workflows save --url <origin> --doctype <doctype> --workflow-json <json> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",

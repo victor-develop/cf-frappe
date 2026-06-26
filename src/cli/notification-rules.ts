@@ -1,6 +1,6 @@
 import { requestRemoteAdmin, type RemoteAdminIo, type RemoteHeaderOption } from "./remote-admin.js";
 
-export type NotificationRuleRemoteAction = "clear" | "list" | "save";
+export type NotificationRuleRemoteAction = "clear" | "disable" | "enable" | "list" | "save";
 
 export type NotificationRuleHeaderOption = RemoteHeaderOption;
 
@@ -89,6 +89,24 @@ export async function runRemoteNotificationRuleCommand(
     });
     return formatNotificationRules(command.url, data, "Cleared notification rule");
   }
+  if (command.action === "enable" || command.action === "disable") {
+    const current = await requestRemoteNotificationRule(command, io, {
+      method: "GET",
+      path: notificationRulesPath(command),
+      ...(query === undefined ? {} : { query })
+    });
+    const data = await requestRemoteNotificationRule(command, io, {
+      body: toggleBody(command, current, command.action === "enable"),
+      method: "PUT",
+      path: notificationRulePath(command),
+      ...(query === undefined ? {} : { query })
+    });
+    return formatNotificationRules(
+      command.url,
+      data,
+      command.action === "enable" ? "Enabled notification rule" : "Disabled notification rule"
+    );
+  }
   const data = await requestRemoteNotificationRule(command, io, {
     body: saveBody(command),
     method: "PUT",
@@ -144,6 +162,38 @@ function saveBody(command: NotificationRuleRemoteCommand): Record<string, unknow
       ...(command.excludeActor === undefined ? {} : { excludeActor: command.excludeActor })
     },
     ...mutationBody(command)
+  };
+}
+
+function toggleBody(
+  command: NotificationRuleRemoteCommand,
+  state: NotificationRuleStateResponse,
+  enabled: boolean
+): Record<string, unknown> {
+  const ruleName = requiredRuleName(command);
+  if (
+    command.expectedVersion !== undefined &&
+    state.version !== undefined &&
+    state.version !== command.expectedVersion
+  ) {
+    throw new NotificationRuleRemoteError(
+      `Expected notification rules at version ${String(command.expectedVersion)}, found ${String(state.version)}`
+    );
+  }
+  const entry = (state.rules ?? []).find((item) => item.rule.name === ruleName);
+  if (entry === undefined) {
+    throw new NotificationRuleRemoteError(`Notification rule '${ruleName}' was not found in remote state`);
+  }
+  return {
+    rule: {
+      events: [...requiredResponseEvents(entry.rule, ruleName)],
+      recipients: [...requiredResponseRecipients(entry.rule, ruleName)],
+      ...(entry.rule.channels === undefined || entry.rule.channels.length === 0 ? {} : { channels: [...entry.rule.channels] }),
+      enabled,
+      ...(entry.rule.subject === undefined ? {} : { subject: entry.rule.subject }),
+      ...(entry.rule.excludeActor === undefined ? {} : { excludeActor: entry.rule.excludeActor })
+    },
+    expectedVersion: command.expectedVersion ?? state.version ?? 0
   };
 }
 
@@ -216,4 +266,21 @@ function requiredRecipients(command: NotificationRuleRemoteCommand): readonly No
     );
   }
   return command.recipients;
+}
+
+function requiredResponseEvents(rule: NotificationRuleResponse, ruleName: string): readonly string[] {
+  if (rule.events === undefined || rule.events.length === 0) {
+    throw new NotificationRuleRemoteError(`Notification rule '${ruleName}' cannot be toggled because it has no events`);
+  }
+  return rule.events;
+}
+
+function requiredResponseRecipients(
+  rule: NotificationRuleResponse,
+  ruleName: string
+): readonly NotificationRuleRecipientOption[] {
+  if (rule.recipients === undefined || rule.recipients.length === 0) {
+    throw new NotificationRuleRemoteError(`Notification rule '${ruleName}' cannot be toggled because it has no recipients`);
+  }
+  return rule.recipients;
 }

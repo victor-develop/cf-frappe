@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the notification email delivery job slice:
+As of the remote notification-rule enable/disable CLI conflict slice:
 
 - Vitest files: `119`
-- Vitest cases: `1294`
+- Vitest cases: `1302`
 
 ## Implication
 

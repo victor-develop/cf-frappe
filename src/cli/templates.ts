@@ -408,7 +408,9 @@ npx cf-frappe notifications read --url https://your-worker.example --id <notific
 npx cf-frappe notifications dismiss --url https://your-worker.example --id <notification-id-from-list> --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe notification-rules list --url https://your-worker.example --doctype Task --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe notification-rules save --url https://your-worker.example --doctype Task --rule "Task updates" --event DocumentUpdated --event DocumentCommentAdded --recipient-field owner --recipient-user manager@example.com --channel inbox --channel email --subject "{{ name }} changed" --expected-version 0 --header-env Authorization=CF_FRAPPE_AUTH
-npx cf-frappe notification-rules clear --url https://your-worker.example --doctype Task --rule "Task updates" --expected-version 1 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe notification-rules disable --url https://your-worker.example --doctype Task --rule "Task updates" --expected-version 1 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe notification-rules enable --url https://your-worker.example --doctype Task --rule "Task updates" --expected-version 2 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe notification-rules clear --url https://your-worker.example --doctype Task --rule "Task updates" --expected-version 3 --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 
 Linked-record user permissions use the event-sourced policy API directly:

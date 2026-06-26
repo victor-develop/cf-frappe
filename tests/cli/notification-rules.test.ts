@@ -77,6 +77,30 @@ describe("cf-frappe CLI remote notification rules", () => {
 
     expect(parseCliArgs([
       "notification-rules",
+      "disable",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--rule",
+      "Managers on updates",
+      "--tenant",
+      "acme/east",
+      "--expected-version",
+      "2"
+    ])).toEqual({
+      kind: "notification-rules",
+      action: "disable",
+      url: "https://app.example",
+      headers: [],
+      doctype: "Task",
+      tenant: "acme/east",
+      ruleName: "Managers on updates",
+      expectedVersion: 2
+    });
+
+    expect(parseCliArgs([
+      "notification-rules",
       "clear",
       "--url",
       "https://app.example",
@@ -186,6 +210,30 @@ describe("cf-frappe CLI remote notification rules", () => {
     ])).toEqual({
       kind: "invalid",
       message: "Notification rule save cannot use both --enabled and --disabled"
+    });
+    expect(parseCliArgs([
+      "notification-rules",
+      "enable",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--event",
+      "DocumentUpdated"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Cannot use --event with notification-rules enable"
+    });
+    expect(parseCliArgs([
+      "notification-rules",
+      "disable",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Notification rule disable requires --rule"
     });
     expect(parseCliArgs([
       "notification-rules",
@@ -413,6 +461,209 @@ describe("cf-frappe CLI remote notification rules", () => {
     expect(clearStdout.text()).toContain("- (none)");
   });
 
+  it("enables and disables remote notification rules by preserving the existing rule body", async () => {
+    const enableCalls: RemoteCall[] = [];
+    const enableStdout = textBuffer();
+    const enableExit = await runCli(
+      [
+        "notification-rules",
+        "enable",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--rule",
+        "Managers/Updates",
+        "--tenant",
+        "default",
+        "--expected-version",
+        "4"
+      ],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeSequenceFetch(enableCalls, [
+          {
+            data: {
+              tenantId: "default",
+              doctypeName: "Task",
+              version: 4,
+              rules: [
+                {
+                  enabled: false,
+                  rule: {
+                    name: "Managers/Updates",
+                    enabled: false,
+                    events: ["DocumentUpdated"],
+                    recipients: [{ kind: "field", field: "owner" }],
+                    channels: ["inbox"],
+                    subject: "Task changed",
+                    excludeActor: false
+                  }
+                }
+              ]
+            }
+          },
+          {
+            data: {
+              tenantId: "default",
+              doctypeName: "Task",
+              version: 5,
+              rules: [{ enabled: true, rule: { name: "Managers/Updates", enabled: true } }]
+            }
+          }
+        ]),
+        stdout: enableStdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(enableExit).toBe(0);
+    expect(enableCalls.map((call) => `${call.method} ${call.url}`)).toEqual([
+      "GET https://app.example/api/notification-rules/Task?tenant=default",
+      "PUT https://app.example/api/notification-rules/Task/Managers%2FUpdates?tenant=default"
+    ]);
+    expect(enableCalls[1]?.body).toBe(JSON.stringify({
+      rule: {
+        events: ["DocumentUpdated"],
+        recipients: [{ kind: "field", field: "owner" }],
+        channels: ["inbox"],
+        enabled: true,
+        subject: "Task changed",
+        excludeActor: false
+      },
+      expectedVersion: 4
+    }));
+    expect(enableStdout.text()).toContain("Enabled notification rule at https://app.example");
+    expect(enableStdout.text()).toContain("Version: 5 Total: 1");
+
+    const disableCalls: RemoteCall[] = [];
+    const disableExit = await runCli(
+      [
+        "notification-rules",
+        "disable",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--rule",
+        "Owner updates"
+      ],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeSequenceFetch(disableCalls, [
+          {
+            data: {
+              tenantId: "default",
+              doctypeName: "Task",
+              version: 7,
+              rules: [
+                {
+                  enabled: true,
+                  rule: {
+                    name: "Owner updates",
+                    events: ["DocumentUpdated"],
+                    recipients: [{ kind: "documentOwner" }]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            data: {
+              tenantId: "default",
+              doctypeName: "Task",
+              version: 8,
+              rules: [{ enabled: false, rule: { name: "Owner updates", enabled: false } }]
+            }
+          }
+        ]),
+        stdout: textBuffer(),
+        stderr: textBuffer()
+      }
+    );
+
+    expect(disableExit).toBe(0);
+    expect(disableCalls[1]?.body).toBe(JSON.stringify({
+      rule: {
+        events: ["DocumentUpdated"],
+        recipients: [{ kind: "documentOwner" }],
+        enabled: false
+      },
+      expectedVersion: 7
+    }));
+  });
+
+  it("fails remote notification-rule toggles when the selected rule is absent", async () => {
+    const calls: RemoteCall[] = [];
+    const stderr = textBuffer();
+    const exit = await runCli(
+      [
+        "notification-rules",
+        "enable",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--rule",
+        "Missing"
+      ],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(calls, {
+          data: {
+            tenantId: "default",
+            doctypeName: "Task",
+            version: 3,
+            rules: []
+          }
+        }),
+        stdout: textBuffer(),
+        stderr
+      }
+    );
+
+    expect(exit).toBe(1);
+    expect(calls).toHaveLength(1);
+    expect(stderr.text()).toContain("Notification rule 'Missing' was not found in remote state");
+  });
+
+  it("reports remote notification-rule toggle version conflicts before missing-rule errors", async () => {
+    const calls: RemoteCall[] = [];
+    const stderr = textBuffer();
+    const exit = await runCli(
+      [
+        "notification-rules",
+        "enable",
+        "--url",
+        "https://app.example",
+        "--doctype",
+        "Task",
+        "--rule",
+        "Missing",
+        "--expected-version",
+        "1"
+      ],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(calls, {
+          data: {
+            tenantId: "default",
+            doctypeName: "Task",
+            version: 2,
+            rules: []
+          }
+        }),
+        stdout: textBuffer(),
+        stderr
+      }
+    );
+
+    expect(exit).toBe(1);
+    expect(calls).toHaveLength(1);
+    expect(stderr.text()).toContain("Expected notification rules at version 1, found 2");
+    expect(stderr.text()).not.toContain("was not found");
+  });
+
   it("maps remote notification-rule API and env header errors to CLI failures", async () => {
     const remoteStderr = textBuffer();
     const remoteExit = await runCli(
@@ -491,6 +742,22 @@ function fakeFetch(calls: RemoteCall[], responseBody: unknown, status = 200): ty
     return new Response(JSON.stringify(responseBody), {
       headers: { "content-type": "application/json" },
       status
+    });
+  };
+}
+
+function fakeSequenceFetch(calls: RemoteCall[], responses: readonly unknown[]): typeof fetch {
+  return async (input, init) => {
+    calls.push({
+      url: String(input),
+      method: init?.method ?? "GET",
+      headers: new Headers(init?.headers),
+      ...(typeof init?.body === "string" ? { body: init.body } : {})
+    });
+    const body = responses[Math.min(calls.length - 1, responses.length - 1)] ?? {};
+    return new Response(JSON.stringify(body), {
+      headers: { "content-type": "application/json" },
+      status: 200
     });
   };
 }
