@@ -2649,7 +2649,9 @@ describe("Desk app", () => {
 
     const list = await app.request("/desk/Note");
     expect(list.status).toBe(200);
-    await expect(list.text()).resolves.toContain("My Note");
+    const listHtml = await list.text();
+    expect(listHtml).toContain("My Note");
+    expect(listHtml).toContain('href="/desk/Note/new"');
 
     const form = await app.request("/desk/Note/new");
     expect(form.status).toBe(200);
@@ -2734,6 +2736,9 @@ describe("Desk app", () => {
     expect(list.status).toBe(200);
     const html = await list.text();
     expect(html).toContain("Readable Note");
+    expect(html).toContain('href="/desk/Note/export.csv"');
+    expect(html).toContain("Filter");
+    expect(html).not.toContain('href="/desk/Note/new"');
     expect(html).not.toContain("/desk/Note/import.csv");
     expect(html).not.toContain("/desk/Note/import-template.csv");
     expect(html).not.toContain("Import CSV");

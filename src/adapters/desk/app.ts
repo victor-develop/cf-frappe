@@ -2408,6 +2408,7 @@ async function renderDeskListPage(
         importModes,
         importReturnHref: listReturnHref,
         ...(result.importResult === undefined ? {} : { importResult: result.importResult }),
+        canCreate: can(actor, doctype, "create"),
         ...deskRealtimeRouteOption(options)
       })
     })

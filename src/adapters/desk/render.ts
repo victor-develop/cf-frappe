@@ -2493,6 +2493,7 @@ export function renderListView(
     readonly importModes?: readonly DocumentImportMode[];
     readonly importReturnHref?: string;
     readonly importResult?: DocumentImportResult;
+    readonly canCreate?: boolean;
   } = {}
 ): string {
   const fields = listView.columns;
@@ -2520,6 +2521,9 @@ export function renderListView(
   const selectableNames = new Set(bulkActions.flatMap((action) => action.names));
   const hasBulkActions = selectableNames.size > 0;
   const bulkActionFormId = "bulk-document-action";
+  const newAction = options.canCreate === false
+    ? ""
+    : `<a class="button primary" href="/desk/${encodeURIComponent(doctype.name)}/new">New ${escapeHtml(labelFor(doctype))}</a>`;
   const rows = documents
     .map((document) => {
       const cells = fields
@@ -2536,7 +2540,7 @@ export function renderListView(
     })
     .join("");
   return `<section class="toolbar">
-    <a class="button primary" href="/desk/${encodeURIComponent(doctype.name)}/new">New ${escapeHtml(labelFor(doctype))}</a>
+    ${newAction}
     ${options.exportHref ? `<a class="button" href="${escapeHtml(options.exportHref)}">Export CSV</a>` : ""}
     ${hasBulkActions ? `<form id="${bulkActionFormId}" method="post" action="${escapeHtml(bulkActions[0]?.action ?? "")}">${options.bulkReturnHref ? `<input type="hidden" name="returnTo" value="${escapeHtml(options.bulkReturnHref)}">` : ""}</form>${bulkActions.map((action) => renderListBulkActionButton(action, bulkActionFormId)).join("")}` : ""}
   </section>
