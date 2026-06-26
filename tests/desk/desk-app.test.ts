@@ -2548,12 +2548,13 @@ describe("Desk app", () => {
   it("renders generated CSV import controls for actors who can create or update documents", async () => {
     const { app } = makeDesk(owner);
 
-    const list = await app.request("/desk/Note");
+    const list = await app.request("/desk/Note?filter_priority=High&order_by=count&order=asc");
 
     expect(list.status).toBe(200);
     const html = await list.text();
     expect(html).toContain('action="/desk/Note/import.csv"');
     expect(html).toContain('href="/desk/Note/import-template.csv"');
+    expect(html).toContain('name="returnTo" value="/desk/Note?filter_priority=High&amp;order_by=count&amp;order=asc"');
     expect(html).toContain('name="mode"');
     expect(html).toContain('<option value="create" selected>Create</option>');
     expect(html).toContain('<option value="update">Update</option>');
@@ -2659,6 +2660,83 @@ describe("Desk app", () => {
     await expect(services.events.readStream("acme:Note:Desk%20Import%20One")).resolves.toMatchObject([
       { metadata: { method: "POST", url: "http://localhost/desk/Note/import.csv" } }
     ]);
+  });
+
+  it("preserves generated list filters and ordering after CSV imports", async () => {
+    const { app } = makeDesk(owner);
+
+    const response = await app.request("/desk/Note/import.csv", {
+      method: "POST",
+      body: new URLSearchParams({
+        returnTo: "/desk/Note?default_filters=0&filter_priority=High&order_by=count&order=asc",
+        csv: ["title,priority,count,body", "Desk Filtered Import,High,8,Visible", "Desk Hidden Import,Low,1,Hidden"].join("\n")
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Imported 2 of 2 Note rows.");
+    expect(html).toContain("Desk Filtered Import");
+    expect(html).not.toContain("Desk Hidden Import");
+    expect(html).toContain('<option value="High" selected>High</option>');
+    expect(html).toContain('<option value="count" selected>count</option>');
+    expect(html).toContain('<option value="asc" selected>Ascending</option>');
+    expect(html).toContain("/desk/Note/export.csv?default_filters=0&amp;filter_priority=High&amp;order_by=count&amp;order=asc");
+    expect(html).toContain(
+      'name="returnTo" value="/desk/Note?default_filters=0&amp;filter_priority=High&amp;order_by=count&amp;order=asc"'
+    );
+  });
+
+  it("rejects CSV import return targets outside the current Desk list", async () => {
+    const { app, services } = makeDesk(owner);
+
+    const response = await app.request("/desk/Note/import.csv", {
+      method: "POST",
+      body: new URLSearchParams({
+        returnTo: "/desk/admin/jobs",
+        csv: ["title,priority,body", "Bad Return,Medium,Blocked"].join("\n")
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toContain("CSV import returnTo must target the current Desk list");
+    await expect(services.events.readStream("acme:Note:Bad%20Return")).resolves.toEqual([]);
+  });
+
+  it("rejects CSV import return targets on another origin", async () => {
+    const { app, services } = makeDesk(owner);
+
+    const response = await app.request("/desk/Note/import.csv", {
+      method: "POST",
+      body: new URLSearchParams({
+        returnTo: "https://example.test/desk/Note?filter_priority=High",
+        csv: ["title,priority,body", "Cross Origin Return,High,Blocked"].join("\n")
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toContain("CSV import returnTo must target the current Desk list");
+    await expect(services.events.readStream("acme:Note:Cross%20Origin%20Return")).resolves.toEqual([]);
+  });
+
+  it("rejects CSV import return targets for a different Desk DocType", async () => {
+    const { app, services } = makeDesk(owner);
+
+    const response = await app.request("/desk/Note/import.csv", {
+      method: "POST",
+      body: new URLSearchParams({
+        returnTo: "/desk/File?filter_name=note",
+        csv: ["title,priority,body", "Wrong DocType Return,Medium,Blocked"].join("\n")
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toContain("CSV import returnTo must target the current Desk list");
+    await expect(services.events.readStream("acme:Note:Wrong%20DocType%20Return")).resolves.toEqual([]);
   });
 
   it("updates generated list CSV posts through the document command boundary", async () => {

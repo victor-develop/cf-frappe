@@ -205,6 +205,7 @@ interface ParsedDeskPrintSettings {
 interface ParsedDeskCsvImport {
   readonly mode?: DocumentImportMode;
   readonly csv: string;
+  readonly returnUrl?: URL;
 }
 
 export interface DeskAppOptions {
@@ -1694,7 +1695,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
     try {
-      const form = await parseDeskCsvImport(c.req.raw);
+      const form = await parseDeskCsvImport(c.req.raw, doctype.name);
       const action = form.mode ?? "create";
       if (!can(actor, doctype, action)) {
         throw new FrameworkError("PERMISSION_DENIED", `Actor '${actor.id}' cannot ${action} ${doctype.name}`, {
@@ -1716,7 +1717,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         options,
         actor,
         doctype.name,
-        new URL(`/desk/${encodeURIComponent(doctype.name)}`, c.req.url),
+        form.returnUrl ?? new URL(`/desk/${encodeURIComponent(doctype.name)}`, c.req.url),
         { importResult }
       );
     } catch (error) {
@@ -2365,6 +2366,7 @@ async function renderDeskListPage(
   const bulkActions = listBulkActionsFor(actor, doctype, listResult.data);
   const importModes = deskCsvImportModesFor(actor, doctype);
   const exportHref = `/desk/${encodeURIComponent(doctype.name)}/export.csv${url.search}`;
+  const importReturnHref = `/desk/${encodeURIComponent(doctype.name)}${url.search}`;
   return html(
     renderDeskLayoutFor(options, {
       title: doctype.label ?? doctype.name,
@@ -2380,6 +2382,7 @@ async function renderDeskListPage(
         clientScripts: options.registry.listClientScripts(doctype.name, "list"),
         bulkActions,
         importModes,
+        importReturnHref,
         ...(result.importResult === undefined ? {} : { importResult: result.importResult }),
         ...deskRealtimeRouteOption(options)
       })
@@ -4059,17 +4062,32 @@ async function parseDeskBulkDocumentAction(request: Request): Promise<ParsedDesk
   };
 }
 
-async function parseDeskCsvImport(request: Request): Promise<ParsedDeskCsvImport> {
+async function parseDeskCsvImport(request: Request, doctypeName: string): Promise<ParsedDeskCsvImport> {
   const form = await readUrlEncodedDeskForm(request);
   const csv = form.get("csv");
   if (typeof csv !== "string" || csv.trim() === "") {
     throw new FrameworkError("BAD_REQUEST", "CSV import content is required", { status: 400 });
   }
   const mode = deskCsvImportMode(form.get("mode") ?? undefined);
+  const returnUrl = deskCsvImportReturnUrl(form.get("returnTo") ?? undefined, request.url, doctypeName);
   return {
     ...(mode === undefined ? {} : { mode }),
+    ...(returnUrl === undefined ? {} : { returnUrl }),
     csv
   };
+}
+
+function deskCsvImportReturnUrl(value: string | undefined, requestUrl: string, doctypeName: string): URL | undefined {
+  if (value === undefined || value.trim() === "") {
+    return undefined;
+  }
+  const base = new URL(requestUrl);
+  const url = new URL(value, base);
+  const expectedPath = `/desk/${encodeURIComponent(doctypeName)}`;
+  if (url.origin !== base.origin || url.pathname !== expectedPath) {
+    throw new FrameworkError("BAD_REQUEST", "CSV import returnTo must target the current Desk list", { status: 400 });
+  }
+  return url;
 }
 
 function deskCsvImportMode(value: string | undefined): DocumentImportMode | undefined {

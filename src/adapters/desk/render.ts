@@ -2439,6 +2439,7 @@ export function renderListView(
     readonly realtimeRoute?: string;
     readonly bulkActions?: readonly ListBulkAction[];
     readonly importModes?: readonly DocumentImportMode[];
+    readonly importReturnHref?: string;
     readonly importResult?: DocumentImportResult;
   } = {}
 ): string {
@@ -2487,7 +2488,7 @@ export function renderListView(
     ${options.exportHref ? `<a class="button" href="${escapeHtml(options.exportHref)}">Export CSV</a>` : ""}
     ${hasBulkActions ? `<form id="${bulkActionFormId}" method="post" action="${escapeHtml(bulkActions[0]?.action ?? "")}"></form>${bulkActions.map((action) => renderListBulkActionButton(action, bulkActionFormId)).join("")}` : ""}
   </section>
-  ${importModes.length > 0 ? renderListImportPanel(doctype, importModes, options.importResult) : ""}
+  ${importModes.length > 0 ? renderListImportPanel(doctype, importModes, options.importResult, options.importReturnHref) : ""}
   ${savedFilterPanel}
   ${filterForm || compoundFilterForm || orderForm ? `<form class="panel form list-filters" method="get"><div class="fields">${filterForm}${compoundFilterForm}${orderForm}${savedFilterControl}</div><div class="actions"><button class="button primary" type="submit">Filter</button>${saveFilterButton}<a class="button" href="/desk/${encodeURIComponent(doctype.name)}?default_filters=0">Clear</a></div></form>` : ""}
   <section class="panel">
@@ -2504,7 +2505,8 @@ export function renderListView(
 function renderListImportPanel(
   doctype: DocTypeDefinition,
   modes: readonly DocumentImportMode[],
-  result: DocumentImportResult | undefined
+  result: DocumentImportResult | undefined,
+  returnHref: string | undefined
 ): string {
   const action = `/desk/${encodeURIComponent(doctype.name)}/import.csv`;
   const templateHref = `/desk/${encodeURIComponent(doctype.name)}/import-template.csv`;
@@ -2515,6 +2517,7 @@ function renderListImportPanel(
   return `<section class="panel list-import">
     ${result ? renderListImportResult(result) : ""}
     <form class="form" method="post" action="${action}">
+      ${returnHref ? `<input type="hidden" name="returnTo" value="${escapeHtml(returnHref)}">` : ""}
       <div class="fields">
         <label class="field" for="import-mode"><span>Import Mode</span><select id="import-mode" name="mode">
           ${modeOptions}
