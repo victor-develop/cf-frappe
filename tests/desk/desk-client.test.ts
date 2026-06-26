@@ -339,6 +339,11 @@ interface DeskClientRuntime {
     ) => Promise<unknown>;
     readonly followers: (doctype: string, name: string) => Promise<unknown>;
     readonly csvUrl: (doctype: string, options?: Record<string, unknown>) => string;
+    readonly importCsv: (
+      doctype: string,
+      csv: string,
+      options?: { readonly mode?: "create" | "update"; readonly maxRows?: number; readonly max_rows?: number }
+    ) => Promise<unknown>;
     readonly listSavedFilters: (doctype: string) => Promise<unknown>;
     readonly saveFilter: (doctype: string, input: Record<string, unknown>) => Promise<unknown>;
     readonly share: (
@@ -598,6 +603,29 @@ describe("Desk client runtime", () => {
     ).toBe(
       "/api/resource/Task/export.csv?order=desc&limit=5&order_by=count&filter_priority__ne=Low&filter_count__gt=2&filter_count__lt=9&filter_count__not_between=3&filter_count__not_between=8&filter_title=Launch"
     );
+  });
+
+  it("wraps resource CSV imports for client scripts", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { total: 1, succeeded: [], failed: [] } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(
+      runtime.resource.importCsv("Task Type", "name,title\nTASK-1,Imported", { mode: "update", maxRows: 25 })
+    ).resolves.toEqual({ total: 1, succeeded: [], failed: [] });
+
+    expect(calls[0]).toMatchObject({
+      url: "/api/resource/Task%20Type/import.csv?mode=update&max_rows=25",
+      init: {
+        method: "POST",
+        body: "name,title\nTASK-1,Imported"
+      }
+    });
+    expect(new Headers(calls[0]?.init.headers).get("content-type")).toBe("text/csv; charset=utf-8");
   });
 
   it("maps resource compound filter expressions to query parameters", async () => {

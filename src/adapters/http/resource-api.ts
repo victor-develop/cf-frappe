@@ -11,6 +11,7 @@ import type { DashboardService } from "../../application/dashboard-service.js";
 import type { DocumentShareService } from "../../application/document-share-service.js";
 import type { BulkDocumentSelection, DocumentCommandExecutor } from "../../application/document-service.js";
 import type { DocumentHistoryService } from "../../application/document-history-service.js";
+import { DocumentImportService } from "../../application/document-import-service.js";
 import type { FileService } from "../../application/file-service.js";
 import type { FieldPropertyService } from "../../application/field-property-service.js";
 import type { JobHistoryService } from "../../application/job-history-service.js";
@@ -64,6 +65,7 @@ import {
   listOrderFromUrl,
   parseOptionalInteger,
   readJsonObject,
+  readBoundedText,
   requestMetadata
 } from "./request.js";
 import { writeCsvExportHeaders } from "./report-export.js";
@@ -422,6 +424,26 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     });
     writeCsvExportHeaders(c, csv);
     return c.body(csv.body);
+  });
+
+  app.post("/api/resource/:doctype/import.csv", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    const maxRows = parseOptionalInteger(c.req.query("max_rows"));
+    const importer = new DocumentImportService({
+      documents: options.documents,
+      queries: options.queries,
+      ...(maxRows === undefined ? {} : { maxRows })
+    });
+    const mode = documentImportMode(c.req.query("mode"));
+    const csv = await readBoundedText(c.req.raw, maxJsonBytes, `CSV import body exceeds ${maxJsonBytes} bytes`);
+    const result = await importer.importCsv({
+      actor,
+      doctype: c.req.param("doctype"),
+      csv,
+      mode,
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data: result }, result.failed.length === 0 ? 201 : 207);
   });
 
   app.get("/api/resource/:doctype", async (c) => {
@@ -1011,6 +1033,16 @@ function numberValue(value: unknown): number | undefined {
     throw badRequest("expectedVersion must be an integer");
   }
   return value;
+}
+
+function documentImportMode(value: string | undefined): "create" | "update" {
+  if (value === undefined || value === "" || value === "create") {
+    return "create";
+  }
+  if (value === "update") {
+    return "update";
+  }
+  throw badRequest("CSV import mode must be create or update");
 }
 
 function baseVersionValue(value: unknown): number {

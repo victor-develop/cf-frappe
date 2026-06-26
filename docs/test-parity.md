@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the shared draft stale guard and child-table apply slice:
+As of the command-bound CSV import slice:
 
-- Vitest files: `93`
-- Vitest cases: `1050`
+- Vitest files: `94`
+- Vitest cases: `1059`
 
 ## Implication
 

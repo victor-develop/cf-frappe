@@ -3355,6 +3355,16 @@ export function renderDeskClientScript(): string {
       csvUrl: function (doctype, options) {
         return withQuery(resourcePath(doctype) + "/export.csv", resourceExportParams(options || {}));
       },
+      importCsv: function (doctype, csv, options) {
+        var params = {};
+        setParam(params, "mode", options && options.mode);
+        setParam(params, "max_rows", options && (options.maxRows !== undefined ? options.maxRows : options.max_rows));
+        return request(withQuery(resourcePath(doctype) + "/import.csv", params), {
+          method: "POST",
+          headers: { "content-type": "text/csv; charset=utf-8" },
+          body: csv || ""
+        }).then(unwrapData);
+      },
       delete: function (doctype, name, options) {
         return request(resourcePath(doctype, name), { method: "DELETE", body: versionBody(options) }).then(unwrapData);
       },

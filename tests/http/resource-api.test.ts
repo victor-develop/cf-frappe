@@ -514,6 +514,43 @@ describe("resource api", () => {
     await expect(deleted.json()).resolves.toMatchObject({ data: { docstatus: "deleted" } });
   });
 
+  it("imports CSV resources through generated resource API commands", async () => {
+    const app = makeApp();
+
+    const imported = await app.request("/api/resource/Note/import.csv", {
+      method: "POST",
+      headers: { ...userHeaders, "content-type": "text/csv" },
+      body: ["title,priority,count,body", "HTTP Import A,Medium,2,Body A", "HTTP Import B,Low,3,Body B"].join("\n")
+    });
+    expect(imported.status).toBe(201);
+    await expect(imported.json()).resolves.toMatchObject({
+      data: {
+        doctype: "Note",
+        mode: "create",
+        total: 2,
+        failed: [],
+        succeeded: [
+          { row: 2, action: "create", name: "HTTP Import A" },
+          { row: 3, action: "create", name: "HTTP Import B" }
+        ]
+      }
+    });
+
+    const updated = await app.request("/api/resource/Note/import.csv?mode=update", {
+      method: "POST",
+      headers: { ...userHeaders, "content-type": "text/csv" },
+      body: ["name,expectedVersion,priority,count", "HTTP Import A,1,High,not-a-number"].join("\n")
+    });
+    expect(updated.status).toBe(207);
+    await expect(updated.json()).resolves.toMatchObject({
+      data: {
+        total: 1,
+        succeeded: [],
+        failed: [{ row: 2, action: "update", name: "HTTP Import A", code: "BAD_REQUEST" }]
+      }
+    });
+  });
+
   it("applies clean stale resource merge requests through normal document updates", async () => {
     const services = createServices(["e1", "e2", "e3"]);
     const app = createResourceApi({
