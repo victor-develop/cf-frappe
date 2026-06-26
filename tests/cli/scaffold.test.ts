@@ -203,6 +203,9 @@ describe("cf-frappe CLI scaffold", () => {
     expect(readmeText).toContain("npx cf-frappe field-properties list --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe field-properties save --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe field-properties clear --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe workflows get --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe workflows save --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe workflows clear --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources list --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources get --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources create --url https://your-worker.example --doctype Task");

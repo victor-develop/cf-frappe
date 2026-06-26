@@ -86,6 +86,13 @@ import {
   type UserPermissionRemoteAction,
   type UserPermissionRemoteCommand
 } from "./user-permissions.js";
+import {
+  WorkflowRemoteError,
+  runRemoteWorkflowCommand,
+  type WorkflowHeaderOption,
+  type WorkflowRemoteAction,
+  type WorkflowRemoteCommand
+} from "./workflows.js";
 import { scaffoldProject, ScaffoldError } from "./scaffold.js";
 import type { StarterAuthMode } from "./templates.js";
 
@@ -151,6 +158,7 @@ type ParsedCommand =
   | FileRemoteCommand
   | ResourceRemoteCommand
   | UserPermissionRemoteCommand
+  | WorkflowRemoteCommand
   | HelpCommand
   | InvalidCommand;
 
@@ -219,6 +227,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     if (command.kind === "user-permissions") {
       io.stdout.write(await runRemoteUserPermissionCommand(command, {
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
+    if (command.kind === "workflows") {
+      io.stdout.write(await runRemoteWorkflowCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -307,7 +322,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof NotificationRuleRemoteError ||
       error instanceof FileRemoteError ||
       error instanceof ResourceRemoteError ||
-      error instanceof UserPermissionRemoteError
+      error instanceof UserPermissionRemoteError ||
+      error instanceof WorkflowRemoteError
     ) {
       io.stderr.write(`cf-frappe: ${error.message}\n`);
       return 1;
@@ -350,6 +366,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "user-permissions") {
     return parseUserPermissionsArgs(rest);
+  }
+  if (command === "workflows") {
+    return parseWorkflowsArgs(rest);
   }
   if (command === "access") {
     return parseAccessArgs(rest);
@@ -859,6 +878,141 @@ function parseFieldPropertiesArgs(argv: readonly string[]): ParsedCommand {
     ...(tenant === undefined ? {} : { tenant }),
     ...(fieldName === undefined ? {} : { fieldName }),
     ...(overrides === undefined ? {} : { overrides }),
+    ...(expectedVersion === undefined ? {} : { expectedVersion })
+  };
+}
+
+function parseWorkflowsArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = workflowAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown workflows command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: WorkflowHeaderOption[] = [];
+  let doctype: string | undefined;
+  let tenant: string | undefined;
+  let workflow: Record<string, unknown> | undefined;
+  let expectedVersion: number | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "Workflow");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "Workflow");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--doctype") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      doctype = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--tenant") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      tenant = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--workflow-json") {
+      if (action !== "save") {
+        return { kind: "invalid", message: `Cannot use --workflow-json with workflows ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseJsonObject(value, "Workflow");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      workflow = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--expected-version") {
+      if (action === "get") {
+        return { kind: "invalid", message: "Cannot use --expected-version with workflows get" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseNonNegativeInteger(value, "Workflow expected version");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      expectedVersion = parsed;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown workflows ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if (doctype === undefined) {
+    return { kind: "invalid", message: `Workflow ${action} requires --doctype` };
+  }
+  if (action === "save" && workflow === undefined) {
+    return { kind: "invalid", message: "Workflow save requires --workflow-json" };
+  }
+
+  return {
+    kind: "workflows",
+    action,
+    url,
+    headers,
+    doctype,
+    ...(tenant === undefined ? {} : { tenant }),
+    ...(workflow === undefined ? {} : { workflow }),
     ...(expectedVersion === undefined ? {} : { expectedVersion })
   };
 }
@@ -2890,6 +3044,10 @@ function notificationRuleAction(value: string): NotificationRuleRemoteAction | u
   return value === "clear" || value === "list" || value === "save" ? value : undefined;
 }
 
+function workflowAction(value: string): WorkflowRemoteAction | undefined {
+  return value === "clear" || value === "get" || value === "save" ? value : undefined;
+}
+
 function resourceAction(value: string): ResourceRemoteAction | undefined {
   return value === "activity" ||
     value === "amend" ||
@@ -3091,7 +3249,7 @@ function parseJsonObject(value: string, label: string): Record<string, unknown> 
 function parseLiteralHeader(
   value: string,
   label: string
-): CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | string {
+): CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | WorkflowHeaderOption | string {
   const separator = value.indexOf(":");
   if (separator < 1) {
     return `${label} header must use 'Name: value' syntax`;
@@ -3110,7 +3268,7 @@ function parseLiteralHeader(
 function parseEnvHeader(
   value: string,
   label: string
-): CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | string {
+): CustomFieldHeaderOption | DataPatchHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | WorkflowHeaderOption | string {
   const separator = value.indexOf("=");
   if (separator < 1) {
     return `${label} environment header must use 'Name=ENV_VAR' syntax`;
@@ -3464,6 +3622,9 @@ function helpText(): string {
     "  cf-frappe notification-rules list --url <origin> --doctype <doctype> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notification-rules save --url <origin> --doctype <doctype> --rule <name> --event <eventKind>... (--recipient-user <user>|--recipient-field <field>|--recipient-owner)... [--subject <text>] [--enabled|--disabled] [--exclude-actor|--include-actor] [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notification-rules clear --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe workflows get --url <origin> --doctype <doctype> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe workflows save --url <origin> --doctype <doctype> --workflow-json <json> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe workflows clear --url <origin> --doctype <doctype> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources list --url <origin> --doctype <doctype> [--filter <field[__operator]=value>] [--filter-expression-json <json>] [--saved-filter <id>] [--limit <n>] [--offset <n>] [--order-by <field>] [--order <asc|desc>] [--no-default-filters] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources get --url <origin> --doctype <doctype> --name <docname> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources create --url <origin> --doctype <doctype> --data-json <json> [--header <name:value>] [--header-env <name=ENV>]",
@@ -3527,6 +3688,7 @@ function helpText(): string {
     "  data-patches   Inspect, plan, apply, rollback, or enqueue remote app-declared data patches through the admin API",
     "  jobs   Inspect remote job history, retry failed runs, and manage runtime schedules through the admin API",
     "  notification-rules   Inspect and mutate event-sourced document notification rules through the admin API",
+    "  workflows   Inspect and mutate event-sourced tenant workflow definitions through the admin API",
     "  resources   Inspect and mutate deployed DocType resources through the generated resource API",
     "  user-permissions   Inspect and mutate event-sourced linked-record user permission grants",
     "  files   Upload, inspect, update, and delete remote File metadata/content through the admin API",

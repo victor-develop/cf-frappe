@@ -307,6 +307,9 @@ npx cf-frappe custom-fields disable --url https://your-worker.example --doctype 
 npx cf-frappe field-properties list --url https://your-worker.example --doctype Task --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe field-properties save --url https://your-worker.example --doctype Task --field priority --overrides-json '{"label":"Urgency","inListFilter":true}' --expected-version 0 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe field-properties clear --url https://your-worker.example --doctype Task --field priority --expected-version 1 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe workflows get --url https://your-worker.example --doctype Task --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe workflows save --url https://your-worker.example --doctype Task --workflow-json '{"initialState":"Open","states":["Open","Doing","Done"],"transitions":[{"action":"start","from":"Open","to":"Doing"},{"action":"finish","from":"Doing","to":"Done"}]}' --expected-version 0 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe workflows clear --url https://your-worker.example --doctype Task --expected-version 1 --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 
 DocType resources can be inspected and mutated through the generated resource API without opening Desk:
