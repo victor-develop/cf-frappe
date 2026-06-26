@@ -250,7 +250,10 @@ npx cf-frappe data-patches status --url https://your-worker.example --header-env
 npx cf-frappe data-patches plan --url https://your-worker.example --id tasks.seed_starter_tasks --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe data-patches rollback-plan --url https://your-worker.example --limit 2 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe data-patches apply --url https://your-worker.example --id tasks.seed_starter_tasks --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe data-patches rollback --url https://your-worker.example --id tasks.seed_starter_tasks --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe data-patches retry --url https://your-worker.example --id tasks.seed_starter_tasks --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe data-patches rollback-retry --url https://your-worker.example --id tasks.seed_starter_tasks --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe data-patches rollback-retry-enqueue --url https://your-worker.example --id tasks.seed_starter_tasks --idempotency-key patches:rollback-retry-1 --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 
 Background jobs and runtime schedules use the same remote admin style:
@@ -399,6 +402,13 @@ export const Task = defineDocType({
       type: "text",
       readOnly: true,
       defaultValue: ({ actor }) => actor.id
+    },
+    {
+      name: "starter_seed_patch",
+      label: "Starter Seed Patch",
+      type: "text",
+      readOnly: true,
+      hidden: true
     }
   ],
   formView: {
@@ -529,41 +539,87 @@ export const TaskWorkspace = defineWorkspace({
   ]
 });
 
-export const StarterTaskSeedData = defineDataPatch<CloudFrappeRuntimeServices>({
-  id: "tasks.seed_starter_tasks",
-  label: "Seed starter Task records",
-  checksum: "v1",
-  async run({ resources }) {
-    const actor = {
-      id: "starter-seed",
-      roles: ["Task Manager"],
-      tenantId: "default"
-    };
-    const tasks = [
-      {
-        title: "Review generated Desk workspace",
-        priority: "High",
-        workflow_state: "Open",
-        description: "Open /desk and explore the Tasks workspace, report, and dashboard."
-      },
-      {
-        title: "Deploy to Cloudflare Workers",
-        priority: "Medium",
-        workflow_state: "Doing",
-        description: "Create D1, apply migrations, and run wrangler deploy."
-      }
-    ];
+const STARTER_TASK_SEED_PATCH_ID = "tasks.seed_starter_tasks";
+const STARTER_TASK_SEED_ACTOR = {
+  id: "starter-seed",
+  roles: ["Task Manager"],
+  tenantId: "default"
+};
+const STARTER_TASK_SEED_RECORDS = [
+  {
+    title: "Review generated Desk workspace",
+    priority: "High",
+    workflow_state: "Open",
+    starter_seed_patch: STARTER_TASK_SEED_PATCH_ID,
+    description: "Open /desk and explore the Tasks workspace, report, and dashboard."
+  },
+  {
+    title: "Deploy to Cloudflare Workers",
+    priority: "Medium",
+    workflow_state: "Doing",
+    starter_seed_patch: STARTER_TASK_SEED_PATCH_ID,
+    description: "Create D1, apply migrations, and run wrangler deploy."
+  }
+] as const;
 
-    for (const task of tasks) {
+export const StarterTaskSeedData = defineDataPatch<CloudFrappeRuntimeServices>({
+  id: STARTER_TASK_SEED_PATCH_ID,
+  label: "Seed starter Task records",
+  checksum: "v2",
+  async run({ resources }) {
+    let created = 0;
+    let skipped = 0;
+
+    for (const task of STARTER_TASK_SEED_RECORDS) {
+      const existing = await resources.queries.listDocuments(STARTER_TASK_SEED_ACTOR, "Task", {
+        filters: [{ field: "title", value: task.title }],
+        limit: 1
+      });
+      if (existing.data.length > 0) {
+        skipped += 1;
+        continue;
+      }
       await resources.documents.create({
-        actor,
+        actor: STARTER_TASK_SEED_ACTOR,
         doctype: "Task",
         data: task,
-        metadata: { patchId: "tasks.seed_starter_tasks" }
+        metadata: { patchId: STARTER_TASK_SEED_PATCH_ID }
       });
+      created += 1;
     }
 
-    return { created: tasks.length };
+    return { created, skipped };
+  },
+  rollback: {
+    label: "Remove starter Task records",
+    async run({ resources }) {
+      let deleted = 0;
+      let skipped = 0;
+
+      for (const task of STARTER_TASK_SEED_RECORDS) {
+        const existing = await resources.queries.listDocuments(STARTER_TASK_SEED_ACTOR, "Task", {
+          filters: [
+            { field: "title", value: task.title },
+            { field: "starter_seed_patch", value: STARTER_TASK_SEED_PATCH_ID }
+          ],
+          limit: 1
+        });
+        const [document] = existing.data;
+        if (document === undefined) {
+          skipped += 1;
+          continue;
+        }
+        await resources.documents.delete({
+          actor: STARTER_TASK_SEED_ACTOR,
+          doctype: "Task",
+          name: document.name,
+          metadata: { patchId: STARTER_TASK_SEED_PATCH_ID, rollback: true }
+        });
+        deleted += 1;
+      }
+
+      return { deleted, skipped };
+    }
   }
 });
 

@@ -103,8 +103,14 @@ describe("cf-frappe CLI scaffold", () => {
     expect(taskApp).toContain("dashboards: [TaskDashboard]");
     expect(taskApp).toContain("workspaces: [TaskWorkspace]");
     expect(taskApp).toContain("dataPatches: [StarterTaskSeedData]");
-    expect(taskApp).toContain('id: "tasks.seed_starter_tasks"');
-    expect(taskApp).toContain('metadata: { patchId: "tasks.seed_starter_tasks" }');
+    expect(taskApp).toContain('const STARTER_TASK_SEED_PATCH_ID = "tasks.seed_starter_tasks"');
+    expect(taskApp).toContain("id: STARTER_TASK_SEED_PATCH_ID");
+    expect(taskApp).toContain('checksum: "v2"');
+    expect(taskApp).toContain("resources.queries.listDocuments");
+    expect(taskApp).toContain("skipped += 1");
+    expect(taskApp).toContain("rollback: {");
+    expect(taskApp).toContain("resources.documents.delete");
+    expect(taskApp).toContain("metadata: { patchId: STARTER_TASK_SEED_PATCH_ID, rollback: true }");
     expect(taskApp).toContain('kind: "dashboard", target: "Task Dashboard"');
     expect(taskApp).toContain('kind: "admin", target: "roles"');
     await expect(readFile(join(target, "src/apps/index.ts"), "utf8")).resolves.toContain(
@@ -124,6 +130,9 @@ describe("cf-frappe CLI scaffold", () => {
     );
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "npx cf-frappe data-patches apply --url https://your-worker.example --id tasks.seed_starter_tasks"
+    );
+    await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
+      "npx cf-frappe data-patches rollback --url https://your-worker.example --id tasks.seed_starter_tasks"
     );
     await expect(readFile(join(target, "public/assets/task-form.js"), "utf8")).resolves.toContain(
       "window.cfFrappe.form.on"
@@ -279,6 +288,93 @@ describe("cf-frappe CLI scaffold", () => {
     );
 
     await runTool(binPath("tsc"), ["--noEmit", "-p", "tsconfig.smoke.json"], target);
+  }, 60_000);
+
+  it("generates a seed patch that preserves pre-existing same-title records during rollback", async () => {
+    const target = join(tempRoot, "seed-rollback");
+    await scaffoldProject({
+      targetDirectory: target,
+      compatibilityDate: "2026-06-22",
+      cfFrappeVersion: "0.1.0",
+      nodeTypesVersion: "^26.0.0",
+      typescriptVersion: "^5.7.2",
+      wranglerVersion: "^4.103.0"
+    });
+
+    const frameworkUrl = join(repoRoot, "src/index.ts");
+    const cloudflareUrl = join(repoRoot, "src/cloudflare/index.ts");
+    const generatedTaskApp = (await readFile(join(target, "src/apps/tasks.ts"), "utf8"))
+      .replace('from "cf-frappe"', `from "${frameworkUrl}"`)
+      .replace('from "cf-frappe/cloudflare"', `from "${cloudflareUrl}"`);
+    await writeFile(
+      join(target, "src/apps/tasks.seed-smoke.ts"),
+      `${generatedTaskApp}
+import {
+  createRegistryFromApps,
+  DocumentService,
+  DocumentShareService,
+  InMemoryDocumentStore,
+  QueryService
+} from "${frameworkUrl}";
+
+const registry = createRegistryFromApps([taskApp]);
+const store = new InMemoryDocumentStore();
+const documentShares = new DocumentShareService({ events: store });
+let id = 0;
+const ids = { next: (prefix = "") => \`\${prefix}seed-smoke-\${++id}\` };
+const clock = { now: () => "2026-06-26T00:00:00.000Z" };
+const documents = new DocumentService({ registry, store, documentShares, ids, clock });
+const queries = new QueryService({ registry, projections: store, documentShares });
+const actor = { id: "owner@example.com", roles: ["Task Manager"], tenantId: "default" };
+const preexisting = await documents.create({
+  actor,
+  doctype: "Task",
+  data: {
+    title: "Review generated Desk workspace",
+    priority: "Low",
+    workflow_state: "Open",
+    description: "User-created record with the same title."
+  }
+});
+
+const resources = { registry, documents, queries };
+const applyResult = await StarterTaskSeedData.run({ resources });
+if (JSON.stringify(applyResult) !== JSON.stringify({ created: 1, skipped: 1 })) {
+  throw new Error(\`Unexpected apply result: \${JSON.stringify(applyResult)}\`);
+}
+const seededBeforeRollback = await queries.listDocuments(actor, "Task", {
+  filters: [{ field: "starter_seed_patch", value: "tasks.seed_starter_tasks" }],
+  limit: 10
+});
+if (seededBeforeRollback.data.length !== 1) {
+  throw new Error(\`Expected one seed-owned record before rollback, got \${seededBeforeRollback.data.length}\`);
+}
+
+const rollbackResult = await StarterTaskSeedData.rollback?.run({ resources });
+if (JSON.stringify(rollbackResult) !== JSON.stringify({ deleted: 1, skipped: 1 })) {
+  throw new Error(\`Unexpected rollback result: \${JSON.stringify(rollbackResult)}\`);
+}
+const preserved = await queries.getDocument(actor, "Task", preexisting.name);
+if (preserved.data.description !== "User-created record with the same title.") {
+  throw new Error("Rollback changed the pre-existing same-title record");
+}
+const seededAfterRollback = await queries.listDocuments(actor, "Task", {
+  filters: [{ field: "starter_seed_patch", value: "tasks.seed_starter_tasks" }],
+  limit: 10
+});
+if (seededAfterRollback.data.length !== 0) {
+  throw new Error(\`Expected rollback to remove seed-owned records, got \${seededAfterRollback.data.length}\`);
+}
+`
+    );
+
+    await mkdir(join(target, "dist"));
+    await runTool(
+      binPath("esbuild"),
+      ["src/apps/tasks.seed-smoke.ts", "--bundle", "--platform=node", "--format=esm", "--outfile=dist/tasks.seed-smoke.mjs"],
+      target
+    );
+    await runTool(process.execPath, ["dist/tasks.seed-smoke.mjs"], target);
   }, 60_000);
 
   it("refuses to write into a non-empty target unless forced", async () => {
@@ -948,7 +1044,7 @@ function registryLoader(registry: ModelRegistry) {
   };
 }
 
-function binPath(command: "tsc" | "wrangler"): string {
+function binPath(command: "tsc" | "wrangler" | "esbuild"): string {
   return join(repoRoot, "node_modules", ".bin", process.platform === "win32" ? `${command}.cmd` : command);
 }
 

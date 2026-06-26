@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the remote file rendition CLI slice:
+As of the starter seed rollback slice:
 
 - Vitest files: `95`
-- Vitest cases: `1126`
+- Vitest cases: `1127`
 
 ## Implication
 
