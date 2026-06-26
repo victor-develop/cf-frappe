@@ -187,6 +187,22 @@ export function renderDeskClientScript(): string {
     return "/desk/dashboards/" + encodePart(dashboard);
   }
 
+  function deskFilesPath(options) {
+    return withQuery("/desk/files", fileListParams(options || {}));
+  }
+
+  function deskNotificationInboxParams(options) {
+    var params = {};
+    setParam(params, "limit", options && options.limit);
+    setParam(params, "unread", options && options.unread);
+    setParam(params, "include_dismissed", options && (options.includeDismissed !== undefined ? options.includeDismissed : options.include_dismissed));
+    return params;
+  }
+
+  function deskNotificationsPath(options) {
+    return withQuery("/desk/notifications", deskNotificationInboxParams(options || {}));
+  }
+
   function deskReportBuilderPath(doctype, id, options) {
     var path = "/desk/report-builder/" + encodePart(doctype) + (id === undefined ? "" : "/" + encodePart(id));
     return withQuery(path, reportRunParams(options || {}));
@@ -3523,6 +3539,7 @@ export function renderDeskClientScript(): string {
     }),
     desk: Object.freeze({
       dashboardUrl: deskDashboardPath,
+      filesUrl: deskFilesPath,
       listUrl: function (doctype, options) {
         return withQuery(deskPath(doctype), resourceListParams(options || {}));
       },
@@ -3535,6 +3552,7 @@ export function renderDeskClientScript(): string {
       importTemplateCsvUrl: function (doctype) {
         return deskPath(doctype) + "/import-template.csv";
       },
+      notificationsUrl: deskNotificationsPath,
       reportBuilderUrl: deskReportBuilderPath,
       reportUrl: deskReportPath,
       workspaceUrl: deskWorkspacePath,

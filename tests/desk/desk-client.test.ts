@@ -374,6 +374,7 @@ interface DeskClientRuntime {
     ) => Promise<unknown>;
     readonly dashboardUrl: (dashboard: string) => string;
     readonly csvUrl: (doctype: string, options?: Record<string, unknown>) => string;
+    readonly filesUrl: (options?: Record<string, unknown>) => string;
     readonly formUrl: (doctype: string, name: string) => string;
     readonly importCsv: (
       doctype: string,
@@ -383,6 +384,7 @@ interface DeskClientRuntime {
     readonly importTemplateCsvUrl: (doctype: string) => string;
     readonly listUrl: (doctype: string, options?: Record<string, unknown>) => string;
     readonly newUrl: (doctype: string) => string;
+    readonly notificationsUrl: (options?: Record<string, unknown>) => string;
     readonly reportBuilderUrl: (doctype: string, id?: string, options?: Record<string, unknown>) => string;
     readonly reportUrl: (report: string, options?: Record<string, unknown>) => string;
     readonly workspaceUrl: (workspace: string) => string;
@@ -794,6 +796,27 @@ describe("Desk client runtime", () => {
         order: "desc"
       })
     ).toBe("/desk/report-builder/Task%20Type/report%2Fhigh-counts?filter_priority=High&order_by=count&order=desc");
+  });
+
+  it("builds Desk file manager and notification inbox URLs for client scripts", async () => {
+    const runtime = evaluateDeskClient();
+
+    expect(
+      runtime.desk.filesUrl({
+        attachedTo: { doctype: "Task Type", name: "TASK/1" },
+        contentType: "text/plain",
+        filename: "brief",
+        isPrivate: false,
+        limit: 5,
+        scanStatus: "clean",
+        storageState: "available",
+        uploadedBy: "owner@example.com"
+      })
+    ).toBe(
+      "/desk/files?attached_to_doctype=Task+Type&attached_to_name=TASK%2F1&content_type=text%2Fplain&filename=brief&is_private=false&limit=5&scan_status=clean&storage_state=available&uploaded_by=owner%40example.com"
+    );
+    expect(runtime.desk.notificationsUrl({ includeDismissed: true, limit: 10, unread: true, user: "ignored@example.com" }))
+      .toBe("/desk/notifications?limit=10&unread=true&include_dismissed=true");
   });
 
   it("wraps Desk CSV imports with list return context for client scripts", async () => {
