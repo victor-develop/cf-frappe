@@ -262,6 +262,29 @@ describe("cf-frappe CLI remote files", () => {
       overlayHeight: 24
     });
 
+    expect(parseCliArgs([
+      "files",
+      "rendition-download",
+      "--url",
+      "https://app.example",
+      "--name",
+      "file/image",
+      "--rendition-id",
+      "w320-h240-fit-cover-f-webp-q82",
+      "--output",
+      "downloads/avatar.webp",
+      "--header-env",
+      "Authorization=CF_FRAPPE_AUTH"
+    ])).toEqual({
+      kind: "files",
+      action: "rendition-download",
+      url: "https://app.example",
+      headers: [{ kind: "env", name: "Authorization", envName: "CF_FRAPPE_AUTH" }],
+      name: "file/image",
+      renditionId: "w320-h240-fit-cover-f-webp-q82",
+      outputPath: "downloads/avatar.webp"
+    });
+
     expect(parseCliArgs(["files", "delete", "--url", "https://app.example"])).toEqual({
       kind: "invalid",
       message: "File delete requires --name"
@@ -273,6 +296,14 @@ describe("cf-frappe CLI remote files", () => {
     expect(parseCliArgs(["files", "download", "--url", "https://app.example", "--name", "file_invoice"])).toEqual({
       kind: "invalid",
       message: "File download requires --output"
+    });
+    expect(parseCliArgs(["files", "rendition-download", "--url", "https://app.example", "--name", "file_image", "--output", "avatar.webp"])).toEqual({
+      kind: "invalid",
+      message: "File rendition download requires --rendition-id"
+    });
+    expect(parseCliArgs(["files", "rendition-download", "--url", "https://app.example", "--name", "file_image", "--rendition-id", "w320"])).toEqual({
+      kind: "invalid",
+      message: "File rendition download requires --output"
     });
     expect(parseCliArgs(["files", "list", "--url", "https://app.example", "--output", "invoice.pdf"])).toEqual({
       kind: "invalid",
@@ -944,6 +975,88 @@ describe("cf-frappe CLI remote files", () => {
     expect(stdout.text()).toContain(
       "Content: https://app.example/cf/api/files/file%2Fimage/renditions/w320-h240-fit-cover-f-webp-q82/content"
     );
+  });
+
+  it("downloads remote file rendition content to a local path", async () => {
+    const calls: RemoteCall[] = [];
+    const stdout = textBuffer();
+    const exitCode = await runCli(
+      [
+        "files",
+        "rendition-download",
+        "--url",
+        "https://app.example/cf",
+        "--name",
+        "file/image",
+        "--rendition-id",
+        "w320-h240-fit-cover-f-webp-q82",
+        "--output",
+        "avatar.webp",
+        "--header-env",
+        "Authorization=CF_FRAPPE_AUTH"
+      ],
+      {
+        cwd: () => tempRoot,
+        env: (name) => name === "CF_FRAPPE_AUTH" ? "Bearer test-token" : undefined,
+        fetch: fakeBinaryFetch(calls, "webp-bytes", {
+          "content-type": "image/webp",
+          etag: '"rendition-etag"'
+        }),
+        stdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(calls[0]?.url).toBe(
+      "https://app.example/cf/api/files/file%2Fimage/renditions/w320-h240-fit-cover-f-webp-q82/content"
+    );
+    expect(calls[0]?.method).toBe("GET");
+    expect(calls[0]?.headers.get("accept")).toBe("*/*");
+    expect(calls[0]?.headers.get("authorization")).toBe("Bearer test-token");
+    await expect(readFile(join(tempRoot, "avatar.webp"), "utf8")).resolves.toBe("webp-bytes");
+    expect(stdout.text()).toContain("Downloaded file rendition from https://app.example/cf");
+    expect(stdout.text()).toContain(
+      `- file/image rendition w320-h240-fit-cover-f-webp-q82 -> ${join(tempRoot, "avatar.webp")} bytes 10 type image/webp`
+    );
+  });
+
+  it("maps remote file rendition download errors without writing output", async () => {
+    const calls: RemoteCall[] = [];
+    const stderr = textBuffer();
+    const exitCode = await runCli(
+      [
+        "files",
+        "rendition-download",
+        "--url",
+        "https://app.example",
+        "--name",
+        "file/image",
+        "--rendition-id",
+        "missing-rendition",
+        "--output",
+        "missing.webp"
+      ],
+      {
+        cwd: () => tempRoot,
+        fetch: fakeFetch(calls, {
+          error: {
+            code: "DOCUMENT_NOT_FOUND",
+            message: "File rendition 'missing-rendition' was not found"
+          }
+        }, 404),
+        stdout: textBuffer(),
+        stderr
+      }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(calls[0]?.url).toBe("https://app.example/api/files/file%2Fimage/renditions/missing-rendition/content");
+    expect(calls[0]?.headers.get("accept")).toBe("*/*");
+    expect(stderr.text()).toContain(
+      "Remote file request failed (404): DOCUMENT_NOT_FOUND: File rendition 'missing-rendition' was not found"
+    );
+    await expect(readFile(join(tempRoot, "missing.webp"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("maps remote file API errors and missing env headers to CLI failures", async () => {

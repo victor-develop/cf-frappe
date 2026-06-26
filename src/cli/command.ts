@@ -930,6 +930,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
   let name: string | undefined;
   let outputPath: string | undefined;
   let path: string | undefined;
+  let renditionId: string | undefined;
   const files: NonNullable<FileRemoteCommand["files"]>[number][] = [];
   let attachedToDoctype: string | undefined;
   let attachedToName: string | undefined;
@@ -1002,7 +1003,13 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--name") {
-      if (action !== "delete" && action !== "download" && action !== "update" && action !== "rendition") {
+      if (
+        action !== "delete" &&
+        action !== "download" &&
+        action !== "update" &&
+        action !== "rendition" &&
+        action !== "rendition-download"
+      ) {
         return { kind: "invalid", message: `Cannot use --name with files ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1014,7 +1021,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--output") {
-      if (action !== "download") {
+      if (action !== "download" && action !== "rendition-download") {
         return { kind: "invalid", message: `Cannot use --output with files ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
@@ -1022,6 +1029,18 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
         return value;
       }
       outputPath = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--rendition-id") {
+      if (action !== "rendition-download") {
+        return { kind: "invalid", message: `Cannot use --rendition-id with files ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      renditionId = value;
       index += 1;
       continue;
     }
@@ -1291,11 +1310,26 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
   if ((attachedToDoctype === undefined) !== (attachedToName === undefined)) {
     return { kind: "invalid", message: "Use --attached-to-doctype and --attached-to-name together" };
   }
-  if ((action === "delete" || action === "download" || action === "update" || action === "rendition") && name === undefined) {
+  if (
+    (action === "delete" ||
+      action === "download" ||
+      action === "update" ||
+      action === "rendition" ||
+      action === "rendition-download") &&
+    name === undefined
+  ) {
     return { kind: "invalid", message: `File ${action} requires --name` };
   }
-  if (action === "download" && outputPath === undefined) {
-    return { kind: "invalid", message: "File download requires --output" };
+  if (action === "download" || action === "rendition-download") {
+    if (action === "rendition-download" && renditionId === undefined) {
+      return { kind: "invalid", message: "File rendition download requires --rendition-id" };
+    }
+    if (outputPath === undefined) {
+      return {
+        kind: "invalid",
+        message: action === "download" ? "File download requires --output" : "File rendition download requires --output"
+      };
+    }
   }
   if (action === "upload" && path === undefined) {
     return { kind: "invalid", message: "File upload requires --path" };
@@ -1346,6 +1380,7 @@ function parseFilesArgs(argv: readonly string[]): ParsedCommand {
     ...(name === undefined ? {} : { name }),
     ...(outputPath === undefined ? {} : { outputPath }),
     ...(path === undefined ? {} : { path }),
+    ...(renditionId === undefined ? {} : { renditionId }),
     ...(files.length === 0 ? {} : { files }),
     ...(attachedToDoctype === undefined ? {} : { attachedToDoctype }),
     ...(attachedToName === undefined ? {} : { attachedToName }),
@@ -1384,6 +1419,7 @@ function fileAction(value: string): FileRemoteAction | undefined {
     value === "bulk-delete" ||
     value === "bulk-update" ||
     value === "rendition" ||
+    value === "rendition-download" ||
     value === "upload"
     ? value
     : undefined;
@@ -1780,6 +1816,7 @@ function helpText(): string {
     "  cf-frappe files bulk-update --url <origin> (--file <fileName>|--file-version <fileName:version>)... [--private|--public] [--attached-to-doctype <doctype> --attached-to-name <name>|--clear-attachment] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files bulk-delete --url <origin> (--file <fileName>|--file-version <fileName:version>)... [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files rendition --url <origin> --name <fileName> [--width <n>] [--height <n>] [--fit <mode>] [--format <type>] [--quality <n>] [--watermark <text> [--watermark-placement <place>] [--watermark-opacity <n>] [--watermark-color <hex>] [--watermark-font-size <n>]] [--overlay <fileName> [--overlay-placement <place>] [--overlay-opacity <n>] [--overlay-width <n>] [--overlay-height <n>]] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe files rendition-download --url <origin> --name <fileName> --rendition-id <id> --output <localPath> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe files delete --url <origin> --name <fileName> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe --help",
     "",

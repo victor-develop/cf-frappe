@@ -8,7 +8,16 @@ import {
   type RemoteHeaderOption
 } from "./remote-admin.js";
 
-export type FileRemoteAction = "bulk-delete" | "bulk-update" | "list" | "delete" | "download" | "rendition" | "update" | "upload";
+export type FileRemoteAction =
+  | "bulk-delete"
+  | "bulk-update"
+  | "list"
+  | "delete"
+  | "download"
+  | "rendition"
+  | "rendition-download"
+  | "update"
+  | "upload";
 
 export type FileHeaderOption = RemoteHeaderOption;
 
@@ -20,6 +29,7 @@ export interface FileRemoteCommand {
   readonly name?: string;
   readonly outputPath?: string;
   readonly path?: string;
+  readonly renditionId?: string;
   readonly files?: readonly FileRemoteSelection[];
   readonly attachedToDoctype?: string;
   readonly attachedToName?: string;
@@ -166,6 +176,22 @@ export async function runRemoteFileCommand(command: FileRemoteCommand, io: FileR
       throw new FileRemoteError(`Could not write download file '${command.outputPath}': ${errorMessage(error)}`);
     }
     return formatDownload(command.url, requiredFileName(command, "download"), output, bytes.byteLength, response);
+  }
+  if (command.action === "rendition-download") {
+    const name = requiredFileName(command, "rendition download");
+    const renditionId = requiredRenditionId(command);
+    const output = await downloadOutputPath(command, io.cwd, "rendition download");
+    const response = await requestRemoteFileResponse(command, io, {
+      method: "GET",
+      path: `/api/files/${encodeURIComponent(name)}/renditions/${encodeURIComponent(renditionId)}/content`
+    });
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    try {
+      await writeFile(output, bytes);
+    } catch (error) {
+      throw new FileRemoteError(`Could not write download file '${command.outputPath}': ${errorMessage(error)}`);
+    }
+    return formatRenditionDownload(command.url, name, renditionId, output, bytes.byteLength, response);
   }
   if (command.action === "list") {
     const query = queryParams({
@@ -389,6 +415,13 @@ function requiredFileName(command: FileRemoteCommand, action: string): string {
   return command.name;
 }
 
+function requiredRenditionId(command: FileRemoteCommand): string {
+  if (command.renditionId === undefined) {
+    throw new FileRemoteError("File rendition download requires --rendition-id");
+  }
+  return command.renditionId;
+}
+
 async function uploadFileBody(command: FileRemoteCommand, cwd = process.cwd()): Promise<{ readonly body: Blob; readonly path: string }> {
   if (command.path === undefined) {
     throw new FileRemoteError("File upload requires --path");
@@ -407,9 +440,9 @@ async function uploadFileBody(command: FileRemoteCommand, cwd = process.cwd()): 
   };
 }
 
-async function downloadOutputPath(command: FileRemoteCommand, cwd = process.cwd()): Promise<string> {
+async function downloadOutputPath(command: FileRemoteCommand, cwd = process.cwd(), action = "download"): Promise<string> {
   if (command.outputPath === undefined) {
-    throw new FileRemoteError("File download requires --output");
+    throw new FileRemoteError(`File ${action} requires --output`);
   }
   return resolve(cwd, command.outputPath);
 }
@@ -445,6 +478,22 @@ function formatDownload(baseUrl: string, name: string, outputPath: string, bytes
   return [
     `Downloaded file from ${baseUrl}`,
     `- ${name} -> ${outputPath} bytes ${String(bytes)}${contentType === null ? "" : ` type ${contentType}`}`,
+    ""
+  ].join("\n");
+}
+
+function formatRenditionDownload(
+  baseUrl: string,
+  name: string,
+  renditionId: string,
+  outputPath: string,
+  bytes: number,
+  response: Response
+): string {
+  const contentType = response.headers.get("content-type");
+  return [
+    `Downloaded file rendition from ${baseUrl}`,
+    `- ${name} rendition ${renditionId} -> ${outputPath} bytes ${String(bytes)}${contentType === null ? "" : ` type ${contentType}`}`,
     ""
   ].join("\n");
 }
