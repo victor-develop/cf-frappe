@@ -43,6 +43,13 @@ import {
   type JobRemoteAction,
   type JobRemoteCommand
 } from "./jobs.js";
+import {
+  FileRemoteError,
+  runRemoteFileCommand,
+  type FileHeaderOption,
+  type FileRemoteAction,
+  type FileRemoteCommand
+} from "./files.js";
 import { scaffoldProject, ScaffoldError } from "./scaffold.js";
 import type { StarterAuthMode } from "./templates.js";
 
@@ -102,6 +109,7 @@ type ParsedCommand =
   | CloudflareAccessSetupCommand
   | DataPatchRemoteCommand
   | JobRemoteCommand
+  | FileRemoteCommand
   | HelpCommand
   | InvalidCommand;
 
@@ -126,6 +134,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     if (command.kind === "jobs") {
       io.stdout.write(await runRemoteJobCommand(command, {
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
+    if (command.kind === "files") {
+      io.stdout.write(await runRemoteFileCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -208,7 +223,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof PackageManagerError ||
       error instanceof CloudflareAccessSetupError ||
       error instanceof DataPatchRemoteError ||
-      error instanceof JobRemoteError
+      error instanceof JobRemoteError ||
+      error instanceof FileRemoteError
     ) {
       io.stderr.write(`cf-frappe: ${error.message}\n`);
       return 1;
@@ -233,6 +249,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "jobs") {
     return parseJobsArgs(rest);
+  }
+  if (command === "files") {
+    return parseFilesArgs(rest);
   }
   if (command === "access") {
     return parseAccessArgs(rest);
@@ -895,6 +914,256 @@ function parseJobsArgs(argv: readonly string[]): ParsedCommand {
   };
 }
 
+function parseFilesArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = fileAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown files command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: FileHeaderOption[] = [];
+  let name: string | undefined;
+  let attachedToDoctype: string | undefined;
+  let attachedToName: string | undefined;
+  let contentType: string | undefined;
+  let filename: string | undefined;
+  let isPrivate: boolean | undefined;
+  let limit: number | undefined;
+  let scanStatus: string | undefined;
+  let storageState: string | undefined;
+  let uploadedBy: string | undefined;
+  let expectedVersion: number | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "File");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "File");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--name") {
+      if (action !== "delete") {
+        return { kind: "invalid", message: `Cannot use --name with files ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      name = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--expected-version") {
+      if (action !== "delete") {
+        return { kind: "invalid", message: `Cannot use --expected-version with files ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parsePositiveInteger(value, "File expected version");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      expectedVersion = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--attached-to-doctype") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --attached-to-doctype with files ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      attachedToDoctype = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--attached-to-name") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --attached-to-name with files ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      attachedToName = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--content-type") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --content-type with files ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      contentType = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--filename") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --filename with files ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      filename = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--private") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --private with files ${action}` };
+      }
+      if (isPrivate !== undefined) {
+        return { kind: "invalid", message: "Use only one of --private or --public" };
+      }
+      isPrivate = true;
+      continue;
+    }
+    if (arg === "--public") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --public with files ${action}` };
+      }
+      if (isPrivate !== undefined) {
+        return { kind: "invalid", message: "Use only one of --private or --public" };
+      }
+      isPrivate = false;
+      continue;
+    }
+    if (arg === "--limit") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --limit with files ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parsePositiveInteger(value, "File list limit");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      limit = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--scan-status") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --scan-status with files ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      scanStatus = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--storage-state") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --storage-state with files ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      storageState = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--uploaded-by") {
+      if (action !== "list") {
+        return { kind: "invalid", message: `Cannot use --uploaded-by with files ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      uploadedBy = value;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown files ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if ((attachedToDoctype === undefined) !== (attachedToName === undefined)) {
+    return { kind: "invalid", message: "Use --attached-to-doctype and --attached-to-name together" };
+  }
+  if (action === "delete" && name === undefined) {
+    return { kind: "invalid", message: "File delete requires --name" };
+  }
+  return {
+    kind: "files",
+    action,
+    url,
+    headers,
+    ...(name === undefined ? {} : { name }),
+    ...(attachedToDoctype === undefined ? {} : { attachedToDoctype }),
+    ...(attachedToName === undefined ? {} : { attachedToName }),
+    ...(contentType === undefined ? {} : { contentType }),
+    ...(filename === undefined ? {} : { filename }),
+    ...(isPrivate === undefined ? {} : { isPrivate }),
+    ...(limit === undefined ? {} : { limit }),
+    ...(scanStatus === undefined ? {} : { scanStatus }),
+    ...(storageState === undefined ? {} : { storageState }),
+    ...(uploadedBy === undefined ? {} : { uploadedBy }),
+    ...(expectedVersion === undefined ? {} : { expectedVersion })
+  };
+}
+
+function fileAction(value: string): FileRemoteAction | undefined {
+  return value === "list" || value === "delete" ? value : undefined;
+}
+
 function jobAction(value: string): JobRemoteAction | undefined {
   return value === "list" ||
     value === "get" ||
@@ -957,7 +1226,7 @@ function parseJsonObject(value: string, label: string): Record<string, unknown> 
   return `${label} must be a valid JSON object`;
 }
 
-function parseLiteralHeader(value: string, label: string): DataPatchHeaderOption | JobHeaderOption | string {
+function parseLiteralHeader(value: string, label: string): DataPatchHeaderOption | JobHeaderOption | FileHeaderOption | string {
   const separator = value.indexOf(":");
   if (separator < 1) {
     return `${label} header must use 'Name: value' syntax`;
@@ -973,7 +1242,7 @@ function parseLiteralHeader(value: string, label: string): DataPatchHeaderOption
   return { kind: "literal", name, value: headerValue };
 }
 
-function parseEnvHeader(value: string, label: string): DataPatchHeaderOption | JobHeaderOption | string {
+function parseEnvHeader(value: string, label: string): DataPatchHeaderOption | JobHeaderOption | FileHeaderOption | string {
   const separator = value.indexOf("=");
   if (separator < 1) {
     return `${label} environment header must use 'Name=ENV_VAR' syntax`;
@@ -1248,6 +1517,8 @@ function helpText(): string {
     "  cf-frappe jobs schedule-reset --url <origin> --id <scheduleId> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs schedule-save --url <origin> [--id <scheduleId>] --cron <expr> --job <name> [--enabled|--disabled] [--payload-json <json>] [--metadata-json <json>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs schedule-delete --url <origin> --id <scheduleId> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe files list --url <origin> [--filename <text>] [--content-type <type>] [--attached-to-doctype <doctype> --attached-to-name <name>] [--storage-state <state>] [--scan-status <status>] [--uploaded-by <user>] [--private|--public] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe files delete --url <origin> --name <fileName> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe --help",
     "",
     "Commands:",
@@ -1257,6 +1528,7 @@ function helpText(): string {
     "  access   Plan or create Cloudflare Access application and policy resources for a starter app",
     "  data-patches   Inspect, plan, apply, rollback, or enqueue remote app-declared data patches through the admin API",
     "  jobs   Inspect remote job history, retry failed runs, and manage runtime schedules through the admin API",
+    "  files   Inspect and delete remote File metadata/content through the admin API",
     "",
     "Use --header-env for secret-bearing auth headers so tokens stay out of shell history.",
     ""
