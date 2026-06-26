@@ -1,7 +1,61 @@
-import { DocumentImportService } from "../../src";
+import { defineDocType, documentImportTemplate, DocumentImportService } from "../../src";
 import { createServices, owner } from "../helpers";
 
 describe("DocumentImportService", () => {
+  it("builds import templates from writable metadata fields", () => {
+    const Importable = defineDocType({
+      name: "Importable Thing",
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "status", type: "select", options: ["Open", "Closed"], defaultValue: "Open" },
+        { name: "count", type: "integer", defaultValue: 0 },
+        { name: "secret", type: "text", hidden: true },
+        { name: "created_by", type: "text", readOnly: true, defaultValue: ({ actor }) => actor.id }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }]
+    });
+
+    const template = documentImportTemplate(Importable);
+
+    expect(template).toEqual({
+      doctype: "Importable Thing",
+      filename: "Importable-Thing-import-template.csv",
+      contentType: "text/csv; charset=utf-8",
+      body: "name,expectedVersion,title,status,count\n,,,Open,0",
+      fields: ["title", "status", "count"]
+    });
+  });
+
+  it("excludes reserved import columns from metadata field headers", () => {
+    const Reserved = defineDocType({
+      name: "Reserved Import",
+      fields: [
+        { name: "name", type: "text" },
+        { name: "expectedVersion", type: "integer" },
+        { name: "title", type: "text" }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }]
+    });
+
+    expect(documentImportTemplate(Reserved)).toMatchObject({
+      body: "name,expectedVersion,title",
+      fields: ["title"]
+    });
+  });
+
+  it("builds header-only import templates when no static defaults exist", () => {
+    const HeaderOnly = defineDocType({
+      name: "Header Only",
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "created_by", type: "text", defaultValue: ({ actor }) => actor.id }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }]
+    });
+
+    expect(documentImportTemplate(HeaderOnly).body).toBe("name,expectedVersion,title,created_by");
+  });
+
   it("imports CSV rows through the document create command boundary", async () => {
     const services = createServices(["import-1", "import-2"]);
     const imports = new DocumentImportService({

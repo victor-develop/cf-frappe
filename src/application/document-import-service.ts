@@ -8,9 +8,10 @@ import type {
   JsonValue,
   MutableDocumentData
 } from "../core/types.js";
+import { can } from "../core/permissions.js";
 import type { DocumentCommandExecutor } from "./document-service.js";
 import type { QueryService } from "./query-service.js";
-import { parseCsv, type ParsedCsvRow } from "./csv.js";
+import { CSV_CONTENT_TYPE, csvLine, filenamePart, parseCsv, type ParsedCsvRow } from "./csv.js";
 
 export type DocumentImportMode = "create" | "update";
 
@@ -50,6 +51,18 @@ export interface DocumentImportResult {
   readonly total: number;
   readonly succeeded: readonly DocumentImportSuccess[];
   readonly failed: readonly DocumentImportFailure[];
+}
+
+export interface DocumentImportTemplate {
+  readonly doctype: string;
+  readonly filename: string;
+  readonly contentType: typeof CSV_CONTENT_TYPE;
+  readonly body: string;
+  readonly fields: readonly string[];
+}
+
+export function canImportDocuments(actor: Actor, doctype: DocTypeDefinition): boolean {
+  return can(actor, doctype, "create") || can(actor, doctype, "update");
 }
 
 const DEFAULT_MAX_IMPORT_ROWS = 500;
@@ -113,10 +126,33 @@ export class DocumentImportService {
   }
 }
 
+export function documentImportTemplate(doctype: DocTypeDefinition): DocumentImportTemplate {
+  const fieldNames = importableFields(doctype).map((field) => field.name);
+  const headers = ["name", "expectedVersion", ...fieldNames];
+  const defaults = importableFields(doctype).map((field) =>
+    field.defaultValue === undefined || typeof field.defaultValue === "function" ? undefined : field.defaultValue
+  );
+  const sample = ["", "", ...defaults];
+  const body = defaults.some((value) => value !== undefined)
+    ? [csvLine(headers), csvLine(sample)].join("\n")
+    : csvLine(headers);
+  return {
+    doctype: doctype.name,
+    filename: `${filenamePart(doctype.name, "documents")}-import-template.csv`,
+    contentType: CSV_CONTENT_TYPE,
+    body,
+    fields: fieldNames
+  };
+}
+
 interface RowInput {
   readonly name?: string;
   readonly expectedVersion?: number;
   readonly data: MutableDocumentData;
+}
+
+function importableFields(doctype: DocTypeDefinition): readonly FieldDefinition[] {
+  return doctype.fields.filter((field) => !field.readOnly && !field.hidden && !RESERVED_HEADERS.has(field.name));
 }
 
 function rowInput(headers: readonly string[], row: ParsedCsvRow, doctype: DocTypeDefinition): RowInput {

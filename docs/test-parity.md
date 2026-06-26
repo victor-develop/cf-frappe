@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the generated Desk CSV import slice:
+As of the generated CSV import template slice:
 
 - Vitest files: `94`
-- Vitest cases: `1066`
+- Vitest cases: `1073`
 
 ## Implication
 

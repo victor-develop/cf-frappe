@@ -17,7 +17,13 @@ import type {
 import type { DocumentShareService } from "../../application/document-share-service.js";
 import type { DocumentCommandExecutor } from "../../application/document-service.js";
 import type { DocumentHistoryService } from "../../application/document-history-service.js";
-import { DocumentImportService, type DocumentImportMode, type DocumentImportResult } from "../../application/document-import-service.js";
+import {
+  canImportDocuments,
+  DocumentImportService,
+  documentImportTemplate,
+  type DocumentImportMode,
+  type DocumentImportResult
+} from "../../application/document-import-service.js";
 import type { FieldPropertyService } from "../../application/field-property-service.js";
 import type {
   FileDashboard,
@@ -101,7 +107,7 @@ import {
   parseOptionalInteger,
   readBoundedText
 } from "../http/request.js";
-import { writeCsvExportHeaders, writeReportCsvHeaders } from "../http/report-export.js";
+import { writeCsvDownloadHeaders, writeCsvExportHeaders, writeReportCsvHeaders } from "../http/report-export.js";
 import { reportFilterExpressionFromValue, reportFiltersFromUrl, reportOrderingFromUrl } from "../report-request.js";
 import {
   defaultPrintLayoutFor,
@@ -1664,6 +1670,19 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     });
     writeCsvExportHeaders(c, csv);
     return c.body(csv.body);
+  });
+
+  app.get("/desk/:doctype/import-template.csv", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
+    if (!canImportDocuments(actor, doctype)) {
+      throw new FrameworkError("PERMISSION_DENIED", `Actor '${actor.id}' cannot import ${doctype.name}`, {
+        status: 403
+      });
+    }
+    const template = documentImportTemplate(doctype);
+    writeCsvDownloadHeaders(c, template);
+    return c.body(template.body);
   });
 
   app.get("/desk/:doctype", async (c) => {

@@ -2553,11 +2553,34 @@ describe("Desk app", () => {
     expect(list.status).toBe(200);
     const html = await list.text();
     expect(html).toContain('action="/desk/Note/import.csv"');
+    expect(html).toContain('href="/desk/Note/import-template.csv"');
     expect(html).toContain('name="mode"');
     expect(html).toContain('<option value="create" selected>Create</option>');
     expect(html).toContain('<option value="update">Update</option>');
     expect(html).toContain('name="csv"');
     expect(html).toContain("Import CSV");
+  });
+
+  it("downloads generated CSV import templates from Desk", async () => {
+    const { app } = makeDesk(owner);
+
+    const response = await app.request("/desk/Note/import-template.csv");
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/csv; charset=utf-8");
+    expect(response.headers.get("content-disposition")).toBe('attachment; filename="Note-import-template.csv"');
+    await expect(response.text()).resolves.toBe(
+      "name,expectedVersion,title,body,priority,count,workflow_state\n,,,,Medium,0,Open"
+    );
+  });
+
+  it("rejects direct generated CSV import template downloads from read-only actors", async () => {
+    const { app } = makeDesk(guest);
+
+    const response = await app.request("/desk/Note/import-template.csv");
+
+    expect(response.status).toBe(403);
+    await expect(response.text()).resolves.toContain("Actor &#39;guest&#39; cannot import Note");
   });
 
   it("renders only generated CSV import modes allowed for the actor", async () => {
@@ -2592,6 +2615,7 @@ describe("Desk app", () => {
     const html = await list.text();
     expect(html).toContain("Readable Note");
     expect(html).not.toContain("/desk/Note/import.csv");
+    expect(html).not.toContain("/desk/Note/import-template.csv");
     expect(html).not.toContain("Import CSV");
   });
 

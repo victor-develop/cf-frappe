@@ -2507,6 +2507,7 @@ function renderListImportPanel(
   result: DocumentImportResult | undefined
 ): string {
   const action = `/desk/${encodeURIComponent(doctype.name)}/import.csv`;
+  const templateHref = `/desk/${encodeURIComponent(doctype.name)}/import-template.csv`;
   const selectedMode = result?.mode ?? modes[0];
   const modeOptions = modes
     .map((mode) => `<option value="${mode}"${selectedMode === mode ? " selected" : ""}>${mode === "create" ? "Create" : "Update"}</option>`)
@@ -2520,7 +2521,7 @@ function renderListImportPanel(
         </select></label>
         <label class="field wide" for="import-csv"><span>CSV</span><textarea id="import-csv" name="csv" rows="6" required></textarea></label>
       </div>
-      <div class="actions"><button class="button" type="submit">Import CSV</button></div>
+      <div class="actions"><a class="button" href="${templateHref}">Download template</a><button class="button" type="submit">Import CSV</button></div>
     </form>
   </section>`;
 }

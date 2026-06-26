@@ -10,9 +10,16 @@ export interface CsvExportResponse {
   readonly truncated: boolean;
 }
 
-export function writeCsvExportHeaders(c: Context, csv: CsvExportResponse): void {
+export function writeCsvDownloadHeaders(
+  c: Context,
+  csv: { readonly filename: string; readonly contentType: string }
+): void {
   c.header("content-type", csv.contentType);
   c.header("content-disposition", `attachment; filename="${csv.filename.replace(/["\\]/g, "_")}"`);
+}
+
+export function writeCsvExportHeaders(c: Context, csv: CsvExportResponse): void {
+  writeCsvDownloadHeaders(c, csv);
   c.header("x-cf-frappe-export-total", String(csv.total));
   c.header("x-cf-frappe-exported", String(csv.exported));
   c.header("x-cf-frappe-export-limit", String(csv.limit));

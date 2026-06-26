@@ -551,6 +551,38 @@ describe("resource api", () => {
     });
   });
 
+  it("downloads generated CSV import templates from effective metadata", async () => {
+    const app = makeApp();
+
+    const response = await app.request("/api/resource/Note/import-template.csv", {
+      headers: userHeaders
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/csv; charset=utf-8");
+    expect(response.headers.get("content-disposition")).toBe('attachment; filename="Note-import-template.csv"');
+    await expect(response.text()).resolves.toBe(
+      "name,expectedVersion,title,body,priority,count,workflow_state\n,,,,Medium,0,Open"
+    );
+  });
+
+  it("rejects generated CSV import template downloads without import permission", async () => {
+    const app = makeApp();
+
+    const response = await app.request("/api/resource/Note/import-template.csv", {
+      headers: {
+        ...userHeaders,
+        "x-cf-frappe-user": "guest",
+        "x-cf-frappe-roles": "Guest"
+      }
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "PERMISSION_DENIED", message: "Actor 'guest' cannot import Note" }
+    });
+  });
+
   it("applies clean stale resource merge requests through normal document updates", async () => {
     const services = createServices(["e1", "e2", "e3"]);
     const app = createResourceApi({

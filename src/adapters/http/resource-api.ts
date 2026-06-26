@@ -11,7 +11,11 @@ import type { DashboardService } from "../../application/dashboard-service.js";
 import type { DocumentShareService } from "../../application/document-share-service.js";
 import type { BulkDocumentSelection, DocumentCommandExecutor } from "../../application/document-service.js";
 import type { DocumentHistoryService } from "../../application/document-history-service.js";
-import { DocumentImportService } from "../../application/document-import-service.js";
+import {
+  canImportDocuments,
+  DocumentImportService,
+  documentImportTemplate
+} from "../../application/document-import-service.js";
 import type { FileService } from "../../application/file-service.js";
 import type { FieldPropertyService } from "../../application/field-property-service.js";
 import type { JobHistoryService } from "../../application/job-history-service.js";
@@ -68,7 +72,7 @@ import {
   readBoundedText,
   requestMetadata
 } from "./request.js";
-import { writeCsvExportHeaders } from "./report-export.js";
+import { writeCsvDownloadHeaders, writeCsvExportHeaders } from "./report-export.js";
 import { createRoleApi } from "./role-api.js";
 import { createSavedReportApi } from "./saved-report-api.js";
 import { createUserAccountApi } from "./user-account-api.js";
@@ -424,6 +428,17 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     });
     writeCsvExportHeaders(c, csv);
     return c.body(csv.body);
+  });
+
+  app.get("/api/resource/:doctype/import-template.csv", async (c) => {
+    const actor = await resolveActor(c.req.raw);
+    const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
+    if (!canImportDocuments(actor, doctype)) {
+      throw permissionDenied(`Actor '${actor.id}' cannot import ${doctype.name}`);
+    }
+    const template = documentImportTemplate(doctype);
+    writeCsvDownloadHeaders(c, template);
+    return c.body(template.body);
   });
 
   app.post("/api/resource/:doctype/import.csv", async (c) => {

@@ -3355,6 +3355,9 @@ export function renderDeskClientScript(): string {
       csvUrl: function (doctype, options) {
         return withQuery(resourcePath(doctype) + "/export.csv", resourceExportParams(options || {}));
       },
+      importTemplateCsvUrl: function (doctype) {
+        return resourcePath(doctype) + "/import-template.csv";
+      },
       importCsv: function (doctype, csv, options) {
         var params = {};
         setParam(params, "mode", options && options.mode);

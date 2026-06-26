@@ -339,6 +339,7 @@ interface DeskClientRuntime {
     ) => Promise<unknown>;
     readonly followers: (doctype: string, name: string) => Promise<unknown>;
     readonly csvUrl: (doctype: string, options?: Record<string, unknown>) => string;
+    readonly importTemplateCsvUrl: (doctype: string) => string;
     readonly importCsv: (
       doctype: string,
       csv: string,
@@ -603,6 +604,7 @@ describe("Desk client runtime", () => {
     ).toBe(
       "/api/resource/Task/export.csv?order=desc&limit=5&order_by=count&filter_priority__ne=Low&filter_count__gt=2&filter_count__lt=9&filter_count__not_between=3&filter_count__not_between=8&filter_title=Launch"
     );
+    expect(runtime.resource.importTemplateCsvUrl("Task Type")).toBe("/api/resource/Task%20Type/import-template.csv");
   });
 
   it("wraps resource CSV imports for client scripts", async () => {
