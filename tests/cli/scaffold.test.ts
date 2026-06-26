@@ -160,6 +160,7 @@ describe("cf-frappe CLI scaffold", () => {
     expect(taskApp).toContain("Create D1, R2, and Queue resources");
     expect(taskApp).toContain('kind: "dashboard", target: "Task Dashboard"');
     expect(taskApp).toContain('kind: "notifications"');
+    expect(taskApp).toContain('kind: "admin", target: "notification-rules"');
     expect(taskApp).toContain('kind: "admin", target: "roles"');
     const appsIndex = await readFile(join(target, "src/apps/index.ts"), "utf8");
     expect(appsIndex).toContain("defineApp");

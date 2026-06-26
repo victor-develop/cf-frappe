@@ -578,6 +578,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     reports,
     dashboards,
     roles,
+    notificationRules,
     ...(printPdfRenderer === undefined ? {} : { printPdfRenderer }),
     ...(dataPatches === undefined ? {} : { dataPatches }),
     ...(dataPatchQueue === undefined || !dataPatchApplyQueueEnabled ? {} : { dataPatchQueue }),

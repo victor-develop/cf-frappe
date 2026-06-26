@@ -33,6 +33,7 @@ import {
   JobRetryService,
   JobScheduleService,
   jobScheduleDefinitionsStream,
+  NotificationRuleService,
   QueryService,
   ReportService,
   REPORT_FORMULA_MAX_DEPTH,
@@ -4092,6 +4093,128 @@ describe("Desk app", () => {
     expect((await services.workflows.list(admin, "Note")).workflow).toBeUndefined();
   });
 
+  it("renders and mutates notification rules from the Desk admin surface", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"], tenantId: "acme" };
+    const services = createServices();
+    const notificationRules = new NotificationRuleService({
+      registry: services.registry,
+      events: services.store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["notification-rule-event-1", "notification-rule-event-2"])
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      notificationRules,
+      actor: () => admin
+    });
+
+    const empty = await app.request("/desk/admin/notification-rules?doctype=Note");
+    expect(empty.status).toBe(200);
+    const emptyHtml = await empty.text();
+    expect(emptyHtml).toContain("Notification Rules");
+    expect(emptyHtml).toContain('action="/desk/admin/notification-rules"');
+    expect(emptyHtml).toContain('name="expectedVersion" value="0"');
+    expect(emptyHtml).toContain("No notification rules configured.");
+
+    const saved = await app.request("/desk/admin/notification-rules", {
+      method: "POST",
+      body: new URLSearchParams({
+        doctype: "Note",
+        name: "Managers on changes",
+        events: "DocumentUpdated\nDocumentCommentAdded",
+        recipients: "field:created_by",
+        channels: "inbox",
+        subject: "{{ actor }} updated {{ doctype }} {{ name }}",
+        enabled: "true",
+        excludeActor: "false",
+        expectedVersion: "0"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(saved.status).toBe(303);
+    expect(saved.headers.get("location")).toBe("/desk/admin/notification-rules?doctype=Note");
+    await expect(notificationRules.list(admin, "Note")).resolves.toMatchObject({
+      version: 1,
+      rules: [
+        {
+          rule: {
+            name: "Managers on changes",
+            events: ["DocumentUpdated", "DocumentCommentAdded"],
+            recipients: [{ kind: "field", field: "created_by" }],
+            channels: ["inbox"],
+            excludeActor: false
+          }
+        }
+      ]
+    });
+
+    const current = await app.request("/desk/admin/notification-rules?doctype=Note");
+    expect(current.status).toBe(200);
+    const currentHtml = await current.text();
+    expect(currentHtml).toContain("Managers on changes");
+    expect(currentHtml).toContain("DocumentCommentAdded");
+    expect(currentHtml).toContain("field:created_by");
+    expect(currentHtml).toContain('action="/desk/admin/notification-rules/Note/Managers%20on%20changes/clear"');
+    expect(currentHtml).toContain('name="expectedVersion" value="1"');
+
+    const stale = await app.request("/desk/admin/notification-rules", {
+      method: "POST",
+      body: new URLSearchParams({
+        doctype: "Note",
+        name: "Stale",
+        events: "DocumentUpdated",
+        recipients: "documentOwner",
+        channels: "inbox",
+        expectedVersion: "0"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(stale.status).toBe(409);
+    const staleHtml = await stale.text();
+    expect(staleHtml).toContain("Expected notification rules at version 0, found 1");
+    expect(staleHtml).toContain("Managers on changes");
+
+    const malformedRecipient = await app.request("/desk/admin/notification-rules", {
+      method: "POST",
+      body: new URLSearchParams({
+        doctype: "Note",
+        name: "Bad recipient",
+        events: "DocumentUpdated",
+        recipients: "bad",
+        channels: "inbox",
+        expectedVersion: "1"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(malformedRecipient.status).toBe(400);
+    const malformedHtml = await malformedRecipient.text();
+    expect(malformedHtml).toContain(
+      "Notification rule recipients must use field:&lt;field&gt;, user:&lt;user&gt;, or documentOwner"
+    );
+    expect(malformedHtml).toContain("Managers on changes");
+
+    const cleared = await app.request("/desk/admin/notification-rules/Note/Managers%20on%20changes/clear", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(cleared.status).toBe(303);
+    expect(cleared.headers.get("location")).toBe("/desk/admin/notification-rules?doctype=Note");
+    await expect(notificationRules.list(admin, "Note")).resolves.toMatchObject({ version: 2, rules: [] });
+
+    const disabled = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: () => admin
+    });
+    const missing = await disabled.request("/desk/admin/notification-rules");
+    expect(missing.status).toBe(404);
+    await expect(missing.text()).resolves.toContain("Notification rules are not enabled");
+  });
+
   it("renders and mutates field property overrides from the Desk admin surface", async () => {
     const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"] };
     const { app, services } = makeFieldPropertyDesk(admin);
@@ -5267,6 +5390,7 @@ describe("Desk app", () => {
     const customFields = new CustomFieldService({ registry: services.registry, events: services.store });
     const fieldProperties = new FieldPropertyService({ registry: services.registry, events: services.store });
     const workflows = new WorkflowService({ registry: services.registry, events: services.store });
+    const notificationRules = new NotificationRuleService({ registry: services.registry, events: services.store });
     const app = createDeskApp({
       registry: services.registry,
       documents: services.documents,
@@ -5276,6 +5400,7 @@ describe("Desk app", () => {
       customFields,
       fieldProperties,
       workflows,
+      notificationRules,
       printSettings: services.printSettings,
       dataPatches,
       jobSchedules: new JobScheduleService({
@@ -5296,6 +5421,7 @@ describe("Desk app", () => {
     expect(homeHtml).toContain('href="/desk/admin/custom-fields"');
     expect(homeHtml).toContain('href="/desk/admin/field-properties"');
     expect(homeHtml).toContain('href="/desk/admin/workflows"');
+    expect(homeHtml).toContain('href="/desk/admin/notification-rules"');
     expect(homeHtml).toContain('href="/desk/admin/print-settings"');
     expect(homeHtml).toContain('href="/desk/admin/data-patches"');
     expect(homeHtml).toContain('href="/desk/admin/jobs/schedules"');
@@ -5311,6 +5437,12 @@ describe("Desk app", () => {
     expect(dataPatchPage.status).toBe(200);
     await expect(dataPatchPage.text()).resolves.toContain(
       '<a class="nav-link is-active" href="/desk/admin/data-patches">Data Patches</a>'
+    );
+
+    const notificationRulesPage = await app.request("/desk/admin/notification-rules");
+    expect(notificationRulesPage.status).toBe(200);
+    await expect(notificationRulesPage.text()).resolves.toContain(
+      '<a class="nav-link is-active" href="/desk/admin/notification-rules">Notification Rules</a>'
     );
 
     const userApp = createDeskApp({

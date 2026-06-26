@@ -67,6 +67,7 @@ import {
 import type { PrintSettingsState } from "../../core/print-settings.js";
 import type { UserAccount } from "../../core/user-accounts.js";
 import type { UserNotificationInbox } from "../../application/user-notification-service.js";
+import type { NotificationRuleState } from "../../core/notification-rules.js";
 import { USER_PROFILE_FIELDS, type UserProfileState } from "../../core/user-profiles.js";
 import type { UserPermissionState } from "../../core/user-permissions.js";
 import { MAX_JOB_QUEUE_DELAY_SECONDS, MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH } from "../../ports/job-queue.js";
@@ -147,6 +148,13 @@ export interface WorkspaceSectionView {
 export interface WorkspacePageView {
   readonly workspace: WorkspaceDefinition;
   readonly sections: readonly WorkspaceSectionView[];
+}
+
+export interface NotificationRuleAdminState {
+  readonly doctypes: readonly DocTypeDefinition[];
+  readonly selectedDoctype: string;
+  readonly state?: NotificationRuleState;
+  readonly error?: string;
 }
 
 type DataPatchQueueControls = {
@@ -1646,6 +1654,56 @@ export function renderWorkflowAdmin(state: WorkflowAdminState): string {
   </section>`;
 }
 
+export function renderNotificationRuleAdmin(state: NotificationRuleAdminState): string {
+  const version = state.state?.version ?? 0;
+  const rows = state.state?.rules
+    .map((entry) => `<tr>
+      <td>${escapeHtml(entry.rule.name)}</td>
+      <td>${entry.enabled ? "enabled" : "disabled"}</td>
+      <td>${escapeHtml(entry.rule.events.join(", "))}</td>
+      <td>${escapeHtml(entry.rule.recipients.map(notificationRuleRecipientLabel).join(", "))}</td>
+      <td>${escapeHtml((entry.rule.channels ?? ["inbox"]).join(", "))}</td>
+      <td>${escapeHtml(entry.rule.subject ?? "")}</td>
+      <td>
+        <form method="post" action="/desk/admin/notification-rules/${encodeURIComponent(state.selectedDoctype)}/${encodeURIComponent(entry.rule.name)}/clear">
+          <input type="hidden" name="expectedVersion" value="${String(version)}">
+          <button class="button danger" type="submit">Clear</button>
+        </form>
+      </td>
+    </tr>`)
+    .join("");
+  return `<form class="panel form" method="get" action="/desk/admin/notification-rules">
+    <div class="fields cols-1">
+      <label class="field"><span>DocType</span><select name="doctype">${renderNotificationRuleDoctypeOptions(state.doctypes, state.selectedDoctype)}</select></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Load</button></div>
+  </form>
+  ${state.error ? `<p class="error" role="alert">${escapeHtml(state.error)}</p>` : ""}
+  <form class="panel form" method="post" action="/desk/admin/notification-rules">
+    <input type="hidden" name="doctype" value="${escapeHtml(state.selectedDoctype)}">
+    <input type="hidden" name="expectedVersion" value="${String(version)}">
+    <div class="form-head"><h2>Notification Rule</h2><p>v${String(version)}</p></div>
+    <div class="fields">
+      <label class="field"><span>Name</span><input name="name"></label>
+      <label class="field"><span>Enabled</span><select name="enabled"><option value="true" selected>Enabled</option><option value="false">Disabled</option></select></label>
+      <label class="field"><span>Events</span><textarea name="events">DocumentUpdated</textarea></label>
+      <label class="field"><span>Recipients</span><textarea name="recipients">field:created_by</textarea></label>
+      <label class="field"><span>Channels</span><input name="channels" value="inbox"></label>
+      <label class="field"><span>Subject</span><input name="subject" placeholder="{{ actor }} updated {{ doctype }} {{ name }}"></label>
+      <label class="field"><span>Exclude Actor</span><select name="excludeActor"><option value="true" selected>Yes</option><option value="false">No</option></select></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Save Rule</button></div>
+  </form>
+  <section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Status</th><th>Events</th><th>Recipients</th><th>Channels</th><th>Subject</th><th>Actions</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="7" class="empty">No notification rules configured.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
 export function renderPrintSettingsAdmin(
   state: PrintSettingsState,
   options: { readonly error?: string } = {}
@@ -1762,6 +1820,22 @@ function renderFieldPropertyOverrides(overrides: FieldPropertyOverrideState["fie
 
 function renderWorkflowDoctypeOptions(doctypes: readonly DocTypeDefinition[], selectedDoctype: string): string {
   return renderCustomFieldDoctypeOptions(doctypes, selectedDoctype);
+}
+
+function renderNotificationRuleDoctypeOptions(doctypes: readonly DocTypeDefinition[], selectedDoctype: string): string {
+  return renderCustomFieldDoctypeOptions(doctypes, selectedDoctype);
+}
+
+function notificationRuleRecipientLabel(
+  recipient: NotificationRuleState["rules"][number]["rule"]["recipients"][number]
+): string {
+  if (recipient.kind === "documentOwner") {
+    return "documentOwner";
+  }
+  if (recipient.kind === "field") {
+    return `field:${recipient.field}`;
+  }
+  return `user:${recipient.userId}`;
 }
 
 function renderWorkflowTransitionLine(

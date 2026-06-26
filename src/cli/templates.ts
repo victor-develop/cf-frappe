@@ -703,6 +703,7 @@ export const TaskWorkspace = defineWorkspace({
       shortcuts: [
         { name: "files", label: "Files", kind: "file", roles: ["User", "Task Manager"] },
         { name: "notifications", label: "Notifications", kind: "notifications", roles: ["User", "Task Manager"] },
+        { name: "notification-rules", label: "Notification Rules", kind: "admin", target: "notification-rules", roles: ["Task Manager"] },
         { name: "roles", label: "Roles", kind: "admin", target: "roles", roles: ["Task Manager"] }
       ]
     }

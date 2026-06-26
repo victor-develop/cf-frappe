@@ -295,6 +295,30 @@ describe("CloudFrappe Worker routing", () => {
     });
   });
 
+  it("mounts notification rule administration on the Worker Desk", async () => {
+    const worker = createCloudFrappeWorker({
+      registry: createRegistry({ doctypes: [noteDocType] }),
+      actor: () => ({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"], tenantId: "acme" })
+    });
+    const env = {
+      DB: fakeEventD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/desk/admin/notification-rules?doctype=Note"),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Notification Rules");
+    expect(html).toContain('action="/desk/admin/notification-rules"');
+    expect(html).toContain('href="/desk/admin/notification-rules"');
+    expect(html).toContain('name="expectedVersion" value="0"');
+  });
+
   it("routes document share API commands through the aggregate namespace", async () => {
     const calls: AggregateCoordinatorCommand[] = [];
     const worker = createCloudFrappeWorker({

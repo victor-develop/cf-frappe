@@ -35,6 +35,7 @@ import { isPreviewableFileContentType } from "../../application/file-service.js"
 import type { JobHistoryService } from "../../application/job-history-service.js";
 import type { JobRetryPort } from "../../application/job-retry-service.js";
 import type { JobScheduleService } from "../../application/job-schedule-service.js";
+import type { NotificationRuleService } from "../../application/notification-rule-service.js";
 import type { PrintService } from "../../application/print-service.js";
 import type { PrintSettingsService } from "../../application/print-settings-service.js";
 import { QueryService } from "../../application/query-service.js";
@@ -94,6 +95,10 @@ import {
   type ListDocumentsFilter,
   type ListFilterExpression,
   type MutableDocumentData,
+  type NotificationRuleChannel,
+  type NotificationRuleDefinition,
+  type NotificationRuleEventKind,
+  type NotificationRuleRecipientDefinition,
   type ResolvedFormView,
   type WorkflowDefinition,
   type WorkflowTransition
@@ -150,6 +155,7 @@ import {
   renderJobScheduleAdmin,
   renderListView,
   renderNotFound,
+  renderNotificationRuleAdmin,
   renderPrintSettingsAdmin,
   renderReportList,
   renderReportView,
@@ -209,6 +215,16 @@ interface ParsedDeskPrintSettings {
   readonly settings: PrintSettingsInput;
 }
 
+interface ParsedDeskNotificationRule {
+  readonly doctype: string;
+  readonly rule: NotificationRuleDefinition;
+  readonly expectedVersion?: number;
+}
+
+interface ParsedDeskNotificationRuleClear {
+  readonly expectedVersion?: number;
+}
+
 interface ParsedDeskCsvImport {
   readonly mode?: DocumentImportMode;
   readonly csv: string;
@@ -233,6 +249,7 @@ export interface DeskAppOptions {
   readonly workflows?: WorkflowService;
   readonly userAccounts?: UserAccountService;
   readonly notifications?: UserNotificationService;
+  readonly notificationRules?: NotificationRuleService;
   readonly userProfiles?: UserProfileService;
   readonly userPermissions?: UserPermissionService;
   readonly reports?: ReportService;
@@ -678,6 +695,17 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const selectedDoctype = url.searchParams.get("doctype")?.trim() || doctypes[0]?.name || "";
     const state = selectedDoctype ? await workflows.list(actor, selectedDoctype) : undefined;
     return renderDeskWorkflowPage(options, actor, selectedDoctype, state);
+  });
+
+  app.get("/desk/admin/notification-rules", async (c) => {
+    const notificationRules = requireNotificationRules(options);
+    const actor = await options.actor(c.req.raw);
+    notificationRules.authorizeAdministration(actor);
+    const url = new URL(c.req.url);
+    const doctypes = options.queries.listDoctypes(actor);
+    const selectedDoctype = url.searchParams.get("doctype")?.trim() || doctypes[0]?.name || "";
+    const state = selectedDoctype ? await notificationRules.list(actor, selectedDoctype) : undefined;
+    return renderDeskNotificationRulePage(options, actor, selectedDoctype, state);
   });
 
   app.get("/desk/admin/print-settings", async (c) => {
@@ -1410,6 +1438,45 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       return c.redirect(workflowAdminHref(c.req.param("doctype")), 303);
     } catch (error) {
       return renderDeskWorkflowFailure(options, actor, workflows, c.req.param("doctype"), error);
+    }
+  });
+
+  app.post("/desk/admin/notification-rules", async (c) => {
+    const notificationRules = requireNotificationRules(options);
+    const actor = await options.actor(c.req.raw);
+    notificationRules.authorizeAdministration(actor);
+    let form: ParsedDeskNotificationRule | undefined;
+    try {
+      form = await parseDeskNotificationRule(c.req.raw);
+      await notificationRules.save({
+        actor,
+        doctype: form.doctype,
+        rule: form.rule,
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(notificationRuleAdminHref(form.doctype), 303);
+    } catch (error) {
+      return renderDeskNotificationRuleFailure(options, actor, notificationRules, form?.doctype ?? "", error);
+    }
+  });
+
+  app.post("/desk/admin/notification-rules/:doctype/:rule/clear", async (c) => {
+    const notificationRules = requireNotificationRules(options);
+    const actor = await options.actor(c.req.raw);
+    notificationRules.authorizeAdministration(actor);
+    try {
+      const form = await parseDeskNotificationRuleClear(c.req.raw);
+      await notificationRules.clear({
+        actor,
+        doctype: c.req.param("doctype"),
+        ruleName: c.req.param("rule"),
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(notificationRuleAdminHref(c.req.param("doctype")), 303);
+    } catch (error) {
+      return renderDeskNotificationRuleFailure(options, actor, notificationRules, c.req.param("doctype"), error);
     }
   });
 
@@ -2532,6 +2599,9 @@ function adminLinksFor(options: DeskAppOptions, actor: Actor): readonly DeskNavL
     ...(options.workflows === undefined
       ? []
       : [{ id: "workflows", label: "Workflows", href: "/desk/admin/workflows" }]),
+    ...(options.notificationRules === undefined
+      ? []
+      : [{ id: "notification-rules", label: "Notification Rules", href: "/desk/admin/notification-rules" }]),
     ...(options.printSettings === undefined
       ? []
       : [{ id: "print-settings", label: "Print Settings", href: "/desk/admin/print-settings" }]),
@@ -2713,6 +2783,13 @@ function requireWorkflows(options: DeskAppOptions): WorkflowService {
     throw new FrameworkError("DOCUMENT_NOT_FOUND", "Workflows are not enabled", { status: 404 });
   }
   return options.workflows;
+}
+
+function requireNotificationRules(options: DeskAppOptions): NotificationRuleService {
+  if (!options.notificationRules) {
+    throw new FrameworkError("DOCUMENT_NOT_FOUND", "Notification rules are not enabled", { status: 404 });
+  }
+  return options.notificationRules;
 }
 
 function requirePrintSettings(options: DeskAppOptions): PrintSettingsService {
@@ -3344,6 +3421,64 @@ async function renderDeskWorkflowFailure(
   );
 }
 
+async function renderDeskNotificationRulePage(
+  options: DeskAppOptions,
+  actor: Actor,
+  selectedDoctype: string,
+  state: Awaited<ReturnType<NotificationRuleService["list"]>> | undefined,
+  status = 200,
+  error?: string
+): Promise<Response> {
+  const doctypes = options.queries.listDoctypes(actor);
+  const reports = listReports(options, actor);
+  return html(
+    renderDeskLayoutFor(options, {
+      title: "Notification Rules",
+      activeAdmin: "notification-rules",
+      adminLinks: adminLinksFor(options, actor),
+      doctypes,
+      reports,
+      body: renderNotificationRuleAdmin({
+        doctypes,
+        selectedDoctype,
+        ...(state === undefined ? {} : { state }),
+        ...(error === undefined ? {} : { error })
+      })
+    }),
+    status
+  );
+}
+
+async function renderDeskNotificationRuleFailure(
+  options: DeskAppOptions,
+  actor: Actor,
+  notificationRules: NotificationRuleService,
+  selectedDoctype: string,
+  error: unknown
+): Promise<Response> {
+  if (error instanceof FrameworkError && error.status === 403) {
+    throw error;
+  }
+  const fallbackDoctype = selectedDoctype || options.queries.listDoctypes(actor)[0]?.name || "";
+  let state: Awaited<ReturnType<NotificationRuleService["list"]>> | undefined;
+  try {
+    state = fallbackDoctype ? await notificationRules.list(actor, fallbackDoctype) : undefined;
+  } catch (listError) {
+    if (!(listError instanceof FrameworkError && listError.status === 404)) {
+      throw listError;
+    }
+  }
+  const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
+  return renderDeskNotificationRulePage(
+    options,
+    actor,
+    fallbackDoctype,
+    state,
+    error instanceof FrameworkError ? error.status : 500,
+    message
+  );
+}
+
 async function renderDeskPrintSettingsPage(
   options: DeskAppOptions,
   actor: Actor,
@@ -3396,6 +3531,10 @@ function fieldPropertyAdminHref(doctype: string, fieldName: string): string {
 
 function workflowAdminHref(doctype: string): string {
   return `/desk/admin/workflows?doctype=${encodeURIComponent(doctype)}`;
+}
+
+function notificationRuleAdminHref(doctype: string): string {
+  return `/desk/admin/notification-rules?doctype=${encodeURIComponent(doctype)}`;
 }
 
 async function renderDeskDocumentPage(
@@ -4645,6 +4784,36 @@ async function parseDeskWorkflowClear(request: Request): Promise<ParsedDeskWorkf
   };
 }
 
+async function parseDeskNotificationRule(request: Request): Promise<ParsedDeskNotificationRule> {
+  const form = await readUrlEncodedDeskForm(request);
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  const channels = notificationRuleChannelsFormValue(form.get("channels"));
+  const enabled = optionalBooleanSearchParamValue(form, "enabled", "Notification rule enabled");
+  const excludeActor = optionalBooleanSearchParamValue(form, "excludeActor", "Notification rule exclude actor");
+  const subject = stringSearchParamValue(form, "subject");
+  return {
+    doctype: requiredSearchParamValue(form, "doctype", "DocType"),
+    rule: {
+      name: requiredSearchParamValue(form, "name", "Notification rule name"),
+      ...(enabled === undefined ? {} : { enabled }),
+      events: notificationRuleEventsFormValue(form.get("events")),
+      recipients: notificationRuleRecipientsFormValue(form.get("recipients")),
+      ...(channels.length === 0 ? {} : { channels }),
+      ...(subject === undefined ? {} : { subject }),
+      ...(excludeActor === undefined ? {} : { excludeActor })
+    },
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
+async function parseDeskNotificationRuleClear(request: Request): Promise<ParsedDeskNotificationRuleClear> {
+  const form = await readUrlEncodedDeskForm(request);
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  return {
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
 async function parseDeskForm(
   request: Request,
   doctype: DocTypeDefinition,
@@ -4714,6 +4883,48 @@ function workflowTransitionsFormValue(value: string | null): readonly WorkflowTr
         ...(eventType === "" ? {} : { eventType })
       };
     });
+}
+
+function notificationRuleEventsFormValue(value: FormDataEntryValue | null): readonly NotificationRuleEventKind[] {
+  return lineListFormValue(value) as readonly NotificationRuleEventKind[];
+}
+
+function notificationRuleChannelsFormValue(value: FormDataEntryValue | null): readonly NotificationRuleChannel[] {
+  return lineListFormValue(value) as readonly NotificationRuleChannel[];
+}
+
+function notificationRuleRecipientsFormValue(
+  value: FormDataEntryValue | null
+): readonly NotificationRuleRecipientDefinition[] {
+  return lineListFormValue(value).map((line) => {
+    if (line === "documentOwner") {
+      return { kind: "documentOwner" };
+    }
+    const separator = line.indexOf(":");
+    const kind = separator === -1 ? "" : line.slice(0, separator).trim();
+    const target = separator === -1 ? "" : line.slice(separator + 1).trim();
+    if (kind === "field" && target) {
+      return { kind: "field", field: target };
+    }
+    if (kind === "user" && target) {
+      return { kind: "user", userId: target };
+    }
+    throw new FrameworkError(
+      "BAD_REQUEST",
+      "Notification rule recipients must use field:<field>, user:<user>, or documentOwner",
+      { status: 400 }
+    );
+  });
+}
+
+function lineListFormValue(value: FormDataEntryValue | null): readonly string[] {
+  if (typeof value !== "string") {
+    return [];
+  }
+  return value
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function optionalWorkflowRoles(value: string): { readonly roles?: readonly string[] } {
