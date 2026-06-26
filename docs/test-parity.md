@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the account management client helper slice:
+As of the dashboard metadata alias client helper slice:
 
 - Vitest files: `94`
-- Vitest cases: `1087`
+- Vitest cases: `1088`
 
 ## Implication
 

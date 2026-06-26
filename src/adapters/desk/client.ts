@@ -3214,6 +3214,12 @@ export function renderDeskClientScript(): string {
       uploadMultipartPart: uploadMultipartPart
     }),
     meta: Object.freeze({
+      dashboard: function (dashboard) {
+        return request(dashboardMetaPath(dashboard)).then(unwrapData);
+      },
+      dashboards: function () {
+        return request(dashboardMetaPath()).then(unwrapData);
+      },
       doctype: function (doctype) {
         return request("/api/meta/doctypes/" + encodePart(doctype)).then(unwrapData);
       },
