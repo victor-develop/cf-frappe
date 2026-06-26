@@ -410,7 +410,7 @@ export function renderFileManager(
   const hasBulkActions = hasBulkDelete || hasBulkMetadata;
   const uploadError = options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : "";
   const uploadForm = dashboard.canUpload
-    ? `<form class="panel form file-upload" method="post" action="/desk/files" enctype="multipart/form-data">
+    ? `<form class="panel form file-upload" method="post" action="/desk/files" enctype="multipart/form-data" data-max-file-bytes="${String(dashboard.maxUploadBytes)}">
         <div class="form-head">
           <h2>Upload File</h2>
         </div>
@@ -481,7 +481,7 @@ export function renderFileAttachmentPanel(
   const documentHref = `/desk/${encodeURIComponent(doctype)}/${encodeURIComponent(documentName)}`;
   const uploadError = options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : "";
   const uploadForm = dashboard.canUpload
-    ? `<form class="form attachment-upload" method="post" action="${escapeHtml(documentHref)}/files" enctype="multipart/form-data">
+    ? `<form class="form attachment-upload" method="post" action="${escapeHtml(documentHref)}/files" enctype="multipart/form-data" data-max-file-bytes="${String(dashboard.maxUploadBytes)}">
         ${uploadError}
         <div class="fields">
           <label class="field"><span>File</span><input name="file" type="file" required></label>

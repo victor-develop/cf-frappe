@@ -1576,7 +1576,7 @@ describe("Desk client runtime", () => {
 
   it("preserves file dashboard upload capabilities for client scripts", async () => {
     const calls: string[] = [];
-    const dashboard = { canUpload: false, files: [], limit: 10, filters: {} };
+    const dashboard = { canUpload: false, maxUploadBytes: 4096, files: [], limit: 10, filters: {} };
     const runtime = evaluateDeskClient(async (url) => {
       calls.push(String(url));
       return new Response(JSON.stringify({ data: dashboard }), {

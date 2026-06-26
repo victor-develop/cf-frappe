@@ -245,7 +245,6 @@ export interface DeskAppOptions {
   readonly jobRetry?: JobRetryPort;
   readonly jobSchedules?: JobScheduleService;
   readonly realtime?: boolean | { readonly route?: string };
-  readonly maxFileBytes?: number;
   readonly actor: ActorResolver;
 }
 
@@ -478,7 +477,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const files = requireFiles(options);
     const actor = await options.actor(c.req.raw);
     try {
-      preflightDeskFileUpload(c.req.raw, options.maxFileBytes ?? 25 * 1024 * 1024);
+      preflightDeskFileUpload(c.req.raw, files.maxUploadBytes);
       const form = await parseDeskFileUpload(c.req.raw);
       await files.upload({
         actor,
@@ -1943,7 +1942,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
     const name = c.req.param("name");
     try {
-      preflightDeskFileUpload(c.req.raw, options.maxFileBytes ?? 25 * 1024 * 1024);
+      preflightDeskFileUpload(c.req.raw, files.maxUploadBytes);
       const form = await parseDeskFileUpload(c.req.raw);
       await files.upload({
         actor,
@@ -2854,9 +2853,10 @@ function optionalBooleanQuery(value: string | undefined): boolean | undefined {
   throw new FrameworkError("BAD_REQUEST", "Expected boolean query parameter", { status: 400 });
 }
 
-function emptyFileDashboard(query: FileDashboardQuery): FileDashboard {
+function emptyFileDashboard(query: FileDashboardQuery, maxUploadBytes = 25 * 1024 * 1024): FileDashboard {
   return {
     canUpload: false,
+    maxUploadBytes,
     files: [],
     limit: query.limit === undefined || query.limit < 1 || query.limit > 200 ? 50 : query.limit,
     filters: fileDashboardFiltersFromQuery(query)
@@ -2906,7 +2906,8 @@ async function renderDeskFileFailure(
 ): Promise<Response> {
   const files = requireFiles(options);
   const dashboardQuery = safeFileDashboardQueryFromUrl(new URL(request.url));
-  const dashboard = await files.dashboard(actor, dashboardQuery).catch(() => emptyFileDashboard(dashboardQuery));
+  const dashboard = await files.dashboard(actor, dashboardQuery)
+    .catch(() => emptyFileDashboard(dashboardQuery, files.maxUploadBytes));
   const doctypes = options.queries.listDoctypes(actor);
   const reports = listReports(options, actor);
   const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";

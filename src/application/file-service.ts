@@ -314,6 +314,7 @@ export interface FileDashboardEntry {
 
 export interface FileDashboard {
   readonly canUpload: boolean;
+  readonly maxUploadBytes: number;
   readonly files: readonly FileDashboardEntry[];
   readonly limit: number;
   readonly filters: {
@@ -351,6 +352,10 @@ export class FileService {
     this.fileDoctype = options.fileDoctype ?? FILE_DOCTYPE_NAME;
     this.scanner = options.scanner;
     this.transformer = options.transformer;
+  }
+
+  get maxUploadBytes(): number {
+    return this.maxFileBytes;
   }
 
   async upload(command: UploadFileCommand): Promise<UploadedFile> {
@@ -811,6 +816,7 @@ export class FileService {
     } while (files.length < limit && offset < total);
     return {
       canUpload: can(actor, doctype, "create"),
+      maxUploadBytes: this.maxFileBytes,
       files: files.slice(0, limit),
       limit,
       filters

@@ -556,8 +556,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(jobHistory === undefined ? {} : { jobs: jobHistory }),
     ...(jobRetry === undefined ? {} : { jobRetry }),
     ...(jobSchedules === undefined ? {} : { jobSchedules }),
-    notifications,
-    ...(options.files?.maxFileBytes === undefined ? {} : { maxFileBytes: options.files.maxFileBytes })
+    notifications
   });
   const desk = createDeskApp({
     registry: options.registry,
@@ -591,7 +590,6 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(jobSchedules === undefined ? {} : { jobSchedules }),
     notifications,
     ...(options.realtime === undefined ? {} : { realtime: { route: options.realtime.route ?? "/api/realtime" } }),
-    ...(options.files?.maxFileBytes === undefined ? {} : { maxFileBytes: options.files.maxFileBytes }),
     actor
   });
   const runtimeApps = {

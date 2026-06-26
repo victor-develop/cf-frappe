@@ -19,13 +19,12 @@ import { parseOptionalInteger, readBoundedBytes, readJsonObject, requestMetadata
 export interface FileApiOptions {
   readonly files: FileService;
   readonly actor: ActorResolver;
-  readonly maxFileBytes?: number;
   readonly maxJsonBytes?: number;
 }
 
 export function createFileApi(options: FileApiOptions): Hono {
   const app = new Hono();
-  const maxFileBytes = options.maxFileBytes ?? 25 * 1024 * 1024;
+  const maxFileBytes = options.files.maxUploadBytes;
   const maxJsonBytes = options.maxJsonBytes ?? 1_048_576;
 
   app.get("/api/files", async (c) => {

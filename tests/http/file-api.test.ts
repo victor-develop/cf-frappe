@@ -677,6 +677,21 @@ describe("file api", () => {
     });
   });
 
+  it("uses the FileService upload limit for HTTP preflight even when adapter options drift", async () => {
+    const app = makeAppFixture(4, ["create"], ["object"], { apiMaxFileBytes: 99 }).app;
+
+    const response = await app.request("/api/files?filename=too-big.txt", {
+      method: "POST",
+      headers: userHeaders("owner@example.com", "User"),
+      body: "hello"
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "File exceeds 4 bytes" }
+    });
+  });
+
   it("does not expose File counts through the generic resource list", async () => {
     const app = makeApp();
     const uploaded = await app.request("/api/files?filename=private.txt", {
@@ -757,6 +772,7 @@ describe("file api", () => {
     await expect(ownerList.json()).resolves.toMatchObject({
       data: {
         canUpload: true,
+        maxUploadBytes: 1024,
         limit: 10,
         filters: {
           attachedToDoctype: "File",
@@ -825,6 +841,7 @@ describe("file api", () => {
     expect(guestBody).toMatchObject({
       data: {
         canUpload: false,
+        maxUploadBytes: 1024,
         files: [
           {
             filename: "public.txt",
@@ -1325,7 +1342,7 @@ function makeApp(
   maxFileBytes = 1024,
   documentIds: readonly string[] = ["create"],
   fileIds: readonly string[] = ["object"],
-  options: { readonly transformer?: FileTransformer } = {}
+  options: { readonly apiMaxFileBytes?: number; readonly transformer?: FileTransformer } = {}
 ) {
   return makeAppFixture(maxFileBytes, documentIds, fileIds, options).app;
 }
@@ -1334,7 +1351,7 @@ function makeAppFixture(
   maxFileBytes = 1024,
   documentIds: readonly string[] = ["create"],
   fileIds: readonly string[] = ["object"],
-  options: { readonly transformer?: FileTransformer } = {}
+  options: { readonly apiMaxFileBytes?: number; readonly transformer?: FileTransformer } = {}
 ) {
   const registry = createRegistry({ doctypes: [fileDocType] });
   const store = new InMemoryDocumentStore();
@@ -1362,9 +1379,13 @@ function makeAppFixture(
     queries,
     actor: unsafeHeaderActorResolver,
     files,
-    maxFileBytes
+    ...(options.apiMaxFileBytes === undefined ? {} : legacyMaxFileBytesOption(options.apiMaxFileBytes))
   });
   return { app, storage };
+}
+
+function legacyMaxFileBytesOption(maxFileBytes: number): Record<string, unknown> {
+  return { maxFileBytes };
 }
 
 function userHeaders(user: string, roles: string): HeadersInit {

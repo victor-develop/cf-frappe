@@ -434,6 +434,7 @@ describe("Desk app", () => {
     actor = owner,
     options: {
       readonly maxFileBytes?: number;
+      readonly appMaxFileBytes?: number;
       readonly ids?: readonly string[];
       readonly fileIds?: readonly string[];
       readonly doctypes?: readonly DocTypeDefinition[];
@@ -463,7 +464,9 @@ describe("Desk app", () => {
       documents,
       queries,
       files,
-      ...(options.maxFileBytes === undefined ? {} : { maxFileBytes: options.maxFileBytes }),
+      ...(options.appMaxFileBytes === undefined && options.maxFileBytes === undefined
+        ? {}
+        : { maxFileBytes: options.appMaxFileBytes ?? options.maxFileBytes }),
       actor: () => actor
     });
     return { app, registry, store, storage, documents, queries, files };
@@ -2594,6 +2597,24 @@ describe("Desk app", () => {
     expect(storage.has("acme/files/file_object-hello.txt")).toBe(false);
   });
 
+  it("uses the FileService upload limit for Desk preflight even when adapter options drift", async () => {
+    const { app, storage } = makeFileDesk(owner, { maxFileBytes: 4, appMaxFileBytes: 99 });
+
+    const response = await app.request("/desk/files", {
+      method: "POST",
+      headers: {
+        "content-type": "multipart/form-data; boundary=oversized",
+        "content-length": "5"
+      },
+      body: "--oversized--"
+    });
+
+    expect(response.status).toBe(400);
+    const html = await response.text();
+    expect(html).toContain("File exceeds 4 bytes");
+    expect(storage.has("acme/files/file_object-hello.txt")).toBe(false);
+  });
+
   it("requires Desk file uploads to declare content length before parsing multipart content", async () => {
     const { app, storage } = makeFileDesk();
 
@@ -2609,6 +2630,23 @@ describe("Desk app", () => {
     const html = await response.text();
     expect(html).toContain("content-length is required for file uploads");
     expect(storage.has("acme/files/file_object-hello.txt")).toBe(false);
+  });
+
+  it("renders Desk file upload limit metadata for browser-side preflight", async () => {
+    const { app, documents } = makeFileDesk(owner, {
+      doctypes: [noteDocType, fileDocType],
+      ids: ["note-create"],
+      maxFileBytes: 4
+    });
+    await documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    const manager = await app.request("/desk/files");
+    expect(manager.status).toBe(200);
+    await expect(manager.text()).resolves.toContain('data-max-file-bytes="4"');
+
+    const document = await app.request("/desk/Note/My%20Note");
+    expect(document.status).toBe(200);
+    await expect(document.text()).resolves.toContain('data-max-file-bytes="4"');
   });
 
   it("enforces File permissions for Desk content and delete routes", async () => {

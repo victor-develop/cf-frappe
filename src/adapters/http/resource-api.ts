@@ -114,7 +114,6 @@ export interface ResourceApiOptions {
   readonly customFields?: CustomFieldService;
   readonly fieldProperties?: FieldPropertyService;
   readonly workflows?: WorkflowService;
-  readonly maxFileBytes?: number;
 }
 
 export function createResourceApi(options: ResourceApiOptions): Hono {
@@ -256,8 +255,7 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       createFileApi({
         files: options.files,
         actor: resolveActor,
-        maxJsonBytes,
-        ...(options.maxFileBytes === undefined ? {} : { maxFileBytes: options.maxFileBytes })
+        maxJsonBytes
       })
     );
   }
