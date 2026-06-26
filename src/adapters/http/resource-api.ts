@@ -950,6 +950,7 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
 
 interface WorkspaceMetadataAccess {
   readonly doctypes: ReadonlySet<string>;
+  readonly creatableDoctypes: ReadonlySet<string>;
   readonly reports: ReadonlySet<string>;
   readonly dashboards: ReadonlySet<string>;
   readonly files: boolean;
@@ -958,8 +959,11 @@ interface WorkspaceMetadataAccess {
 }
 
 async function workspaceMetadataAccess(options: ResourceApiOptions, actor: Actor): Promise<WorkspaceMetadataAccess> {
+  const doctypes = options.queries.listDoctypes(actor);
+  const creatableDoctypes = options.registry.list().filter((doctype) => can(actor, doctype, "create"));
   return {
-    doctypes: new Set(options.queries.listDoctypes(actor).map((doctype) => doctype.name)),
+    doctypes: new Set(doctypes.map((doctype) => doctype.name)),
+    creatableDoctypes: new Set(creatableDoctypes.map((doctype) => doctype.name)),
     reports: new Set(
       options.registry
         .listReports()
@@ -1010,6 +1014,9 @@ function canReadWorkspaceShortcutTarget(
 ): boolean {
   if (shortcut.kind === "doctype") {
     return access.doctypes.has(shortcut.target ?? "");
+  }
+  if (shortcut.kind === "newDoc") {
+    return access.creatableDoctypes.has(shortcut.target ?? "");
   }
   if (shortcut.kind === "report") {
     return access.reports.has(shortcut.target ?? "");

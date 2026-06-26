@@ -90,8 +90,18 @@ describe("resource api", () => {
   }
 
   function makeWorkspaceApp() {
+    const ReadOnlyLog = defineDocType({
+      name: "ReadOnlyLog",
+      fields: [{ name: "title", type: "text" }],
+      permissions: [{ roles: ["User"], actions: ["read"] }]
+    });
+    const CreateOnlyLog = defineDocType({
+      name: "CreateOnlyLog",
+      fields: [{ name: "title", type: "text" }],
+      permissions: [{ roles: ["User"], actions: ["create"] }]
+    });
     const registry = createRegistry({
-      doctypes: [noteDocType],
+      doctypes: [noteDocType, ReadOnlyLog, CreateOnlyLog],
       reports: [openNotesReport],
       dashboards: [
         defineDashboard({
@@ -118,6 +128,11 @@ describe("resource api", () => {
               label: "Main",
               shortcuts: [
                 { name: "notes", kind: "doctype", target: "Note" },
+                { name: "new-note", kind: "newDoc", target: "Note" },
+                { name: "read-only-log", kind: "doctype", target: "ReadOnlyLog" },
+                { name: "new-read-only-log", kind: "newDoc", target: "ReadOnlyLog" },
+                { name: "create-only-log", kind: "doctype", target: "CreateOnlyLog" },
+                { name: "new-create-only-log", kind: "newDoc", target: "CreateOnlyLog" },
                 { name: "open-notes", kind: "report", target: "Open Notes" },
                 { name: "ops-dashboard", kind: "dashboard", target: "Operations Dashboard" },
                 { name: "management-dashboard", kind: "dashboard", target: "Management Dashboard" },
@@ -340,7 +355,9 @@ describe("resource api", () => {
 
     const listed = await app.request("/api/meta/workspaces", { headers: userHeaders });
     expect(listed.status).toBe(200);
-    const listedBody = await listed.json();
+    const listedBody = await listed.json() as {
+      readonly data: readonly { readonly sections: readonly { readonly shortcuts: readonly unknown[] }[] }[];
+    };
     expect(listedBody).toMatchObject({
       data: [
         {
@@ -350,6 +367,9 @@ describe("resource api", () => {
               name: "main",
               shortcuts: [
                 { name: "notes", kind: "doctype", target: "Note" },
+                { name: "new-note", kind: "newDoc", target: "Note" },
+                { name: "read-only-log", kind: "doctype", target: "ReadOnlyLog" },
+                { name: "new-create-only-log", kind: "newDoc", target: "CreateOnlyLog" },
                 { name: "open-notes", kind: "report", target: "Open Notes" },
                 { name: "ops-dashboard", kind: "dashboard", target: "Operations Dashboard" }
               ]
@@ -359,6 +379,13 @@ describe("resource api", () => {
       ]
     });
     expect(JSON.stringify(listedBody)).not.toContain("manager-only");
+    expect(listedBody.data[0]!.sections[0]!.shortcuts).not.toContainEqual(
+      expect.objectContaining({ name: "create-only-log" })
+    );
+    expect(listedBody.data[0]!.sections[0]!.shortcuts).toContainEqual(
+      expect.objectContaining({ name: "new-create-only-log", kind: "newDoc", target: "CreateOnlyLog" })
+    );
+    expect(JSON.stringify(listedBody)).not.toContain("new-read-only-log");
     expect(JSON.stringify(listedBody)).not.toContain("management-dashboard");
     expect(JSON.stringify(listedBody)).not.toContain("Management Dashboard");
     expect(JSON.stringify(listedBody)).not.toContain("files");
@@ -366,8 +393,17 @@ describe("resource api", () => {
     expect(JSON.stringify(listedBody)).not.toContain("users-admin");
     const direct = await app.request("/api/meta/workspaces/Operations", { headers: userHeaders });
     expect(direct.status).toBe(200);
-    const directBody = await direct.json();
+    const directBody = await direct.json() as {
+      readonly data: { readonly sections: readonly { readonly shortcuts: readonly unknown[] }[] };
+    };
     expect(JSON.stringify(directBody)).not.toContain("manager-only");
+    expect(directBody.data.sections[0]!.shortcuts).not.toContainEqual(
+      expect.objectContaining({ name: "create-only-log" })
+    );
+    expect(directBody.data.sections[0]!.shortcuts).toContainEqual(
+      expect.objectContaining({ name: "new-create-only-log", kind: "newDoc", target: "CreateOnlyLog" })
+    );
+    expect(JSON.stringify(directBody)).not.toContain("new-read-only-log");
     expect(JSON.stringify(directBody)).not.toContain("management-dashboard");
     expect(JSON.stringify(directBody)).not.toContain("Management Dashboard");
     expect(JSON.stringify(directBody)).not.toContain("files");

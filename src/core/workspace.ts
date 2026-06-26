@@ -1,7 +1,15 @@
 import { FrameworkError } from "./errors.js";
 import { SYSTEM_MANAGER_ROLE, type Actor } from "./types.js";
 
-export type WorkspaceShortcutKind = "doctype" | "report" | "dashboard" | "file" | "notifications" | "admin" | "url";
+export type WorkspaceShortcutKind =
+  | "doctype"
+  | "newDoc"
+  | "report"
+  | "dashboard"
+  | "file"
+  | "notifications"
+  | "admin"
+  | "url";
 
 export interface WorkspaceShortcutDefinition {
   readonly name: string;
@@ -28,7 +36,16 @@ export interface WorkspaceDefinition {
   readonly sections: readonly WorkspaceSectionDefinition[];
 }
 
-const WORKSPACE_SHORTCUT_KINDS = ["doctype", "report", "dashboard", "file", "notifications", "admin", "url"] as const;
+const WORKSPACE_SHORTCUT_KINDS = [
+  "doctype",
+  "newDoc",
+  "report",
+  "dashboard",
+  "file",
+  "notifications",
+  "admin",
+  "url"
+] as const;
 
 export function defineWorkspace(definition: WorkspaceDefinition): WorkspaceDefinition {
   assertWorkspaceDefinition(definition);

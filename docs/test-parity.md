@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk global search page slice:
+As of the workspace new-document shortcut slice:
 
 - Vitest files: `94`
-- Vitest cases: `1101`
+- Vitest cases: `1102`
 
 ## Implication
 

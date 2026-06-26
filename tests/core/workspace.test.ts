@@ -92,6 +92,7 @@ describe("workspaces", () => {
           name: "main",
           shortcuts: [
             { name: "notes", kind: "doctype", target: "Note" },
+            { name: "new-note", kind: "newDoc", target: "Note" },
             { name: "open-notes", kind: "report", target: "Open Notes" },
             { name: "operations-dashboard", kind: "dashboard", target: "Operations Dashboard" }
           ]
@@ -110,6 +111,17 @@ describe("workspaces", () => {
           defineWorkspace({
             name: "Broken",
             sections: [{ name: "main", shortcuts: [{ name: "missing", kind: "doctype", target: "Missing" }] }]
+          })
+        ]
+      })
+    ).toThrow("references unknown DocType");
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        workspaces: [
+          defineWorkspace({
+            name: "Broken New",
+            sections: [{ name: "main", shortcuts: [{ name: "missing", kind: "newDoc", target: "Missing" }] }]
           })
         ]
       })

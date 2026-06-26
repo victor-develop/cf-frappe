@@ -516,8 +516,18 @@ describe("Desk app", () => {
   });
 
   it("renders metadata-defined workspaces with permissioned shortcuts", async () => {
+    const ReadOnlyLog = defineDocType({
+      name: "ReadOnlyLog",
+      fields: [{ name: "title", type: "text" }],
+      permissions: [{ roles: ["User"], actions: ["read"] }]
+    });
+    const CreateOnlyLog = defineDocType({
+      name: "CreateOnlyLog",
+      fields: [{ name: "title", type: "text" }],
+      permissions: [{ roles: ["User"], actions: ["create"] }]
+    });
     const registry = createRegistry({
-      doctypes: [noteDocType],
+      doctypes: [noteDocType, ReadOnlyLog, CreateOnlyLog],
       reports: [openNotesReport],
       dashboards: [
         defineDashboard({
@@ -545,6 +555,11 @@ describe("Desk app", () => {
               label: "Main",
               shortcuts: [
                 { name: "notes", label: "Notes", kind: "doctype", target: "Note" },
+                { name: "new-note", kind: "newDoc", target: "Note" },
+                { name: "read-only-log", label: "Read only logs", kind: "doctype", target: "ReadOnlyLog" },
+                { name: "new-read-only-log", kind: "newDoc", target: "ReadOnlyLog" },
+                { name: "create-only-log", label: "Create-only logs", kind: "doctype", target: "CreateOnlyLog" },
+                { name: "new-create-only-log", kind: "newDoc", target: "CreateOnlyLog" },
                 { name: "open-notes", label: "Open Notes", kind: "report", target: "Open Notes" },
                 { name: "ops-dashboard", kind: "dashboard", target: "Operations Dashboard" },
                 { name: "management-dashboard", kind: "dashboard", target: "Management Dashboard" },
@@ -560,7 +575,7 @@ describe("Desk app", () => {
       registry,
       store,
       clock: fixedClock(now),
-      ids: deterministicIds(["workspace-test"])
+      ids: deterministicIds(["workspace-test", "workspace-create"])
     });
     const queries = new QueryService({ registry, projections: store });
     const reports = new ReportService({ registry, queries });
@@ -585,11 +600,34 @@ describe("Desk app", () => {
     const html = await workspace.text();
     expect(html).toContain("Daily workspace");
     expect(html).toContain('href="/desk/Note"');
+    expect(html).toContain('href="/desk/Note/new"');
+    expect(html).toContain("New Note");
+    expect(html).toContain('href="/desk/ReadOnlyLog"');
+    expect(html).not.toContain('href="/desk/ReadOnlyLog/new"');
+    expect(html).not.toContain("new-read-only-log");
+    expect(html).not.toContain('href="/desk/CreateOnlyLog"');
+    expect(html).toContain('href="/desk/CreateOnlyLog/new"');
+    expect(html).toContain("New CreateOnlyLog");
     expect(html).toContain('href="/desk/reports/Open%20Notes"');
     expect(html).toContain('href="/desk/dashboards/Operations%20Dashboard"');
     expect(html).toContain("Ops Dashboard");
     expect(html).not.toContain("Management Dashboard");
     expect(html).not.toContain("Manager Only");
+
+    const createOnlyNew = await app.request("/desk/CreateOnlyLog/new");
+    expect(createOnlyNew.status).toBe(200);
+    await expect(createOnlyNew.text()).resolves.toContain('action="/desk/CreateOnlyLog"');
+
+    const created = await app.request("/desk/CreateOnlyLog", {
+      method: "POST",
+      body: new URLSearchParams({ title: "Desk Create Only" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(created.status).toBe(303);
+    expect(created.headers.get("location")).toBe("/desk/CreateOnlyLog/new?created=doc_workspace-test");
+    const createOnlyCreated = await app.request(created.headers.get("location") ?? "");
+    expect(createOnlyCreated.status).toBe(200);
+    await expect(createOnlyCreated.text()).resolves.toContain("Created CreateOnlyLog/doc_workspace-test");
   });
 
   it("renders metadata-defined dashboards in Desk", async () => {

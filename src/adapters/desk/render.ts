@@ -329,6 +329,9 @@ function workspaceShortcutKindLabel(kind: WorkspaceShortcutKind): string {
   if (kind === "doctype") {
     return "DocType";
   }
+  if (kind === "newDoc") {
+    return "New Document";
+  }
   if (kind === "report") {
     return "Report";
   }

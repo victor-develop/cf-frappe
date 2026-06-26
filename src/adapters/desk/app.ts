@@ -1882,12 +1882,14 @@ export function createDeskApp(options: DeskAppOptions): Hono {
 
   app.get("/desk/:doctype/new", async (c) => {
     const actor = await options.actor(c.req.raw);
-    const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
-    const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
+    const url = new URL(c.req.url);
+    const doctype = await options.queries.getEffectiveCreateMeta(actor, c.req.param("doctype"));
+    const formView = await options.queries.getEffectiveCreateFormView(actor, doctype.name);
     const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView);
     const linkOptions = await linkOptionsForForm(options, actor, doctype, formView, tableDefinitions);
     const doctypes = await listDeskDoctypes(options, actor);
     const reports = listReports(options, actor);
+    const created = url.searchParams.get("created")?.trim();
     return html(
       renderDeskLayoutFor(options, {
         title: `New ${doctype.label ?? doctype.name}`,
@@ -1895,6 +1897,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         active: doctype.name,
         doctypes,
         reports,
+        ...(created ? { message: `Created ${doctype.name}/${created}` } : {}),
         body: renderFormView(doctype, formView, {
           mode: "create",
           linkOptions,
@@ -1908,8 +1911,8 @@ export function createDeskApp(options: DeskAppOptions): Hono {
 
   app.post("/desk/:doctype", async (c) => {
     const actor = await options.actor(c.req.raw);
-    const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
-    const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
+    const doctype = await options.queries.getEffectiveCreateMeta(actor, c.req.param("doctype"));
+    const formView = await options.queries.getEffectiveCreateFormView(actor, doctype.name);
     const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView);
     try {
       const snapshot = await options.documents.create({
@@ -1918,7 +1921,10 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         data: (await parseDeskForm(c.req.raw, doctype, formView, tableDefinitions)).data,
         metadata: requestMetadata(c.req.raw)
       });
-      return c.redirect(`/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(snapshot.name)}`, 303);
+      const location = can(actor, doctype, "read")
+        ? `/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(snapshot.name)}`
+        : `/desk/${encodeURIComponent(doctype.name)}/new?created=${encodeURIComponent(snapshot.name)}`;
+      return c.redirect(location, 303);
     } catch (error) {
       return renderDeskError(options, c.req.raw, actor, doctype, "create", error);
     }
@@ -2450,7 +2456,9 @@ async function renderDeskError(
 ): Promise<Response> {
   const doctypes = await listDeskDoctypes(options, actor);
   const reports = listReports(options, actor);
-  const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
+  const formView = mode === "create"
+    ? await options.queries.getEffectiveCreateFormView(actor, doctype.name)
+    : await options.queries.getEffectiveFormView(actor, doctype.name);
   const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView);
   const linkOptions = await linkOptionsForForm(options, actor, doctype, formView, tableDefinitions);
   const document = name ? await options.queries.getDocument(actor, doctype.name, name).catch(() => undefined) : undefined;
@@ -2549,13 +2557,14 @@ function workspacePageFor(
   dashboards: Awaited<ReturnType<typeof listDashboards>>
 ): WorkspacePageView {
   const adminLinks = adminLinksFor(options, actor);
+  const creatableDoctypes = options.registry.list().filter((doctype) => can(actor, doctype, "create"));
   return {
     workspace,
     sections: workspace.sections.map((section) => ({
       name: section.name,
       label: section.label ?? section.name,
       shortcuts: section.shortcuts.flatMap((shortcut) =>
-        workspaceShortcutFor(options, actor, shortcut, doctypes, reports, dashboards, adminLinks)
+        workspaceShortcutFor(options, actor, shortcut, doctypes, creatableDoctypes, reports, dashboards, adminLinks)
       )
     }))
   };
@@ -2566,6 +2575,7 @@ function workspaceShortcutFor(
   actor: Actor,
   shortcut: WorkspaceShortcutDefinition,
   doctypes: readonly DocTypeDefinition[],
+  creatableDoctypes: readonly DocTypeDefinition[],
   reports: ReturnType<typeof listReports>,
   dashboards: Awaited<ReturnType<typeof listDashboards>>,
   adminLinks: readonly DeskNavLink[]
@@ -2582,6 +2592,18 @@ function workspaceShortcutFor(
           ...(shortcut.description === undefined ? {} : { description: shortcut.description }),
           kind: shortcut.kind,
           href: `/desk/${encodeURIComponent(doctype.name)}`
+        }]
+      : [];
+  }
+  if (shortcut.kind === "newDoc") {
+    const doctype = creatableDoctypes.find((item) => item.name === shortcut.target);
+    return doctype
+      ? [{
+          name: shortcut.name,
+          label: shortcut.label ?? `New ${doctype.label ?? doctype.name}`,
+          ...(shortcut.description === undefined ? {} : { description: shortcut.description }),
+          kind: shortcut.kind,
+          href: `/desk/${encodeURIComponent(doctype.name)}/new`
         }]
       : [];
   }

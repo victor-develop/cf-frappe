@@ -100,6 +100,14 @@ export class QueryService {
     return doctype;
   }
 
+  getCreateMeta(actor: Actor, doctypeName: string): DocTypeDefinition {
+    const doctype = this.registry.get(doctypeName);
+    if (!can(actor, doctype, "create")) {
+      throw permissionDenied(`Actor '${actor.id}' cannot create ${doctype.name}`);
+    }
+    return doctype;
+  }
+
   async getDocument(
     actor: Actor,
     doctypeName: string,
@@ -183,6 +191,14 @@ export class QueryService {
     return this.resolveDocType(this.getMeta(actor, doctypeName), actor, tenantId);
   }
 
+  async getEffectiveCreateMeta(
+    actor: Actor,
+    doctypeName: string,
+    tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
+  ): Promise<DocTypeDefinition> {
+    return this.resolveDocType(this.getCreateMeta(actor, doctypeName), actor, tenantId);
+  }
+
   async resolveEffectiveDocType(
     actor: Actor,
     doctypeName: string,
@@ -205,6 +221,14 @@ export class QueryService {
     tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
   ): Promise<ResolvedFormView> {
     return resolveFormView(await this.getEffectiveMeta(actor, doctypeName, tenantId));
+  }
+
+  async getEffectiveCreateFormView(
+    actor: Actor,
+    doctypeName: string,
+    tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
+  ): Promise<ResolvedFormView> {
+    return resolveFormView(await this.getEffectiveCreateMeta(actor, doctypeName, tenantId));
   }
 
   async listLinkOptions(

@@ -27,6 +27,25 @@ describe("QueryService", () => {
     ]);
   });
 
+  it("resolves create metadata independently from read metadata", async () => {
+    const CreateOnlyLog = defineDocType({
+      name: "CreateOnlyLog",
+      fields: [{ name: "title", type: "text", required: true }],
+      formView: { sections: [{ fields: ["title"] }] },
+      permissions: [{ roles: ["User"], actions: ["create"] }]
+    });
+    const queries = new QueryService({
+      registry: createRegistry({ doctypes: [CreateOnlyLog] }),
+      projections: new InMemoryDocumentStore()
+    });
+
+    expect(() => queries.getMeta(owner, "CreateOnlyLog")).toThrow("cannot read CreateOnlyLog");
+    expect(queries.getCreateMeta(owner, "CreateOnlyLog")).toMatchObject({ name: "CreateOnlyLog" });
+    await expect(queries.getEffectiveCreateFormView(owner, "CreateOnlyLog")).resolves.toMatchObject({
+      fields: [expect.objectContaining({ name: "title" })]
+    });
+  });
+
   it("hides deleted documents from list results", async () => {
     const { documents, queries } = createServices(["e1", "e2"]);
     await documents.create({ actor: owner, doctype: "Note", data: data() });

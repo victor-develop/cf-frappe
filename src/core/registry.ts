@@ -397,7 +397,10 @@ export class ModelRegistry {
   private assertWorkspaceReferencesResolve(workspace: WorkspaceDefinition): void {
     for (const section of workspace.sections) {
       for (const shortcut of section.shortcuts) {
-        if (shortcut.kind === "doctype" && !this.doctypes.has(shortcut.target ?? "")) {
+        if (
+          (shortcut.kind === "doctype" || shortcut.kind === "newDoc") &&
+          !this.doctypes.has(shortcut.target ?? "")
+        ) {
           throw new FrameworkError(
             "WORKSPACE_INVALID",
             `Workspace '${workspace.name}' shortcut '${shortcut.name}' references unknown DocType '${shortcut.target ?? ""}'`,
