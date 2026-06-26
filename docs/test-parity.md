@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the remote user-permission CLI slice:
+As of the remote notification-rule CLI slice:
 
-- Vitest files: `97`
-- Vitest cases: `1159`
+- Vitest files: `98`
+- Vitest cases: `1164`
 
 ## Implication
 

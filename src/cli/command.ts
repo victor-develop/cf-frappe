@@ -44,6 +44,14 @@ import {
   type JobRemoteCommand
 } from "./jobs.js";
 import {
+  NotificationRuleRemoteError,
+  runRemoteNotificationRuleCommand,
+  type NotificationRuleHeaderOption,
+  type NotificationRuleRecipientOption,
+  type NotificationRuleRemoteAction,
+  type NotificationRuleRemoteCommand
+} from "./notification-rules.js";
+import {
   FileRemoteError,
   runRemoteFileCommand,
   type FileHeaderOption,
@@ -123,6 +131,7 @@ type ParsedCommand =
   | CloudflareAccessSetupCommand
   | DataPatchRemoteCommand
   | JobRemoteCommand
+  | NotificationRuleRemoteCommand
   | FileRemoteCommand
   | ResourceRemoteCommand
   | UserPermissionRemoteCommand
@@ -150,6 +159,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     if (command.kind === "jobs") {
       io.stdout.write(await runRemoteJobCommand(command, {
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
+    if (command.kind === "notification-rules") {
+      io.stdout.write(await runRemoteNotificationRuleCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -256,6 +272,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof CloudflareAccessSetupError ||
       error instanceof DataPatchRemoteError ||
       error instanceof JobRemoteError ||
+      error instanceof NotificationRuleRemoteError ||
       error instanceof FileRemoteError ||
       error instanceof ResourceRemoteError ||
       error instanceof UserPermissionRemoteError
@@ -283,6 +300,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "jobs") {
     return parseJobsArgs(rest);
+  }
+  if (command === "notification-rules") {
+    return parseNotificationRulesArgs(rest);
   }
   if (command === "files") {
     return parseFilesArgs(rest);
@@ -951,6 +971,233 @@ function parseJobsArgs(argv: readonly string[]): ParsedCommand {
     ...(metadata === undefined ? {} : { metadata }),
     ...(scheduleIdempotencyKey === undefined ? {} : { scheduleIdempotencyKey }),
     ...(delaySeconds === undefined ? {} : { delaySeconds })
+  };
+}
+
+function parseNotificationRulesArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = notificationRuleAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown notification-rules command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: NotificationRuleHeaderOption[] = [];
+  let doctype: string | undefined;
+  let tenant: string | undefined;
+  let ruleName: string | undefined;
+  const events: string[] = [];
+  const recipients: NotificationRuleRecipientOption[] = [];
+  let subject: string | undefined;
+  let enabled: boolean | undefined;
+  let excludeActor: boolean | undefined;
+  let expectedVersion: number | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "Notification rule");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "Notification rule");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--doctype") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      doctype = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--tenant") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      tenant = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--rule") {
+      if (action === "list") {
+        return { kind: "invalid", message: "Cannot use --rule with notification-rules list" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      ruleName = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--event") {
+      if (action !== "save") {
+        return { kind: "invalid", message: `Cannot use --event with notification-rules ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      events.push(value);
+      index += 1;
+      continue;
+    }
+    if (arg === "--recipient-user") {
+      if (action !== "save") {
+        return { kind: "invalid", message: `Cannot use --recipient-user with notification-rules ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      recipients.push({ kind: "user", userId: value });
+      index += 1;
+      continue;
+    }
+    if (arg === "--recipient-field") {
+      if (action !== "save") {
+        return { kind: "invalid", message: `Cannot use --recipient-field with notification-rules ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      recipients.push({ kind: "field", field: value });
+      index += 1;
+      continue;
+    }
+    if (arg === "--recipient-owner") {
+      if (action !== "save") {
+        return { kind: "invalid", message: `Cannot use --recipient-owner with notification-rules ${action}` };
+      }
+      recipients.push({ kind: "documentOwner" });
+      continue;
+    }
+    if (arg === "--subject") {
+      if (action !== "save") {
+        return { kind: "invalid", message: `Cannot use --subject with notification-rules ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      subject = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--enabled" || arg === "--disabled") {
+      if (action !== "save") {
+        return { kind: "invalid", message: `Cannot use ${arg} with notification-rules ${action}` };
+      }
+      const nextEnabled = arg === "--enabled";
+      if (enabled !== undefined && enabled !== nextEnabled) {
+        return { kind: "invalid", message: "Notification rule save cannot use both --enabled and --disabled" };
+      }
+      enabled = nextEnabled;
+      continue;
+    }
+    if (arg === "--exclude-actor" || arg === "--include-actor") {
+      if (action !== "save") {
+        return { kind: "invalid", message: `Cannot use ${arg} with notification-rules ${action}` };
+      }
+      const nextExcludeActor = arg === "--exclude-actor";
+      if (excludeActor !== undefined && excludeActor !== nextExcludeActor) {
+        return { kind: "invalid", message: "Notification rule save cannot use both --exclude-actor and --include-actor" };
+      }
+      excludeActor = nextExcludeActor;
+      continue;
+    }
+    if (arg === "--expected-version") {
+      if (action === "list") {
+        return { kind: "invalid", message: "Cannot use --expected-version with notification-rules list" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseNonNegativeInteger(value, "Notification rule expected version");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      expectedVersion = parsed;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown notification-rules ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if (doctype === undefined) {
+    return { kind: "invalid", message: `Notification rule ${action} requires --doctype` };
+  }
+  if (action !== "list" && ruleName === undefined) {
+    return { kind: "invalid", message: `Notification rule ${action} requires --rule` };
+  }
+  if (action === "save" && events.length === 0) {
+    return { kind: "invalid", message: "Notification rule save requires at least one --event" };
+  }
+  if (action === "save" && recipients.length === 0) {
+    return {
+      kind: "invalid",
+      message: "Notification rule save requires at least one --recipient-user, --recipient-field, or --recipient-owner"
+    };
+  }
+
+  return {
+    kind: "notification-rules",
+    action,
+    url,
+    headers,
+    doctype,
+    ...(tenant === undefined ? {} : { tenant }),
+    ...(ruleName === undefined ? {} : { ruleName }),
+    ...(events.length === 0 ? {} : { events }),
+    ...(recipients.length === 0 ? {} : { recipients }),
+    ...(subject === undefined ? {} : { subject }),
+    ...(enabled === undefined ? {} : { enabled }),
+    ...(excludeActor === undefined ? {} : { excludeActor }),
+    ...(expectedVersion === undefined ? {} : { expectedVersion })
   };
 }
 
@@ -2286,6 +2533,10 @@ function userPermissionAction(value: string): UserPermissionRemoteAction | undef
   return value === "allow" || value === "list" || value === "revoke" ? value : undefined;
 }
 
+function notificationRuleAction(value: string): NotificationRuleRemoteAction | undefined {
+  return value === "clear" || value === "list" || value === "save" ? value : undefined;
+}
+
 function resourceAction(value: string): ResourceRemoteAction | undefined {
   return value === "activity" ||
     value === "amend" ||
@@ -2487,7 +2738,7 @@ function parseJsonObject(value: string, label: string): Record<string, unknown> 
 function parseLiteralHeader(
   value: string,
   label: string
-): DataPatchHeaderOption | JobHeaderOption | FileHeaderOption | ResourceHeaderOption | string {
+): DataPatchHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | string {
   const separator = value.indexOf(":");
   if (separator < 1) {
     return `${label} header must use 'Name: value' syntax`;
@@ -2506,7 +2757,7 @@ function parseLiteralHeader(
 function parseEnvHeader(
   value: string,
   label: string
-): DataPatchHeaderOption | JobHeaderOption | FileHeaderOption | ResourceHeaderOption | string {
+): DataPatchHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | string {
   const separator = value.indexOf("=");
   if (separator < 1) {
     return `${label} environment header must use 'Name=ENV_VAR' syntax`;
@@ -2851,6 +3102,9 @@ function helpText(): string {
     "  cf-frappe jobs schedule-reset --url <origin> --id <scheduleId> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs schedule-save --url <origin> [--id <scheduleId>] --cron <expr> --job <name> [--enabled|--disabled] [--payload-json <json>] [--metadata-json <json>] [--idempotency-key <key>] [--delay-seconds <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe jobs schedule-delete --url <origin> --id <scheduleId> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe notification-rules list --url <origin> --doctype <doctype> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe notification-rules save --url <origin> --doctype <doctype> --rule <name> --event <eventKind>... (--recipient-user <user>|--recipient-field <field>|--recipient-owner)... [--subject <text>] [--enabled|--disabled] [--exclude-actor|--include-actor] [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe notification-rules clear --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources list --url <origin> --doctype <doctype> [--filter <field[__operator]=value>] [--filter-expression-json <json>] [--saved-filter <id>] [--limit <n>] [--offset <n>] [--order-by <field>] [--order <asc|desc>] [--no-default-filters] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources get --url <origin> --doctype <doctype> --name <docname> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources create --url <origin> --doctype <doctype> --data-json <json> [--header <name:value>] [--header-env <name=ENV>]",
@@ -2911,6 +3165,7 @@ function helpText(): string {
     "  access   Plan or create Cloudflare Access application and policy resources for a starter app",
     "  data-patches   Inspect, plan, apply, rollback, or enqueue remote app-declared data patches through the admin API",
     "  jobs   Inspect remote job history, retry failed runs, and manage runtime schedules through the admin API",
+    "  notification-rules   Inspect and mutate event-sourced document notification rules through the admin API",
     "  resources   Inspect and mutate deployed DocType resources through the generated resource API",
     "  user-permissions   Inspect and mutate event-sourced linked-record user permission grants",
     "  files   Upload, inspect, update, and delete remote File metadata/content through the admin API",

@@ -227,6 +227,9 @@ describe("cf-frappe CLI scaffold", () => {
     expect(readmeText).toContain("npx cf-frappe resources import-template --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources import --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe resources delete --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe notification-rules list --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe notification-rules save --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe notification-rules clear --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain(
       "npx cf-frappe user-permissions list --url https://your-worker.example --user-id teammate@example.com"
     );
