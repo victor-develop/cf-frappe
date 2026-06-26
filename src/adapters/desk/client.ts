@@ -3246,6 +3246,9 @@ export function renderDeskClientScript(): string {
       linkOptions: function (doctype, field, params) {
         return request(linkOptionsPath(doctype, field, params)).then(unwrapData);
       },
+      notificationRules: function (doctype, options) {
+        return request(notificationRulePath(doctype, undefined, options || {})).then(unwrapData);
+      },
       profile: function (userId, options) {
         return request(profilePath(userId, options || {})).then(unwrapData);
       },
@@ -3266,6 +3269,9 @@ export function renderDeskClientScript(): string {
       },
       roles: function (options) {
         return request(rolesPath(options || {})).then(unwrapData);
+      },
+      userPermissions: function (userId, options) {
+        return request(userPermissionPath(userId, options || {})).then(unwrapData);
       },
       workflow: function (doctype, options) {
         return request(workflowPath(doctype, options || {})).then(unwrapData);

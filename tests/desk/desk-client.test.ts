@@ -127,6 +127,7 @@ interface DeskClientRuntime {
     readonly fieldProperties: (doctype: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly listView: (doctype: string) => Promise<unknown>;
     readonly linkOptions: (doctype: string, field: string, params?: Record<string, unknown>) => Promise<unknown>;
+    readonly notificationRules: (doctype: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly profile: (userId: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly printFormat: (format: string) => Promise<unknown>;
     readonly printFormats: (options?: { readonly doctype?: string }) => Promise<unknown>;
@@ -134,6 +135,7 @@ interface DeskClientRuntime {
     readonly reports: () => Promise<unknown>;
     readonly role: (role: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly roles: (options?: { readonly tenant?: string }) => Promise<unknown>;
+    readonly userPermissions: (userId: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly workflow: (doctype: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly workspace: (workspace: string) => Promise<unknown>;
     readonly workspaces: () => Promise<unknown>;
@@ -2304,6 +2306,47 @@ describe("Desk client runtime", () => {
       JSON.stringify({ ...expectedGrant, expectedVersion: 1 }),
       JSON.stringify({ ...expectedGrant, expectedVersion: 2 })
     ]);
+  });
+
+  it("exposes policy and automation reads through the metadata namespace", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const results: Record<string, unknown> = {
+      "/api/notification-rules/Task%20Type?tenant=acme%2Feast": {
+        doctype: "Task Type",
+        version: 2,
+        rules: [{ rule: { name: "Managers" } }]
+      },
+      "/api/user-permissions/owner%40example.com?tenant=acme%2Feast": {
+        userId: "owner@example.com",
+        version: 3,
+        grants: [{ targetDoctype: "Customer", targetName: "CUST/1" }]
+      }
+    };
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: results[String(url)] }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.meta.notificationRules("Task Type", { tenant: "acme/east" })).resolves.toEqual({
+      doctype: "Task Type",
+      version: 2,
+      rules: [{ rule: { name: "Managers" } }]
+    });
+    await expect(runtime.meta.userPermissions("owner@example.com", { tenant: "acme/east" })).resolves.toEqual({
+      userId: "owner@example.com",
+      version: 3,
+      grants: [{ targetDoctype: "Customer", targetName: "CUST/1" }]
+    });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/notification-rules/Task%20Type?tenant=acme%2Feast",
+      "GET /api/user-permissions/owner%40example.com?tenant=acme%2Feast"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin"]);
+    expect(calls.map((call) => call.init.body)).toEqual([undefined, undefined]);
+    expect(calls.map((call) => new Headers(call.init.headers).get("content-type"))).toEqual([null, null]);
   });
 
   it("wraps journal-backed data patch APIs without browser-side validation", async () => {
