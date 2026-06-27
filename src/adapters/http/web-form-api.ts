@@ -209,11 +209,12 @@ function renderWebForm(metadata: Awaited<ReturnType<WebFormService["getWebForm"]
 
 function renderWebFormField(field: WebFormResolvedField): string {
   const required = field.required ? " required" : "";
+  const placeholder = webFormPlaceholder(field);
   const help = field.description === undefined ? "" : `<small>${escapeHtml(field.description)}</small>`;
   const label = `<span>${escapeHtml(field.label)}${field.required ? " *" : ""}</span>`;
   const name = escapeHtml(field.field);
   if (field.type === "longText" || field.type === "json") {
-    return `<label>${label}<textarea name="${name}"${required}></textarea>${help}</label>`;
+    return `<label>${label}<textarea name="${name}"${required}${placeholder}></textarea>${help}</label>`;
   }
   if (field.type === "select") {
     const options = (field.options ?? [])
@@ -224,7 +225,20 @@ function renderWebFormField(field: WebFormResolvedField): string {
   if (field.type === "boolean") {
     return `<label class="checkbox"><input type="checkbox" name="${name}" value="1"><span>${escapeHtml(field.label)}</span>${help}</label>`;
   }
-  return `<label>${label}<input name="${name}" type="${inputType(field.type)}"${required}>${help}</label>`;
+  return `<label>${label}<input name="${name}" type="${inputType(field.type)}"${required}${placeholder}>${help}</label>`;
+}
+
+function webFormPlaceholder(field: WebFormResolvedField): string {
+  if (
+    field.placeholder === undefined ||
+    field.type === "boolean" ||
+    field.type === "link" ||
+    field.type === "select" ||
+    field.type === "table"
+  ) {
+    return "";
+  }
+  return ` placeholder="${escapeHtml(field.placeholder)}"`;
 }
 
 function renderWebFormSuccess(

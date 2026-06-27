@@ -9,6 +9,7 @@ export interface WebFormResolvedField {
   readonly field: string;
   readonly label: string;
   readonly description?: string;
+  readonly placeholder?: string;
   readonly type: FieldDefinition["type"];
   readonly required: boolean;
   readonly options?: readonly string[];
@@ -85,6 +86,7 @@ export class WebFormService {
           field: field.name,
           label: formField.label ?? field.label ?? field.name,
           ...(formField.description === undefined ? {} : { description: formField.description }),
+          ...(field.placeholder === undefined ? {} : { placeholder: field.placeholder }),
           type: field.type,
           required: formField.required ?? field.required ?? false,
           ...(field.options === undefined ? {} : { options: field.options }),

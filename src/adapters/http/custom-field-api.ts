@@ -66,6 +66,7 @@ function fieldValue(value: JsonValue | undefined): FieldDefinition {
     type,
     ...optionalString(value.label, "field.label", "label"),
     ...optionalString(value.description, "field.description", "description"),
+    ...optionalString(value.placeholder, "field.placeholder", "placeholder"),
     ...optionalBoolean(value.required, "field.required", "required"),
     ...optionalListFilterExpression(value.mandatoryDependsOn, "field.mandatoryDependsOn", "mandatoryDependsOn"),
     ...optionalBoolean(value.readOnly, "field.readOnly", "readOnly"),

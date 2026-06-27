@@ -4143,6 +4143,7 @@ describe("Desk app", () => {
     expect(emptyHtml).toContain("Custom Fields");
     expect(emptyHtml).toContain('name="doctype"');
     expect(emptyHtml).toContain('name="description"');
+    expect(emptyHtml).toContain('name="placeholder"');
     expect(emptyHtml).toContain('name="mandatoryDependsOn"');
     expect(emptyHtml).toContain('name="readOnlyDependsOn"');
     expect(emptyHtml).toContain('name="hiddenDependsOn"');
@@ -4160,6 +4161,7 @@ describe("Desk app", () => {
         name: "reviewed",
         label: "Reviewed",
         description: "Visible after quality review.",
+        placeholder: "Reviewed by QA",
         type: "boolean",
         mandatoryDependsOn: JSON.stringify({ field: "priority", value: "High" }),
         readOnlyDependsOn: JSON.stringify({ field: "priority", value: "Low" }),
@@ -4185,6 +4187,7 @@ describe("Desk app", () => {
             name: "reviewed",
             label: "Reviewed",
             description: "Visible after quality review.",
+            placeholder: "Reviewed by QA",
             type: "boolean",
             mandatoryDependsOn: { field: "priority", value: "High" },
             readOnlyDependsOn: { field: "priority", value: "Low" },
@@ -4207,6 +4210,7 @@ describe("Desk app", () => {
     expect(currentHtml).toContain("reviewed");
     expect(currentHtml).toContain("Reviewed");
     expect(currentHtml).toContain("description: Visible after quality review.");
+    expect(currentHtml).toContain("placeholder: Reviewed by QA");
     expect(currentHtml).toContain("mandatory depends on");
     expect(currentHtml).toContain("read only depends on");
     expect(currentHtml).toContain("hidden depends on");
@@ -5121,6 +5125,7 @@ describe("Desk app", () => {
     expect(emptyHtml).toContain("Field Properties");
     expect(emptyHtml).toContain('name="field"');
     expect(emptyHtml).toContain('name="description"');
+    expect(emptyHtml).toContain('name="placeholder"');
     expect(emptyHtml).toContain('name="mandatoryDependsOn"');
     expect(emptyHtml).toContain('name="readOnlyDependsOn"');
     expect(emptyHtml).toContain('name="hiddenDependsOn"');
@@ -5137,6 +5142,7 @@ describe("Desk app", () => {
         fieldName: "priority",
         label: "Urgency",
         description: "Pick the operational urgency.",
+        placeholder: "Choose a priority",
         mandatoryDependsOn: JSON.stringify({ field: "title", operator: "is", value: "set" }),
         readOnlyDependsOn: JSON.stringify({ field: "workflow_state", value: "Closed" }),
         hiddenDependsOn: JSON.stringify({ field: "title", operator: "is", value: "not set" }),
@@ -5157,11 +5163,12 @@ describe("Desk app", () => {
       version: 1,
       fields: [
         {
-          fieldName: "priority",
-          overrides: {
-            label: "Urgency",
-            description: "Pick the operational urgency.",
-            mandatoryDependsOn: { field: "title", operator: "is", value: "set" },
+            fieldName: "priority",
+            overrides: {
+              label: "Urgency",
+              description: "Pick the operational urgency.",
+              placeholder: "Choose a priority",
+              mandatoryDependsOn: { field: "title", operator: "is", value: "set" },
             readOnlyDependsOn: { field: "workflow_state", value: "Closed" },
             hiddenDependsOn: { field: "title", operator: "is", value: "not set" },
             printHide: true,
@@ -5180,6 +5187,7 @@ describe("Desk app", () => {
     const currentHtml = await current.text();
     expect(currentHtml).toContain("Urgency");
     expect(currentHtml).toContain("description: Pick the operational urgency.");
+    expect(currentHtml).toContain("placeholder: Choose a priority");
     expect(currentHtml).toContain("mandatory depends on");
     expect(currentHtml).toContain("read only depends on");
     expect(currentHtml).toContain("hidden depends on");

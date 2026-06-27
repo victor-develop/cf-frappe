@@ -362,6 +362,9 @@ function normalizeField(field: FieldDefinition): PersistedFieldDefinition {
     ...(field.description === undefined || field.description.trim().length === 0
       ? {}
       : { description: field.description.trim() }),
+    ...(field.placeholder === undefined || field.placeholder.trim().length === 0
+      ? {}
+      : { placeholder: field.placeholder.trim() }),
     ...(field.required === undefined ? {} : { required: field.required }),
     ...(field.mandatoryDependsOn === undefined ? {} : { mandatoryDependsOn: field.mandatoryDependsOn }),
     ...(field.readOnly === undefined ? {} : { readOnly: field.readOnly }),

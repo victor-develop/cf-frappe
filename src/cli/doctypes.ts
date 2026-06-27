@@ -38,6 +38,7 @@ interface FieldResponse {
   readonly name?: string;
   readonly label?: string;
   readonly description?: string;
+  readonly placeholder?: string;
   readonly type?: string;
   readonly required?: boolean;
   readonly mandatoryDependsOn?: unknown;
@@ -186,7 +187,8 @@ function fieldLine(field: FieldResponse): string {
   const flagText = flags.length === 0 ? "" : ` [${flags.join(",")}]`;
   const label = field.label === undefined ? "" : ` - ${field.label}`;
   const description = field.description === undefined ? "" : ` help "${field.description}"`;
-  return `- ${field.name ?? "(unknown)"} ${field.type ?? "unknown"}${targetText}${flagText}${label}${description}`;
+  const placeholder = field.placeholder === undefined ? "" : ` placeholder "${field.placeholder}"`;
+  return `- ${field.name ?? "(unknown)"} ${field.type ?? "unknown"}${targetText}${flagText}${label}${description}${placeholder}`;
 }
 
 function fieldFlags(field: FieldResponse): readonly string[] {

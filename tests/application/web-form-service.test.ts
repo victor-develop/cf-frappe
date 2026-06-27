@@ -17,8 +17,8 @@ const leadDocType = defineDocType({
   name: "Lead",
   naming: { kind: "field", field: "title" },
   fields: [
-    { name: "title", type: "text", required: true },
-    { name: "email", type: "text" },
+    { name: "title", type: "text", required: true, placeholder: "Jane Buyer" },
+    { name: "email", type: "text", placeholder: "jane@example.com" },
     { name: "priority", type: "select", options: ["Low", "High"] },
     { name: "accepted", type: "boolean" },
     { name: "created_by", type: "text", readOnly: true, defaultValue: ({ actor }) => actor.id }
@@ -65,8 +65,8 @@ describe("WebFormService", () => {
       form: { name: "Lead Intake", route: "lead/intake" },
       doctype: "Lead",
       fields: [
-        { field: "title", label: "Name", type: "text", required: true },
-        { field: "email", type: "text", required: false },
+        { field: "title", label: "Name", type: "text", required: true, placeholder: "Jane Buyer" },
+        { field: "email", type: "text", required: false, placeholder: "jane@example.com" },
         { field: "priority", type: "select", options: ["Low", "High"] },
         { field: "accepted", type: "boolean" }
       ]

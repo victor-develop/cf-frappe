@@ -36,6 +36,7 @@ describe("field property api", () => {
         overrides: {
           label: "Urgency",
           description: "Pick the operational urgency.",
+          placeholder: "Choose a priority",
           mandatoryDependsOn: { field: "title", operator: "is", value: "set" },
           readOnlyDependsOn: { field: "workflow_state", value: "Closed" },
           hiddenDependsOn: { field: "title", operator: "is", value: "not set" },
@@ -59,6 +60,7 @@ describe("field property api", () => {
             overrides: {
               label: "Urgency",
               description: "Pick the operational urgency.",
+              placeholder: "Choose a priority",
               mandatoryDependsOn: { field: "title", operator: "is", value: "set" },
               readOnlyDependsOn: { field: "workflow_state", value: "Closed" },
               hiddenDependsOn: { field: "title", operator: "is", value: "not set" },
@@ -82,6 +84,7 @@ describe("field property api", () => {
             name: "priority",
             label: "Urgency",
             description: "Pick the operational urgency.",
+            placeholder: "Choose a priority",
             mandatoryDependsOn: { field: "title", operator: "is", value: "set" },
             readOnlyDependsOn: { field: "workflow_state", value: "Closed" },
             hiddenDependsOn: { field: "title", operator: "is", value: "not set" },

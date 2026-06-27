@@ -5143,6 +5143,7 @@ async function parseDeskCustomField(request: Request): Promise<ParsedDeskCustomF
   const options = commaListFormValue(form.get("options"));
   const label = stringSearchParamValue(form, "label");
   const description = stringSearchParamValue(form, "description");
+  const placeholder = stringSearchParamValue(form, "placeholder");
   const linkTo = stringSearchParamValue(form, "linkTo");
   const tableOf = stringSearchParamValue(form, "tableOf");
   const min = optionalNumberSearchParamValue(form, "min", "Minimum");
@@ -5158,6 +5159,7 @@ async function parseDeskCustomField(request: Request): Promise<ParsedDeskCustomF
       type,
       ...(label === undefined ? {} : { label }),
       ...(description === undefined ? {} : { description }),
+      ...(placeholder === undefined ? {} : { placeholder }),
       ...(form.has("required") ? { required: true } : {}),
       ...(mandatoryDependsOn === undefined ? {} : { mandatoryDependsOn }),
       ...(form.has("readOnly") ? { readOnly: true } : {}),
@@ -5204,6 +5206,7 @@ async function parseDeskFieldPropertyOverride(request: Request): Promise<ParsedD
   const overrides = {
     ...optionalStringProperty(form, "label", "label"),
     ...optionalStringProperty(form, "description", "description"),
+    ...optionalStringProperty(form, "placeholder", "placeholder"),
     ...optionalBooleanProperty(form, "required", "required", "Required"),
     ...(mandatoryDependsOn === undefined ? {} : { mandatoryDependsOn }),
     ...optionalBooleanProperty(form, "readOnly", "readOnly", "Read only"),

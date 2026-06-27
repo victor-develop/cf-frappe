@@ -1633,6 +1633,7 @@ export function renderCustomFieldAdmin(state: CustomFieldAdminState): string {
       <label class="field"><span>Field Name</span><input name="name"></label>
       <label class="field"><span>Label</span><input name="label"></label>
       <label class="field"><span>Description</span><input name="description"></label>
+      <label class="field"><span>Placeholder</span><input name="placeholder"></label>
       <label class="field"><span>Type</span><select name="type">${renderCustomFieldTypeOptions()}</select></label>
       <label class="field"><span>Options</span><input name="options"></label>
       <label class="field"><span>Link To</span><input name="linkTo"></label>
@@ -1715,6 +1716,7 @@ export function renderFieldPropertyAdmin(state: FieldPropertyAdminState): string
     <div class="fields">
       <label class="field"><span>Label</span><input name="label" value="${escapeHtml(overrides.label ?? "")}"></label>
       <label class="field"><span>Description</span><input name="description" value="${escapeHtml(overrides.description ?? "")}"></label>
+      <label class="field"><span>Placeholder</span><input name="placeholder" value="${escapeHtml(overrides.placeholder ?? "")}"></label>
       <label class="field"><span>Required</span><select name="required">${renderBooleanOverrideOptions(overrides.required)}</select></label>
       <label class="field wide"><span>Mandatory Depends On JSON</span><textarea name="mandatoryDependsOn" rows="4">${escapeHtml(overrides.mandatoryDependsOn === undefined ? "" : JSON.stringify(overrides.mandatoryDependsOn))}</textarea></label>
       <label class="field"><span>Read Only</span><select name="readOnly">${renderBooleanOverrideOptions(overrides.readOnly)}</select></label>
@@ -2019,6 +2021,7 @@ function renderFieldPropertyOverrides(overrides: FieldPropertyOverrideState["fie
   return [
     overrides.label === undefined ? "" : `label: ${overrides.label}`,
     overrides.description === undefined ? "" : `description: ${overrides.description}`,
+    overrides.placeholder === undefined ? "" : `placeholder: ${overrides.placeholder}`,
     overrides.required === undefined ? "" : `required: ${String(overrides.required)}`,
     overrides.mandatoryDependsOn === undefined ? "" : `mandatory depends on: ${JSON.stringify(overrides.mandatoryDependsOn)}`,
     overrides.readOnly === undefined ? "" : `read only: ${String(overrides.readOnly)}`,
@@ -2120,6 +2123,7 @@ function renderCustomFieldCheckbox(name: string, label: string): string {
 function renderCustomFieldDetails(field: FieldDefinition): string {
   return [
     field.description ? `description: ${field.description}` : "",
+    field.placeholder ? `placeholder: ${field.placeholder}` : "",
     field.mandatoryDependsOn ? `mandatory depends on: ${JSON.stringify(field.mandatoryDependsOn)}` : "",
     field.readOnlyDependsOn ? `read only depends on: ${JSON.stringify(field.readOnlyDependsOn)}` : "",
     field.hiddenDependsOn ? `hidden depends on: ${JSON.stringify(field.hiddenDependsOn)}` : "",
@@ -3628,6 +3632,7 @@ function renderField(
   const hiddenDependsOn = field.hiddenDependsOn === undefined
     ? ""
     : ` data-cf-frappe-hidden-depends-on="${escapeHtml(JSON.stringify(field.hiddenDependsOn))}"`;
+  const placeholder = renderFieldPlaceholder(field);
   const common = `id="${id}" name="${escapeHtml(field.name)}" data-cf-frappe-field-type="${field.type}"${hiddenDependsOn}${required}${readonly}`;
   const formatted = formatFormValue(value);
   const help = renderFieldHelp(field);
@@ -3645,11 +3650,11 @@ function renderField(
     return `<label class="field" for="${id}"><span>${label}${field.required ? " *" : ""}</span><select ${common}>${options}</select>${help}</label>`;
   }
   if (field.type === "longText" || field.type === "json") {
-    return `<label class="field" for="${id}"><span>${label}${field.required ? " *" : ""}</span><textarea ${common}>${escapeHtml(formatted)}</textarea>${help}</label>`;
+    return `<label class="field" for="${id}"><span>${label}${field.required ? " *" : ""}</span><textarea ${common}${placeholder}>${escapeHtml(formatted)}</textarea>${help}</label>`;
   }
   const type = inputType(field);
   const checked = field.type === "boolean" && value === true ? " checked" : "";
-  return `<label class="field" for="${id}"><span>${label}${field.required ? " *" : ""}</span><input type="${type}" ${common} value="${escapeHtml(formatted)}"${checked}>${help}</label>`;
+  return `<label class="field" for="${id}"><span>${label}${field.required ? " *" : ""}</span><input type="${type}" ${common} value="${escapeHtml(formatted)}"${checked}${placeholder}>${help}</label>`;
 }
 
 function renderTableField(
@@ -3777,6 +3782,7 @@ function renderTableCellInput(
     return renderTableField(field, value, child, allLinkOptions, tableDefinitions, fieldDefinitionPath, name);
   }
   const id = `field-${slug(name)}`;
+  const placeholder = renderFieldPlaceholder(field);
   const common = `id="${id}" name="${escapeHtml(name)}" data-cf-frappe-field-type="${field.type}"`;
   const formatted = formatFormValue(value);
   if (field.type === "link") {
@@ -3789,11 +3795,24 @@ function renderTableCellInput(
     return `<select ${common}>${options}</select>`;
   }
   if (field.type === "longText" || field.type === "json") {
-    return `<textarea ${common}>${escapeHtml(formatted)}</textarea>`;
+    return `<textarea ${common}${placeholder}>${escapeHtml(formatted)}</textarea>`;
   }
   const type = inputType(field);
   const checked = field.type === "boolean" && value === true ? " checked" : "";
-  return `<input type="${type}" ${common} value="${escapeHtml(formatted)}"${checked}>`;
+  return `<input type="${type}" ${common} value="${escapeHtml(formatted)}"${checked}${placeholder}>`;
+}
+
+function renderFieldPlaceholder(field: FieldDefinition): string {
+  if (
+    field.placeholder === undefined ||
+    field.type === "boolean" ||
+    field.type === "link" ||
+    field.type === "select" ||
+    field.type === "table"
+  ) {
+    return "";
+  }
+  return ` placeholder="${escapeHtml(field.placeholder)}"`;
 }
 
 function renderLinkOptions(options: readonly LinkOption[], currentValue: string): string {

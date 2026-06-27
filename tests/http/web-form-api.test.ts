@@ -22,8 +22,8 @@ const leadDocType = defineDocType({
   name: "Lead",
   naming: { kind: "field", field: "title" },
   fields: [
-    { name: "title", type: "text", required: true },
-    { name: "email", type: "text" },
+    { name: "title", type: "text", required: true, placeholder: "Jane Buyer" },
+    { name: "email", type: "text", placeholder: "jane@example.com" },
     { name: "score", type: "integer" },
     { name: "accepted", type: "boolean" },
     { name: "details", type: "json" }
@@ -75,7 +75,7 @@ describe("web form api", () => {
       data: {
         form: { name: "Lead Intake", route: "lead/intake", successUrl: "/page/thanks" },
         doctype: "Lead",
-        fields: expect.arrayContaining([{ field: "title", label: "Name", type: "text", required: true }])
+        fields: expect.arrayContaining([{ field: "title", label: "Name", type: "text", required: true, placeholder: "Jane Buyer" }])
       }
     });
 
@@ -91,7 +91,9 @@ describe("web form api", () => {
 
     const html = await app.request("/web-forms/Lead%20Intake");
     expect(html.status).toBe(200);
-    await expect(html.text()).resolves.toContain("<h1>Lead Intake</h1>");
+    const htmlText = await html.text();
+    expect(htmlText).toContain("<h1>Lead Intake</h1>");
+    expect(htmlText).toContain('placeholder="Jane Buyer"');
 
     const list = await app.request("/web-forms");
     expect(list.status).toBe(200);

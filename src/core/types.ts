@@ -35,6 +35,7 @@ export interface FieldDefinition {
   readonly name: string;
   readonly label?: string;
   readonly description?: string;
+  readonly placeholder?: string;
   readonly type: FieldType;
   readonly required?: boolean;
   readonly mandatoryDependsOn?: ListFilterExpression;
@@ -68,6 +69,7 @@ export interface PersistedFieldDefinition extends Omit<FieldDefinition, "default
 export interface FieldPropertyOverrides {
   readonly label?: string;
   readonly description?: string;
+  readonly placeholder?: string;
   readonly required?: boolean;
   readonly mandatoryDependsOn?: ListFilterExpression;
   readonly readOnly?: boolean;

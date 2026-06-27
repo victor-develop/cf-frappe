@@ -217,6 +217,7 @@ function normalizeOverrides(field: FieldDefinition, overrides: FieldPropertyOver
   const normalized: FieldPropertyOverrides = {
     ...optionalTrimmedString(overrides.label, "label", "label"),
     ...optionalTrimmedString(overrides.description, "description", "description"),
+    ...optionalTrimmedString(overrides.placeholder, "placeholder", "placeholder"),
     ...optionalBoolean(overrides.required, "required", "required"),
     ...(overrides.mandatoryDependsOn === undefined ? {} : { mandatoryDependsOn: overrides.mandatoryDependsOn }),
     ...optionalBoolean(overrides.readOnly, "readOnly", "readOnly"),

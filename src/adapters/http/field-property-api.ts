@@ -64,6 +64,7 @@ function overridesValue(value: JsonValue | undefined): FieldPropertyOverrides {
   return {
     ...optionalString(value.label, "overrides.label", "label"),
     ...optionalString(value.description, "overrides.description", "description"),
+    ...optionalString(value.placeholder, "overrides.placeholder", "placeholder"),
     ...optionalBoolean(value.required, "overrides.required", "required"),
     ...optionalListFilterExpression(value.mandatoryDependsOn, "overrides.mandatoryDependsOn", "mandatoryDependsOn"),
     ...optionalBoolean(value.readOnly, "overrides.readOnly", "readOnly"),
