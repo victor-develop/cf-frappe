@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the user notification event payload module slice:
+As of the saved list filter event payload module slice:
 
 - Vitest files: `156`
-- Vitest cases: `1501`
+- Vitest cases: `1502`
 
 ## Implication
 

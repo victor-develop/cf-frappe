@@ -13,11 +13,14 @@ import {
   type NewDomainEvent,
   type TenantId
 } from "../core/types.js";
+import type { SavedListFilterEventPayload } from "./saved-list-filter-events.js";
 import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 import { cryptoIdGenerator } from "../ports/id-generator.js";
+
+export type { SavedListFilterEventPayload } from "./saved-list-filter-events.js";
 
 const MAX_FILTER_LABEL_LENGTH = 140;
 
@@ -286,6 +289,8 @@ function currentVersion(events: readonly DomainEvent[]): number {
   return events.at(-1)?.sequence ?? 0;
 }
 
-function newEvent<TPayload extends NewDomainEvent["payload"]>(event: NewDomainEvent<TPayload>): NewDomainEvent<TPayload> {
+function newEvent<TPayload extends SavedListFilterEventPayload>(
+  event: NewDomainEvent<TPayload>
+): NewDomainEvent<TPayload> {
   return event;
 }

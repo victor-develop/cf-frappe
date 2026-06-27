@@ -500,19 +500,6 @@ export type CoreDocumentEventPayload =
       readonly role: string;
     }
   | {
-      readonly kind: "SavedListFilterSaved";
-      readonly filterId: string;
-      readonly label: string;
-      readonly ownerId: string;
-      readonly filters: readonly ListDocumentsFilter[];
-      readonly filterExpression?: ListFilterExpression;
-    }
-  | {
-      readonly kind: "SavedListFilterDeleted";
-      readonly filterId: string;
-      readonly ownerId: string;
-    }
-  | {
       readonly kind: "SavedReportSaved";
       readonly reportId: string;
       readonly label: string;

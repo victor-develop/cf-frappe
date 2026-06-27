@@ -1,7 +1,20 @@
 import { SavedListFilterService } from "../../src";
 import { createServices, manager, owner } from "../helpers";
+import type { DocumentEventPayload, SavedListFilterEventPayload } from "../../src";
 
 describe("SavedListFilterService", () => {
+  it("registers saved list filter payloads through the domain event extension map", () => {
+    const payload = savedListFilterPayload({
+      kind: "SavedListFilterSaved",
+      filterId: "filter-high",
+      label: "High notes",
+      ownerId: owner.id,
+      filters: [{ field: "priority", value: "High" }]
+    });
+
+    expect(payload.label).toBe("High notes");
+  });
+
   it("saves normalized user list filters as events and lists only the actor's filters", async () => {
     const { events, registry } = createServices(["create-1"]);
     const savedFilters = new SavedListFilterService({
@@ -221,6 +234,12 @@ describe("SavedListFilterService", () => {
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });
+
+function savedListFilterPayload(
+  payload: Extract<DocumentEventPayload, { readonly kind: "SavedListFilterSaved" }>
+): Extract<SavedListFilterEventPayload, { readonly kind: "SavedListFilterSaved" }> {
+  return payload;
+}
 
 function deterministicFilterIds(values: readonly string[]) {
   let index = 0;
