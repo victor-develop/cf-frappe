@@ -334,42 +334,6 @@ export type CoreDocumentEventPayload =
       readonly kind: "DocumentCancelled";
     }
   | {
-      readonly kind: "DocumentCommentAdded";
-      readonly text: string;
-    }
-  | {
-      readonly kind: "DocumentActivityRecorded";
-      readonly activityType: string;
-      readonly subject: string;
-      readonly detail?: string;
-      readonly channel?: string;
-      readonly externalId?: string;
-    }
-  | {
-      readonly kind: "DocumentAssigned";
-      readonly assigneeId: string;
-    }
-  | {
-      readonly kind: "DocumentUnassigned";
-      readonly assigneeId: string;
-    }
-  | {
-      readonly kind: "DocumentTagged";
-      readonly tag: string;
-    }
-  | {
-      readonly kind: "DocumentUntagged";
-      readonly tag: string;
-    }
-  | {
-      readonly kind: "DocumentFollowed";
-      readonly followerId: string;
-    }
-  | {
-      readonly kind: "DocumentUnfollowed";
-      readonly followerId: string;
-    }
-  | {
       readonly kind: "WorkflowTransitioned";
       readonly action: string;
       readonly from: string;

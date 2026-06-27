@@ -16,7 +16,12 @@ import {
   namingSeriesStream,
   uniqueValueStream
 } from "../../src";
-import type { DocTypeDefinition, DocumentEventPayload, DocumentShareEventPayload } from "../../src";
+import type {
+  DocTypeDefinition,
+  DocumentCollaborationEventPayload,
+  DocumentEventPayload,
+  DocumentShareEventPayload
+} from "../../src";
 import {
   createChildTableServices,
   createLinkedServices,
@@ -1402,6 +1407,16 @@ describe("DocumentService", () => {
         payload: { kind: "DocumentCommentAdded", text: "Looks good to me" }
       }
     ]);
+  });
+
+  it("registers document collaboration payloads through the domain event extension map", () => {
+    const payload = documentCollaborationPayload({
+      kind: "DocumentActivityRecorded",
+      activityType: "email",
+      subject: "Follow-up sent"
+    });
+
+    expect(payload.subject).toBe("Follow-up sent");
   });
 
   it("requires comment permission and non-empty comment text", async () => {
@@ -3047,5 +3062,11 @@ describe("DocumentService", () => {
 function documentSharePayload(
   payload: Extract<DocumentEventPayload, { readonly kind: "DocumentShared" }>
 ): Extract<DocumentShareEventPayload, { readonly kind: "DocumentShared" }> {
+  return payload;
+}
+
+function documentCollaborationPayload(
+  payload: Extract<DocumentEventPayload, { readonly kind: "DocumentActivityRecorded" }>
+): Extract<DocumentCollaborationEventPayload, { readonly kind: "DocumentActivityRecorded" }> {
   return payload;
 }
