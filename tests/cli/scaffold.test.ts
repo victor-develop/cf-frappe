@@ -130,22 +130,25 @@ describe("cf-frappe CLI scaffold", () => {
     expect(worker).toContain("jobs: {");
     const taskApp = await readFile(join(target, "src/apps/tasks.ts"), "utf8");
     expect(taskApp).toContain("defineClientScript");
+    expect(taskApp).toContain("defineCalendar");
     expect(taskApp).toContain("defineDashboard");
     expect(taskApp).toContain("defineDataPatch");
     expect(taskApp).toContain("defineKanban");
     expect(taskApp).toContain("defineWorkspace");
     expect(taskApp).toContain('import type { CloudFrappeRuntimeServices } from "cf-frappe/cloudflare"');
     expect(taskApp).toContain("export const TaskDashboard");
+    expect(taskApp).toContain("export const TaskCalendar");
     expect(taskApp).toContain("export const TaskKanban");
     expect(taskApp).toContain("export const TaskWorkspace");
     expect(taskApp).toContain("export const StarterTaskSeedData");
     expect(taskApp).toContain("dashboards: [TaskDashboard]");
+    expect(taskApp).toContain("calendars: [TaskCalendar]");
     expect(taskApp).toContain("kanbans: [TaskKanban]");
     expect(taskApp).toContain("workspaces: [TaskWorkspace]");
     expect(taskApp).toContain("dataPatches: [StarterTaskSeedData]");
     expect(taskApp).toContain('const STARTER_TASK_SEED_PATCH_ID = "tasks.seed_starter_tasks"');
     expect(taskApp).toContain("id: STARTER_TASK_SEED_PATCH_ID");
-    expect(taskApp).toContain('checksum: "v3"');
+    expect(taskApp).toContain('checksum: "v4"');
     expect(taskApp).toContain('name: "Task owner updates"');
     expect(taskApp).toContain('events: ["DocumentUpdated", "DocumentCommentAdded"]');
     expect(taskApp).toContain('recipients: [{ kind: "field", field: "created_by" }]');
@@ -161,6 +164,7 @@ describe("cf-frappe CLI scaffold", () => {
     expect(taskApp).toContain("resources.documents.delete");
     expect(taskApp).toContain("metadata: { patchId: STARTER_TASK_SEED_PATCH_ID, rollback: true }");
     expect(taskApp).toContain("Create D1, R2, and Queue resources");
+    expect(taskApp).toContain('kind: "calendar", target: "Task Calendar"');
     expect(taskApp).toContain('kind: "kanban", target: "Task Board"');
     expect(taskApp).toContain('kind: "dashboard", target: "Task Dashboard"');
     expect(taskApp).toContain('kind: "notifications"');
@@ -177,7 +181,7 @@ describe("cf-frappe CLI scaffold", () => {
       "npx cf-frappe install @acme/cf-frappe-crm"
     );
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
-      "the `Tasks` workspace, the `Task Board`, the `Task Dashboard`, and the file manager at `/desk/files`"
+      "the `Tasks` workspace, the `Task Calendar`, the `Task Board`, the `Task Dashboard`, and the file manager at `/desk/files`"
     );
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "`tasks.seed_starter_tasks` data patch"
@@ -227,6 +231,9 @@ describe("cf-frappe CLI scaffold", () => {
     expect(readmeText).toContain("npx cf-frappe dashboards list --url https://your-worker.example");
     expect(readmeText).toContain('npx cf-frappe dashboards get --url https://your-worker.example --dashboard "Task Dashboard"');
     expect(readmeText).toContain('npx cf-frappe dashboards run --url https://your-worker.example --dashboard "Task Dashboard"');
+    expect(readmeText).toContain("npx cf-frappe calendars list --url https://your-worker.example");
+    expect(readmeText).toContain('npx cf-frappe calendars get --url https://your-worker.example --calendar "Task Calendar"');
+    expect(readmeText).toContain('npx cf-frappe calendars run --url https://your-worker.example --calendar "Task Calendar"');
     expect(readmeText).toContain("npx cf-frappe kanbans list --url https://your-worker.example");
     expect(readmeText).toContain('npx cf-frappe kanbans get --url https://your-worker.example --kanban "Task Board"');
     expect(readmeText).toContain('npx cf-frappe kanbans run --url https://your-worker.example --kanban "Task Board"');

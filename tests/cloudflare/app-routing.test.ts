@@ -6,8 +6,10 @@ import {
   createRegistry,
   createInMemoryAccountRecoveryNotifier,
   createSignedSessionCookie,
+  defineCalendar,
   defineDashboard,
   defineDataPatch,
+  defineDocType,
   defineKanban,
   deterministicIds,
   fixedClock,
@@ -169,6 +171,70 @@ describe("CloudFrappe Worker routing", () => {
     expect(html).toContain("Notes grouped by workflow state");
     expect(html).toContain("Open");
     expect(html).toContain("Closed");
+  });
+
+  it("mounts metadata Calendar API and Desk routes through Worker routing", async () => {
+    const Event = defineDocType({
+      name: "Event",
+      fields: [
+        { name: "title", type: "text" },
+        { name: "starts_on", type: "date" }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read"] }]
+    });
+    const registry = createRegistry({
+      doctypes: [Event],
+      calendars: [
+        defineCalendar({
+          name: "Event Calendar",
+          label: "Event Calendar",
+          description: "Events grouped by date",
+          roles: ["User"],
+          doctype: "Event",
+          startField: "starts_on",
+          titleField: "title"
+        })
+      ]
+    });
+    const worker = createCloudFrappeWorker({
+      registry,
+      actor: () => owner
+    });
+    const env = {
+      DB: fakeD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const metadata = await worker.fetch!(cfRequest("http://localhost/api/meta/calendars"), env, fakeExecutionContext());
+    const run = await worker.fetch!(
+      cfRequest("http://localhost/api/calendar/Event%20Calendar/run?from=2026-01-01&to=2026-01-31"),
+      env,
+      fakeExecutionContext()
+    );
+    const desk = await worker.fetch!(
+      cfRequest("http://localhost/desk/calendars/Event%20Calendar"),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(metadata.status).toBe(200);
+    await expect(metadata.json()).resolves.toMatchObject({
+      data: [{ name: "Event Calendar", doctype: "Event", startField: "starts_on" }]
+    });
+    expect(run.status).toBe(200);
+    await expect(run.json()).resolves.toMatchObject({
+      data: {
+        calendar: { name: "Event Calendar" },
+        from: "2026-01-01",
+        to: "2026-01-31",
+        total: 0,
+        events: []
+      }
+    });
+    expect(desk.status).toBe(200);
+    const html = await desk.text();
+    expect(html).toContain("Events grouped by date");
+    expect(html).toContain("No events.");
   });
 
   it("enables generated Desk document presence panels when realtime is configured", async () => {

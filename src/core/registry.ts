@@ -1,5 +1,11 @@
 import { assertAppName, assertAppNames } from "./app-name.js";
 import { resolveAppDependencyOrder } from "./app-graph.js";
+import {
+  assertCalendarDefinition,
+  assertCalendarMatchesDocType,
+  defineCalendar,
+  type CalendarDefinition
+} from "./calendar.js";
 import { clientScriptAppliesTo, defineClientScript } from "./client-script.js";
 import type { ClientScriptDefinition, ClientScriptScope } from "./client-script.js";
 import { assertDataPatchId, defineDataPatch, type DataPatchDefinition } from "./data-patch.js";
@@ -55,6 +61,7 @@ export interface RegistryOptions {
   readonly reports?: readonly ReportDefinition[];
   readonly dashboards?: readonly DashboardDefinition[];
   readonly kanbans?: readonly KanbanDefinition[];
+  readonly calendars?: readonly CalendarDefinition[];
   readonly workspaces?: readonly WorkspaceDefinition[];
   readonly clientScripts?: readonly ClientScriptDefinition[];
   readonly dataPatches?: readonly DataPatchDefinition[];
@@ -69,6 +76,7 @@ export class ModelRegistry {
   private readonly reports = new Map<string, ReportDefinition>();
   private readonly dashboards = new Map<string, DashboardDefinition>();
   private readonly kanbans = new Map<string, KanbanDefinition>();
+  private readonly calendars = new Map<string, CalendarDefinition>();
   private readonly workspaces = new Map<string, WorkspaceDefinition>();
   private readonly clientScripts = new Map<string, ClientScriptDefinition>();
   private readonly dataPatches = new Map<string, DataPatchDefinition>();
@@ -93,6 +101,9 @@ export class ModelRegistry {
     }
     for (const kanban of options.kanbans ?? []) {
       this.registerKanban(kanban);
+    }
+    for (const calendar of options.calendars ?? []) {
+      this.registerCalendar(calendar);
     }
     for (const format of options.printFormats ?? []) {
       this.registerPrintFormat(format);
@@ -281,6 +292,18 @@ export class ModelRegistry {
     this.kanbans.set(definition.name, definition);
   }
 
+  registerCalendar(calendar: CalendarDefinition): void {
+    const definition = defineCalendar(calendar);
+    if (this.calendars.has(definition.name)) {
+      throw new FrameworkError("CALENDAR_DUPLICATE", `Calendar '${definition.name}' is already registered`, {
+        status: 409
+      });
+    }
+    assertCalendarDefinition(definition);
+    this.assertCalendarReferencesResolve(definition);
+    this.calendars.set(definition.name, definition);
+  }
+
   registerWorkspace(workspace: WorkspaceDefinition): void {
     const definition = defineWorkspace(workspace);
     if (this.workspaces.has(definition.name)) {
@@ -364,6 +387,20 @@ export class ModelRegistry {
 
   listKanbans(): readonly KanbanDefinition[] {
     return [...this.kanbans.values()].sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  getCalendar(calendarName: string): CalendarDefinition {
+    const definition = this.calendars.get(calendarName);
+    if (!definition) {
+      throw new FrameworkError("CALENDAR_NOT_FOUND", `Calendar '${calendarName}' is not registered`, {
+        status: 404
+      });
+    }
+    return definition;
+  }
+
+  listCalendars(): readonly CalendarDefinition[] {
+    return [...this.calendars.values()].sort((left, right) => left.name.localeCompare(right.name));
   }
 
   getPrintFormat(formatName: string): PrintFormatDefinition {
@@ -460,6 +497,13 @@ export class ModelRegistry {
             { status: 400 }
           );
         }
+        if (shortcut.kind === "calendar" && !this.calendars.has(shortcut.target ?? "")) {
+          throw new FrameworkError(
+            "WORKSPACE_INVALID",
+            `Workspace '${workspace.name}' shortcut '${shortcut.name}' references unknown calendar '${shortcut.target ?? ""}'`,
+            { status: 400 }
+          );
+        }
       }
     }
   }
@@ -474,6 +518,18 @@ export class ModelRegistry {
       );
     }
     assertKanbanMatchesDocType(kanban, doctype);
+  }
+
+  private assertCalendarReferencesResolve(calendar: CalendarDefinition): void {
+    const doctype = this.doctypes.get(calendar.doctype);
+    if (!doctype) {
+      throw new FrameworkError(
+        "CALENDAR_INVALID",
+        `Calendar '${calendar.name}' references unknown DocType '${calendar.doctype}'`,
+        { status: 400 }
+      );
+    }
+    assertCalendarMatchesDocType(calendar, doctype);
   }
 
   private assertDashboardReferencesResolve(dashboard: DashboardDefinition): void {

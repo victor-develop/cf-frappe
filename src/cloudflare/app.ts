@@ -1,4 +1,5 @@
 import { AuditService } from "../application/audit-service.js";
+import { CalendarService } from "../application/calendar-service.js";
 import { CustomFieldService } from "../application/custom-field-service.js";
 import { DashboardService } from "../application/dashboard-service.js";
 import {
@@ -113,6 +114,7 @@ export interface CloudFrappeRuntimeServices {
   readonly reports: ReportService;
   readonly dashboards: DashboardService;
   readonly kanbans: KanbanService;
+  readonly calendars: CalendarService;
   readonly roles: RoleService;
   readonly savedReports: SavedReportService;
   readonly dataPatches?: DataPatchAdminPort;
@@ -390,6 +392,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   const reports = new ReportService({ registry: options.registry, queries: restrictedQueries });
   const dashboards = new DashboardService({ registry: options.registry, queries: restrictedQueries, reports });
   const kanbans = new KanbanService({ registry: options.registry, queries: restrictedQueries });
+  const calendars = new CalendarService({ registry: options.registry, queries: restrictedQueries });
   const roles = new RoleService({
     events,
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
@@ -427,6 +430,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     reports,
     dashboards,
     kanbans,
+    calendars,
     roles,
     savedReports
   };
@@ -546,6 +550,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     reports,
     dashboards,
     kanbans,
+    calendars,
     roles,
     ...(printPdfRenderer === undefined ? {} : { printPdfRenderer }),
     actor,
@@ -583,6 +588,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     reports,
     dashboards,
     kanbans,
+    calendars,
     roles,
     notificationRules,
     ...(printPdfRenderer === undefined ? {} : { printPdfRenderer }),

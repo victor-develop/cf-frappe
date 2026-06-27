@@ -32,6 +32,7 @@ import {
 } from "../../core/reports.js";
 import type { DashboardDefinition } from "../../core/dashboard.js";
 import type { KanbanDefinition } from "../../core/kanban.js";
+import type { CalendarDefinition } from "../../core/calendar.js";
 import type { ClientScriptDefinition, ClientScriptScope } from "../../core/client-script.js";
 import type { WorkspaceDefinition, WorkspaceShortcutKind } from "../../core/workspace.js";
 import type {
@@ -47,6 +48,7 @@ import type { WorkflowDefinitionState } from "../../core/workflow.js";
 import type { DocumentSharePermission, DocumentShareState } from "../../core/document-shares.js";
 import type { FileDashboard } from "../../application/file-service.js";
 import type { KanbanRunResult } from "../../application/kanban-service.js";
+import type { CalendarRunResult } from "../../application/calendar-service.js";
 import type {
   DataPatchApplyPlan,
   DataPatchDashboard,
@@ -111,6 +113,7 @@ export interface DeskLayoutOptions {
   readonly activeReport?: string;
   readonly activeDashboard?: string;
   readonly activeKanban?: string;
+  readonly activeCalendar?: string;
   readonly activeSearch?: boolean;
   readonly activeAdmin?: string;
   readonly activeWorkspace?: string;
@@ -121,6 +124,7 @@ export interface DeskLayoutOptions {
   readonly reports?: readonly ReportDefinition[];
   readonly dashboards?: readonly DashboardDefinition[];
   readonly kanbans?: readonly KanbanDefinition[];
+  readonly calendars?: readonly CalendarDefinition[];
   readonly workspaces?: readonly WorkspaceDefinition[];
   readonly message?: string;
 }
@@ -199,6 +203,12 @@ export function renderDeskLayout(options: DeskLayoutOptions): string {
         `<a class="nav-link${kanban.name === options.activeKanban ? " is-active" : ""}" href="/desk/kanbans/${encodeURIComponent(kanban.name)}">${escapeHtml(kanban.label ?? kanban.name)}</a>`
     )
     .join("");
+  const calendarNav = (options.calendars ?? [])
+    .map(
+      (calendar) =>
+        `<a class="nav-link${calendar.name === options.activeCalendar ? " is-active" : ""}" href="/desk/calendars/${encodeURIComponent(calendar.name)}">${escapeHtml(calendar.label ?? calendar.name)}</a>`
+    )
+    .join("");
   const adminNav = (options.adminLinks ?? [])
     .map(
       (link) =>
@@ -224,6 +234,7 @@ export function renderDeskLayout(options: DeskLayoutOptions): string {
       ${reportNav ? `<p class="nav-heading">Reports</p>${reportNav}` : ""}
       ${dashboardNav ? `<p class="nav-heading">Dashboards</p>${dashboardNav}` : ""}
       ${kanbanNav ? `<p class="nav-heading">Kanban</p>${kanbanNav}` : ""}
+      ${calendarNav ? `<p class="nav-heading">Calendars</p>${calendarNav}` : ""}
       ${options.showNotifications ? `<p class="nav-heading">Notifications</p><a class="nav-link" href="/desk/notifications">Inbox</a>` : ""}
       ${options.showFiles ? `<p class="nav-heading">Files</p><a class="nav-link" href="/desk/files">Files</a>` : ""}
       ${adminNav ? `<p class="nav-heading">Admin</p>${adminNav}` : ""}
@@ -248,7 +259,8 @@ export function renderDeskHome(
   reports: readonly ReportDefinition[] = [],
   workspaces: readonly WorkspaceDefinition[] = [],
   dashboards: readonly DashboardDefinition[] = [],
-  kanbans: readonly KanbanDefinition[] = []
+  kanbans: readonly KanbanDefinition[] = [],
+  calendars: readonly CalendarDefinition[] = []
 ): string {
   const workspaceCards = workspaces
     .map(
@@ -271,6 +283,7 @@ export function renderDeskHome(
   return `${workspaceCards ? `<section class="workspace-grid">${workspaceCards}</section>` : ""}
   ${dashboards.length > 0 ? renderDashboardList(dashboards) : ""}
   ${kanbans.length > 0 ? renderKanbanList(kanbans) : ""}
+  ${calendars.length > 0 ? renderCalendarList(calendars) : ""}
   <section class="panel">
     <div class="table-wrap">
       <table>
@@ -779,6 +792,51 @@ export function renderKanbanView(result: KanbanRunResult): string {
     </section>`)
     .join("");
   return `${description}<section class="kanban-board">${columns || `<p class="empty">No kanban columns.</p>`}</section>`;
+}
+
+export function renderCalendarList(calendars: readonly CalendarDefinition[]): string {
+  const rows = calendars
+    .map(
+      (calendar) => `<tr>
+        <td><a href="/desk/calendars/${encodeURIComponent(calendar.name)}">${escapeHtml(calendar.label ?? calendar.name)}</a></td>
+        <td>${escapeHtml(calendar.doctype)}</td>
+        <td>${escapeHtml(calendar.startField)}</td>
+        <td>${escapeHtml(calendar.endField ?? "")}</td>
+        <td>${escapeHtml(calendar.module ?? "")}</td>
+        <td>${escapeHtml(calendar.description ?? "")}</td>
+      </tr>`
+    )
+    .join("");
+  return `<section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Calendar</th><th>DocType</th><th>Start Field</th><th>End Field</th><th>Module</th><th>Description</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="6" class="empty">No readable calendars.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+export function renderCalendarView(result: CalendarRunResult): string {
+  const description = result.calendar.description
+    ? `<p class="muted">${escapeHtml(result.calendar.description)}</p>`
+    : "";
+  const windowLabel = result.from === undefined && result.to === undefined
+    ? ""
+    : `<p class="muted">Window ${escapeHtml(result.from ?? "beginning")} to ${escapeHtml(result.to ?? "end")}</p>`;
+  const events = result.events
+    .map((event) => `<a class="calendar-event" href="/desk/${encodeURIComponent(event.doctype)}/${encodeURIComponent(event.name)}">
+      <time>${escapeHtml(event.start)}${event.end === undefined ? "" : ` to ${escapeHtml(event.end)}`}</time>
+      <strong>${escapeHtml(event.title)}</strong>
+      <span>${escapeHtml(event.name)}${event.color === undefined ? "" : ` - ${escapeHtml(event.color)}`}</span>
+      <small>v${String(event.version)} updated ${escapeHtml(event.updatedAt)}</small>
+    </a>`)
+    .join("");
+  return `${description}${windowLabel}<section class="calendar-list">
+    <header><h2>${escapeHtml(result.calendar.label ?? result.calendar.name)}</h2><span>${String(result.total)}</span></header>
+    ${events || `<p class="empty">No events.</p>`}
+    ${result.hasMore ? `<p class="muted">More events hidden by calendar limit.</p>` : ""}
+  </section>`;
 }
 
 function renderDashboardCard(card: DashboardRunResult["cards"][number]): string {
@@ -3930,6 +3988,46 @@ h3 { margin: 0 0 12px; font-size: 16px; line-height: 1.35; letter-spacing: 0; }
 .kanban-card:hover { border-color: var(--primary); }
 .kanban-card span,
 .kanban-card small {
+  color: var(--muted);
+  font-size: 13px;
+}
+.calendar-list {
+  display: grid;
+  gap: 10px;
+}
+.calendar-list header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f9fafb;
+}
+.calendar-list header span {
+  min-width: 28px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #e9eef7;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+.calendar-event {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+}
+.calendar-event:hover { border-color: var(--primary); }
+.calendar-event time,
+.calendar-event span,
+.calendar-event small {
   color: var(--muted);
   font-size: 13px;
 }

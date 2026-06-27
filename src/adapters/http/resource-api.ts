@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AuditService } from "../../application/audit-service.js";
+import type { CalendarService } from "../../application/calendar-service.js";
 import type { CustomFieldService } from "../../application/custom-field-service.js";
 import type {
   DataPatchQueuePort,
@@ -51,6 +52,7 @@ import {
 import type { ActorResolver } from "./actor.js";
 import { createAuthApi, type AuthSessionOptions } from "./auth-api.js";
 import { createAuditApi } from "./audit-api.js";
+import { createCalendarApi } from "./calendar-api.js";
 import { createCustomFieldApi } from "./custom-field-api.js";
 import { createDashboardApi } from "./dashboard-api.js";
 import { createDataPatchApi } from "./data-patch-api.js";
@@ -102,6 +104,7 @@ export interface ResourceApiOptions {
   readonly dataPatches?: DataPatchAdminPort;
   readonly dashboards?: DashboardService;
   readonly kanbans?: KanbanService;
+  readonly calendars?: CalendarService;
   readonly dataPatchQueue?: DataPatchQueuePort;
   readonly dataPatchRollbackQueue?: DataPatchRollbackQueuePort;
   readonly dataPatchRollbackRetryQueue?: DataPatchRollbackRetryQueuePort;
@@ -278,6 +281,16 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       "/",
       createKanbanApi({
         kanbans: options.kanbans,
+        actor: resolveActor
+      })
+    );
+  }
+
+  if (options.calendars) {
+    app.route(
+      "/",
+      createCalendarApi({
+        calendars: options.calendars,
         actor: resolveActor
       })
     );
@@ -965,6 +978,7 @@ interface WorkspaceMetadataAccess {
   readonly reports: ReadonlySet<string>;
   readonly dashboards: ReadonlySet<string>;
   readonly kanbans: ReadonlySet<string>;
+  readonly calendars: ReadonlySet<string>;
   readonly files: boolean;
   readonly notifications: boolean;
   readonly adminTargets: ReadonlySet<string>;
@@ -984,6 +998,7 @@ async function workspaceMetadataAccess(options: ResourceApiOptions, actor: Actor
     ),
     dashboards: new Set((await options.dashboards?.listDashboards(actor) ?? []).map((dashboard) => dashboard.name)),
     kanbans: new Set((await options.kanbans?.listKanbans(actor) ?? []).map((kanban) => kanban.name)),
+    calendars: new Set((await options.calendars?.listCalendars(actor) ?? []).map((calendar) => calendar.name)),
     files: options.files !== undefined,
     notifications: options.notifications !== undefined,
     adminTargets: workspaceAdminTargets(options, actor)
@@ -1039,6 +1054,9 @@ function canReadWorkspaceShortcutTarget(
   }
   if (shortcut.kind === "kanban") {
     return access.kanbans.has(shortcut.target ?? "");
+  }
+  if (shortcut.kind === "calendar") {
+    return access.calendars.has(shortcut.target ?? "");
   }
   if (shortcut.kind === "file") {
     return access.files;

@@ -191,6 +191,10 @@ export function renderDeskClientScript(): string {
     return "/desk/kanbans/" + encodePart(kanban);
   }
 
+  function deskCalendarPath(calendar, options) {
+    return withQuery("/desk/calendars/" + encodePart(calendar), calendarParams(options || {}));
+  }
+
   function deskAdminUsersPath(options) {
     var params = {};
     setParam(params, "user", options && (options.userId !== undefined ? options.userId : options.user));
@@ -349,6 +353,14 @@ export function renderDeskClientScript(): string {
 
   function kanbanMetaPath(kanban) {
     return "/api/meta/kanbans" + (kanban === undefined ? "" : "/" + encodePart(kanban));
+  }
+
+  function calendarPath(calendar, action, options) {
+    return withQuery((calendar === undefined ? "/api/meta/calendars" : "/api/calendar/" + encodePart(calendar)) + (action === undefined ? "" : "/" + action), calendarParams(options || {}));
+  }
+
+  function calendarMetaPath(calendar) {
+    return "/api/meta/calendars" + (calendar === undefined ? "" : "/" + encodePart(calendar));
   }
 
   function reportBuilderPath(doctype, id, action) {
@@ -941,6 +953,14 @@ export function renderDeskClientScript(): string {
   function reportExportParams(options) {
     var params = reportRunParams(options);
     delete params.offset;
+    return params;
+  }
+
+  function calendarParams(options) {
+    var params = {};
+    setParam(params, "from", options && options.from);
+    setParam(params, "to", options && options.to);
+    setParam(params, "limit", options && options.limit);
     return params;
   }
 
@@ -3507,6 +3527,17 @@ export function renderDeskClientScript(): string {
         return request(kanbanPath(kanban, "run")).then(unwrapData);
       }
     }),
+    calendar: Object.freeze({
+      get: function (calendar) {
+        return request(calendarMetaPath(calendar)).then(unwrapData);
+      },
+      list: function () {
+        return request(calendarMetaPath()).then(unwrapData);
+      },
+      run: function (calendar, options) {
+        return request(calendarPath(calendar, "run", options || {})).then(unwrapData);
+      }
+    }),
     jobs: Object.freeze({
       createSchedule: function (input) {
         return request(jobSchedulePath(), { method: "POST", body: input || {} }).then(unwrapData);
@@ -3639,6 +3670,12 @@ export function renderDeskClientScript(): string {
       },
       kanbans: function () {
         return request(kanbanMetaPath()).then(unwrapData);
+      },
+      calendar: function (calendar) {
+        return request(calendarMetaPath(calendar)).then(unwrapData);
+      },
+      calendars: function () {
+        return request(calendarMetaPath()).then(unwrapData);
       },
       doctype: function (doctype) {
         return request("/api/meta/doctypes/" + encodePart(doctype)).then(unwrapData);
@@ -3940,6 +3977,7 @@ export function renderDeskClientScript(): string {
       adminWorkflowsUrl: deskAdminWorkflowsPath,
       dashboardUrl: deskDashboardPath,
       kanbanUrl: deskKanbanPath,
+      calendarUrl: deskCalendarPath,
       fileContentUrl: function (name) {
         return deskFilePath(name, "content");
       },

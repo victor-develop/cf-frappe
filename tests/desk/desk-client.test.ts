@@ -135,6 +135,8 @@ interface DeskClientRuntime {
     readonly dashboards: () => Promise<unknown>;
     readonly kanban: (kanban: string) => Promise<unknown>;
     readonly kanbans: () => Promise<unknown>;
+    readonly calendar: (calendar: string) => Promise<unknown>;
+    readonly calendars: () => Promise<unknown>;
     readonly doctype: (doctype: string) => Promise<unknown>;
     readonly doctypes: () => Promise<unknown>;
     readonly fieldProperties: (doctype: string, options?: { readonly tenant?: string }) => Promise<unknown>;
@@ -286,6 +288,11 @@ interface DeskClientRuntime {
     readonly list: () => Promise<unknown>;
     readonly run: (kanban: string) => Promise<unknown>;
   };
+  readonly calendar: {
+    readonly get: (calendar: string) => Promise<unknown>;
+    readonly list: () => Promise<unknown>;
+    readonly run: (calendar: string, options?: Record<string, unknown>) => Promise<unknown>;
+  };
   readonly jobs: {
     readonly createSchedule: (input: Record<string, unknown>) => Promise<unknown>;
     readonly dashboard: (options?: Record<string, unknown>) => Promise<unknown>;
@@ -407,6 +414,7 @@ interface DeskClientRuntime {
     ) => Promise<unknown>;
     readonly dashboardUrl: (dashboard: string) => string;
     readonly kanbanUrl: (kanban: string) => string;
+    readonly calendarUrl: (calendar: string, options?: Record<string, unknown>) => string;
     readonly csvUrl: (doctype: string, options?: Record<string, unknown>) => string;
     readonly fileContentUrl: (name: string) => string;
     readonly filesUrl: (options?: Record<string, unknown>) => string;
@@ -815,12 +823,14 @@ describe("Desk client runtime", () => {
     expect(runtime.desk.formUrl("Task Type", "TASK/1")).toBe("/desk/Task%20Type/TASK%2F1");
   });
 
-  it("builds Desk workspace, dashboard, kanban, and report navigation URLs for client scripts", async () => {
+  it("builds Desk workspace, dashboard, kanban, calendar, and report navigation URLs for client scripts", async () => {
     const runtime = evaluateDeskClient();
 
     expect(runtime.desk.workspaceUrl("Team Operations")).toBe("/desk/workspaces/Team%20Operations");
     expect(runtime.desk.dashboardUrl("Operations/Board")).toBe("/desk/dashboards/Operations%2FBoard");
     expect(runtime.desk.kanbanUrl("Operations/Board")).toBe("/desk/kanbans/Operations%2FBoard");
+    expect(runtime.desk.calendarUrl("Operations/Board", { from: "2026-01-01", to: "2026-01-31" }))
+      .toBe("/desk/calendars/Operations%2FBoard?from=2026-01-01&to=2026-01-31");
     expect(
       runtime.desk.reportUrl("Open Notes", {
         filters: { priority: "High" },
@@ -1509,6 +1519,35 @@ describe("Desk client runtime", () => {
     expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin"]);
   });
 
+  it("wraps metadata calendar APIs", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { route: String(url) } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.calendar.list()).resolves.toEqual({ route: "/api/meta/calendars" });
+    await expect(runtime.calendar.get("Operations Calendar")).resolves.toEqual({
+      route: "/api/meta/calendars/Operations%20Calendar"
+    });
+    await expect(runtime.calendar.run("Operations Calendar", {
+      from: "2026-01-01",
+      to: "2026-01-31",
+      limit: 5
+    })).resolves.toEqual({
+      route: "/api/calendar/Operations%20Calendar/run?from=2026-01-01&to=2026-01-31&limit=5"
+    });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/meta/calendars",
+      "GET /api/meta/calendars/Operations%20Calendar",
+      "GET /api/calendar/Operations%20Calendar/run?from=2026-01-01&to=2026-01-31&limit=5"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin"]);
+  });
+
   it("exposes dashboard metadata through the meta namespace", async () => {
     const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
     const runtime = evaluateDeskClient(async (url, init) => {
@@ -1547,6 +1586,27 @@ describe("Desk client runtime", () => {
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
       "GET /api/meta/kanbans",
       "GET /api/meta/kanbans/Operations%20Board"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin"]);
+  });
+
+  it("exposes calendar metadata through the meta namespace", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { route: String(url) } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.meta.calendars()).resolves.toEqual({ route: "/api/meta/calendars" });
+    await expect(runtime.meta.calendar("Operations Calendar")).resolves.toEqual({
+      route: "/api/meta/calendars/Operations%20Calendar"
+    });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/meta/calendars",
+      "GET /api/meta/calendars/Operations%20Calendar"
     ]);
     expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin"]);
   });

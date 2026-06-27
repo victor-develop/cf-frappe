@@ -7,6 +7,7 @@ export type WorkspaceShortcutKind =
   | "report"
   | "dashboard"
   | "kanban"
+  | "calendar"
   | "file"
   | "notifications"
   | "admin"
@@ -43,6 +44,7 @@ const WORKSPACE_SHORTCUT_KINDS = [
   "report",
   "dashboard",
   "kanban",
+  "calendar",
   "file",
   "notifications",
   "admin",

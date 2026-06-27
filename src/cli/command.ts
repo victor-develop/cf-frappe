@@ -58,6 +58,13 @@ import {
   type DashboardRemoteCommand
 } from "./dashboards.js";
 import {
+  CalendarRemoteError,
+  runRemoteCalendarCommand,
+  type CalendarHeaderOption,
+  type CalendarRemoteAction,
+  type CalendarRemoteCommand
+} from "./calendars.js";
+import {
   KanbanRemoteError,
   runRemoteKanbanCommand,
   type KanbanHeaderOption,
@@ -258,6 +265,7 @@ type ParsedCommand =
   | CustomFieldRemoteCommand
   | DataPatchRemoteCommand
   | DashboardRemoteCommand
+  | CalendarRemoteCommand
   | KanbanRemoteCommand
   | DocTypeRemoteCommand
   | FieldPropertyRemoteCommand
@@ -316,6 +324,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     if (command.kind === "dashboards") {
       io.stdout.write(await runRemoteDashboardCommand(command, {
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
+    if (command.kind === "calendars") {
+      io.stdout.write(await runRemoteCalendarCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -544,6 +559,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof CustomFieldRemoteError ||
       error instanceof DataPatchRemoteError ||
       error instanceof DashboardRemoteError ||
+      error instanceof CalendarRemoteError ||
       error instanceof KanbanRemoteError ||
       error instanceof DocTypeRemoteError ||
       error instanceof FieldPropertyRemoteError ||
@@ -594,6 +610,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "dashboards") {
     return parseDashboardsArgs(rest);
+  }
+  if (command === "calendars") {
+    return parseCalendarsArgs(rest);
   }
   if (command === "kanbans") {
     return parseKanbansArgs(rest);
@@ -2535,6 +2554,144 @@ function dataPatchAction(value: string): DataPatchRemoteAction | undefined {
 }
 
 function dashboardAction(value: string): DashboardRemoteAction | undefined {
+  return value === "list" || value === "get" || value === "run" ? value : undefined;
+}
+
+function parseCalendarsArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = calendarAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown calendars command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: CalendarHeaderOption[] = [];
+  let calendar: string | undefined;
+  let from: string | undefined;
+  let to: string | undefined;
+  let limit: number | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "Calendar");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "Calendar");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--calendar") {
+      if (action === "list") {
+        return { kind: "invalid", message: "Cannot use --calendar with calendars list" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      calendar = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--from") {
+      if (action !== "run") {
+        return { kind: "invalid", message: `Cannot use --from with calendars ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      from = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--to") {
+      if (action !== "run") {
+        return { kind: "invalid", message: `Cannot use --to with calendars ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      to = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--limit") {
+      if (action !== "run") {
+        return { kind: "invalid", message: `Cannot use --limit with calendars ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = Number(value);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        return { kind: "invalid", message: "Calendar run --limit must be a positive integer" };
+      }
+      limit = parsed;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown calendars ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if (action !== "list" && calendar === undefined) {
+    return { kind: "invalid", message: `Calendar ${action} requires --calendar` };
+  }
+
+  return {
+    kind: "calendars",
+    action,
+    url,
+    headers,
+    ...(calendar === undefined ? {} : { calendar }),
+    ...(from === undefined ? {} : { from }),
+    ...(to === undefined ? {} : { to }),
+    ...(limit === undefined ? {} : { limit })
+  };
+}
+
+function calendarAction(value: string): CalendarRemoteAction | undefined {
   return value === "list" || value === "get" || value === "run" ? value : undefined;
 }
 
@@ -6157,6 +6314,9 @@ function helpText(): string {
     "  cf-frappe dashboards list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe dashboards get --url <origin> --dashboard <dashboard> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe dashboards run --url <origin> --dashboard <dashboard> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe calendars list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe calendars get --url <origin> --calendar <calendar> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe calendars run --url <origin> --calendar <calendar> [--from <date>] [--to <date>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe kanbans list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe kanbans get --url <origin> --kanban <kanban> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe kanbans run --url <origin> --kanban <kanban> [--header <name:value>] [--header-env <name=ENV>]",

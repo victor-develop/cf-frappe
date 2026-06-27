@@ -1,5 +1,6 @@
 import {
   CHILD_TABLE_ROW_INDEX_FIELD,
+  CalendarService,
   CustomFieldService,
   createDeskApp,
   createDataPatchApplyJob,
@@ -12,6 +13,7 @@ import {
   defineClientScript,
   defineDataPatch,
   defineDashboard,
+  defineCalendar,
   defineKanban,
   defineDocType,
   defineReport,
@@ -902,6 +904,95 @@ describe("Desk app", () => {
     expect(html).toContain("Kanban Open");
     expect(html).toContain('href="/desk/Note/Kanban%20Open"');
     expect(html).toContain("Kanban Closed");
+  });
+
+  it("renders metadata-defined calendars in Desk", async () => {
+    const Event = defineDocType({
+      name: "Event",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "starts_on", type: "date" },
+        { name: "category", type: "select", options: ["Customer", "Internal"] },
+        { name: "created_by", type: "text", readOnly: true, defaultValue: ({ actor }) => actor.id }
+      ],
+      permissions: [
+        {
+          roles: ["User"],
+          actions: ["read", "create"],
+          when: ({ actor, document }) => !document || document.data.created_by === actor.id
+        }
+      ]
+    });
+    const registry = createRegistry({
+      doctypes: [Event],
+      calendars: [
+        defineCalendar({
+          name: "Events Calendar",
+          label: "Events Calendar",
+          description: "Events by date",
+          roles: ["User"],
+          doctype: "Event",
+          startField: "starts_on",
+          titleField: "title",
+          colorField: "category"
+        })
+      ],
+      workspaces: [
+        defineWorkspace({
+          name: "Operations",
+          sections: [
+            {
+              name: "main",
+              shortcuts: [{ name: "events-calendar", kind: "calendar", target: "Events Calendar" }]
+            }
+          ]
+        })
+      ]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry,
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["event-1"])
+    });
+    const queries = new QueryService({ registry, projections: store });
+    const calendars = new CalendarService({ registry, queries });
+    const app = createDeskApp({
+      registry,
+      documents,
+      queries,
+      calendars,
+      actor: () => owner
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Event",
+      data: { title: "Calendar Event", starts_on: "2026-01-10", category: "Customer" }
+    });
+
+    const home = await app.request("/desk");
+    expect(home.status).toBe(200);
+    await expect(home.text()).resolves.toContain('href="/desk/calendars/Events%20Calendar"');
+
+    const workspace = await app.request("/desk/workspaces/Operations");
+    expect(workspace.status).toBe(200);
+    await expect(workspace.text()).resolves.toContain('href="/desk/calendars/Events%20Calendar"');
+
+    const list = await app.request("/desk/calendars");
+    expect(list.status).toBe(200);
+    const listHtml = await list.text();
+    expect(listHtml).toContain("Events by date");
+    expect(listHtml).toContain("<td>starts_on</td>");
+
+    const page = await app.request("/desk/calendars/Events%20Calendar?from=2026-01-01&to=2026-01-31");
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain("Events by date");
+    expect(html).toContain("calendar-event");
+    expect(html).toContain("Calendar Event");
+    expect(html).toContain('href="/desk/Event/Calendar%20Event"');
   });
 
   it("renders and updates a durable notification inbox in Desk", async () => {

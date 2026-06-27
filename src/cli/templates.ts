@@ -256,7 +256,7 @@ npm run d1:migrate:local
 npm run dev
 \`\`\`
 
-Open \`/desk\` for the generated Desk UI, the \`Tasks\` workspace, the \`Task Board\`, the \`Task Dashboard\`, and the file manager at \`/desk/files\`; run the \`tasks.seed_starter_tasks\` data patch when you want sample Task records and the starter Task owner notification rule in a fresh environment. Use \`/api/meta/doctypes/Task\` for the metadata API. ${authLocalReadme(input.auth)}
+Open \`/desk\` for the generated Desk UI, the \`Tasks\` workspace, the \`Task Calendar\`, the \`Task Board\`, the \`Task Dashboard\`, and the file manager at \`/desk/files\`; run the \`tasks.seed_starter_tasks\` data patch when you want sample Task records and the starter Task owner notification rule in a fresh environment. Use \`/api/meta/doctypes/Task\` for the metadata API. ${authLocalReadme(input.auth)}
 The generated R2 binding supports buffered Desk uploads immediately. Add a \`directUploads\` signer to \`R2FileStorage\` before enabling signed browser direct-upload targets.
 Client scripts live under \`public/assets\`; add them with \`defineClientScript(...)\` in files under \`src/apps\`.
 ${authProviderReadme(input.auth)}
@@ -325,6 +325,9 @@ npx cf-frappe link-options --url https://your-worker.example --doctype Task --fi
 npx cf-frappe dashboards list --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe dashboards get --url https://your-worker.example --dashboard "Task Dashboard" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe dashboards run --url https://your-worker.example --dashboard "Task Dashboard" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe calendars list --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe calendars get --url https://your-worker.example --calendar "Task Calendar" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe calendars run --url https://your-worker.example --calendar "Task Calendar" --from 2026-01-01 --to 2026-01-31 --limit 20 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe kanbans list --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe kanbans get --url https://your-worker.example --kanban "Task Board" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe kanbans run --url https://your-worker.example --kanban "Task Board" --header-env Authorization=CF_FRAPPE_AUTH
@@ -534,7 +537,7 @@ For OIDC deployments, replace the placeholder \`OIDC_ISSUER\`, \`OIDC_AUD\`, and
 }
 
 function taskAppTs(): string {
-  return `import { defineApp, defineClientScript, defineDashboard, defineDataPatch, defineDocType, defineKanban, definePrintFormat, defineReport, defineWorkspace } from "cf-frappe";
+  return `import { defineApp, defineCalendar, defineClientScript, defineDashboard, defineDataPatch, defineDocType, defineKanban, definePrintFormat, defineReport, defineWorkspace } from "cf-frappe";
 import type { CloudFrappeRuntimeServices } from "cf-frappe/cloudflare";
 
 export const Task = defineDocType({
@@ -572,6 +575,11 @@ export const Task = defineDocType({
       defaultValue: "Open"
     },
     {
+      name: "starts_on",
+      label: "Starts On",
+      type: "date"
+    },
+    {
       name: "created_by",
       label: "Created By",
       type: "text",
@@ -588,7 +596,7 @@ export const Task = defineDocType({
   ],
   formView: {
     sections: [
-      { heading: "Task", columns: 1, fields: ["title", "priority", "workflow_state"] },
+      { heading: "Task", columns: 1, fields: ["title", "priority", "workflow_state", "starts_on"] },
       { heading: "Details", columns: 1, fields: ["description"] }
     ]
   },
@@ -702,6 +710,18 @@ export const TaskKanban = defineKanban({
   roles: ["Guest", "User", "Task Manager"]
 });
 
+export const TaskCalendar = defineCalendar({
+  name: "Task Calendar",
+  label: "Task Calendar",
+  module: "Desk",
+  description: "Read-only starter Task calendar grouped by start date.",
+  doctype: "Task",
+  startField: "starts_on",
+  titleField: "title",
+  colorField: "priority",
+  roles: ["Guest", "User", "Task Manager"]
+});
+
 export const TaskWorkspace = defineWorkspace({
   name: "Tasks",
   label: "Tasks",
@@ -716,6 +736,7 @@ export const TaskWorkspace = defineWorkspace({
         { name: "all-tasks", label: "All Tasks", kind: "doctype", target: "Task" },
         { name: "new-task", label: "New Task", kind: "newDoc", target: "Task", roles: ["User", "Task Manager"] },
         { name: "open-tasks", label: "Open Tasks Report", kind: "report", target: "Open Tasks" },
+        { name: "task-calendar", label: "Task Calendar", kind: "calendar", target: "Task Calendar" },
         { name: "task-board", label: "Task Board", kind: "kanban", target: "Task Board" },
         { name: "task-dashboard", label: "Task Dashboard", kind: "dashboard", target: "Task Dashboard" }
       ]
@@ -749,13 +770,15 @@ const STARTER_TASK_SEED_RECORDS = [
     title: "Review generated Desk workspace",
     priority: "High",
     workflow_state: "Open",
+    starts_on: "2026-01-10",
     starter_seed_patch: STARTER_TASK_SEED_PATCH_ID,
-    description: "Open /desk and explore the Tasks workspace, report, and dashboard."
+    description: "Open /desk and explore the Tasks workspace, calendar, report, and dashboard."
   },
   {
     title: "Deploy to Cloudflare Workers",
     priority: "Medium",
     workflow_state: "Doing",
+    starts_on: "2026-01-15",
     starter_seed_patch: STARTER_TASK_SEED_PATCH_ID,
     description: "Create D1, R2, and Queue resources, apply migrations, and run wrangler deploy."
   }
@@ -796,7 +819,7 @@ function sameStarterRecipient(
 export const StarterTaskSeedData = defineDataPatch<CloudFrappeRuntimeServices>({
   id: STARTER_TASK_SEED_PATCH_ID,
   label: "Seed starter Task records",
-  checksum: "v3",
+  checksum: "v4",
   async run({ resources }) {
     let created = 0;
     let skipped = 0;
@@ -906,6 +929,7 @@ export const taskApp = defineApp({
   reports: [OpenTasks],
   dashboards: [TaskDashboard],
   kanbans: [TaskKanban],
+  calendars: [TaskCalendar],
   workspaces: [TaskWorkspace],
   dataPatches: [StarterTaskSeedData],
   clientScripts: [TaskFormScript],

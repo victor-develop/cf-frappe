@@ -1,5 +1,6 @@
 import { assertAppName, assertAppNames } from "./app-name.js";
 import { resolveAppDependencyOrder } from "./app-graph.js";
+import type { CalendarDefinition } from "./calendar.js";
 import type { ClientScriptDefinition } from "./client-script.js";
 import type { DashboardDefinition } from "./dashboard.js";
 import type { DataPatchDefinition } from "./data-patch.js";
@@ -22,6 +23,7 @@ export interface FrameworkAppDefinition<TDataPatchResources = unknown> {
   readonly reports?: readonly ReportDefinition[];
   readonly dashboards?: readonly DashboardDefinition[];
   readonly kanbans?: readonly KanbanDefinition[];
+  readonly calendars?: readonly CalendarDefinition[];
   readonly workspaces?: readonly WorkspaceDefinition[];
   readonly clientScripts?: readonly ClientScriptDefinition[];
   readonly dataPatches?: readonly DataPatchDefinition<TDataPatchResources>[];
@@ -51,6 +53,7 @@ export function defineApp<TDataPatchResources = unknown>(
     reports: Object.freeze([...(input.reports ?? [])]),
     dashboards: Object.freeze([...(input.dashboards ?? [])]),
     kanbans: Object.freeze([...(input.kanbans ?? [])]),
+    calendars: Object.freeze([...(input.calendars ?? [])]),
     workspaces: Object.freeze([...(input.workspaces ?? [])]),
     clientScripts: Object.freeze([...(input.clientScripts ?? [])]),
     dataPatches: Object.freeze([...(input.dataPatches ?? [])]),
@@ -82,6 +85,7 @@ export function registryOptionsFromApps<TDataPatchResources = unknown>(
     reports: orderedApps.flatMap((app) => app.reports ?? []),
     dashboards: orderedApps.flatMap((app) => app.dashboards ?? []),
     kanbans: orderedApps.flatMap((app) => app.kanbans ?? []),
+    calendars: orderedApps.flatMap((app) => app.calendars ?? []),
     workspaces: orderedApps.flatMap((app) => app.workspaces ?? []),
     clientScripts: orderedApps.flatMap((app) => app.clientScripts ?? []),
     dataPatches: orderedApps.flatMap((app) => app.dataPatches ?? []) as readonly DataPatchDefinition[],

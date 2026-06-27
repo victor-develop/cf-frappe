@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the metadata-defined Kanban board slice:
+As of the metadata-defined Calendar view slice:
 
-- Vitest files: `123`
-- Vitest cases: `1324`
+- Vitest files: `127`
+- Vitest cases: `1339`
 
 ## Implication
 

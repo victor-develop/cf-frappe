@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { CalendarService } from "../../application/calendar-service.js";
 import type { CustomFieldService } from "../../application/custom-field-service.js";
 import type { DashboardService } from "../../application/dashboard-service.js";
 import type {
@@ -142,6 +143,8 @@ import {
   renderDeskLayout,
   renderDashboardList,
   renderDashboardView,
+  renderCalendarList,
+  renderCalendarView,
   renderErrorPanel,
   renderFileAttachmentPanel,
   renderFileManager,
@@ -258,6 +261,7 @@ export interface DeskAppOptions {
   readonly reports?: ReportService;
   readonly dashboards?: DashboardService;
   readonly kanbans?: KanbanService;
+  readonly calendars?: CalendarService;
   readonly dataPatches?: DataPatchAdminPort;
   readonly dataPatchQueue?: DataPatchQueuePort;
   readonly dataPatchRollbackQueue?: DataPatchRollbackQueuePort;
@@ -289,6 +293,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const reports = listReports(options, actor);
     const dashboards = await listDashboards(options, actor);
     const kanbans = await listKanbans(options, actor);
+    const calendars = await listCalendars(options, actor);
     const workspaces = listWorkspaces(options, actor);
     return html(
       renderDeskLayoutFor(options, {
@@ -298,10 +303,11 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         reports,
         dashboards,
         kanbans,
+        calendars,
         workspaces,
         showNotifications: options.notifications !== undefined,
         showFiles: options.files !== undefined,
-        body: renderDeskHome(doctypes, reports, workspaces, dashboards, kanbans)
+        body: renderDeskHome(doctypes, reports, workspaces, dashboards, kanbans, calendars)
       })
     );
   });
@@ -348,6 +354,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const reports = listReports(options, actor);
     const dashboards = await listDashboards(options, actor);
     const kanbans = await listKanbans(options, actor);
+    const calendars = await listCalendars(options, actor);
     const workspaces = listWorkspaces(options, actor);
     const searchPage = renderGlobalSearchPage({
       query,
@@ -363,6 +370,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         reports,
         dashboards,
         kanbans,
+        calendars,
         workspaces,
         activeSearch: true,
         showNotifications: options.notifications !== undefined,
@@ -392,6 +400,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const reports = listReports(options, actor);
     const dashboards = await listDashboards(options, actor);
     const kanbans = await listKanbans(options, actor);
+    const calendars = await listCalendars(options, actor);
     const workspaces = listWorkspaces(options, actor);
     return html(
       renderDeskLayoutFor(options, {
@@ -401,6 +410,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         reports,
         dashboards,
         kanbans,
+        calendars,
         workspaces,
         showFiles: options.files !== undefined,
         body: renderReportList(reports, {
@@ -416,6 +426,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const reports = listReports(options, actor);
     const dashboards = await listDashboards(options, actor);
     const kanbans = await listKanbans(options, actor);
+    const calendars = await listCalendars(options, actor);
     const workspaces = listWorkspaces(options, actor);
     return html(
       renderDeskLayoutFor(options, {
@@ -425,6 +436,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         reports,
         dashboards,
         kanbans,
+        calendars,
         workspaces,
         showFiles: options.files !== undefined,
         body: renderDashboardList(dashboards)
@@ -438,6 +450,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const reports = listReports(options, actor);
     const dashboards = await listDashboards(options, actor);
     const kanbans = await listKanbans(options, actor);
+    const calendars = await listCalendars(options, actor);
     const workspaces = listWorkspaces(options, actor);
     return html(
       renderDeskLayoutFor(options, {
@@ -447,6 +460,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         reports,
         dashboards,
         kanbans,
+        calendars,
         workspaces,
         showFiles: options.files !== undefined,
         body: renderKanbanList(kanbans)
@@ -462,6 +476,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const reports = listReports(options, actor);
     const dashboards = await listDashboards(options, actor);
     const kanbans = await listKanbans(options, actor);
+    const calendars = await listCalendars(options, actor);
     const workspaces = listWorkspaces(options, actor);
     return html(
       renderDeskLayoutFor(options, {
@@ -472,9 +487,69 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         reports,
         dashboards,
         kanbans,
+        calendars,
         workspaces,
         showFiles: options.files !== undefined,
         body: renderKanbanView(result)
+      })
+    );
+  });
+
+  app.get("/desk/calendars", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const doctypes = options.queries.listDoctypes(actor);
+    const reports = listReports(options, actor);
+    const dashboards = await listDashboards(options, actor);
+    const kanbans = await listKanbans(options, actor);
+    const calendars = await listCalendars(options, actor);
+    const workspaces = listWorkspaces(options, actor);
+    return html(
+      renderDeskLayoutFor(options, {
+        title: "Calendars",
+        adminLinks: adminLinksFor(options, actor),
+        doctypes,
+        reports,
+        dashboards,
+        kanbans,
+        calendars,
+        workspaces,
+        showFiles: options.files !== undefined,
+        body: renderCalendarList(calendars)
+      })
+    );
+  });
+
+  app.get("/desk/calendars/:calendar", async (c) => {
+    const calendarsService = requireCalendars(options);
+    const actor = await options.actor(c.req.raw);
+    const url = new URL(c.req.url);
+    const from = url.searchParams.get("from") ?? undefined;
+    const to = url.searchParams.get("to") ?? undefined;
+    const limit = parseOptionalInteger(url.searchParams.get("limit") ?? undefined);
+    const result = await calendarsService.runCalendar(actor, c.req.param("calendar"), {
+      ...(from === undefined ? {} : { from }),
+      ...(to === undefined ? {} : { to }),
+      ...(limit === undefined ? {} : { limit })
+    });
+    const doctypes = options.queries.listDoctypes(actor);
+    const reports = listReports(options, actor);
+    const dashboards = await listDashboards(options, actor);
+    const kanbans = await listKanbans(options, actor);
+    const calendars = await listCalendars(options, actor);
+    const workspaces = listWorkspaces(options, actor);
+    return html(
+      renderDeskLayoutFor(options, {
+        title: result.calendar.label ?? result.calendar.name,
+        activeCalendar: result.calendar.name,
+        adminLinks: adminLinksFor(options, actor),
+        doctypes,
+        reports,
+        dashboards,
+        kanbans,
+        calendars,
+        workspaces,
+        showFiles: options.files !== undefined,
+        body: renderCalendarView(result)
       })
     );
   });
@@ -487,6 +562,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const reports = listReports(options, actor);
     const dashboards = await listDashboards(options, actor);
     const kanbans = await listKanbans(options, actor);
+    const calendars = await listCalendars(options, actor);
     const workspaces = listWorkspaces(options, actor);
     return html(
       renderDeskLayoutFor(options, {
@@ -497,6 +573,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         reports,
         dashboards,
         kanbans,
+        calendars,
         workspaces,
         showFiles: options.files !== undefined,
         body: renderDashboardView(result)
@@ -516,8 +593,9 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const reports = listReports(options, actor);
     const dashboards = await listDashboards(options, actor);
     const kanbans = await listKanbans(options, actor);
+    const calendars = await listCalendars(options, actor);
     const workspaces = listWorkspaces(options, actor);
-    const page = workspacePageFor(options, actor, workspace, doctypes, reports, dashboards, kanbans);
+    const page = workspacePageFor(options, actor, workspace, doctypes, reports, dashboards, kanbans, calendars);
     return html(
       renderDeskLayoutFor(options, {
         title: workspace.label ?? workspace.name,
@@ -527,6 +605,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         reports,
         dashboards,
         kanbans,
+        calendars,
         workspaces,
         showFiles: options.files !== undefined,
         body: renderWorkspacePage(page)
@@ -2677,6 +2756,10 @@ async function listKanbans(options: DeskAppOptions, actor: Actor) {
   return options.kanbans?.listKanbans(actor) ?? [];
 }
 
+async function listCalendars(options: DeskAppOptions, actor: Actor) {
+  return options.calendars?.listCalendars(actor) ?? [];
+}
+
 function listDeskDoctypes(options: DeskAppOptions, actor: Actor): Promise<readonly DocTypeDefinition[]> {
   return options.queries.listEffectiveDoctypes(actor);
 }
@@ -2739,6 +2822,13 @@ function requireKanbans(options: DeskAppOptions): KanbanService {
   return options.kanbans;
 }
 
+function requireCalendars(options: DeskAppOptions): CalendarService {
+  if (!options.calendars) {
+    throw new FrameworkError("CALENDAR_NOT_FOUND", "Calendars are not enabled", { status: 404 });
+  }
+  return options.calendars;
+}
+
 function workspacePageFor(
   options: DeskAppOptions,
   actor: Actor,
@@ -2746,7 +2836,8 @@ function workspacePageFor(
   doctypes: readonly DocTypeDefinition[],
   reports: ReturnType<typeof listReports>,
   dashboards: Awaited<ReturnType<typeof listDashboards>>,
-  kanbans: Awaited<ReturnType<typeof listKanbans>>
+  kanbans: Awaited<ReturnType<typeof listKanbans>>,
+  calendars: Awaited<ReturnType<typeof listCalendars>>
 ): WorkspacePageView {
   const adminLinks = adminLinksFor(options, actor);
   const creatableDoctypes = options.registry.list().filter((doctype) => can(actor, doctype, "create"));
@@ -2756,7 +2847,7 @@ function workspacePageFor(
       name: section.name,
       label: section.label ?? section.name,
       shortcuts: section.shortcuts.flatMap((shortcut) =>
-        workspaceShortcutFor(options, actor, shortcut, doctypes, creatableDoctypes, reports, dashboards, kanbans, adminLinks)
+        workspaceShortcutFor(options, actor, shortcut, doctypes, creatableDoctypes, reports, dashboards, kanbans, calendars, adminLinks)
       )
     }))
   };
@@ -2771,6 +2862,7 @@ function workspaceShortcutFor(
   reports: ReturnType<typeof listReports>,
   dashboards: Awaited<ReturnType<typeof listDashboards>>,
   kanbans: Awaited<ReturnType<typeof listKanbans>>,
+  calendars: Awaited<ReturnType<typeof listCalendars>>,
   adminLinks: readonly DeskNavLink[]
 ): readonly WorkspaceShortcutView[] {
   if (!canReadWorkspaceShortcut(actor, shortcut)) {
@@ -2833,6 +2925,18 @@ function workspaceShortcutFor(
           ...(shortcut.description === undefined ? {} : { description: shortcut.description }),
           kind: shortcut.kind,
           href: `/desk/kanbans/${encodeURIComponent(kanban.name)}`
+        }]
+      : [];
+  }
+  if (shortcut.kind === "calendar") {
+    const calendar = calendars.find((item) => item.name === shortcut.target);
+    return calendar
+      ? [{
+          name: shortcut.name,
+          label: shortcut.label ?? calendar.label ?? calendar.name,
+          ...(shortcut.description === undefined ? {} : { description: shortcut.description }),
+          kind: shortcut.kind,
+          href: `/desk/calendars/${encodeURIComponent(calendar.name)}`
         }]
       : [];
   }

@@ -1,6 +1,7 @@
 export * from "./actor.js";
 export * from "./auth-api.js";
 export * from "./audit-api.js";
+export * from "./calendar-api.js";
 export * from "./cloudflare-access.js";
 export * from "./custom-field-api.js";
 export * from "./dashboard-api.js";
