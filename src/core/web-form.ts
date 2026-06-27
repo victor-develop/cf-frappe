@@ -17,6 +17,7 @@ export interface WebFormDefinition {
   readonly module?: string;
   readonly description?: string;
   readonly roles?: readonly string[];
+  readonly published?: boolean;
   readonly doctype: string;
   readonly fields: readonly WebFormFieldDefinition[];
   readonly submitLabel?: string;

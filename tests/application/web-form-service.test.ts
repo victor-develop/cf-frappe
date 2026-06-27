@@ -6,6 +6,7 @@ import {
   fixedClock,
   InMemoryDocumentStore,
   QueryService,
+  SYSTEM_MANAGER_ROLE,
   WebFormService
 } from "../../src";
 import { documentStream } from "../../src";
@@ -100,6 +101,38 @@ describe("WebFormService", () => {
     await expect(store.readStream(documentStream(result.document.tenantId, "Lead", "Jane Buyer"))).resolves.toMatchObject([
       { payload: { kind: "DocumentCreated" }, metadata: { source: "web-form" } }
     ]);
+  });
+
+  it("hides unpublished forms from public readers and submissions", async () => {
+    const admin: Actor = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const registry = createRegistry({
+      doctypes: [leadDocType],
+      webForms: [
+        defineWebForm({
+          name: "Draft Intake",
+          route: "draft/intake",
+          published: false,
+          doctype: "Lead",
+          fields: [{ field: "title" }]
+        })
+      ]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+    const queries = new QueryService({ registry, projections: store });
+    const webForms = new WebFormService({ registry, documents, queries });
+
+    await expect(webForms.listWebForms(guest)).resolves.toEqual([]);
+    await expect(webForms.getWebForm(guest, "Draft Intake")).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+    await expect(webForms.getWebFormByRoute(guest, "draft/intake")).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+    await expect(webForms.submitWebForm(guest, "Draft Intake", { data: { title: "Should Not Create" } }))
+      .rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+    await expect(store.get("acme", "Lead", "Should Not Create")).resolves.toBeNull();
+
+    await expect(webForms.getWebForm(admin, "Draft Intake")).resolves.toMatchObject({
+      form: { name: "Draft Intake", published: false },
+      doctype: "Lead"
+    });
   });
 
   it("validates form fields against effective create metadata", async () => {

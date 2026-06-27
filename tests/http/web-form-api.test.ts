@@ -127,6 +127,75 @@ describe("web form api", () => {
       });
   });
 
+  it("hides unpublished Web Forms from public metadata, listing, and HTML submission routes", async () => {
+    const registry = createRegistry({
+      doctypes: [leadDocType],
+      webForms: [
+        defineWebForm({
+          name: "Published Intake",
+          route: "published/intake",
+          doctype: "Lead",
+          fields: [{ field: "title", label: "Name", required: true }]
+        }),
+        defineWebForm({
+          name: "Draft Intake",
+          route: "draft/intake",
+          published: false,
+          doctype: "Lead",
+          fields: [{ field: "title", label: "Name", required: true }]
+        })
+      ]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+    const queries = new QueryService({ registry, projections: store });
+    const webForms = new WebFormService({ registry, documents, queries });
+    const app = createResourceApi({
+      registry,
+      documents,
+      queries,
+      webForms,
+      actor: unsafeHeaderActorResolver
+    });
+
+    const metadataList = await app.request("/api/meta/web-forms");
+    expect(metadataList.status).toBe(200);
+    await expect(metadataList.json()).resolves.toMatchObject({
+      data: [{ name: "Published Intake" }]
+    });
+
+    const publicList = await app.request("/web-forms");
+    expect(publicList.status).toBe(200);
+    const publicListHtml = await publicList.text();
+    expect(publicListHtml).toContain("Published Intake");
+    expect(publicListHtml).not.toContain("Draft Intake");
+
+    const metadata = await app.request("/api/meta/web-forms/Draft%20Intake");
+    expect(metadata.status).toBe(403);
+    await expect(metadata.json()).resolves.toMatchObject({
+      error: { code: "PERMISSION_DENIED" }
+    });
+
+    const jsonSubmit = await app.request("/api/web-form/Draft%20Intake/submit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ data: { title: "Draft JSON Lead" } })
+    });
+    expect(jsonSubmit.status).toBe(403);
+    await expect(store.get("default", "Lead", "Draft JSON Lead")).resolves.toBeNull();
+
+    const page = await app.request("/web-forms/draft/intake");
+    expect(page.status).toBe(403);
+
+    const submit = await app.request("/web-forms/draft/intake", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ title: "Draft Lead" })
+    });
+    expect(submit.status).toBe(403);
+    await expect(store.get("default", "Lead", "Draft Lead")).resolves.toBeNull();
+  });
+
   it("applies Website presentation to public Web Form pages", async () => {
     const registry = createRegistry({
       doctypes: [leadDocType],

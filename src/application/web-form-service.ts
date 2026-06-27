@@ -1,7 +1,7 @@
 import { badRequest, permissionDenied } from "../core/errors.js";
 import { assertWebFormMatchesDocType, canReadWebForm, type WebFormDefinition } from "../core/web-form.js";
 import type { ModelRegistry } from "../core/registry.js";
-import type { Actor, DocTypeDefinition, DocumentData, DocumentSnapshot, FieldDefinition, JsonValue, MutableDocumentData } from "../core/types.js";
+import { SYSTEM_MANAGER_ROLE, type Actor, type DocTypeDefinition, type DocumentData, type DocumentSnapshot, type FieldDefinition, type JsonValue, type MutableDocumentData } from "../core/types.js";
 import type { DocumentService } from "./document-service.js";
 import type { QueryService } from "./query-service.js";
 
@@ -120,6 +120,9 @@ export class WebFormService {
   }
 
   private async canAccessWebForm(actor: Actor, webForm: WebFormDefinition): Promise<boolean> {
+    if (!isPublishedWebFormForActor(actor, webForm)) {
+      return false;
+    }
     if (!canReadWebForm(actor, webForm)) {
       return false;
     }
@@ -143,6 +146,10 @@ export class WebFormService {
 
 function isPermissionDenied(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "PERMISSION_DENIED";
+}
+
+function isPublishedWebFormForActor(actor: Actor, webForm: WebFormDefinition): boolean {
+  return webForm.published !== false || actor.roles.includes(SYSTEM_MANAGER_ROLE);
 }
 
 function isMissingRequiredValue(value: JsonValue | undefined): boolean {
