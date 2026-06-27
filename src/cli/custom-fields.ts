@@ -49,6 +49,7 @@ interface CustomFieldResponse {
   readonly hidden?: boolean;
   readonly unique?: boolean;
   readonly noCopy?: boolean;
+  readonly allowOnSubmit?: boolean;
   readonly inFormView?: boolean;
   readonly inListView?: boolean;
   readonly inListFilter?: boolean;
@@ -179,6 +180,7 @@ function fieldFlags(field: CustomFieldResponse): readonly string[] {
     ...(field.hidden ? ["hidden"] : []),
     ...(field.unique ? ["unique"] : []),
     ...(field.noCopy ? ["noCopy"] : []),
+    ...(field.allowOnSubmit ? ["allowOnSubmit"] : []),
     ...(field.inFormView ? ["form"] : []),
     ...(field.inListView ? ["list"] : []),
     ...(field.inListFilter ? ["filter"] : [])

@@ -44,6 +44,7 @@ interface FieldResponse {
   readonly hidden?: boolean;
   readonly unique?: boolean;
   readonly noCopy?: boolean;
+  readonly allowOnSubmit?: boolean;
   readonly inListView?: boolean;
   readonly inListFilter?: boolean;
   readonly inGlobalSearch?: boolean;
@@ -188,6 +189,7 @@ function fieldFlags(field: FieldResponse): readonly string[] {
     ...(field.hidden ? ["hidden"] : []),
     ...(field.unique ? ["unique"] : []),
     ...(field.noCopy ? ["noCopy"] : []),
+    ...(field.allowOnSubmit ? ["allowOnSubmit"] : []),
     ...(field.inListView ? ["list"] : []),
     ...(field.inListFilter ? ["filter"] : []),
     ...(field.inGlobalSearch ? ["search"] : [])

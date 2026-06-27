@@ -41,6 +41,7 @@ export interface FieldDefinition {
   readonly hidden?: boolean;
   readonly unique?: boolean;
   readonly noCopy?: boolean;
+  readonly allowOnSubmit?: boolean;
   readonly inFormView?: boolean;
   readonly inGlobalSearch?: boolean;
   readonly inListView?: boolean;
@@ -64,6 +65,7 @@ export interface FieldPropertyOverrides {
   readonly readOnly?: boolean;
   readonly hidden?: boolean;
   readonly noCopy?: boolean;
+  readonly allowOnSubmit?: boolean;
   readonly inFormView?: boolean;
   readonly inGlobalSearch?: boolean;
   readonly inListView?: boolean;

@@ -38,6 +38,7 @@ describe("custom field api", () => {
           type: "boolean",
           unique: true,
           noCopy: true,
+          allowOnSubmit: true,
           inListView: true,
           defaultValue: false
         },
@@ -57,6 +58,7 @@ describe("custom field api", () => {
               type: "boolean",
               unique: true,
               noCopy: true,
+              allowOnSubmit: true,
               inListView: true,
               defaultValue: false
             },

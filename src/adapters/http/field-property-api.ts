@@ -68,6 +68,7 @@ function overridesValue(value: JsonValue | undefined): FieldPropertyOverrides {
     ...optionalBoolean(value.readOnly, "overrides.readOnly", "readOnly"),
     ...optionalBoolean(value.hidden, "overrides.hidden", "hidden"),
     ...optionalBoolean(value.noCopy, "overrides.noCopy", "noCopy"),
+    ...optionalBoolean(value.allowOnSubmit, "overrides.allowOnSubmit", "allowOnSubmit"),
     ...optionalBoolean(value.inFormView, "overrides.inFormView", "inFormView"),
     ...optionalBoolean(value.inGlobalSearch, "overrides.inGlobalSearch", "inGlobalSearch"),
     ...optionalBoolean(value.inListView, "overrides.inListView", "inListView"),

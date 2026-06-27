@@ -367,6 +367,7 @@ function normalizeField(field: FieldDefinition): PersistedFieldDefinition {
     ...(field.hidden === undefined ? {} : { hidden: field.hidden }),
     ...(field.unique === undefined ? {} : { unique: field.unique }),
     ...(field.noCopy === undefined ? {} : { noCopy: field.noCopy }),
+    ...(field.allowOnSubmit === undefined ? {} : { allowOnSubmit: field.allowOnSubmit }),
     ...(field.inFormView === undefined ? {} : { inFormView: field.inFormView }),
     ...(field.inListView === undefined ? {} : { inListView: field.inListView }),
     ...(field.inListFilter === undefined ? {} : { inListFilter: field.inListFilter }),

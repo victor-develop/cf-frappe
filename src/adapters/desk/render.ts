@@ -1647,6 +1647,7 @@ export function renderCustomFieldAdmin(state: CustomFieldAdminState): string {
       ${renderCustomFieldCheckbox("hidden", "Hidden")}
       ${renderCustomFieldCheckbox("unique", "Unique")}
       ${renderCustomFieldCheckbox("noCopy", "No Copy")}
+      ${renderCustomFieldCheckbox("allowOnSubmit", "Allow On Submit")}
       ${renderCustomFieldCheckbox("inFormView", "Form View")}
       ${renderCustomFieldCheckbox("inListView", "List View")}
       ${renderCustomFieldCheckbox("inListFilter", "List Filter")}
@@ -1711,6 +1712,7 @@ export function renderFieldPropertyAdmin(state: FieldPropertyAdminState): string
       <label class="field"><span>Read Only</span><select name="readOnly">${renderBooleanOverrideOptions(overrides.readOnly)}</select></label>
       <label class="field"><span>Hidden</span><select name="hidden">${renderBooleanOverrideOptions(overrides.hidden)}</select></label>
       <label class="field"><span>No Copy</span><select name="noCopy">${renderBooleanOverrideOptions(overrides.noCopy)}</select></label>
+      <label class="field"><span>Allow On Submit</span><select name="allowOnSubmit">${renderBooleanOverrideOptions(overrides.allowOnSubmit)}</select></label>
       <label class="field"><span>Form View</span><select name="inFormView">${renderBooleanOverrideOptions(overrides.inFormView)}</select></label>
       <label class="field"><span>Global Search</span><select name="inGlobalSearch">${renderBooleanOverrideOptions(overrides.inGlobalSearch)}</select></label>
       <label class="field"><span>List View</span><select name="inListView">${renderBooleanOverrideOptions(overrides.inListView)}</select></label>
@@ -2007,6 +2009,7 @@ function renderFieldPropertyOverrides(overrides: FieldPropertyOverrideState["fie
     overrides.readOnly === undefined ? "" : `read only: ${String(overrides.readOnly)}`,
     overrides.hidden === undefined ? "" : `hidden: ${String(overrides.hidden)}`,
     overrides.noCopy === undefined ? "" : `no copy: ${String(overrides.noCopy)}`,
+    overrides.allowOnSubmit === undefined ? "" : `allow on submit: ${String(overrides.allowOnSubmit)}`,
     overrides.inFormView === undefined ? "" : `form: ${String(overrides.inFormView)}`,
     overrides.inGlobalSearch === undefined ? "" : `search: ${String(overrides.inGlobalSearch)}`,
     overrides.inListView === undefined ? "" : `list: ${String(overrides.inListView)}`,
@@ -2112,6 +2115,7 @@ function renderCustomFieldFlags(field: FieldDefinition): string {
     field.hidden ? "hidden" : "",
     field.unique ? "unique" : "",
     field.noCopy ? "no copy" : "",
+    field.allowOnSubmit ? "allow on submit" : "",
     field.inFormView ? "form" : "",
     field.inListView ? "list" : "",
     field.inListFilter ? "filter" : ""

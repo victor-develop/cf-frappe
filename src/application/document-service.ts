@@ -606,12 +606,17 @@ export class DocumentService implements DocumentCommandExecutor {
     readonly tenantId: string;
     readonly unset?: readonly string[];
   }): Promise<DocumentSnapshot> {
-    ensureDocumentStatus(options.existing, ["draft"], options.action);
+    if (options.existing.docstatus !== "draft" && options.existing.docstatus !== "submitted") {
+      ensureDocumentStatus(options.existing, ["draft"], options.action);
+    }
 
     const patch = options.prevalidatedPatch ??
       await this.runBeforeValidate(options.doctype, compactData(options.patch), options.existing);
     const patchWithoutInternalFields = stripInternalTableFields(options.doctype, patch, options.relatedDocType);
     const unset = normalizeUnsetFields(options.unset);
+    const submittedUpdateIssues = options.existing.docstatus === "submitted"
+      ? allowOnSubmitIssues(options.doctype, patchWithoutInternalFields, unset)
+      : [];
     const unsetIssues = documentUnsetIssues(
       options.doctype,
       unset,
@@ -646,7 +651,14 @@ export class DocumentService implements DocumentCommandExecutor {
       normalizedPatch,
       options.relatedDocType
     );
-    const issues = [...unsetIssues, ...originIssues, ...readOnlyIssues, ...validationIssues, ...linkIssues];
+    const issues = [
+      ...submittedUpdateIssues,
+      ...unsetIssues,
+      ...originIssues,
+      ...readOnlyIssues,
+      ...validationIssues,
+      ...linkIssues
+    ];
     if (issues.length > 0) {
       throw validationFailed(issues);
     }
@@ -2427,6 +2439,26 @@ function readonlyIssues(
       );
     });
   return [...topLevelIssues, ...childIssues];
+}
+
+function allowOnSubmitIssues(
+  doctype: DocTypeDefinition,
+  patch: MutableDocumentData,
+  unset: readonly string[]
+): readonly ValidationIssue[] {
+  const fields = new Map(doctype.fields.map((field) => [field.name, field]));
+  const changedFields = [...new Set([...Object.keys(patch), ...unset])];
+  return changedFields.flatMap((fieldName) => {
+    const field = fields.get(fieldName);
+    if (!field || field.allowOnSubmit === true) {
+      return [];
+    }
+    return [{
+      field: fieldName,
+      code: "allow_on_submit",
+      message: `Field '${fieldName}' cannot be updated after submit`
+    }];
+  });
 }
 
 function normalizeUnsetFields(fields: readonly string[] | undefined): readonly string[] {

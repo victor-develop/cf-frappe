@@ -37,6 +37,7 @@ describe("field property api", () => {
           label: "Urgency",
           description: "Pick the operational urgency.",
           noCopy: true,
+          allowOnSubmit: true,
           options: ["Low", "High"],
           defaultValue: "High",
           inListFilter: true
@@ -54,6 +55,7 @@ describe("field property api", () => {
               label: "Urgency",
               description: "Pick the operational urgency.",
               noCopy: true,
+              allowOnSubmit: true,
               options: ["Low", "High"]
             }
           }
@@ -71,6 +73,7 @@ describe("field property api", () => {
             label: "Urgency",
             description: "Pick the operational urgency.",
             noCopy: true,
+            allowOnSubmit: true,
             options: ["Low", "High"]
           })
         ])

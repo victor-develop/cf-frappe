@@ -2359,6 +2359,60 @@ describe("DocumentService", () => {
     ]);
   });
 
+  it("allows submitted document updates only for allow-on-submit fields", async () => {
+    const SubmittedMemo = defineDocType({
+      name: "Submitted Memo",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "body", type: "longText" },
+        { name: "revision_note", type: "text", allowOnSubmit: true }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read", "create", "update", "submit"] }]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry: createRegistry({ doctypes: [SubmittedMemo] }),
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["memo-1", "memo-2", "memo-3"])
+    });
+
+    await documents.create({
+      actor: owner,
+      doctype: "Submitted Memo",
+      data: { title: "Memo", body: "Locked body", revision_note: "Initial" }
+    });
+    await documents.submit({ actor: owner, doctype: "Submitted Memo", name: "Memo", expectedVersion: 1 });
+
+    await expect(
+      documents.update({
+        actor: owner,
+        doctype: "Submitted Memo",
+        name: "Memo",
+        patch: { revision_note: "Post-submit correction" },
+        expectedVersion: 2
+      })
+    ).resolves.toMatchObject({
+      version: 3,
+      docstatus: "submitted",
+      data: { body: "Locked body", revision_note: "Post-submit correction" }
+    });
+
+    await expect(
+      documents.update({
+        actor: owner,
+        doctype: "Submitted Memo",
+        name: "Memo",
+        patch: { body: "Changed after submit" },
+        expectedVersion: 3
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "body", code: "allow_on_submit" })]
+    });
+  });
+
   it("duplicates readable documents through the create event path without copying read-only ownership", async () => {
     const { documents, events, projections } = createServices(["e1", "e2"]);
     await documents.create({ actor: owner, doctype: "Note", data: data({ body: "Original" }) });
@@ -2557,7 +2611,10 @@ describe("DocumentService", () => {
 
     await expect(
       documents.update({ actor: owner, doctype: "Note", name: "My Note", patch: { body: "Too late" } })
-    ).rejects.toMatchObject({ code: "DOCUMENT_STATUS_CONFLICT" });
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "body", code: "allow_on_submit" })]
+    });
     await expect(
       documents.execute({ actor: owner, doctype: "Note", name: "My Note", command: "rewriteBody", input: { body: "Too late" } })
     ).rejects.toMatchObject({ code: "DOCUMENT_STATUS_CONFLICT" });

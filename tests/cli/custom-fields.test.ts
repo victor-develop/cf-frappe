@@ -206,6 +206,7 @@ describe("cf-frappe CLI remote custom fields", () => {
                   linkTo: "User",
                   unique: true,
                   noCopy: true,
+                  allowOnSubmit: true,
                   inFormView: true
                 }
               }
@@ -223,7 +224,7 @@ describe("cf-frappe CLI remote custom fields", () => {
     expect(calls[0]?.headers.get("authorization")).toBe("Bearer test-token");
     expect(stdout.text()).toContain("Custom fields at https://app.example/cf");
     expect(stdout.text()).toContain("DocType: Sales Invoice Tenant: acme/east Version: 2 Total: 1");
-    expect(stdout.text()).toContain('- reviewer enabled type link label "Reviewer" help "Person responsible for review." target User [unique,noCopy,form]');
+    expect(stdout.text()).toContain('- reviewer enabled type link label "Reviewer" help "Person responsible for review." target User [unique,noCopy,allowOnSubmit,form]');
     expect(stdout.text()).toContain("{\"name\":\"reviewer\"");
   });
 
@@ -239,7 +240,7 @@ describe("cf-frappe CLI remote custom fields", () => {
         "--doctype",
         "Task",
         "--field-json",
-        "{\"name\":\"reviewer\",\"type\":\"link\",\"label\":\"Reviewer\",\"description\":\"Person responsible for review.\",\"linkTo\":\"User\",\"unique\":true,\"noCopy\":true,\"inFormView\":true,\"defaultValue\":\"owner@example.com\"}",
+        "{\"name\":\"reviewer\",\"type\":\"link\",\"label\":\"Reviewer\",\"description\":\"Person responsible for review.\",\"linkTo\":\"User\",\"unique\":true,\"noCopy\":true,\"allowOnSubmit\":true,\"inFormView\":true,\"defaultValue\":\"owner@example.com\"}",
         "--tenant",
         "acme/east",
         "--expected-version",
@@ -263,6 +264,7 @@ describe("cf-frappe CLI remote custom fields", () => {
                   linkTo: "User",
                   unique: true,
                   noCopy: true,
+                  allowOnSubmit: true,
                   inFormView: true,
                   defaultValue: "owner@example.com"
                 }
@@ -287,6 +289,7 @@ describe("cf-frappe CLI remote custom fields", () => {
         linkTo: "User",
         unique: true,
         noCopy: true,
+        allowOnSubmit: true,
         inFormView: true,
         defaultValue: "owner@example.com"
       },
@@ -294,7 +297,7 @@ describe("cf-frappe CLI remote custom fields", () => {
     }));
     expect(saveStdout.text()).toContain("Saved custom field at https://app.example");
     expect(saveStdout.text()).toContain("Version: 1 Total: 1");
-    expect(saveStdout.text()).toContain('- reviewer enabled type link label "Reviewer" help "Person responsible for review." target User [unique,noCopy,form]');
+    expect(saveStdout.text()).toContain('- reviewer enabled type link label "Reviewer" help "Person responsible for review." target User [unique,noCopy,allowOnSubmit,form]');
 
     const disableCalls: RemoteCall[] = [];
     const disableStdout = textBuffer();
