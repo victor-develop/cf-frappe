@@ -83,3 +83,4 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Extracted multipart manifest parsing, part-size detection, reservation bounds, completion manifest matching, and R2-compatible part-size checks from `FileService` into the file policy with focused coverage.
 - Extracted persisted rendition manifest parsing, view projection, transform option serialization, source/overlay matching, deterministic rendition id generation, and pending/failed/completed manifest transitions from `FileService` into the file policy with focused coverage.
 - Extracted selected-file bulk operation normalization from `FileService` into the file policy, covering trimming, duplicates, expected-version validation, empty selections, and the bounded 100-file limit.
+- Extracted direct-upload object metadata matching and scanner result patch shaping from `FileService` into the file policy with focused size/content-type and optional scan-field coverage.

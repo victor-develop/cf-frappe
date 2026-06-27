@@ -15,6 +15,7 @@ import type {
   MultipartFilePartContent,
   UploadedMultipartFilePart
 } from "../ports/file-storage.js";
+import type { FileScanResult } from "../ports/file-scanner.js";
 
 const PREVIEWABLE_FILE_CONTENT_TYPES = new Set([
   "application/json",
@@ -243,6 +244,29 @@ export function normalizeBulkFileSelections<TSelection extends BulkFileSelection
       ...(file.expectedVersion === undefined ? {} : { expectedVersion: file.expectedVersion })
     };
   });
+}
+
+export function ensureDirectUploadMatches(
+  snapshot: DocumentSnapshot,
+  object: FileObjectMetadata,
+  label = "Direct upload"
+): void {
+  const expectedSize = snapshotNumberData(snapshot, "size");
+  if (object.size !== expectedSize) {
+    throw badRequest(`${label} object size mismatch`);
+  }
+  if (normalizeContentType(object.contentType) !== normalizeContentType(snapshotStringData(snapshot, "content_type"))) {
+    throw badRequest(`${label} object content type mismatch`);
+  }
+}
+
+export function fileScanPatch(result: FileScanResult, checkedAt: string): DocumentData {
+  return {
+    scan_status: result.status,
+    scan_checked_at: result.checkedAt ?? checkedAt,
+    ...(result.engine === undefined || result.engine === "" ? {} : { scan_engine: result.engine }),
+    ...(result.message === undefined || result.message === "" ? {} : { scan_message: result.message })
+  };
 }
 
 export interface FileRenditionManifestEntry {

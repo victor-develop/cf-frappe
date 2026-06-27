@@ -1,5 +1,6 @@
 import {
   completeFileRendition,
+  ensureDirectUploadMatches,
   ensureMultipartCompletionMatchesManifest,
   ensureMultipartPartFitsReservation,
   expectedRenditionContentType,
@@ -9,6 +10,7 @@ import {
   fileRenditionFilename,
   fileRenditions,
   fileRenditionView,
+  fileScanPatch,
   fileTransformOptionsData,
   fileTransformOptionsFromData,
   isPreviewableFileContentType,
@@ -368,6 +370,45 @@ describe("file policy", () => {
       normalizeBulkFileSelections(Array.from({ length: 101 }, (_, index) => ({ name: `file_${String(index)}` })))
     ).toThrow("At most 100 files can be selected");
   });
+
+  it("validates direct upload object metadata against its reservation", () => {
+    const snapshot = fileSnapshot({
+      size: 12,
+      content_type: "Text/Plain"
+    });
+    const object = fileObject({ size: 12, contentType: " text/plain " });
+
+    expect(() => ensureDirectUploadMatches(snapshot, object)).not.toThrow();
+    expect(() => ensureDirectUploadMatches(snapshot, { ...object, size: 11 })).toThrow(
+      "Direct upload object size mismatch"
+    );
+    expect(() => ensureDirectUploadMatches(snapshot, { ...object, contentType: "application/pdf" }, "Multipart upload")).toThrow(
+      "Multipart upload object content type mismatch"
+    );
+  });
+
+  it("plans file scan patches without persisting empty optional scanner fields", () => {
+    expect(fileScanPatch({ status: "clean", engine: "", message: "" }, "2026-06-28T01:00:00.000Z")).toEqual({
+      scan_status: "clean",
+      scan_checked_at: "2026-06-28T01:00:00.000Z"
+    });
+    expect(
+      fileScanPatch(
+        {
+          status: "infected",
+          checkedAt: "2026-06-28T02:00:00.000Z",
+          engine: "unit-av",
+          message: "EICAR"
+        },
+        "2026-06-28T01:00:00.000Z"
+      )
+    ).toEqual({
+      scan_status: "infected",
+      scan_checked_at: "2026-06-28T02:00:00.000Z",
+      scan_engine: "unit-av",
+      scan_message: "EICAR"
+    });
+  });
 });
 
 function fileSnapshot(data: DocumentSnapshot["data"]): DocumentSnapshot {
@@ -407,5 +448,23 @@ function overlaySource(overrides: Partial<FileTransformOverlaySource> = {}): Fil
     size: 10,
     body: new ReadableStream(),
     ...overrides
+  };
+}
+
+function fileObject(overrides: Partial<ReturnType<typeof baseFileObject>> = {}): ReturnType<typeof baseFileObject> {
+  return {
+    ...baseFileObject(),
+    ...overrides
+  };
+}
+
+function baseFileObject() {
+  return {
+    key: "acme/files/file_object-invoice.txt",
+    size: 12,
+    etag: "object-1",
+    uploadedAt: "2026-06-28T00:00:00.000Z",
+    contentType: "text/plain",
+    customMetadata: {}
   };
 }

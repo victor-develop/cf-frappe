@@ -44,6 +44,7 @@ import type {
 } from "../ports/file-storage.js";
 import {
   completeFileRendition,
+  ensureDirectUploadMatches,
   ensureMultipartCompletionMatchesManifest,
   ensureMultipartPartFitsReservation,
   failedFileRendition,
@@ -51,11 +52,11 @@ import {
   fileRenditionFilename,
   fileRenditions,
   fileRenditionView,
+  fileScanPatch,
   isPreviewableFileContentType,
   multipartPartManifest,
   multipartPartSize,
   normalizeBulkFileSelections,
-  normalizeContentType,
   normalizeDirectUploadExpiry,
   normalizeFileSize,
   objectKey,
@@ -1527,29 +1528,6 @@ function addSeconds(isoTimestamp: string, seconds: number): string {
     throw badRequest("clock returned an invalid timestamp");
   }
   return new Date(timestamp + seconds * 1000).toISOString();
-}
-
-function ensureDirectUploadMatches(
-  snapshot: DocumentSnapshot,
-  object: FileObjectMetadata,
-  label = "Direct upload"
-): void {
-  const expectedSize = numberData(snapshot, "size");
-  if (object.size !== expectedSize) {
-    throw badRequest(`${label} object size mismatch`);
-  }
-  if (normalizeContentType(object.contentType) !== normalizeContentType(stringData(snapshot, "content_type"))) {
-    throw badRequest(`${label} object content type mismatch`);
-  }
-}
-
-function fileScanPatch(result: FileScanResult, checkedAt: string): DocumentData {
-  return {
-    scan_status: result.status,
-    scan_checked_at: result.checkedAt ?? checkedAt,
-    ...(result.engine === undefined || result.engine === "" ? {} : { scan_engine: result.engine }),
-    ...(result.message === undefined || result.message === "" ? {} : { scan_message: result.message })
-  };
 }
 
 function fileScanFailed(result: FileScanResult, snapshot: DocumentSnapshot): FrameworkError {
