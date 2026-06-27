@@ -316,6 +316,7 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       "/",
       createWebFormApi({
         webForms: options.webForms,
+        ...(options.websiteSettings === undefined ? {} : { websiteSettings: options.websiteSettings }),
         actor: resolveActor,
         maxJsonBytes
       })

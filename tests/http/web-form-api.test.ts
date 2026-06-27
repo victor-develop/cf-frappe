@@ -3,12 +3,18 @@ import {
   createResourceApi,
   defineDocType,
   defineWebForm,
+  defineWebPage,
+  defineWebsiteSettings,
+  defineWebsiteTheme,
   DocumentService,
   fixedClock,
   InMemoryDocumentStore,
   QueryService,
   unsafeHeaderActorResolver,
-  WebFormService
+  WebFormService,
+  WebPageService,
+  WebsiteSettingsService,
+  WebsiteThemeService
 } from "../../src";
 import { now } from "../helpers";
 
@@ -107,5 +113,185 @@ describe("web form api", () => {
           details: { source: "html" }
         }
       });
+  });
+
+  it("applies Website presentation to public Web Form pages", async () => {
+    const registry = createRegistry({
+      doctypes: [leadDocType],
+      webPages: [
+        defineWebPage({
+          name: "About",
+          route: "about",
+          title: "About",
+          sections: [{ body: "Welcome" }]
+        })
+      ],
+      webForms: [
+        defineWebForm({
+          name: "Lead Intake",
+          label: "Lead <Intake>",
+          doctype: "Lead",
+          fields: [{ field: "title", label: "Name", required: true }],
+          successMessage: "Thanks <friend>."
+        })
+      ],
+      websiteThemes: [
+        defineWebsiteTheme({
+          name: "Starter",
+          fontFamily: "Inter, system-ui",
+          tokens: {
+            primaryColor: "#0f766e",
+            backgroundColor: "#f8fafc",
+            textColor: "#0f172a"
+          }
+        })
+      ],
+      websiteSettings: defineWebsiteSettings({
+        title: "Starter Site",
+        theme: "Starter",
+        navItems: [
+          { name: "about", label: "About", pageRoute: "about" },
+          { name: "intake", label: "<Intake>", href: "/web-forms/Lead%20Intake" }
+        ]
+      })
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+    const queries = new QueryService({ registry, projections: store });
+    const webPages = new WebPageService({ registry });
+    const webForms = new WebFormService({ registry, documents, queries });
+    const app = createResourceApi({
+      registry,
+      documents,
+      queries,
+      webForms,
+      webPages,
+      websiteSettings: new WebsiteSettingsService({
+        registry,
+        webPages,
+        websiteThemes: new WebsiteThemeService({ registry })
+      }),
+      websiteThemes: new WebsiteThemeService({ registry }),
+      actor: unsafeHeaderActorResolver
+    });
+
+    const listPage = await app.request("/web-forms");
+    expect(listPage.status).toBe(200);
+    const listHtml = await listPage.text();
+    expect(listHtml).toContain("--cf-frappe-primary: #0f766e");
+    expect(listHtml).toContain("--cf-frappe-background: #f8fafc");
+    expect(listHtml).toContain("--cf-frappe-font-family: Inter, system-ui");
+    expect(listHtml).toContain('aria-label="Website navigation"');
+    expect(listHtml).toContain('<a href="/page/about">About</a>');
+    expect(listHtml).toContain('<a href="/web-forms/Lead%20Intake">&lt;Intake&gt;</a>');
+
+    const formPage = await app.request("/web-forms/Lead%20Intake");
+    expect(formPage.status).toBe(200);
+    const formHtml = await formPage.text();
+    expect(formHtml).toContain("<h1>Lead &lt;Intake&gt;</h1>");
+    expect(formHtml).toContain("background: var(--cf-frappe-primary)");
+    expect(formHtml).toContain('<a href="/web-forms/Lead%20Intake">&lt;Intake&gt;</a>');
+
+    const submitted = await app.request("/web-forms/Lead%20Intake", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ title: "HTML Lead" })
+    });
+    expect(submitted.status).toBe(201);
+    const submittedHtml = await submitted.text();
+    expect(submittedHtml).toContain("Thanks &lt;friend&gt;.");
+    expect(submittedHtml).toContain("--cf-frappe-primary: #0f766e");
+    expect(submittedHtml).toContain('<a href="/page/about">About</a>');
+  });
+
+  it("falls back to default Web Form CSS and no navigation when Website Settings cannot be read", async () => {
+    for (const registry of [
+      createRegistry({
+        doctypes: [leadDocType],
+        webForms: [
+          defineWebForm({
+            name: "Lead Intake",
+            doctype: "Lead",
+            fields: [{ field: "title", label: "Name", required: true }]
+          })
+        ]
+      }),
+      createRegistry({
+        doctypes: [leadDocType],
+        webPages: [
+          defineWebPage({
+            name: "About",
+            route: "about",
+            title: "About",
+            sections: [{ body: "Welcome" }]
+          })
+        ],
+        webForms: [
+          defineWebForm({
+            name: "Lead Intake",
+            doctype: "Lead",
+            fields: [{ field: "title", label: "Name", required: true }]
+          })
+        ],
+        websiteThemes: [defineWebsiteTheme({ name: "Starter", tokens: { primaryColor: "#0f766e" } })],
+        websiteSettings: defineWebsiteSettings({
+          title: "Private Site",
+          theme: "Starter",
+          roles: ["User"],
+          navItems: [{ name: "about", label: "About", pageRoute: "about" }]
+        })
+      }),
+      createRegistry({
+        doctypes: [leadDocType],
+        webPages: [
+          defineWebPage({
+            name: "About",
+            route: "about",
+            title: "About",
+            sections: [{ body: "Welcome" }]
+          })
+        ],
+        webForms: [
+          defineWebForm({
+            name: "Lead Intake",
+            doctype: "Lead",
+            fields: [{ field: "title", label: "Name", required: true }]
+          })
+        ],
+        websiteThemes: [defineWebsiteTheme({ name: "Starter", tokens: { primaryColor: "#0f766e" } })],
+        websiteSettings: defineWebsiteSettings({
+          title: "Draft Site",
+          theme: "Starter",
+          published: false,
+          navItems: [{ name: "about", label: "About", pageRoute: "about" }]
+        })
+      })
+    ]) {
+      const store = new InMemoryDocumentStore();
+      const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+      const queries = new QueryService({ registry, projections: store });
+      const webPages = new WebPageService({ registry });
+      const app = createResourceApi({
+        registry,
+        documents,
+        queries,
+        webForms: new WebFormService({ registry, documents, queries }),
+        webPages,
+        websiteSettings: new WebsiteSettingsService({
+          registry,
+          webPages,
+          websiteThemes: new WebsiteThemeService({ registry })
+        }),
+        websiteThemes: new WebsiteThemeService({ registry }),
+        actor: unsafeHeaderActorResolver
+      });
+
+      const page = await app.request("/web-forms/Lead%20Intake");
+      expect(page.status).toBe(200);
+      const html = await page.text();
+      expect(html).toContain("--cf-frappe-primary: #2563eb");
+      expect(html).not.toContain("--cf-frappe-primary: #0f766e");
+      expect(html).not.toContain("Website navigation");
+    }
   });
 });

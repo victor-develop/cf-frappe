@@ -4,9 +4,11 @@ import type { JsonValue } from "../../core/types.js";
 import type { WebFormResolvedField, WebFormService } from "../../application/web-form-service.js";
 import type { ActorResolver } from "./actor.js";
 import { readJsonObject, requestMetadata } from "./request.js";
+import { escapeHtml, resolveWebsitePresentation, websitePage, type WebsitePresentation, type WebsiteSettingsReader } from "./website-rendering.js";
 
 export interface WebFormApiOptions {
   readonly webForms: WebFormService;
+  readonly websiteSettings?: WebsiteSettingsReader;
   readonly actor: ActorResolver;
   readonly maxJsonBytes?: number;
 }
@@ -45,13 +47,13 @@ export function createWebFormApi(options: WebFormApiOptions): Hono {
       name: form.name,
       label: form.label ?? form.name,
       description: form.description ?? form.module ?? ""
-    }))));
+    })), resolveWebsitePresentation(options.websiteSettings, actor)));
   });
 
   app.get("/web-forms/:webForm", async (c) => {
     const actor = await options.actor(c.req.raw);
     const metadata = await options.webForms.getWebForm(actor, c.req.param("webForm"));
-    return html(renderWebForm(metadata));
+    return html(renderWebForm(metadata, resolveWebsitePresentation(options.websiteSettings, actor)));
   });
 
   app.post("/web-forms/:webForm", async (c) => {
@@ -62,7 +64,12 @@ export function createWebFormApi(options: WebFormApiOptions): Hono {
       data: dataFromFormData(formData, metadata.fields),
       metadata: requestMetadata(c.req.raw)
     });
-    return html(renderWebFormSuccess(metadata.form.label ?? metadata.form.name, result.document.name, metadata.form.successMessage), 201);
+    return html(renderWebFormSuccess(
+      metadata.form.label ?? metadata.form.name,
+      result.document.name,
+      metadata.form.successMessage,
+      resolveWebsitePresentation(options.websiteSettings, actor)
+    ), 201);
   });
 
   return app;
@@ -134,20 +141,24 @@ interface WebFormListItem {
   readonly description: string;
 }
 
-function renderWebFormList(forms: readonly WebFormListItem[]): string {
+function renderWebFormList(forms: readonly WebFormListItem[], presentation: WebsitePresentation): string {
   const rows = forms
     .map(
       (form) => `<li><a href="/web-forms/${encodeURIComponent(form.name)}">${escapeHtml(form.label)}</a>${form.description ? `<span>${escapeHtml(form.description)}</span>` : ""}</li>`
     )
     .join("");
-  return page("Web Forms", `<main><h1>Web Forms</h1><ul class="web-form-list">${rows || "<li>No web forms.</li>"}</ul></main>`);
+  return websitePage("Web Forms", `<main class="web-form-main"><h1>Web Forms</h1><ul class="web-form-list">${rows || "<li>No web forms.</li>"}</ul></main>`, presentation, {
+    styles: WEB_FORM_STYLES
+  });
 }
 
-function renderWebForm(metadata: Awaited<ReturnType<WebFormService["getWebForm"]>>): string {
+function renderWebForm(metadata: Awaited<ReturnType<WebFormService["getWebForm"]>>, presentation: WebsitePresentation): string {
   const title = metadata.form.label ?? metadata.form.name;
   const fields = metadata.fields.map(renderWebFormField).join("");
   const description = metadata.form.description ? `<p>${escapeHtml(metadata.form.description)}</p>` : "";
-  return page(title, `<main><h1>${escapeHtml(title)}</h1>${description}<form method="post">${fields}<button type="submit">${escapeHtml(metadata.form.submitLabel ?? "Submit")}</button></form></main>`);
+  return websitePage(title, `<main class="web-form-main"><h1>${escapeHtml(title)}</h1>${description}<form method="post">${fields}<button type="submit">${escapeHtml(metadata.form.submitLabel ?? "Submit")}</button></form></main>`, presentation, {
+    styles: WEB_FORM_STYLES
+  });
 }
 
 function renderWebFormField(field: WebFormResolvedField): string {
@@ -170,8 +181,15 @@ function renderWebFormField(field: WebFormResolvedField): string {
   return `<label>${label}<input name="${name}" type="${inputType(field.type)}"${required}>${help}</label>`;
 }
 
-function renderWebFormSuccess(title: string, documentName: string, message: string | undefined): string {
-  return page(title, `<main><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message ?? "Submitted successfully.")}</p><p>Document: ${escapeHtml(documentName)}</p></main>`);
+function renderWebFormSuccess(
+  title: string,
+  documentName: string,
+  message: string | undefined,
+  presentation: WebsitePresentation
+): string {
+  return websitePage(title, `<main class="web-form-main"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message ?? "Submitted successfully.")}</p><p>Document: ${escapeHtml(documentName)}</p></main>`, presentation, {
+    styles: WEB_FORM_STYLES
+  });
 }
 
 function inputType(type: WebFormResolvedField["type"]): string {
@@ -187,23 +205,20 @@ function inputType(type: WebFormResolvedField["type"]): string {
   return "text";
 }
 
-function page(title: string, body: string): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><style>
-body { margin: 0; font: 15px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #111827; background: #f3f4f6; }
-main { width: min(720px, calc(100vw - 32px)); margin: 40px auto; padding: 24px; background: #fff; border: 1px solid #d1d5db; border-radius: 8px; }
-h1 { margin: 0 0 16px; font-size: 28px; line-height: 1.2; }
+const WEB_FORM_STYLES = `
+.web-form-main { width: min(720px, calc(100vw - 32px)); padding: 24px; background: var(--cf-frappe-surface); border: 1px solid color-mix(in srgb, var(--cf-frappe-muted-text) 28%, transparent); border-radius: 8px; }
+.web-form-main h1 { font-size: 28px; line-height: 1.2; }
 form { display: grid; gap: 16px; }
 label { display: grid; gap: 6px; font-weight: 600; }
 input, textarea, select { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font: inherit; }
 textarea { min-height: 120px; resize: vertical; }
-small, p, .web-form-list span { color: #4b5563; font-weight: 400; }
+small, .web-form-list span { color: var(--cf-frappe-muted-text); font-weight: 400; }
 .checkbox { display: flex; align-items: center; gap: 8px; }
 .checkbox input { width: auto; }
-button { width: fit-content; padding: 10px 14px; border: 0; border-radius: 6px; color: #fff; background: #2563eb; font: inherit; font-weight: 700; cursor: pointer; }
+button { width: fit-content; padding: 10px 14px; border: 0; border-radius: 6px; color: #fff; background: var(--cf-frappe-primary); font: inherit; font-weight: 700; cursor: pointer; }
 .web-form-list { display: grid; gap: 12px; padding: 0; list-style: none; }
 .web-form-list li { display: grid; gap: 2px; }
-</style></head><body>${body}</body></html>`;
-}
+`;
 
 function html(body: string, status = 200): Response {
   return new Response(body, {
@@ -212,12 +227,4 @@ function html(body: string, status = 200): Response {
       "content-type": "text/html; charset=utf-8"
     }
   });
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }

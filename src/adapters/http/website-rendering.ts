@@ -9,9 +9,18 @@ export interface WebsitePresentation {
   readonly navItems: ResolvedWebsiteSettings["navItems"];
 }
 
+export interface WebsitePageOptions {
+  readonly styles?: string;
+}
+
 const DEFAULT_WEBSITE_PRESENTATION: WebsitePresentation = Object.freeze({ navItems: Object.freeze([]) });
 
-export function websitePage(title: string, body: string, presentation: WebsitePresentation | undefined): string {
+export function websitePage(
+  title: string,
+  body: string,
+  presentation: WebsitePresentation | undefined,
+  options: WebsitePageOptions = {}
+): string {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><style>
 ${themeCss(presentation?.theme)}body { margin: 0; font: 15px/1.6 var(--cf-frappe-font-family); color: var(--cf-frappe-text); background: var(--cf-frappe-background); }
 .site-nav { border-bottom: 1px solid color-mix(in srgb, var(--cf-frappe-muted-text) 18%, transparent); background: var(--cf-frappe-surface); }
@@ -23,6 +32,7 @@ h2 { margin: 28px 0 8px; font-size: 18px; color: var(--cf-frappe-heading); }
 p, li { color: var(--cf-frappe-muted-text); white-space: pre-wrap; }
 ul { display: grid; gap: 12px; padding-left: 20px; }
 a { color: var(--cf-frappe-link); }
+${options.styles ?? ""}
 </style></head><body>${renderNavigation(presentation)}${body}</body></html>`;
 }
 
