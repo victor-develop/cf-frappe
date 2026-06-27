@@ -2,7 +2,9 @@ import { badRequest, FrameworkError } from "../core/errors.js";
 import type {
   BulkDeleteDocumentFailure,
   BulkDeleteDocumentSelection,
+  BulkDocumentCommand,
   BulkDocumentCommandFailure,
+  BulkDocumentsCommand,
   BulkDocumentSelection
 } from "./document-service.js";
 
@@ -61,5 +63,19 @@ export function bulkDocumentFailure(name: string, error: unknown): BulkDocumentC
     code: "UNKNOWN",
     message: error instanceof Error ? error.message : "Bulk delete failed",
     status: 500
+  };
+}
+
+export function bulkNamedCommand(
+  command: BulkDocumentsCommand,
+  selection: BulkDocumentSelection
+): BulkDocumentCommand {
+  return {
+    actor: command.actor,
+    doctype: command.doctype,
+    name: selection.name,
+    ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+    ...(selection.expectedVersion === undefined ? {} : { expectedVersion: selection.expectedVersion }),
+    metadata: command.metadata ?? {}
   };
 }

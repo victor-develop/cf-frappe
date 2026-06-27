@@ -4,6 +4,7 @@ import {
   FrameworkError,
   bulkDeleteDocumentFailure,
   bulkDocumentFailure,
+  bulkNamedCommand,
   normalizeBulkDeleteDocumentSelections,
   normalizeBulkDocumentSelections
 } from "../../src";
@@ -65,6 +66,28 @@ describe("document bulk policy", () => {
       code: "UNKNOWN",
       message: "Bulk delete failed",
       status: 500
+    });
+  });
+
+  it("shapes normalized bulk selections into single-document commands", () => {
+    expect(
+      bulkNamedCommand(
+        {
+          actor: { id: "owner@example.com", roles: ["User"], tenantId: "acme" },
+          doctype: "Note",
+          tenantId: "tenant_b",
+          documents: [],
+          metadata: { source: "bulk-action" }
+        },
+        { name: "NOTE-1", expectedVersion: 3 }
+      )
+    ).toEqual({
+      actor: { id: "owner@example.com", roles: ["User"], tenantId: "acme" },
+      doctype: "Note",
+      name: "NOTE-1",
+      tenantId: "tenant_b",
+      expectedVersion: 3,
+      metadata: { source: "bulk-action" }
     });
   });
 });

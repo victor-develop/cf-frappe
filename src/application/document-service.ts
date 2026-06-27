@@ -28,6 +28,7 @@ import {
   normalizeValidDocumentShareUserId
 } from "./document-collaboration-policy.js";
 import {
+  bulkNamedCommand,
   bulkDocumentFailure,
   normalizeBulkDocumentSelections
 } from "./document-bulk-policy.js";
@@ -86,6 +87,7 @@ import {
   parseFetchFrom,
   relatedDocTypeNames
 } from "./document-reference-policy.js";
+import { resolveTenant } from "./document-tenant-policy.js";
 import {
   allowOnSubmitIssues,
   childTableOriginIssues,
@@ -110,7 +112,6 @@ import type { DocumentStore } from "../ports/document-store.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 import { cryptoIdGenerator } from "../ports/id-generator.js";
 import {
-  DEFAULT_TENANT_ID,
   type Actor,
   type DocStatus,
   type DocTypeDefinition,
@@ -2105,10 +2106,6 @@ export class DocumentService implements DocumentCommandExecutor {
   }
 }
 
-function resolveTenant(actor: Actor, explicitTenantId?: string): string {
-  return explicitTenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
-}
-
 function isDocumentConflict(error: unknown): boolean {
   return error instanceof FrameworkError && error.code === "DOCUMENT_CONFLICT";
 }
@@ -2119,15 +2116,4 @@ function requireSavedEvent(events: readonly DomainEvent[], id: string): DomainEv
     throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
   }
   return event;
-}
-
-function bulkNamedCommand(command: BulkDocumentsCommand, selection: BulkDocumentSelection): BulkDocumentCommand {
-  return {
-    actor: command.actor,
-    doctype: command.doctype,
-    name: selection.name,
-    ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
-    ...(selection.expectedVersion === undefined ? {} : { expectedVersion: selection.expectedVersion }),
-    metadata: command.metadata ?? {}
-  };
 }
