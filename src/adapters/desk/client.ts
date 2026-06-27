@@ -196,7 +196,20 @@ export function renderDeskClientScript(): string {
   }
 
   function webFormPagePath(webForm) {
-    return "/web-forms/" + encodePart(webForm);
+    return "/web-forms/" + webFormPublicPath(webForm);
+  }
+
+  function webFormPublicPath(input) {
+    if (input && typeof input === "object") {
+      var form = input.form && typeof input.form === "object" ? input.form : input;
+      if (form.route !== undefined && form.route !== null && String(form.route).trim()) {
+        return encodePath(form.route);
+      }
+      if (form.name !== undefined && form.name !== null) {
+        return encodePart(form.name);
+      }
+    }
+    return encodePart(input);
   }
 
   function webViewPagePath(webView) {

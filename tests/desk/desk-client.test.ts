@@ -1,6 +1,11 @@
 import { renderDeskClientScript } from "../../src/adapters/desk/client";
 import { MAX_MULTIPART_FILE_PARTS, MIN_MULTIPART_FILE_PART_BYTES } from "../../src";
 
+type DeskWebFormUrlInput =
+  | string
+  | { readonly name?: string; readonly route?: string }
+  | { readonly form?: { readonly name?: string; readonly route?: string } };
+
 interface DeskClientRuntime {
   readonly context: (script?: { readonly dataset?: Record<string, string> }) => {
     readonly doctype?: string;
@@ -306,7 +311,7 @@ interface DeskClientRuntime {
     readonly get: (webForm: string) => Promise<unknown>;
     readonly list: () => Promise<unknown>;
     readonly submit: (webForm: string, data?: Record<string, unknown>) => Promise<unknown>;
-    readonly url: (webForm: string) => string;
+    readonly url: (webForm: DeskWebFormUrlInput) => string;
   };
   readonly webView: {
     readonly get: (webView: string) => Promise<unknown>;
@@ -450,7 +455,7 @@ interface DeskClientRuntime {
     readonly dashboardUrl: (dashboard: string) => string;
     readonly kanbanUrl: (kanban: string) => string;
     readonly calendarUrl: (calendar: string, options?: Record<string, unknown>) => string;
-    readonly webFormUrl: (webForm: string) => string;
+    readonly webFormUrl: (webForm: DeskWebFormUrlInput) => string;
     readonly webViewItemUrl: (webView: string, route: string) => string;
     readonly webViewUrl: (webView: string) => string;
     readonly webPageUrl: (route: string) => string;
@@ -871,6 +876,7 @@ describe("Desk client runtime", () => {
     expect(runtime.desk.calendarUrl("Operations/Board", { from: "2026-01-01", to: "2026-01-31" }))
       .toBe("/desk/calendars/Operations%2FBoard?from=2026-01-01&to=2026-01-31");
     expect(runtime.desk.webFormUrl("Lead/Intake")).toBe("/web-forms/Lead%2FIntake");
+    expect(runtime.desk.webFormUrl({ name: "Lead Intake", route: "lead/intake" })).toBe("/web-forms/lead/intake");
     expect(runtime.desk.webViewUrl("Articles/View")).toBe("/web/Articles%2FView");
     expect(runtime.desk.webViewItemUrl("Articles/View", "launch/post")).toBe("/web/Articles%2FView/launch%2Fpost");
     expect(runtime.desk.webPageUrl("about/company profile")).toBe("/page/about/company%20profile");
@@ -1613,6 +1619,9 @@ describe("Desk client runtime", () => {
       route: "/api/web-form/Lead%20Intake/submit"
     });
     expect(runtime.webForm.url("Lead Intake")).toBe("/web-forms/Lead%20Intake");
+    expect(runtime.webForm.url({ name: "Lead Intake", route: "lead/intake" })).toBe("/web-forms/lead/intake");
+    expect(runtime.webForm.url({ form: { name: "Lead Intake", route: "lead/intake" } })).toBe("/web-forms/lead/intake");
+    expect(runtime.webForm.url({ name: "Legacy Intake" })).toBe("/web-forms/Legacy%20Intake");
 
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
       "GET /api/meta/web-forms",
