@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document unique-value policy module slice:
+As of the document naming policy module slice:
 
-- Vitest files: `161`
-- Vitest cases: `1539`
+- Vitest files: `162`
+- Vitest cases: `1544`
 
 ## Implication
 

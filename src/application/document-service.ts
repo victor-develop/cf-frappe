@@ -63,6 +63,13 @@ import {
   type UniqueValueReservation
 } from "./document-unique-values.js";
 import {
+  ensureCreateNameAllowed,
+  namingSeriesCurrentValue,
+  NAMING_SERIES_DOCTYPE,
+  renderNamingSeries,
+  resolveDocumentName
+} from "./document-naming.js";
+import {
   allowOnSubmitIssues,
   childTableOriginIssues,
   copyDocumentData,
@@ -465,7 +472,6 @@ export interface DocumentCommandExecutor {
   revokeShare(command: RevokeDocumentShareCommand): Promise<DocumentSnapshot>;
 }
 
-const NAMING_SERIES_DOCTYPE = "__NamingSeries";
 const NAMING_SERIES_MAX_ATTEMPTS = 10;
 
 export class DocumentService implements DocumentCommandExecutor {
@@ -2023,7 +2029,7 @@ export class DocumentService implements DocumentCommandExecutor {
   ): Promise<string> {
     const naming = doctype.naming ?? { kind: "uuid" };
     if (naming.kind !== "series") {
-      return resolveName(doctype, data, this.ids);
+      return resolveDocumentName(doctype, data, this.ids);
     }
     return this.allocateSeriesName(doctype, naming.pattern, context);
   }
@@ -2036,7 +2042,7 @@ export class DocumentService implements DocumentCommandExecutor {
     const stream = namingSeriesStream(context.tenantId, doctype.name, pattern);
     for (let attempt = 0; attempt < NAMING_SERIES_MAX_ATTEMPTS; attempt += 1) {
       const existing = foldDocument(await this.store.readStream(stream));
-      const current = numberField(existing?.data.current) ?? 0;
+      const current = namingSeriesCurrentValue(existing?.data.current) ?? 0;
       const next = current + 1;
       const event = this.newEvent({
         tenantId: context.tenantId,
@@ -2080,58 +2086,6 @@ export class DocumentService implements DocumentCommandExecutor {
 
 function resolveTenant(actor: Actor, explicitTenantId?: string): string {
   return explicitTenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
-}
-
-function resolveName(doctype: DocTypeDefinition, data: DocumentData, ids: IdGenerator): string {
-  const naming = doctype.naming ?? { kind: "uuid" };
-  if (naming.kind === "uuid") {
-    return ids.next("doc_");
-  }
-  if (naming.kind === "field") {
-    const value = data[naming.field];
-    if (typeof value !== "string" || value.length === 0) {
-      throw validationFailed([
-        {
-          field: naming.field,
-          code: "name",
-          message: `Field '${naming.field}' must be a non-empty string to name ${doctype.name}`
-        }
-      ]);
-    }
-    return value;
-  }
-  if (naming.kind === "series") {
-    throw new FrameworkError("DOCTYPE_NAMING_INVALID", `Naming series for ${doctype.name} needs a document store`, {
-      status: 500
-    });
-  }
-  const field = naming.field ?? "name";
-  const value = data[field];
-  if (typeof value === "string" && value.length > 0) {
-    return value;
-  }
-  return ids.next("doc_");
-}
-
-function ensureCreateNameAllowed(doctype: DocTypeDefinition, name: string | undefined): void {
-  if (name === undefined || doctype.naming?.kind !== "series") {
-    return;
-  }
-  throw validationFailed([
-    {
-      field: "name",
-      code: "name",
-      message: `${doctype.name} uses a naming series and cannot be created with an explicit name`
-    }
-  ]);
-}
-
-function renderNamingSeries(pattern: string, value: number): string {
-  return pattern.replace(/#+/, (placeholder) => String(value).padStart(placeholder.length, "0"));
-}
-
-function numberField(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
 function isDocumentConflict(error: unknown): boolean {
