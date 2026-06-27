@@ -12,6 +12,7 @@ export * from "./application/dashboard-service.js";
 export * from "./application/data-patch-runner.js";
 export * from "./application/data-patch-service.js";
 export * from "./application/data-patch-jobs.js";
+export * from "./application/document-delivery-outbox-service.js";
 export * from "./application/document-service.js";
 export * from "./application/document-history-service.js";
 export * from "./application/document-import-service.js";

@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the multi-stream document commit slice:
+As of the durable document delivery outbox slice:
 
-- Vitest files: `154`
-- Vitest cases: `1489`
+- Vitest files: `155`
+- Vitest cases: `1493`
 
 ## Implication
 

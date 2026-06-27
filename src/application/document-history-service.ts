@@ -329,6 +329,10 @@ function diffEvent(
     case "EmailNotificationDeliveryClaimed":
     case "EmailNotificationFailed":
     case "EmailNotificationSkipped":
+    case "DocumentDeliveryOutboxEnqueued":
+    case "DocumentDeliveryOutboxClaimed":
+    case "DocumentDeliveryOutboxDelivered":
+    case "DocumentDeliveryOutboxFailed":
       return [];
   }
 }
@@ -493,6 +497,14 @@ function summarize(payload: DocumentEventPayload): string {
       return `Email notification failed ${payload.messageId}`;
     case "EmailNotificationSkipped":
       return `Skipped email notification ${payload.messageId}`;
+    case "DocumentDeliveryOutboxEnqueued":
+      return `Queued ${payload.target} delivery ${payload.outboxId}`;
+    case "DocumentDeliveryOutboxClaimed":
+      return `Claimed document delivery ${payload.outboxId}`;
+    case "DocumentDeliveryOutboxDelivered":
+      return `Delivered document delivery ${payload.outboxId}`;
+    case "DocumentDeliveryOutboxFailed":
+      return `Document delivery failed ${payload.outboxId}`;
     case "WorkflowTransitioned":
       return workflowSummary(payload);
     case "DomainCommandApplied":

@@ -666,6 +666,35 @@ export type DocumentEventPayload =
       readonly reason: string;
     }
   | {
+      readonly kind: "DocumentDeliveryOutboxEnqueued";
+      readonly outboxId: string;
+      readonly target: "notification" | "realtime" | "email";
+      readonly sourceEventId: string;
+      readonly sourceEventType: string;
+      readonly payloadKind: string;
+      readonly doctype: DocTypeName;
+      readonly documentName: DocumentName;
+      readonly actorId: string;
+      readonly payload?: DocumentData;
+    }
+  | {
+      readonly kind: "DocumentDeliveryOutboxClaimed";
+      readonly outboxId: string;
+      readonly claimId: string;
+    }
+  | {
+      readonly kind: "DocumentDeliveryOutboxDelivered";
+      readonly outboxId: string;
+      readonly claimId: string;
+    }
+  | {
+      readonly kind: "DocumentDeliveryOutboxFailed";
+      readonly outboxId: string;
+      readonly claimId: string;
+      readonly error: string;
+      readonly retryAt?: string;
+    }
+  | {
       readonly kind: "WorkflowTransitioned";
       readonly action: string;
       readonly from: string;

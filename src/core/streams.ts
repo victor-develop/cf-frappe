@@ -73,6 +73,10 @@ export function emailOutboxStream(tenantId: TenantId, messageId: string): Stream
   return documentStream(tenantId, "__EmailOutbox", messageId);
 }
 
+export function documentDeliveryOutboxStream(tenantId: TenantId): StreamName {
+  return documentStream(tenantId, "__DocumentDeliveryOutbox", "deliveries");
+}
+
 export function roleCatalogStream(tenantId: TenantId): StreamName {
   return documentStream(tenantId, "__Roles", "catalog");
 }
