@@ -346,6 +346,14 @@ describe("cf-frappe CLI scaffold", () => {
     expect(readmeText).toContain("npx cf-frappe notification-rules disable --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe notification-rules enable --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain("npx cf-frappe notification-rules clear --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe assignment-rules list --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe assignment-rules get --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe assignment-rules save --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain(
+      "npx cf-frappe assignment-rules disable --url https://your-worker.example --doctype Task"
+    );
+    expect(readmeText).toContain("npx cf-frappe assignment-rules enable --url https://your-worker.example --doctype Task");
+    expect(readmeText).toContain("npx cf-frappe assignment-rules clear --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain(
       "npx cf-frappe user-permissions list --url https://your-worker.example --user-id teammate@example.com"
     );

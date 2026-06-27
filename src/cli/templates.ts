@@ -430,6 +430,12 @@ npx cf-frappe notification-rules save --url https://your-worker.example --doctyp
 npx cf-frappe notification-rules disable --url https://your-worker.example --doctype Task --rule "Task updates" --expected-version 1 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe notification-rules enable --url https://your-worker.example --doctype Task --rule "Task updates" --expected-version 2 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe notification-rules clear --url https://your-worker.example --doctype Task --rule "Task updates" --expected-version 3 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe assignment-rules list --url https://your-worker.example --doctype Task --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe assignment-rules get --url https://your-worker.example --doctype Task --rule "High priority triage" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe assignment-rules save --url https://your-worker.example --doctype Task --rule "High priority triage" --event DocumentCreated --event DocumentUpdated --assignee-user manager@example.com --assignee-field created_by --condition-json '{"field":"priority","operator":"in","value":["High","Urgent"]}' --expected-version 0 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe assignment-rules disable --url https://your-worker.example --doctype Task --rule "High priority triage" --expected-version 1 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe assignment-rules enable --url https://your-worker.example --doctype Task --rule "High priority triage" --expected-version 2 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe assignment-rules clear --url https://your-worker.example --doctype Task --rule "High priority triage" --expected-version 3 --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 
 Linked-record user permissions use the event-sourced policy API directly:

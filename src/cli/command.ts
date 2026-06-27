@@ -30,6 +30,14 @@ import {
   type CloudflareAccessSetupScope
 } from "./access-setup.js";
 import {
+  AssignmentRuleRemoteError,
+  runRemoteAssignmentRuleCommand,
+  type AssignmentRuleAssigneeOption,
+  type AssignmentRuleHeaderOption,
+  type AssignmentRuleRemoteAction,
+  type AssignmentRuleRemoteCommand
+} from "./assignment-rules.js";
+import {
   AuditRemoteError,
   runRemoteAuditCommand,
   type AuditHeaderOption,
@@ -296,6 +304,7 @@ type ParsedCommand =
   | InstallCommand
   | MigrateGenerateCommand
   | CloudflareAccessSetupCommand
+  | AssignmentRuleRemoteCommand
   | AuditRemoteCommand
   | CustomFieldRemoteCommand
   | DataPatchRemoteCommand
@@ -343,6 +352,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   try {
     if (command.kind === "audit") {
       io.stdout.write(await runRemoteAuditCommand(command, {
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
+    if (command.kind === "assignment-rules") {
+      io.stdout.write(await runRemoteAssignmentRuleCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -630,6 +646,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof PackageJsonError ||
       error instanceof PackageManagerError ||
       error instanceof CloudflareAccessSetupError ||
+      error instanceof AssignmentRuleRemoteError ||
       error instanceof AuditRemoteError ||
       error instanceof CustomFieldRemoteError ||
       error instanceof DataPatchRemoteError ||
@@ -678,6 +695,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "audit") {
     return parseAuditArgs(rest);
+  }
+  if (command === "assignment-rules") {
+    return parseAssignmentRulesArgs(rest);
   }
   if (command === "migrate") {
     return parseMigrateArgs(rest);
@@ -4967,6 +4987,230 @@ function parseNotificationRulesArgs(argv: readonly string[]): ParsedCommand {
   };
 }
 
+function parseAssignmentRulesArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = assignmentRuleAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown assignment-rules command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: AssignmentRuleHeaderOption[] = [];
+  let doctype: string | undefined;
+  let tenant: string | undefined;
+  let ruleName: string | undefined;
+  const events: string[] = [];
+  const assignees: AssignmentRuleAssigneeOption[] = [];
+  let condition: Record<string, unknown> | undefined;
+  let enabled: boolean | undefined;
+  let excludeActor: boolean | undefined;
+  let expectedVersion: number | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "Assignment rule");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "Assignment rule");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--doctype") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      doctype = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--tenant") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      tenant = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--rule") {
+      if (action === "list") {
+        return { kind: "invalid", message: "Cannot use --rule with assignment-rules list" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      ruleName = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--event") {
+      if (action !== "save") {
+        return { kind: "invalid", message: `Cannot use --event with assignment-rules ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      events.push(value);
+      index += 1;
+      continue;
+    }
+    if (arg === "--assignee-user") {
+      if (action !== "save") {
+        return { kind: "invalid", message: `Cannot use --assignee-user with assignment-rules ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      assignees.push({ kind: "user", userId: value });
+      index += 1;
+      continue;
+    }
+    if (arg === "--assignee-field") {
+      if (action !== "save") {
+        return { kind: "invalid", message: `Cannot use --assignee-field with assignment-rules ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      assignees.push({ kind: "field", field: value });
+      index += 1;
+      continue;
+    }
+    if (arg === "--condition-json") {
+      if (action !== "save") {
+        return { kind: "invalid", message: `Cannot use --condition-json with assignment-rules ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseJsonObject(value, "Assignment rule condition");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      condition = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg === "--enabled" || arg === "--disabled") {
+      if (action !== "save") {
+        return { kind: "invalid", message: `Cannot use ${arg} with assignment-rules ${action}` };
+      }
+      const nextEnabled = arg === "--enabled";
+      if (enabled !== undefined && enabled !== nextEnabled) {
+        return { kind: "invalid", message: "Assignment rule save cannot use both --enabled and --disabled" };
+      }
+      enabled = nextEnabled;
+      continue;
+    }
+    if (arg === "--exclude-actor" || arg === "--include-actor") {
+      if (action !== "save") {
+        return { kind: "invalid", message: `Cannot use ${arg} with assignment-rules ${action}` };
+      }
+      const nextExcludeActor = arg === "--exclude-actor";
+      if (excludeActor !== undefined && excludeActor !== nextExcludeActor) {
+        return { kind: "invalid", message: "Assignment rule save cannot use both --exclude-actor and --include-actor" };
+      }
+      excludeActor = nextExcludeActor;
+      continue;
+    }
+    if (arg === "--expected-version") {
+      if (action === "list" || action === "get") {
+        return { kind: "invalid", message: `Cannot use --expected-version with assignment-rules ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseNonNegativeInteger(value, "Assignment rule expected version");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      expectedVersion = parsed;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown assignment-rules ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if (doctype === undefined) {
+    return { kind: "invalid", message: `Assignment rule ${action} requires --doctype` };
+  }
+  if (action !== "list" && ruleName === undefined) {
+    return { kind: "invalid", message: `Assignment rule ${action} requires --rule` };
+  }
+  if (action === "save" && events.length === 0) {
+    return { kind: "invalid", message: "Assignment rule save requires at least one --event" };
+  }
+  if (action === "save" && assignees.length === 0) {
+    return {
+      kind: "invalid",
+      message: "Assignment rule save requires at least one --assignee-user or --assignee-field"
+    };
+  }
+
+  return {
+    kind: "assignment-rules",
+    action,
+    url,
+    headers,
+    doctype,
+    ...(tenant === undefined ? {} : { tenant }),
+    ...(ruleName === undefined ? {} : { ruleName }),
+    ...(events.length === 0 ? {} : { events }),
+    ...(assignees.length === 0 ? {} : { assignees }),
+    ...(condition === undefined ? {} : { condition }),
+    ...(enabled === undefined ? {} : { enabled }),
+    ...(excludeActor === undefined ? {} : { excludeActor }),
+    ...(expectedVersion === undefined ? {} : { expectedVersion })
+  };
+}
+
 function parseUserPermissionsArgs(argv: readonly string[]): ParsedCommand {
   const [subcommand, ...rest] = argv;
   if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
@@ -6321,6 +6565,12 @@ function workflowAction(value: string): WorkflowRemoteAction | undefined {
   return value === "clear" || value === "get" || value === "save" ? value : undefined;
 }
 
+function assignmentRuleAction(value: string): AssignmentRuleRemoteAction | undefined {
+  return value === "clear" || value === "disable" || value === "enable" || value === "get" || value === "list" || value === "save"
+    ? value
+    : undefined;
+}
+
 function roleAction(value: string): RoleRemoteAction | undefined {
   return value === "create" ||
     value === "describe" ||
@@ -6979,6 +7229,12 @@ function helpText(): string {
     "  cf-frappe notification-rules enable --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notification-rules disable --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe notification-rules clear --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe assignment-rules list --url <origin> --doctype <doctype> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe assignment-rules get --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe assignment-rules save --url <origin> --doctype <doctype> --rule <name> --event <eventKind>... (--assignee-user <user>|--assignee-field <field>)... [--condition-json <json>] [--enabled|--disabled] [--exclude-actor|--include-actor] [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe assignment-rules enable --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe assignment-rules disable --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe assignment-rules clear --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe workflows get --url <origin> --doctype <doctype> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe workflows save --url <origin> --doctype <doctype> --workflow-json <json> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe workflows clear --url <origin> --doctype <doctype> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
@@ -7068,6 +7324,7 @@ function helpText(): string {
     "  data-patches   Inspect, plan, apply, rollback, or enqueue remote app-declared data patches through the admin API",
     "  jobs   Inspect remote job history, retry failed runs, and manage runtime schedules through the admin API",
     "  notification-rules   Inspect and mutate event-sourced document notification rules through the admin API",
+    "  assignment-rules   Inspect and mutate event-sourced document assignment rules through the admin API",
     "  workflows   Inspect and mutate event-sourced tenant workflow definitions through the admin API",
     "  roles   Inspect and mutate event-sourced tenant role catalogs through the admin API",
     "  users   Inspect and mutate event-sourced user accounts through the admin API",

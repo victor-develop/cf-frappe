@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the runtime assignment-rule service/API slice:
+As of the remote assignment-rule CLI slice:
 
-- Vitest files: `149`
-- Vitest cases: `1433`
+- Vitest files: `150`
+- Vitest cases: `1442`
 
 ## Implication
 
