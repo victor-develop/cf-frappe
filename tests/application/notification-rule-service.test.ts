@@ -13,7 +13,13 @@ import {
   notificationRulesStream
 } from "../../src";
 import { data, noteDocType, now, owner } from "../helpers";
-import type { DocTypeDefinition, DocumentSnapshot, DomainEvent } from "../../src";
+import type {
+  DocTypeDefinition,
+  DocumentEventPayload,
+  DocumentSnapshot,
+  DomainEvent,
+  NotificationRuleEventPayload
+} from "../../src";
 
 const admin = {
   id: "admin@example.com",
@@ -22,6 +28,20 @@ const admin = {
 };
 
 describe("NotificationRuleService", () => {
+  it("registers notification rule payloads through the domain event extension map", () => {
+    const payload = notificationRulePayload({
+      kind: "NotificationRuleSaved",
+      doctypeName: "Note",
+      rule: {
+        name: "Managers on updates",
+        events: ["DocumentUpdated"],
+        recipients: [{ kind: "user", userId: "manager@example.com" }]
+      }
+    });
+
+    expect(payload.rule.name).toBe("Managers on updates");
+  });
+
   it("saves, clears, and audits notification rule metadata events", async () => {
     const events = new InMemoryDocumentStore();
     const service = new NotificationRuleService({
@@ -319,6 +339,12 @@ describe("NotificationRuleService", () => {
     ]);
   });
 });
+
+function notificationRulePayload(
+  payload: Extract<DocumentEventPayload, { readonly kind: "NotificationRuleSaved" }>
+): Extract<NotificationRuleEventPayload, { readonly kind: "NotificationRuleSaved" }> {
+  return payload;
+}
 
 function documentUpdatedEvent(id: string): DomainEvent {
   return {

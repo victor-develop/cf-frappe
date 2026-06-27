@@ -15,11 +15,14 @@ import {
   type NotificationRuleDefinition,
   type TenantId
 } from "../core/types.js";
+import type { NotificationRuleEventPayload } from "./notification-rule-events.js";
 import type { ModelRegistry } from "../core/registry.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
 import type { NotificationRuleProvider } from "./user-notification-service.js";
+
+export type { NotificationRuleEventPayload } from "./notification-rule-events.js";
 
 export type PreNotificationRuleDocTypeResolver = (
   base: DocTypeDefinition,
@@ -160,7 +163,7 @@ export class NotificationRuleService implements NotificationRuleProvider {
       : base;
   }
 
-  private async appendAndFold<TPayload extends NewDomainEvent["payload"]>(
+  private async appendAndFold<TPayload extends NotificationRuleEventPayload>(
     state: NotificationRuleState,
     options: {
       readonly actor: Actor;
@@ -223,14 +226,11 @@ function normalizeRequiredString(value: string, label: string): string {
   return normalized;
 }
 
-function ruleNameForPayload(payload: NewDomainEvent["payload"]): string {
+function ruleNameForPayload(payload: NotificationRuleEventPayload): string {
   if (payload.kind === "NotificationRuleSaved") {
     return payload.rule.name;
   }
-  if (payload.kind === "NotificationRuleCleared") {
-    return payload.ruleName;
-  }
-  return "rule";
+  return payload.ruleName;
 }
 
 function jsonEqual(left: unknown, right: unknown): boolean {

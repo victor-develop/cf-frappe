@@ -393,16 +393,6 @@ export type CoreDocumentEventPayload =
       readonly applicableDoctypes?: readonly DocTypeName[];
     }
   | {
-      readonly kind: "NotificationRuleSaved";
-      readonly doctypeName: DocTypeName;
-      readonly rule: NotificationRuleDefinition;
-    }
-  | {
-      readonly kind: "NotificationRuleCleared";
-      readonly doctypeName: DocTypeName;
-      readonly ruleName: string;
-    }
-  | {
       readonly kind: "AssignmentRuleSaved";
       readonly doctypeName: DocTypeName;
       readonly rule: AssignmentRuleDefinition;
