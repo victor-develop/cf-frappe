@@ -19,6 +19,7 @@ export * from "./application/document-collaboration-events.js";
 export * from "./application/document-lifecycle-events.js";
 export * from "./application/document-share-events.js";
 export * from "./application/document-service.js";
+export * from "./application/document-unique-values.js";
 export * from "./application/document-history-service.js";
 export * from "./application/document-import-service.js";
 export * from "./application/document-share-service.js";

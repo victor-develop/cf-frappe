@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document command and share event helper module slice:
+As of the document unique-value policy module slice:
 
-- Vitest files: `160`
-- Vitest cases: `1533`
+- Vitest files: `161`
+- Vitest cases: `1539`
 
 ## Implication
 

@@ -55,6 +55,14 @@ import {
   documentShareRevokedPayload
 } from "./document-share-events.js";
 import {
+  activeUniqueValueOwner,
+  releasedUniqueValueReservations,
+  uniqueReservationOwnerStillOwnsValue,
+  uniqueValueReservations,
+  UNIQUE_VALUE_DOCTYPE,
+  type UniqueValueReservation
+} from "./document-unique-values.js";
+import {
   allowOnSubmitIssues,
   childTableOriginIssues,
   copyDocumentData,
@@ -63,7 +71,7 @@ import {
   readonlyIssues,
   stripInternalTableFields
 } from "./document-field-policy.js";
-import { documentStream, namingSeriesStream, uniqueValueStream } from "../core/streams.js";
+import { documentStream, namingSeriesStream } from "../core/streams.js";
 import {
   documentMatchesUserPermissions,
   linkTargetMatchesUserPermissions,
@@ -128,16 +136,6 @@ type RelatedDocTypeResolver = (doctype: string) => DocTypeDefinition | undefined
 interface DocumentServiceDocTypeContext {
   readonly doctype: DocTypeDefinition;
   readonly relatedDocType: RelatedDocTypeResolver;
-}
-
-interface UniqueValueReservation {
-  readonly tenantId: string;
-  readonly stream: string;
-  readonly doctype: string;
-  readonly field: string;
-  readonly valueKey: string;
-  readonly valueLabel: string;
-  readonly documentName: string;
 }
 
 interface UniqueValueReservationWrite {
@@ -469,8 +467,6 @@ export interface DocumentCommandExecutor {
 
 const NAMING_SERIES_DOCTYPE = "__NamingSeries";
 const NAMING_SERIES_MAX_ATTEMPTS = 10;
-const UNIQUE_VALUE_DOCTYPE = "__UniqueValues";
-const MAX_UNIQUE_VALUE_KEY_LENGTH = 512;
 
 export class DocumentService implements DocumentCommandExecutor {
   private readonly registry: ModelRegistry;
@@ -750,7 +746,7 @@ export class DocumentService implements DocumentCommandExecutor {
       options.existing.data,
       options.existing.name
     );
-    const releasedReservations = withoutReservationKeys(existingReservations, nextReservations);
+    const releasedReservations = releasedUniqueValueReservations(existingReservations, nextReservations);
     const uniqueReservationWrites = await this.planUniqueValueReservationWrites(
       options.command.actor,
       nextReservations,
@@ -1945,11 +1941,7 @@ export class DocumentService implements DocumentCommandExecutor {
     const owner = foldDocument(
       await this.store.readStream(documentStream(reservation.tenantId, reservation.doctype, documentName))
     );
-    if (!owner || owner.docstatus === "deleted") {
-      return false;
-    }
-    const value = canonicalUniqueValue(owner.data[reservation.field], reservation.field);
-    return value?.key === reservation.valueKey;
+    return uniqueReservationOwnerStillOwnsValue(reservation, owner);
   }
 
   private async releaseUniqueValues(
@@ -2136,99 +2128,6 @@ function ensureCreateNameAllowed(doctype: DocTypeDefinition, name: string | unde
 
 function renderNamingSeries(pattern: string, value: number): string {
   return pattern.replace(/#+/, (placeholder) => String(value).padStart(placeholder.length, "0"));
-}
-
-function uniqueValueReservations(
-  tenantId: string,
-  doctype: DocTypeDefinition,
-  data: DocumentData,
-  documentName: string
-): readonly UniqueValueReservation[] {
-  return doctype.fields.flatMap((field) => {
-    if (!field.unique) {
-      return [];
-    }
-    const value = canonicalUniqueValue(data[field.name], field.name);
-    if (value === undefined) {
-      return [];
-    }
-    return [
-      {
-        tenantId,
-        stream: uniqueValueStream(tenantId, doctype.name, field.name, value.key),
-        doctype: doctype.name,
-        field: field.name,
-        valueKey: value.key,
-        valueLabel: value.label,
-        documentName
-      }
-    ];
-  });
-}
-
-function canonicalUniqueValue(
-  value: JsonValue | undefined,
-  fieldName: string
-): { readonly key: string; readonly label: string } | undefined {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-  if (typeof value === "string") {
-    if (value.length === 0) {
-      return undefined;
-    }
-    return boundedUniqueValue(`s:${value}`, value, fieldName);
-  }
-  if (typeof value === "number") {
-    return boundedUniqueValue(`n:${String(value)}`, String(value), fieldName);
-  }
-  if (typeof value === "boolean") {
-    return boundedUniqueValue(`b:${String(value)}`, String(value), fieldName);
-  }
-  throw validationFailed([
-    {
-      field: fieldName,
-      code: "unique",
-      message: `Field '${fieldName}' must be scalar to enforce uniqueness`
-    }
-  ]);
-}
-
-function boundedUniqueValue(
-  key: string,
-  label: string,
-  fieldName: string
-): { readonly key: string; readonly label: string } {
-  if (key.length > MAX_UNIQUE_VALUE_KEY_LENGTH) {
-    throw validationFailed([
-      {
-        field: fieldName,
-        code: "unique",
-        message: `Field '${fieldName}' unique value exceeds ${String(MAX_UNIQUE_VALUE_KEY_LENGTH)} characters`
-      }
-    ]);
-  }
-  return { key, label };
-}
-
-function activeUniqueValueOwner(snapshot: DocumentSnapshot | null): string | undefined {
-  if (!snapshot || snapshot.docstatus === "deleted" || snapshot.data.active === false) {
-    return undefined;
-  }
-  const owner = snapshot.data.documentName;
-  return typeof owner === "string" && owner.length > 0 ? owner : undefined;
-}
-
-function withoutReservationKeys(
-  left: readonly UniqueValueReservation[],
-  right: readonly UniqueValueReservation[]
-): readonly UniqueValueReservation[] {
-  const rightKeys = new Set(right.map(uniqueValueReservationKey));
-  return left.filter((reservation) => !rightKeys.has(uniqueValueReservationKey(reservation)));
-}
-
-function uniqueValueReservationKey(reservation: UniqueValueReservation): string {
-  return `${reservation.stream}\u0000${reservation.documentName}`;
 }
 
 function numberField(value: unknown): number | undefined {
