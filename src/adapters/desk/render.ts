@@ -1642,6 +1642,7 @@ export function renderCustomFieldAdmin(state: CustomFieldAdminState): string {
       <label class="field"><span>Maximum</span><input name="max" type="number" step="any"></label>
       <label class="field wide"><span>Mandatory Depends On JSON</span><textarea name="mandatoryDependsOn" rows="4"></textarea></label>
       <label class="field wide"><span>Read Only Depends On JSON</span><textarea name="readOnlyDependsOn" rows="4"></textarea></label>
+      <label class="field wide"><span>Hidden Depends On JSON</span><textarea name="hiddenDependsOn" rows="4"></textarea></label>
       <label class="field"><span>Default JSON</span><textarea name="defaultValue"></textarea></label>
     </div>
     <div class="choices">
@@ -1717,6 +1718,7 @@ export function renderFieldPropertyAdmin(state: FieldPropertyAdminState): string
       <label class="field"><span>Read Only</span><select name="readOnly">${renderBooleanOverrideOptions(overrides.readOnly)}</select></label>
       <label class="field wide"><span>Read Only Depends On JSON</span><textarea name="readOnlyDependsOn" rows="4">${escapeHtml(overrides.readOnlyDependsOn === undefined ? "" : JSON.stringify(overrides.readOnlyDependsOn))}</textarea></label>
       <label class="field"><span>Hidden</span><select name="hidden">${renderBooleanOverrideOptions(overrides.hidden)}</select></label>
+      <label class="field wide"><span>Hidden Depends On JSON</span><textarea name="hiddenDependsOn" rows="4">${escapeHtml(overrides.hiddenDependsOn === undefined ? "" : JSON.stringify(overrides.hiddenDependsOn))}</textarea></label>
       <label class="field"><span>No Copy</span><select name="noCopy">${renderBooleanOverrideOptions(overrides.noCopy)}</select></label>
       <label class="field"><span>Allow On Submit</span><select name="allowOnSubmit">${renderBooleanOverrideOptions(overrides.allowOnSubmit)}</select></label>
       <label class="field"><span>Fetch From</span><input name="fetchFrom" value="${escapeHtml(overrides.fetchFrom ?? "")}" placeholder="link_field.source_field"></label>
@@ -2018,6 +2020,7 @@ function renderFieldPropertyOverrides(overrides: FieldPropertyOverrideState["fie
     overrides.readOnly === undefined ? "" : `read only: ${String(overrides.readOnly)}`,
     overrides.readOnlyDependsOn === undefined ? "" : `read only depends on: ${JSON.stringify(overrides.readOnlyDependsOn)}`,
     overrides.hidden === undefined ? "" : `hidden: ${String(overrides.hidden)}`,
+    overrides.hiddenDependsOn === undefined ? "" : `hidden depends on: ${JSON.stringify(overrides.hiddenDependsOn)}`,
     overrides.noCopy === undefined ? "" : `no copy: ${String(overrides.noCopy)}`,
     overrides.allowOnSubmit === undefined ? "" : `allow on submit: ${String(overrides.allowOnSubmit)}`,
     overrides.fetchFrom === undefined ? "" : `fetch from: ${overrides.fetchFrom}`,
@@ -2113,6 +2116,7 @@ function renderCustomFieldDetails(field: FieldDefinition): string {
     field.description ? `description: ${field.description}` : "",
     field.mandatoryDependsOn ? `mandatory depends on: ${JSON.stringify(field.mandatoryDependsOn)}` : "",
     field.readOnlyDependsOn ? `read only depends on: ${JSON.stringify(field.readOnlyDependsOn)}` : "",
+    field.hiddenDependsOn ? `hidden depends on: ${JSON.stringify(field.hiddenDependsOn)}` : "",
     field.options && field.options.length > 0 ? `options: ${field.options.join(", ")}` : "",
     field.linkTo ? `link: ${field.linkTo}` : "",
     field.tableOf ? `table: ${field.tableOf}` : "",
@@ -2129,6 +2133,7 @@ function renderCustomFieldFlags(field: FieldDefinition): string {
     field.mandatoryDependsOn ? "mandatory depends on" : "",
     field.readOnly ? "read only" : "",
     field.readOnlyDependsOn ? "read only depends on" : "",
+    field.hiddenDependsOn ? "hidden depends on" : "",
     field.hidden ? "hidden" : "",
     field.unique ? "unique" : "",
     field.noCopy ? "no copy" : "",
@@ -3612,7 +3617,10 @@ function renderField(
   const label = escapeHtml(field.label ?? field.name);
   const required = field.required ? " required" : "";
   const readonly = field.readOnly || (mode === "update" && field.readOnly) ? " readonly" : "";
-  const common = `id="${id}" name="${escapeHtml(field.name)}" data-cf-frappe-field-type="${field.type}"${required}${readonly}`;
+  const hiddenDependsOn = field.hiddenDependsOn === undefined
+    ? ""
+    : ` data-cf-frappe-hidden-depends-on="${escapeHtml(JSON.stringify(field.hiddenDependsOn))}"`;
+  const common = `id="${id}" name="${escapeHtml(field.name)}" data-cf-frappe-field-type="${field.type}"${hiddenDependsOn}${required}${readonly}`;
   const formatted = formatFormValue(value);
   const help = renderFieldHelp(field);
   if (field.type === "table") {

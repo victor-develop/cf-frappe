@@ -4145,6 +4145,7 @@ describe("Desk app", () => {
     expect(emptyHtml).toContain('name="description"');
     expect(emptyHtml).toContain('name="mandatoryDependsOn"');
     expect(emptyHtml).toContain('name="readOnlyDependsOn"');
+    expect(emptyHtml).toContain('name="hiddenDependsOn"');
     expect(emptyHtml).toContain('name="fetchFrom"');
     expect(emptyHtml).toContain('name="fetchIfEmpty"');
     expect(emptyHtml).toContain('name="defaultValue"');
@@ -4160,6 +4161,7 @@ describe("Desk app", () => {
         type: "boolean",
         mandatoryDependsOn: JSON.stringify({ field: "priority", value: "High" }),
         readOnlyDependsOn: JSON.stringify({ field: "priority", value: "Low" }),
+        hiddenDependsOn: JSON.stringify({ field: "priority", operator: "is", value: "not set" }),
         unique: "1",
         noCopy: "1",
         allowOnSubmit: "1",
@@ -4182,6 +4184,7 @@ describe("Desk app", () => {
             type: "boolean",
             mandatoryDependsOn: { field: "priority", value: "High" },
             readOnlyDependsOn: { field: "priority", value: "Low" },
+            hiddenDependsOn: { field: "priority", operator: "is", value: "not set" },
             unique: true,
             noCopy: true,
             allowOnSubmit: true,
@@ -4200,6 +4203,7 @@ describe("Desk app", () => {
     expect(currentHtml).toContain("description: Visible after quality review.");
     expect(currentHtml).toContain("mandatory depends on");
     expect(currentHtml).toContain("read only depends on");
+    expect(currentHtml).toContain("hidden depends on");
     expect(currentHtml).toContain("unique");
     expect(currentHtml).toContain("no copy");
     expect(currentHtml).toContain("allow on submit");
@@ -5111,6 +5115,7 @@ describe("Desk app", () => {
     expect(emptyHtml).toContain('name="description"');
     expect(emptyHtml).toContain('name="mandatoryDependsOn"');
     expect(emptyHtml).toContain('name="readOnlyDependsOn"');
+    expect(emptyHtml).toContain('name="hiddenDependsOn"');
     expect(emptyHtml).toContain('name="fetchFrom"');
     expect(emptyHtml).toContain('name="fetchIfEmpty"');
     expect(emptyHtml).toContain("No field property overrides configured.");
@@ -5124,6 +5129,7 @@ describe("Desk app", () => {
         description: "Pick the operational urgency.",
         mandatoryDependsOn: JSON.stringify({ field: "title", operator: "is", value: "set" }),
         readOnlyDependsOn: JSON.stringify({ field: "workflow_state", value: "Closed" }),
+        hiddenDependsOn: JSON.stringify({ field: "title", operator: "is", value: "not set" }),
         noCopy: "true",
         allowOnSubmit: "true",
         inListFilter: "true",
@@ -5145,6 +5151,7 @@ describe("Desk app", () => {
             description: "Pick the operational urgency.",
             mandatoryDependsOn: { field: "title", operator: "is", value: "set" },
             readOnlyDependsOn: { field: "workflow_state", value: "Closed" },
+            hiddenDependsOn: { field: "title", operator: "is", value: "not set" },
             noCopy: true,
             allowOnSubmit: true,
             inListFilter: true,
@@ -5161,6 +5168,7 @@ describe("Desk app", () => {
     expect(currentHtml).toContain("description: Pick the operational urgency.");
     expect(currentHtml).toContain("mandatory depends on");
     expect(currentHtml).toContain("read only depends on");
+    expect(currentHtml).toContain("hidden depends on");
     expect(currentHtml).toContain("no copy: true");
     expect(currentHtml).toContain("allow on submit: true");
     expect(currentHtml).toContain("options: Low, High");
@@ -5169,7 +5177,9 @@ describe("Desk app", () => {
 
     const noteForm = await app.request("/desk/Note/new");
     expect(noteForm.status).toBe(200);
-    await expect(noteForm.text()).resolves.toContain("Pick the operational urgency.");
+    const noteFormHtml = await noteForm.text();
+    expect(noteFormHtml).toContain("Pick the operational urgency.");
+    expect(noteFormHtml).toContain("data-cf-frappe-hidden-depends-on");
 
     const stale = await app.request("/desk/admin/field-properties", {
       method: "POST",

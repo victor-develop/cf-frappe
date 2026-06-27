@@ -225,6 +225,29 @@ describe("schema", () => {
     ).toThrow(FrameworkError);
   });
 
+  it("validates conditional hidden field metadata from normalized field expressions", () => {
+    const Task = defineDocType({
+      name: "Task",
+      fields: [
+        { name: "status", type: "select", options: ["Draft", "Closed"] },
+        {
+          name: "closure_reason",
+          type: "text",
+          hiddenDependsOn: { field: "status", operator: "ne", value: "Closed" }
+        }
+      ]
+    });
+
+    expect(Object.isFrozen(Task.fields[1]?.hiddenDependsOn)).toBe(true);
+    expect(Task.fields[1]?.hiddenDependsOn).toEqual({ field: "status", operator: "ne", value: "Closed" });
+    expect(() =>
+      defineDocType({
+        name: "Bad Hidden",
+        fields: [{ name: "closure_reason", type: "text", hiddenDependsOn: { field: "missing", value: true } }]
+      })
+    ).toThrow(FrameworkError);
+  });
+
   it("validates table rows against child DocType metadata", () => {
     const InvoiceItem = defineDocType({
       name: "Invoice Item",

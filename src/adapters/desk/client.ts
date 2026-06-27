@@ -2022,6 +2022,7 @@ export function renderDeskClientScript(): string {
     };
     binding.frm = createFrm(binding);
     attachFieldListeners(binding);
+    applyConditionalFieldVisibility(binding);
     attachDocumentCollaboration(binding);
     form.addEventListener("submit", function (event) {
       if (binding.submitting) {
@@ -2081,6 +2082,7 @@ export function renderDeskClientScript(): string {
         syncFormData(binding);
         frm.dirty();
         triggerFormEvent(binding, fieldname);
+        applyConditionalFieldVisibility(binding);
         return Promise.resolve(value);
       },
       set_df_property: function (fieldname, property, value) {
@@ -2182,6 +2184,7 @@ export function renderDeskClientScript(): string {
         syncFormData(binding);
         binding.frm.dirty();
         triggerFormEvent(binding, fieldname);
+        applyConditionalFieldVisibility(binding);
         sendFormFieldEdit(binding, field, true);
       });
       field.addEventListener("input", function () {
@@ -2190,6 +2193,7 @@ export function renderDeskClientScript(): string {
         }
         syncFormData(binding);
         binding.frm.dirty();
+        applyConditionalFieldVisibility(binding);
         sendFormFieldEdit(binding, field, true);
       });
       field.addEventListener("blur", function () {
@@ -2556,6 +2560,7 @@ export function renderDeskClientScript(): string {
     binding.doc = cloneMergeValue(snapshot.data);
     binding.frm.doc = binding.doc;
     writeDocumentToForm(binding, binding.doc);
+    applyConditionalFieldVisibility(binding);
     binding.dirty = false;
     delete binding.form.dataset.dirty;
     delete binding.form.dataset.remoteUpdate;
@@ -2578,6 +2583,146 @@ export function renderDeskClientScript(): string {
       setControlValue(field, docValue(data, field.name));
       rememberLockedFieldValue(field);
     });
+  }
+
+  function applyConditionalFieldVisibility(binding) {
+    syncFormData(binding);
+    Array.prototype.forEach.call(binding.form.querySelectorAll("[name]"), function (field) {
+      var expressionSource = field.dataset && field.dataset.cfFrappeHiddenDependsOn;
+      if (!expressionSource) {
+        return;
+      }
+      var expression = parseJson(expressionSource);
+      if (!expression) {
+        return;
+      }
+      setFieldHidden(field, matchesFormFilterExpression(binding, expression));
+    });
+  }
+
+  function parseJson(source) {
+    try {
+      return JSON.parse(source);
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function matchesFormFilterExpression(binding, expression) {
+    if (!expression || typeof expression !== "object") {
+      return false;
+    }
+    if (expression.kind === "group") {
+      var filters = Array.isArray(expression.filters) ? expression.filters : [];
+      return expression.match === "any"
+        ? filters.some(function (filter) { return matchesFormFilterExpression(binding, filter); })
+        : filters.every(function (filter) { return matchesFormFilterExpression(binding, filter); });
+    }
+    return matchesFormFilterPredicate(binding, expression);
+  }
+
+  function matchesFormFilterPredicate(binding, filter) {
+    if (!filter || typeof filter.field !== "string") {
+      return false;
+    }
+    var actual = formConditionValue(binding, filter.field);
+    var operator = filter.operator || "eq";
+    if (operator === "eq") {
+      return actual === filter.value;
+    }
+    if (operator === "ne") {
+      return actual !== undefined && actual !== null && actual !== filter.value;
+    }
+    if (operator === "in") {
+      return actual !== undefined && actual !== null && Array.isArray(filter.value) && filter.value.indexOf(actual) >= 0;
+    }
+    if (operator === "not_in") {
+      return actual !== undefined && actual !== null && Array.isArray(filter.value) && filter.value.indexOf(actual) < 0;
+    }
+    if (operator === "is") {
+      return filter.value === "set" ? actual !== undefined && actual !== null : actual === undefined || actual === null;
+    }
+    if (operator === "contains") {
+      return actual !== undefined && actual !== null &&
+        String(actual).toLowerCase().indexOf(String(filter.value).toLowerCase()) >= 0;
+    }
+    if (operator === "like" || operator === "not_like") {
+      if (actual === undefined || actual === null) {
+        return false;
+      }
+      var matched = likePatternMatches(actual, String(filter.value));
+      return operator === "like" ? matched : !matched;
+    }
+    if (operator === "gt" || operator === "gte" || operator === "lt" || operator === "lte") {
+      if (actual === undefined || actual === null) {
+        return false;
+      }
+      var compared = compareConditionValues(actual, filter.value);
+      return operator === "gt" ? compared > 0 :
+        operator === "gte" ? compared >= 0 :
+        operator === "lt" ? compared < 0 :
+        compared <= 0;
+    }
+    if (operator === "between" || operator === "not_between") {
+      if (actual === undefined || actual === null || !Array.isArray(filter.value) || filter.value.length !== 2) {
+        return false;
+      }
+      var between = compareConditionValues(actual, filter.value[0]) >= 0 &&
+        compareConditionValues(actual, filter.value[1]) <= 0;
+      return operator === "between" ? between : !between;
+    }
+    return false;
+  }
+
+  function formConditionValue(binding, fieldname) {
+    if (fieldname === "system.name") {
+      return binding.context.documentName;
+    }
+    if (fieldname === "system.docstatus") {
+      return binding.context.documentStatus;
+    }
+    if (fieldname === "system.version") {
+      return binding.context.documentVersion;
+    }
+    return docValue(binding.doc, fieldname);
+  }
+
+  function compareConditionValues(left, right) {
+    if (typeof left === "number" && typeof right === "number") {
+      return left - right;
+    }
+    return String(left).localeCompare(String(right));
+  }
+
+  function likePatternMatches(actual, pattern) {
+    return new RegExp("^" + likePatternRegex(pattern) + "$", "i").test(String(actual));
+  }
+
+  function likePatternRegex(pattern) {
+    var regex = "";
+    for (var index = 0; index < pattern.length; index += 1) {
+      var character = pattern[index];
+      if (character === "\\\\") {
+        var next = pattern[index + 1];
+        if (next === undefined) {
+          regex += "(?!)";
+          continue;
+        }
+        regex += escapeRegex(next);
+        index += 1;
+      } else if (character === "%") {
+        regex += "[\\\\s\\\\S]*";
+      } else if (character === "_") {
+        regex += "[\\\\s\\\\S]";
+      } else {
+        regex += escapeRegex(character || "");
+      }
+    }
+    return regex;
+  }
+
+  function escapeRegex(value) {
+    return String(value).replace(/[\\\\^$.*+?()[\\]{}|]/g, "\\\\$&");
   }
 
   function isSaveSubmit(event) {

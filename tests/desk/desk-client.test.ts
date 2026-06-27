@@ -5639,6 +5639,47 @@ describe("Desk client runtime", () => {
     expect(events.at(-1)).toBe("validate:Blocked");
   });
 
+  it("applies model-declared conditional hidden fields on generated forms", async () => {
+    const status = new FakeField("status", "");
+    status.dataset.cfFrappeFieldType = "select";
+    const reasonWrapper = new FakeFieldWrapper();
+    const reason = new FakeField("closure_reason", "Done", "text", reasonWrapper);
+    reason.dataset.cfFrappeHiddenDependsOn = JSON.stringify({
+      kind: "group",
+      match: "any",
+      filters: [
+        { field: "status", operator: "is", value: "not set" },
+        { field: "status", operator: "ne", value: "Closed" }
+      ]
+    });
+    const form = new FakeForm([status, reason, new FakeField("expectedVersion", "0", "hidden")]);
+    const document = new FakeDocument({
+      form,
+      runtimeDataset: {
+        doctype: "Task",
+        scope: "form",
+        tenantId: "acme"
+      }
+    });
+    const runtime = evaluateDeskClient(fetch, document);
+
+    expect(runtime.form.current()?.doc).toMatchObject({ status: undefined, closure_reason: "Done" });
+    expect(reason.hidden).toBe(true);
+    expect(reasonWrapper.hidden).toBe(true);
+
+    status.value = "Closed";
+    status.emit("change");
+
+    expect(reason.hidden).toBe(false);
+    expect(reasonWrapper.hidden).toBe(false);
+
+    status.value = "Open";
+    status.emit("input");
+
+    expect(reason.hidden).toBe(true);
+    expect(reasonWrapper.hidden).toBe(true);
+  });
+
   it("merge-saves generated form drafts through the resource merge endpoint", async () => {
     const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
     const fetch = async (url: string | URL | Request, init?: RequestInit) => {

@@ -5149,6 +5149,7 @@ async function parseDeskCustomField(request: Request): Promise<ParsedDeskCustomF
   const max = optionalNumberSearchParamValue(form, "max", "Maximum");
   const mandatoryDependsOn = mandatoryDependsOnFormValue(form);
   const readOnlyDependsOn = readOnlyDependsOnFormValue(form);
+  const hiddenDependsOn = hiddenDependsOnFormValue(form);
   const defaultValue = optionalJsonSearchParamValue(form, "defaultValue", "Default value");
   return {
     doctype,
@@ -5162,6 +5163,7 @@ async function parseDeskCustomField(request: Request): Promise<ParsedDeskCustomF
       ...(form.has("readOnly") ? { readOnly: true } : {}),
       ...(readOnlyDependsOn === undefined ? {} : { readOnlyDependsOn }),
       ...(form.has("hidden") ? { hidden: true } : {}),
+      ...(hiddenDependsOn === undefined ? {} : { hiddenDependsOn }),
       ...(form.has("unique") ? { unique: true } : {}),
       ...(form.has("noCopy") ? { noCopy: true } : {}),
       ...(form.has("allowOnSubmit") ? { allowOnSubmit: true } : {}),
@@ -5195,6 +5197,7 @@ async function parseDeskFieldPropertyOverride(request: Request): Promise<ParsedD
   const options = commaListFormValue(form.get("options"));
   const mandatoryDependsOn = mandatoryDependsOnFormValue(form);
   const readOnlyDependsOn = readOnlyDependsOnFormValue(form);
+  const hiddenDependsOn = hiddenDependsOnFormValue(form);
   const defaultValue = optionalJsonSearchParamValue(form, "defaultValue", "Default value");
   const overrides = {
     ...optionalStringProperty(form, "label", "label"),
@@ -5204,6 +5207,7 @@ async function parseDeskFieldPropertyOverride(request: Request): Promise<ParsedD
     ...optionalBooleanProperty(form, "readOnly", "readOnly", "Read only"),
     ...(readOnlyDependsOn === undefined ? {} : { readOnlyDependsOn }),
     ...optionalBooleanProperty(form, "hidden", "hidden", "Hidden"),
+    ...(hiddenDependsOn === undefined ? {} : { hiddenDependsOn }),
     ...optionalBooleanProperty(form, "noCopy", "noCopy", "No copy"),
     ...optionalBooleanProperty(form, "allowOnSubmit", "allowOnSubmit", "Allow on submit"),
     ...optionalStringProperty(form, "fetchFrom", "fetchFrom"),
@@ -5468,6 +5472,17 @@ function readOnlyDependsOnFormValue(form: URLSearchParams): ListFilterExpression
     return value as unknown as ListFilterExpression;
   }
   throw new FrameworkError("BAD_REQUEST", "Read only depends on must be a JSON object", { status: 400 });
+}
+
+function hiddenDependsOnFormValue(form: URLSearchParams): ListFilterExpression | undefined {
+  const value = optionalJsonSearchParamValue(form, "hiddenDependsOn", "Hidden depends on");
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as unknown as ListFilterExpression;
+  }
+  throw new FrameworkError("BAD_REQUEST", "Hidden depends on must be a JSON object", { status: 400 });
 }
 
 function assignmentRuleAssigneesFormValue(
