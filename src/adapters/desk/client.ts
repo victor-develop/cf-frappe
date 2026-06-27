@@ -187,6 +187,10 @@ export function renderDeskClientScript(): string {
     return "/desk/dashboards/" + encodePart(dashboard);
   }
 
+  function deskKanbanPath(kanban) {
+    return "/desk/kanbans/" + encodePart(kanban);
+  }
+
   function deskAdminUsersPath(options) {
     var params = {};
     setParam(params, "user", options && (options.userId !== undefined ? options.userId : options.user));
@@ -337,6 +341,14 @@ export function renderDeskClientScript(): string {
 
   function dashboardMetaPath(dashboard) {
     return "/api/meta/dashboards" + (dashboard === undefined ? "" : "/" + encodePart(dashboard));
+  }
+
+  function kanbanPath(kanban, action) {
+    return (kanban === undefined ? "/api/meta/kanbans" : "/api/kanban/" + encodePart(kanban)) + (action === undefined ? "" : "/" + action);
+  }
+
+  function kanbanMetaPath(kanban) {
+    return "/api/meta/kanbans" + (kanban === undefined ? "" : "/" + encodePart(kanban));
   }
 
   function reportBuilderPath(doctype, id, action) {
@@ -3484,6 +3496,17 @@ export function renderDeskClientScript(): string {
         return request(dashboardPath(dashboard, "run")).then(unwrapData);
       }
     }),
+    kanban: Object.freeze({
+      get: function (kanban) {
+        return request(kanbanMetaPath(kanban)).then(unwrapData);
+      },
+      list: function () {
+        return request(kanbanMetaPath()).then(unwrapData);
+      },
+      run: function (kanban) {
+        return request(kanbanPath(kanban, "run")).then(unwrapData);
+      }
+    }),
     jobs: Object.freeze({
       createSchedule: function (input) {
         return request(jobSchedulePath(), { method: "POST", body: input || {} }).then(unwrapData);
@@ -3610,6 +3633,12 @@ export function renderDeskClientScript(): string {
       },
       dashboards: function () {
         return request(dashboardMetaPath()).then(unwrapData);
+      },
+      kanban: function (kanban) {
+        return request(kanbanMetaPath(kanban)).then(unwrapData);
+      },
+      kanbans: function () {
+        return request(kanbanMetaPath()).then(unwrapData);
       },
       doctype: function (doctype) {
         return request("/api/meta/doctypes/" + encodePart(doctype)).then(unwrapData);
@@ -3910,6 +3939,7 @@ export function renderDeskClientScript(): string {
       adminUsersUrl: deskAdminUsersPath,
       adminWorkflowsUrl: deskAdminWorkflowsPath,
       dashboardUrl: deskDashboardPath,
+      kanbanUrl: deskKanbanPath,
       fileContentUrl: function (name) {
         return deskFilePath(name, "content");
       },

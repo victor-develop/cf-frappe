@@ -11,6 +11,7 @@ import {
 } from "./dashboard.js";
 import { FrameworkError } from "./errors.js";
 import { normalizeListFilters } from "./list-view.js";
+import { assertKanbanDefinition, assertKanbanMatchesDocType, defineKanban, type KanbanDefinition } from "./kanban.js";
 import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-format.js";
 import { assertPrintFormatMatchesDocType, assertPrintLetterheadValid } from "./print-format.js";
 import type { ReportDefinition, ReportSummaryDefinition } from "./reports.js";
@@ -53,6 +54,7 @@ export interface RegistryOptions {
   readonly printFormats?: readonly PrintFormatDefinition[];
   readonly reports?: readonly ReportDefinition[];
   readonly dashboards?: readonly DashboardDefinition[];
+  readonly kanbans?: readonly KanbanDefinition[];
   readonly workspaces?: readonly WorkspaceDefinition[];
   readonly clientScripts?: readonly ClientScriptDefinition[];
   readonly dataPatches?: readonly DataPatchDefinition[];
@@ -66,6 +68,7 @@ export class ModelRegistry {
   private readonly printFormats = new Map<string, PrintFormatDefinition>();
   private readonly reports = new Map<string, ReportDefinition>();
   private readonly dashboards = new Map<string, DashboardDefinition>();
+  private readonly kanbans = new Map<string, KanbanDefinition>();
   private readonly workspaces = new Map<string, WorkspaceDefinition>();
   private readonly clientScripts = new Map<string, ClientScriptDefinition>();
   private readonly dataPatches = new Map<string, DataPatchDefinition>();
@@ -87,6 +90,9 @@ export class ModelRegistry {
     }
     for (const dashboard of options.dashboards ?? []) {
       this.registerDashboard(dashboard);
+    }
+    for (const kanban of options.kanbans ?? []) {
+      this.registerKanban(kanban);
     }
     for (const format of options.printFormats ?? []) {
       this.registerPrintFormat(format);
@@ -263,6 +269,18 @@ export class ModelRegistry {
     this.dashboards.set(definition.name, definition);
   }
 
+  registerKanban(kanban: KanbanDefinition): void {
+    const definition = defineKanban(kanban);
+    if (this.kanbans.has(definition.name)) {
+      throw new FrameworkError("KANBAN_DUPLICATE", `Kanban '${definition.name}' is already registered`, {
+        status: 409
+      });
+    }
+    assertKanbanDefinition(definition);
+    this.assertKanbanReferencesResolve(definition);
+    this.kanbans.set(definition.name, definition);
+  }
+
   registerWorkspace(workspace: WorkspaceDefinition): void {
     const definition = defineWorkspace(workspace);
     if (this.workspaces.has(definition.name)) {
@@ -332,6 +350,20 @@ export class ModelRegistry {
 
   listDashboards(): readonly DashboardDefinition[] {
     return [...this.dashboards.values()].sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  getKanban(kanbanName: string): KanbanDefinition {
+    const definition = this.kanbans.get(kanbanName);
+    if (!definition) {
+      throw new FrameworkError("KANBAN_NOT_FOUND", `Kanban '${kanbanName}' is not registered`, {
+        status: 404
+      });
+    }
+    return definition;
+  }
+
+  listKanbans(): readonly KanbanDefinition[] {
+    return [...this.kanbans.values()].sort((left, right) => left.name.localeCompare(right.name));
   }
 
   getPrintFormat(formatName: string): PrintFormatDefinition {
@@ -421,8 +453,27 @@ export class ModelRegistry {
             { status: 400 }
           );
         }
+        if (shortcut.kind === "kanban" && !this.kanbans.has(shortcut.target ?? "")) {
+          throw new FrameworkError(
+            "WORKSPACE_INVALID",
+            `Workspace '${workspace.name}' shortcut '${shortcut.name}' references unknown kanban '${shortcut.target ?? ""}'`,
+            { status: 400 }
+          );
+        }
       }
     }
+  }
+
+  private assertKanbanReferencesResolve(kanban: KanbanDefinition): void {
+    const doctype = this.doctypes.get(kanban.doctype);
+    if (!doctype) {
+      throw new FrameworkError(
+        "KANBAN_INVALID",
+        `Kanban '${kanban.name}' references unknown DocType '${kanban.doctype}'`,
+        { status: 400 }
+      );
+    }
+    assertKanbanMatchesDocType(kanban, doctype);
   }
 
   private assertDashboardReferencesResolve(dashboard: DashboardDefinition): void {

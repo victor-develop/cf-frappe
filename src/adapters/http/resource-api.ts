@@ -21,6 +21,7 @@ import type { FieldPropertyService } from "../../application/field-property-serv
 import type { JobHistoryService } from "../../application/job-history-service.js";
 import type { JobRetryPort } from "../../application/job-retry-service.js";
 import type { JobScheduleService } from "../../application/job-schedule-service.js";
+import type { KanbanService } from "../../application/kanban-service.js";
 import type { PrintSettingsService } from "../../application/print-settings-service.js";
 import type { PrintService } from "../../application/print-service.js";
 import { QueryService } from "../../application/query-service.js";
@@ -57,6 +58,7 @@ import { toErrorResponse } from "./errors.js";
 import { createFileApi } from "./file-api.js";
 import { createFieldPropertyApi } from "./field-property-api.js";
 import { createJobApi } from "./job-api.js";
+import { createKanbanApi } from "./kanban-api.js";
 import { createNotificationApi } from "./notification-api.js";
 import { createNotificationRuleApi } from "./notification-rule-api.js";
 import { createPrintApi } from "./print-api.js";
@@ -99,6 +101,7 @@ export interface ResourceApiOptions {
   readonly audit?: AuditService;
   readonly dataPatches?: DataPatchAdminPort;
   readonly dashboards?: DashboardService;
+  readonly kanbans?: KanbanService;
   readonly dataPatchQueue?: DataPatchQueuePort;
   readonly dataPatchRollbackQueue?: DataPatchRollbackQueuePort;
   readonly dataPatchRollbackRetryQueue?: DataPatchRollbackRetryQueuePort;
@@ -265,6 +268,16 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       "/",
       createDashboardApi({
         dashboards: options.dashboards,
+        actor: resolveActor
+      })
+    );
+  }
+
+  if (options.kanbans) {
+    app.route(
+      "/",
+      createKanbanApi({
+        kanbans: options.kanbans,
         actor: resolveActor
       })
     );
@@ -951,6 +964,7 @@ interface WorkspaceMetadataAccess {
   readonly creatableDoctypes: ReadonlySet<string>;
   readonly reports: ReadonlySet<string>;
   readonly dashboards: ReadonlySet<string>;
+  readonly kanbans: ReadonlySet<string>;
   readonly files: boolean;
   readonly notifications: boolean;
   readonly adminTargets: ReadonlySet<string>;
@@ -969,6 +983,7 @@ async function workspaceMetadataAccess(options: ResourceApiOptions, actor: Actor
         .map((report) => report.name)
     ),
     dashboards: new Set((await options.dashboards?.listDashboards(actor) ?? []).map((dashboard) => dashboard.name)),
+    kanbans: new Set((await options.kanbans?.listKanbans(actor) ?? []).map((kanban) => kanban.name)),
     files: options.files !== undefined,
     notifications: options.notifications !== undefined,
     adminTargets: workspaceAdminTargets(options, actor)
@@ -1021,6 +1036,9 @@ function canReadWorkspaceShortcutTarget(
   }
   if (shortcut.kind === "dashboard") {
     return access.dashboards.has(shortcut.target ?? "");
+  }
+  if (shortcut.kind === "kanban") {
+    return access.kanbans.has(shortcut.target ?? "");
   }
   if (shortcut.kind === "file") {
     return access.files;

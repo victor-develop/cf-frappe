@@ -8,6 +8,7 @@ import {
   createSignedSessionCookie,
   defineDashboard,
   defineDataPatch,
+  defineKanban,
   deterministicIds,
   fixedClock,
   InMemoryDataPatchLog,
@@ -111,6 +112,63 @@ describe("CloudFrappe Worker routing", () => {
     expect(html).toContain("Operational KPIs");
     expect(html).toContain("Open Notes");
     expect(html).toContain("<strong>0</strong>");
+  });
+
+  it("mounts metadata Kanban API and Desk routes through Worker routing", async () => {
+    const registry = createRegistry({
+      doctypes: [noteDocType],
+      kanbans: [
+        defineKanban({
+          name: "Note Board",
+          label: "Note Board",
+          description: "Notes grouped by workflow state",
+          roles: ["User"],
+          doctype: "Note",
+          columnField: "workflow_state",
+          titleField: "title"
+        })
+      ]
+    });
+    const worker = createCloudFrappeWorker({
+      registry,
+      actor: () => owner
+    });
+    const env = {
+      DB: fakeD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const metadata = await worker.fetch!(cfRequest("http://localhost/api/meta/kanbans"), env, fakeExecutionContext());
+    const run = await worker.fetch!(
+      cfRequest("http://localhost/api/kanban/Note%20Board/run"),
+      env,
+      fakeExecutionContext()
+    );
+    const desk = await worker.fetch!(
+      cfRequest("http://localhost/desk/kanbans/Note%20Board"),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(metadata.status).toBe(200);
+    await expect(metadata.json()).resolves.toMatchObject({
+      data: [{ name: "Note Board", doctype: "Note", columnField: "workflow_state" }]
+    });
+    expect(run.status).toBe(200);
+    await expect(run.json()).resolves.toMatchObject({
+      data: {
+        board: { name: "Note Board" },
+        columns: [
+          { value: "Open", label: "Open", total: 0, cards: [] },
+          { value: "Closed", label: "Closed", total: 0, cards: [] }
+        ]
+      }
+    });
+    expect(desk.status).toBe(200);
+    const html = await desk.text();
+    expect(html).toContain("Notes grouped by workflow state");
+    expect(html).toContain("Open");
+    expect(html).toContain("Closed");
   });
 
   it("enables generated Desk document presence panels when realtime is configured", async () => {

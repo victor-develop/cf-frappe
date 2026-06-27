@@ -31,6 +31,7 @@ import {
   type ReportFilterOperator
 } from "../../core/reports.js";
 import type { DashboardDefinition } from "../../core/dashboard.js";
+import type { KanbanDefinition } from "../../core/kanban.js";
 import type { ClientScriptDefinition, ClientScriptScope } from "../../core/client-script.js";
 import type { WorkspaceDefinition, WorkspaceShortcutKind } from "../../core/workspace.js";
 import type {
@@ -45,6 +46,7 @@ import type { FieldPropertyOverrideState } from "../../core/field-property-overr
 import type { WorkflowDefinitionState } from "../../core/workflow.js";
 import type { DocumentSharePermission, DocumentShareState } from "../../core/document-shares.js";
 import type { FileDashboard } from "../../application/file-service.js";
+import type { KanbanRunResult } from "../../application/kanban-service.js";
 import type {
   DataPatchApplyPlan,
   DataPatchDashboard,
@@ -108,6 +110,7 @@ export interface DeskLayoutOptions {
   readonly active?: string;
   readonly activeReport?: string;
   readonly activeDashboard?: string;
+  readonly activeKanban?: string;
   readonly activeSearch?: boolean;
   readonly activeAdmin?: string;
   readonly activeWorkspace?: string;
@@ -117,6 +120,7 @@ export interface DeskLayoutOptions {
   readonly doctypes: readonly DocTypeDefinition[];
   readonly reports?: readonly ReportDefinition[];
   readonly dashboards?: readonly DashboardDefinition[];
+  readonly kanbans?: readonly KanbanDefinition[];
   readonly workspaces?: readonly WorkspaceDefinition[];
   readonly message?: string;
 }
@@ -189,6 +193,12 @@ export function renderDeskLayout(options: DeskLayoutOptions): string {
         `<a class="nav-link${dashboard.name === options.activeDashboard ? " is-active" : ""}" href="/desk/dashboards/${encodeURIComponent(dashboard.name)}">${escapeHtml(dashboard.label ?? dashboard.name)}</a>`
     )
     .join("");
+  const kanbanNav = (options.kanbans ?? [])
+    .map(
+      (kanban) =>
+        `<a class="nav-link${kanban.name === options.activeKanban ? " is-active" : ""}" href="/desk/kanbans/${encodeURIComponent(kanban.name)}">${escapeHtml(kanban.label ?? kanban.name)}</a>`
+    )
+    .join("");
   const adminNav = (options.adminLinks ?? [])
     .map(
       (link) =>
@@ -213,6 +223,7 @@ export function renderDeskLayout(options: DeskLayoutOptions): string {
       ${nav ? `<p class="nav-heading">DocTypes</p>${nav}` : ""}
       ${reportNav ? `<p class="nav-heading">Reports</p>${reportNav}` : ""}
       ${dashboardNav ? `<p class="nav-heading">Dashboards</p>${dashboardNav}` : ""}
+      ${kanbanNav ? `<p class="nav-heading">Kanban</p>${kanbanNav}` : ""}
       ${options.showNotifications ? `<p class="nav-heading">Notifications</p><a class="nav-link" href="/desk/notifications">Inbox</a>` : ""}
       ${options.showFiles ? `<p class="nav-heading">Files</p><a class="nav-link" href="/desk/files">Files</a>` : ""}
       ${adminNav ? `<p class="nav-heading">Admin</p>${adminNav}` : ""}
@@ -236,7 +247,8 @@ export function renderDeskHome(
   doctypes: readonly DocTypeDefinition[],
   reports: readonly ReportDefinition[] = [],
   workspaces: readonly WorkspaceDefinition[] = [],
-  dashboards: readonly DashboardDefinition[] = []
+  dashboards: readonly DashboardDefinition[] = [],
+  kanbans: readonly KanbanDefinition[] = []
 ): string {
   const workspaceCards = workspaces
     .map(
@@ -258,6 +270,7 @@ export function renderDeskHome(
     .join("");
   return `${workspaceCards ? `<section class="workspace-grid">${workspaceCards}</section>` : ""}
   ${dashboards.length > 0 ? renderDashboardList(dashboards) : ""}
+  ${kanbans.length > 0 ? renderKanbanList(kanbans) : ""}
   <section class="panel">
     <div class="table-wrap">
       <table>
@@ -721,6 +734,51 @@ export function renderDashboardView(result: DashboardRunResult): string {
     : "";
   const cards = result.cards.map(renderDashboardCard).join("");
   return `${description}<section class="dashboard-grid">${cards || `<p class="empty">No dashboard cards.</p>`}</section>`;
+}
+
+export function renderKanbanList(kanbans: readonly KanbanDefinition[]): string {
+  const rows = kanbans
+    .map(
+      (kanban) => `<tr>
+        <td><a href="/desk/kanbans/${encodeURIComponent(kanban.name)}">${escapeHtml(kanban.label ?? kanban.name)}</a></td>
+        <td>${escapeHtml(kanban.doctype)}</td>
+        <td>${escapeHtml(kanban.columnField)}</td>
+        <td>${escapeHtml(kanban.module ?? "")}</td>
+        <td>${escapeHtml(kanban.description ?? "")}</td>
+      </tr>`
+    )
+    .join("");
+  return `<section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Kanban</th><th>DocType</th><th>Column Field</th><th>Module</th><th>Description</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="5" class="empty">No readable kanban boards.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+export function renderKanbanView(result: KanbanRunResult): string {
+  const description = result.board.description
+    ? `<p class="muted">${escapeHtml(result.board.description)}</p>`
+    : "";
+  const columns = result.columns
+    .map((column) => `<section class="kanban-column">
+      <header>
+        <h2>${escapeHtml(column.label)}</h2>
+        <span>${String(column.total)}</span>
+      </header>
+      ${column.cards.length === 0
+        ? `<p class="empty">No cards.</p>`
+        : column.cards.map((card) => `<a class="kanban-card" href="/desk/${encodeURIComponent(card.doctype)}/${encodeURIComponent(card.name)}">
+          <strong>${escapeHtml(card.title)}</strong>
+          <span>${escapeHtml(card.name)}</span>
+          <small>v${String(card.version)} updated ${escapeHtml(card.updatedAt)}</small>
+        </a>`).join("")}
+      ${column.hasMore ? `<p class="muted">More cards hidden by board limit.</p>` : ""}
+    </section>`)
+    .join("");
+  return `${description}<section class="kanban-board">${columns || `<p class="empty">No kanban columns.</p>`}</section>`;
 }
 
 function renderDashboardCard(card: DashboardRunResult["cards"][number]): string {
@@ -3828,6 +3886,52 @@ h3 { margin: 0 0 12px; font-size: 16px; line-height: 1.35; letter-spacing: 0; }
 .dashboard-chart-card { min-width: 0; }
 @media (min-width: 720px) {
   .dashboard-chart-card { grid-column: span 2; }
+}
+.kanban-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+.kanban-column {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f9fafb;
+}
+.kanban-column header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.kanban-column header span {
+  min-width: 28px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #e9eef7;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+.kanban-card {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+}
+.kanban-card:hover { border-color: var(--primary); }
+.kanban-card span,
+.kanban-card small {
+  color: var(--muted);
+  font-size: 13px;
 }
 .panel {
   background: var(--surface);

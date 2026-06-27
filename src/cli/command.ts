@@ -58,6 +58,13 @@ import {
   type DashboardRemoteCommand
 } from "./dashboards.js";
 import {
+  KanbanRemoteError,
+  runRemoteKanbanCommand,
+  type KanbanHeaderOption,
+  type KanbanRemoteAction,
+  type KanbanRemoteCommand
+} from "./kanbans.js";
+import {
   DocTypeRemoteError,
   runRemoteDocTypeCommand,
   type DocTypeHeaderOption,
@@ -251,6 +258,7 @@ type ParsedCommand =
   | CustomFieldRemoteCommand
   | DataPatchRemoteCommand
   | DashboardRemoteCommand
+  | KanbanRemoteCommand
   | DocTypeRemoteCommand
   | FieldPropertyRemoteCommand
   | JobRemoteCommand
@@ -308,6 +316,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     if (command.kind === "dashboards") {
       io.stdout.write(await runRemoteDashboardCommand(command, {
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
+    if (command.kind === "kanbans") {
+      io.stdout.write(await runRemoteKanbanCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -529,6 +544,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof CustomFieldRemoteError ||
       error instanceof DataPatchRemoteError ||
       error instanceof DashboardRemoteError ||
+      error instanceof KanbanRemoteError ||
       error instanceof DocTypeRemoteError ||
       error instanceof FieldPropertyRemoteError ||
       error instanceof JobRemoteError ||
@@ -578,6 +594,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "dashboards") {
     return parseDashboardsArgs(rest);
+  }
+  if (command === "kanbans") {
+    return parseKanbansArgs(rest);
   }
   if (command === "doctypes") {
     return parseDoctypesArgs(rest);
@@ -2516,6 +2535,98 @@ function dataPatchAction(value: string): DataPatchRemoteAction | undefined {
 }
 
 function dashboardAction(value: string): DashboardRemoteAction | undefined {
+  return value === "list" || value === "get" || value === "run" ? value : undefined;
+}
+
+function parseKanbansArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = kanbanAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown kanbans command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: KanbanHeaderOption[] = [];
+  let kanban: string | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "Kanban");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "Kanban");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--kanban") {
+      if (action === "list") {
+        return { kind: "invalid", message: "Cannot use --kanban with kanbans list" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      kanban = value;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown kanbans ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if (action !== "list" && kanban === undefined) {
+    return { kind: "invalid", message: `Kanban ${action} requires --kanban` };
+  }
+
+  return {
+    kind: "kanbans",
+    action,
+    url,
+    headers,
+    ...(kanban === undefined ? {} : { kanban })
+  };
+}
+
+function kanbanAction(value: string): KanbanRemoteAction | undefined {
   return value === "list" || value === "get" || value === "run" ? value : undefined;
 }
 
@@ -6046,6 +6157,9 @@ function helpText(): string {
     "  cf-frappe dashboards list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe dashboards get --url <origin> --dashboard <dashboard> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe dashboards run --url <origin> --dashboard <dashboard> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe kanbans list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe kanbans get --url <origin> --kanban <kanban> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe kanbans run --url <origin> --kanban <kanban> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe doctypes list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe doctypes get --url <origin> --doctype <doctype> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe doctypes list-view --url <origin> --doctype <doctype> [--header <name:value>] [--header-env <name=ENV>]",

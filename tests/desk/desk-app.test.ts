@@ -12,6 +12,7 @@ import {
   defineClientScript,
   defineDataPatch,
   defineDashboard,
+  defineKanban,
   defineDocType,
   defineReport,
   defineWorkspace,
@@ -32,6 +33,7 @@ import {
   JobHistoryService,
   JobRetryService,
   JobScheduleService,
+  KanbanService,
   jobScheduleDefinitionsStream,
   NotificationRuleService,
   QueryService,
@@ -819,6 +821,87 @@ describe("Desk app", () => {
     expect(html).toContain(
       '<a class="chart-drilldown" href="/desk/reports/Note%20States?filter_priority=High&amp;filter_workflow_state=Open"><g>'
     );
+  });
+
+  it("renders metadata-defined kanban boards in Desk", async () => {
+    const registry = createRegistry({
+      doctypes: [noteDocType],
+      kanbans: [
+        defineKanban({
+          name: "Notes Board",
+          label: "Notes Board",
+          description: "Work by state",
+          roles: ["User"],
+          doctype: "Note",
+          columnField: "workflow_state",
+          titleField: "title",
+          columns: [
+            { value: "Open", label: "Open" },
+            { value: "Closed", label: "Closed" }
+          ]
+        })
+      ],
+      workspaces: [
+        defineWorkspace({
+          name: "Operations",
+          sections: [
+            {
+              name: "main",
+              shortcuts: [{ name: "notes-board", kind: "kanban", target: "Notes Board" }]
+            }
+          ]
+        })
+      ]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry,
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["kanban-1", "kanban-2"])
+    });
+    const queries = new QueryService({ registry, projections: store });
+    const kanbans = new KanbanService({ registry, queries });
+    const app = createDeskApp({
+      registry,
+      documents,
+      queries,
+      kanbans,
+      actor: () => owner
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Kanban Open", priority: "High", workflow_state: "Open", count: 1 })
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Kanban Closed", priority: "High", workflow_state: "Closed", count: 2 })
+    });
+
+    const home = await app.request("/desk");
+    expect(home.status).toBe(200);
+    await expect(home.text()).resolves.toContain('href="/desk/kanbans/Notes%20Board"');
+
+    const workspace = await app.request("/desk/workspaces/Operations");
+    expect(workspace.status).toBe(200);
+    await expect(workspace.text()).resolves.toContain('href="/desk/kanbans/Notes%20Board"');
+
+    const list = await app.request("/desk/kanbans");
+    expect(list.status).toBe(200);
+    const listHtml = await list.text();
+    expect(listHtml).toContain("Work by state");
+    expect(listHtml).toContain("<td>workflow_state</td>");
+
+    const page = await app.request("/desk/kanbans/Notes%20Board");
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain("Work by state");
+    expect(html).toContain("kanban-column");
+    expect(html).toContain("Kanban Open");
+    expect(html).toContain('href="/desk/Note/Kanban%20Open"');
+    expect(html).toContain("Kanban Closed");
   });
 
   it("renders and updates a durable notification inbox in Desk", async () => {

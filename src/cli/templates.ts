@@ -256,7 +256,7 @@ npm run d1:migrate:local
 npm run dev
 \`\`\`
 
-Open \`/desk\` for the generated Desk UI, the \`Tasks\` workspace, the \`Task Dashboard\`, and the file manager at \`/desk/files\`; run the \`tasks.seed_starter_tasks\` data patch when you want sample Task records and the starter Task owner notification rule in a fresh environment. Use \`/api/meta/doctypes/Task\` for the metadata API. ${authLocalReadme(input.auth)}
+Open \`/desk\` for the generated Desk UI, the \`Tasks\` workspace, the \`Task Board\`, the \`Task Dashboard\`, and the file manager at \`/desk/files\`; run the \`tasks.seed_starter_tasks\` data patch when you want sample Task records and the starter Task owner notification rule in a fresh environment. Use \`/api/meta/doctypes/Task\` for the metadata API. ${authLocalReadme(input.auth)}
 The generated R2 binding supports buffered Desk uploads immediately. Add a \`directUploads\` signer to \`R2FileStorage\` before enabling signed browser direct-upload targets.
 Client scripts live under \`public/assets\`; add them with \`defineClientScript(...)\` in files under \`src/apps\`.
 ${authProviderReadme(input.auth)}
@@ -325,6 +325,9 @@ npx cf-frappe link-options --url https://your-worker.example --doctype Task --fi
 npx cf-frappe dashboards list --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe dashboards get --url https://your-worker.example --dashboard "Task Dashboard" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe dashboards run --url https://your-worker.example --dashboard "Task Dashboard" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe kanbans list --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe kanbans get --url https://your-worker.example --kanban "Task Board" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe kanbans run --url https://your-worker.example --kanban "Task Board" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe workspaces list --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe workspaces get --url https://your-worker.example --workspace Tasks --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe print-formats list --url https://your-worker.example --doctype Task --header-env Authorization=CF_FRAPPE_AUTH
@@ -531,7 +534,7 @@ For OIDC deployments, replace the placeholder \`OIDC_ISSUER\`, \`OIDC_AUD\`, and
 }
 
 function taskAppTs(): string {
-  return `import { defineApp, defineClientScript, defineDashboard, defineDataPatch, defineDocType, definePrintFormat, defineReport, defineWorkspace } from "cf-frappe";
+  return `import { defineApp, defineClientScript, defineDashboard, defineDataPatch, defineDocType, defineKanban, definePrintFormat, defineReport, defineWorkspace } from "cf-frappe";
 import type { CloudFrappeRuntimeServices } from "cf-frappe/cloudflare";
 
 export const Task = defineDocType({
@@ -683,6 +686,22 @@ export const TaskDashboard = defineDashboard({
   ]
 });
 
+export const TaskKanban = defineKanban({
+  name: "Task Board",
+  label: "Task Board",
+  module: "Desk",
+  description: "Read-only starter Task board grouped by workflow state.",
+  doctype: "Task",
+  columnField: "workflow_state",
+  titleField: "title",
+  columns: [
+    { value: "Open", label: "Open" },
+    { value: "Doing", label: "Doing" },
+    { value: "Done", label: "Done" }
+  ],
+  roles: ["Guest", "User", "Task Manager"]
+});
+
 export const TaskWorkspace = defineWorkspace({
   name: "Tasks",
   label: "Tasks",
@@ -697,6 +716,7 @@ export const TaskWorkspace = defineWorkspace({
         { name: "all-tasks", label: "All Tasks", kind: "doctype", target: "Task" },
         { name: "new-task", label: "New Task", kind: "newDoc", target: "Task", roles: ["User", "Task Manager"] },
         { name: "open-tasks", label: "Open Tasks Report", kind: "report", target: "Open Tasks" },
+        { name: "task-board", label: "Task Board", kind: "kanban", target: "Task Board" },
         { name: "task-dashboard", label: "Task Dashboard", kind: "dashboard", target: "Task Dashboard" }
       ]
     },
@@ -885,6 +905,7 @@ export const taskApp = defineApp({
   printFormats: [TaskPrint],
   reports: [OpenTasks],
   dashboards: [TaskDashboard],
+  kanbans: [TaskKanban],
   workspaces: [TaskWorkspace],
   dataPatches: [StarterTaskSeedData],
   clientScripts: [TaskFormScript],

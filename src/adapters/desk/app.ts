@@ -35,6 +35,7 @@ import { isPreviewableFileContentType } from "../../application/file-service.js"
 import type { JobHistoryService } from "../../application/job-history-service.js";
 import type { JobRetryPort } from "../../application/job-retry-service.js";
 import type { JobScheduleService } from "../../application/job-schedule-service.js";
+import type { KanbanService } from "../../application/kanban-service.js";
 import type { NotificationRuleService } from "../../application/notification-rule-service.js";
 import type { PrintService } from "../../application/print-service.js";
 import type { PrintSettingsService } from "../../application/print-settings-service.js";
@@ -153,6 +154,8 @@ import {
   renderGlobalSearchPage,
   renderJobAdmin,
   renderJobScheduleAdmin,
+  renderKanbanList,
+  renderKanbanView,
   renderListView,
   renderNotFound,
   renderNotificationRuleAdmin,
@@ -254,6 +257,7 @@ export interface DeskAppOptions {
   readonly userPermissions?: UserPermissionService;
   readonly reports?: ReportService;
   readonly dashboards?: DashboardService;
+  readonly kanbans?: KanbanService;
   readonly dataPatches?: DataPatchAdminPort;
   readonly dataPatchQueue?: DataPatchQueuePort;
   readonly dataPatchRollbackQueue?: DataPatchRollbackQueuePort;
@@ -284,6 +288,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
     const dashboards = await listDashboards(options, actor);
+    const kanbans = await listKanbans(options, actor);
     const workspaces = listWorkspaces(options, actor);
     return html(
       renderDeskLayoutFor(options, {
@@ -292,10 +297,11 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         doctypes,
         reports,
         dashboards,
+        kanbans,
         workspaces,
         showNotifications: options.notifications !== undefined,
         showFiles: options.files !== undefined,
-        body: renderDeskHome(doctypes, reports, workspaces, dashboards)
+        body: renderDeskHome(doctypes, reports, workspaces, dashboards, kanbans)
       })
     );
   });
@@ -341,6 +347,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
     const dashboards = await listDashboards(options, actor);
+    const kanbans = await listKanbans(options, actor);
     const workspaces = listWorkspaces(options, actor);
     const searchPage = renderGlobalSearchPage({
       query,
@@ -355,6 +362,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         doctypes,
         reports,
         dashboards,
+        kanbans,
         workspaces,
         activeSearch: true,
         showNotifications: options.notifications !== undefined,
@@ -383,6 +391,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
     const dashboards = await listDashboards(options, actor);
+    const kanbans = await listKanbans(options, actor);
     const workspaces = listWorkspaces(options, actor);
     return html(
       renderDeskLayoutFor(options, {
@@ -391,6 +400,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         doctypes,
         reports,
         dashboards,
+        kanbans,
         workspaces,
         showFiles: options.files !== undefined,
         body: renderReportList(reports, {
@@ -405,6 +415,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
     const dashboards = await listDashboards(options, actor);
+    const kanbans = await listKanbans(options, actor);
     const workspaces = listWorkspaces(options, actor);
     return html(
       renderDeskLayoutFor(options, {
@@ -413,9 +424,57 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         doctypes,
         reports,
         dashboards,
+        kanbans,
         workspaces,
         showFiles: options.files !== undefined,
         body: renderDashboardList(dashboards)
+      })
+    );
+  });
+
+  app.get("/desk/kanbans", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const doctypes = options.queries.listDoctypes(actor);
+    const reports = listReports(options, actor);
+    const dashboards = await listDashboards(options, actor);
+    const kanbans = await listKanbans(options, actor);
+    const workspaces = listWorkspaces(options, actor);
+    return html(
+      renderDeskLayoutFor(options, {
+        title: "Kanban",
+        adminLinks: adminLinksFor(options, actor),
+        doctypes,
+        reports,
+        dashboards,
+        kanbans,
+        workspaces,
+        showFiles: options.files !== undefined,
+        body: renderKanbanList(kanbans)
+      })
+    );
+  });
+
+  app.get("/desk/kanbans/:kanban", async (c) => {
+    const kanbansService = requireKanbans(options);
+    const actor = await options.actor(c.req.raw);
+    const result = await kanbansService.runKanban(actor, c.req.param("kanban"));
+    const doctypes = options.queries.listDoctypes(actor);
+    const reports = listReports(options, actor);
+    const dashboards = await listDashboards(options, actor);
+    const kanbans = await listKanbans(options, actor);
+    const workspaces = listWorkspaces(options, actor);
+    return html(
+      renderDeskLayoutFor(options, {
+        title: result.board.label ?? result.board.name,
+        activeKanban: result.board.name,
+        adminLinks: adminLinksFor(options, actor),
+        doctypes,
+        reports,
+        dashboards,
+        kanbans,
+        workspaces,
+        showFiles: options.files !== undefined,
+        body: renderKanbanView(result)
       })
     );
   });
@@ -427,6 +486,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
     const dashboards = await listDashboards(options, actor);
+    const kanbans = await listKanbans(options, actor);
     const workspaces = listWorkspaces(options, actor);
     return html(
       renderDeskLayoutFor(options, {
@@ -436,6 +496,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         doctypes,
         reports,
         dashboards,
+        kanbans,
         workspaces,
         showFiles: options.files !== undefined,
         body: renderDashboardView(result)
@@ -454,8 +515,9 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctypes = options.queries.listDoctypes(actor);
     const reports = listReports(options, actor);
     const dashboards = await listDashboards(options, actor);
+    const kanbans = await listKanbans(options, actor);
     const workspaces = listWorkspaces(options, actor);
-    const page = workspacePageFor(options, actor, workspace, doctypes, reports, dashboards);
+    const page = workspacePageFor(options, actor, workspace, doctypes, reports, dashboards, kanbans);
     return html(
       renderDeskLayoutFor(options, {
         title: workspace.label ?? workspace.name,
@@ -464,6 +526,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         doctypes,
         reports,
         dashboards,
+        kanbans,
         workspaces,
         showFiles: options.files !== undefined,
         body: renderWorkspacePage(page)
@@ -2610,6 +2673,10 @@ async function listDashboards(options: DeskAppOptions, actor: Actor) {
   return options.dashboards?.listDashboards(actor) ?? [];
 }
 
+async function listKanbans(options: DeskAppOptions, actor: Actor) {
+  return options.kanbans?.listKanbans(actor) ?? [];
+}
+
 function listDeskDoctypes(options: DeskAppOptions, actor: Actor): Promise<readonly DocTypeDefinition[]> {
   return options.queries.listEffectiveDoctypes(actor);
 }
@@ -2665,13 +2732,21 @@ function listWorkspaces(options: DeskAppOptions, actor: Actor): readonly Workspa
   return options.registry.listWorkspaces().filter((workspace) => canReadWorkspace(actor, workspace));
 }
 
+function requireKanbans(options: DeskAppOptions): KanbanService {
+  if (!options.kanbans) {
+    throw new FrameworkError("DOCUMENT_NOT_FOUND", "Kanbans are not enabled", { status: 404 });
+  }
+  return options.kanbans;
+}
+
 function workspacePageFor(
   options: DeskAppOptions,
   actor: Actor,
   workspace: WorkspaceDefinition,
   doctypes: readonly DocTypeDefinition[],
   reports: ReturnType<typeof listReports>,
-  dashboards: Awaited<ReturnType<typeof listDashboards>>
+  dashboards: Awaited<ReturnType<typeof listDashboards>>,
+  kanbans: Awaited<ReturnType<typeof listKanbans>>
 ): WorkspacePageView {
   const adminLinks = adminLinksFor(options, actor);
   const creatableDoctypes = options.registry.list().filter((doctype) => can(actor, doctype, "create"));
@@ -2681,7 +2756,7 @@ function workspacePageFor(
       name: section.name,
       label: section.label ?? section.name,
       shortcuts: section.shortcuts.flatMap((shortcut) =>
-        workspaceShortcutFor(options, actor, shortcut, doctypes, creatableDoctypes, reports, dashboards, adminLinks)
+        workspaceShortcutFor(options, actor, shortcut, doctypes, creatableDoctypes, reports, dashboards, kanbans, adminLinks)
       )
     }))
   };
@@ -2695,6 +2770,7 @@ function workspaceShortcutFor(
   creatableDoctypes: readonly DocTypeDefinition[],
   reports: ReturnType<typeof listReports>,
   dashboards: Awaited<ReturnType<typeof listDashboards>>,
+  kanbans: Awaited<ReturnType<typeof listKanbans>>,
   adminLinks: readonly DeskNavLink[]
 ): readonly WorkspaceShortcutView[] {
   if (!canReadWorkspaceShortcut(actor, shortcut)) {
@@ -2745,6 +2821,18 @@ function workspaceShortcutFor(
           ...(shortcut.description === undefined ? {} : { description: shortcut.description }),
           kind: shortcut.kind,
           href: `/desk/dashboards/${encodeURIComponent(dashboard.name)}`
+        }]
+      : [];
+  }
+  if (shortcut.kind === "kanban") {
+    const kanban = kanbans.find((item) => item.name === shortcut.target);
+    return kanban
+      ? [{
+          name: shortcut.name,
+          label: shortcut.label ?? kanban.label ?? kanban.name,
+          ...(shortcut.description === undefined ? {} : { description: shortcut.description }),
+          kind: shortcut.kind,
+          href: `/desk/kanbans/${encodeURIComponent(kanban.name)}`
         }]
       : [];
   }

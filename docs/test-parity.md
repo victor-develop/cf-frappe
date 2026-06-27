@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the notification-rule condition slice:
+As of the metadata-defined Kanban board slice:
 
-- Vitest files: `119`
-- Vitest cases: `1310`
+- Vitest files: `123`
+- Vitest cases: `1324`
 
 ## Implication
 

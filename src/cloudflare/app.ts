@@ -17,6 +17,7 @@ import { JobExecutor } from "../application/job-executor.js";
 import { JobHistoryService } from "../application/job-history-service.js";
 import { JobRetryService } from "../application/job-retry-service.js";
 import { JobScheduleService } from "../application/job-schedule-service.js";
+import { KanbanService } from "../application/kanban-service.js";
 import { DocumentHistoryService } from "../application/document-history-service.js";
 import { DocumentShareService } from "../application/document-share-service.js";
 import { FieldPropertyService } from "../application/field-property-service.js";
@@ -111,6 +112,7 @@ export interface CloudFrappeRuntimeServices {
   readonly queries: QueryService;
   readonly reports: ReportService;
   readonly dashboards: DashboardService;
+  readonly kanbans: KanbanService;
   readonly roles: RoleService;
   readonly savedReports: SavedReportService;
   readonly dataPatches?: DataPatchAdminPort;
@@ -387,6 +389,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   const prints = new PrintService({ registry: options.registry, queries: restrictedQueries, printSettings });
   const reports = new ReportService({ registry: options.registry, queries: restrictedQueries });
   const dashboards = new DashboardService({ registry: options.registry, queries: restrictedQueries, reports });
+  const kanbans = new KanbanService({ registry: options.registry, queries: restrictedQueries });
   const roles = new RoleService({
     events,
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
@@ -423,6 +426,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     queries: restrictedQueries,
     reports,
     dashboards,
+    kanbans,
     roles,
     savedReports
   };
@@ -541,6 +545,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     workflows,
     reports,
     dashboards,
+    kanbans,
     roles,
     ...(printPdfRenderer === undefined ? {} : { printPdfRenderer }),
     actor,
@@ -577,6 +582,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     workflows,
     reports,
     dashboards,
+    kanbans,
     roles,
     notificationRules,
     ...(printPdfRenderer === undefined ? {} : { printPdfRenderer }),

@@ -3,6 +3,7 @@ import { resolveAppDependencyOrder } from "./app-graph.js";
 import type { ClientScriptDefinition } from "./client-script.js";
 import type { DashboardDefinition } from "./dashboard.js";
 import type { DataPatchDefinition } from "./data-patch.js";
+import type { KanbanDefinition } from "./kanban.js";
 import { createRegistry, type DocumentHooks, type ModelRegistry, type RegistryOptions } from "./registry.js";
 import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-format.js";
 import type { ReportDefinition } from "./reports.js";
@@ -20,6 +21,7 @@ export interface FrameworkAppDefinition<TDataPatchResources = unknown> {
   readonly printFormats?: readonly PrintFormatDefinition[];
   readonly reports?: readonly ReportDefinition[];
   readonly dashboards?: readonly DashboardDefinition[];
+  readonly kanbans?: readonly KanbanDefinition[];
   readonly workspaces?: readonly WorkspaceDefinition[];
   readonly clientScripts?: readonly ClientScriptDefinition[];
   readonly dataPatches?: readonly DataPatchDefinition<TDataPatchResources>[];
@@ -48,6 +50,7 @@ export function defineApp<TDataPatchResources = unknown>(
     printFormats: Object.freeze([...(input.printFormats ?? [])]),
     reports: Object.freeze([...(input.reports ?? [])]),
     dashboards: Object.freeze([...(input.dashboards ?? [])]),
+    kanbans: Object.freeze([...(input.kanbans ?? [])]),
     workspaces: Object.freeze([...(input.workspaces ?? [])]),
     clientScripts: Object.freeze([...(input.clientScripts ?? [])]),
     dataPatches: Object.freeze([...(input.dataPatches ?? [])]),
@@ -78,6 +81,7 @@ export function registryOptionsFromApps<TDataPatchResources = unknown>(
     printFormats: orderedApps.flatMap((app) => app.printFormats ?? []),
     reports: orderedApps.flatMap((app) => app.reports ?? []),
     dashboards: orderedApps.flatMap((app) => app.dashboards ?? []),
+    kanbans: orderedApps.flatMap((app) => app.kanbans ?? []),
     workspaces: orderedApps.flatMap((app) => app.workspaces ?? []),
     clientScripts: orderedApps.flatMap((app) => app.clientScripts ?? []),
     dataPatches: orderedApps.flatMap((app) => app.dataPatches ?? []) as readonly DataPatchDefinition[],
