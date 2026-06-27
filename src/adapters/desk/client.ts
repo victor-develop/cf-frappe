@@ -199,6 +199,10 @@ export function renderDeskClientScript(): string {
     return "/web-forms/" + encodePart(webForm);
   }
 
+  function webPagePath(route) {
+    return "/page/" + encodePath(route);
+  }
+
   function deskAdminUsersPath(options) {
     var params = {};
     setParam(params, "user", options && (options.userId !== undefined ? options.userId : options.user));
@@ -373,6 +377,14 @@ export function renderDeskClientScript(): string {
 
   function webFormMetaPath(webForm) {
     return "/api/meta/web-forms" + (webForm === undefined ? "" : "/" + encodePart(webForm));
+  }
+
+  function webPageMetaPath(webPage) {
+    return "/api/meta/web-pages" + (webPage === undefined ? "" : "/" + encodePart(webPage));
+  }
+
+  function websiteThemeMetaPath(theme) {
+    return "/api/meta/website-themes" + (theme === undefined ? "" : "/" + encodePart(theme));
   }
 
   function reportBuilderPath(doctype, id, action) {
@@ -577,6 +589,10 @@ export function renderDeskClientScript(): string {
     if (value !== undefined && value !== null) {
       params[key] = value;
     }
+  }
+
+  function encodePath(value) {
+    return String(value).split("/").map(encodePart).join("/");
   }
 
   function setFormParam(params, key, value) {
@@ -3562,6 +3578,28 @@ export function renderDeskClientScript(): string {
       },
       url: webFormPagePath
     }),
+    webPage: Object.freeze({
+      get: function (webPage) {
+        return request(webPageMetaPath(webPage)).then(unwrapData);
+      },
+      list: function () {
+        return request(webPageMetaPath()).then(unwrapData);
+      },
+      url: webPagePath
+    }),
+    websiteSettings: Object.freeze({
+      get: function () {
+        return request("/api/meta/website-settings").then(unwrapData);
+      }
+    }),
+    websiteTheme: Object.freeze({
+      get: function (theme) {
+        return request(websiteThemeMetaPath(theme)).then(unwrapData);
+      },
+      list: function () {
+        return request(websiteThemeMetaPath()).then(unwrapData);
+      }
+    }),
     jobs: Object.freeze({
       createSchedule: function (input) {
         return request(jobSchedulePath(), { method: "POST", body: input || {} }).then(unwrapData);
@@ -3706,6 +3744,21 @@ export function renderDeskClientScript(): string {
       },
       webForms: function () {
         return request(webFormMetaPath()).then(unwrapData);
+      },
+      webPage: function (webPage) {
+        return request(webPageMetaPath(webPage)).then(unwrapData);
+      },
+      webPages: function () {
+        return request(webPageMetaPath()).then(unwrapData);
+      },
+      websiteSettings: function () {
+        return request("/api/meta/website-settings").then(unwrapData);
+      },
+      websiteTheme: function (theme) {
+        return request(websiteThemeMetaPath(theme)).then(unwrapData);
+      },
+      websiteThemes: function () {
+        return request(websiteThemeMetaPath()).then(unwrapData);
       },
       doctype: function (doctype) {
         return request("/api/meta/doctypes/" + encodePart(doctype)).then(unwrapData);
@@ -4009,6 +4062,7 @@ export function renderDeskClientScript(): string {
       kanbanUrl: deskKanbanPath,
       calendarUrl: deskCalendarPath,
       webFormUrl: webFormPagePath,
+      webPageUrl: webPagePath,
       fileContentUrl: function (name) {
         return deskFilePath(name, "content");
       },
