@@ -1025,6 +1025,7 @@ export function renderDeskClientScript(): string {
   function webViewParams(options) {
     var params = {};
     setParam(params, "limit", options && options.limit);
+    setParam(params, "offset", options && options.offset);
     return params;
   }
 

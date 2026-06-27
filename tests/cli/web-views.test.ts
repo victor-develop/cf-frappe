@@ -18,6 +18,8 @@ describe("cf-frappe CLI remote web views", () => {
       "Articles",
       "--limit",
       "5",
+      "--offset",
+      "10",
       "--header",
       "Authorization: Bearer test"
     ])).toEqual({
@@ -26,7 +28,8 @@ describe("cf-frappe CLI remote web views", () => {
       url: "https://app.example",
       headers: [{ kind: "literal", name: "Authorization", value: "Bearer test" }],
       webView: "Articles",
-      limit: 5
+      limit: 5,
+      offset: 10
     });
     expect(parseCliArgs([
       "web-views",
@@ -63,6 +66,18 @@ describe("cf-frappe CLI remote web views", () => {
     });
   });
 
+  it("documents Web View item pagination options in CLI help", async () => {
+    const stdout = textBuffer();
+    expect(await runCli(["--help"], {
+      stdout,
+      stderr: textBuffer(),
+      cwd: () => process.cwd()
+    })).toBe(0);
+    expect(stdout.text()).toContain(
+      "cf-frappe web-views items --url <origin> --web-view <view> [--limit <n>] [--offset <n>]"
+    );
+  });
+
   it("reads remote web views through generated metadata and item APIs", async () => {
     const calls: Array<{ readonly url: string; readonly method: string }> = [];
     const fetch = async (url: URL | RequestInfo, init?: RequestInit) => {
@@ -86,8 +101,11 @@ describe("cf-frappe CLI remote web views", () => {
         return jsonResponse({
           data: {
             items: [{ route: "news/launch", title: "Launch", doctype: "Article", name: "Launch" }],
-            total: 1,
-            limit: 2
+            total: 3,
+            totalIsExact: false,
+            limit: 2,
+            offset: 1,
+            nextOffset: 2
           }
         });
       }
@@ -118,13 +136,16 @@ describe("cf-frappe CLI remote web views", () => {
     expect(getStdout.text()).toContain("Route field: route");
 
     const itemsStdout = textBuffer();
-    expect(await runCli(["web-views", "items", "--url", "https://app.example", "--web-view", "Articles", "--limit", "2"], {
+    expect(await runCli(["web-views", "items", "--url", "https://app.example", "--web-view", "Articles", "--limit", "2", "--offset", "1"], {
       stdout: itemsStdout,
       stderr: textBuffer(),
       cwd: () => process.cwd(),
       fetch
     })).toBe(0);
     expect(itemsStdout.text()).toContain("news/launch Article/Launch");
+    expect(itemsStdout.text()).toContain("Total: 3+");
+    expect(itemsStdout.text()).toContain("Offset: 1");
+    expect(itemsStdout.text()).toContain("Next offset: 2");
 
     const itemStdout = textBuffer();
     expect(await runCli(["web-views", "item", "--url", "https://app.example", "--web-view", "Articles/View", "--route", "news/launch"], {
@@ -138,7 +159,7 @@ describe("cf-frappe CLI remote web views", () => {
     expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
       "GET https://app.example/api/meta/web-views",
       "GET https://app.example/api/meta/web-views/Articles",
-      "GET https://app.example/api/web-view/Articles?limit=2",
+      "GET https://app.example/api/web-view/Articles?limit=2&offset=1",
       "GET https://app.example/api/web-view/Articles%2FView/news/launch"
     ]);
   });

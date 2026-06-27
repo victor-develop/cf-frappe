@@ -143,6 +143,88 @@ describe("WebViewService", () => {
     await expect(webViews.getWebView(owner, "Members Blog")).resolves.toMatchObject({ view: { name: "Members Blog" } });
   });
 
+  it("paginates over visible safe item routes", async () => {
+    const registry = createRegistry({
+      doctypes: [BlogPost],
+      webViews: [
+        defineWebView({
+          name: "Blog",
+          doctype: "Blog Post",
+          routeField: "route",
+          titleField: "title",
+          publishedField: "published",
+          pageSize: 2
+        })
+      ]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+    const queries = new QueryService({ registry, projections: store });
+    const webViews = new WebViewService({ registry, queries });
+
+    for (const data of [
+      { title: "First", route: "first", published: true },
+      { title: "Unsafe", route: "../unsafe", published: true },
+      { title: "Second", route: "second", published: true },
+      { title: "Third", route: "third", published: true }
+    ]) {
+      await documents.create({ actor: owner, doctype: "Blog Post", data });
+    }
+
+    await expect(webViews.listItems(guest, "Blog", { limit: 1, offset: 1 })).resolves.toMatchObject({
+      total: 3,
+      totalIsExact: false,
+      limit: 1,
+      offset: 1,
+      hasMore: true,
+      nextOffset: 2,
+      items: [{ route: "second", title: "Second" }]
+    });
+    await expect(webViews.listItems(guest, "Blog", { limit: 2, offset: 2 })).resolves.toMatchObject({
+      total: 3,
+      totalIsExact: true,
+      limit: 2,
+      offset: 2,
+      hasMore: false,
+      items: [{ route: "third", title: "Third" }]
+    });
+  });
+
+  it("rejects Web View pagination that exceeds the bounded projection scan budget", async () => {
+    const registry = createRegistry({
+      doctypes: [BlogPost],
+      webViews: [
+        defineWebView({
+          name: "Blog",
+          doctype: "Blog Post",
+          routeField: "route",
+          titleField: "title",
+          publishedField: "published"
+        })
+      ]
+    });
+    const listDocuments = vi.fn(async (
+      _actor: Actor,
+      _doctype: string,
+      options: { readonly limit?: number; readonly offset?: number } = {}
+    ) => ({
+      data: [],
+      limit: options.limit ?? 20,
+      offset: options.offset ?? 0,
+      total: 10_000
+    }));
+    const queries = {
+      getEffectiveMeta: async () => BlogPost,
+      listDocuments
+    } as unknown as QueryService;
+    const webViews = new WebViewService({ registry, queries });
+
+    await expect(webViews.listItems(guest, "Blog", { limit: 1, offset: 500 })).rejects.toMatchObject({
+      code: "BAD_REQUEST"
+    });
+    expect(listDocuments).toHaveBeenCalledTimes(50);
+  });
+
   it("validates fields against effective read metadata", async () => {
     const registry = createRegistry({
       doctypes: [BlogPost],

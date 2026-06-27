@@ -12,6 +12,7 @@ export interface WebViewRemoteCommand {
   readonly webView?: string;
   readonly route?: string;
   readonly limit?: number;
+  readonly offset?: number;
 }
 
 export type WebViewRemoteIo = RemoteAdminIo;
@@ -49,7 +50,11 @@ interface WebViewItemsResponse {
   readonly view?: WebViewResponse;
   readonly items?: readonly WebViewItemResponse[];
   readonly total?: number;
+  readonly totalIsExact?: boolean;
   readonly limit?: number;
+  readonly offset?: number;
+  readonly hasMore?: boolean;
+  readonly nextOffset?: number;
 }
 
 interface WebViewItemEnvelope {
@@ -133,10 +138,13 @@ function formatWebViewMetadata(baseUrl: string, metadata: WebViewMetadataRespons
 
 function formatWebViewItems(baseUrl: string, result: WebViewItemsResponse): string {
   const items = result.items ?? [];
+  const total = result.total ?? items.length;
   return [
     `Web view items at ${baseUrl}`,
-    `Total: ${String(result.total ?? items.length)}`,
+    `Total: ${String(total)}${result.totalIsExact === false ? "+" : ""}`,
     `Limit: ${String(result.limit ?? items.length)}`,
+    `Offset: ${String(result.offset ?? 0)}`,
+    ...(result.nextOffset === undefined ? [] : [`Next offset: ${String(result.nextOffset)}`]),
     ...(items.length === 0 ? ["- (none)"] : items.map(webViewItemLine)),
     ""
   ].join("\n");
@@ -193,11 +201,16 @@ function encodePath(value: string): string {
 }
 
 function webViewItemsQuery(command: WebViewRemoteCommand): URLSearchParams | undefined {
-  if (command.limit === undefined) {
+  if (command.limit === undefined && command.offset === undefined) {
     return undefined;
   }
   const query = new URLSearchParams();
-  query.set("limit", String(command.limit));
+  if (command.limit !== undefined) {
+    query.set("limit", String(command.limit));
+  }
+  if (command.offset !== undefined) {
+    query.set("offset", String(command.offset));
+  }
   return query;
 }
 

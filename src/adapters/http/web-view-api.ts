@@ -1,6 +1,12 @@
 import { Hono } from "hono";
 import type { JsonValue } from "../../core/types.js";
-import type { WebViewItem, WebViewMetadata, WebViewResolvedField, WebViewService } from "../../application/web-view-service.js";
+import type {
+  WebViewItem,
+  WebViewListResult,
+  WebViewMetadata,
+  WebViewResolvedField,
+  WebViewService
+} from "../../application/web-view-service.js";
 import type { ActorResolver } from "./actor.js";
 import { parseOptionalInteger } from "./request.js";
 import { escapeHtml, resolveWebsitePresentation, websitePage, type WebsitePresentation, type WebsiteSettingsReader } from "./website-rendering.js";
@@ -27,8 +33,10 @@ export function createWebViewApi(options: WebViewApiOptions): Hono {
   app.get("/api/web-view/:webView", async (c) => {
     const actor = await options.actor(c.req.raw);
     const limit = parseOptionalInteger(c.req.query("limit"));
+    const offset = parseOptionalInteger(c.req.query("offset"));
     const result = await options.webViews.listItems(actor, c.req.param("webView"), {
-      ...(limit === undefined ? {} : { limit })
+      ...(limit === undefined ? {} : { limit }),
+      ...(offset === undefined ? {} : { offset })
     });
     return c.json({ data: result });
   });
@@ -45,9 +53,14 @@ export function createWebViewApi(options: WebViewApiOptions): Hono {
 
   app.get("/web/:webView", async (c) => {
     const actor = await options.actor(c.req.raw);
+    const limit = parseOptionalInteger(c.req.query("limit"));
+    const offset = parseOptionalInteger(c.req.query("offset"));
     const metadata = await options.webViews.getWebView(actor, c.req.param("webView"));
-    const result = await options.webViews.listItems(actor, metadata.view.name);
-    return html(renderWebViewList(metadata, result.items, await resolveWebsitePresentation(options.websiteSettings, actor)));
+    const result = await options.webViews.listItems(actor, metadata.view.name, {
+      ...(limit === undefined ? {} : { limit }),
+      ...(offset === undefined ? {} : { offset })
+    });
+    return html(renderWebViewList(metadata, result, await resolveWebsitePresentation(options.websiteSettings, actor)));
   });
 
   app.get("/web/:webView/:route{.+}", async (c) => {
@@ -69,15 +82,20 @@ export function createWebViewApi(options: WebViewApiOptions): Hono {
 
 function renderWebViewList(
   metadata: WebViewMetadata,
-  items: readonly WebViewItem[],
+  result: WebViewListResult,
   presentation: WebsitePresentation
 ): string {
   const title = metadata.view.label ?? metadata.view.name;
   const description = metadata.view.description ? `<p>${escapeHtml(metadata.view.description)}</p>` : "";
-  const rows = items
+  const rows = result.items
     .map((item) => `<li><a href="/web/${encodeURIComponent(metadata.view.name)}/${encodePath(item.route)}">${escapeHtml(item.title)}</a></li>`)
     .join("");
-  return websitePage(title, `<main><h1>${escapeHtml(title)}</h1>${description}<ul>${rows || "<li>No published items.</li>"}</ul></main>`, presentation);
+  const pagination = renderWebViewPagination(metadata.view.name, result);
+  return websitePage(
+    title,
+    `<main><h1>${escapeHtml(title)}</h1>${description}<ul>${rows || "<li>No published items.</li>"}</ul>${pagination}</main>`,
+    presentation
+  );
 }
 
 function renderWebViewItem(
@@ -96,6 +114,26 @@ function renderField(field: WebViewResolvedField, value: JsonValue | undefined):
     return "";
   }
   return `<section><h2>${escapeHtml(field.label)}</h2><p>${escapeHtml(formatValue(value))}</p></section>`;
+}
+
+function renderWebViewPagination(webViewName: string, result: WebViewListResult): string {
+  const links: string[] = [];
+  if (result.offset > 0) {
+    links.push(`<a href="${escapeHtml(webViewListHref(webViewName, result.limit, Math.max(0, result.offset - result.limit)))}">Previous</a>`);
+  }
+  if (result.nextOffset !== undefined) {
+    links.push(`<a href="${escapeHtml(webViewListHref(webViewName, result.limit, result.nextOffset))}">Next</a>`);
+  }
+  return links.length === 0 ? "" : `<nav aria-label="Web view pagination">${links.join(" ")}</nav>`;
+}
+
+function webViewListHref(webViewName: string, limit: number, offset: number): string {
+  const params = new URLSearchParams();
+  params.set("limit", String(limit));
+  if (offset > 0) {
+    params.set("offset", String(offset));
+  }
+  return `/web/${encodeURIComponent(webViewName)}?${params.toString()}`;
 }
 
 function formatValue(value: JsonValue): string {

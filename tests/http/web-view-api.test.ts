@@ -79,6 +79,11 @@ describe("web view api", () => {
       doctype: "Article",
       data: { title: "Unsafe", route: "bad route", published: true, body: "Hidden unsafe route" }
     });
+    await documents.create({
+      actor: defaultOwner,
+      doctype: "Article",
+      data: { title: "Follow Up", route: "news/follow-up", published: true, body: "More news" }
+    });
 
     const listed = await app.request("/api/meta/web-views");
     expect(listed.status).toBe(200);
@@ -94,12 +99,16 @@ describe("web view api", () => {
       }
     });
 
-    const items = await app.request("/api/web-view/Articles?limit=5");
+    const items = await app.request("/api/web-view/Articles?limit=1&offset=1");
     expect(items.status).toBe(200);
     await expect(items.json()).resolves.toMatchObject({
       data: {
-        total: 1,
-        items: [{ route: "news/launch", title: "<Launch>", data: { body: "Hello <world>" } }]
+        total: 2,
+        totalIsExact: true,
+        limit: 1,
+        offset: 1,
+        hasMore: false,
+        items: [{ route: "news/follow-up", title: "Follow Up", data: { body: "More news" } }]
       }
     });
 
@@ -116,6 +125,20 @@ describe("web view api", () => {
     expect(listHtml).toContain("&lt;Launch&gt;");
     expect(listHtml).toContain('href="/web/Articles/news/launch"');
     expect(listHtml).not.toContain("Unsafe");
+
+    const firstPage = await app.request("/web/Articles?limit=1");
+    expect(firstPage.status).toBe(200);
+    const firstPageHtml = await firstPage.text();
+    expect(firstPageHtml).toContain('href="/web/Articles?limit=1&amp;offset=1"');
+    expect(firstPageHtml).toContain("Next");
+    expect(firstPageHtml).not.toContain("Previous");
+
+    const secondPage = await app.request("/web/Articles?limit=1&offset=1");
+    expect(secondPage.status).toBe(200);
+    const secondPageHtml = await secondPage.text();
+    expect(secondPageHtml).toContain('href="/web/Articles?limit=1"');
+    expect(secondPageHtml).toContain("Previous");
+    expect(secondPageHtml).not.toContain("Next");
 
     const itemPage = await app.request("/web/Articles/news/launch");
     expect(itemPage.status).toBe(200);

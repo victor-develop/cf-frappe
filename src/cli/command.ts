@@ -3174,6 +3174,7 @@ function parseWebViewsArgs(argv: readonly string[]): ParsedCommand {
   let webView: string | undefined;
   let route: string | undefined;
   let limit: number | undefined;
+  let offset: number | undefined;
 
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];
@@ -3258,6 +3259,22 @@ function parseWebViewsArgs(argv: readonly string[]): ParsedCommand {
       index += 1;
       continue;
     }
+    if (arg === "--offset") {
+      if (action !== "items") {
+        return { kind: "invalid", message: `Cannot use --offset with web-views ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseNonNegativeInteger(value, "Web view offset");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      offset = parsed;
+      index += 1;
+      continue;
+    }
     return { kind: "invalid", message: `Unknown web-views ${action} option '${arg}'` };
   }
 
@@ -3278,7 +3295,8 @@ function parseWebViewsArgs(argv: readonly string[]): ParsedCommand {
     headers,
     ...(webView === undefined ? {} : { webView }),
     ...(route === undefined ? {} : { route }),
-    ...(limit === undefined ? {} : { limit })
+    ...(limit === undefined ? {} : { limit }),
+    ...(offset === undefined ? {} : { offset })
   };
 }
 
@@ -6921,7 +6939,7 @@ function helpText(): string {
     "  cf-frappe website-themes get --url <origin> --theme <theme> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe web-views list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe web-views get --url <origin> --web-view <view> [--header <name:value>] [--header-env <name=ENV>]",
-    "  cf-frappe web-views items --url <origin> --web-view <view> [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe web-views items --url <origin> --web-view <view> [--limit <n>] [--offset <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe web-views item --url <origin> --web-view <view> --route <route> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe doctypes list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe doctypes get --url <origin> --doctype <doctype> [--header <name:value>] [--header-env <name=ENV>]",

@@ -317,7 +317,7 @@ interface DeskClientRuntime {
     readonly get: (webView: string) => Promise<unknown>;
     readonly item: (webView: string, route: string) => Promise<unknown>;
     readonly itemUrl: (webView: string, route: string) => string;
-    readonly items: (webView: string, options?: { readonly limit?: number }) => Promise<unknown>;
+    readonly items: (webView: string, options?: { readonly limit?: number; readonly offset?: number }) => Promise<unknown>;
     readonly list: () => Promise<unknown>;
     readonly url: (webView: string) => string;
   };
@@ -1645,8 +1645,8 @@ describe("Desk client runtime", () => {
     await expect(runtime.webView.get("Articles/View")).resolves.toEqual({
       route: "/api/meta/web-views/Articles%2FView"
     });
-    await expect(runtime.webView.items("Articles/View", { limit: 5 })).resolves.toEqual({
-      route: "/api/web-view/Articles%2FView?limit=5"
+    await expect(runtime.webView.items("Articles/View", { limit: 5, offset: 10 })).resolves.toEqual({
+      route: "/api/web-view/Articles%2FView?limit=5&offset=10"
     });
     await expect(runtime.webView.item("Articles/View", "launch/post")).resolves.toEqual({
       route: "/api/web-view/Articles%2FView/launch/post"
@@ -1657,7 +1657,7 @@ describe("Desk client runtime", () => {
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
       "GET /api/meta/web-views",
       "GET /api/meta/web-views/Articles%2FView",
-      "GET /api/web-view/Articles%2FView?limit=5",
+      "GET /api/web-view/Articles%2FView?limit=5&offset=10",
       "GET /api/web-view/Articles%2FView/launch/post"
     ]);
     expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin", "same-origin"]);

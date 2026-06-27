@@ -1,4 +1,4 @@
-import { notFound, permissionDenied } from "../core/errors.js";
+import { badRequest, notFound, permissionDenied } from "../core/errors.js";
 import { assertWebViewMatchesDocType, canReadWebView, type WebViewDefinition } from "../core/web-view.js";
 import { isCanonicalWebPageRoute } from "../core/web-page.js";
 import type { ModelRegistry } from "../core/registry.js";
@@ -32,7 +32,11 @@ export interface WebViewListResult {
   readonly view: WebViewDefinition;
   readonly items: readonly WebViewItem[];
   readonly total: number;
+  readonly totalIsExact: boolean;
   readonly limit: number;
+  readonly offset: number;
+  readonly hasMore: boolean;
+  readonly nextOffset?: number;
 }
 
 export interface WebViewServiceOptions {
@@ -41,6 +45,8 @@ export interface WebViewServiceOptions {
 }
 
 const DEFAULT_WEB_VIEW_LIMIT = 20;
+const MAX_WEB_VIEW_LIMIT = 200;
+const MAX_WEB_VIEW_SCAN_DOCUMENTS = 1_000;
 
 export class WebViewService {
   private readonly registry: ModelRegistry;
@@ -80,21 +86,61 @@ export class WebViewService {
   async listItems(
     actor: Actor,
     webViewName: string,
-    options: { readonly limit?: number } = {}
+    options: { readonly limit?: number; readonly offset?: number } = {}
   ): Promise<WebViewListResult> {
     const metadata = await this.getWebView(actor, webViewName);
     const limit = clampLimit(options.limit, metadata.view.pageSize ?? DEFAULT_WEB_VIEW_LIMIT);
-    const result = await this.queries.listDocuments(actor, metadata.doctype, {
-      filters: publishedFilters(metadata),
-      limit,
-      maxLimit: limit
-    });
-    const items = result.data.flatMap((document) => itemFromDocument(metadata, document) ?? []);
+    const offset = clampOffset(options.offset);
+    const collected: WebViewItem[] = [];
+    let visibleSeen = 0;
+    let scanned = 0;
+    let rawOffset = 0;
+    let rawTotal = Number.POSITIVE_INFINITY;
+    while (rawOffset < rawTotal && collected.length <= limit) {
+      const remainingScan = MAX_WEB_VIEW_SCAN_DOCUMENTS - scanned;
+      if (remainingScan <= 0) {
+        throw badRequest(
+          `Web view pagination scanned more than ${MAX_WEB_VIEW_SCAN_DOCUMENTS} documents; use a smaller offset or a more selective published field`
+        );
+      }
+      const pageLimit = Math.min(Math.max(limit + 1, DEFAULT_WEB_VIEW_LIMIT), remainingScan);
+      const result = await this.queries.listDocuments(actor, metadata.doctype, {
+        filters: publishedFilters(metadata),
+        limit: pageLimit,
+        offset: rawOffset,
+        maxLimit: pageLimit
+      });
+      rawTotal = result.total;
+      rawOffset = result.offset + result.limit;
+      scanned += result.limit;
+      for (const document of result.data) {
+        const item = itemFromDocument(metadata, document);
+        if (item === undefined) {
+          continue;
+        }
+        if (visibleSeen >= offset) {
+          collected.push(item);
+          visibleSeen += 1;
+          if (collected.length > limit) {
+            break;
+          }
+          continue;
+        }
+        visibleSeen += 1;
+      }
+    }
+    const hasMore = collected.length > limit;
+    const items = hasMore ? collected.slice(0, limit) : collected;
+    const totalIsExact = !hasMore && rawOffset >= rawTotal;
     return {
       view: metadata.view,
       items,
-      total: items.length,
-      limit
+      total: visibleSeen,
+      totalIsExact,
+      limit,
+      offset,
+      hasMore,
+      ...(hasMore ? { nextOffset: offset + items.length } : {})
     };
   }
 
@@ -186,9 +232,18 @@ function itemFromDocument(metadata: WebViewMetadata, document: DocumentSnapshot)
 
 function clampLimit(input: number | undefined, configured: number): number {
   if (input === undefined) {
-    return configured;
+    return Math.min(configured, MAX_WEB_VIEW_LIMIT);
   }
-  return Number.isInteger(input) && input > 0 ? Math.min(input, configured) : configured;
+  return Number.isInteger(input) && input > 0
+    ? Math.min(input, configured, MAX_WEB_VIEW_LIMIT)
+    : Math.min(configured, MAX_WEB_VIEW_LIMIT);
+}
+
+function clampOffset(input: number | undefined): number {
+  if (input === undefined) {
+    return 0;
+  }
+  return Number.isInteger(input) && input > 0 ? input : 0;
 }
 
 function isPermissionDenied(error: unknown): boolean {

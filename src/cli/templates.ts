@@ -336,7 +336,7 @@ npx cf-frappe web-forms get --url https://your-worker.example --web-form "Task I
 npx cf-frappe web-forms submit --url https://your-worker.example --web-form "Task Intake" --data-json '{"title":"Follow up from intake","priority":"Medium","description":"Created through the generated Web Form."}' --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe web-views list --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe web-views get --url https://your-worker.example --web-view "Task Updates" --header-env Authorization=CF_FRAPPE_AUTH
-npx cf-frappe web-views items --url https://your-worker.example --web-view "Task Updates" --limit 10 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe web-views items --url https://your-worker.example --web-view "Task Updates" --limit 10 --offset 20 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe web-views item --url https://your-worker.example --web-view "Task Updates" --route review-generated-desk-workspace --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe web-pages list --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe web-pages get --url https://your-worker.example --web-page About --header-env Authorization=CF_FRAPPE_AUTH
