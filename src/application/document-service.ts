@@ -23,7 +23,7 @@ import {
   type DocumentFieldMergePlan,
   type DocumentMergeSnapshot
 } from "../core/document-merge.js";
-import { documentStream, namingSeriesStream } from "../core/streams.js";
+import { documentStream, namingSeriesStream, uniqueValueStream } from "../core/streams.js";
 import {
   documentMatchesUserPermissions,
   linkTargetMatchesUserPermissions,
@@ -47,6 +47,7 @@ import {
   type DocumentSnapshot,
   type DomainEvent,
   type FieldDefinition,
+  type JsonValue,
   type MutableDocumentData,
   type NewDomainEvent,
   type ValidationIssue
@@ -83,6 +84,16 @@ type RelatedDocTypeResolver = (doctype: string) => DocTypeDefinition | undefined
 interface DocumentServiceDocTypeContext {
   readonly doctype: DocTypeDefinition;
   readonly relatedDocType: RelatedDocTypeResolver;
+}
+
+interface UniqueValueReservation {
+  readonly tenantId: string;
+  readonly stream: string;
+  readonly doctype: string;
+  readonly field: string;
+  readonly valueKey: string;
+  readonly valueLabel: string;
+  readonly documentName: string;
 }
 
 export interface CreateDocumentCommand {
@@ -408,6 +419,8 @@ export interface DocumentCommandExecutor {
 
 const NAMING_SERIES_DOCTYPE = "__NamingSeries";
 const NAMING_SERIES_MAX_ATTEMPTS = 10;
+const UNIQUE_VALUE_DOCTYPE = "__UniqueValues";
+const MAX_UNIQUE_VALUE_KEY_LENGTH = 512;
 const MAX_COMMENT_TEXT_LENGTH = 5000;
 const MAX_ACTIVITY_TYPE_LENGTH = 64;
 const MAX_ACTIVITY_SUBJECT_LENGTH = 240;
@@ -475,6 +488,8 @@ export class DocumentService implements DocumentCommandExecutor {
     if (existing && existing.docstatus !== "deleted") {
       throw conflict(`${doctype.name}/${name} already exists`);
     }
+    const uniqueReservations = uniqueValueReservations(tenantId, doctype, data, name);
+    await this.reserveUniqueValues(command.actor, uniqueReservations, now);
     const event = this.newEvent({
       tenantId,
       stream,
@@ -490,12 +505,18 @@ export class DocumentService implements DocumentCommandExecutor {
       },
       metadata: command.metadata ?? {}
     });
-    const commit = await this.store.commit(stream, 0, [event], ([saved]) => {
-      if (!saved) {
-        throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
-      }
-      return snapshotFromCreate(saved);
-    });
+    let commit: Awaited<ReturnType<DocumentStore["commit"]>>;
+    try {
+      commit = await this.store.commit(stream, 0, [event], ([saved]) => {
+        if (!saved) {
+          throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
+        }
+        return snapshotFromCreate(saved);
+      });
+    } catch (error) {
+      await this.releaseUniqueValues(command.actor, uniqueReservations, this.clock.now(), { suppressErrors: true });
+      throw error;
+    }
     const [saved] = commit.events;
     if (saved) {
       return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
@@ -631,6 +652,21 @@ export class DocumentService implements DocumentCommandExecutor {
     }
 
     const now = this.clock.now();
+    const nextReservations = uniqueValueReservations(
+      options.tenantId,
+      options.doctype,
+      data,
+      options.existing.name
+    );
+    const existingReservations = uniqueValueReservations(
+      options.tenantId,
+      options.doctype,
+      options.existing.data,
+      options.existing.name
+    );
+    const newlyReserved = withoutReservationKeys(nextReservations, existingReservations);
+    const releasedReservations = withoutReservationKeys(existingReservations, nextReservations);
+    await this.reserveUniqueValues(options.command.actor, nextReservations, now);
     const payload = {
       kind: "DocumentUpdated" as const,
       patch: normalizedPatch,
@@ -647,19 +683,28 @@ export class DocumentService implements DocumentCommandExecutor {
       payload,
       metadata: options.command.metadata ?? {}
     });
-    const commit = await this.store.commit(options.stream, options.existing.version, [event], ([saved]) => {
-      if (!saved) {
-        throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
-      }
-      return {
-        ...options.existing,
-        version: saved.sequence,
-        data,
-        updatedAt: saved.occurredAt
-      };
-    });
+    let commit: Awaited<ReturnType<DocumentStore["commit"]>>;
+    try {
+      commit = await this.store.commit(options.stream, options.existing.version, [event], ([saved]) => {
+        if (!saved) {
+          throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
+        }
+        return {
+          ...options.existing,
+          version: saved.sequence,
+          data,
+          updatedAt: saved.occurredAt
+        };
+      });
+    } catch (error) {
+      await this.releaseUniqueValues(options.command.actor, newlyReserved, this.clock.now(), { suppressErrors: true });
+      throw error;
+    }
     const [saved] = commit.events;
     if (saved) {
+      await this.releaseUniqueValues(options.command.actor, releasedReservations, saved.occurredAt, {
+        suppressErrors: true
+      });
       return await this.runAfterCommit(options.doctype, saved, commit.snapshot) ?? commit.snapshot;
     }
     return commit.snapshot;
@@ -1114,6 +1159,7 @@ export class DocumentService implements DocumentCommandExecutor {
     ensureDocumentStatus(existing, ["draft", "cancelled"], "delete");
 
     const now = this.clock.now();
+    const uniqueReservations = uniqueValueReservations(tenantId, doctype, existing.data, existing.name);
     const event = this.newEvent({
       tenantId,
       stream,
@@ -1138,6 +1184,7 @@ export class DocumentService implements DocumentCommandExecutor {
     });
     const [saved] = commit.events;
     if (saved) {
+      await this.releaseUniqueValues(command.actor, uniqueReservations, saved.occurredAt, { suppressErrors: true });
       return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
     }
     return commit.snapshot;
@@ -1682,6 +1729,134 @@ export class DocumentService implements DocumentCommandExecutor {
     return foldDocument(await this.store.readStream(documentStream(tenantId, doctype.name, name)));
   }
 
+  private async reserveUniqueValues(
+    actor: Actor,
+    reservations: readonly UniqueValueReservation[],
+    occurredAt: string
+  ): Promise<void> {
+    const acquired: UniqueValueReservation[] = [];
+    try {
+      for (const reservation of reservations) {
+        const existing = foldDocument(await this.store.readStream(reservation.stream));
+        const owner = activeUniqueValueOwner(existing);
+        if (owner === reservation.documentName) {
+          continue;
+        }
+        if (owner !== undefined && (await this.uniqueReservationOwnerStillOwnsValue(reservation, owner))) {
+          throw conflict(
+            `Unique field '${reservation.field}' on ${reservation.doctype} already uses value '${reservation.valueLabel}'`
+          );
+        }
+        const event = this.newEvent({
+          tenantId: reservation.tenantId,
+          stream: reservation.stream,
+          type: existing ? "UniqueValueReserved" : "UniqueValueStarted",
+          doctype: UNIQUE_VALUE_DOCTYPE,
+          documentName: `${reservation.doctype}:${reservation.field}:${reservation.valueKey}`,
+          actorId: actor.id,
+          occurredAt,
+          payload: existing
+            ? {
+                kind: "DocumentUpdated",
+                patch: {
+                  active: true,
+                  documentName: reservation.documentName
+                }
+              }
+            : {
+                kind: "DocumentCreated",
+                data: {
+                  doctype: reservation.doctype,
+                  field: reservation.field,
+                  value: reservation.valueLabel,
+                  valueKey: reservation.valueKey,
+                  documentName: reservation.documentName,
+                  active: true
+                },
+                docstatus: "draft"
+              },
+          metadata: { target_doctype: reservation.doctype, target_field: reservation.field }
+        });
+        await this.store.commit(reservation.stream, existing?.version ?? 0, [event], ([saved]) => {
+          if (!saved) {
+            throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
+          }
+          return existing
+            ? {
+                ...existing,
+                version: saved.sequence,
+                data: { ...existing.data, documentName: reservation.documentName, active: true },
+                updatedAt: saved.occurredAt
+              }
+            : snapshotFromCreate(saved);
+        });
+        acquired.push(reservation);
+      }
+    } catch (error) {
+      await this.releaseUniqueValues(actor, acquired, this.clock.now(), { suppressErrors: true });
+      throw error;
+    }
+  }
+
+  private async uniqueReservationOwnerStillOwnsValue(
+    reservation: UniqueValueReservation,
+    documentName: string
+  ): Promise<boolean> {
+    const owner = foldDocument(
+      await this.store.readStream(documentStream(reservation.tenantId, reservation.doctype, documentName))
+    );
+    if (!owner || owner.docstatus === "deleted") {
+      return false;
+    }
+    const value = canonicalUniqueValue(owner.data[reservation.field], reservation.field);
+    return value?.key === reservation.valueKey;
+  }
+
+  private async releaseUniqueValues(
+    actor: Actor,
+    reservations: readonly UniqueValueReservation[],
+    occurredAt: string,
+    options: { readonly suppressErrors?: boolean } = {}
+  ): Promise<void> {
+    for (const reservation of reservations) {
+      try {
+        const existing = foldDocument(await this.store.readStream(reservation.stream));
+        if (!existing || activeUniqueValueOwner(existing) !== reservation.documentName) {
+          continue;
+        }
+        const event = this.newEvent({
+          tenantId: existing.tenantId,
+          stream: reservation.stream,
+          type: "UniqueValueReleased",
+          doctype: UNIQUE_VALUE_DOCTYPE,
+          documentName: `${reservation.doctype}:${reservation.field}:${reservation.valueKey}`,
+          actorId: actor.id,
+          occurredAt,
+          payload: {
+            kind: "DocumentUpdated",
+            patch: { active: false }
+          },
+          metadata: { target_doctype: reservation.doctype, target_field: reservation.field }
+        });
+        await this.store.commit(reservation.stream, existing.version, [event], ([saved]) => {
+          if (!saved) {
+            throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
+          }
+          return {
+            ...existing,
+            version: saved.sequence,
+            data: { ...existing.data, active: false },
+            updatedAt: saved.occurredAt
+          };
+        });
+      } catch (error) {
+        if (!options.suppressErrors) {
+          throw error;
+        }
+      }
+    }
+  }
+
   private async runAfterCommit(
     doctype: DocTypeDefinition,
     event: DomainEvent,
@@ -1831,6 +2006,99 @@ function ensureCreateNameAllowed(doctype: DocTypeDefinition, name: string | unde
 
 function renderNamingSeries(pattern: string, value: number): string {
   return pattern.replace(/#+/, (placeholder) => String(value).padStart(placeholder.length, "0"));
+}
+
+function uniqueValueReservations(
+  tenantId: string,
+  doctype: DocTypeDefinition,
+  data: DocumentData,
+  documentName: string
+): readonly UniqueValueReservation[] {
+  return doctype.fields.flatMap((field) => {
+    if (!field.unique) {
+      return [];
+    }
+    const value = canonicalUniqueValue(data[field.name], field.name);
+    if (value === undefined) {
+      return [];
+    }
+    return [
+      {
+        tenantId,
+        stream: uniqueValueStream(tenantId, doctype.name, field.name, value.key),
+        doctype: doctype.name,
+        field: field.name,
+        valueKey: value.key,
+        valueLabel: value.label,
+        documentName
+      }
+    ];
+  });
+}
+
+function canonicalUniqueValue(
+  value: JsonValue | undefined,
+  fieldName: string
+): { readonly key: string; readonly label: string } | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value === "string") {
+    if (value.length === 0) {
+      return undefined;
+    }
+    return boundedUniqueValue(`s:${value}`, value, fieldName);
+  }
+  if (typeof value === "number") {
+    return boundedUniqueValue(`n:${String(value)}`, String(value), fieldName);
+  }
+  if (typeof value === "boolean") {
+    return boundedUniqueValue(`b:${String(value)}`, String(value), fieldName);
+  }
+  throw validationFailed([
+    {
+      field: fieldName,
+      code: "unique",
+      message: `Field '${fieldName}' must be scalar to enforce uniqueness`
+    }
+  ]);
+}
+
+function boundedUniqueValue(
+  key: string,
+  label: string,
+  fieldName: string
+): { readonly key: string; readonly label: string } {
+  if (key.length > MAX_UNIQUE_VALUE_KEY_LENGTH) {
+    throw validationFailed([
+      {
+        field: fieldName,
+        code: "unique",
+        message: `Field '${fieldName}' unique value exceeds ${String(MAX_UNIQUE_VALUE_KEY_LENGTH)} characters`
+      }
+    ]);
+  }
+  return { key, label };
+}
+
+function activeUniqueValueOwner(snapshot: DocumentSnapshot | null): string | undefined {
+  if (!snapshot || snapshot.docstatus === "deleted" || snapshot.data.active === false) {
+    return undefined;
+  }
+  const owner = snapshot.data.documentName;
+  return typeof owner === "string" && owner.length > 0 ? owner : undefined;
+}
+
+function withoutReservationKeys(
+  left: readonly UniqueValueReservation[],
+  right: readonly UniqueValueReservation[]
+): readonly UniqueValueReservation[] {
+  const rightKeys = new Set(right.map(uniqueValueReservationKey));
+  return left.filter((reservation) => !rightKeys.has(uniqueValueReservationKey(reservation)));
+}
+
+function uniqueValueReservationKey(reservation: UniqueValueReservation): string {
+  return `${reservation.stream}\u0000${reservation.documentName}`;
 }
 
 function numberField(value: unknown): number | undefined {

@@ -68,6 +68,7 @@ function fieldValue(value: JsonValue | undefined): FieldDefinition {
     ...optionalBoolean(value.required, "field.required", "required"),
     ...optionalBoolean(value.readOnly, "field.readOnly", "readOnly"),
     ...optionalBoolean(value.hidden, "field.hidden", "hidden"),
+    ...optionalBoolean(value.unique, "field.unique", "unique"),
     ...optionalBoolean(value.inFormView, "field.inFormView", "inFormView"),
     ...optionalBoolean(value.inListView, "field.inListView", "inListView"),
     ...optionalBoolean(value.inListFilter, "field.inListFilter", "inListFilter"),

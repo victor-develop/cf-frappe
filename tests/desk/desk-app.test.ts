@@ -4152,6 +4152,7 @@ describe("Desk app", () => {
         name: "reviewed",
         label: "Reviewed",
         type: "boolean",
+        unique: "1",
         inListView: "1",
         defaultValue: "false",
         expectedVersion: "0"
@@ -4162,7 +4163,7 @@ describe("Desk app", () => {
     expect(created.headers.get("location")).toBe("/desk/admin/custom-fields?doctype=Note");
     await expect(services.customFields.list(admin, "Note")).resolves.toMatchObject({
       version: 1,
-      fields: [{ field: { name: "reviewed", label: "Reviewed", type: "boolean", defaultValue: false }, enabled: true }]
+      fields: [{ field: { name: "reviewed", label: "Reviewed", type: "boolean", unique: true, defaultValue: false }, enabled: true }]
     });
 
     const current = await app.request("/desk/admin/custom-fields?doctype=Note");
@@ -4170,6 +4171,7 @@ describe("Desk app", () => {
     const currentHtml = await current.text();
     expect(currentHtml).toContain("reviewed");
     expect(currentHtml).toContain("Reviewed");
+    expect(currentHtml).toContain("unique");
     expect(currentHtml).toContain("default: false");
     expect(currentHtml).toContain('action="/desk/admin/custom-fields/Note/reviewed/disable"');
     expect(currentHtml).toContain('name="expectedVersion" value="1"');

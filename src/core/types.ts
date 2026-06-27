@@ -38,6 +38,7 @@ export interface FieldDefinition {
   readonly required?: boolean;
   readonly readOnly?: boolean;
   readonly hidden?: boolean;
+  readonly unique?: boolean;
   readonly inFormView?: boolean;
   readonly inGlobalSearch?: boolean;
   readonly inListView?: boolean;

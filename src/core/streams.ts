@@ -8,6 +8,15 @@ export function namingSeriesStream(tenantId: TenantId, doctype: DocTypeName, pat
   return documentStream(tenantId, "__NamingSeries", `${doctype}:${pattern}`);
 }
 
+export function uniqueValueStream(
+  tenantId: TenantId,
+  doctype: DocTypeName,
+  field: string,
+  value: string
+): StreamName {
+  return documentStream(tenantId, "__UniqueValues", `${doctype}:${field}:${value}`);
+}
+
 export function savedListFiltersStream(tenantId: TenantId, doctype: DocTypeName, ownerId: string): StreamName {
   return documentStream(tenantId, "__SavedListFilters", `${doctype}:${ownerId}`);
 }

@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk assignment-rule management slice:
+As of the unique field reservation slice:
 
 - Vitest files: `150`
-- Vitest cases: `1456`
+- Vitest cases: `1459`
 
 ## Implication
 

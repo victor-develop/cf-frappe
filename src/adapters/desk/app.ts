@@ -5156,6 +5156,7 @@ async function parseDeskCustomField(request: Request): Promise<ParsedDeskCustomF
       ...(form.has("required") ? { required: true } : {}),
       ...(form.has("readOnly") ? { readOnly: true } : {}),
       ...(form.has("hidden") ? { hidden: true } : {}),
+      ...(form.has("unique") ? { unique: true } : {}),
       ...(form.has("inFormView") ? { inFormView: true } : {}),
       ...(form.has("inListView") ? { inListView: true } : {}),
       ...(form.has("inListFilter") ? { inListFilter: true } : {}),

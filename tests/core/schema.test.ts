@@ -112,6 +112,27 @@ describe("schema", () => {
     ).toThrow(FrameworkError);
   });
 
+  it("allows unique scalar fields and rejects unique table or JSON fields", () => {
+    expect(() =>
+      defineDocType({
+        name: "Contact",
+        fields: [{ name: "email", type: "text", unique: true }]
+      })
+    ).not.toThrow();
+    expect(() =>
+      defineDocType({
+        name: "Bad JSON",
+        fields: [{ name: "metadata", type: "json", unique: true }]
+      })
+    ).toThrow(FrameworkError);
+    expect(() =>
+      defineDocType({
+        name: "Bad Table",
+        fields: [{ name: "items", type: "table", tableOf: "Item", unique: true }]
+      })
+    ).toThrow(FrameworkError);
+  });
+
   it("validates table rows against child DocType metadata", () => {
     const InvoiceItem = defineDocType({
       name: "Invoice Item",

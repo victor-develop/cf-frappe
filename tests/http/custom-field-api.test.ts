@@ -35,6 +35,7 @@ describe("custom field api", () => {
           name: "reviewed",
           label: "Reviewed",
           type: "boolean",
+          unique: true,
           inListView: true,
           defaultValue: false
         },
@@ -47,7 +48,7 @@ describe("custom field api", () => {
         version: 1,
         fields: [
           {
-            field: { name: "reviewed", label: "Reviewed", type: "boolean", inListView: true, defaultValue: false },
+            field: { name: "reviewed", label: "Reviewed", type: "boolean", unique: true, inListView: true, defaultValue: false },
             enabled: true
           }
         ]

@@ -13,7 +13,8 @@ import {
   deterministicIds,
   documentStream,
   fixedClock,
-  namingSeriesStream
+  namingSeriesStream,
+  uniqueValueStream
 } from "../../src";
 import type { DocTypeDefinition } from "../../src";
 import {
@@ -259,6 +260,185 @@ describe("DocumentService", () => {
     await expect(queries.getDocument(owner, "Support Ticket", "TICK-.0002")).resolves.toMatchObject({
       data: { subject: "Second" }
     });
+  });
+
+  it("reserves metadata-defined unique field values through event streams", async () => {
+    const Contact = defineDocType({
+      name: "Contact",
+      naming: { kind: "provided" },
+      fields: [
+        { name: "email", type: "text", required: true, unique: true },
+        { name: "display_name", type: "text" },
+        { name: "workflow_state", type: "select", options: ["Open", "Closed"], defaultValue: "Open" }
+      ],
+      workflow: {
+        initialState: "Open",
+        states: ["Open", "Closed"],
+        transitions: [{ action: "close", from: "Open", to: "Closed", roles: ["User"] }]
+      },
+      permissions: [{ roles: ["User"], actions: ["read", "create", "update", "delete", "transition"] }]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry: createRegistry({ doctypes: [Contact] }),
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds([
+        "unique-1",
+        "contact-1",
+        "transition-1",
+        "unique-2",
+        "contact-2",
+        "release-1",
+        "unique-3",
+        "contact-3",
+        "delete-1",
+        "release-2",
+        "unique-4",
+        "contact-4",
+        "unique-5",
+        "contact-5",
+        "unique-6",
+        "contact-6"
+      ])
+    });
+
+    await documents.create({
+      actor: owner,
+      doctype: "Contact",
+      name: "ada",
+        data: { email: "ada@example.com", display_name: "Ada" }
+      });
+    await documents.transition({ actor: owner, doctype: "Contact", name: "ada", action: "close" });
+    await expect(
+      documents.create({
+        actor: owner,
+        doctype: "Contact",
+        name: "duplicate",
+        data: { email: "ada@example.com" }
+      })
+    ).rejects.toMatchObject({
+      code: "DOCUMENT_CONFLICT",
+      message: "Unique field 'email' on Contact already uses value 'ada@example.com'"
+    });
+
+    await documents.create({
+      actor: owner,
+      doctype: "Contact",
+      name: "bob",
+      data: { email: "bob@example.com", display_name: "Bob" }
+    });
+    await expect(
+      documents.update({
+        actor: owner,
+        doctype: "Contact",
+        name: "bob",
+        patch: { email: "ada@example.com" },
+        expectedVersion: 1
+      })
+    ).rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
+    await expect(store.readStream(documentStream("acme", "Contact", "bob"))).resolves.toHaveLength(1);
+
+    const updated = await documents.update({
+      actor: owner,
+      doctype: "Contact",
+      name: "ada",
+      patch: { email: "ada.lovelace@example.com" },
+      expectedVersion: 2
+    });
+    expect(updated).toMatchObject({ version: 3, data: { email: "ada.lovelace@example.com" } });
+
+    const reused = await documents.create({
+      actor: owner,
+      doctype: "Contact",
+      name: "grace",
+      data: { email: "ada@example.com", display_name: "Grace" }
+    });
+    expect(reused).toMatchObject({ name: "grace", data: { email: "ada@example.com" } });
+
+    await documents.delete({ actor: owner, doctype: "Contact", name: "grace", expectedVersion: 1 });
+    const afterDelete = await documents.create({
+      actor: owner,
+      doctype: "Contact",
+      name: "katherine",
+      data: { email: "ada@example.com", display_name: "Katherine" }
+    });
+    expect(afterDelete).toMatchObject({ name: "katherine", data: { email: "ada@example.com" } });
+
+    await expect(
+      store.readStream(uniqueValueStream("acme", "Contact", "email", "s:ada@example.com"))
+    ).resolves.toMatchObject([
+      { type: "UniqueValueStarted", payload: { kind: "DocumentCreated", data: { documentName: "ada", active: true } } },
+      { type: "UniqueValueReleased", payload: { kind: "DocumentUpdated", patch: { active: false } } },
+      { type: "UniqueValueReserved", payload: { kind: "DocumentUpdated", patch: { documentName: "grace", active: true } } },
+      { type: "UniqueValueReleased", payload: { kind: "DocumentUpdated", patch: { active: false } } },
+      { type: "UniqueValueReserved", payload: { kind: "DocumentUpdated", patch: { documentName: "katherine", active: true } } }
+    ]);
+  });
+
+  it("rolls back unique reservations acquired before a later unique field conflicts", async () => {
+    const Account = defineDocType({
+      name: "Account",
+      naming: { kind: "provided" },
+      fields: [
+        { name: "email", type: "text", required: true, unique: true },
+        { name: "handle", type: "text", required: true, unique: true }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read", "create"] }]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry: createRegistry({ doctypes: [Account] }),
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds([
+        "existing-email",
+        "existing-handle",
+        "existing-account",
+        "attempt-email",
+        "attempt-release",
+        "retry-email",
+        "retry-handle",
+        "retry-account"
+      ])
+    });
+
+    await documents.create({
+      actor: owner,
+      doctype: "Account",
+      name: "existing",
+      data: { email: "existing@example.com", handle: "taken" }
+    });
+
+    await expect(
+      documents.create({
+        actor: owner,
+        doctype: "Account",
+        name: "failed",
+        data: { email: "new@example.com", handle: "taken" }
+      })
+    ).rejects.toMatchObject({
+      code: "DOCUMENT_CONFLICT",
+      message: "Unique field 'handle' on Account already uses value 'taken'"
+    });
+
+    await expect(
+      documents.create({
+        actor: owner,
+        doctype: "Account",
+        name: "retry",
+        data: { email: "new@example.com", handle: "free" }
+      })
+    ).resolves.toMatchObject({
+      name: "retry",
+      data: { email: "new@example.com", handle: "free" }
+    });
+    await expect(store.readStream(documentStream("acme", "Account", "failed"))).resolves.toHaveLength(0);
+    await expect(store.readStream(uniqueValueStream("acme", "Account", "email", "s:new@example.com"))).resolves.toMatchObject([
+      { type: "UniqueValueStarted", payload: { kind: "DocumentCreated", data: { documentName: "failed", active: true } } },
+      { type: "UniqueValueReleased", payload: { kind: "DocumentUpdated", patch: { active: false } } },
+      { type: "UniqueValueReserved", payload: { kind: "DocumentUpdated", patch: { documentName: "retry", active: true } } }
+    ]);
   });
 
   it("accepts link fields only when the target document exists in the event stream", async () => {

@@ -30,6 +30,7 @@ export function defineDocType<TData extends DocumentData>(
     }
     assertLinkFieldDefinition(definition, field);
     assertTableFieldDefinition(definition, field);
+    assertUniqueFieldDefinition(definition, field);
     seen.add(field.name);
   }
   assertNamingStrategyDefinition(definition);
@@ -290,6 +291,19 @@ function assertTableFieldDefinition(doctype: DocTypeDefinition, field: FieldDefi
     throw new FrameworkError(
       "DOCTYPE_TABLE_INVALID",
       `Field '${field.name}' on ${doctype.name} declares tableOf but is not a table field`,
+      { status: 400 }
+    );
+  }
+}
+
+function assertUniqueFieldDefinition(doctype: DocTypeDefinition, field: FieldDefinition): void {
+  if (!field.unique) {
+    return;
+  }
+  if (field.type === "json" || field.type === "table") {
+    throw new FrameworkError(
+      "DOCTYPE_FIELD_INVALID",
+      `Unique field '${field.name}' on ${doctype.name} must be scalar`,
       { status: 400 }
     );
   }

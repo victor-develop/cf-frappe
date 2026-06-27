@@ -1644,6 +1644,7 @@ export function renderCustomFieldAdmin(state: CustomFieldAdminState): string {
       ${renderCustomFieldCheckbox("required", "Required")}
       ${renderCustomFieldCheckbox("readOnly", "Read Only")}
       ${renderCustomFieldCheckbox("hidden", "Hidden")}
+      ${renderCustomFieldCheckbox("unique", "Unique")}
       ${renderCustomFieldCheckbox("inFormView", "Form View")}
       ${renderCustomFieldCheckbox("inListView", "List View")}
       ${renderCustomFieldCheckbox("inListFilter", "List Filter")}
@@ -2102,6 +2103,7 @@ function renderCustomFieldFlags(field: FieldDefinition): string {
     field.required ? "required" : "",
     field.readOnly ? "read only" : "",
     field.hidden ? "hidden" : "",
+    field.unique ? "unique" : "",
     field.inFormView ? "form" : "",
     field.inListView ? "list" : "",
     field.inListFilter ? "filter" : ""
