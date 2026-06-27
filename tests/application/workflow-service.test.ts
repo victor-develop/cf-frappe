@@ -10,8 +10,10 @@ import {
   SYSTEM_MANAGER_ROLE,
   WorkflowService,
   workflowDefinitionsStream,
+  type DocumentEventPayload,
   type DocTypeDefinition
 } from "../../src";
+import type { WorkflowEventPayload } from "../../src";
 import { data, noteDocType, now, owner } from "../helpers";
 
 const admin = {
@@ -27,6 +29,16 @@ const overrideWorkflow = {
 };
 
 describe("WorkflowService", () => {
+  it("registers workflow payloads through the domain event extension map", () => {
+    const payload = workflowPayload({
+      kind: "WorkflowDefinitionSaved",
+      doctypeName: "Note",
+      workflow: overrideWorkflow
+    });
+
+    expect(payload.workflow.transitions[0]?.action).toBe("approve");
+  });
+
   it("saves, clears, and audits tenant workflow definition events", async () => {
     const events = new InMemoryDocumentStore();
     const service = new WorkflowService({
@@ -162,3 +174,9 @@ describe("WorkflowService", () => {
     });
   });
 });
+
+function workflowPayload(
+  payload: Extract<DocumentEventPayload, { readonly kind: "WorkflowDefinitionSaved" }>
+): Extract<WorkflowEventPayload, { readonly kind: "WorkflowDefinitionSaved" }> {
+  return payload;
+}

@@ -16,10 +16,13 @@ import {
   type TenantId,
   type WorkflowDefinition
 } from "../core/types.js";
+import type { WorkflowEventPayload } from "./workflow-events.js";
 import type { ModelRegistry } from "../core/registry.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
+
+export type { WorkflowEventPayload } from "./workflow-events.js";
 
 export type PreWorkflowDocTypeResolver = (
   base: DocTypeDefinition,
@@ -145,7 +148,7 @@ export class WorkflowService {
     return this.preWorkflowDocTypeResolver ? await this.preWorkflowDocTypeResolver(base, { tenantId }) : base;
   }
 
-  private async appendAndFold<TPayload extends NewDomainEvent["payload"]>(
+  private async appendAndFold<TPayload extends WorkflowEventPayload>(
     state: WorkflowDefinitionState,
     options: {
       readonly actor: Actor;

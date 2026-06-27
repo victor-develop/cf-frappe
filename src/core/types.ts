@@ -393,15 +393,6 @@ export type CoreDocumentEventPayload =
       readonly applicableDoctypes?: readonly DocTypeName[];
     }
   | {
-      readonly kind: "WorkflowDefinitionSaved";
-      readonly doctypeName: DocTypeName;
-      readonly workflow: WorkflowDefinition;
-    }
-  | {
-      readonly kind: "WorkflowDefinitionCleared";
-      readonly doctypeName: DocTypeName;
-    }
-  | {
       readonly kind: "NotificationRuleSaved";
       readonly doctypeName: DocTypeName;
       readonly rule: NotificationRuleDefinition;
