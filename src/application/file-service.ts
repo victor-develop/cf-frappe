@@ -54,6 +54,7 @@ import {
   isPreviewableFileContentType,
   multipartPartManifest,
   multipartPartSize,
+  normalizeBulkFileSelections,
   normalizeContentType,
   normalizeDirectUploadExpiry,
   normalizeFileSize,
@@ -1429,37 +1430,6 @@ export class FileService {
 function optionalTextFilter<TKey extends string>(key: TKey, value: string | undefined): { readonly [K in TKey]?: string } {
   const trimmed = value?.trim();
   return trimmed === undefined || trimmed === "" ? {} : { [key]: trimmed } as { readonly [K in TKey]: string };
-}
-
-const MAX_BULK_FILES = 100;
-
-function normalizeBulkFileSelections(
-  files: readonly BulkFileSelection[]
-): readonly BulkFileSelection[] {
-  if (files.length === 0) {
-    throw badRequest("At least one file must be selected");
-  }
-  if (files.length > MAX_BULK_FILES) {
-    throw badRequest(`At most ${String(MAX_BULK_FILES)} files can be selected`);
-  }
-  const seen = new Set<string>();
-  return files.map((file) => {
-    const name = file.name.trim();
-    if (name === "") {
-      throw badRequest("File name is required");
-    }
-    if (seen.has(name)) {
-      throw badRequest(`Duplicate file selection '${name}'`);
-    }
-    seen.add(name);
-    if (file.expectedVersion !== undefined && !Number.isInteger(file.expectedVersion)) {
-      throw badRequest("expectedVersion must be an integer");
-    }
-    return {
-      name,
-      ...(file.expectedVersion === undefined ? {} : { expectedVersion: file.expectedVersion })
-    };
-  });
 }
 
 function bulkDeleteFailure(name: string, error: unknown): BulkDeleteFileFailure {

@@ -15,6 +15,7 @@ import {
   MIN_MULTIPART_FILE_PART_BYTES,
   multipartPartManifest,
   multipartPartSize,
+  normalizeBulkFileSelections,
   normalizeContentType,
   normalizeDirectUploadExpiry,
   normalizeFileSize,
@@ -342,6 +343,30 @@ describe("file policy", () => {
         renditionEntry("overflow")
       )
     ).toThrow("At most 32 renditions can be stored per file");
+  });
+
+  it("normalizes bulk file selections", () => {
+    expect(normalizeBulkFileSelections([
+      { name: " file_a ", expectedVersion: 2 },
+      { name: "file_b" }
+    ])).toEqual([
+      { name: "file_a", expectedVersion: 2 },
+      { name: "file_b" }
+    ]);
+  });
+
+  it("rejects invalid bulk file selections", () => {
+    expect(() => normalizeBulkFileSelections([])).toThrow("At least one file must be selected");
+    expect(() => normalizeBulkFileSelections([{ name: " " }])).toThrow("File name is required");
+    expect(() => normalizeBulkFileSelections([{ name: "file_a" }, { name: " file_a " }])).toThrow(
+      "Duplicate file selection 'file_a'"
+    );
+    expect(() => normalizeBulkFileSelections([{ name: "file_a", expectedVersion: 1.5 }])).toThrow(
+      "expectedVersion must be an integer"
+    );
+    expect(() =>
+      normalizeBulkFileSelections(Array.from({ length: 101 }, (_, index) => ({ name: `file_${String(index)}` })))
+    ).toThrow("At most 100 files can be selected");
   });
 });
 

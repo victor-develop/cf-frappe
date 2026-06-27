@@ -25,6 +25,7 @@ const PREVIEWABLE_FILE_CONTENT_TYPES = new Set([
 ]);
 
 const MAX_FILE_RENDITIONS = 32;
+const MAX_BULK_FILES = 100;
 
 export function normalizeContentType(value: string | undefined): string {
   return value?.trim().toLowerCase() ?? "";
@@ -208,6 +209,40 @@ export function ensureMultipartCompletionMatchesManifest(
   if (totalSize !== snapshotNumberData(snapshot, "size")) {
     throw badRequest("Multipart upload object size mismatch");
   }
+}
+
+export interface BulkFileSelectionPolicyInput {
+  readonly name: string;
+  readonly expectedVersion?: number;
+}
+
+export function normalizeBulkFileSelections<TSelection extends BulkFileSelectionPolicyInput>(
+  files: readonly TSelection[]
+): readonly BulkFileSelectionPolicyInput[] {
+  if (files.length === 0) {
+    throw badRequest("At least one file must be selected");
+  }
+  if (files.length > MAX_BULK_FILES) {
+    throw badRequest(`At most ${String(MAX_BULK_FILES)} files can be selected`);
+  }
+  const seen = new Set<string>();
+  return files.map((file) => {
+    const name = file.name.trim();
+    if (name === "") {
+      throw badRequest("File name is required");
+    }
+    if (seen.has(name)) {
+      throw badRequest(`Duplicate file selection '${name}'`);
+    }
+    seen.add(name);
+    if (file.expectedVersion !== undefined && !Number.isInteger(file.expectedVersion)) {
+      throw badRequest("expectedVersion must be an integer");
+    }
+    return {
+      name,
+      ...(file.expectedVersion === undefined ? {} : { expectedVersion: file.expectedVersion })
+    };
+  });
 }
 
 export interface FileRenditionManifestEntry {
