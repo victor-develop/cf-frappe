@@ -92,6 +92,7 @@ export class ModelRegistry {
   private readonly kanbans = new Map<string, KanbanDefinition>();
   private readonly calendars = new Map<string, CalendarDefinition>();
   private readonly webForms = new Map<string, WebFormDefinition>();
+  private readonly webFormRoutes = new Map<string, string>();
   private readonly webPages = new Map<string, WebPageDefinition>();
   private readonly webViews = new Map<string, WebViewDefinition>();
   private websiteSettings: WebsiteSettingsDefinition | undefined;
@@ -345,9 +346,27 @@ export class ModelRegistry {
         status: 409
       });
     }
+    if (definition.route !== undefined && this.webFormRoutes.has(definition.route)) {
+      throw new FrameworkError("WEB_FORM_DUPLICATE", `Web form route '${definition.route}' is already registered`, {
+        status: 409
+      });
+    }
+    if (definition.route !== undefined && this.webForms.has(definition.route)) {
+      throw new FrameworkError("WEB_FORM_DUPLICATE", `Web form route '${definition.route}' conflicts with an existing web form name`, {
+        status: 409
+      });
+    }
+    if (this.webFormRoutes.has(definition.name)) {
+      throw new FrameworkError("WEB_FORM_DUPLICATE", `Web form name '${definition.name}' conflicts with an existing web form route`, {
+        status: 409
+      });
+    }
     assertWebFormDefinition(definition);
     this.assertWebFormReferencesResolve(definition);
     this.webForms.set(definition.name, definition);
+    if (definition.route !== undefined) {
+      this.webFormRoutes.set(definition.route, definition.name);
+    }
   }
 
   registerWebView(webView: WebViewDefinition): void {
@@ -508,6 +527,16 @@ export class ModelRegistry {
       });
     }
     return definition;
+  }
+
+  getWebFormByRoute(route: string): WebFormDefinition {
+    const name = this.webFormRoutes.get(route);
+    if (name === undefined) {
+      throw new FrameworkError("WEB_FORM_NOT_FOUND", `Web form route '${route}' is not registered`, {
+        status: 404
+      });
+    }
+    return this.getWebForm(name);
   }
 
   listWebForms(): readonly WebFormDefinition[] {

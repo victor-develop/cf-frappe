@@ -72,7 +72,7 @@ describe("cf-frappe CLI remote web forms", () => {
         cwd: () => "/workspace",
         env: (name) => name === "CF_FRAPPE_AUTH" ? "Bearer test-token" : undefined,
         fetch: fakeFetch(listCalls, {
-          data: [{ name: "Lead Intake", label: "Lead Intake", doctype: "Lead" }]
+          data: [{ name: "Lead Intake", label: "Lead Intake", route: "lead/intake", doctype: "Lead" }]
         }),
         stdout: listStdout,
         stderr: textBuffer()
@@ -85,6 +85,7 @@ describe("cf-frappe CLI remote web forms", () => {
     expect(listCalls[0]?.headers.get("authorization")).toBe("Bearer test-token");
     expect(listStdout.text()).toContain("Web forms at https://app.example/cf");
     expect(listStdout.text()).toContain("- Lead Intake Lead - Lead Intake");
+    expect(listStdout.text()).toContain("route:lead/intake");
 
     const getCalls: RemoteCall[] = [];
     const getStdout = textBuffer();
@@ -94,7 +95,7 @@ describe("cf-frappe CLI remote web forms", () => {
         cwd: () => "/workspace",
         fetch: fakeFetch(getCalls, {
           data: {
-            form: { name: "Lead Intake", label: "Lead Intake" },
+            form: { name: "Lead Intake", label: "Lead Intake", route: "lead/intake" },
             doctype: "Lead",
             fields: [{ field: "title", label: "Name", type: "text", required: true }]
           }
@@ -107,6 +108,7 @@ describe("cf-frappe CLI remote web forms", () => {
     expect(getExit).toBe(0);
     expect(getCalls[0]?.url).toBe("https://app.example/api/meta/web-forms/Lead%20Intake");
     expect(getStdout.text()).toContain("  - title text required - Name");
+    expect(getStdout.text()).toContain("route:lead/intake");
   });
 
   it("submits remote web forms", async () => {

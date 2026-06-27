@@ -259,6 +259,7 @@ describe("CloudFrappe Worker routing", () => {
         defineWebForm({
           name: "Lead Intake",
           label: "Lead Intake",
+          route: "lead/intake",
           description: "Capture website leads",
           doctype: "Lead",
           fields: [{ field: "title" }, { field: "email" }],
@@ -277,7 +278,7 @@ describe("CloudFrappe Worker routing", () => {
     };
 
     const metadata = await worker.fetch!(cfRequest("http://localhost/api/meta/web-forms"), env, fakeExecutionContext());
-    const page = await worker.fetch!(cfRequest("http://localhost/web-forms/Lead%20Intake"), env, fakeExecutionContext());
+    const page = await worker.fetch!(cfRequest("http://localhost/web-forms/lead/intake"), env, fakeExecutionContext());
     const submit = await worker.fetch!(
       cfRequest("http://localhost/api/web-form/Lead%20Intake/submit", {
         method: "POST",
@@ -290,7 +291,7 @@ describe("CloudFrappe Worker routing", () => {
 
     expect(metadata.status).toBe(200);
     await expect(metadata.json()).resolves.toMatchObject({
-      data: [{ name: "Lead Intake", doctype: "Lead", fields: [{ field: "title" }, { field: "email" }] }]
+      data: [{ name: "Lead Intake", route: "lead/intake", doctype: "Lead", fields: [{ field: "title" }, { field: "email" }] }]
     });
     expect(page.status).toBe(200);
     await expect(page.text()).resolves.toContain("Capture website leads");

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { badRequest } from "../../core/errors.js";
-import type { JsonValue } from "../../core/types.js";
+import type { Actor, JsonValue } from "../../core/types.js";
 import type { WebFormResolvedField, WebFormService } from "../../application/web-form-service.js";
 import type { ActorResolver } from "./actor.js";
 import { readJsonObject, requestMetadata } from "./request.js";
@@ -46,19 +46,42 @@ export function createWebFormApi(options: WebFormApiOptions): Hono {
     return html(renderWebFormList(forms.map((form) => ({
       name: form.name,
       label: form.label ?? form.name,
+      ...(form.route === undefined ? {} : { route: form.route }),
       description: form.description ?? form.module ?? ""
     })), resolveWebsitePresentation(options.websiteSettings, actor)));
   });
 
+  app.get("/web-forms/:webForm{.+}", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const metadata = await getPublicWebForm(options.webForms, actor, c.req.param("webForm"));
+    return html(renderWebForm(metadata, resolveWebsitePresentation(options.websiteSettings, actor)));
+  });
+
   app.get("/web-forms/:webForm", async (c) => {
     const actor = await options.actor(c.req.raw);
-    const metadata = await options.webForms.getWebForm(actor, c.req.param("webForm"));
+    const metadata = await getPublicWebForm(options.webForms, actor, c.req.param("webForm"));
     return html(renderWebForm(metadata, resolveWebsitePresentation(options.websiteSettings, actor)));
+  });
+
+  app.post("/web-forms/:webForm{.+}", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const metadata = await getPublicWebForm(options.webForms, actor, c.req.param("webForm"));
+    const formData = await c.req.raw.formData();
+    const result = await options.webForms.submitWebForm(actor, metadata.form.name, {
+      data: dataFromFormData(formData, metadata.fields),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return html(renderWebFormSuccess(
+      metadata.form.label ?? metadata.form.name,
+      result.document.name,
+      metadata.form.successMessage,
+      resolveWebsitePresentation(options.websiteSettings, actor)
+    ), 201);
   });
 
   app.post("/web-forms/:webForm", async (c) => {
     const actor = await options.actor(c.req.raw);
-    const metadata = await options.webForms.getWebForm(actor, c.req.param("webForm"));
+    const metadata = await getPublicWebForm(options.webForms, actor, c.req.param("webForm"));
     const formData = await c.req.raw.formData();
     const result = await options.webForms.submitWebForm(actor, metadata.form.name, {
       data: dataFromFormData(formData, metadata.fields),
@@ -138,18 +161,42 @@ function valueFromFormData(value: FormDataEntryValue | null, field: WebFormResol
 interface WebFormListItem {
   readonly name: string;
   readonly label: string;
+  readonly route?: string;
   readonly description: string;
 }
 
 function renderWebFormList(forms: readonly WebFormListItem[], presentation: WebsitePresentation): string {
   const rows = forms
     .map(
-      (form) => `<li><a href="/web-forms/${encodeURIComponent(form.name)}">${escapeHtml(form.label)}</a>${form.description ? `<span>${escapeHtml(form.description)}</span>` : ""}</li>`
+      (form) => `<li><a href="${escapeHtml(webFormPublicHref(form))}">${escapeHtml(form.label)}</a>${form.description ? `<span>${escapeHtml(form.description)}</span>` : ""}</li>`
     )
     .join("");
   return websitePage("Web Forms", `<main class="web-form-main"><h1>Web Forms</h1><ul class="web-form-list">${rows || "<li>No web forms.</li>"}</ul></main>`, presentation, {
     styles: WEB_FORM_STYLES
   });
+}
+
+async function getPublicWebForm(
+  webForms: WebFormService,
+  actor: Actor,
+  identifier: string
+): Promise<Awaited<ReturnType<WebFormService["getWebForm"]>>> {
+  try {
+    return await webForms.getWebFormByRoute(actor, identifier);
+  } catch (error) {
+    if (!isWebFormNotFound(error)) {
+      throw error;
+    }
+  }
+  return webForms.getWebForm(actor, identifier);
+}
+
+function webFormPublicHref(form: WebFormListItem): string {
+  return `/web-forms/${form.route ?? encodeURIComponent(form.name)}`;
+}
+
+function isWebFormNotFound(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "WEB_FORM_NOT_FOUND";
 }
 
 function renderWebForm(metadata: Awaited<ReturnType<WebFormService["getWebForm"]>>, presentation: WebsitePresentation): string {

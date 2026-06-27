@@ -43,6 +43,7 @@ describe("WebFormService", () => {
         defineWebForm({
           name: "Lead Intake",
           label: "Lead Intake",
+          route: "lead/intake",
           doctype: "Lead",
           fields: [
             { field: "title", label: "Name", required: true },
@@ -60,7 +61,7 @@ describe("WebFormService", () => {
 
     await expect(webForms.listWebForms(guest)).resolves.toMatchObject([{ name: "Lead Intake" }]);
     await expect(webForms.getWebForm(guest, "Lead Intake")).resolves.toMatchObject({
-      form: { name: "Lead Intake" },
+      form: { name: "Lead Intake", route: "lead/intake" },
       doctype: "Lead",
       fields: [
         { field: "title", label: "Name", type: "text", required: true },
@@ -68,6 +69,10 @@ describe("WebFormService", () => {
         { field: "priority", type: "select", options: ["Low", "High"] },
         { field: "accepted", type: "boolean" }
       ]
+    });
+    await expect(webForms.getWebFormByRoute(guest, "lead/intake")).resolves.toMatchObject({
+      form: { name: "Lead Intake", route: "lead/intake" },
+      doctype: "Lead"
     });
 
     const result = await webForms.submitWebForm(guest, "Lead Intake", {

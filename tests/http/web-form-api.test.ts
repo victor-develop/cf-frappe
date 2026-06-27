@@ -39,6 +39,7 @@ describe("web form api", () => {
         defineWebForm({
           name: "Lead Intake",
           label: "Lead Intake",
+          route: "lead/intake",
           doctype: "Lead",
           fields: [
             { field: "title", label: "Name", required: true },
@@ -71,7 +72,7 @@ describe("web form api", () => {
     expect(metadata.status).toBe(200);
     await expect(metadata.json()).resolves.toMatchObject({
       data: {
-        form: { name: "Lead Intake" },
+        form: { name: "Lead Intake", route: "lead/intake" },
         doctype: "Lead",
         fields: expect.arrayContaining([{ field: "title", label: "Name", type: "text", required: true }])
       }
@@ -90,6 +91,14 @@ describe("web form api", () => {
     const html = await app.request("/web-forms/Lead%20Intake");
     expect(html.status).toBe(200);
     await expect(html.text()).resolves.toContain("<h1>Lead Intake</h1>");
+
+    const list = await app.request("/web-forms");
+    expect(list.status).toBe(200);
+    await expect(list.text()).resolves.toContain('href="/web-forms/lead/intake"');
+
+    const routedHtml = await app.request("/web-forms/lead/intake");
+    expect(routedHtml.status).toBe(200);
+    await expect(routedHtml.text()).resolves.toContain("<h1>Lead Intake</h1>");
 
     const formSubmit = await app.request("/web-forms/Lead%20Intake", {
       method: "POST",
@@ -129,6 +138,7 @@ describe("web form api", () => {
       webForms: [
         defineWebForm({
           name: "Lead Intake",
+          route: "lead/intake",
           label: "Lead <Intake>",
           doctype: "Lead",
           fields: [{ field: "title", label: "Name", required: true }],
@@ -151,7 +161,7 @@ describe("web form api", () => {
         theme: "Starter",
         navItems: [
           { name: "about", label: "About", pageRoute: "about" },
-          { name: "intake", label: "<Intake>", href: "/web-forms/Lead%20Intake" }
+          { name: "intake", label: "<Intake>", href: "/web-forms/lead/intake" }
         ]
       })
     });
@@ -183,16 +193,17 @@ describe("web form api", () => {
     expect(listHtml).toContain("--cf-frappe-font-family: Inter, system-ui");
     expect(listHtml).toContain('aria-label="Website navigation"');
     expect(listHtml).toContain('<a href="/page/about">About</a>');
-    expect(listHtml).toContain('<a href="/web-forms/Lead%20Intake">&lt;Intake&gt;</a>');
+    expect(listHtml).toContain('href="/web-forms/lead/intake"');
+    expect(listHtml).toContain('<a href="/web-forms/lead/intake">&lt;Intake&gt;</a>');
 
-    const formPage = await app.request("/web-forms/Lead%20Intake");
+    const formPage = await app.request("/web-forms/lead/intake");
     expect(formPage.status).toBe(200);
     const formHtml = await formPage.text();
     expect(formHtml).toContain("<h1>Lead &lt;Intake&gt;</h1>");
     expect(formHtml).toContain("background: var(--cf-frappe-primary)");
-    expect(formHtml).toContain('<a href="/web-forms/Lead%20Intake">&lt;Intake&gt;</a>');
+    expect(formHtml).toContain('<a href="/web-forms/lead/intake">&lt;Intake&gt;</a>');
 
-    const submitted = await app.request("/web-forms/Lead%20Intake", {
+    const submitted = await app.request("/web-forms/lead/intake", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ title: "HTML Lead" })

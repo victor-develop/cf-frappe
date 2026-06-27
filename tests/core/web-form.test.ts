@@ -38,6 +38,7 @@ describe("web form metadata", () => {
     });
     const form = defineWebForm({
       name: "Lead Intake",
+      route: "lead/intake",
       doctype: "Lead",
       fields: [{ field: "title" }, { field: "email" }]
     });
@@ -45,9 +46,43 @@ describe("web form metadata", () => {
     const registry = createRegistry({ doctypes: [Lead, LeadChild], webForms: [form] });
 
     expect(registry.getWebForm("Lead Intake")).toEqual(form);
+    expect(registry.getWebFormByRoute("lead/intake")).toEqual(form);
     expect(registry.listWebForms().map((item) => item.name)).toEqual(["Lead Intake"]);
     expect(createRegistryFromApp(form).getWebForm("Lead Intake")).toEqual(form);
     expect(() => createRegistry({ doctypes: [Lead, LeadChild], webForms: [form, form] })).toThrow("already registered");
+    expect(() =>
+      createRegistry({
+        doctypes: [Lead, LeadChild],
+        webForms: [
+          form,
+          defineWebForm({ name: "Duplicate Route", route: "lead/intake", doctype: "Lead", fields: [{ field: "title" }] })
+        ]
+      })
+    ).toThrow("route 'lead/intake' is already registered");
+    expect(() =>
+      createRegistry({
+        doctypes: [Lead, LeadChild],
+        webForms: [
+          defineWebForm({ name: "contact", doctype: "Lead", fields: [{ field: "title" }] }),
+          defineWebForm({ name: "Contact Intake", route: "contact", doctype: "Lead", fields: [{ field: "title" }] })
+        ]
+      })
+    ).toThrow("route 'contact' conflicts with an existing web form name");
+    expect(() =>
+      createRegistry({
+        doctypes: [Lead, LeadChild],
+        webForms: [
+          defineWebForm({ name: "Contact Intake", route: "contact", doctype: "Lead", fields: [{ field: "title" }] }),
+          defineWebForm({ name: "contact", doctype: "Lead", fields: [{ field: "title" }] })
+        ]
+      })
+    ).toThrow("name 'contact' conflicts with an existing web form route");
+    expect(() => defineWebForm({ name: "Bad", route: "/lead", doctype: "Lead", fields: [{ field: "title" }] }))
+      .toThrow("safe canonical relative path");
+    expect(() => defineWebForm({ name: "Bad", route: "lead?x=1", doctype: "Lead", fields: [{ field: "title" }] }))
+      .toThrow("safe canonical relative path");
+    expect(() => defineWebForm({ name: "Bad", route: "lead/../admin", doctype: "Lead", fields: [{ field: "title" }] }))
+      .toThrow("safe canonical relative path");
     expect(() =>
       createRegistry({
         doctypes: [Lead, LeadChild],

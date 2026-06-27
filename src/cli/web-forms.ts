@@ -27,6 +27,7 @@ interface WebFormResponse {
   readonly label?: string;
   readonly module?: string;
   readonly description?: string;
+  readonly route?: string;
   readonly doctype?: string;
   readonly fields?: readonly WebFormFieldResponse[];
 }
@@ -135,7 +136,8 @@ function formatWebFormSubmit(baseUrl: string, result: WebFormSubmitResponse): st
 
 function webFormLine(form: WebFormResponse): string {
   const label = form.label === undefined ? "" : ` - ${form.label}`;
-  return `- ${form.name ?? "(unknown)"} ${form.doctype ?? "(unknown)"}${label}`;
+  const route = form.route === undefined ? "" : ` route:${form.route}`;
+  return `- ${form.name ?? "(unknown)"} ${form.doctype ?? "(unknown)"}${label}${route}`;
 }
 
 function webFormFieldLine(field: WebFormFieldResponse): string {

@@ -256,7 +256,7 @@ npm run d1:migrate:local
 npm run dev
 \`\`\`
 
-Open \`/\` for the generated website homepage, \`/desk\` for the generated Desk UI, the \`Tasks\` workspace, the \`Task Calendar\`, the \`Task Board\`, the \`Task Dashboard\`, the \`Task Intake\` Web Form, the \`Task Updates\` Web View, the \`About\` Web Page, and the file manager at \`/desk/files\`; run the \`tasks.seed_starter_tasks\` data patch when you want sample Task records and the starter Task owner notification rule in a fresh environment. Use \`/api/meta/doctypes/Task\`, \`/api/meta/web-forms/Task%20Intake\`, \`/api/meta/web-views/Task%20Updates\`, \`/api/meta/web-pages/About\`, \`/api/meta/website-settings\`, and \`/api/meta/website-themes/Starter Theme\` for metadata APIs. ${authLocalReadme(input.auth)}
+Open \`/\` for the generated website homepage, \`/desk\` for the generated Desk UI, the \`Tasks\` workspace, the \`Task Calendar\`, the \`Task Board\`, the \`Task Dashboard\`, the \`Task Intake\` Web Form at \`/web-forms/task-intake\`, the \`Task Updates\` Web View, the \`About\` Web Page, and the file manager at \`/desk/files\`; run the \`tasks.seed_starter_tasks\` data patch when you want sample Task records and the starter Task owner notification rule in a fresh environment. Use \`/api/meta/doctypes/Task\`, \`/api/meta/web-forms/Task%20Intake\`, \`/api/meta/web-views/Task%20Updates\`, \`/api/meta/web-pages/About\`, \`/api/meta/website-settings\`, and \`/api/meta/website-themes/Starter Theme\` for metadata APIs. ${authLocalReadme(input.auth)}
 The generated R2 binding supports buffered Desk uploads immediately. Add a \`directUploads\` signer to \`R2FileStorage\` before enabling signed browser direct-upload targets.
 Client scripts live under \`public/assets\`; add them with \`defineClientScript(...)\` in files under \`src/apps\`.
 ${authProviderReadme(input.auth)}
@@ -749,6 +749,7 @@ export const TaskCalendar = defineCalendar({
 export const TaskIntakeWebForm = defineWebForm({
   name: "Task Intake",
   label: "Task Intake",
+  route: "task-intake",
   module: "Desk",
   description: "Create a starter Task through a metadata-defined submission page.",
   doctype: "Task",
@@ -823,7 +824,7 @@ export const TaskWebsiteSettings = defineWebsiteSettings({
   navItems: [
     { name: "about", label: "About", pageRoute: "about" },
     { name: "task-updates", label: "Task Updates", href: "/web/Task%20Updates" },
-    { name: "task-intake", label: "Task Intake", href: "/web-forms/Task%20Intake", roles: ["User", "Task Manager"] }
+    { name: "task-intake", label: "Task Intake", href: "/web-forms/task-intake", roles: ["User", "Task Manager"] }
   ],
   roles: ["Guest", "User", "Task Manager"]
 });
@@ -845,7 +846,7 @@ export const TaskWorkspace = defineWorkspace({
         { name: "task-calendar", label: "Task Calendar", kind: "calendar", target: "Task Calendar" },
         { name: "task-board", label: "Task Board", kind: "kanban", target: "Task Board" },
         { name: "task-dashboard", label: "Task Dashboard", kind: "dashboard", target: "Task Dashboard" },
-        { name: "task-intake", label: "Task Intake", kind: "url", href: "/web-forms/Task%20Intake", roles: ["User", "Task Manager"] },
+        { name: "task-intake", label: "Task Intake", kind: "url", href: "/web-forms/task-intake", roles: ["User", "Task Manager"] },
         { name: "task-updates", label: "Task Updates", kind: "url", href: "/web/Task%20Updates" },
         { name: "about", label: "About", kind: "url", href: "/page/about" }
       ]

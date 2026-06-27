@@ -1,5 +1,6 @@
 import { FrameworkError } from "./errors.js";
 import { SYSTEM_MANAGER_ROLE, type Actor, type DocTypeDefinition, type FieldDefinition } from "./types.js";
+import { isCanonicalWebPageRoute } from "./web-page.js";
 
 export interface WebFormFieldDefinition {
   readonly field: string;
@@ -11,6 +12,7 @@ export interface WebFormFieldDefinition {
 export interface WebFormDefinition {
   readonly name: string;
   readonly label?: string;
+  readonly route?: string;
   readonly module?: string;
   readonly description?: string;
   readonly roles?: readonly string[];
@@ -32,6 +34,9 @@ export function defineWebForm(definition: WebFormDefinition): WebFormDefinition 
 export function assertWebFormDefinition(definition: WebFormDefinition): void {
   assertWebFormIdentifier(definition.name, "web form name");
   assertWebFormIdentifier(definition.doctype, `web form '${definition.name}' DocType`);
+  if (definition.route !== undefined) {
+    assertWebFormRoute(definition.route, definition.name);
+  }
   if (!Array.isArray(definition.fields) || definition.fields.length === 0) {
     throw new FrameworkError("WEB_FORM_INVALID", `Web form '${definition.name}' fields must not be empty`, {
       status: 400
@@ -46,6 +51,15 @@ export function assertWebFormDefinition(definition: WebFormDefinition): void {
       });
     }
     seen.add(field.field);
+  }
+}
+
+function assertWebFormRoute(route: string, formName: string): void {
+  assertWebFormIdentifier(route, `web form '${formName}' route`);
+  if (!isCanonicalWebPageRoute(route)) {
+    throw new FrameworkError("WEB_FORM_INVALID", `Web form '${formName}' route must be a safe canonical relative path`, {
+      status: 400
+    });
   }
 }
 

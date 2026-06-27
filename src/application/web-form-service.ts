@@ -60,6 +60,15 @@ export class WebFormService {
 
   async getWebForm(actor: Actor, webFormName: string): Promise<WebFormMetadata> {
     const webForm = this.registry.getWebForm(webFormName);
+    return this.resolveWebForm(actor, webForm);
+  }
+
+  async getWebFormByRoute(actor: Actor, route: string): Promise<WebFormMetadata> {
+    const webForm = this.registry.getWebFormByRoute(route);
+    return this.resolveWebForm(actor, webForm);
+  }
+
+  private async resolveWebForm(actor: Actor, webForm: WebFormDefinition): Promise<WebFormMetadata> {
     if (!(await this.canAccessWebForm(actor, webForm))) {
       throw permissionDenied(`Actor '${actor.id}' cannot submit web form '${webForm.name}'`);
     }

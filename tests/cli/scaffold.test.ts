@@ -154,6 +154,7 @@ describe("cf-frappe CLI scaffold", () => {
     expect(taskApp).toContain("dashboards: [TaskDashboard]");
     expect(taskApp).toContain("calendars: [TaskCalendar]");
     expect(taskApp).toContain("webForms: [TaskIntakeWebForm]");
+    expect(taskApp).toContain('route: "task-intake"');
     expect(taskApp).toContain("webPages: [AboutWebPage]");
     expect(taskApp).toContain("webViews: [TaskUpdatesWebView]");
     expect(taskApp).toContain("websiteSettings: TaskWebsiteSettings");
@@ -182,7 +183,7 @@ describe("cf-frappe CLI scaffold", () => {
     expect(taskApp).toContain('kind: "calendar", target: "Task Calendar"');
     expect(taskApp).toContain('kind: "kanban", target: "Task Board"');
     expect(taskApp).toContain('kind: "dashboard", target: "Task Dashboard"');
-    expect(taskApp).toContain('kind: "url", href: "/web-forms/Task%20Intake"');
+    expect(taskApp).toContain('kind: "url", href: "/web-forms/task-intake"');
     expect(taskApp).toContain('kind: "url", href: "/web/Task%20Updates"');
     expect(taskApp).toContain('kind: "url", href: "/page/about"');
     expect(taskApp).toContain('homePageRoute: "about"');
