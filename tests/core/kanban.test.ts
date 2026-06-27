@@ -2,6 +2,7 @@ import { createRegistry, defineDocType, defineKanban, defineWorkspace, Framework
 
 describe("kanban metadata", () => {
   it("freezes metadata-defined kanban boards", () => {
+    const priorities = ["High", "Low"] as const;
     const board = defineKanban({
       name: "Task Board",
       label: "Task Board",
@@ -9,7 +10,15 @@ describe("kanban metadata", () => {
       doctype: "Task",
       columnField: "status",
       titleField: "title",
-      filters: [{ field: "priority", value: "High" }],
+      filters: [{ field: "priority", operator: "in", value: priorities }],
+      filterExpression: {
+        kind: "group",
+        match: "any",
+        filters: [
+          { field: "priority", value: "High" },
+          { field: "title", operator: "contains", value: "Escalation" }
+        ]
+      },
       columns: [
         { value: "Open", label: "Open", indicator: "blue" },
         { value: "Done", label: "Done", indicator: "green" }
@@ -20,8 +29,13 @@ describe("kanban metadata", () => {
     expect(Object.isFrozen(board)).toBe(true);
     expect(Object.isFrozen(board.roles ?? [])).toBe(true);
     expect(Object.isFrozen(board.filters ?? [])).toBe(true);
+    expect(Object.isFrozen(board.filters?.[0]?.value)).toBe(true);
+    expect(Object.isFrozen(board.filterExpression)).toBe(true);
+    expect(Object.isFrozen((board.filterExpression as { readonly filters: readonly unknown[] }).filters)).toBe(true);
     expect(Object.isFrozen(board.columns ?? [])).toBe(true);
     expect(Object.isFrozen(board.columns?.[0])).toBe(true);
+    (priorities as unknown as string[]).push("Urgent");
+    expect(board.filters?.[0]?.value).toEqual(["High", "Low"]);
   });
 
   it("validates kanban boards against registered DocType metadata", () => {
@@ -85,6 +99,43 @@ describe("kanban metadata", () => {
         ]
       })
     ).toThrow(FrameworkError);
+    expect(() =>
+      defineKanban({
+        name: "Broken",
+        doctype: "Task",
+        columnField: "status",
+        filterExpression: "not-an-expression" as never
+      })
+    ).toThrow("filter expression must be an object");
+    expect(() =>
+      defineKanban({
+        name: "Broken",
+        doctype: "Task",
+        columnField: "status",
+        filterExpression: deepKanbanFilterExpression(7) as never
+      })
+    ).toThrow("List filter expression cannot exceed 5 levels");
+    expect(() =>
+      defineKanban({
+        name: "Broken",
+        doctype: "Task",
+        columnField: "status",
+        filterExpression: wideKanbanFilterExpression(65) as never
+      })
+    ).toThrow("List filter expression cannot exceed 5 levels or 64 nodes");
+    expect(() =>
+      createRegistry({
+        doctypes: [Task],
+        kanbans: [
+          defineKanban({
+            name: "Broken Expression",
+            doctype: "Task",
+            columnField: "status",
+            filterExpression: { field: "payload", value: "x" }
+          })
+        ]
+      })
+    ).toThrow("Filter field 'payload' cannot be a json field");
   });
 
   it("allows workspaces to reference registered kanban boards", () => {
@@ -106,3 +157,17 @@ describe("kanban metadata", () => {
     expect(() => createRegistry({ doctypes: [Task], workspaces: [workspace] })).toThrow("references unknown kanban");
   });
 });
+
+function deepKanbanFilterExpression(depth: number): unknown {
+  return depth <= 1
+    ? { field: "priority", value: "High" }
+    : { kind: "group", match: "all", filters: [deepKanbanFilterExpression(depth - 1)] };
+}
+
+function wideKanbanFilterExpression(nodes: number): unknown {
+  return {
+    kind: "group",
+    match: "all",
+    filters: Array.from({ length: nodes }, () => ({ field: "priority", value: "High" }))
+  };
+}

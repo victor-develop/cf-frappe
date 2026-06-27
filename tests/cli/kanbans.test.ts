@@ -93,6 +93,11 @@ describe("cf-frappe CLI remote kanbans", () => {
             doctype: "Task",
             columnField: "status",
             description: "Task flow",
+            filterExpression: {
+              kind: "group",
+              match: "any",
+              filters: [{ field: "title", operator: "contains", value: "Launch" }]
+            },
             columns: [{ value: "Open", label: "Open" }, { value: "Done", label: "Done" }]
           }
         }),
@@ -103,6 +108,7 @@ describe("cf-frappe CLI remote kanbans", () => {
     expect(getExit).toBe(0);
     expect(getCalls[0]?.url).toBe("https://app.example/api/meta/kanbans/Task%20Board");
     expect(getStdout.text()).toContain("Description: Task flow");
+    expect(getStdout.text()).toContain("Filter expression: yes");
     expect(getStdout.text()).toContain("- Done - Done");
 
     const runCalls: RemoteCall[] = [];

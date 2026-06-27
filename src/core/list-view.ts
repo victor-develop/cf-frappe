@@ -126,6 +126,13 @@ interface NormalizeListFiltersOptions {
   readonly maxExpressionNodes?: number;
 }
 
+interface ListFilterExpressionShapeOptions {
+  readonly errorCode?: FrameworkErrorCode;
+  readonly label?: string;
+  readonly maxExpressionDepth?: number;
+  readonly maxExpressionNodes?: number;
+}
+
 interface ListFilterExpressionBudget {
   remaining: number;
 }
@@ -226,6 +233,95 @@ export function normalizeListFilterExpression(
   });
 }
 
+export function assertListFilterExpressionShape(
+  expression: unknown,
+  options: ListFilterExpressionShapeOptions = {}
+): asserts expression is ListFilterExpression {
+  const errorCode = options.errorCode ?? "BAD_REQUEST";
+  const label = options.label ?? "List filter expression";
+  const maxDepth = options.maxExpressionDepth ?? MAX_LIST_FILTER_EXPRESSION_DEPTH;
+  const maxNodes = options.maxExpressionNodes ?? MAX_LIST_FILTER_EXPRESSION_NODES;
+  const budget: ListFilterExpressionBudget = {
+    remaining: maxNodes
+  };
+  assertListFilterExpressionShapeNode(expression, {
+    budget,
+    depth: 1,
+    errorCode,
+    label,
+    maxDepth,
+    maxNodes
+  });
+}
+
+function assertListFilterExpressionShapeNode(
+  expression: unknown,
+  options: {
+    readonly budget: ListFilterExpressionBudget;
+    readonly depth: number;
+    readonly errorCode: FrameworkErrorCode;
+    readonly label: string;
+    readonly maxDepth: number;
+    readonly maxNodes: number;
+  }
+): asserts expression is ListFilterExpression {
+  options.budget.remaining -= 1;
+  if (options.budget.remaining < 0) {
+    throw new FrameworkError(
+      options.errorCode,
+      `List filter expression cannot exceed ${options.maxDepth} levels or ${options.maxNodes} nodes`,
+      { status: 400 }
+    );
+  }
+  if (!isRecord(expression)) {
+    throw new FrameworkError(options.errorCode, `${options.label} must be an object`, { status: 400 });
+  }
+  if (expression.kind === "group") {
+    if (options.depth > options.maxDepth) {
+      throw new FrameworkError(
+        options.errorCode,
+        `List filter expression cannot exceed ${options.maxDepth} levels`,
+        { status: 400 }
+      );
+    }
+    if (!isListFilterGroupMatch(expression.match)) {
+      throw new FrameworkError(options.errorCode, "List filter group match must be all or any", { status: 400 });
+    }
+    if (!Array.isArray(expression.filters) || expression.filters.length === 0) {
+      throw new FrameworkError(options.errorCode, "List filter group must include at least one filter", {
+        status: 400
+      });
+    }
+    for (const filter of expression.filters) {
+      assertListFilterExpressionShapeNode(filter, {
+        ...options,
+        depth: options.depth + 1
+      });
+    }
+    return;
+  }
+  if (typeof expression.field !== "string") {
+    throw new FrameworkError(options.errorCode, "Filter field must be a string", { status: 400 });
+  }
+}
+
+export function freezeListFilter(filter: ListDocumentsFilter): ListDocumentsFilter {
+  return Object.freeze({
+    ...filter,
+    value: Array.isArray(filter.value) ? Object.freeze([...filter.value]) : filter.value
+  });
+}
+
+export function freezeListFilterExpression(expression: ListFilterExpression): ListFilterExpression {
+  if (isListFilterGroup(expression)) {
+    return Object.freeze({
+      ...expression,
+      filters: Object.freeze(expression.filters.map(freezeListFilterExpression))
+    });
+  }
+  return freezeListFilter(expression);
+}
+
 export function listFilterExpressionFromFilters(
   filters: readonly ListDocumentsFilter[]
 ): ListFilterExpression | undefined {
@@ -307,6 +403,10 @@ function filterIsOverridden(defaultFilter: ListDocumentsFilter, overrideFilter: 
   const defaultOperator = defaultFilter.operator ?? "eq";
   const overrideOperator = overrideFilter.operator ?? "eq";
   return defaultOperator === overrideOperator || defaultOperator === "eq" || overrideOperator === "eq";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function normalizeListFilterExpressionNode(

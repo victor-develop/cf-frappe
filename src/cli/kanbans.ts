@@ -28,6 +28,7 @@ interface KanbanResponse {
   readonly description?: string;
   readonly doctype?: string;
   readonly columnField?: string;
+  readonly filterExpression?: unknown;
   readonly columns?: readonly { readonly value?: string; readonly label?: string }[];
 }
 
@@ -110,6 +111,7 @@ function formatKanban(baseUrl: string, kanban: KanbanResponse): string {
     kanbanLine(kanban),
     ...(kanban.module === undefined ? [] : [`Module: ${kanban.module}`]),
     ...(kanban.description === undefined ? [] : [`Description: ${kanban.description}`]),
+    `Filter expression: ${kanban.filterExpression === undefined ? "no" : "yes"}`,
     `Columns: ${String(kanban.columns?.length ?? 0)}`,
     ...(kanban.columns ?? []).map((column) => `- ${column.value ?? "(unknown)"}${column.label === undefined ? "" : ` - ${column.label}`}`),
     ""

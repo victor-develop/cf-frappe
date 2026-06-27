@@ -1,6 +1,8 @@
 import {
   defineDocType,
   FrameworkError,
+  assertListFilterExpressionShape,
+  freezeListFilterExpression,
   listFilterControlsForField,
   listFilterOperatorsForField,
   matchesListFilterExpression,
@@ -179,6 +181,48 @@ describe("list views", () => {
         }
       ]
     });
+  });
+
+  it("validates and freezes reusable compound filter expression metadata", () => {
+    const priorities = ["High", "Low"] as const;
+    const expression: ListFilterExpression = {
+      kind: "group",
+      match: "any",
+      filters: [
+        { field: "priority", operator: "in", value: priorities },
+        { field: "title", operator: "contains", value: "Launch" }
+      ]
+    };
+
+    assertListFilterExpressionShape(expression, { errorCode: "LIST_VIEW_INVALID", label: "Shared filter expression" });
+    const frozen = freezeListFilterExpression(expression);
+
+    expect(Object.isFrozen(frozen)).toBe(true);
+    expect(Object.isFrozen((frozen as { readonly filters: readonly unknown[] }).filters)).toBe(true);
+    expect(Object.isFrozen((frozen as { readonly filters: readonly { readonly value?: unknown }[] }).filters[0]?.value)).toBe(true);
+    (priorities as unknown as string[]).push("Urgent");
+    expect((frozen as { readonly filters: readonly { readonly value?: unknown }[] }).filters[0]?.value).toEqual([
+      "High",
+      "Low"
+    ]);
+    expect(() =>
+      assertListFilterExpressionShape(
+        { kind: "group", match: "sideways", filters: [{ field: "priority", value: "High" }] },
+        { errorCode: "LIST_VIEW_INVALID" }
+      )
+    ).toThrow(FrameworkError);
+    expect(() =>
+      assertListFilterExpressionShape(
+        { kind: "group", match: "all", filters: [{ kind: "group", match: "any", filters: [{ field: "priority", value: "High" }] }] },
+        { maxExpressionDepth: 1 }
+      )
+    ).toThrow("List filter expression cannot exceed 1 levels");
+    expect(() =>
+      assertListFilterExpressionShape(
+        { kind: "group", match: "all", filters: [{ field: "priority", value: "High" }] },
+        { maxExpressionNodes: 1 }
+      )
+    ).toThrow("List filter expression cannot exceed 5 levels or 1 nodes");
   });
 
   it("matches normalized list filter expressions against document snapshots", () => {

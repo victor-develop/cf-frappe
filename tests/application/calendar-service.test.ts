@@ -46,6 +46,14 @@ describe("CalendarService", () => {
           allDayField: "all_day",
           colorField: "category",
           filters: [{ field: "category", value: "Customer" }],
+          filterExpression: {
+            kind: "group",
+            match: "any",
+            filters: [
+              { field: "title", operator: "contains", value: "Visible" },
+              { field: "title", operator: "contains", value: "Planning" }
+            ]
+          },
           maxEvents: 1
         })
       ]
@@ -63,6 +71,16 @@ describe("CalendarService", () => {
         starts_on: "2026-01-10T09:00:00.000Z",
         ends_on: "2026-01-10T10:00:00.000Z",
         all_day: false,
+        category: "Customer"
+      }
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Event",
+      data: {
+        title: "Filtered Customer",
+        starts_on: "2026-01-12T09:00:00.000Z",
+        ends_on: "2026-01-12T10:00:00.000Z",
         category: "Customer"
       }
     });

@@ -32,6 +32,7 @@ interface CalendarResponse {
   readonly doctype?: string;
   readonly startField?: string;
   readonly endField?: string;
+  readonly filterExpression?: unknown;
 }
 
 interface CalendarRunResponse {
@@ -128,6 +129,7 @@ function formatCalendar(baseUrl: string, calendar: CalendarResponse): string {
     calendarLine(calendar),
     ...(calendar.module === undefined ? [] : [`Module: ${calendar.module}`]),
     ...(calendar.description === undefined ? [] : [`Description: ${calendar.description}`]),
+    `Filter expression: ${calendar.filterExpression === undefined ? "no" : "yes"}`,
     ""
   ].join("\n");
 }

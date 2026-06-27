@@ -76,7 +76,7 @@ export class CalendarService {
   ): Promise<CalendarRunResult> {
     const calendar = await this.getCalendar(actor, calendarName);
     const limit = calendarEventLimit(options.limit, calendar.maxEvents ?? DEFAULT_MAX_EVENTS);
-    const filterExpression = calendarWindowExpression(calendar, options);
+    const filterExpression = calendarFilterExpression(calendar, options);
     let total = 0;
     const events: CalendarEventResult[] = [];
     for (let offset = 0; ; offset += PAGE_SIZE) {
@@ -127,6 +127,16 @@ export class CalendarService {
       throw error;
     }
   }
+}
+
+function calendarFilterExpression(
+  calendar: CalendarDefinition,
+  options: CalendarRunOptions
+): ListFilterExpression | undefined {
+  return andListFilterExpressions([
+    calendar.filterExpression,
+    calendarWindowExpression(calendar, options)
+  ]);
 }
 
 function calendarWindowExpression(

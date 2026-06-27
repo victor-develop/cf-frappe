@@ -1,6 +1,18 @@
 import { FrameworkError } from "./errors.js";
-import { normalizeListFilters } from "./list-view.js";
-import { SYSTEM_MANAGER_ROLE, type Actor, type DocTypeDefinition, type ListDocumentsFilter } from "./types.js";
+import {
+  assertListFilterExpressionShape,
+  freezeListFilter,
+  freezeListFilterExpression,
+  normalizeListFilterExpression,
+  normalizeListFilters
+} from "./list-view.js";
+import {
+  SYSTEM_MANAGER_ROLE,
+  type Actor,
+  type DocTypeDefinition,
+  type ListDocumentsFilter,
+  type ListFilterExpression
+} from "./types.js";
 
 export interface KanbanColumnDefinition {
   readonly value: string;
@@ -18,6 +30,7 @@ export interface KanbanDefinition {
   readonly columnField: string;
   readonly titleField?: string;
   readonly filters?: readonly ListDocumentsFilter[];
+  readonly filterExpression?: ListFilterExpression;
   readonly columns?: readonly KanbanColumnDefinition[];
   readonly maxCardsPerColumn?: number;
 }
@@ -29,7 +42,10 @@ export function defineKanban(definition: KanbanDefinition): KanbanDefinition {
     ...(definition.roles === undefined ? {} : { roles: Object.freeze([...definition.roles]) }),
     ...(definition.filters === undefined
       ? {}
-      : { filters: Object.freeze(definition.filters.map((filter) => Object.freeze({ ...filter }))) }),
+      : { filters: Object.freeze(definition.filters.map(freezeListFilter)) }),
+    ...(definition.filterExpression === undefined
+      ? {}
+      : { filterExpression: freezeListFilterExpression(definition.filterExpression) }),
     ...(definition.columns === undefined
       ? {}
       : { columns: Object.freeze(definition.columns.map((column) => Object.freeze({ ...column }))) })
@@ -42,6 +58,12 @@ export function assertKanbanDefinition(definition: KanbanDefinition): void {
   assertKanbanIdentifier(definition.columnField, `kanban '${definition.name}' column field`);
   if (definition.titleField !== undefined) {
     assertKanbanIdentifier(definition.titleField, `kanban '${definition.name}' title field`);
+  }
+  if (definition.filterExpression !== undefined) {
+    assertListFilterExpressionShape(definition.filterExpression, {
+      errorCode: "KANBAN_INVALID",
+      label: `Kanban '${definition.name}' filter expression`
+    });
   }
   if (definition.columns !== undefined) {
     if (definition.columns.length === 0) {
@@ -132,7 +154,10 @@ export function assertKanbanMatchesDocType(kanban: KanbanDefinition, doctype: Do
       );
     }
   }
-  normalizeListFilters(doctype, kanban.filters ?? []);
+  normalizeListFilters(doctype, kanban.filters ?? [], { errorCode: "KANBAN_INVALID" });
+  if (kanban.filterExpression !== undefined) {
+    normalizeListFilterExpression(doctype, kanban.filterExpression, { errorCode: "KANBAN_INVALID" });
+  }
 }
 
 export function kanbanColumnsForDocType(

@@ -22,6 +22,14 @@ describe("KanbanService", () => {
           columnField: "workflow_state",
           titleField: "title",
           filters: [{ field: "priority", value: "High" }],
+          filterExpression: {
+            kind: "group",
+            match: "any",
+            filters: [
+              { field: "title", operator: "contains", value: "Visible" },
+              { field: "title", operator: "contains", value: "Escalation" }
+            ]
+          },
           columns: [
             { value: "Open", label: "Open", indicator: "blue" },
             { value: "Closed", label: "Closed", indicator: "green" }
@@ -53,6 +61,11 @@ describe("KanbanService", () => {
       actor: owner,
       doctype: "Note",
       data: data({ title: "Filtered Low", priority: "Low", workflow_state: "Open", count: 4 })
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Filtered Expression", priority: "High", workflow_state: "Open", count: 6 })
     });
     await documents.create({
       actor: { ...owner, id: "other@example.com" },

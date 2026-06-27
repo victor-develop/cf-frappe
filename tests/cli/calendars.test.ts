@@ -106,7 +106,12 @@ describe("cf-frappe CLI remote calendars", () => {
             doctype: "Task",
             startField: "starts_on",
             endField: "ends_on",
-            description: "Task dates"
+            description: "Task dates",
+            filterExpression: {
+              kind: "group",
+              match: "any",
+              filters: [{ field: "title", operator: "contains", value: "Launch" }]
+            }
           }
         }),
         stdout: getStdout,
@@ -116,6 +121,7 @@ describe("cf-frappe CLI remote calendars", () => {
     expect(getExit).toBe(0);
     expect(getCalls[0]?.url).toBe("https://app.example/api/meta/calendars/Task%20Calendar");
     expect(getStdout.text()).toContain("Description: Task dates");
+    expect(getStdout.text()).toContain("Filter expression: yes");
 
     const runCalls: RemoteCall[] = [];
     const runStdout = textBuffer();

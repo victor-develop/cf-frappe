@@ -1,6 +1,19 @@
 import { FrameworkError } from "./errors.js";
-import { normalizeListFilters } from "./list-view.js";
-import { SYSTEM_MANAGER_ROLE, type Actor, type DocTypeDefinition, type FieldDefinition, type ListDocumentsFilter } from "./types.js";
+import {
+  assertListFilterExpressionShape,
+  freezeListFilter,
+  freezeListFilterExpression,
+  normalizeListFilterExpression,
+  normalizeListFilters
+} from "./list-view.js";
+import {
+  SYSTEM_MANAGER_ROLE,
+  type Actor,
+  type DocTypeDefinition,
+  type FieldDefinition,
+  type ListDocumentsFilter,
+  type ListFilterExpression
+} from "./types.js";
 
 export interface CalendarDefinition {
   readonly name: string;
@@ -15,6 +28,7 @@ export interface CalendarDefinition {
   readonly allDayField?: string;
   readonly colorField?: string;
   readonly filters?: readonly ListDocumentsFilter[];
+  readonly filterExpression?: ListFilterExpression;
   readonly maxEvents?: number;
 }
 
@@ -25,7 +39,10 @@ export function defineCalendar(definition: CalendarDefinition): CalendarDefiniti
     ...(definition.roles === undefined ? {} : { roles: Object.freeze([...definition.roles]) }),
     ...(definition.filters === undefined
       ? {}
-      : { filters: Object.freeze(definition.filters.map((filter) => Object.freeze({ ...filter }))) })
+      : { filters: Object.freeze(definition.filters.map(freezeListFilter)) }),
+    ...(definition.filterExpression === undefined
+      ? {}
+      : { filterExpression: freezeListFilterExpression(definition.filterExpression) })
   });
 }
 
@@ -44,6 +61,12 @@ export function assertCalendarDefinition(definition: CalendarDefinition): void {
   }
   if (definition.colorField !== undefined) {
     assertCalendarIdentifier(definition.colorField, `calendar '${definition.name}' color field`);
+  }
+  if (definition.filterExpression !== undefined) {
+    assertListFilterExpressionShape(definition.filterExpression, {
+      errorCode: "CALENDAR_INVALID",
+      label: `Calendar '${definition.name}' filter expression`
+    });
   }
   if (
     definition.maxEvents !== undefined &&
@@ -92,7 +115,10 @@ export function assertCalendarMatchesDocType(calendar: CalendarDefinition, docty
       );
     }
   }
-  normalizeListFilters(doctype, calendar.filters ?? []);
+  normalizeListFilters(doctype, calendar.filters ?? [], { errorCode: "CALENDAR_INVALID" });
+  if (calendar.filterExpression !== undefined) {
+    normalizeListFilterExpression(doctype, calendar.filterExpression, { errorCode: "CALENDAR_INVALID" });
+  }
 }
 
 export function canReadCalendar(actor: Actor, calendar: CalendarDefinition): boolean {

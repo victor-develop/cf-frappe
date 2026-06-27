@@ -126,6 +126,24 @@ describe("metadata Web Views", () => {
       })
     ).toThrow("List filter group must include at least one filter");
     expect(() =>
+      defineWebView({
+        name: "Broken",
+        doctype: "Blog Post",
+        routeField: "route",
+        titleField: "title",
+        filterExpression: deepWebViewFilterExpression(7) as never
+      })
+    ).toThrow("List filter expression cannot exceed 5 levels");
+    expect(() =>
+      defineWebView({
+        name: "Broken",
+        doctype: "Blog Post",
+        routeField: "route",
+        titleField: "title",
+        filterExpression: wideWebViewFilterExpression(65) as never
+      })
+    ).toThrow("List filter expression cannot exceed 5 levels or 64 nodes");
+    expect(() =>
       createRegistry({ doctypes: blogDoctypes, webViews: [defineWebView({ name: "Broken", doctype: "Blog Post", routeField: "route", titleField: "title", orderBy: "missing" })] })
     ).toThrow("orderBy field 'missing' is not defined");
     expect(() =>
@@ -190,3 +208,17 @@ describe("metadata Web Views", () => {
     ).toThrow("Filter field 'children' cannot be a table field");
   });
 });
+
+function deepWebViewFilterExpression(depth: number): unknown {
+  return depth <= 1
+    ? { field: "category", value: "News" }
+    : { kind: "group", match: "all", filters: [deepWebViewFilterExpression(depth - 1)] };
+}
+
+function wideWebViewFilterExpression(nodes: number): unknown {
+  return {
+    kind: "group",
+    match: "all",
+    filters: Array.from({ length: nodes }, () => ({ field: "category", value: "News" }))
+  };
+}

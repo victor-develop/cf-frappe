@@ -83,6 +83,7 @@ export class KanbanService {
     for (let offset = 0; ; offset += PAGE_SIZE) {
       const page = await this.queries.listDocuments(actor, board.doctype, {
         filters,
+        ...(board.filterExpression === undefined ? {} : { filterExpression: board.filterExpression }),
         orderBy: "updatedAt",
         order: "desc",
         limit: PAGE_SIZE,
