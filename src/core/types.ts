@@ -627,53 +627,6 @@ export type CoreDocumentEventPayload =
       readonly ruleName: string;
     }
   | {
-      readonly kind: "EmailNotificationQueued";
-      readonly messageId: string;
-      readonly sourceEventId: string;
-      readonly sourceEventType: string;
-      readonly payloadKind: string;
-      readonly ruleName: string;
-      readonly recipientId: string;
-      readonly from: {
-        readonly email: string;
-        readonly name?: string;
-      };
-      readonly to: {
-        readonly email: string;
-        readonly name?: string;
-      };
-      readonly subject: string;
-      readonly text: string;
-      readonly headers?: Readonly<Record<string, string>>;
-    }
-  | {
-      readonly kind: "EmailNotificationSent";
-      readonly messageId: string;
-      readonly claimId: string;
-      readonly providerMessageId?: string;
-    }
-  | {
-      readonly kind: "EmailNotificationDeliveryClaimed";
-      readonly messageId: string;
-      readonly claimId: string;
-    }
-  | {
-      readonly kind: "EmailNotificationFailed";
-      readonly messageId: string;
-      readonly claimId: string;
-      readonly error: string;
-    }
-  | {
-      readonly kind: "EmailNotificationSkipped";
-      readonly messageId: string;
-      readonly sourceEventId: string;
-      readonly sourceEventType: string;
-      readonly payloadKind: string;
-      readonly ruleName: string;
-      readonly recipientId: string;
-      readonly reason: string;
-    }
-  | {
       readonly kind: "WorkflowTransitioned";
       readonly action: string;
       readonly from: string;

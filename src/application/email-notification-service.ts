@@ -3,10 +3,13 @@ import { emailOutboxStream, userAccountsStream } from "../core/streams.js";
 import type { DocumentSnapshot, DomainEvent, NewDomainEvent, NotificationRuleDefinition, TenantId } from "../core/types.js";
 import { foldUserAccount } from "../core/user-accounts.js";
 import { FrameworkError } from "../core/errors.js";
+import type { EmailNotificationEventPayload } from "./email-notification-events.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EmailAddress, EmailMessage, EmailSender } from "../ports/email.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
+
+export type { EmailNotificationAddressPayload, EmailNotificationEventPayload } from "./email-notification-events.js";
 
 const EMAIL_OUTBOX_ACTOR_ID = "system:email-outbox";
 const EMAIL_OUTBOX_PAYLOAD_KINDS = Object.freeze([
@@ -314,10 +317,7 @@ export class EmailNotificationService {
     tenantId: TenantId,
     messageId: string,
     claimId: string,
-    payload: Extract<
-      NewDomainEvent["payload"],
-      { readonly kind: "EmailNotificationFailed" | "EmailNotificationSent" }
-    >
+    payload: Extract<EmailNotificationEventPayload, { readonly kind: "EmailNotificationFailed" | "EmailNotificationSent" }>
   ): Promise<boolean> {
     const stream = emailOutboxStream(tenantId, messageId);
     const state = await this.state(tenantId, messageId);
@@ -388,7 +388,11 @@ export class EmailNotificationService {
     }));
   }
 
-  private async append(tenantId: TenantId, messageId: string, payload: NewDomainEvent["payload"]): Promise<DomainEvent> {
+  private async append(
+    tenantId: TenantId,
+    messageId: string,
+    payload: EmailNotificationEventPayload
+  ): Promise<DomainEvent> {
     const stream = emailOutboxStream(tenantId, messageId);
     const state = await this.state(tenantId, messageId);
     const [event] = await this.events.append(stream, state.version, [

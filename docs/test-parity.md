@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the domain event payload extension-map slice:
+As of the email notification event payload module slice:
 
 - Vitest files: `156`
-- Vitest cases: `1499`
+- Vitest cases: `1500`
 
 ## Implication
 

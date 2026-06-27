@@ -8,7 +8,9 @@ import {
   userAccountsStream,
   type EmailMessage,
   type EmailSender,
+  type EmailNotificationEventPayload,
   type EventStore,
+  type DocumentEventPayload,
   type NewDomainEvent,
   type NotificationRuleDefinition,
   type StreamName
@@ -16,6 +18,24 @@ import {
 import { now, owner } from "../helpers";
 
 describe("EmailNotificationService", () => {
+  it("registers email notification payloads through the domain event extension map", () => {
+    const payload = emailNotificationPayload({
+      kind: "EmailNotificationQueued",
+      messageId: "evt_update:rule:Email%20owners:email:user_123",
+      sourceEventId: "evt_update",
+      sourceEventType: "NoteUpdated",
+      payloadKind: "DocumentUpdated",
+      ruleName: "Email owners",
+      recipientId: "user_123",
+      from: { email: "notifications@example.com" },
+      to: { email: "reviewer@example.com", name: "Reviewer" },
+      subject: "Note My Note changed",
+      text: "Note My Note changed"
+    });
+
+    expect(payload.to.email).toBe("reviewer@example.com");
+  });
+
   it("queues and sends rule-driven transactional emails through a resolved recipient address", async () => {
     const events = new InMemoryEventStore();
     const sender = recordingEmailSender("cf-msg-1");
@@ -632,6 +652,12 @@ function emailOutboxEvent(
     payload,
     metadata: {}
   };
+}
+
+function emailNotificationPayload(
+  payload: Extract<DocumentEventPayload, { readonly kind: "EmailNotificationQueued" }>
+): Extract<EmailNotificationEventPayload, { readonly kind: "EmailNotificationQueued" }> {
+  return payload;
 }
 
 function queuedDelivery(
