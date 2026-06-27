@@ -137,6 +137,8 @@ interface DeskClientRuntime {
     readonly kanbans: () => Promise<unknown>;
     readonly calendar: (calendar: string) => Promise<unknown>;
     readonly calendars: () => Promise<unknown>;
+    readonly webForm: (webForm: string) => Promise<unknown>;
+    readonly webForms: () => Promise<unknown>;
     readonly doctype: (doctype: string) => Promise<unknown>;
     readonly doctypes: () => Promise<unknown>;
     readonly fieldProperties: (doctype: string, options?: { readonly tenant?: string }) => Promise<unknown>;
@@ -293,6 +295,12 @@ interface DeskClientRuntime {
     readonly list: () => Promise<unknown>;
     readonly run: (calendar: string, options?: Record<string, unknown>) => Promise<unknown>;
   };
+  readonly webForm: {
+    readonly get: (webForm: string) => Promise<unknown>;
+    readonly list: () => Promise<unknown>;
+    readonly submit: (webForm: string, data?: Record<string, unknown>) => Promise<unknown>;
+    readonly url: (webForm: string) => string;
+  };
   readonly jobs: {
     readonly createSchedule: (input: Record<string, unknown>) => Promise<unknown>;
     readonly dashboard: (options?: Record<string, unknown>) => Promise<unknown>;
@@ -415,6 +423,7 @@ interface DeskClientRuntime {
     readonly dashboardUrl: (dashboard: string) => string;
     readonly kanbanUrl: (kanban: string) => string;
     readonly calendarUrl: (calendar: string, options?: Record<string, unknown>) => string;
+    readonly webFormUrl: (webForm: string) => string;
     readonly csvUrl: (doctype: string, options?: Record<string, unknown>) => string;
     readonly fileContentUrl: (name: string) => string;
     readonly filesUrl: (options?: Record<string, unknown>) => string;
@@ -823,7 +832,7 @@ describe("Desk client runtime", () => {
     expect(runtime.desk.formUrl("Task Type", "TASK/1")).toBe("/desk/Task%20Type/TASK%2F1");
   });
 
-  it("builds Desk workspace, dashboard, kanban, calendar, and report navigation URLs for client scripts", async () => {
+  it("builds Desk workspace, dashboard, kanban, calendar, web form, and report navigation URLs for client scripts", async () => {
     const runtime = evaluateDeskClient();
 
     expect(runtime.desk.workspaceUrl("Team Operations")).toBe("/desk/workspaces/Team%20Operations");
@@ -831,6 +840,7 @@ describe("Desk client runtime", () => {
     expect(runtime.desk.kanbanUrl("Operations/Board")).toBe("/desk/kanbans/Operations%2FBoard");
     expect(runtime.desk.calendarUrl("Operations/Board", { from: "2026-01-01", to: "2026-01-31" }))
       .toBe("/desk/calendars/Operations%2FBoard?from=2026-01-01&to=2026-01-31");
+    expect(runtime.desk.webFormUrl("Lead/Intake")).toBe("/web-forms/Lead%2FIntake");
     expect(
       runtime.desk.reportUrl("Open Notes", {
         filters: { priority: "High" },
@@ -1548,6 +1558,38 @@ describe("Desk client runtime", () => {
     expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin"]);
   });
 
+  it("wraps metadata web form APIs", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit; readonly body?: string }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      const body = init?.body === undefined ? undefined : String(init.body);
+      calls.push({
+        url: String(url),
+        init: init ?? {},
+        ...(body === undefined ? {} : { body })
+      });
+      return new Response(JSON.stringify({ data: { route: String(url) } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.webForm.list()).resolves.toEqual({ route: "/api/meta/web-forms" });
+    await expect(runtime.webForm.get("Lead Intake")).resolves.toEqual({
+      route: "/api/meta/web-forms/Lead%20Intake"
+    });
+    await expect(runtime.webForm.submit("Lead Intake", { title: "Jane Buyer" })).resolves.toEqual({
+      route: "/api/web-form/Lead%20Intake/submit"
+    });
+    expect(runtime.webForm.url("Lead Intake")).toBe("/web-forms/Lead%20Intake");
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/meta/web-forms",
+      "GET /api/meta/web-forms/Lead%20Intake",
+      "POST /api/web-form/Lead%20Intake/submit"
+    ]);
+    expect(calls[2]?.body).toBe("{\"data\":{\"title\":\"Jane Buyer\"}}");
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin"]);
+  });
+
   it("exposes dashboard metadata through the meta namespace", async () => {
     const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
     const runtime = evaluateDeskClient(async (url, init) => {
@@ -1607,6 +1649,27 @@ describe("Desk client runtime", () => {
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
       "GET /api/meta/calendars",
       "GET /api/meta/calendars/Operations%20Calendar"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin"]);
+  });
+
+  it("exposes web form metadata through the meta namespace", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { route: String(url) } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.meta.webForms()).resolves.toEqual({ route: "/api/meta/web-forms" });
+    await expect(runtime.meta.webForm("Lead Intake")).resolves.toEqual({
+      route: "/api/meta/web-forms/Lead%20Intake"
+    });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/meta/web-forms",
+      "GET /api/meta/web-forms/Lead%20Intake"
     ]);
     expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin"]);
   });

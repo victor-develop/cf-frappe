@@ -32,6 +32,7 @@ The current slice is a working kernel:
 - metadata-defined dashboards with permissioned card execution and remote CLI inspection/run commands
 - metadata-defined read-only Calendar views over permissioned date/datetime projections with HTTP, Desk, browser, and remote CLI reads
 - metadata-defined read-only Kanban boards grouped from permissioned document projections with HTTP, Desk, browser, and remote CLI reads
+- metadata-defined Web Forms with whitelisted public submission fields, generated metadata/HTML routes, Desk browser helpers, and remote CLI submit commands over the same document command boundary
 - event-sourced saved report definitions for per-user report-builder presets with generated HTTP, Desk, browser, and remote CLI report-builder APIs
 - metadata-defined workspaces with role-filtered shortcuts to DocType lists, new-document forms, reports, dashboards, Calendar views, Kanban boards, files, notifications, admin tools, safe links, and remote CLI metadata reads
 - event-sourced tenant role catalog with generated HTTP, Desk, browser-helper, and remote CLI administration
@@ -41,8 +42,8 @@ The current slice is a working kernel:
 - R2-backed file attachments with event-sourced `File` metadata, metadata updates, multipart upload orchestration with browser chunk helpers, remote CLI uploads, downloads, preview downloads, transform downloads, and rendition downloads, permissioned image transform/rendition workflows with overlay sources, bounded bulk metadata/delete workflows, generated Desk record attachment panels, and filtered file manager workflows
 - event-sourced per-user notification inboxes plus tenant notification rules for document commit events, with generated HTTP management, Desk browser helpers, remote inbox CLI operations, Desk read/dismiss workflows, and optional transactional email delivery through a Cloudflare Email Sending adapter
 - Durable Object realtime topics for tenant, DocType, document, redacted per-user notifications, permissioned presence snapshots, transient field-edit intent, field-level merge planning, deterministic stale-save merge apply, generated realtime-updated Desk presence panels with stale-document warnings and live field-edit indicators, and bounded durable replay
-- composable app manifests for packaging DocTypes, reports, print formats, Calendar views, Kanban boards, hooks, and idempotent data patches/backfills
-- installable `cf-frappe init` starter scaffold with a Task DocType/report/print/workspace/dashboard/Calendar/Kanban app, R2-backed file manager, idempotent rollbackable seed data patch for sample records and a starter owner-notification rule, Queue-backed data-patch jobs with D1 execution history, signed-session, Cloudflare Access, or OIDC account-sync auth modes plus `cf-frappe access` setup automation, `cf-frappe install` package-manager, dependency metadata, app-registry wiring, migration generation, and remote DocType/custom-field/field-property/workflow/report/dashboard/Calendar/Kanban/workspace/print-formats/print-settings/role/user-account/resource/notification-inbox/notification-rule/user-permission/data-patch/job/file metadata and content operator commands for new Cloudflare apps
+- composable app manifests for packaging DocTypes, reports, print formats, Calendar views, Kanban boards, Web Forms, hooks, and idempotent data patches/backfills
+- installable `cf-frappe init` starter scaffold with a Task DocType/report/print/workspace/dashboard/Calendar/Kanban/Web Form app, R2-backed file manager, idempotent rollbackable seed data patch for sample records and a starter owner-notification rule, Queue-backed data-patch jobs with D1 execution history, signed-session, Cloudflare Access, or OIDC account-sync auth modes plus `cf-frappe access` setup automation, `cf-frappe install` package-manager, dependency metadata, app-registry wiring, migration generation, and remote DocType/custom-field/field-property/workflow/report/dashboard/Calendar/Kanban/Web Form/workspace/print-formats/print-settings/role/user-account/resource/notification-inbox/notification-rule/user-permission/data-patch/job/file metadata and content operator commands for new Cloudflare apps
 - a runnable `Task` example under `examples/todos`
 
 ## Why
@@ -73,6 +74,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | Dashboards | metadata-defined Desk number and chart cards backed by document counts, document aggregates, report summaries, report charts, value-driven indicators, drilldowns, and remote CLI metadata/run reads |
 | Calendar views | metadata-defined read-only date/datetime event projections through permissioned `QueryService` list reads, with HTTP, Desk, browser, workspace shortcut, and remote CLI metadata/run surfaces |
 | Kanban boards | metadata-defined read-only boards grouped by a DocType select/text field through permissioned `QueryService` list reads, with HTTP, Desk, browser, and remote CLI metadata/run surfaces |
+| Web Forms | metadata-defined submission forms that validate fields against DocType metadata, expose only declared writable fields, and create documents through `DocumentService` with HTTP, public HTML, browser-helper, and remote CLI surfaces |
 | Workspaces | metadata-defined role-filtered workspace shortcuts to DocType lists, new-document forms, reports, dashboards, Calendar views, Kanban boards, files, notifications, admin tools, links, and remote CLI metadata reads |
 | Users/login | event-sourced account/profile streams, PBKDF2 password hashing, signed-cookie auth routes, Cloudflare Access and generic OIDC provider sync with provider claim presets, recovery tokens, and remote user-account/profile operations |
 | Client scripts | `defineClientScript(...)` browser bundles attached to Desk list/form pages |
@@ -84,7 +86,7 @@ Frappe is productive because DocTypes centralize schema, form metadata, permissi
 | Migrations/patches | metadata-planned D1 migrations plus app-declared data patches with applied and rollback journals, event-level field unsets for rename/remove backfills, rollback planning/execution, and CLI-driven remote status/plan/rollback-plan/apply/rollback/enqueue/rollback-enqueue/retry/rollback-retry/rollback-retry-enqueue |
 | Concurrency boundary | Durable Object command coordinator per aggregate stream |
 | Apps | `defineApp(...)` manifests composed through `createRegistryFromApps(...)` |
-| App starter | `cf-frappe init` scaffold with Worker, D1, Durable Object, Queue binding/consumer, R2 file storage binding, D1 job execution history, a Task DocType/report/print/workspace/dashboard/Calendar/Kanban app plus an R2-backed file manager and idempotent rollbackable seed data patch for sample records and a starter owner-notification rule, signed-session, Cloudflare Access, or OIDC account-sync wiring, `cf-frappe access` setup automation, `cf-frappe install` package-manager/dependency/registry wiring, and `cf-frappe doctypes` / `cf-frappe custom-fields` / `cf-frappe field-properties` / `cf-frappe workflows` / `cf-frappe reports` / `cf-frappe report-builder` / `cf-frappe search` / `cf-frappe link-options` / `cf-frappe dashboards` / `cf-frappe calendars` / `cf-frappe kanbans` / `cf-frappe workspaces` / `cf-frappe print-formats` / `cf-frappe print-settings` / `cf-frappe roles` / `cf-frappe users` / `cf-frappe profiles` / `cf-frappe audit` / `cf-frappe data-patches` / `cf-frappe notifications` / `cf-frappe notification-rules` / `cf-frappe user-permissions` / `cf-frappe jobs` / `cf-frappe files` remote operations |
+| App starter | `cf-frappe init` scaffold with Worker, D1, Durable Object, Queue binding/consumer, R2 file storage binding, D1 job execution history, a Task DocType/report/print/workspace/dashboard/Calendar/Kanban/Web Form app plus an R2-backed file manager and idempotent rollbackable seed data patch for sample records and a starter owner-notification rule, signed-session, Cloudflare Access, or OIDC account-sync wiring, `cf-frappe access` setup automation, `cf-frappe install` package-manager/dependency/registry wiring, and `cf-frappe doctypes` / `cf-frappe custom-fields` / `cf-frappe field-properties` / `cf-frappe workflows` / `cf-frappe reports` / `cf-frappe report-builder` / `cf-frappe search` / `cf-frappe link-options` / `cf-frappe dashboards` / `cf-frappe calendars` / `cf-frappe kanbans` / `cf-frappe web-forms` / `cf-frappe workspaces` / `cf-frappe print-formats` / `cf-frappe print-settings` / `cf-frappe roles` / `cf-frappe users` / `cf-frappe profiles` / `cf-frappe audit` / `cf-frappe data-patches` / `cf-frappe notifications` / `cf-frappe notification-rules` / `cf-frappe user-permissions` / `cf-frappe jobs` / `cf-frappe files` remote operations |
 
 See [docs/frappe-assessment.md](docs/frappe-assessment.md) for the assessment and parity map.
 See [docs/test-parity.md](docs/test-parity.md) for the current upstream Frappe test-count target.
@@ -141,7 +143,7 @@ npm run dev
 ## Define A Model
 
 ```ts
-import { createRegistryFromApps, defineApp, defineClientScript, defineDocType, definePrintFormat, defineReport, fileDocType } from "cf-frappe";
+import { createRegistryFromApps, defineApp, defineClientScript, defineDocType, definePrintFormat, defineReport, defineWebForm, fileDocType } from "cf-frappe";
 
 export const Project = defineDocType({
   name: "Project",
@@ -235,6 +237,17 @@ export const TaskPrint = definePrintFormat({
   roles: ["User"]
 });
 
+export const TaskIntake = defineWebForm({
+  name: "Task Intake",
+  doctype: "Task",
+  fields: [
+    { field: "title", required: true },
+    { field: "priority" },
+    { field: "description" }
+  ],
+  roles: ["User"]
+});
+
 export const TaskFormScript = defineClientScript({
   name: "task-form",
   doctype: "Task",
@@ -250,13 +263,14 @@ export const projectApp = defineApp({
   doctypes: [Project, Task, fileDocType],
   printFormats: [TaskPrint],
   reports: [OpenTasks],
+  webForms: [TaskIntake],
   clientScripts: [TaskFormScript]
 });
 
 export const registry = createRegistryFromApps([projectApp]);
 ```
 
-Generated Desk list and form pages load `/desk/client.js` before model-declared client scripts. That runtime exposes `window.cfFrappe` helpers for same-origin DocType, workspace, report, calendar, Kanban, print, link-option, customization-overlay, policy/automation, document-history, and resolved list-view/filter-builder metadata, auth/session/recovery/account-management/provider/profile workflows, audit search/deleted-recovery workflows, role catalog workflows, custom-field workflows, field-property workflows, workflow-definition workflows, notification-rule workflows, user-permission workflows, data-patch workflows, job workflows, print workflows, report-builder workflows, resource reads/writes/merge apply, selected-document bulk actions, Desk navigation/list/export/import/bulk-action helpers, file metadata/upload/direct-upload/multipart-upload workflows, notification inbox/read-state workflows, document collaboration, saved-filter, report, calendar, Kanban, link-option, command, workflow, lifecycle, form-event, field-control, generated stale-form `frm.merge_save()` / `frm.save({ merge: true })`, explicit shared-draft patch helpers plus presence-panel merge and shared-draft apply actions including child-table patches, user-feedback, parsed realtime subscription calls, transient field-edit and shared-draft patch messages, field-level merge preflight, and permissioned presence snapshots, so browser scripts can stay small and use the same permissioned HTTP/event boundaries as the server-rendered UI. Client form hooks and field controls are ergonomic only; authoritative validation and writes still live in server-side DocType, permission, and command handlers.
+Generated Desk list and form pages load `/desk/client.js` before model-declared client scripts. That runtime exposes `window.cfFrappe` helpers for same-origin DocType, workspace, report, calendar, Kanban, Web Form, print, link-option, customization-overlay, policy/automation, document-history, and resolved list-view/filter-builder metadata, auth/session/recovery/account-management/provider/profile workflows, audit search/deleted-recovery workflows, role catalog workflows, custom-field workflows, field-property workflows, workflow-definition workflows, notification-rule workflows, user-permission workflows, data-patch workflows, job workflows, print workflows, report-builder workflows, resource reads/writes/merge apply, selected-document bulk actions, Desk navigation/list/export/import/bulk-action helpers, file metadata/upload/direct-upload/multipart-upload workflows, notification inbox/read-state workflows, document collaboration, saved-filter, report, calendar, Kanban, Web Form, link-option, command, workflow, lifecycle, form-event, field-control, generated stale-form `frm.merge_save()` / `frm.save({ merge: true })`, explicit shared-draft patch helpers plus presence-panel merge and shared-draft apply actions including child-table patches, user-feedback, parsed realtime subscription calls, transient field-edit and shared-draft patch messages, field-level merge preflight, and permissioned presence snapshots, so browser scripts can stay small and use the same permissioned HTTP/event boundaries as the server-rendered UI. Client form hooks and field controls are ergonomic only; authoritative validation and writes still live in server-side DocType, permission, and command handlers.
 
 ```js
 window.cfFrappe.form.on("Task", {
@@ -326,6 +340,12 @@ The generated API includes:
 - `GET /api/meta/kanbans/:kanban`
 - `GET /api/meta/calendars`
 - `GET /api/meta/calendars/:calendar`
+- `GET /api/meta/web-forms`
+- `GET /api/meta/web-forms/:webForm`
+- `POST /api/web-form/:webForm/submit`
+- `GET /web-forms`
+- `GET /web-forms/:webForm`
+- `POST /web-forms/:webForm`
 - `GET /api/print/:format/:name`
 - `GET /api/print/:format/:name/pdf`
 - `GET /api/report/:report/run`
@@ -667,6 +687,9 @@ npx cf-frappe resources create --url https://your-worker.example --doctype Task 
 npx cf-frappe resources update --url https://your-worker.example --doctype Task --name TASK-1 --data-json '{"workflow_state":"Doing"}' --expected-version 1 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources transition --url https://your-worker.example --doctype Task --name TASK-1 --transition close --expected-version 2 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources command --url https://your-worker.example --doctype Task --name TASK-1 --command raisePriority --data-json '{"priority":"High"}' --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe web-forms list --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe web-forms get --url https://your-worker.example --web-form "Task Intake" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe web-forms submit --url https://your-worker.example --web-form "Task Intake" --data-json '{"title":"Follow up from intake","priority":"Medium"}' --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe print-formats html --url https://your-worker.example --format "Task Standard" --name TASK-1 --output ./task.html --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe print-formats pdf --url https://your-worker.example --format "Task Standard" --name TASK-1 --output ./task.pdf --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources duplicate --url https://your-worker.example --doctype Task --name TASK-1 --new-name TASK-1-copy --header-env Authorization=CF_FRAPPE_AUTH

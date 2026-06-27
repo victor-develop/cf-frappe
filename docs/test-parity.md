@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the metadata-defined Calendar view slice:
+As of the metadata-defined Web Forms slice:
 
-- Vitest files: `127`
-- Vitest cases: `1339`
+- Vitest files: `131`
+- Vitest cases: `1354`
 
 ## Implication
 

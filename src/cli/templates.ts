@@ -256,7 +256,7 @@ npm run d1:migrate:local
 npm run dev
 \`\`\`
 
-Open \`/desk\` for the generated Desk UI, the \`Tasks\` workspace, the \`Task Calendar\`, the \`Task Board\`, the \`Task Dashboard\`, and the file manager at \`/desk/files\`; run the \`tasks.seed_starter_tasks\` data patch when you want sample Task records and the starter Task owner notification rule in a fresh environment. Use \`/api/meta/doctypes/Task\` for the metadata API. ${authLocalReadme(input.auth)}
+Open \`/desk\` for the generated Desk UI, the \`Tasks\` workspace, the \`Task Calendar\`, the \`Task Board\`, the \`Task Dashboard\`, the \`Task Intake\` Web Form, and the file manager at \`/desk/files\`; run the \`tasks.seed_starter_tasks\` data patch when you want sample Task records and the starter Task owner notification rule in a fresh environment. Use \`/api/meta/doctypes/Task\` and \`/api/meta/web-forms/Task%20Intake\` for metadata APIs. ${authLocalReadme(input.auth)}
 The generated R2 binding supports buffered Desk uploads immediately. Add a \`directUploads\` signer to \`R2FileStorage\` before enabling signed browser direct-upload targets.
 Client scripts live under \`public/assets\`; add them with \`defineClientScript(...)\` in files under \`src/apps\`.
 ${authProviderReadme(input.auth)}
@@ -331,6 +331,9 @@ npx cf-frappe calendars run --url https://your-worker.example --calendar "Task C
 npx cf-frappe kanbans list --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe kanbans get --url https://your-worker.example --kanban "Task Board" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe kanbans run --url https://your-worker.example --kanban "Task Board" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe web-forms list --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe web-forms get --url https://your-worker.example --web-form "Task Intake" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe web-forms submit --url https://your-worker.example --web-form "Task Intake" --data-json '{"title":"Follow up from intake","priority":"Medium","description":"Created through the generated Web Form."}' --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe workspaces list --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe workspaces get --url https://your-worker.example --workspace Tasks --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe print-formats list --url https://your-worker.example --doctype Task --header-env Authorization=CF_FRAPPE_AUTH
@@ -537,7 +540,7 @@ For OIDC deployments, replace the placeholder \`OIDC_ISSUER\`, \`OIDC_AUD\`, and
 }
 
 function taskAppTs(): string {
-  return `import { defineApp, defineCalendar, defineClientScript, defineDashboard, defineDataPatch, defineDocType, defineKanban, definePrintFormat, defineReport, defineWorkspace } from "cf-frappe";
+  return `import { defineApp, defineCalendar, defineClientScript, defineDashboard, defineDataPatch, defineDocType, defineKanban, definePrintFormat, defineReport, defineWebForm, defineWorkspace } from "cf-frappe";
 import type { CloudFrappeRuntimeServices } from "cf-frappe/cloudflare";
 
 export const Task = defineDocType({
@@ -722,6 +725,23 @@ export const TaskCalendar = defineCalendar({
   roles: ["Guest", "User", "Task Manager"]
 });
 
+export const TaskIntakeWebForm = defineWebForm({
+  name: "Task Intake",
+  label: "Task Intake",
+  module: "Desk",
+  description: "Create a starter Task through a metadata-defined submission page.",
+  doctype: "Task",
+  fields: [
+    { field: "title", label: "Title", required: true },
+    { field: "description", label: "Description" },
+    { field: "priority", label: "Priority" },
+    { field: "starts_on", label: "Starts On" }
+  ],
+  submitLabel: "Create Task",
+  successMessage: "Task created.",
+  roles: ["User", "Task Manager"]
+});
+
 export const TaskWorkspace = defineWorkspace({
   name: "Tasks",
   label: "Tasks",
@@ -738,7 +758,8 @@ export const TaskWorkspace = defineWorkspace({
         { name: "open-tasks", label: "Open Tasks Report", kind: "report", target: "Open Tasks" },
         { name: "task-calendar", label: "Task Calendar", kind: "calendar", target: "Task Calendar" },
         { name: "task-board", label: "Task Board", kind: "kanban", target: "Task Board" },
-        { name: "task-dashboard", label: "Task Dashboard", kind: "dashboard", target: "Task Dashboard" }
+        { name: "task-dashboard", label: "Task Dashboard", kind: "dashboard", target: "Task Dashboard" },
+        { name: "task-intake", label: "Task Intake", kind: "url", href: "/web-forms/Task%20Intake", roles: ["User", "Task Manager"] }
       ]
     },
     {
@@ -930,6 +951,7 @@ export const taskApp = defineApp({
   dashboards: [TaskDashboard],
   kanbans: [TaskKanban],
   calendars: [TaskCalendar],
+  webForms: [TaskIntakeWebForm],
   workspaces: [TaskWorkspace],
   dataPatches: [StarterTaskSeedData],
   clientScripts: [TaskFormScript],

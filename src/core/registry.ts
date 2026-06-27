@@ -23,6 +23,7 @@ import { assertPrintFormatMatchesDocType, assertPrintLetterheadValid } from "./p
 import type { ReportDefinition, ReportSummaryDefinition } from "./reports.js";
 import { assertReportDefinition, assertReportFilterValues, assertReportMatchesDocType } from "./reports.js";
 import type { InstalledAppDefinition } from "./app.js";
+import { assertWebFormDefinition, assertWebFormMatchesDocType, defineWebForm, type WebFormDefinition } from "./web-form.js";
 import { assertWorkspaceDefinition, defineWorkspace, type WorkspaceDefinition } from "./workspace.js";
 import type {
   DocTypeDefinition,
@@ -62,6 +63,7 @@ export interface RegistryOptions {
   readonly dashboards?: readonly DashboardDefinition[];
   readonly kanbans?: readonly KanbanDefinition[];
   readonly calendars?: readonly CalendarDefinition[];
+  readonly webForms?: readonly WebFormDefinition[];
   readonly workspaces?: readonly WorkspaceDefinition[];
   readonly clientScripts?: readonly ClientScriptDefinition[];
   readonly dataPatches?: readonly DataPatchDefinition[];
@@ -77,6 +79,7 @@ export class ModelRegistry {
   private readonly dashboards = new Map<string, DashboardDefinition>();
   private readonly kanbans = new Map<string, KanbanDefinition>();
   private readonly calendars = new Map<string, CalendarDefinition>();
+  private readonly webForms = new Map<string, WebFormDefinition>();
   private readonly workspaces = new Map<string, WorkspaceDefinition>();
   private readonly clientScripts = new Map<string, ClientScriptDefinition>();
   private readonly dataPatches = new Map<string, DataPatchDefinition>();
@@ -104,6 +107,9 @@ export class ModelRegistry {
     }
     for (const calendar of options.calendars ?? []) {
       this.registerCalendar(calendar);
+    }
+    for (const webForm of options.webForms ?? []) {
+      this.registerWebForm(webForm);
     }
     for (const format of options.printFormats ?? []) {
       this.registerPrintFormat(format);
@@ -304,6 +310,18 @@ export class ModelRegistry {
     this.calendars.set(definition.name, definition);
   }
 
+  registerWebForm(webForm: WebFormDefinition): void {
+    const definition = defineWebForm(webForm);
+    if (this.webForms.has(definition.name)) {
+      throw new FrameworkError("WEB_FORM_DUPLICATE", `Web form '${definition.name}' is already registered`, {
+        status: 409
+      });
+    }
+    assertWebFormDefinition(definition);
+    this.assertWebFormReferencesResolve(definition);
+    this.webForms.set(definition.name, definition);
+  }
+
   registerWorkspace(workspace: WorkspaceDefinition): void {
     const definition = defineWorkspace(workspace);
     if (this.workspaces.has(definition.name)) {
@@ -401,6 +419,20 @@ export class ModelRegistry {
 
   listCalendars(): readonly CalendarDefinition[] {
     return [...this.calendars.values()].sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  getWebForm(webFormName: string): WebFormDefinition {
+    const definition = this.webForms.get(webFormName);
+    if (!definition) {
+      throw new FrameworkError("WEB_FORM_NOT_FOUND", `Web form '${webFormName}' is not registered`, {
+        status: 404
+      });
+    }
+    return definition;
+  }
+
+  listWebForms(): readonly WebFormDefinition[] {
+    return [...this.webForms.values()].sort((left, right) => left.name.localeCompare(right.name));
   }
 
   getPrintFormat(formatName: string): PrintFormatDefinition {
@@ -530,6 +562,18 @@ export class ModelRegistry {
       );
     }
     assertCalendarMatchesDocType(calendar, doctype);
+  }
+
+  private assertWebFormReferencesResolve(webForm: WebFormDefinition): void {
+    const doctype = this.doctypes.get(webForm.doctype);
+    if (!doctype) {
+      throw new FrameworkError(
+        "WEB_FORM_INVALID",
+        `Web form '${webForm.name}' references unknown DocType '${webForm.doctype}'`,
+        { status: 400 }
+      );
+    }
+    assertWebFormMatchesDocType(webForm, doctype);
   }
 
   private assertDashboardReferencesResolve(dashboard: DashboardDefinition): void {

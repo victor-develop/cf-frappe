@@ -134,15 +134,18 @@ describe("cf-frappe CLI scaffold", () => {
     expect(taskApp).toContain("defineDashboard");
     expect(taskApp).toContain("defineDataPatch");
     expect(taskApp).toContain("defineKanban");
+    expect(taskApp).toContain("defineWebForm");
     expect(taskApp).toContain("defineWorkspace");
     expect(taskApp).toContain('import type { CloudFrappeRuntimeServices } from "cf-frappe/cloudflare"');
     expect(taskApp).toContain("export const TaskDashboard");
     expect(taskApp).toContain("export const TaskCalendar");
+    expect(taskApp).toContain("export const TaskIntakeWebForm");
     expect(taskApp).toContain("export const TaskKanban");
     expect(taskApp).toContain("export const TaskWorkspace");
     expect(taskApp).toContain("export const StarterTaskSeedData");
     expect(taskApp).toContain("dashboards: [TaskDashboard]");
     expect(taskApp).toContain("calendars: [TaskCalendar]");
+    expect(taskApp).toContain("webForms: [TaskIntakeWebForm]");
     expect(taskApp).toContain("kanbans: [TaskKanban]");
     expect(taskApp).toContain("workspaces: [TaskWorkspace]");
     expect(taskApp).toContain("dataPatches: [StarterTaskSeedData]");
@@ -167,6 +170,7 @@ describe("cf-frappe CLI scaffold", () => {
     expect(taskApp).toContain('kind: "calendar", target: "Task Calendar"');
     expect(taskApp).toContain('kind: "kanban", target: "Task Board"');
     expect(taskApp).toContain('kind: "dashboard", target: "Task Dashboard"');
+    expect(taskApp).toContain('kind: "url", href: "/web-forms/Task%20Intake"');
     expect(taskApp).toContain('kind: "notifications"');
     expect(taskApp).toContain('kind: "admin", target: "notification-rules"');
     expect(taskApp).toContain('kind: "admin", target: "roles"');
@@ -181,7 +185,7 @@ describe("cf-frappe CLI scaffold", () => {
       "npx cf-frappe install @acme/cf-frappe-crm"
     );
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
-      "the `Tasks` workspace, the `Task Calendar`, the `Task Board`, the `Task Dashboard`, and the file manager at `/desk/files`"
+      "the `Tasks` workspace, the `Task Calendar`, the `Task Board`, the `Task Dashboard`, the `Task Intake` Web Form, and the file manager at `/desk/files`"
     );
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "`tasks.seed_starter_tasks` data patch"
@@ -237,6 +241,9 @@ describe("cf-frappe CLI scaffold", () => {
     expect(readmeText).toContain("npx cf-frappe kanbans list --url https://your-worker.example");
     expect(readmeText).toContain('npx cf-frappe kanbans get --url https://your-worker.example --kanban "Task Board"');
     expect(readmeText).toContain('npx cf-frappe kanbans run --url https://your-worker.example --kanban "Task Board"');
+    expect(readmeText).toContain("npx cf-frappe web-forms list --url https://your-worker.example");
+    expect(readmeText).toContain('npx cf-frappe web-forms get --url https://your-worker.example --web-form "Task Intake"');
+    expect(readmeText).toContain('npx cf-frappe web-forms submit --url https://your-worker.example --web-form "Task Intake"');
     expect(readmeText).toContain("npx cf-frappe print-formats list --url https://your-worker.example --doctype Task");
     expect(readmeText).toContain('npx cf-frappe print-formats get --url https://your-worker.example --format "Task Standard"');
     expect(readmeText).toContain('npx cf-frappe print-formats html --url https://your-worker.example --format "Task Standard"');

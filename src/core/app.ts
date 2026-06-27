@@ -9,6 +9,7 @@ import { createRegistry, type DocumentHooks, type ModelRegistry, type RegistryOp
 import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-format.js";
 import type { ReportDefinition } from "./reports.js";
 import type { DocTypeDefinition } from "./types.js";
+import type { WebFormDefinition } from "./web-form.js";
 import type { WorkspaceDefinition } from "./workspace.js";
 
 export interface FrameworkAppDefinition<TDataPatchResources = unknown> {
@@ -24,6 +25,7 @@ export interface FrameworkAppDefinition<TDataPatchResources = unknown> {
   readonly dashboards?: readonly DashboardDefinition[];
   readonly kanbans?: readonly KanbanDefinition[];
   readonly calendars?: readonly CalendarDefinition[];
+  readonly webForms?: readonly WebFormDefinition[];
   readonly workspaces?: readonly WorkspaceDefinition[];
   readonly clientScripts?: readonly ClientScriptDefinition[];
   readonly dataPatches?: readonly DataPatchDefinition<TDataPatchResources>[];
@@ -54,6 +56,7 @@ export function defineApp<TDataPatchResources = unknown>(
     dashboards: Object.freeze([...(input.dashboards ?? [])]),
     kanbans: Object.freeze([...(input.kanbans ?? [])]),
     calendars: Object.freeze([...(input.calendars ?? [])]),
+    webForms: Object.freeze([...(input.webForms ?? [])]),
     workspaces: Object.freeze([...(input.workspaces ?? [])]),
     clientScripts: Object.freeze([...(input.clientScripts ?? [])]),
     dataPatches: Object.freeze([...(input.dataPatches ?? [])]),
@@ -86,6 +89,7 @@ export function registryOptionsFromApps<TDataPatchResources = unknown>(
     dashboards: orderedApps.flatMap((app) => app.dashboards ?? []),
     kanbans: orderedApps.flatMap((app) => app.kanbans ?? []),
     calendars: orderedApps.flatMap((app) => app.calendars ?? []),
+    webForms: orderedApps.flatMap((app) => app.webForms ?? []),
     workspaces: orderedApps.flatMap((app) => app.workspaces ?? []),
     clientScripts: orderedApps.flatMap((app) => app.clientScripts ?? []),
     dataPatches: orderedApps.flatMap((app) => app.dataPatches ?? []) as readonly DataPatchDefinition[],

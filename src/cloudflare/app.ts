@@ -34,6 +34,7 @@ import { UserAccountService } from "../application/user-account-service.js";
 import { UserNotificationService } from "../application/user-notification-service.js";
 import { UserProfileService } from "../application/user-profile-service.js";
 import { UserPermissionService } from "../application/user-permission-service.js";
+import { WebFormService } from "../application/web-form-service.js";
 import { WorkflowService } from "../application/workflow-service.js";
 import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator.js";
 import { RoleCatalogUserRoleValidator } from "../application/user-role-validator.js";
@@ -115,6 +116,7 @@ export interface CloudFrappeRuntimeServices {
   readonly dashboards: DashboardService;
   readonly kanbans: KanbanService;
   readonly calendars: CalendarService;
+  readonly webForms: WebFormService;
   readonly roles: RoleService;
   readonly savedReports: SavedReportService;
   readonly dataPatches?: DataPatchAdminPort;
@@ -393,6 +395,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   const dashboards = new DashboardService({ registry: options.registry, queries: restrictedQueries, reports });
   const kanbans = new KanbanService({ registry: options.registry, queries: restrictedQueries });
   const calendars = new CalendarService({ registry: options.registry, queries: restrictedQueries });
+  const webForms = new WebFormService({ registry: options.registry, documents, queries: restrictedQueries });
   const roles = new RoleService({
     events,
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
@@ -431,6 +434,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     dashboards,
     kanbans,
     calendars,
+    webForms,
     roles,
     savedReports
   };
@@ -551,6 +555,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     dashboards,
     kanbans,
     calendars,
+    webForms,
     roles,
     ...(printPdfRenderer === undefined ? {} : { printPdfRenderer }),
     actor,

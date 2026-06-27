@@ -1,0 +1,93 @@
+import { createRegistry, createRegistryFromApps, defineApp, defineDocType, defineWebForm } from "../../src";
+
+describe("web form metadata", () => {
+  it("freezes metadata-defined web forms", () => {
+    const webForm = defineWebForm({
+      name: "Lead Intake",
+      label: "Lead Intake",
+      roles: ["Guest"],
+      doctype: "Lead",
+      fields: [
+        { field: "title", label: "Name", required: true },
+        { field: "email", description: "Work email" }
+      ],
+      submitLabel: "Send",
+      successMessage: "Thanks"
+    });
+
+    expect(Object.isFrozen(webForm)).toBe(true);
+    expect(Object.isFrozen(webForm.roles ?? [])).toBe(true);
+    expect(Object.isFrozen(webForm.fields)).toBe(true);
+    expect(Object.isFrozen(webForm.fields[0])).toBe(true);
+  });
+
+  it("validates web forms against registered DocType metadata", () => {
+    const Lead = defineDocType({
+      name: "Lead",
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "email", type: "text" },
+        { name: "internal_notes", type: "longText", hidden: true },
+        { name: "created_by", type: "text", readOnly: true },
+        { name: "children", type: "table", tableOf: "Lead Child" }
+      ]
+    });
+    const LeadChild = defineDocType({
+      name: "Lead Child",
+      fields: [{ name: "name", type: "text" }]
+    });
+    const form = defineWebForm({
+      name: "Lead Intake",
+      doctype: "Lead",
+      fields: [{ field: "title" }, { field: "email" }]
+    });
+
+    const registry = createRegistry({ doctypes: [Lead, LeadChild], webForms: [form] });
+
+    expect(registry.getWebForm("Lead Intake")).toEqual(form);
+    expect(registry.listWebForms().map((item) => item.name)).toEqual(["Lead Intake"]);
+    expect(createRegistryFromApp(form).getWebForm("Lead Intake")).toEqual(form);
+    expect(() => createRegistry({ doctypes: [Lead, LeadChild], webForms: [form, form] })).toThrow("already registered");
+    expect(() =>
+      createRegistry({
+        doctypes: [Lead, LeadChild],
+        webForms: [defineWebForm({ name: "Broken", doctype: "Missing", fields: [{ field: "title" }] })]
+      })
+    ).toThrow("references unknown DocType");
+    expect(() =>
+      createRegistry({
+        doctypes: [Lead, LeadChild],
+        webForms: [defineWebForm({ name: "Broken", doctype: "Lead", fields: [{ field: "missing" }] })]
+      })
+    ).toThrow("references unknown field");
+    expect(() =>
+      createRegistry({
+        doctypes: [Lead, LeadChild],
+        webForms: [defineWebForm({ name: "Broken", doctype: "Lead", fields: [{ field: "internal_notes" }] })]
+      })
+    ).toThrow("must not be hidden");
+    expect(() =>
+      createRegistry({
+        doctypes: [Lead, LeadChild],
+        webForms: [defineWebForm({ name: "Broken", doctype: "Lead", fields: [{ field: "created_by" }] })]
+      })
+    ).toThrow("must not be read-only");
+    expect(() =>
+      createRegistry({
+        doctypes: [Lead, LeadChild],
+        webForms: [defineWebForm({ name: "Broken", doctype: "Lead", fields: [{ field: "children" }] })]
+      })
+    ).toThrow("cannot be a table field");
+  });
+});
+
+function createRegistryFromApp(form: ReturnType<typeof defineWebForm>) {
+  const Lead = defineDocType({
+    name: "Lead",
+    fields: [
+      { name: "title", type: "text" },
+      { name: "email", type: "text" }
+    ]
+  });
+  return createRegistryFromApps([defineApp({ name: "crm", doctypes: [Lead], webForms: [form] })]);
+}

@@ -11,6 +11,7 @@ import {
   defineDataPatch,
   defineDocType,
   defineKanban,
+  defineWebForm,
   deterministicIds,
   fixedClock,
   InMemoryDataPatchLog,
@@ -43,9 +44,10 @@ describe("CloudFrappe Worker routing", () => {
       registry: createTestRegistry(),
       actor: () => owner
     });
+    const commands: AggregateCoordinatorCommand[] = [];
     const env = {
       DB: fakeD1(),
-      AGGREGATES: fakeNamespace()
+      AGGREGATES: fakeTransactingNamespace(commands)
     };
 
     const fetch = worker.fetch!;
@@ -235,6 +237,73 @@ describe("CloudFrappe Worker routing", () => {
     const html = await desk.text();
     expect(html).toContain("Events grouped by date");
     expect(html).toContain("No events.");
+  });
+
+  it("mounts metadata Web Form API and public routes through Worker routing", async () => {
+    const Lead = defineDocType({
+      name: "Lead",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "email", type: "text" }
+      ],
+      permissions: [{ roles: ["Guest"], actions: ["create"] }]
+    });
+    const registry = createRegistry({
+      doctypes: [Lead],
+      webForms: [
+        defineWebForm({
+          name: "Lead Intake",
+          label: "Lead Intake",
+          description: "Capture website leads",
+          doctype: "Lead",
+          fields: [{ field: "title" }, { field: "email" }],
+          successMessage: "Thanks"
+        })
+      ]
+    });
+    const worker = createCloudFrappeWorker({
+      registry,
+      actor: () => ({ id: "guest", roles: ["Guest"], tenantId: "acme" })
+    });
+    const commands: AggregateCoordinatorCommand[] = [];
+    const env = {
+      DB: fakeD1(),
+      AGGREGATES: fakeTransactingNamespace(commands)
+    };
+
+    const metadata = await worker.fetch!(cfRequest("http://localhost/api/meta/web-forms"), env, fakeExecutionContext());
+    const page = await worker.fetch!(cfRequest("http://localhost/web-forms/Lead%20Intake"), env, fakeExecutionContext());
+    const submit = await worker.fetch!(
+      cfRequest("http://localhost/api/web-form/Lead%20Intake/submit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ data: { title: "Worker Lead", email: "worker@example.com" } })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(metadata.status).toBe(200);
+    await expect(metadata.json()).resolves.toMatchObject({
+      data: [{ name: "Lead Intake", doctype: "Lead", fields: [{ field: "title" }, { field: "email" }] }]
+    });
+    expect(page.status).toBe(200);
+    await expect(page.text()).resolves.toContain("Capture website leads");
+    expect(submit.status).toBe(201);
+    await expect(submit.json()).resolves.toMatchObject({
+      data: {
+        form: { name: "Lead Intake" },
+        document: { doctype: "Lead", name: "My Note", data: { title: "My Note" } }
+      }
+    });
+    expect(commands).toEqual([
+      expect.objectContaining({
+        kind: "create",
+        doctype: "Lead",
+        data: { title: "Worker Lead", email: "worker@example.com" }
+      })
+    ]);
   });
 
   it("enables generated Desk document presence panels when realtime is configured", async () => {

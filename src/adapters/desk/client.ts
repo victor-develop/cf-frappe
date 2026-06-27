@@ -195,6 +195,10 @@ export function renderDeskClientScript(): string {
     return withQuery("/desk/calendars/" + encodePart(calendar), calendarParams(options || {}));
   }
 
+  function webFormPagePath(webForm) {
+    return "/web-forms/" + encodePart(webForm);
+  }
+
   function deskAdminUsersPath(options) {
     var params = {};
     setParam(params, "user", options && (options.userId !== undefined ? options.userId : options.user));
@@ -361,6 +365,14 @@ export function renderDeskClientScript(): string {
 
   function calendarMetaPath(calendar) {
     return "/api/meta/calendars" + (calendar === undefined ? "" : "/" + encodePart(calendar));
+  }
+
+  function webFormPath(webForm, action) {
+    return (webForm === undefined ? "/api/meta/web-forms" : "/api/web-form/" + encodePart(webForm)) + (action === undefined ? "" : "/" + action);
+  }
+
+  function webFormMetaPath(webForm) {
+    return "/api/meta/web-forms" + (webForm === undefined ? "" : "/" + encodePart(webForm));
   }
 
   function reportBuilderPath(doctype, id, action) {
@@ -3538,6 +3550,18 @@ export function renderDeskClientScript(): string {
         return request(calendarPath(calendar, "run", options || {})).then(unwrapData);
       }
     }),
+    webForm: Object.freeze({
+      get: function (webForm) {
+        return request(webFormMetaPath(webForm)).then(unwrapData);
+      },
+      list: function () {
+        return request(webFormMetaPath()).then(unwrapData);
+      },
+      submit: function (webForm, data) {
+        return request(webFormPath(webForm, "submit"), { method: "POST", body: { data: data || {} } }).then(unwrapData);
+      },
+      url: webFormPagePath
+    }),
     jobs: Object.freeze({
       createSchedule: function (input) {
         return request(jobSchedulePath(), { method: "POST", body: input || {} }).then(unwrapData);
@@ -3676,6 +3700,12 @@ export function renderDeskClientScript(): string {
       },
       calendars: function () {
         return request(calendarMetaPath()).then(unwrapData);
+      },
+      webForm: function (webForm) {
+        return request(webFormMetaPath(webForm)).then(unwrapData);
+      },
+      webForms: function () {
+        return request(webFormMetaPath()).then(unwrapData);
       },
       doctype: function (doctype) {
         return request("/api/meta/doctypes/" + encodePart(doctype)).then(unwrapData);
@@ -3978,6 +4008,7 @@ export function renderDeskClientScript(): string {
       dashboardUrl: deskDashboardPath,
       kanbanUrl: deskKanbanPath,
       calendarUrl: deskCalendarPath,
+      webFormUrl: webFormPagePath,
       fileContentUrl: function (name) {
         return deskFilePath(name, "content");
       },

@@ -35,6 +35,7 @@ import type { UserNotificationService } from "../../application/user-notificatio
 import type { NotificationRuleService } from "../../application/notification-rule-service.js";
 import type { UserPermissionService } from "../../application/user-permission-service.js";
 import type { UserProfileService } from "../../application/user-profile-service.js";
+import type { WebFormService } from "../../application/web-form-service.js";
 import type { WorkflowService } from "../../application/workflow-service.js";
 import { badRequest, permissionDenied } from "../../core/errors.js";
 import { can } from "../../core/permissions.js";
@@ -82,6 +83,7 @@ import { createSavedReportApi } from "./saved-report-api.js";
 import { createUserAccountApi } from "./user-account-api.js";
 import { createUserPermissionApi } from "./user-permission-api.js";
 import { createUserProfileApi } from "./user-profile-api.js";
+import { createWebFormApi } from "./web-form-api.js";
 import { createWorkflowApi } from "./workflow-api.js";
 
 export interface ResourceApiOptions {
@@ -105,6 +107,7 @@ export interface ResourceApiOptions {
   readonly dashboards?: DashboardService;
   readonly kanbans?: KanbanService;
   readonly calendars?: CalendarService;
+  readonly webForms?: WebFormService;
   readonly dataPatchQueue?: DataPatchQueuePort;
   readonly dataPatchRollbackQueue?: DataPatchRollbackQueuePort;
   readonly dataPatchRollbackRetryQueue?: DataPatchRollbackRetryQueuePort;
@@ -292,6 +295,17 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       createCalendarApi({
         calendars: options.calendars,
         actor: resolveActor
+      })
+    );
+  }
+
+  if (options.webForms) {
+    app.route(
+      "/",
+      createWebFormApi({
+        webForms: options.webForms,
+        actor: resolveActor,
+        maxJsonBytes
       })
     );
   }
