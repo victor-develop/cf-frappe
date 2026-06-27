@@ -15,7 +15,13 @@ import {
   documentStream
 } from "../../src";
 import { manager, now, owner } from "../helpers";
-import type { DocTypeDefinition, DocumentSnapshot, DomainEvent } from "../../src";
+import type {
+  AssignmentRuleEventPayload,
+  DocTypeDefinition,
+  DocumentEventPayload,
+  DocumentSnapshot,
+  DomainEvent
+} from "../../src";
 
 const admin = {
   id: "admin@example.com",
@@ -24,6 +30,20 @@ const admin = {
 };
 
 describe("assignment rules", () => {
+  it("registers assignment rule payloads through the domain event extension map", () => {
+    const payload = assignmentRulePayload({
+      kind: "AssignmentRuleSaved",
+      doctypeName: "Ticket",
+      rule: {
+        name: "High priority triage",
+        events: ["DocumentCreated"],
+        assignees: [{ kind: "user", userId: "manager@example.com" }]
+      }
+    });
+
+    expect(payload.rule.name).toBe("High priority triage");
+  });
+
   it("normalizes assignment rule metadata on DocTypes", () => {
     const doctype = defineDocType({
       name: "Ticket",
@@ -593,6 +613,12 @@ describe("assignment rules", () => {
     await expect(store.readStream(documentStream("acme", "Ticket", "Tenant Guard"))).resolves.toHaveLength(1);
   });
 });
+
+function assignmentRulePayload(
+  payload: Extract<DocumentEventPayload, { readonly kind: "AssignmentRuleSaved" }>
+): Extract<AssignmentRuleEventPayload, { readonly kind: "AssignmentRuleSaved" }> {
+  return payload;
+}
 
 function ticketDocType(
   overrides: Partial<DocTypeDefinition> = {}
