@@ -15,8 +15,7 @@ import { can } from "../core/permissions.js";
 import { applyDefaults, compactData, validateDocumentData } from "../core/schema.js";
 import {
   planDocumentFieldMerge,
-  type DocumentFieldMergePlan,
-  type DocumentMergeSnapshot
+  type DocumentFieldMergePlan
 } from "../core/document-merge.js";
 import {
   ensureSharedGrantIsDelegable,
@@ -32,6 +31,14 @@ import {
   bulkDocumentFailure,
   normalizeBulkDocumentSelections
 } from "./document-bulk-policy.js";
+import {
+  ensureDocumentStatus,
+  ensureExpectedVersion,
+  ensureMergeBaseVersion,
+  mergeSnapshotFromDocument,
+  normalizeUnsetFields,
+  pickCommandFields
+} from "./document-command-policy.js";
 import {
   domainCommandAppliedPayload,
   workflowTransitionedPayload
@@ -116,7 +123,6 @@ import {
   type ValidationIssue
 } from "../core/types.js";
 import {
-  badRequest,
   conflict,
   FrameworkError,
   notFound,
@@ -2115,40 +2121,6 @@ function requireSavedEvent(events: readonly DomainEvent[], id: string): DomainEv
   return event;
 }
 
-function ensureExpectedVersion(existing: DocumentSnapshot, expectedVersion?: number): void {
-  if (expectedVersion !== undefined && existing.version !== expectedVersion) {
-    throw conflict(`Expected version ${expectedVersion}, found ${existing.version}`);
-  }
-}
-
-function ensureMergeBaseVersion(baseVersion: number): void {
-  if (!Number.isSafeInteger(baseVersion) || baseVersion < 0) {
-    throw badRequest("baseVersion must be a non-negative integer");
-  }
-}
-
-function mergeSnapshotFromDocument(document: DocumentSnapshot): DocumentMergeSnapshot {
-  return {
-    version: document.version,
-    docstatus: document.docstatus,
-    data: document.data
-  };
-}
-
-function ensureDocumentStatus(
-  document: DocumentSnapshot,
-  allowed: readonly DocStatus[],
-  action: string
-): void {
-  if (!allowed.includes(document.docstatus)) {
-    throw new FrameworkError(
-      "DOCUMENT_STATUS_CONFLICT",
-      `Cannot ${action} ${document.doctype}/${document.name} while it is ${document.docstatus}`,
-      { status: 409 }
-    );
-  }
-}
-
 function bulkNamedCommand(command: BulkDocumentsCommand, selection: BulkDocumentSelection): BulkDocumentCommand {
   return {
     actor: command.actor,
@@ -2158,19 +2130,4 @@ function bulkNamedCommand(command: BulkDocumentsCommand, selection: BulkDocument
     ...(selection.expectedVersion === undefined ? {} : { expectedVersion: selection.expectedVersion }),
     metadata: command.metadata ?? {}
   };
-}
-
-function normalizeUnsetFields(fields: readonly string[] | undefined): readonly string[] {
-  if (fields === undefined) {
-    return [];
-  }
-  const normalized = fields.map((field) => field.trim()).filter((field) => field.length > 0);
-  return [...new Set(normalized)];
-}
-
-function pickCommandFields(fields: readonly string[] | undefined, input: DocumentData): DocumentData {
-  if (!fields) {
-    return input;
-  }
-  return Object.fromEntries(fields.map((field) => [field, input[field]]).filter(([, value]) => value !== undefined)) as DocumentData;
 }
