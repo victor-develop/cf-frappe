@@ -44,16 +44,20 @@ import type {
 } from "../ports/file-storage.js";
 import {
   completeFileRendition,
+  ensureFileExpectedVersion,
   ensureDirectUploadMatches,
   ensureMultipartCompletionMatchesManifest,
   ensureMultipartPartFitsReservation,
   failedFileRendition,
+  fileContentLength,
   fileDashboardEntry,
   fileRenditionId,
   fileRenditionFilename,
   fileRenditions,
   fileRenditionView,
+  fileScanFailureError,
   fileScanPatch,
+  fileSnapshotStringData,
   multipartPartManifest,
   multipartPartSize,
   normalizeBulkFileSelections,
@@ -62,6 +66,7 @@ import {
   normalizeFileSize,
   objectKey,
   pendingFileRendition,
+  requireFileSnapshotString,
   renditionSourcesMatch,
   sanitizeFilename,
   type FileRenditionManifestEntry,
@@ -381,7 +386,7 @@ export class FileService {
 
   async upload(command: UploadFileCommand): Promise<UploadedFile> {
     const filename = sanitizeFilename(command.filename);
-    const size = byteLength(command.body);
+    const size = fileContentLength(command.body);
     if (size > this.maxFileBytes) {
       throw badRequest(`File exceeds ${this.maxFileBytes} bytes`);
     }
@@ -450,7 +455,7 @@ export class FileService {
           eventType: "FileScanFailed",
           metadata: command.metadata ?? {}
         });
-        throw fileScanFailed(scan, snapshot);
+        throw fileScanFailureError(scan, snapshot);
       }
       const snapshot = await this.documents.create({
         actor: command.actor,
@@ -540,7 +545,7 @@ export class FileService {
     if (current.data.storage_state !== "upload_pending") {
       throw badRequest(`${this.fileDoctype}/${command.name} is not pending direct upload`);
     }
-    const object = await this.storage.head(stringField(current, "key"));
+    const object = await this.storage.head(requireFileSnapshotString(current, "key"));
     if (!object) {
       throw notFound(`${this.fileDoctype}/${command.name} content was not found`);
     }
@@ -548,7 +553,7 @@ export class FileService {
     const scan = await this.scanObject({
       actor: command.actor,
       tenantId,
-      filename: stringField(current, "filename"),
+      filename: requireFileSnapshotString(current, "filename"),
       source: "direct_upload",
       object
     });
@@ -568,8 +573,8 @@ export class FileService {
         ...(command.expectedVersion === undefined ? {} : { expectedVersion: command.expectedVersion }),
         metadata: command.metadata ?? {}
       });
-      await this.storage.delete(stringField(current, "key")).catch(() => undefined);
-      throw fileScanFailed(scan, snapshot);
+      await this.storage.delete(requireFileSnapshotString(current, "key")).catch(() => undefined);
+      throw fileScanFailureError(scan, snapshot);
     }
     return this.documents.execute({
       actor: command.actor,
@@ -658,7 +663,7 @@ export class FileService {
     const size = multipartPartSize(command.body, command.size);
     ensureMultipartPartFitsReservation(current, command.partNumber, size);
     const part = await multipartUploads.uploadMultipartPart({
-      key: stringField(current, "key"),
+      key: requireFileSnapshotString(current, "key"),
       uploadId,
       partNumber: command.partNumber,
       body: command.body
@@ -685,7 +690,7 @@ export class FileService {
   async completeMultipartUpload(command: CompleteMultipartUploadCommand): Promise<DocumentSnapshot> {
     const multipartUploads = this.requireMultipartUploads();
     const current = await this.multipartUploadSnapshot(command, ["upload_pending", "upload_completing"]);
-    const key = stringField(current, "key");
+    const key = requireFileSnapshotString(current, "key");
     ensureMultipartCompletionMatchesManifest(current, command.parts);
     const completing = current.data.storage_state === "upload_completing"
       ? current
@@ -708,7 +713,7 @@ export class FileService {
     const scan = await this.scanObject({
       actor: command.actor,
       tenantId: command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID,
-      filename: stringField(completing, "filename"),
+      filename: requireFileSnapshotString(completing, "filename"),
       source: "multipart_upload",
       object
     });
@@ -729,7 +734,7 @@ export class FileService {
         metadata: command.metadata ?? {}
       });
       await this.storage.delete(key).catch(() => undefined);
-      throw fileScanFailed(scan, snapshot);
+      throw fileScanFailureError(scan, snapshot);
     }
     return this.documents.execute({
       actor: command.actor,
@@ -750,9 +755,9 @@ export class FileService {
   async abortMultipartUpload(command: AbortMultipartUploadCommand): Promise<DocumentSnapshot> {
     const multipartUploads = this.requireMultipartUploads();
     const current = await this.multipartUploadSnapshot(command, ["upload_pending"]);
-    ensureExpectedVersion(current, command.expectedVersion);
+    ensureFileExpectedVersion(current, command.expectedVersion);
     await multipartUploads.abortMultipartUpload({
-      key: stringField(current, "key"),
+      key: requireFileSnapshotString(current, "key"),
       uploadId: this.multipartUploadId(current)
     });
     return this.documents.delete({
@@ -905,7 +910,7 @@ export class FileService {
 
   async download(command: DownloadFileCommand): Promise<DownloadedFile> {
     const snapshot = await this.availableFileSnapshot(command);
-    const key = stringField(snapshot, "key");
+    const key = requireFileSnapshotString(snapshot, "key");
     const object = await this.storage.get(key);
     if (!object) {
       throw notFound(`${this.fileDoctype}/${command.name} content was not found`);
@@ -919,7 +924,8 @@ export class FileService {
     }
     const downloaded = await this.download(command);
     const options = normalizeFileTransformOptions(command.options);
-    const sourceContentType = downloaded.object.metadata.contentType ?? stringField(downloaded.snapshot, "content_type");
+    const sourceContentType = downloaded.object.metadata.contentType ??
+      requireFileSnapshotString(downloaded.snapshot, "content_type");
     if (!isTransformableFileContentType(sourceContentType)) {
       throw badRequest(`File '${downloaded.snapshot.name}' cannot be transformed`);
     }
@@ -995,7 +1001,11 @@ export class FileService {
         options,
         ...(overlay === undefined ? {} : { overlay })
       });
-      const filename = fileRenditionFilename(stringField(downloaded.snapshot, "filename"), renditionId, transform.contentType);
+      const filename = fileRenditionFilename(
+        requireFileSnapshotString(downloaded.snapshot, "filename"),
+        renditionId,
+        transform.contentType
+      );
       object = await this.storage.put({
         key: pending.key,
         body: transform.body,
@@ -1064,7 +1074,8 @@ export class FileService {
     }
     const downloaded = await this.download(command);
     const options = normalizeFileTransformOptions(command.options);
-    const contentType = downloaded.object.metadata.contentType ?? stringField(downloaded.snapshot, "content_type");
+    const contentType = downloaded.object.metadata.contentType ??
+      requireFileSnapshotString(downloaded.snapshot, "content_type");
     if (!isTransformableFileContentType(contentType)) {
       throw badRequest(`File '${downloaded.snapshot.name}' cannot be transformed`);
     }
@@ -1216,8 +1227,8 @@ export class FileService {
       throw badRequest("File transforms are not configured");
     }
     const contentType = command.downloaded.object.metadata.contentType ??
-      stringField(command.downloaded.snapshot, "content_type");
-    const filename = stringField(command.downloaded.snapshot, "filename") || command.downloaded.snapshot.name;
+      requireFileSnapshotString(command.downloaded.snapshot, "content_type");
+    const filename = requireFileSnapshotString(command.downloaded.snapshot, "filename");
     return this.transformer.transform({
       actorId: command.actor.id,
       tenantId: command.tenantId,
@@ -1255,16 +1266,16 @@ export class FileService {
       name: overlay.file,
       tenantId: command.tenantId
     });
-    const key = stringField(snapshot, "key");
+    const key = requireFileSnapshotString(snapshot, "key");
     const object = await this.storage.get(key);
     if (!object) {
       throw notFound(`${this.fileDoctype}/${overlay.file} content was not found`);
     }
-    const contentType = object.metadata.contentType ?? stringField(snapshot, "content_type");
+    const contentType = object.metadata.contentType ?? requireFileSnapshotString(snapshot, "content_type");
     if (!isTransformableFileContentType(contentType)) {
       throw badRequest(`File overlay '${overlay.file}' cannot be transformed`);
     }
-    const filename = stringField(snapshot, "filename") || snapshot.name;
+    const filename = requireFileSnapshotString(snapshot, "filename");
     return {
       file: overlay.file,
       key: object.metadata.key,
@@ -1308,7 +1319,7 @@ export class FileService {
 
   private async deleteFileObjects(snapshot: DocumentSnapshot): Promise<void> {
     const keys = [
-      stringField(snapshot, "key"),
+      requireFileSnapshotString(snapshot, "key"),
       ...fileRenditions(snapshot).map((rendition) => rendition.key)
     ];
     for (const key of [...new Set(keys)]) {
@@ -1362,7 +1373,7 @@ export class FileService {
     if (
       typeof current.data.storage_state !== "string" ||
       !allowedStates.includes(current.data.storage_state) ||
-      !stringData(current, "multipart_upload_id")
+      !fileSnapshotStringData(current, "multipart_upload_id")
     ) {
       throw badRequest(`${this.fileDoctype}/${command.name} is not pending multipart upload`);
     }
@@ -1376,7 +1387,7 @@ export class FileService {
   }
 
   private multipartUploadId(snapshot: DocumentSnapshot): string {
-    const uploadId = stringData(snapshot, "multipart_upload_id");
+    const uploadId = fileSnapshotStringData(snapshot, "multipart_upload_id");
     if (!uploadId) {
       throw badRequest(`${snapshot.doctype}/${snapshot.name} has no multipart upload`);
     }
@@ -1388,7 +1399,7 @@ export class FileService {
     readonly snapshot: DocumentSnapshot;
     readonly parts: readonly UploadedMultipartFilePart[];
   }): Promise<FileObjectMetadata> {
-    const key = stringField(command.snapshot, "key");
+    const key = requireFileSnapshotString(command.snapshot, "key");
     const existing = await this.storage.head(key);
     if (existing) {
       return existing;
@@ -1459,53 +1470,10 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function stringData(snapshot: DocumentSnapshot, field: string): string {
-  const value = snapshot.data[field];
-  return typeof value === "string" ? value : "";
-}
-
-function byteLength(body: FileContent): number {
-  if (typeof body === "string") {
-    return new TextEncoder().encode(body).byteLength;
-  }
-  if (body instanceof Blob) {
-    return body.size;
-  }
-  if (ArrayBuffer.isView(body)) {
-    return body.byteLength;
-  }
-  return body.byteLength;
-}
-
 function addSeconds(isoTimestamp: string, seconds: number): string {
   const timestamp = Date.parse(isoTimestamp);
   if (!Number.isFinite(timestamp)) {
     throw badRequest("clock returned an invalid timestamp");
   }
   return new Date(timestamp + seconds * 1000).toISOString();
-}
-
-function fileScanFailed(result: FileScanResult, snapshot: DocumentSnapshot): FrameworkError {
-  const message = typeof snapshot.data.scan_message === "string" && snapshot.data.scan_message
-    ? snapshot.data.scan_message
-    : result.message;
-  return new FrameworkError(
-    "FILE_SCAN_FAILED",
-    message ? `File scan failed: ${message}` : "File scan failed",
-    { status: 422 }
-  );
-}
-
-function stringField(snapshot: DocumentSnapshot, field: string): string {
-  const value = snapshot.data[field];
-  if (typeof value !== "string" || !value) {
-    throw badRequest(`${snapshot.doctype}/${snapshot.name} has no ${field}`);
-  }
-  return value;
-}
-
-function ensureExpectedVersion(snapshot: DocumentSnapshot, expectedVersion: number | undefined): void {
-  if (expectedVersion !== undefined && snapshot.version !== expectedVersion) {
-    throw conflict(`Expected version ${expectedVersion}, found ${snapshot.version}`);
-  }
 }

@@ -1,4 +1,4 @@
-import { badRequest } from "../core/errors.js";
+import { badRequest, conflict, FrameworkError } from "../core/errors.js";
 import { DEFAULT_TENANT_ID, type DocumentData, type DocumentSnapshot, type JsonValue } from "../core/types.js";
 import type {
   FileTransformOverlayPlacement,
@@ -11,6 +11,7 @@ import {
   sortedUploadedMultipartParts
 } from "../ports/multipart-file-storage.js";
 import type {
+  FileContent,
   FileObjectMetadata,
   MultipartFilePartContent,
   UploadedMultipartFilePart
@@ -148,6 +149,19 @@ export function multipartPartSize(body: MultipartFilePartContent, size: number |
   return body.byteLength;
 }
 
+export function fileContentLength(body: FileContent): number {
+  if (typeof body === "string") {
+    return new TextEncoder().encode(body).byteLength;
+  }
+  if (body instanceof Blob) {
+    return body.size;
+  }
+  if (ArrayBuffer.isView(body)) {
+    return body.byteLength;
+  }
+  return body.byteLength;
+}
+
 export function multipartPartManifest(snapshot: DocumentSnapshot): readonly MultipartPartManifestEntry[] {
   const value = snapshot.data.multipart_parts;
   if (!Array.isArray(value)) {
@@ -255,7 +269,7 @@ export function ensureDirectUploadMatches(
   if (object.size !== expectedSize) {
     throw badRequest(`${label} object size mismatch`);
   }
-  if (normalizeContentType(object.contentType) !== normalizeContentType(snapshotStringData(snapshot, "content_type"))) {
+  if (normalizeContentType(object.contentType) !== normalizeContentType(fileSnapshotStringData(snapshot, "content_type"))) {
     throw badRequest(`${label} object content type mismatch`);
   }
 }
@@ -267,6 +281,34 @@ export function fileScanPatch(result: FileScanResult, checkedAt: string): Docume
     ...(result.engine === undefined || result.engine === "" ? {} : { scan_engine: result.engine }),
     ...(result.message === undefined || result.message === "" ? {} : { scan_message: result.message })
   };
+}
+
+export function fileScanFailureError(result: FileScanResult, snapshot: DocumentSnapshot): FrameworkError {
+  const message = fileSnapshotStringData(snapshot, "scan_message") || result.message;
+  return new FrameworkError(
+    "FILE_SCAN_FAILED",
+    message ? `File scan failed: ${message}` : "File scan failed",
+    { status: 422 }
+  );
+}
+
+export function fileSnapshotStringData(snapshot: DocumentSnapshot, field: string): string {
+  const value = snapshot.data[field];
+  return typeof value === "string" ? value : "";
+}
+
+export function requireFileSnapshotString(snapshot: DocumentSnapshot, field: string): string {
+  const value = fileSnapshotStringData(snapshot, field);
+  if (!value) {
+    throw badRequest(`${snapshot.doctype}/${snapshot.name} has no ${field}`);
+  }
+  return value;
+}
+
+export function ensureFileExpectedVersion(snapshot: DocumentSnapshot, expectedVersion: number | undefined): void {
+  if (expectedVersion !== undefined && snapshot.version !== expectedVersion) {
+    throw conflict(`Expected version ${expectedVersion}, found ${snapshot.version}`);
+  }
 }
 
 export interface FileRenditionManifestEntry {
@@ -349,30 +391,30 @@ export function fileRenditions(snapshot: DocumentSnapshot): readonly FileRenditi
 }
 
 export function fileDashboardEntry(snapshot: DocumentSnapshot): FileDashboardEntryView {
-  const attachedToDoctype = snapshotStringData(snapshot, "attached_to_doctype");
-  const attachedToName = snapshotStringData(snapshot, "attached_to_name");
-  const contentType = snapshotStringData(snapshot, "content_type");
-  const storageState = snapshotStringData(snapshot, "storage_state") || "available";
+  const attachedToDoctype = fileSnapshotStringData(snapshot, "attached_to_doctype");
+  const attachedToName = fileSnapshotStringData(snapshot, "attached_to_name");
+  const contentType = fileSnapshotStringData(snapshot, "content_type");
+  const storageState = fileSnapshotStringData(snapshot, "storage_state") || "available";
   const renditions = fileRenditions(snapshot).map(fileRenditionView);
   return {
     name: snapshot.name,
-    filename: snapshotStringData(snapshot, "filename") || snapshot.name,
+    filename: fileSnapshotStringData(snapshot, "filename") || snapshot.name,
     contentType,
     size: snapshotNumberData(snapshot, "size"),
     isPrivate: snapshot.data.is_private !== false,
     previewable: storageState === "available" && isPreviewableFileContentType(contentType),
     storageState,
-    ...(snapshotStringData(snapshot, "direct_upload_expires_at")
-      ? { directUploadExpiresAt: snapshotStringData(snapshot, "direct_upload_expires_at") }
+    ...(fileSnapshotStringData(snapshot, "direct_upload_expires_at")
+      ? { directUploadExpiresAt: fileSnapshotStringData(snapshot, "direct_upload_expires_at") }
       : {}),
-    ...(snapshotStringData(snapshot, "scan_status") ? { scanStatus: snapshotStringData(snapshot, "scan_status") } : {}),
-    ...(snapshotStringData(snapshot, "scan_checked_at")
-      ? { scanCheckedAt: snapshotStringData(snapshot, "scan_checked_at") }
+    ...(fileSnapshotStringData(snapshot, "scan_status") ? { scanStatus: fileSnapshotStringData(snapshot, "scan_status") } : {}),
+    ...(fileSnapshotStringData(snapshot, "scan_checked_at")
+      ? { scanCheckedAt: fileSnapshotStringData(snapshot, "scan_checked_at") }
       : {}),
-    ...(snapshotStringData(snapshot, "scan_engine") ? { scanEngine: snapshotStringData(snapshot, "scan_engine") } : {}),
-    ...(snapshotStringData(snapshot, "scan_message") ? { scanMessage: snapshotStringData(snapshot, "scan_message") } : {}),
-    uploadedBy: snapshotStringData(snapshot, "uploaded_by"),
-    uploadedAt: snapshotStringData(snapshot, "uploaded_at"),
+    ...(fileSnapshotStringData(snapshot, "scan_engine") ? { scanEngine: fileSnapshotStringData(snapshot, "scan_engine") } : {}),
+    ...(fileSnapshotStringData(snapshot, "scan_message") ? { scanMessage: fileSnapshotStringData(snapshot, "scan_message") } : {}),
+    uploadedBy: fileSnapshotStringData(snapshot, "uploaded_by"),
+    uploadedAt: fileSnapshotStringData(snapshot, "uploaded_at"),
     expectedVersion: snapshot.version,
     ...(renditions.length === 0 ? {} : { renditions }),
     ...(attachedToDoctype && attachedToName
@@ -441,7 +483,7 @@ export function pendingFileRendition(command: {
   readonly requestedAt: string;
   readonly requestedBy: string;
 }): FileRenditionManifestEntry {
-  const contentType = expectedRenditionContentType(snapshotStringData(command.snapshot, "content_type"), command.options);
+  const contentType = expectedRenditionContentType(fileSnapshotStringData(command.snapshot, "content_type"), command.options);
   return {
     id: command.id,
     key: renditionObjectKey(command.tenantId, command.snapshot.name, command.id, command.attemptId, contentType),
@@ -554,11 +596,6 @@ function ensureFileObjectKeyFits(key: string, message: string): void {
 function snapshotNumberData(snapshot: DocumentSnapshot, field: string): number {
   const value = snapshot.data[field];
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-function snapshotStringData(snapshot: DocumentSnapshot, field: string): string {
-  const value = snapshot.data[field];
-  return typeof value === "string" ? value : "";
 }
 
 function isRenditionManifestEntry(value: JsonValue): value is FileRenditionManifestEntry {

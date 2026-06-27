@@ -1,17 +1,21 @@
 import {
   completeFileRendition,
+  ensureFileExpectedVersion,
   ensureDirectUploadMatches,
   ensureMultipartCompletionMatchesManifest,
   ensureMultipartPartFitsReservation,
   expectedRenditionContentType,
   failedFileRendition,
+  fileContentLength,
   fileContentTypeExtension,
   fileDashboardEntry,
   fileRenditionId,
   fileRenditionFilename,
   fileRenditions,
   fileRenditionView,
+  fileScanFailureError,
   fileScanPatch,
+  fileSnapshotStringData,
   fileTransformOptionsData,
   fileTransformOptionsFromData,
   isPreviewableFileContentType,
@@ -25,6 +29,7 @@ import {
   normalizeFileSize,
   objectKey,
   pendingFileRendition,
+  requireFileSnapshotString,
   renditionObjectKey,
   renditionSourcesMatch,
   sanitizeFilename,
@@ -102,6 +107,13 @@ describe("file policy", () => {
     expect(() => multipartPartSize(new ReadableStream(), undefined)).toThrow(
       "Multipart upload part size is required for streamed bodies"
     );
+  });
+
+  it("calculates buffered file content lengths", () => {
+    expect(fileContentLength("你好")).toBe(6);
+    expect(fileContentLength(new Uint8Array([1, 2, 3]))).toBe(3);
+    expect(fileContentLength(new ArrayBuffer(4))).toBe(4);
+    expect(fileContentLength(new Blob(["hello"]))).toBe(5);
   });
 
   it("reads and upserts multipart manifests deterministically", () => {
@@ -410,6 +422,36 @@ describe("file policy", () => {
       scan_engine: "unit-av",
       scan_message: "EICAR"
     });
+  });
+
+  it("builds file scan failure errors from persisted scan details first", () => {
+    const fromSnapshot = fileScanFailureError(
+      { status: "infected", message: "scanner fallback" },
+      fileSnapshot({ scan_message: "persisted signature" })
+    );
+    expect(fromSnapshot.code).toBe("FILE_SCAN_FAILED");
+    expect(fromSnapshot.status).toBe(422);
+    expect(fromSnapshot.message).toBe("File scan failed: persisted signature");
+
+    expect(
+      fileScanFailureError({ status: "infected", message: "scanner signature" }, fileSnapshot({})).message
+    ).toBe("File scan failed: scanner signature");
+    expect(fileScanFailureError({ status: "infected" }, fileSnapshot({})).message).toBe("File scan failed");
+  });
+
+  it("reads optional and required string fields from file snapshots", () => {
+    const snapshot = fileSnapshot({ key: "acme/files/file.pdf", filename: 42 });
+    expect(fileSnapshotStringData(snapshot, "key")).toBe("acme/files/file.pdf");
+    expect(fileSnapshotStringData(snapshot, "filename")).toBe("");
+    expect(requireFileSnapshotString(snapshot, "key")).toBe("acme/files/file.pdf");
+    expect(() => requireFileSnapshotString(snapshot, "filename")).toThrow("File/file_multipart has no filename");
+  });
+
+  it("validates expected file snapshot versions", () => {
+    const snapshot = fileSnapshot({});
+    expect(() => ensureFileExpectedVersion(snapshot, undefined)).not.toThrow();
+    expect(() => ensureFileExpectedVersion(snapshot, 1)).not.toThrow();
+    expect(() => ensureFileExpectedVersion(snapshot, 2)).toThrow("Expected version 2, found 1");
   });
 
   it("normalizes file dashboard limits", () => {
