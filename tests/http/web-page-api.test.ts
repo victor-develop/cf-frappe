@@ -102,6 +102,53 @@ describe("web page api", () => {
     expect(html).toContain("--cf-frappe-font-family: Inter, system-ui");
   });
 
+  it("renders actor-filtered Website Settings navigation on public pages", async () => {
+    const registry = createRegistry({
+      webPages: [
+        defineWebPage({
+          name: "About",
+          route: "about",
+          title: "About",
+          sections: [{ body: "Welcome" }]
+        }),
+        defineWebPage({
+          name: "Members",
+          route: "members",
+          title: "Members",
+          roles: ["User"],
+          sections: [{ body: "Private" }]
+        })
+      ],
+      websiteSettings: defineWebsiteSettings({
+        title: "Starter Site",
+        navItems: [
+          { name: "about", label: "About", pageRoute: "about" },
+          { name: "members", label: "Members", pageRoute: "members" },
+          { name: "docs", label: "<Docs>", href: "https://example.com/docs?ref=cf&tab=api" }
+        ]
+      })
+    });
+    const store = new InMemoryDocumentStore();
+    const webPages = new WebPageService({ registry });
+    const app = createResourceApi({
+      registry,
+      documents: new DocumentService({ registry, store, clock: fixedClock(now) }),
+      queries: new QueryService({ registry, projections: store }),
+      webPages,
+      websiteSettings: new WebsiteSettingsService({ registry, webPages }),
+      actor: unsafeHeaderActorResolver
+    });
+
+    const page = await app.request("/page/about");
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain('aria-label="Website navigation"');
+    expect(html).toContain('<a href="/page/about">About</a>');
+    expect(html).toContain('<a href="https://example.com/docs?ref=cf&amp;tab=api">&lt;Docs&gt;</a>');
+    expect(html).not.toContain('href="/page/members"');
+    expect(html).not.toContain(">Members</a>");
+  });
+
   it("falls back to default page CSS when Website Settings cannot be read", async () => {
     for (const websiteSettings of [
       defineWebsiteSettings({
@@ -148,6 +195,7 @@ describe("web page api", () => {
       const html = await page.text();
       expect(html).toContain("--cf-frappe-primary: #2563eb");
       expect(html).not.toContain("--cf-frappe-primary: #0f766e");
+      expect(html).not.toContain("Website navigation");
     }
   });
 
@@ -175,6 +223,8 @@ describe("web page api", () => {
 
     const page = await app.request("/page/about");
     expect(page.status).toBe(200);
-    await expect(page.text()).resolves.toContain("--cf-frappe-primary: #2563eb");
+    const html = await page.text();
+    expect(html).toContain("--cf-frappe-primary: #2563eb");
+    expect(html).not.toContain("Website navigation");
   });
 });

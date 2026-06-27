@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the themed Web View rendering slice:
+As of the Website navigation rendering slice:
 
 - Vitest files: `147`
-- Vitest cases: `1397`
+- Vitest cases: `1399`
 
 ## Implication
 

@@ -1,10 +1,9 @@
 import { Hono } from "hono";
 import type { JsonValue } from "../../core/types.js";
 import type { WebViewItem, WebViewMetadata, WebViewResolvedField, WebViewService } from "../../application/web-view-service.js";
-import type { WebsiteThemeDefinition } from "../../core/website-theme.js";
 import type { ActorResolver } from "./actor.js";
 import { parseOptionalInteger } from "./request.js";
-import { escapeHtml, resolveWebsiteTheme, websitePage, type WebsiteSettingsReader } from "./website-rendering.js";
+import { escapeHtml, resolveWebsitePresentation, websitePage, type WebsitePresentation, type WebsiteSettingsReader } from "./website-rendering.js";
 
 export interface WebViewApiOptions {
   readonly webViews: WebViewService;
@@ -43,14 +42,14 @@ export function createWebViewApi(options: WebViewApiOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const metadata = await options.webViews.getWebView(actor, c.req.param("webView"));
     const result = await options.webViews.listItems(actor, metadata.view.name);
-    return html(renderWebViewList(metadata, result.items, resolveWebsiteTheme(options.websiteSettings, actor)));
+    return html(renderWebViewList(metadata, result.items, resolveWebsitePresentation(options.websiteSettings, actor)));
   });
 
   app.get("/web/:webView/:route", async (c) => {
     const actor = await options.actor(c.req.raw);
     const metadata = await options.webViews.getWebView(actor, c.req.param("webView"));
     const result = await options.webViews.getItem(actor, metadata.view.name, c.req.param("route"));
-    return html(renderWebViewItem(metadata, result.item, resolveWebsiteTheme(options.websiteSettings, actor)));
+    return html(renderWebViewItem(metadata, result.item, resolveWebsitePresentation(options.websiteSettings, actor)));
   });
 
   return app;
@@ -59,25 +58,25 @@ export function createWebViewApi(options: WebViewApiOptions): Hono {
 function renderWebViewList(
   metadata: WebViewMetadata,
   items: readonly WebViewItem[],
-  theme: WebsiteThemeDefinition | undefined
+  presentation: WebsitePresentation
 ): string {
   const title = metadata.view.label ?? metadata.view.name;
   const description = metadata.view.description ? `<p>${escapeHtml(metadata.view.description)}</p>` : "";
   const rows = items
     .map((item) => `<li><a href="/web/${encodeURIComponent(metadata.view.name)}/${encodeURIComponent(item.route)}">${escapeHtml(item.title)}</a></li>`)
     .join("");
-  return websitePage(title, `<main><h1>${escapeHtml(title)}</h1>${description}<ul>${rows || "<li>No published items.</li>"}</ul></main>`, theme);
+  return websitePage(title, `<main><h1>${escapeHtml(title)}</h1>${description}<ul>${rows || "<li>No published items.</li>"}</ul></main>`, presentation);
 }
 
 function renderWebViewItem(
   metadata: WebViewMetadata,
   item: WebViewItem,
-  theme: WebsiteThemeDefinition | undefined
+  presentation: WebsitePresentation
 ): string {
   const rows = metadata.fields
     .map((field) => renderField(field, item.data[field.field]))
     .join("");
-  return websitePage(item.title, `<main><a href="/web/${encodeURIComponent(metadata.view.name)}">Back</a><h1>${escapeHtml(item.title)}</h1>${rows}</main>`, theme);
+  return websitePage(item.title, `<main><a href="/web/${encodeURIComponent(metadata.view.name)}">Back</a><h1>${escapeHtml(item.title)}</h1>${rows}</main>`, presentation);
 }
 
 function renderField(field: WebViewResolvedField, value: JsonValue | undefined): string {

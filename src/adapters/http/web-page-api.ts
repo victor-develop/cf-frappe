@@ -1,9 +1,8 @@
 import { Hono } from "hono";
 import type { WebPageDefinition, WebPageSectionDefinition } from "../../core/web-page.js";
 import type { WebPageService } from "../../application/web-page-service.js";
-import type { WebsiteThemeDefinition } from "../../core/website-theme.js";
 import type { ActorResolver } from "./actor.js";
-import { escapeHtml, resolveWebsiteTheme, websitePage, type WebsiteSettingsReader } from "./website-rendering.js";
+import { escapeHtml, resolveWebsitePresentation, websitePage, type WebsitePresentation, type WebsiteSettingsReader } from "./website-rendering.js";
 
 export interface WebPageApiOptions {
   readonly webPages: WebPageService;
@@ -26,23 +25,23 @@ export function createWebPageApi(options: WebPageApiOptions): Hono {
 
   app.get("/page/:route{.+}", async (c) => {
     const actor = await options.actor(c.req.raw);
-    return html(renderWebPage(options.webPages.getWebPageByRoute(actor, c.req.param("route")), resolveWebsiteTheme(options.websiteSettings, actor)));
+    return html(renderWebPage(options.webPages.getWebPageByRoute(actor, c.req.param("route")), resolveWebsitePresentation(options.websiteSettings, actor)));
   });
 
   app.get("/page/:route", async (c) => {
     const actor = await options.actor(c.req.raw);
-    return html(renderWebPage(options.webPages.getWebPageByRoute(actor, c.req.param("route")), resolveWebsiteTheme(options.websiteSettings, actor)));
+    return html(renderWebPage(options.webPages.getWebPageByRoute(actor, c.req.param("route")), resolveWebsitePresentation(options.websiteSettings, actor)));
   });
 
   return app;
 }
 
-function renderWebPage(pageDefinition: WebPageDefinition, theme: WebsiteThemeDefinition | undefined): string {
+function renderWebPage(pageDefinition: WebPageDefinition, presentation: WebsitePresentation): string {
   const description = pageDefinition.description === undefined ? "" : `<p>${escapeHtml(pageDefinition.description)}</p>`;
   return websitePage(
     pageDefinition.title,
     `<main><h1>${escapeHtml(pageDefinition.title)}</h1>${description}${pageDefinition.sections.map(renderSection).join("")}</main>`,
-    theme
+    presentation
   );
 }
 

@@ -2,6 +2,7 @@ import {
   createRegistry,
   createResourceApi,
   defineDocType,
+  defineWebPage,
   defineWebsiteSettings,
   defineWebsiteTheme,
   defineWebView,
@@ -190,6 +191,80 @@ describe("web view api", () => {
     expect(itemHtml).toContain("--cf-frappe-font-family: Inter, system-ui");
   });
 
+  it("renders Website Settings navigation on public Web View pages", async () => {
+    const registry = createRegistry({
+      doctypes: [articleDocType],
+      webPages: [
+        defineWebPage({
+          name: "About",
+          route: "about",
+          title: "About",
+          sections: [{ body: "Welcome" }]
+        }),
+        defineWebPage({
+          name: "Members",
+          route: "members",
+          title: "Members",
+          roles: ["User"],
+          sections: [{ body: "Private" }]
+        })
+      ],
+      webViews: [
+        defineWebView({
+          name: "Articles",
+          label: "Articles",
+          doctype: "Article",
+          routeField: "route",
+          titleField: "title",
+          publishedField: "published",
+          fields: [{ field: "body", label: "Body" }]
+        })
+      ],
+      websiteSettings: defineWebsiteSettings({
+        title: "Starter Site",
+        navItems: [
+          { name: "about", label: "About", pageRoute: "about" },
+          { name: "members", label: "Members", pageRoute: "members" },
+          { name: "articles", label: "Articles", href: "/web/Articles" }
+        ]
+      })
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+    const queries = new QueryService({ registry, projections: store });
+    const webPages = new WebPageService({ registry });
+    const app = createResourceApi({
+      registry,
+      documents,
+      queries,
+      webViews: new WebViewService({ registry, queries }),
+      webPages,
+      websiteSettings: new WebsiteSettingsService({ registry, webPages }),
+      actor: unsafeHeaderActorResolver
+    });
+
+    await documents.create({
+      actor: defaultOwner,
+      doctype: "Article",
+      data: { title: "Launch", route: "launch", published: true, body: "Hello" }
+    });
+
+    const listPage = await app.request("/web/Articles");
+    expect(listPage.status).toBe(200);
+    const listHtml = await listPage.text();
+    expect(listHtml).toContain('aria-label="Website navigation"');
+    expect(listHtml).toContain('<a href="/page/about">About</a>');
+    expect(listHtml).toContain('<a href="/web/Articles">Articles</a>');
+    expect(listHtml).not.toContain('href="/page/members"');
+
+    const itemPage = await app.request("/web/Articles/launch");
+    expect(itemPage.status).toBe(200);
+    const itemHtml = await itemPage.text();
+    expect(itemHtml).toContain('aria-label="Website navigation"');
+    expect(itemHtml).toContain('<a href="/web/Articles">Articles</a>');
+    expect(itemHtml).not.toContain('href="/page/members"');
+  });
+
   it("falls back to default Web View CSS when Website Settings cannot be read", async () => {
     for (const websiteSettings of [
       defineWebsiteSettings({
@@ -249,6 +324,7 @@ describe("web view api", () => {
       const html = await page.text();
       expect(html).toContain("--cf-frappe-primary: #2563eb");
       expect(html).not.toContain("--cf-frappe-primary: #0f766e");
+      expect(html).not.toContain("Website navigation");
     }
   });
 
@@ -289,10 +365,14 @@ describe("web view api", () => {
 
     const listPage = await app.request("/web/Articles");
     expect(listPage.status).toBe(200);
-    await expect(listPage.text()).resolves.toContain("--cf-frappe-primary: #2563eb");
+    const listHtml = await listPage.text();
+    expect(listHtml).toContain("--cf-frappe-primary: #2563eb");
+    expect(listHtml).not.toContain("Website navigation");
 
     const itemPage = await app.request("/web/Articles/launch");
     expect(itemPage.status).toBe(200);
-    await expect(itemPage.text()).resolves.toContain("--cf-frappe-primary: #2563eb");
+    const itemHtml = await itemPage.text();
+    expect(itemHtml).toContain("--cf-frappe-primary: #2563eb");
+    expect(itemHtml).not.toContain("Website navigation");
   });
 });
