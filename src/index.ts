@@ -12,6 +12,7 @@ export * from "./application/dashboard-service.js";
 export * from "./application/data-patch-runner.js";
 export * from "./application/data-patch-service.js";
 export * from "./application/data-patch-jobs.js";
+export * from "./application/document-access-policy.js";
 export * from "./application/document-bulk-policy.js";
 export * from "./application/document-command-policy.js";
 export * from "./application/document-delivery-outbox-consumer.js";

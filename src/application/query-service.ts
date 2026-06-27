@@ -7,15 +7,21 @@ import {
   normalizeListOrder,
   resolveListView
 } from "../core/list-view.js";
-import { documentShareAllows, type DocumentShareProvider } from "../core/document-shares.js";
+import type {
+  DocumentSharePermission,
+  DocumentShareProvider
+} from "../core/document-shares.js";
 import { can } from "../core/permissions.js";
 import type { ModelRegistry } from "../core/registry.js";
 import {
-  documentMatchesUserPermissions,
-  linkTargetMatchesUserPermissions,
   type UserPermissionGrant,
   type UserPermissionProvider
 } from "../core/user-permissions.js";
+import {
+  canReadLinkedDocumentTarget,
+  canUseDocumentAction,
+  canUseVisibleDocument
+} from "./document-access-policy.js";
 import {
   DEFAULT_TENANT_ID,
   type Actor,
@@ -486,16 +492,18 @@ export class QueryService {
   }
 
   async canReadDocument(actor: Actor, doctype: DocTypeDefinition, document: DocumentSnapshot): Promise<boolean> {
-    if (document.docstatus === "deleted") {
-      return false;
-    }
-    const staticRead = can(actor, doctype, "read", document);
-    const sharedRead = staticRead ? false : await this.shareAllows(actor, document, "read");
-    if (!staticRead && !sharedRead) {
-      return false;
-    }
+    const sharedPermissions = canUseDocumentAction({ actor, doctype, action: "read", document })
+      ? []
+      : await this.sharedPermissionsFor(actor, document);
     const grants = await this.userPermissions?.permissionsFor(actor, document.tenantId);
-    return documentMatchesUserPermissions(doctype, document, grants ?? []);
+    return canUseVisibleDocument({
+      actor,
+      doctype,
+      action: "read",
+      document,
+      sharedPermissions,
+      userPermissionGrants: grants ?? []
+    });
   }
 
   async canActOnDocument(
@@ -504,16 +512,18 @@ export class QueryService {
     action: PermissionAction,
     document: DocumentSnapshot
   ): Promise<boolean> {
-    if (document.docstatus === "deleted") {
-      return false;
-    }
-    const staticAllowed = can(actor, doctype, action, document);
-    const sharedAllowed = staticAllowed ? false : await this.shareAllows(actor, document, action);
-    if (!staticAllowed && !sharedAllowed) {
-      return false;
-    }
+    const sharedPermissions = canUseDocumentAction({ actor, doctype, action, document })
+      ? []
+      : await this.sharedPermissionsFor(actor, document);
     const grants = await this.userPermissions?.permissionsFor(actor, document.tenantId);
-    return documentMatchesUserPermissions(doctype, document, grants ?? []);
+    return canUseVisibleDocument({
+      actor,
+      doctype,
+      action,
+      document,
+      sharedPermissions,
+      userPermissionGrants: grants ?? []
+    });
   }
 
   private async canReadLinkTarget(
@@ -524,24 +534,25 @@ export class QueryService {
     document: DocumentSnapshot,
     grants: readonly UserPermissionGrant[]
   ): Promise<boolean> {
-    if (document.docstatus === "deleted") {
-      return false;
-    }
-    const staticRead = can(actor, target, "read", document);
-    const sharedRead = staticRead ? false : await this.shareAllows(actor, document, "read");
-    return (
-      (staticRead || sharedRead) &&
-      linkTargetMatchesUserPermissions(source, field, document, grants)
-    );
+    const sharedPermissions = canUseDocumentAction({ actor, doctype: target, action: "read", document })
+      ? []
+      : await this.sharedPermissionsFor(actor, document);
+    return canReadLinkedDocumentTarget({
+      actor,
+      sourceDoctype: source,
+      field,
+      targetDoctype: target,
+      target: document,
+      sharedPermissions,
+      userPermissionGrants: grants
+    });
   }
 
-  private async shareAllows(
+  private async sharedPermissionsFor(
     actor: Actor,
-    document: DocumentSnapshot,
-    action: Parameters<typeof can>[2]
-  ): Promise<boolean> {
-    const permissions = await this.documentShares?.sharedPermissionsFor(actor, document);
-    return documentShareAllows(permissions ?? [], action);
+    document: DocumentSnapshot
+  ): Promise<readonly DocumentSharePermission[]> {
+    return await this.documentShares?.sharedPermissionsFor(actor, document) ?? [];
   }
 }
 

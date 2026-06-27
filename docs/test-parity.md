@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document link validation policy module slice:
+As of the document access policy module slice:
 
-- Vitest files: `166`
-- Vitest cases: `1567`
+- Vitest files: `167`
+- Vitest cases: `1573`
 
 ## Implication
 

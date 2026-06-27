@@ -33,6 +33,11 @@ import {
   normalizeBulkDocumentSelections
 } from "./document-bulk-policy.js";
 import {
+  canReadLinkedDocumentTarget,
+  canUseDocumentAction,
+  documentSatisfiesUserPermissions
+} from "./document-access-policy.js";
+import {
   ensureDocumentStatus,
   ensureExpectedVersion,
   ensureMergeBaseVersion,
@@ -100,8 +105,6 @@ import {
 } from "./document-field-policy.js";
 import { documentStream, namingSeriesStream } from "../core/streams.js";
 import {
-  documentMatchesUserPermissions,
-  linkTargetMatchesUserPermissions,
   type UserPermissionProvider
 } from "../core/user-permissions.js";
 import { allowedWorkflowTransitions, currentWorkflowState } from "../core/workflow.js";
@@ -1755,17 +1758,11 @@ export class DocumentService implements DocumentCommandExecutor {
     document: DocumentSnapshot
   ): Promise<boolean> {
     const grants = await this.userPermissions?.permissionsFor(actor, document.tenantId);
-    return documentMatchesUserPermissions(doctype, document, grants ?? []);
-  }
-
-  private async matchesLinkUserPermissions(
-    actor: Actor,
-    sourceDoctype: DocTypeDefinition,
-    field: FieldDefinition,
-    target: DocumentSnapshot
-  ): Promise<boolean> {
-    const grants = await this.userPermissions?.permissionsFor(actor, target.tenantId);
-    return linkTargetMatchesUserPermissions(sourceDoctype, field, target, grants ?? []);
+    return documentSatisfiesUserPermissions({
+      doctype,
+      document,
+      userPermissionGrants: grants ?? []
+    });
   }
 
   private async canReadLinkedDocument(
@@ -1775,11 +1772,17 @@ export class DocumentService implements DocumentCommandExecutor {
     targetDoctype: DocTypeDefinition,
     target: DocumentSnapshot
   ): Promise<boolean> {
-    return (
-      target.docstatus !== "deleted" &&
-      (await this.canActOnDocument(actor, targetDoctype, "read", target)) &&
-      (await this.matchesLinkUserPermissions(actor, sourceDoctype, field, target))
-    );
+    const sharedPermissions = await this.documentShares?.sharedPermissionsFor(actor, target);
+    const userPermissionGrants = await this.userPermissions?.permissionsFor(actor, target.tenantId);
+    return canReadLinkedDocumentTarget({
+      actor,
+      sourceDoctype,
+      field,
+      targetDoctype,
+      target,
+      sharedPermissions: sharedPermissions ?? [],
+      userPermissionGrants: userPermissionGrants ?? []
+    });
   }
 
   private async canActOnDocument(
@@ -1788,11 +1791,17 @@ export class DocumentService implements DocumentCommandExecutor {
     action: Parameters<typeof can>[2],
     document: DocumentSnapshot
   ): Promise<boolean> {
-    if (can(actor, doctype, action, document)) {
+    if (canUseDocumentAction({ actor, doctype, action, document })) {
       return true;
     }
     const permissions = await this.documentShares?.sharedPermissionsFor(actor, document);
-    return documentShareAllows(permissions ?? [], action);
+    return canUseDocumentAction({
+      actor,
+      doctype,
+      action,
+      document,
+      sharedPermissions: permissions ?? []
+    });
   }
 
   private async doctypeContext(

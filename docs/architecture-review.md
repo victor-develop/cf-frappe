@@ -74,3 +74,4 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Extracted expected-version checks, merge-base validation, merge snapshot shaping, document-status guards, unset normalization, and model-declared command field picking from `DocumentService` into a pure document command policy module with focused unit coverage.
 - Extracted tenant resolution and bulk single-command shaping from `DocumentService` into pure application policy helpers with focused unit coverage.
 - Extracted recursive link validation and nested child-table issue path shaping from `DocumentService` into the document reference policy while keeping target reads and permission checks injected by the service.
+- Extracted document action, visible-document, and linked-target access composition into a shared application access policy reused by document commands and document queries while services retain only share/grant retrieval.
