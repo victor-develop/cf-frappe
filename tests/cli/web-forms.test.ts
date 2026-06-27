@@ -72,7 +72,14 @@ describe("cf-frappe CLI remote web forms", () => {
         cwd: () => "/workspace",
         env: (name) => name === "CF_FRAPPE_AUTH" ? "Bearer test-token" : undefined,
         fetch: fakeFetch(listCalls, {
-          data: [{ name: "Lead Intake", label: "Lead Intake", route: "lead/intake", successUrl: "/page/thanks", doctype: "Lead" }]
+          data: [{
+            name: "Lead Intake",
+            label: "Lead Intake",
+            route: "lead/intake",
+            loginRequired: true,
+            successUrl: "/page/thanks",
+            doctype: "Lead"
+          }]
         }),
         stdout: listStdout,
         stderr: textBuffer()
@@ -86,6 +93,7 @@ describe("cf-frappe CLI remote web forms", () => {
     expect(listStdout.text()).toContain("Web forms at https://app.example/cf");
     expect(listStdout.text()).toContain("- Lead Intake Lead - Lead Intake");
     expect(listStdout.text()).toContain("route:lead/intake");
+    expect(listStdout.text()).toContain("login:required");
     expect(listStdout.text()).toContain("success:/page/thanks");
 
     const getCalls: RemoteCall[] = [];
@@ -96,7 +104,13 @@ describe("cf-frappe CLI remote web forms", () => {
         cwd: () => "/workspace",
         fetch: fakeFetch(getCalls, {
           data: {
-            form: { name: "Lead Intake", label: "Lead Intake", route: "lead/intake", successUrl: "/page/thanks" },
+            form: {
+              name: "Lead Intake",
+              label: "Lead Intake",
+              route: "lead/intake",
+              loginRequired: true,
+              successUrl: "/page/thanks"
+            },
             doctype: "Lead",
             fields: [{ field: "title", label: "Name", type: "text", required: true }]
           }
@@ -110,6 +124,7 @@ describe("cf-frappe CLI remote web forms", () => {
     expect(getCalls[0]?.url).toBe("https://app.example/api/meta/web-forms/Lead%20Intake");
     expect(getStdout.text()).toContain("  - title text required - Name");
     expect(getStdout.text()).toContain("route:lead/intake");
+    expect(getStdout.text()).toContain("login:required");
     expect(getStdout.text()).toContain("success:/page/thanks");
   });
 

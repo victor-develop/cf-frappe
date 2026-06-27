@@ -785,5 +785,6 @@ export interface GlobalSearchResult {
 }
 
 export const CHILD_TABLE_ROW_INDEX_FIELD = "__cf_frappe_row_index";
+export const GUEST_ROLE = "Guest";
 export const SYSTEM_MANAGER_ROLE = "System Manager";
 export const DEFAULT_TENANT_ID = "default";

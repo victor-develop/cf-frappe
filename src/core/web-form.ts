@@ -1,5 +1,5 @@
 import { FrameworkError } from "./errors.js";
-import { SYSTEM_MANAGER_ROLE, type Actor, type DocTypeDefinition, type FieldDefinition } from "./types.js";
+import { GUEST_ROLE, SYSTEM_MANAGER_ROLE, type Actor, type DocTypeDefinition, type FieldDefinition } from "./types.js";
 import { isSafeWebsiteHref } from "./website-href.js";
 import { isCanonicalWebPageRoute } from "./web-page.js";
 
@@ -18,6 +18,7 @@ export interface WebFormDefinition {
   readonly description?: string;
   readonly roles?: readonly string[];
   readonly published?: boolean;
+  readonly loginRequired?: boolean;
   readonly doctype: string;
   readonly fields: readonly WebFormFieldDefinition[];
   readonly submitLabel?: string;
@@ -96,7 +97,14 @@ export function canReadWebForm(actor: Actor, webForm: WebFormDefinition): boolea
   if (actor.roles.includes(SYSTEM_MANAGER_ROLE)) {
     return true;
   }
+  if (webForm.loginRequired === true && !hasAuthenticatedRole(actor)) {
+    return false;
+  }
   return webForm.roles === undefined || webForm.roles.some((role) => actor.roles.includes(role));
+}
+
+function hasAuthenticatedRole(actor: Actor): boolean {
+  return actor.roles.some((role) => role !== GUEST_ROLE);
 }
 
 function assertSubmittableWebFormField(

@@ -135,6 +135,44 @@ describe("WebFormService", () => {
     });
   });
 
+  it("requires authenticated actors for login-required forms", async () => {
+    const registry = createRegistry({
+      doctypes: [leadDocType],
+      webForms: [
+        defineWebForm({
+          name: "Member Lead Intake",
+          route: "members/lead-intake",
+          loginRequired: true,
+          doctype: "Lead",
+          fields: [{ field: "title" }, { field: "email" }]
+        })
+      ]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+    const queries = new QueryService({ registry, projections: store });
+    const webForms = new WebFormService({ registry, documents, queries });
+
+    await expect(webForms.listWebForms(guest)).resolves.toEqual([]);
+    await expect(webForms.getWebForm(guest, "Member Lead Intake")).rejects.toMatchObject({
+      code: "PERMISSION_DENIED"
+    });
+    await expect(webForms.getWebFormByRoute(guest, "members/lead-intake")).rejects.toMatchObject({
+      code: "PERMISSION_DENIED"
+    });
+    await expect(webForms.submitWebForm(guest, "Member Lead Intake", { data: { title: "Guest Lead" } }))
+      .rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+    await expect(store.get("acme", "Lead", "Guest Lead")).resolves.toBeNull();
+
+    await expect(webForms.listWebForms(owner)).resolves.toMatchObject([{ name: "Member Lead Intake", loginRequired: true }]);
+    await expect(webForms.getWebForm(owner, "Member Lead Intake")).resolves.toMatchObject({
+      form: { name: "Member Lead Intake", loginRequired: true },
+      doctype: "Lead"
+    });
+    await expect(webForms.submitWebForm(owner, "Member Lead Intake", { data: { title: "Member Lead" } }))
+      .resolves.toMatchObject({ document: { name: "Member Lead" } });
+  });
+
   it("validates form fields against effective create metadata", async () => {
     const registry = createRegistry({
       doctypes: [leadDocType],

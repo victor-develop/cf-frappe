@@ -196,6 +196,98 @@ describe("web form api", () => {
     await expect(store.get("default", "Lead", "Draft Lead")).resolves.toBeNull();
   });
 
+  it("hides login-required Web Forms from Guest metadata, listing, and submission routes", async () => {
+    const gatedLeadDocType = defineDocType({
+      name: "Gated Lead",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "email", type: "text" }
+      ],
+      permissions: [
+        { roles: ["Guest"], actions: ["create"] },
+        { roles: ["User"], actions: ["create"] }
+      ]
+    });
+    const registry = createRegistry({
+      doctypes: [gatedLeadDocType],
+      webForms: [
+        defineWebForm({
+          name: "Public Lead Intake",
+          route: "public/lead-intake",
+          doctype: "Gated Lead",
+          fields: [{ field: "title", label: "Name", required: true }]
+        }),
+        defineWebForm({
+          name: "Member Lead Intake",
+          route: "members/lead-intake",
+          loginRequired: true,
+          doctype: "Gated Lead",
+          fields: [{ field: "title", label: "Name", required: true }, { field: "email" }]
+        })
+      ]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+    const queries = new QueryService({ registry, projections: store });
+    const webForms = new WebFormService({ registry, documents, queries });
+    const app = createResourceApi({
+      registry,
+      documents,
+      queries,
+      webForms,
+      actor: unsafeHeaderActorResolver
+    });
+
+    const guestMetadataList = await app.request("/api/meta/web-forms");
+    expect(guestMetadataList.status).toBe(200);
+    await expect(guestMetadataList.json()).resolves.toMatchObject({
+      data: [{ name: "Public Lead Intake" }]
+    });
+
+    const guestPublicList = await app.request("/web-forms");
+    expect(guestPublicList.status).toBe(200);
+    const guestPublicListHtml = await guestPublicList.text();
+    expect(guestPublicListHtml).toContain("Public Lead Intake");
+    expect(guestPublicListHtml).not.toContain("Member Lead Intake");
+
+    const guestMetadata = await app.request("/api/meta/web-forms/Member%20Lead%20Intake");
+    expect(guestMetadata.status).toBe(403);
+    const guestPage = await app.request("/web-forms/members/lead-intake");
+    expect(guestPage.status).toBe(403);
+    const guestSubmit = await app.request("/api/web-form/Member%20Lead%20Intake/submit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ data: { title: "Guest Lead" } })
+    });
+    expect(guestSubmit.status).toBe(403);
+    await expect(store.get("default", "Gated Lead", "Guest Lead")).resolves.toBeNull();
+
+    const userHeaders = { "x-cf-frappe-user": "member@example.com", "x-cf-frappe-roles": "User" };
+    const userMetadataList = await app.request("/api/meta/web-forms", { headers: userHeaders });
+    expect(userMetadataList.status).toBe(200);
+    await expect(userMetadataList.json()).resolves.toMatchObject({
+      data: [
+        { name: "Member Lead Intake", loginRequired: true },
+        { name: "Public Lead Intake" }
+      ]
+    });
+
+    const userPage = await app.request("/web-forms/members/lead-intake", { headers: userHeaders });
+    expect(userPage.status).toBe(200);
+    await expect(userPage.text()).resolves.toContain("<h1>Member Lead Intake</h1>");
+
+    const userSubmit = await app.request("/web-forms/members/lead-intake", {
+      method: "POST",
+      headers: { ...userHeaders, "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ title: "Member Lead", email: "member@example.com" })
+    });
+    expect(userSubmit.status).toBe(201);
+    await expect(store.get("default", "Gated Lead", "Member Lead")).resolves.toMatchObject({
+      data: { title: "Member Lead", email: "member@example.com" }
+    });
+  });
+
   it("applies Website presentation to public Web Form pages", async () => {
     const registry = createRegistry({
       doctypes: [leadDocType],

@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Web Form published filtering slice:
+As of the Web Form login-required filtering slice:
 
 - Vitest files: `147`
-- Vitest cases: `1403`
+- Vitest cases: `1405`
 
 ## Implication
 

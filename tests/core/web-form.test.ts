@@ -13,10 +13,12 @@ describe("web form metadata", () => {
       ],
       submitLabel: "Send",
       successMessage: "Thanks",
-      successUrl: "/page/thanks"
+      successUrl: "/page/thanks",
+      loginRequired: true
     });
 
     expect(Object.isFrozen(webForm)).toBe(true);
+    expect(webForm.loginRequired).toBe(true);
     expect(Object.isFrozen(webForm.roles ?? [])).toBe(true);
     expect(Object.isFrozen(webForm.fields)).toBe(true);
     expect(Object.isFrozen(webForm.fields[0])).toBe(true);
