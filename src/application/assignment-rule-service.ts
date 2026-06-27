@@ -56,6 +56,16 @@ export interface ClearAssignmentRuleCommand {
   readonly metadata?: DocumentData;
 }
 
+export interface SetAssignmentRuleEnabledCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly ruleName: string;
+  readonly enabled: boolean;
+  readonly tenantId?: TenantId;
+  readonly expectedVersion?: number;
+  readonly metadata?: DocumentData;
+}
+
 export interface AssignmentRuleProvider {
   assignmentRulesFor(
     tenantId: TenantId,
@@ -207,6 +217,39 @@ export class AssignmentRuleService implements AssignmentRuleProvider {
         kind: "AssignmentRuleCleared",
         doctypeName: doctype.name,
         ruleName
+      }
+    });
+  }
+
+  async setEnabled(command: SetAssignmentRuleEnabledCommand): Promise<AssignmentRuleState> {
+    this.authorizeAdministration(command.actor, command.tenantId);
+    const tenantId = resolveActorTenant(command.actor, command.tenantId);
+    const doctype = this.registry.get(command.doctype);
+    const ruleName = normalizeRequiredString(command.ruleName, "Assignment rule name");
+    const state = await this.stateFor(tenantId, doctype.name);
+    ensureExpectedVersion(state, command.expectedVersion);
+    const existing = state.rules.find((entry) => entry.rule.name === ruleName);
+    if (existing === undefined) {
+      throw new FrameworkError(
+        "ASSIGNMENT_RULE_NOT_FOUND",
+        `Assignment rule '${ruleName}' was not found`,
+        { status: 404 }
+      );
+    }
+    if (existing.enabled === command.enabled) {
+      return state;
+    }
+    return this.appendAndFold(state, {
+      actor: command.actor,
+      type: "AssignmentRuleSaved",
+      metadata: command.metadata,
+      payload: {
+        kind: "AssignmentRuleSaved",
+        doctypeName: doctype.name,
+        rule: {
+          ...existing.rule,
+          enabled: command.enabled
+        }
       }
     });
   }

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { AssignmentRuleService } from "../../application/assignment-rule-service.js";
 import type { CalendarService } from "../../application/calendar-service.js";
 import type { CustomFieldService } from "../../application/custom-field-service.js";
 import type { DashboardService } from "../../application/dashboard-service.js";
@@ -85,6 +86,9 @@ import {
   FIELD_TYPES,
   SYSTEM_MANAGER_ROLE,
   type Actor,
+  type AssignmentRuleAssigneeDefinition,
+  type AssignmentRuleDefinition,
+  type AssignmentRuleEventKind,
   type DocTypeDefinition,
   type DocumentData,
   type DocumentSnapshot,
@@ -161,6 +165,7 @@ import {
   renderKanbanView,
   renderListView,
   renderNotFound,
+  renderAssignmentRuleAdmin,
   renderNotificationRuleAdmin,
   renderPrintSettingsAdmin,
   renderReportList,
@@ -231,6 +236,16 @@ interface ParsedDeskNotificationRuleClear {
   readonly expectedVersion?: number;
 }
 
+interface ParsedDeskAssignmentRule {
+  readonly doctype: string;
+  readonly rule: AssignmentRuleDefinition;
+  readonly expectedVersion?: number;
+}
+
+interface ParsedDeskAssignmentRuleClear {
+  readonly expectedVersion?: number;
+}
+
 interface ParsedDeskCsvImport {
   readonly mode?: DocumentImportMode;
   readonly csv: string;
@@ -245,6 +260,7 @@ export interface DeskAppOptions {
   readonly printPdfRenderer?: PrintPdfRenderer;
   readonly files?: FileService;
   readonly queries: QueryService;
+  readonly adminRoles?: readonly string[];
   readonly documentShares?: DocumentShareService;
   readonly timeline?: DocumentHistoryService;
   readonly savedFilters?: SavedListFilterService;
@@ -256,6 +272,7 @@ export interface DeskAppOptions {
   readonly userAccounts?: UserAccountService;
   readonly notifications?: UserNotificationService;
   readonly notificationRules?: NotificationRuleService;
+  readonly assignmentRules?: AssignmentRuleService;
   readonly userProfiles?: UserProfileService;
   readonly userPermissions?: UserPermissionService;
   readonly reports?: ReportService;
@@ -849,6 +866,18 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const selectedRule = url.searchParams.get("rule")?.trim() || undefined;
     const state = selectedDoctype ? await notificationRules.list(actor, selectedDoctype) : undefined;
     return renderDeskNotificationRulePage(options, actor, selectedDoctype, state, 200, undefined, selectedRule);
+  });
+
+  app.get("/desk/admin/assignment-rules", async (c) => {
+    const assignmentRules = requireAssignmentRules(options);
+    const actor = await options.actor(c.req.raw);
+    assignmentRules.authorizeAdministration(actor);
+    const url = new URL(c.req.url);
+    const doctypes = options.queries.listDoctypes(actor);
+    const selectedDoctype = url.searchParams.get("doctype")?.trim() || doctypes[0]?.name || "";
+    const selectedRule = url.searchParams.get("rule")?.trim() || undefined;
+    const state = selectedDoctype ? await assignmentRules.list(actor, selectedDoctype) : undefined;
+    return renderDeskAssignmentRulePage(options, actor, selectedDoctype, state, 200, undefined, selectedRule);
   });
 
   app.get("/desk/admin/print-settings", async (c) => {
@@ -1662,6 +1691,85 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       return c.redirect(notificationRuleAdminHref(c.req.param("doctype"), c.req.param("rule")), 303);
     } catch (error) {
       return renderDeskNotificationRuleFailure(options, actor, notificationRules, c.req.param("doctype"), error);
+    }
+  });
+
+  app.post("/desk/admin/assignment-rules", async (c) => {
+    const assignmentRules = requireAssignmentRules(options);
+    const actor = await options.actor(c.req.raw);
+    assignmentRules.authorizeAdministration(actor);
+    let form: ParsedDeskAssignmentRule | undefined;
+    try {
+      form = await parseDeskAssignmentRule(c.req.raw);
+      await assignmentRules.save({
+        actor,
+        doctype: form.doctype,
+        rule: form.rule,
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(assignmentRuleAdminHref(form.doctype, form.rule.name), 303);
+    } catch (error) {
+      return renderDeskAssignmentRuleFailure(options, actor, assignmentRules, form?.doctype ?? "", error);
+    }
+  });
+
+  app.post("/desk/admin/assignment-rules/:doctype/:rule/clear", async (c) => {
+    const assignmentRules = requireAssignmentRules(options);
+    const actor = await options.actor(c.req.raw);
+    assignmentRules.authorizeAdministration(actor);
+    try {
+      const form = await parseDeskAssignmentRuleClear(c.req.raw);
+      await assignmentRules.clear({
+        actor,
+        doctype: c.req.param("doctype"),
+        ruleName: c.req.param("rule"),
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(assignmentRuleAdminHref(c.req.param("doctype")), 303);
+    } catch (error) {
+      return renderDeskAssignmentRuleFailure(options, actor, assignmentRules, c.req.param("doctype"), error);
+    }
+  });
+
+  app.post("/desk/admin/assignment-rules/:doctype/:rule/enable", async (c) => {
+    const assignmentRules = requireAssignmentRules(options);
+    const actor = await options.actor(c.req.raw);
+    assignmentRules.authorizeAdministration(actor);
+    try {
+      const form = await parseDeskAssignmentRuleClear(c.req.raw);
+      await assignmentRules.setEnabled({
+        actor,
+        doctype: c.req.param("doctype"),
+        ruleName: c.req.param("rule"),
+        enabled: true,
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(assignmentRuleAdminHref(c.req.param("doctype"), c.req.param("rule")), 303);
+    } catch (error) {
+      return renderDeskAssignmentRuleFailure(options, actor, assignmentRules, c.req.param("doctype"), error);
+    }
+  });
+
+  app.post("/desk/admin/assignment-rules/:doctype/:rule/disable", async (c) => {
+    const assignmentRules = requireAssignmentRules(options);
+    const actor = await options.actor(c.req.raw);
+    assignmentRules.authorizeAdministration(actor);
+    try {
+      const form = await parseDeskAssignmentRuleClear(c.req.raw);
+      await assignmentRules.setEnabled({
+        actor,
+        doctype: c.req.param("doctype"),
+        ruleName: c.req.param("rule"),
+        enabled: false,
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(assignmentRuleAdminHref(c.req.param("doctype"), c.req.param("rule")), 303);
+    } catch (error) {
+      return renderDeskAssignmentRuleFailure(options, actor, assignmentRules, c.req.param("doctype"), error);
     }
   });
 
@@ -2777,7 +2885,8 @@ function deskRealtimeRouteOption(options: DeskAppOptions): { readonly realtimeRo
 }
 
 function adminLinksFor(options: DeskAppOptions, actor: Actor): readonly DeskNavLink[] {
-  if (!actor.roles.includes(SYSTEM_MANAGER_ROLE)) {
+  const adminRoles = options.adminRoles ?? [SYSTEM_MANAGER_ROLE];
+  if (!adminRoles.some((role) => actor.roles.includes(role))) {
     return [];
   }
   return [
@@ -2795,6 +2904,9 @@ function adminLinksFor(options: DeskAppOptions, actor: Actor): readonly DeskNavL
     ...(options.notificationRules === undefined
       ? []
       : [{ id: "notification-rules", label: "Notification Rules", href: "/desk/admin/notification-rules" }]),
+    ...(options.assignmentRules === undefined
+      ? []
+      : [{ id: "assignment-rules", label: "Assignment Rules", href: "/desk/admin/assignment-rules" }]),
     ...(options.printSettings === undefined
       ? []
       : [{ id: "print-settings", label: "Print Settings", href: "/desk/admin/print-settings" }]),
@@ -3025,6 +3137,13 @@ function requireNotificationRules(options: DeskAppOptions): NotificationRuleServ
     throw new FrameworkError("DOCUMENT_NOT_FOUND", "Notification rules are not enabled", { status: 404 });
   }
   return options.notificationRules;
+}
+
+function requireAssignmentRules(options: DeskAppOptions): AssignmentRuleService {
+  if (!options.assignmentRules) {
+    throw new FrameworkError("DOCUMENT_NOT_FOUND", "Assignment rules are not enabled", { status: 404 });
+  }
+  return options.assignmentRules;
 }
 
 function requirePrintSettings(options: DeskAppOptions): PrintSettingsService {
@@ -3749,6 +3868,66 @@ async function saveDeskNotificationRuleStatus(options: {
   });
 }
 
+async function renderDeskAssignmentRulePage(
+  options: DeskAppOptions,
+  actor: Actor,
+  selectedDoctype: string,
+  state: Awaited<ReturnType<AssignmentRuleService["list"]>> | undefined,
+  status = 200,
+  error?: string,
+  selectedRuleName?: string
+): Promise<Response> {
+  const doctypes = options.queries.listDoctypes(actor);
+  const reports = listReports(options, actor);
+  return html(
+    renderDeskLayoutFor(options, {
+      title: "Assignment Rules",
+      activeAdmin: "assignment-rules",
+      adminLinks: adminLinksFor(options, actor),
+      doctypes,
+      reports,
+      body: renderAssignmentRuleAdmin({
+        doctypes,
+        selectedDoctype,
+        ...(selectedRuleName === undefined ? {} : { selectedRuleName }),
+        ...(state === undefined ? {} : { state }),
+        ...(error === undefined ? {} : { error })
+      })
+    }),
+    status
+  );
+}
+
+async function renderDeskAssignmentRuleFailure(
+  options: DeskAppOptions,
+  actor: Actor,
+  assignmentRules: AssignmentRuleService,
+  selectedDoctype: string,
+  error: unknown
+): Promise<Response> {
+  if (error instanceof FrameworkError && error.status === 403) {
+    throw error;
+  }
+  const fallbackDoctype = selectedDoctype || options.queries.listDoctypes(actor)[0]?.name || "";
+  let state: Awaited<ReturnType<AssignmentRuleService["list"]>> | undefined;
+  try {
+    state = fallbackDoctype ? await assignmentRules.list(actor, fallbackDoctype) : undefined;
+  } catch (listError) {
+    if (!(listError instanceof FrameworkError && listError.status === 404)) {
+      throw listError;
+    }
+  }
+  const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
+  return renderDeskAssignmentRulePage(
+    options,
+    actor,
+    fallbackDoctype,
+    state,
+    error instanceof FrameworkError ? error.status : 500,
+    message
+  );
+}
+
 async function renderDeskPrintSettingsPage(
   options: DeskAppOptions,
   actor: Actor,
@@ -3805,6 +3984,11 @@ function workflowAdminHref(doctype: string): string {
 
 function notificationRuleAdminHref(doctype: string, ruleName?: string): string {
   const base = `/desk/admin/notification-rules?doctype=${encodeURIComponent(doctype)}`;
+  return ruleName === undefined ? base : `${base}&rule=${encodeURIComponent(ruleName)}`;
+}
+
+function assignmentRuleAdminHref(doctype: string, ruleName?: string): string {
+  const base = `/desk/admin/assignment-rules?doctype=${encodeURIComponent(doctype)}`;
   return ruleName === undefined ? base : `${base}&rule=${encodeURIComponent(ruleName)}`;
 }
 
@@ -5087,6 +5271,34 @@ async function parseDeskNotificationRuleClear(request: Request): Promise<ParsedD
   };
 }
 
+async function parseDeskAssignmentRule(request: Request): Promise<ParsedDeskAssignmentRule> {
+  const form = await readUrlEncodedDeskForm(request);
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  const condition = assignmentRuleConditionFormValue(form);
+  const enabled = optionalBooleanSearchParamValue(form, "enabled", "Assignment rule enabled");
+  const excludeActor = optionalBooleanSearchParamValue(form, "excludeActor", "Assignment rule exclude actor");
+  return {
+    doctype: requiredSearchParamValue(form, "doctype", "DocType"),
+    rule: {
+      name: requiredSearchParamValue(form, "name", "Assignment rule name"),
+      ...(enabled === undefined ? {} : { enabled }),
+      events: assignmentRuleEventsFormValue(form.get("events")),
+      assignees: assignmentRuleAssigneesFormValue(form.get("assignees")),
+      ...(condition === undefined ? {} : { condition }),
+      ...(excludeActor === undefined ? {} : { excludeActor })
+    },
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
+async function parseDeskAssignmentRuleClear(request: Request): Promise<ParsedDeskAssignmentRuleClear> {
+  const form = await readUrlEncodedDeskForm(request);
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  return {
+    ...(expectedVersion !== undefined ? { expectedVersion } : {})
+  };
+}
+
 async function parseDeskForm(
   request: Request,
   doctype: DocTypeDefinition,
@@ -5196,6 +5408,42 @@ function notificationRuleRecipientsFormValue(
     throw new FrameworkError(
       "BAD_REQUEST",
       "Notification rule recipients must use field:<field>, user:<user>, or documentOwner",
+      { status: 400 }
+    );
+  });
+}
+
+function assignmentRuleEventsFormValue(value: FormDataEntryValue | null): readonly AssignmentRuleEventKind[] {
+  return lineListFormValue(value) as readonly AssignmentRuleEventKind[];
+}
+
+function assignmentRuleConditionFormValue(form: URLSearchParams): ListFilterExpression | undefined {
+  const value = optionalJsonSearchParamValue(form, "condition", "Assignment rule condition");
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as unknown as ListFilterExpression;
+  }
+  throw new FrameworkError("BAD_REQUEST", "Assignment rule condition must be a JSON object", { status: 400 });
+}
+
+function assignmentRuleAssigneesFormValue(
+  value: FormDataEntryValue | null
+): readonly AssignmentRuleAssigneeDefinition[] {
+  return lineListFormValue(value).map((line) => {
+    const separator = line.indexOf(":");
+    const kind = separator === -1 ? "" : line.slice(0, separator).trim();
+    const target = separator === -1 ? "" : line.slice(separator + 1).trim();
+    if (kind === "field" && target) {
+      return { kind: "field", field: target };
+    }
+    if (kind === "user" && target) {
+      return { kind: "user", userId: target };
+    }
+    throw new FrameworkError(
+      "BAD_REQUEST",
+      "Assignment rule assignees must use field:<field> or user:<user>",
       { status: 400 }
     );
   });

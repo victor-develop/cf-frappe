@@ -49,6 +49,40 @@ export function createAssignmentRuleApi(options: AssignmentRuleApiOptions): Hono
     return c.json({ data });
   });
 
+  app.post("/api/assignment-rules/:doctype/:rule/enable", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const tenantId = c.req.query("tenant");
+    options.assignmentRules.authorizeAdministration(actor, tenantId);
+    const body = await readJsonObject(c.req.raw, { allowEmpty: true, maxJsonBytes });
+    const data = await options.assignmentRules.setEnabled({
+      actor,
+      doctype: c.req.param("doctype"),
+      ruleName: c.req.param("rule"),
+      enabled: true,
+      ...(body.expectedVersion === undefined ? {} : { expectedVersion: integerValue(body.expectedVersion, "expectedVersion") }),
+      ...(tenantId === undefined ? {} : { tenantId }),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data });
+  });
+
+  app.post("/api/assignment-rules/:doctype/:rule/disable", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const tenantId = c.req.query("tenant");
+    options.assignmentRules.authorizeAdministration(actor, tenantId);
+    const body = await readJsonObject(c.req.raw, { allowEmpty: true, maxJsonBytes });
+    const data = await options.assignmentRules.setEnabled({
+      actor,
+      doctype: c.req.param("doctype"),
+      ruleName: c.req.param("rule"),
+      enabled: false,
+      ...(body.expectedVersion === undefined ? {} : { expectedVersion: integerValue(body.expectedVersion, "expectedVersion") }),
+      ...(tenantId === undefined ? {} : { tenantId }),
+      metadata: requestMetadata(c.req.raw)
+    });
+    return c.json({ data });
+  });
+
   app.delete("/api/assignment-rules/:doctype/:rule", async (c) => {
     const actor = await options.actor(c.req.raw);
     const tenantId = c.req.query("tenant");

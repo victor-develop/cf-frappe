@@ -539,7 +539,7 @@ describe("cf-frappe CLI remote assignment rules", () => {
     expect(clearStdout.text()).toContain("- (none)");
   });
 
-  it("enables and disables remote assignment rules by preserving the existing rule body", async () => {
+  it("enables and disables remote assignment rules through application commands", async () => {
     const enableCalls: RemoteCall[] = [];
     const enableStdout = textBuffer();
     const enableExit = await runCli(
@@ -564,26 +564,6 @@ describe("cf-frappe CLI remote assignment rules", () => {
             data: {
               tenantId: "default",
               doctypeName: "Task",
-              version: 4,
-              rules: [
-                {
-                  enabled: false,
-                  rule: {
-                    name: "High/Triage",
-                    enabled: false,
-                    events: ["DocumentCreated"],
-                    assignees: [{ kind: "field", field: "owner" }],
-                    condition: { field: "priority", value: "High" },
-                    excludeActor: false
-                  }
-                }
-              ]
-            }
-          },
-          {
-            data: {
-              tenantId: "default",
-              doctypeName: "Task",
               version: 5,
               rules: [{ enabled: true, rule: { name: "High/Triage", enabled: true } }]
             }
@@ -596,17 +576,9 @@ describe("cf-frappe CLI remote assignment rules", () => {
 
     expect(enableExit).toBe(0);
     expect(enableCalls.map((call) => `${call.method} ${call.url}`)).toEqual([
-      "GET https://app.example/api/assignment-rules/Task?tenant=default",
-      "PUT https://app.example/api/assignment-rules/Task/High%2FTriage?tenant=default"
+      "POST https://app.example/api/assignment-rules/Task/High%2FTriage/enable?tenant=default"
     ]);
-    expect(enableCalls[1]?.body).toBe(JSON.stringify({
-      rule: {
-        events: ["DocumentCreated"],
-        assignees: [{ kind: "field", field: "owner" }],
-        condition: { field: "priority", value: "High" },
-        enabled: true,
-        excludeActor: false
-      },
+    expect(enableCalls[0]?.body).toBe(JSON.stringify({
       expectedVersion: 4
     }));
     expect(enableStdout.text()).toContain("Enabled assignment rule at https://app.example");
@@ -631,24 +603,6 @@ describe("cf-frappe CLI remote assignment rules", () => {
             data: {
               tenantId: "default",
               doctypeName: "Task",
-              version: 7,
-              rules: [
-                {
-                  enabled: true,
-                  rule: {
-                    name: "Owner triage",
-                    events: ["DocumentUpdated"],
-                    assignees: [{ kind: "field", field: "owner" }],
-                    condition: { field: "system.docstatus", value: "draft" }
-                  }
-                }
-              ]
-            }
-          },
-          {
-            data: {
-              tenantId: "default",
-              doctypeName: "Task",
               version: 8,
               rules: [{ enabled: false, rule: { name: "Owner triage", enabled: false } }]
             }
@@ -660,15 +614,10 @@ describe("cf-frappe CLI remote assignment rules", () => {
     );
 
     expect(disableExit).toBe(0);
-    expect(disableCalls[1]?.body).toBe(JSON.stringify({
-      rule: {
-        events: ["DocumentUpdated"],
-        assignees: [{ kind: "field", field: "owner" }],
-        condition: { field: "system.docstatus", value: "draft" },
-        enabled: false
-      },
-      expectedVersion: 7
-    }));
+    expect(disableCalls.map((call) => `${call.method} ${call.url}`)).toEqual([
+      "POST https://app.example/api/assignment-rules/Task/Owner%20triage/disable"
+    ]);
+    expect(disableCalls[0]?.body).toBe(JSON.stringify({}));
   });
 
   it("fails remote assignment-rule toggles when the selected rule is absent", async () => {
@@ -688,13 +637,11 @@ describe("cf-frappe CLI remote assignment rules", () => {
       {
         cwd: () => "/workspace",
         fetch: fakeFetch(calls, {
-          data: {
-            tenantId: "default",
-            doctypeName: "Task",
-            version: 3,
-            rules: []
+          error: {
+            code: "ASSIGNMENT_RULE_NOT_FOUND",
+            message: "Assignment rule 'Missing' was not found"
           }
-        }),
+        }, 404),
         stdout: textBuffer(),
         stderr
       }
@@ -702,7 +649,8 @@ describe("cf-frappe CLI remote assignment rules", () => {
 
     expect(exit).toBe(1);
     expect(calls).toHaveLength(1);
-    expect(stderr.text()).toContain("Assignment rule 'Missing' was not found in remote state");
+    expect(calls[0]?.url).toBe("https://app.example/api/assignment-rules/Task/Missing/enable");
+    expect(stderr.text()).toContain("ASSIGNMENT_RULE_NOT_FOUND: Assignment rule 'Missing' was not found");
   });
 
   it("reports remote assignment-rule toggle version conflicts before missing-rule errors", async () => {
@@ -724,13 +672,11 @@ describe("cf-frappe CLI remote assignment rules", () => {
       {
         cwd: () => "/workspace",
         fetch: fakeFetch(calls, {
-          data: {
-            tenantId: "default",
-            doctypeName: "Task",
-            version: 2,
-            rules: []
+          error: {
+            code: "DOCUMENT_CONFLICT",
+            message: "Expected assignment rules at version 1, found 2"
           }
-        }),
+        }, 409),
         stdout: textBuffer(),
         stderr
       }
@@ -738,6 +684,7 @@ describe("cf-frappe CLI remote assignment rules", () => {
 
     expect(exit).toBe(1);
     expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("https://app.example/api/assignment-rules/Task/Missing/enable");
     expect(stderr.text()).toContain("Expected assignment rules at version 1, found 2");
     expect(stderr.text()).not.toContain("was not found");
   });

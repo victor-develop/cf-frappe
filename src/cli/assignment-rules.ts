@@ -93,15 +93,10 @@ export async function runRemoteAssignmentRuleCommand(
     return formatAssignmentRules(command.url, data, "Cleared assignment rule");
   }
   if (command.action === "enable" || command.action === "disable") {
-    const current = await requestRemoteAssignmentRule(command, io, {
-      method: "GET",
-      path: assignmentRulesPath(command),
-      ...(query === undefined ? {} : { query })
-    });
     const data = await requestRemoteAssignmentRule(command, io, {
-      body: toggleBody(command, current, command.action === "enable"),
-      method: "PUT",
-      path: assignmentRulePath(command),
+      body: mutationBody(command),
+      method: "POST",
+      path: assignmentRuleStatusPath(command, command.action),
       ...(query === undefined ? {} : { query })
     });
     return formatAssignmentRules(
@@ -124,7 +119,7 @@ function requestRemoteAssignmentRule(
   io: AssignmentRuleRemoteIo,
   request: {
     readonly body?: Record<string, unknown>;
-    readonly method: "DELETE" | "GET" | "PUT";
+    readonly method: "DELETE" | "GET" | "POST" | "PUT";
     readonly path: string;
     readonly query?: URLSearchParams;
   }
@@ -143,6 +138,10 @@ function assignmentRulesPath(command: AssignmentRuleRemoteCommand): string {
 
 function assignmentRulePath(command: AssignmentRuleRemoteCommand): string {
   return `${assignmentRulesPath(command)}/${encodeURIComponent(requiredRuleName(command))}`;
+}
+
+function assignmentRuleStatusPath(command: AssignmentRuleRemoteCommand, action: "disable" | "enable"): string {
+  return `${assignmentRulePath(command)}/${action}`;
 }
 
 function tenantQuery(command: AssignmentRuleRemoteCommand): URLSearchParams | undefined {
@@ -164,37 +163,6 @@ function saveBody(command: AssignmentRuleRemoteCommand): Record<string, unknown>
       ...(command.excludeActor === undefined ? {} : { excludeActor: command.excludeActor })
     },
     ...mutationBody(command)
-  };
-}
-
-function toggleBody(
-  command: AssignmentRuleRemoteCommand,
-  state: AssignmentRuleStateResponse,
-  enabled: boolean
-): Record<string, unknown> {
-  const ruleName = requiredRuleName(command);
-  if (
-    command.expectedVersion !== undefined &&
-    state.version !== undefined &&
-    state.version !== command.expectedVersion
-  ) {
-    throw new AssignmentRuleRemoteError(
-      `Expected assignment rules at version ${String(command.expectedVersion)}, found ${String(state.version)}`
-    );
-  }
-  const entry = (state.rules ?? []).find((item) => item.rule.name === ruleName);
-  if (entry === undefined) {
-    throw new AssignmentRuleRemoteError(`Assignment rule '${ruleName}' was not found in remote state`);
-  }
-  return {
-    rule: {
-      events: [...requiredResponseEvents(entry.rule, ruleName)],
-      assignees: [...requiredResponseAssignees(entry.rule, ruleName)],
-      ...(entry.rule.condition === undefined ? {} : { condition: entry.rule.condition }),
-      enabled,
-      ...(entry.rule.excludeActor === undefined ? {} : { excludeActor: entry.rule.excludeActor })
-    },
-    expectedVersion: command.expectedVersion ?? state.version ?? 0
   };
 }
 
@@ -259,21 +227,4 @@ function requiredAssignees(command: AssignmentRuleRemoteCommand): readonly Assig
     );
   }
   return command.assignees;
-}
-
-function requiredResponseEvents(rule: AssignmentRuleResponse, ruleName: string): readonly string[] {
-  if (rule.events === undefined || rule.events.length === 0) {
-    throw new AssignmentRuleRemoteError(`Assignment rule '${ruleName}' cannot be toggled because it has no events`);
-  }
-  return rule.events;
-}
-
-function requiredResponseAssignees(
-  rule: AssignmentRuleResponse,
-  ruleName: string
-): readonly AssignmentRuleAssigneeOption[] {
-  if (rule.assignees === undefined || rule.assignees.length === 0) {
-    throw new AssignmentRuleRemoteError(`Assignment rule '${ruleName}' cannot be toggled because it has no assignees`);
-  }
-  return rule.assignees;
 }

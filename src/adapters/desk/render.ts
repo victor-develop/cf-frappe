@@ -70,6 +70,7 @@ import {
 } from "../../core/print-format.js";
 import type { PrintSettingsState } from "../../core/print-settings.js";
 import type { UserAccount } from "../../core/user-accounts.js";
+import type { AssignmentRuleState } from "../../core/assignment-rules.js";
 import type { UserNotificationInbox } from "../../application/user-notification-service.js";
 import type { NotificationRuleState } from "../../core/notification-rules.js";
 import { USER_PROFILE_FIELDS, type UserProfileState } from "../../core/user-profiles.js";
@@ -163,6 +164,14 @@ export interface NotificationRuleAdminState {
   readonly selectedDoctype: string;
   readonly selectedRuleName?: string;
   readonly state?: NotificationRuleState;
+  readonly error?: string;
+}
+
+export interface AssignmentRuleAdminState {
+  readonly doctypes: readonly DocTypeDefinition[];
+  readonly selectedDoctype: string;
+  readonly selectedRuleName?: string;
+  readonly state?: AssignmentRuleState;
   readonly error?: string;
 }
 
@@ -1833,6 +1842,61 @@ export function renderNotificationRuleAdmin(state: NotificationRuleAdminState): 
   </section>`;
 }
 
+export function renderAssignmentRuleAdmin(state: AssignmentRuleAdminState): string {
+  const version = state.state?.version ?? 0;
+  const selectedRule = state.state?.rules.find((entry) => entry.rule.name === state.selectedRuleName);
+  const rule = selectedRule?.rule;
+  const rows = state.state?.rules
+    .map((entry) => `<tr>
+      <td>${escapeHtml(entry.rule.name)}</td>
+      <td>${entry.enabled ? "enabled" : "disabled"}</td>
+      <td>${escapeHtml(entry.rule.events.join(", "))}</td>
+      <td>${escapeHtml(entry.rule.assignees.map(assignmentRuleAssigneeLabel).join(", "))}</td>
+      <td>${escapeHtml(notificationRuleConditionLabel(entry.rule.condition))}</td>
+      <td>
+        <a class="button" href="${escapeHtml(assignmentRuleAdminHref(state.selectedDoctype, entry.rule.name))}">Edit</a>
+        <form method="post" action="/desk/admin/assignment-rules/${encodeURIComponent(state.selectedDoctype)}/${encodeURIComponent(entry.rule.name)}/${entry.enabled ? "disable" : "enable"}">
+          <input type="hidden" name="expectedVersion" value="${String(version)}">
+          <button class="button" type="submit">${entry.enabled ? "Disable" : "Enable"}</button>
+        </form>
+        <form method="post" action="/desk/admin/assignment-rules/${encodeURIComponent(state.selectedDoctype)}/${encodeURIComponent(entry.rule.name)}/clear">
+          <input type="hidden" name="expectedVersion" value="${String(version)}">
+          <button class="button danger" type="submit">Clear</button>
+        </form>
+      </td>
+    </tr>`)
+    .join("");
+  return `<form class="panel form" method="get" action="/desk/admin/assignment-rules">
+    <div class="fields cols-1">
+      <label class="field"><span>DocType</span><select name="doctype">${renderNotificationRuleDoctypeOptions(state.doctypes, state.selectedDoctype)}</select></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Load</button></div>
+  </form>
+  ${state.error ? `<p class="error" role="alert">${escapeHtml(state.error)}</p>` : ""}
+  <form class="panel form" method="post" action="/desk/admin/assignment-rules">
+    <input type="hidden" name="doctype" value="${escapeHtml(state.selectedDoctype)}">
+    <input type="hidden" name="expectedVersion" value="${String(version)}">
+    <div class="form-head"><h2>${selectedRule === undefined ? "Assignment Rule" : "Edit Assignment Rule"}</h2><p>v${String(version)}</p></div>
+    <div class="fields">
+      <label class="field"><span>Name</span><input name="name" value="${escapeHtml(rule?.name ?? "")}"></label>
+      <label class="field"><span>Enabled</span><select name="enabled">${renderNotificationRuleBooleanOptions(rule?.enabled, "Enabled", "Disabled")}</select></label>
+      <label class="field"><span>Events</span><textarea name="events">${escapeHtml(rule?.events.join("\n") ?? "DocumentCreated")}</textarea></label>
+      <label class="field"><span>Assignees</span><textarea name="assignees">${escapeHtml(rule?.assignees.map(assignmentRuleAssigneeLabel).join("\n") ?? "field:created_by")}</textarea></label>
+      <label class="field wide"><span>Condition JSON</span><textarea name="condition" rows="5">${escapeHtml(notificationRuleConditionValue(rule?.condition))}</textarea></label>
+      <label class="field"><span>Exclude Actor</span><select name="excludeActor">${renderNotificationRuleBooleanOptions(rule?.excludeActor, "Yes", "No")}</select></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Save Rule</button></div>
+  </form>
+  <section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Status</th><th>Events</th><th>Assignees</th><th>Condition</th><th>Actions</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="6" class="empty">No assignment rules configured.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
 export function renderPrintSettingsAdmin(
   state: PrintSettingsState,
   options: { readonly error?: string } = {}
@@ -1967,6 +2031,10 @@ function notificationRuleAdminHref(doctype: string, ruleName: string): string {
   return `/desk/admin/notification-rules?doctype=${encodeURIComponent(doctype)}&rule=${encodeURIComponent(ruleName)}`;
 }
 
+function assignmentRuleAdminHref(doctype: string, ruleName: string): string {
+  return `/desk/admin/assignment-rules?doctype=${encodeURIComponent(doctype)}&rule=${encodeURIComponent(ruleName)}`;
+}
+
 function notificationRuleRecipientLabel(
   recipient: NotificationRuleState["rules"][number]["rule"]["recipients"][number]
 ): string {
@@ -1977,6 +2045,15 @@ function notificationRuleRecipientLabel(
     return `field:${recipient.field}`;
   }
   return `user:${recipient.userId}`;
+}
+
+function assignmentRuleAssigneeLabel(
+  assignee: AssignmentRuleState["rules"][number]["rule"]["assignees"][number]
+): string {
+  if (assignee.kind === "field") {
+    return `field:${assignee.field}`;
+  }
+  return `user:${assignee.userId}`;
 }
 
 function notificationRuleConditionValue(condition: ListFilterExpression | undefined): string {

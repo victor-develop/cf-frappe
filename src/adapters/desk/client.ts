@@ -255,6 +255,13 @@ export function renderDeskClientScript(): string {
     return withQuery("/desk/admin/workflows", params);
   }
 
+  function deskAdminAssignmentRulesPath(doctype, rule) {
+    var params = {};
+    setParam(params, "doctype", doctype);
+    setParam(params, "rule", rule);
+    return withQuery("/desk/admin/assignment-rules", params);
+  }
+
   function deskFilesPath(options) {
     return withQuery("/desk/files", fileListParams(options || {}));
   }
@@ -334,6 +341,14 @@ export function renderDeskClientScript(): string {
 
   function notificationRulePath(doctype, rule, options) {
     return withQuery("/api/notification-rules/" + encodePart(doctype) + (rule === undefined ? "" : "/" + encodePart(rule)), tenantParams(options || {}));
+  }
+
+  function assignmentRulePath(doctype, rule, options) {
+    return withQuery("/api/assignment-rules/" + encodePart(doctype) + (rule === undefined ? "" : "/" + encodePart(rule)), tenantParams(options || {}));
+  }
+
+  function assignmentRuleActionPath(doctype, rule, action, options) {
+    return withQuery("/api/assignment-rules/" + encodePart(doctype) + "/" + encodePart(rule) + "/" + action, tenantParams(options || {}));
   }
 
   function rolesPath(options) {
@@ -517,6 +532,11 @@ export function renderDeskClientScript(): string {
     return Object.assign({ rule: bodyRule }, versionBody(options));
   }
 
+  function assignmentRuleBody(rule, options) {
+    var bodyRule = isPlainObject(rule) ? withoutKeys(rule, ["name", "expectedVersion"]) : rule;
+    return Object.assign({ rule: bodyRule }, versionBody(options));
+  }
+
   function requiredNotificationRuleEvents(rule, ruleName) {
     if (!Array.isArray(rule.events) || rule.events.length === 0) {
       throw new Error("Notification rule '" + ruleName + "' cannot be toggled because it has no events");
@@ -571,9 +591,24 @@ export function renderDeskClientScript(): string {
     return entry;
   }
 
+  function assignmentRuleEntry(ruleName, state) {
+    var entry = ((state && state.rules) || []).find(function (item) {
+      return item && item.rule && item.rule.name === ruleName;
+    });
+    if (entry === undefined) {
+      throw new Error("Assignment rule '" + ruleName + "' was not found in remote state");
+    }
+    return entry;
+  }
+
   async function getNotificationRule(doctype, rule, options) {
     var state = unwrapData(await request(notificationRulePath(doctype, rule, options || {})));
     return notificationRuleEntry(rule, state);
+  }
+
+  async function getAssignmentRule(doctype, rule, options) {
+    var state = unwrapData(await request(assignmentRulePath(doctype, rule, options || {})));
+    return assignmentRuleEntry(rule, state);
   }
 
   async function toggleNotificationRule(doctype, rule, enabled, options) {
@@ -582,6 +617,14 @@ export function renderDeskClientScript(): string {
     return request(notificationRulePath(doctype, rule, commandOptions), {
       method: "PUT",
       body: notificationRuleToggleBody(rule, state, enabled, commandOptions)
+    }).then(unwrapData);
+  }
+
+  async function toggleAssignmentRule(doctype, rule, enabled, options) {
+    var commandOptions = options || {};
+    return request(assignmentRuleActionPath(doctype, rule, enabled ? "enable" : "disable", commandOptions), {
+      method: "POST",
+      body: versionBody(commandOptions)
     }).then(unwrapData);
   }
 
@@ -3837,6 +3880,9 @@ export function renderDeskClientScript(): string {
       notificationRules: function (doctype, options) {
         return request(notificationRulePath(doctype, undefined, options || {})).then(unwrapData);
       },
+      assignmentRules: function (doctype, options) {
+        return request(assignmentRulePath(doctype, undefined, options || {})).then(unwrapData);
+      },
       profile: function (userId, options) {
         return request(profilePath(userId, options || {})).then(unwrapData);
       },
@@ -3906,6 +3952,26 @@ export function renderDeskClientScript(): string {
       },
       save: function (doctype, rule, options) {
         return request(notificationRulePath(doctype, rule.name, options || {}), { method: "PUT", body: notificationRuleBody(rule, options) }).then(unwrapData);
+      }
+    }),
+    assignmentRules: Object.freeze({
+      clear: function (doctype, rule, options) {
+        return request(assignmentRulePath(doctype, rule, options || {}), { method: "DELETE", body: versionBody(options) }).then(unwrapData);
+      },
+      disable: function (doctype, rule, options) {
+        return toggleAssignmentRule(doctype, rule, false, options);
+      },
+      enable: function (doctype, rule, options) {
+        return toggleAssignmentRule(doctype, rule, true, options);
+      },
+      get: function (doctype, rule, options) {
+        return getAssignmentRule(doctype, rule, options);
+      },
+      list: function (doctype, options) {
+        return request(assignmentRulePath(doctype, undefined, options || {})).then(unwrapData);
+      },
+      save: function (doctype, rule, options) {
+        return request(assignmentRulePath(doctype, rule.name, options || {}), { method: "PUT", body: assignmentRuleBody(rule, options) }).then(unwrapData);
       }
     }),
     profiles: Object.freeze({
@@ -4097,6 +4163,7 @@ export function renderDeskClientScript(): string {
       msgprint: msgprint
     }),
     desk: Object.freeze({
+      adminAssignmentRulesUrl: deskAdminAssignmentRulesPath,
       adminCustomFieldsUrl: deskAdminCustomFieldsPath,
       adminDataPatchesUrl: function () {
         return "/desk/admin/data-patches";

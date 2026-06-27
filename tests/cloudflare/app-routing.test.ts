@@ -656,6 +656,30 @@ describe("CloudFrappe Worker routing", () => {
     expect(html).toContain('name="expectedVersion" value="0"');
   });
 
+  it("mounts assignment rule administration on the Worker Desk", async () => {
+    const worker = createCloudFrappeWorker({
+      registry: createRegistry({ doctypes: [noteDocType] }),
+      actor: () => ({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"], tenantId: "acme" })
+    });
+    const env = {
+      DB: fakeEventD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/desk/admin/assignment-rules?doctype=Note"),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Assignment Rules");
+    expect(html).toContain('action="/desk/admin/assignment-rules"');
+    expect(html).toContain('href="/desk/admin/assignment-rules"');
+    expect(html).toContain('name="expectedVersion" value="0"');
+  });
+
   it("routes document share API commands through the aggregate namespace", async () => {
     const calls: AggregateCoordinatorCommand[] = [];
     const worker = createCloudFrappeWorker({
@@ -1633,6 +1657,31 @@ describe("CloudFrappe Worker routing", () => {
     );
     expect(desk.status).toBe(200);
     await expect(desk.text()).resolves.toContain("Create Role");
+  });
+
+  it("uses custom auth admin roles for Worker assignment rule Desk administration", async () => {
+    const worker = createCloudFrappeWorker<CloudFrappeAuthTestEnv>({
+      registry: createRegistry({ doctypes: [noteDocType] }),
+      actor: () => ({ id: "desk-admin@example.com", roles: ["Desk Admin", "User"], tenantId: "acme" }),
+      auth: {
+        sessionSecret: (env) => env.SESSION_SECRET,
+        sessionMaxAgeSeconds: 60,
+        secure: false,
+        adminRoles: ["Desk Admin"]
+      }
+    });
+    const env = { DB: fakeEventD1(), AGGREGATES: fakeNamespace(), SESSION_SECRET: "edge-secret" };
+
+    const desk = await worker.fetch!(
+      cfRequest("http://localhost/desk/admin/assignment-rules?doctype=Note"),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(desk.status).toBe(200);
+    const html = await desk.text();
+    expect(html).toContain("Assignment Rules");
+    expect(html).toContain('href="/desk/admin/assignment-rules"');
   });
 
   it("uses custom auth admin roles for Worker notification inbox inspection", async () => {

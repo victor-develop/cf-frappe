@@ -135,6 +135,7 @@ interface DeskClientRuntime {
     readonly msgprint: (message: unknown) => string;
   };
   readonly meta: {
+    readonly assignmentRules: (doctype: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly customFields: (doctype: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly dashboard: (dashboard: string) => Promise<unknown>;
     readonly dashboards: () => Promise<unknown>;
@@ -222,6 +223,30 @@ interface DeskClientRuntime {
     readonly markRead: (notificationId: string, options?: { readonly user?: string }) => Promise<unknown>;
   };
   readonly notificationRules: {
+    readonly clear: (
+      doctype: string,
+      rule: string,
+      options?: { readonly expectedVersion?: number; readonly tenant?: string }
+    ) => Promise<unknown>;
+    readonly disable: (
+      doctype: string,
+      rule: string,
+      options?: { readonly expectedVersion?: number; readonly tenant?: string }
+    ) => Promise<unknown>;
+    readonly enable: (
+      doctype: string,
+      rule: string,
+      options?: { readonly expectedVersion?: number; readonly tenant?: string }
+    ) => Promise<unknown>;
+    readonly get: (doctype: string, rule: string, options?: { readonly tenant?: string }) => Promise<unknown>;
+    readonly list: (doctype: string, options?: { readonly tenant?: string }) => Promise<unknown>;
+    readonly save: (
+      doctype: string,
+      rule: Record<string, unknown> & { readonly name: string },
+      options?: { readonly expectedVersion?: number; readonly tenant?: string }
+    ) => Promise<unknown>;
+  };
+  readonly assignmentRules: {
     readonly clear: (
       doctype: string,
       rule: string,
@@ -421,6 +446,7 @@ interface DeskClientRuntime {
     ) => Promise<unknown>;
   };
   readonly desk: {
+    readonly adminAssignmentRulesUrl: (doctype?: string, rule?: string) => string;
     readonly adminCustomFieldsUrl: (doctype?: string) => string;
     readonly adminDataPatchesUrl: () => string;
     readonly adminFieldPropertiesUrl: (doctype?: string, field?: string) => string;
@@ -963,6 +989,9 @@ describe("Desk client runtime", () => {
       "/desk/admin/field-properties?doctype=Task+Type&field=due%2Fdate"
     );
     expect(runtime.desk.adminWorkflowsUrl("Task Type")).toBe("/desk/admin/workflows?doctype=Task+Type");
+    expect(runtime.desk.adminAssignmentRulesUrl("Task Type", "High/Triage")).toBe(
+      "/desk/admin/assignment-rules?doctype=Task+Type&rule=High%2FTriage"
+    );
     expect(runtime.desk.adminPrintSettingsUrl()).toBe("/desk/admin/print-settings");
     expect(runtime.desk.adminUserPermissionsUrl({ user: "reader@example.com" })).toBe(
       "/desk/admin/user-permissions?user=reader%40example.com"
@@ -2980,6 +3009,169 @@ describe("Desk client runtime", () => {
     ]);
   });
 
+  it("wraps event-sourced assignment rule APIs with tenant and version metadata", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { version: 2, rules: [{ rule: { name: "Managers" } }] } }), {
+        headers: { "content-type": "application/json" },
+        status: (init?.method ?? "GET") === "PUT" ? 201 : 200
+      });
+    });
+    const rule = {
+      name: "Managers/Updates",
+      events: ["DocumentUpdated"],
+      assignees: [{ kind: "user", userId: "manager@example.com" }],
+      condition: { field: "priority", value: "High" },
+      expectedVersion: 99
+    };
+
+    await expect(runtime.assignmentRules.list("Task Type", { tenant: "acme/east" })).resolves.toEqual({
+      version: 2,
+      rules: [{ rule: { name: "Managers" } }]
+    });
+    await runtime.assignmentRules.save("Task Type", rule, { expectedVersion: 1, tenant: "acme/east" });
+    await runtime.assignmentRules.clear("Task Type", "Managers/Updates", { expectedVersion: 2, tenant: "acme/east" });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/assignment-rules/Task%20Type?tenant=acme%2Feast",
+      "PUT /api/assignment-rules/Task%20Type/Managers%2FUpdates?tenant=acme%2Feast",
+      "DELETE /api/assignment-rules/Task%20Type/Managers%2FUpdates?tenant=acme%2Feast"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin"]);
+    expect(calls.map((call) => call.init.body)).toEqual([
+      undefined,
+      JSON.stringify({
+        rule: {
+          events: ["DocumentUpdated"],
+          assignees: [{ kind: "user", userId: "manager@example.com" }],
+          condition: { field: "priority", value: "High" }
+        },
+        expectedVersion: 1
+      }),
+      JSON.stringify({ expectedVersion: 2 })
+    ]);
+  });
+
+  it("wraps assignment rule enable and disable as event-sourced application commands", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(
+        JSON.stringify({
+          data: {
+            version: calls.length,
+            rules: [
+              {
+                rule: {
+                  name: "Managers/Updates",
+                  enabled: String(url).endsWith("/enable?tenant=acme%2Feast")
+                }
+              }
+            ]
+          }
+        }),
+        {
+          headers: { "content-type": "application/json" },
+          status: (init?.method ?? "GET") === "PUT" ? 201 : 200
+        }
+      );
+    });
+
+    await runtime.assignmentRules.enable("Task Type", "Managers/Updates", { tenant: "acme/east" });
+    await runtime.assignmentRules.disable("Task Type", "Managers/Updates", {
+      expectedVersion: 4,
+      tenant: "acme/east"
+    });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "POST /api/assignment-rules/Task%20Type/Managers%2FUpdates/enable?tenant=acme%2Feast",
+      "POST /api/assignment-rules/Task%20Type/Managers%2FUpdates/disable?tenant=acme%2Feast"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin"]);
+    expect(calls.map((call) => call.init.body)).toEqual([
+      JSON.stringify({}),
+      JSON.stringify({ expectedVersion: 4 })
+    ]);
+  });
+
+  it("surfaces assignment rule toggle errors from the application command", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({
+        error: {
+          code: "DOCUMENT_CONFLICT",
+          message: "Expected assignment rules at version 4, found 5"
+        }
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 409
+      });
+    });
+
+    await expect(
+      runtime.assignmentRules.enable("Task Type", "Missing Rule", {
+        expectedVersion: 4,
+        tenant: "acme/east"
+      })
+    ).rejects.toThrow("Expected assignment rules at version 4, found 5");
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "POST /api/assignment-rules/Task%20Type/Missing%20Rule/enable?tenant=acme%2Feast"
+    ]);
+    expect(calls[0]?.init.credentials).toBe("same-origin");
+    expect(calls[0]?.init.body).toBe(JSON.stringify({ expectedVersion: 4 }));
+  });
+
+  it("reads one assignment rule from the event-sourced rule state", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(
+        JSON.stringify({
+          data: {
+            version: 3,
+            rules: [
+              { enabled: true, rule: { name: "Owners", events: ["DocumentCreated"] } },
+              { enabled: false, rule: { name: "Managers/Updates", events: ["DocumentUpdated"] } }
+            ]
+          }
+        }),
+        { headers: { "content-type": "application/json" } }
+      );
+    });
+
+    await expect(runtime.assignmentRules.get("Task Type", "Managers/Updates", { tenant: "acme/east" })).resolves.toEqual({
+      enabled: false,
+      rule: { name: "Managers/Updates", events: ["DocumentUpdated"] }
+    });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/assignment-rules/Task%20Type/Managers%2FUpdates?tenant=acme%2Feast"
+    ]);
+    expect(calls[0]?.init.credentials).toBe("same-origin");
+    expect(calls[0]?.init.body).toBeUndefined();
+  });
+
+  it("rejects missing assignment rule reads without mutating remote state", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { version: 3, rules: [] } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.assignmentRules.get("Task Type", "Missing", { tenant: "acme/east" })).rejects.toThrow(
+      "Assignment rule 'Missing' was not found in remote state"
+    );
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/assignment-rules/Task%20Type/Missing?tenant=acme%2Feast"
+    ]);
+  });
+
   it("wraps event-sourced role catalog APIs with tenant and version metadata", async () => {
     const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
     const runtime = evaluateDeskClient(async (url, init) => {
@@ -3290,6 +3482,11 @@ describe("Desk client runtime", () => {
         version: 2,
         rules: [{ rule: { name: "Managers" } }]
       },
+      "/api/assignment-rules/Task%20Type?tenant=acme%2Feast": {
+        doctype: "Task Type",
+        version: 4,
+        rules: [{ rule: { name: "High priority triage" } }]
+      },
       "/api/user-permissions/owner%40example.com?tenant=acme%2Feast": {
         userId: "owner@example.com",
         version: 3,
@@ -3308,6 +3505,11 @@ describe("Desk client runtime", () => {
       version: 2,
       rules: [{ rule: { name: "Managers" } }]
     });
+    await expect(runtime.meta.assignmentRules("Task Type", { tenant: "acme/east" })).resolves.toEqual({
+      doctype: "Task Type",
+      version: 4,
+      rules: [{ rule: { name: "High priority triage" } }]
+    });
     await expect(runtime.meta.userPermissions("owner@example.com", { tenant: "acme/east" })).resolves.toEqual({
       userId: "owner@example.com",
       version: 3,
@@ -3316,11 +3518,12 @@ describe("Desk client runtime", () => {
 
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
       "GET /api/notification-rules/Task%20Type?tenant=acme%2Feast",
+      "GET /api/assignment-rules/Task%20Type?tenant=acme%2Feast",
       "GET /api/user-permissions/owner%40example.com?tenant=acme%2Feast"
     ]);
-    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin"]);
-    expect(calls.map((call) => call.init.body)).toEqual([undefined, undefined]);
-    expect(calls.map((call) => new Headers(call.init.headers).get("content-type"))).toEqual([null, null]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin"]);
+    expect(calls.map((call) => call.init.body)).toEqual([undefined, undefined, undefined]);
+    expect(calls.map((call) => new Headers(call.init.headers).get("content-type"))).toEqual([null, null, null]);
   });
 
   it("wraps journal-backed data patch APIs without browser-side validation", async () => {

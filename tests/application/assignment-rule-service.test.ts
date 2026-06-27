@@ -299,6 +299,71 @@ describe("assignment rules", () => {
     ).resolves.toEqual([]);
   });
 
+  it("centralizes runtime assignment rule enablement as an application command", async () => {
+    const registry = createRegistry({ doctypes: [ticketDocType()] });
+    const store = new InMemoryDocumentStore();
+    const assignmentRules = new AssignmentRuleService({
+      registry,
+      events: store,
+      ids: deterministicIds(["rule-1", "rule-2"]),
+      clock: fixedClock(now)
+    });
+
+    await assignmentRules.save({
+      actor: admin,
+      doctype: "Ticket",
+      expectedVersion: 0,
+      rule: {
+        name: "Runtime triage",
+        events: ["DocumentCreated"],
+        assignees: [{ kind: "user", userId: "manager@example.com" }]
+      }
+    });
+
+    await expect(
+      assignmentRules.setEnabled({
+        actor: admin,
+        doctype: "Ticket",
+        ruleName: "Runtime triage",
+        enabled: true,
+        expectedVersion: 1
+      })
+    ).resolves.toMatchObject({ version: 1 });
+
+    await expect(
+      assignmentRules.setEnabled({
+        actor: admin,
+        doctype: "Ticket",
+        ruleName: "Runtime triage",
+        enabled: false,
+        expectedVersion: 1
+      })
+    ).resolves.toMatchObject({
+      version: 2,
+      rules: [{ enabled: false, rule: { name: "Runtime triage", enabled: false } }]
+    });
+
+    await expect(
+      assignmentRules.setEnabled({
+        actor: admin,
+        doctype: "Ticket",
+        ruleName: "Missing",
+        enabled: true,
+        expectedVersion: 1
+      })
+    ).rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
+
+    await expect(
+      assignmentRules.setEnabled({
+        actor: admin,
+        doctype: "Ticket",
+        ruleName: "Missing",
+        enabled: true,
+        expectedVersion: 2
+      })
+    ).rejects.toMatchObject({ code: "ASSIGNMENT_RULE_NOT_FOUND", status: 404 });
+  });
+
   it("evaluates update conditions and avoids duplicate assignment events", async () => {
     const doctype = ticketDocType({
       assignmentRules: [

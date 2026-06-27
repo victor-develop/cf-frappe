@@ -1,4 +1,5 @@
 import {
+  AssignmentRuleService,
   CHILD_TABLE_ROW_INDEX_FIELD,
   CalendarService,
   CustomFieldService,
@@ -3386,6 +3387,7 @@ describe("Desk app", () => {
     expect(source).toContain("jobs: Object.freeze");
     expect(source).toContain("notifications: Object.freeze");
     expect(source).toContain("notificationRules: Object.freeze");
+    expect(source).toContain("assignmentRules: Object.freeze");
     expect(source).toContain("print: Object.freeze");
     expect(source).toContain("profiles: Object.freeze");
     expect(source).toContain("reportBuilder: Object.freeze");
@@ -4651,6 +4653,419 @@ describe("Desk app", () => {
     await expect(stale.text()).resolves.toContain("Expected notification rules at version 1, found 2");
   });
 
+  it("renders and mutates assignment rules from the Desk admin surface", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"], tenantId: "acme" };
+    const services = createServices();
+    const assignmentRules = new AssignmentRuleService({
+      registry: services.registry,
+      events: services.store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["assignment-rule-event-1", "assignment-rule-event-2", "assignment-rule-event-3"])
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      assignmentRules,
+      actor: () => admin
+    });
+
+    const empty = await app.request("/desk/admin/assignment-rules?doctype=Note");
+    expect(empty.status).toBe(200);
+    const emptyHtml = await empty.text();
+    expect(emptyHtml).toContain("Assignment Rules");
+    expect(emptyHtml).toContain('action="/desk/admin/assignment-rules"');
+    expect(emptyHtml).toContain('name="expectedVersion" value="0"');
+    expect(emptyHtml).toContain("No assignment rules configured.");
+
+    const saved = await app.request("/desk/admin/assignment-rules", {
+      method: "POST",
+      body: new URLSearchParams({
+        doctype: "Note",
+        name: "High priority triage",
+        events: "DocumentCreated\nDocumentUpdated",
+        assignees: "field:created_by\nuser:manager@example.com",
+        condition: "{\"field\":\"priority\",\"value\":\"High\"}",
+        enabled: "true",
+        excludeActor: "false",
+        expectedVersion: "0"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(saved.status).toBe(303);
+    expect(saved.headers.get("location")).toBe(
+      "/desk/admin/assignment-rules?doctype=Note&rule=High%20priority%20triage"
+    );
+    await expect(assignmentRules.list(admin, "Note")).resolves.toMatchObject({
+      version: 1,
+      rules: [
+        {
+          rule: {
+            name: "High priority triage",
+            events: ["DocumentCreated", "DocumentUpdated"],
+            assignees: [
+              { kind: "field", field: "created_by" },
+              { kind: "user", userId: "manager@example.com" }
+            ],
+            condition: { field: "priority", value: "High" },
+            excludeActor: false
+          }
+        }
+      ]
+    });
+
+    const current = await app.request("/desk/admin/assignment-rules?doctype=Note");
+    expect(current.status).toBe(200);
+    const currentHtml = await current.text();
+    expect(currentHtml).toContain("High priority triage");
+    expect(currentHtml).toContain("DocumentUpdated");
+    expect(currentHtml).toContain("field:created_by");
+    expect(currentHtml).toContain("user:manager@example.com");
+    expect(currentHtml).toContain(
+      'href="/desk/admin/assignment-rules?doctype=Note&amp;rule=High%20priority%20triage"'
+    );
+    expect(currentHtml).toContain('action="/desk/admin/assignment-rules/Note/High%20priority%20triage/clear"');
+    expect(currentHtml).toContain('name="expectedVersion" value="1"');
+
+    const edit = await app.request("/desk/admin/assignment-rules?doctype=Note&rule=High%20priority%20triage");
+    expect(edit.status).toBe(200);
+    const editHtml = await edit.text();
+    expect(editHtml).toContain("Edit Assignment Rule");
+    expect(editHtml).toContain('name="name" value="High priority triage"');
+    expect(editHtml).toContain("<textarea name=\"events\">DocumentCreated\nDocumentUpdated</textarea>");
+    expect(editHtml).toContain("<textarea name=\"assignees\">field:created_by\nuser:manager@example.com</textarea>");
+    expect(editHtml).toContain("&quot;field&quot;: &quot;priority&quot;");
+    expect(editHtml).toContain('<option value="false" selected>No</option>');
+
+    const updated = await app.request("/desk/admin/assignment-rules", {
+      method: "POST",
+      body: new URLSearchParams({
+        doctype: "Note",
+        name: "High priority triage",
+        events: "DocumentSubmitted",
+        assignees: "user:manager@example.com",
+        condition: "{\"field\":\"system.docstatus\",\"value\":\"draft\"}",
+        enabled: "false",
+        excludeActor: "true",
+        expectedVersion: "1"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(updated.status).toBe(303);
+    expect(updated.headers.get("location")).toBe(
+      "/desk/admin/assignment-rules?doctype=Note&rule=High%20priority%20triage"
+    );
+    await expect(assignmentRules.list(admin, "Note")).resolves.toMatchObject({
+      version: 2,
+      rules: [
+        {
+          enabled: false,
+          rule: {
+            name: "High priority triage",
+            events: ["DocumentSubmitted"],
+            assignees: [{ kind: "user", userId: "manager@example.com" }],
+            condition: { field: "system.docstatus", value: "draft" },
+            enabled: false,
+            excludeActor: true
+          }
+        }
+      ]
+    });
+
+    const stale = await app.request("/desk/admin/assignment-rules", {
+      method: "POST",
+      body: new URLSearchParams({
+        doctype: "Note",
+        name: "Stale",
+        events: "DocumentUpdated",
+        assignees: "user:manager@example.com",
+        expectedVersion: "1"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(stale.status).toBe(409);
+    const staleHtml = await stale.text();
+    expect(staleHtml).toContain("Expected assignment rules at version 1, found 2");
+    expect(staleHtml).toContain("High priority triage");
+
+    const malformedAssignee = await app.request("/desk/admin/assignment-rules", {
+      method: "POST",
+      body: new URLSearchParams({
+        doctype: "Note",
+        name: "Bad assignee",
+        events: "DocumentUpdated",
+        assignees: "bad",
+        expectedVersion: "2"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(malformedAssignee.status).toBe(400);
+    const malformedHtml = await malformedAssignee.text();
+    expect(malformedHtml).toContain("Assignment rule assignees must use field:&lt;field&gt; or user:&lt;user&gt;");
+    expect(malformedHtml).toContain("High priority triage");
+
+    const malformedCondition = await app.request("/desk/admin/assignment-rules", {
+      method: "POST",
+      body: new URLSearchParams({
+        doctype: "Note",
+        name: "Bad condition",
+        events: "DocumentUpdated",
+        assignees: "user:manager@example.com",
+        condition: "[]",
+        expectedVersion: "2"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(malformedCondition.status).toBe(400);
+    await expect(malformedCondition.text()).resolves.toContain("Assignment rule condition must be a JSON object");
+
+    const cleared = await app.request("/desk/admin/assignment-rules/Note/High%20priority%20triage/clear", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "2" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(cleared.status).toBe(303);
+    expect(cleared.headers.get("location")).toBe("/desk/admin/assignment-rules?doctype=Note");
+    await expect(assignmentRules.list(admin, "Note")).resolves.toMatchObject({ version: 3, rules: [] });
+
+    const disabled = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: () => admin
+    });
+    const missing = await disabled.request("/desk/admin/assignment-rules");
+    expect(missing.status).toBe(404);
+    await expect(missing.text()).resolves.toContain("Assignment rules are not enabled");
+  });
+
+  it("round-trips sparse assignment rules without materializing default fields", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"], tenantId: "acme" };
+    const services = createServices();
+    const assignmentRules = new AssignmentRuleService({
+      registry: services.registry,
+      events: services.store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["assignment-rule-event-1", "assignment-rule-event-2"])
+    });
+    await assignmentRules.save({
+      actor: admin,
+      doctype: "Note",
+      expectedVersion: 0,
+      rule: {
+        name: "Sparse",
+        events: ["DocumentUpdated"],
+        assignees: [{ kind: "user", userId: "manager@example.com" }]
+      }
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      assignmentRules,
+      actor: () => admin
+    });
+
+    const edit = await app.request("/desk/admin/assignment-rules?doctype=Note&rule=Sparse");
+    expect(edit.status).toBe(200);
+    const html = await edit.text();
+    expect(html).toContain('<option value="" selected>Default</option>');
+    expect(html).toContain("<textarea name=\"condition\" rows=\"5\"></textarea>");
+
+    const unchanged = await app.request("/desk/admin/assignment-rules", {
+      method: "POST",
+      body: new URLSearchParams({
+        doctype: "Note",
+        name: "Sparse",
+        events: "DocumentUpdated",
+        assignees: "user:manager@example.com",
+        condition: "",
+        enabled: "",
+        excludeActor: "",
+        expectedVersion: "1"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(unchanged.status).toBe(303);
+    await expect(assignmentRules.list(admin, "Note")).resolves.toEqual({
+      tenantId: "acme",
+      doctypeName: "Note",
+      version: 1,
+      rules: [
+        expect.objectContaining({
+          rule: {
+            name: "Sparse",
+            events: ["DocumentUpdated"],
+            assignees: [{ kind: "user", userId: "manager@example.com" }]
+          }
+        })
+      ]
+    });
+  });
+
+  it("toggles assignment rules from Desk row actions", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"], tenantId: "acme" };
+    const services = createServices();
+    const assignmentRules = new AssignmentRuleService({
+      registry: services.registry,
+      events: services.store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["assignment-rule-event-1", "assignment-rule-event-2", "assignment-rule-event-3"])
+    });
+    await assignmentRules.save({
+      actor: admin,
+      doctype: "Note",
+      expectedVersion: 0,
+      rule: {
+        name: "Escalations",
+        enabled: false,
+        events: ["DocumentUpdated"],
+        assignees: [{ kind: "user", userId: "manager@example.com" }],
+        condition: { field: "priority", value: "High" }
+      }
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      assignmentRules,
+      actor: () => admin
+    });
+
+    const disabledPage = await app.request("/desk/admin/assignment-rules?doctype=Note");
+    expect(disabledPage.status).toBe(200);
+    await expect(disabledPage.text()).resolves.toContain(
+      'action="/desk/admin/assignment-rules/Note/Escalations/enable"'
+    );
+
+    const enabled = await app.request("/desk/admin/assignment-rules/Note/Escalations/enable", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(enabled.status).toBe(303);
+    expect(enabled.headers.get("location")).toBe("/desk/admin/assignment-rules?doctype=Note&rule=Escalations");
+    await expect(assignmentRules.list(admin, "Note")).resolves.toMatchObject({
+      version: 2,
+      rules: [
+        {
+          enabled: true,
+          rule: { name: "Escalations", enabled: true, condition: { field: "priority", value: "High" } }
+        }
+      ]
+    });
+
+    const enabledPage = await app.request("/desk/admin/assignment-rules?doctype=Note");
+    expect(enabledPage.status).toBe(200);
+    await expect(enabledPage.text()).resolves.toContain(
+      'action="/desk/admin/assignment-rules/Note/Escalations/disable"'
+    );
+
+    const disabled = await app.request("/desk/admin/assignment-rules/Note/Escalations/disable", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "2" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(disabled.status).toBe(303);
+    await expect(assignmentRules.list(admin, "Note")).resolves.toMatchObject({
+      version: 3,
+      rules: [
+        {
+          enabled: false,
+          rule: { name: "Escalations", enabled: false, condition: { field: "priority", value: "High" } }
+        }
+      ]
+    });
+  });
+
+  it("uses configured admin roles for Desk assignment rule discovery and authorization", async () => {
+    const deskAdmin = { ...owner, id: "desk-admin@example.com", roles: ["Desk Admin", "User"], tenantId: "acme" };
+    const services = createServices();
+    const assignmentRules = new AssignmentRuleService({
+      registry: services.registry,
+      events: services.store,
+      adminRoles: ["Desk Admin"]
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      adminRoles: ["Desk Admin"],
+      assignmentRules,
+      actor: () => deskAdmin
+    });
+
+    const response = await app.request("/desk/admin/assignment-rules?doctype=Note");
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Assignment Rules");
+    expect(html).toContain('href="/desk/admin/assignment-rules"');
+  });
+
+  it("denies Desk assignment rule administration for non-admin actors", async () => {
+    const user = { ...owner, id: "user@example.com", roles: ["User"], tenantId: "acme" };
+    const services = createServices();
+    const assignmentRules = new AssignmentRuleService({
+      registry: services.registry,
+      events: services.store
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      assignmentRules,
+      actor: () => user
+    });
+
+    const response = await app.request("/desk/admin/assignment-rules?doctype=Note");
+    expect(response.status).toBe(403);
+    await expect(response.text()).resolves.toContain("cannot manage assignment rules");
+  });
+
+  it("returns assignment rule version conflicts before missing-rule errors on stale row actions", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"], tenantId: "acme" };
+    const services = createServices();
+    const assignmentRules = new AssignmentRuleService({
+      registry: services.registry,
+      events: services.store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["assignment-rule-event-1", "assignment-rule-event-2"])
+    });
+    await assignmentRules.save({
+      actor: admin,
+      doctype: "Note",
+      expectedVersion: 0,
+      rule: {
+        name: "Stale toggle",
+        enabled: false,
+        events: ["DocumentUpdated"],
+        assignees: [{ kind: "user", userId: "manager@example.com" }]
+      }
+    });
+    await assignmentRules.clear({
+      actor: admin,
+      doctype: "Note",
+      ruleName: "Stale toggle",
+      expectedVersion: 1
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      assignmentRules,
+      actor: () => admin
+    });
+
+    const stale = await app.request("/desk/admin/assignment-rules/Note/Stale%20toggle/enable", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "1" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(stale.status).toBe(409);
+    await expect(stale.text()).resolves.toContain("Expected assignment rules at version 1, found 2");
+  });
+
   it("renders and mutates field property overrides from the Desk admin surface", async () => {
     const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"] };
     const { app, services } = makeFieldPropertyDesk(admin);
@@ -5827,6 +6242,7 @@ describe("Desk app", () => {
     const fieldProperties = new FieldPropertyService({ registry: services.registry, events: services.store });
     const workflows = new WorkflowService({ registry: services.registry, events: services.store });
     const notificationRules = new NotificationRuleService({ registry: services.registry, events: services.store });
+    const assignmentRules = new AssignmentRuleService({ registry: services.registry, events: services.store });
     const app = createDeskApp({
       registry: services.registry,
       documents: services.documents,
@@ -5837,6 +6253,7 @@ describe("Desk app", () => {
       fieldProperties,
       workflows,
       notificationRules,
+      assignmentRules,
       printSettings: services.printSettings,
       dataPatches,
       jobSchedules: new JobScheduleService({
@@ -5858,6 +6275,7 @@ describe("Desk app", () => {
     expect(homeHtml).toContain('href="/desk/admin/field-properties"');
     expect(homeHtml).toContain('href="/desk/admin/workflows"');
     expect(homeHtml).toContain('href="/desk/admin/notification-rules"');
+    expect(homeHtml).toContain('href="/desk/admin/assignment-rules"');
     expect(homeHtml).toContain('href="/desk/admin/print-settings"');
     expect(homeHtml).toContain('href="/desk/admin/data-patches"');
     expect(homeHtml).toContain('href="/desk/admin/jobs/schedules"');
@@ -5879,6 +6297,12 @@ describe("Desk app", () => {
     expect(notificationRulesPage.status).toBe(200);
     await expect(notificationRulesPage.text()).resolves.toContain(
       '<a class="nav-link is-active" href="/desk/admin/notification-rules">Notification Rules</a>'
+    );
+
+    const assignmentRulesPage = await app.request("/desk/admin/assignment-rules");
+    expect(assignmentRulesPage.status).toBe(200);
+    await expect(assignmentRulesPage.text()).resolves.toContain(
+      '<a class="nav-link is-active" href="/desk/admin/assignment-rules">Assignment Rules</a>'
     );
 
     const userApp = createDeskApp({

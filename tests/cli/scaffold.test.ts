@@ -198,8 +198,15 @@ describe("cf-frappe CLI scaffold", () => {
     expect(taskApp).toContain('route: "review-generated-desk-workspace"');
     expect(taskApp).toContain("published: true");
     expect(taskApp).toContain('kind: "notifications"');
-    expect(taskApp).toContain('kind: "admin", target: "notification-rules"');
-    expect(taskApp).toContain('kind: "admin", target: "roles"');
+    expect(taskApp).toContain(
+      '{ name: "notification-rules", label: "Notification Rules", kind: "admin", target: "notification-rules", roles: ["System Manager"] }'
+    );
+    expect(taskApp).toContain(
+      '{ name: "assignment-rules", label: "Assignment Rules", kind: "admin", target: "assignment-rules", roles: ["System Manager"] }'
+    );
+    expect(taskApp).toContain(
+      '{ name: "roles", label: "Roles", kind: "admin", target: "roles", roles: ["System Manager"] }'
+    );
     const appsIndex = await readFile(join(target, "src/apps/index.ts"), "utf8");
     expect(appsIndex).toContain("defineApp");
     expect(appsIndex).toContain("fileDocType");

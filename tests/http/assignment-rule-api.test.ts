@@ -82,13 +82,59 @@ describe("assignment rule api", () => {
       }
     });
 
-    const cleared = await app.request("/api/assignment-rules/Note/High%20priority%20triage", {
-      method: "DELETE",
+    const disabled = await app.request("/api/assignment-rules/Note/High%20priority%20triage/disable", {
+      method: "POST",
       headers: adminHeaders,
       body: JSON.stringify({ expectedVersion: 1 })
     });
+    expect(disabled.status).toBe(200);
+    await expect(disabled.json()).resolves.toMatchObject({
+      data: {
+        version: 2,
+        rules: [
+          {
+            enabled: false,
+            rule: {
+              name: "High priority triage",
+              enabled: false,
+              condition: { field: "priority", value: "High" },
+              excludeActor: true
+            }
+          }
+        ]
+      }
+    });
+
+    const enabled = await app.request("/api/assignment-rules/Note/High%20priority%20triage/enable", {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({ expectedVersion: 2 })
+    });
+    expect(enabled.status).toBe(200);
+    await expect(enabled.json()).resolves.toMatchObject({
+      data: {
+        version: 3,
+        rules: [
+          {
+            enabled: true,
+            rule: {
+              name: "High priority triage",
+              enabled: true,
+              condition: { field: "priority", value: "High" },
+              excludeActor: true
+            }
+          }
+        ]
+      }
+    });
+
+    const cleared = await app.request("/api/assignment-rules/Note/High%20priority%20triage", {
+      method: "DELETE",
+      headers: adminHeaders,
+      body: JSON.stringify({ expectedVersion: 3 })
+    });
     expect(cleared.status).toBe(200);
-    await expect(cleared.json()).resolves.toMatchObject({ data: { version: 2, rules: [] } });
+    await expect(cleared.json()).resolves.toMatchObject({ data: { version: 4, rules: [] } });
   });
 
   it("maps validation, conflict, and permission failures to JSON errors", async () => {
@@ -186,7 +232,7 @@ function makeAssignmentRuleApp(maxJsonBytes = 1_048_576) {
   const assignmentRules = new AssignmentRuleService({
     registry: services.registry,
     events: services.store,
-    ids: deterministicIds(["rule-1", "rule-2"]),
+    ids: deterministicIds(["rule-1", "rule-2", "rule-3", "rule-4"]),
     clock: fixedClock(now)
   });
   return {
