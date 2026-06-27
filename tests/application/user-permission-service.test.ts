@@ -1,5 +1,6 @@
 import { SYSTEM_MANAGER_ROLE, UserPermissionService, userPermissionsStream } from "../../src";
 import { createServices, owner } from "../helpers";
+import type { DocumentEventPayload, UserPermissionEventPayload } from "../../src";
 
 const admin = {
   id: "admin@example.com",
@@ -8,6 +9,18 @@ const admin = {
 };
 
 describe("UserPermissionService", () => {
+  it("registers user permission payloads through the domain event extension map", () => {
+    const payload = userPermissionPayload({
+      kind: "UserPermissionAllowed",
+      userId: owner.id,
+      targetDoctype: "Project",
+      targetName: "Apollo",
+      applicableDoctypes: ["Issue", "Task"]
+    });
+
+    expect(payload.targetName).toBe("Apollo");
+  });
+
   it("grants and revokes linked-record user permissions as idempotent events", async () => {
     const { events } = createServices(["unused"]);
     const userPermissions = new UserPermissionService({
@@ -128,6 +141,12 @@ describe("UserPermissionService", () => {
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });
+
+function userPermissionPayload(
+  payload: Extract<DocumentEventPayload, { readonly kind: "UserPermissionAllowed" }>
+): Extract<UserPermissionEventPayload, { readonly kind: "UserPermissionAllowed" }> {
+  return payload;
+}
 
 function deterministicPermissionIds(values: readonly string[]) {
   let index = 0;

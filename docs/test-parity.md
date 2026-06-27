@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the assignment rule event payload module slice:
+As of the user permission event payload module slice:
 
 - Vitest files: `156`
-- Vitest cases: `1513`
+- Vitest cases: `1514`
 
 ## Implication
 

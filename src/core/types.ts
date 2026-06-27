@@ -379,20 +379,6 @@ export type CoreDocumentEventPayload =
       readonly userId: string;
     }
   | {
-      readonly kind: "UserPermissionAllowed";
-      readonly userId: string;
-      readonly targetDoctype: DocTypeName;
-      readonly targetName: DocumentName;
-      readonly applicableDoctypes?: readonly DocTypeName[];
-    }
-  | {
-      readonly kind: "UserPermissionRevoked";
-      readonly userId: string;
-      readonly targetDoctype: DocTypeName;
-      readonly targetName: DocumentName;
-      readonly applicableDoctypes?: readonly DocTypeName[];
-    }
-  | {
       readonly kind: "WorkflowTransitioned";
       readonly action: string;
       readonly from: string;

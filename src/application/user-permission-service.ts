@@ -10,6 +10,7 @@ import {
   type NewDomainEvent,
   type TenantId
 } from "../core/types.js";
+import type { UserPermissionEventPayload } from "./user-permission-events.js";
 import {
   foldUserPermissions,
   normalizeUserPermissionGrant,
@@ -22,6 +23,8 @@ import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
 import type { UserPermissionGrantValidator } from "./user-permission-grant-validator.js";
+
+export type { UserPermissionEventPayload } from "./user-permission-events.js";
 
 export interface UserPermissionServiceOptions {
   readonly events: EventStore;
@@ -97,7 +100,7 @@ export class UserPermissionService implements UserPermissionProvider {
   private async changePermission(options: {
     readonly command: AllowUserPermissionCommand | RevokeUserPermissionCommand;
     readonly eventType: "UserPermissionAllowed" | "UserPermissionRevoked";
-    readonly eventKind: "UserPermissionAllowed" | "UserPermissionRevoked";
+    readonly eventKind: UserPermissionEventPayload["kind"];
     readonly alreadyDone: (state: UserPermissionState, grant: UserPermissionGrant) => boolean;
   }): Promise<UserPermissionState> {
     this.ensureAdmin(options.command.actor);
@@ -112,7 +115,14 @@ export class UserPermissionService implements UserPermissionProvider {
     if (options.eventKind === "UserPermissionAllowed") {
       await this.validator?.validateGrant({ tenantId, grant });
     }
-    const event: NewDomainEvent = {
+    const payload: UserPermissionEventPayload = {
+      kind: options.eventKind,
+      userId,
+      targetDoctype: grant.targetDoctype,
+      targetName: grant.targetName,
+      ...(grant.applicableDoctypes !== undefined ? { applicableDoctypes: grant.applicableDoctypes } : {})
+    };
+    const event: NewDomainEvent<UserPermissionEventPayload> = {
       id: this.ids.next(),
       tenantId,
       stream: userPermissionsStream(tenantId, userId),
@@ -121,13 +131,7 @@ export class UserPermissionService implements UserPermissionProvider {
       documentName: userId,
       actorId: options.command.actor.id,
       occurredAt: this.clock.now(),
-      payload: {
-        kind: options.eventKind,
-        userId,
-        targetDoctype: grant.targetDoctype,
-        targetName: grant.targetName,
-        ...(grant.applicableDoctypes !== undefined ? { applicableDoctypes: grant.applicableDoctypes } : {})
-      },
+      payload,
       metadata: options.command.metadata ?? {}
     };
     const saved = await this.events.append(event.stream, state.version, [event]);
