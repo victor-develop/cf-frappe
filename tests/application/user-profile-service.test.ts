@@ -9,6 +9,7 @@ import {
   type PasswordHasher
 } from "../../src";
 import { owner } from "../helpers";
+import type { DocumentEventPayload, UserProfileEventPayload } from "../../src";
 
 const admin = {
   id: "admin@example.com",
@@ -17,6 +18,16 @@ const admin = {
 };
 
 describe("UserProfileService", () => {
+  it("registers user profile payloads through the domain event extension map", () => {
+    const payload = userProfilePayload({
+      kind: "UserProfileChanged",
+      userId: owner.id,
+      profile: { fullName: "Ada Lovelace" }
+    });
+
+    expect(payload.profile.fullName).toBe("Ada Lovelace");
+  });
+
   it("stores admin and self profile changes in a separate event stream", async () => {
     const events = new InMemoryEventStore();
     const userAccounts = new UserAccountService({
@@ -266,6 +277,12 @@ describe("UserProfileService", () => {
     });
   });
 });
+
+function userProfilePayload(
+  payload: Extract<DocumentEventPayload, { readonly kind: "UserProfileChanged" }>
+): UserProfileEventPayload {
+  return payload;
+}
 
 function deterministicPasswords(): PasswordHasher {
   return {

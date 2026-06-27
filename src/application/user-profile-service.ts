@@ -9,6 +9,7 @@ import {
   type NewDomainEvent,
   type TenantId
 } from "../core/types.js";
+import type { UserProfileEventPayload } from "./user-profile-events.js";
 import { foldUserAccount } from "../core/user-accounts.js";
 import {
   foldUserProfile,
@@ -20,6 +21,8 @@ import {
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
+
+export type { UserProfileEventPayload } from "./user-profile-events.js";
 
 export interface UserProfileServiceOptions {
   readonly events: EventStore;
@@ -99,7 +102,7 @@ export class UserProfileService {
     readonly profile: UserProfilePatch;
   }): Promise<readonly DomainEvent[]> {
     const stream = userProfilesStream(options.tenantId, options.userId);
-    const event: NewDomainEvent = {
+    const event: NewDomainEvent<UserProfileEventPayload> = {
       id: this.ids.next("evt_"),
       tenantId: options.tenantId,
       stream,

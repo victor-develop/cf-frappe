@@ -472,11 +472,6 @@ export type CoreDocumentEventPayload =
       readonly userId: string;
     }
   | {
-      readonly kind: "UserProfileChanged";
-      readonly userId: string;
-      readonly profile: DocumentData;
-    }
-  | {
       readonly kind: "JobScheduleOverrideSet";
       readonly scheduleId: string;
       readonly enabled: boolean;
