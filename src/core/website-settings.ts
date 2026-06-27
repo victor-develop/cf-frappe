@@ -8,6 +8,7 @@ export interface WebsiteNavigationItemDefinition {
   readonly label: string;
   readonly pageRoute?: string;
   readonly webForm?: string;
+  readonly webView?: string;
   readonly href?: string;
   readonly roles?: readonly string[];
 }
@@ -87,15 +88,18 @@ export function websiteNavigationItemHref(item: WebsiteNavigationItemDefinition)
   if (item.webForm !== undefined) {
     return `/web-forms/${encodeURIComponent(item.webForm)}`;
   }
+  if (item.webView !== undefined) {
+    return `/web/${encodeURIComponent(item.webView)}`;
+  }
   return item.href ?? "";
 }
 
 function assertNavigationTarget(item: WebsiteNavigationItemDefinition): void {
-  const targetCount = [item.pageRoute, item.webForm, item.href].filter((target) => target !== undefined).length;
+  const targetCount = [item.pageRoute, item.webForm, item.webView, item.href].filter((target) => target !== undefined).length;
   if (targetCount !== 1) {
     throw new FrameworkError(
       "WEBSITE_SETTINGS_INVALID",
-      `Website navigation item '${item.name}' must define exactly one of pageRoute, webForm, or href`,
+      `Website navigation item '${item.name}' must define exactly one of pageRoute, webForm, webView, or href`,
       { status: 400 }
     );
   }
@@ -104,6 +108,9 @@ function assertNavigationTarget(item: WebsiteNavigationItemDefinition): void {
   }
   if (item.webForm !== undefined) {
     assertIdentifier(item.webForm, `website navigation item '${item.name}' Web Form`);
+  }
+  if (item.webView !== undefined) {
+    assertIdentifier(item.webView, `website navigation item '${item.name}' Web View`);
   }
   if (item.href !== undefined && !isSafeWebsiteHref(item.href)) {
     throw new FrameworkError(

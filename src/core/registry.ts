@@ -778,6 +778,15 @@ export class ModelRegistry {
         );
       }
     }
+    for (const webView of (settings.navItems ?? []).flatMap((item) => (item.webView === undefined ? [] : [item.webView]))) {
+      if (!this.webViews.has(webView)) {
+        throw new FrameworkError(
+          "WEBSITE_SETTINGS_INVALID",
+          `Website settings reference unknown Web View '${webView}'`,
+          { status: 400 }
+        );
+      }
+    }
   }
 
   private assertDashboardReferencesResolve(dashboard: DashboardDefinition): void {

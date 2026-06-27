@@ -11,6 +11,7 @@ import {
 import type { WebsiteThemeDefinition } from "../core/website-theme.js";
 import type { WebFormService } from "./web-form-service.js";
 import type { WebPageService } from "./web-page-service.js";
+import type { WebViewService } from "./web-view-service.js";
 import type { WebsiteThemeService } from "./website-theme-service.js";
 
 export interface WebsiteNavigationItem {
@@ -31,6 +32,7 @@ export interface WebsiteSettingsServiceOptions {
   readonly registry: ModelRegistry;
   readonly webPages: Pick<WebPageService, "getWebPageByRoute">;
   readonly webForms?: Pick<WebFormService, "getWebForm">;
+  readonly webViews?: Pick<WebViewService, "getWebView">;
   readonly websiteThemes?: Pick<WebsiteThemeService, "getWebsiteTheme">;
 }
 
@@ -38,12 +40,14 @@ export class WebsiteSettingsService {
   private readonly registry: ModelRegistry;
   private readonly webPages: Pick<WebPageService, "getWebPageByRoute">;
   private readonly webForms: Pick<WebFormService, "getWebForm"> | undefined;
+  private readonly webViews: Pick<WebViewService, "getWebView"> | undefined;
   private readonly websiteThemes: Pick<WebsiteThemeService, "getWebsiteTheme"> | undefined;
 
   constructor(options: WebsiteSettingsServiceOptions) {
     this.registry = options.registry;
     this.webPages = options.webPages;
     this.webForms = options.webForms;
+    this.webViews = options.webViews;
     this.websiteThemes = options.websiteThemes;
   }
 
@@ -103,6 +107,9 @@ export class WebsiteSettingsService {
     if (item.webForm !== undefined) {
       return this.webFormHref(actor, item.webForm);
     }
+    if (item.webView !== undefined) {
+      return this.webViewHref(actor, item.webView);
+    }
     return websiteNavigationItemHref(item);
   }
 
@@ -135,11 +142,26 @@ export class WebsiteSettingsService {
       throw error;
     }
   }
+
+  private async webViewHref(actor: Actor, webViewName: string): Promise<string | undefined> {
+    if (this.webViews === undefined) {
+      return undefined;
+    }
+    try {
+      const metadata = await this.webViews.getWebView(actor, webViewName);
+      return `/web/${encodeURIComponent(metadata.view.name)}`;
+    } catch (error) {
+      if (isExpectedAccessMiss(error)) {
+        return undefined;
+      }
+      throw error;
+    }
+  }
 }
 
 function isExpectedAccessMiss(error: unknown): boolean {
   return typeof error === "object" &&
     error !== null &&
     "code" in error &&
-    (error.code === "WEB_PAGE_NOT_FOUND" || error.code === "PERMISSION_DENIED");
+    (error.code === "WEB_PAGE_NOT_FOUND" || error.code === "WEB_VIEW_NOT_FOUND" || error.code === "PERMISSION_DENIED");
 }

@@ -5,6 +5,7 @@ import {
   defineDocType,
   defineWebForm,
   defineWebPage,
+  defineWebView,
   defineWebsiteSettings,
   websiteNavigationItemHref
 } from "../../src";
@@ -33,11 +34,26 @@ describe("metadata Website Settings", () => {
 
   it("validates singleton settings and referenced web page routes", () => {
     const Lead = defineDocType({ name: "Lead", fields: [{ name: "title", type: "text" }] });
+    const BlogPost = defineDocType({
+      name: "Blog Post",
+      fields: [
+        { name: "title", type: "text" },
+        { name: "route", type: "text" },
+        { name: "published", type: "boolean" }
+      ]
+    });
     const leadIntake = defineWebForm({
       name: "Lead Intake",
       route: "lead/intake",
       doctype: "Lead",
       fields: [{ field: "title" }]
+    });
+    const blog = defineWebView({
+      name: "Blog",
+      doctype: "Blog Post",
+      routeField: "route",
+      titleField: "title",
+      publishedField: "published"
     });
     const settings = defineWebsiteSettings({
       title: "Starter Site",
@@ -45,17 +61,39 @@ describe("metadata Website Settings", () => {
       navItems: [
         { name: "about", label: "About", pageRoute: "about" },
         { name: "intake", label: "Lead Intake", webForm: "Lead Intake" },
+        { name: "blog", label: "Blog", webView: "Blog" },
         { name: "docs", label: "Docs", href: "https://example.com/docs" }
       ]
     });
-    const registry = createRegistry({ doctypes: [Lead], webForms: [leadIntake], webPages: [about], websiteSettings: settings });
+    const registry = createRegistry({
+      doctypes: [Lead, BlogPost],
+      webForms: [leadIntake],
+      webPages: [about],
+      webViews: [blog],
+      websiteSettings: settings
+    });
 
     expect(registry.getWebsiteSettings()).toEqual(settings);
     expect(websiteNavigationItemHref({ name: "intake", label: "Lead Intake", webForm: "Lead Intake" }))
       .toBe("/web-forms/Lead%20Intake");
-    expect(createRegistryFromApps([defineApp({ name: "website", doctypes: [Lead], webForms: [leadIntake], webPages: [about], websiteSettings: settings })]).getWebsiteSettings())
+    expect(websiteNavigationItemHref({ name: "blog", label: "Blog", webView: "Blog" }))
+      .toBe("/web/Blog");
+    expect(createRegistryFromApps([defineApp({
+      name: "website",
+      doctypes: [Lead, BlogPost],
+      webForms: [leadIntake],
+      webPages: [about],
+      webViews: [blog],
+      websiteSettings: settings
+    })]).getWebsiteSettings())
       .toEqual(settings);
-    expect(() => createRegistry({ doctypes: [Lead], webForms: [leadIntake], webPages: [about], websiteSettings: [settings, settings] })).toThrow("already registered");
+    expect(() => createRegistry({
+      doctypes: [Lead, BlogPost],
+      webForms: [leadIntake],
+      webPages: [about],
+      webViews: [blog],
+      websiteSettings: [settings, settings]
+    })).toThrow("already registered");
     expect(() => defineWebsiteSettings({ title: "", homePageRoute: "about" })).toThrow("website title is required");
     expect(() =>
       defineWebsiteSettings({
@@ -104,13 +142,19 @@ describe("metadata Website Settings", () => {
         title: "Bad",
         navItems: [{ name: "bad", label: "Bad", pageRoute: "about", href: "/page/about" }]
       })
-    ).toThrow("exactly one of pageRoute, webForm, or href");
+    ).toThrow("exactly one of pageRoute, webForm, webView, or href");
     expect(() =>
       defineWebsiteSettings({
         title: "Bad",
         navItems: [{ name: "bad", label: "Bad", webForm: " " }]
       })
     ).toThrow("Web Form is required");
+    expect(() =>
+      defineWebsiteSettings({
+        title: "Bad",
+        navItems: [{ name: "bad", label: "Bad", webView: " " }]
+      })
+    ).toThrow("Web View is required");
     expect(() =>
       defineWebsiteSettings({
         title: "Bad",
@@ -132,5 +176,15 @@ describe("metadata Website Settings", () => {
         })
       })
     ).toThrow("unknown Web Form 'Missing Form'");
+    expect(() =>
+      createRegistry({
+        doctypes: [Lead],
+        webPages: [about],
+        websiteSettings: defineWebsiteSettings({
+          title: "Bad",
+          navItems: [{ name: "missing", label: "Missing", webView: "Missing View" }]
+        })
+      })
+    ).toThrow("unknown Web View 'Missing View'");
   });
 });

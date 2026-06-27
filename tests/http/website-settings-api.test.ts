@@ -4,6 +4,7 @@ import {
   defineDocType,
   defineWebForm,
   defineWebPage,
+  defineWebView,
   defineWebsiteSettings,
   DocumentService,
   fixedClock,
@@ -12,6 +13,7 @@ import {
   unsafeHeaderActorResolver,
   WebFormService,
   WebPageService,
+  WebViewService,
   WebsiteSettingsService
 } from "../../src";
 import { now } from "../helpers";
@@ -203,6 +205,91 @@ describe("website settings api", () => {
         navItems: [
           { name: "public-intake", href: "/web-forms/public/intake" },
           { name: "member-intake", href: "/web-forms/member/intake" }
+        ]
+      }
+    });
+  });
+
+  it("filters Web View navigation references through Web View access rules", async () => {
+    const Article = defineDocType({
+      name: "Article",
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "route", type: "text" },
+        { name: "published", type: "boolean" }
+      ],
+      permissions: [
+        { roles: ["Guest"], actions: ["read"] },
+        { roles: ["User"], actions: ["read"] }
+      ]
+    });
+    const registry = createRegistry({
+      doctypes: [Article],
+      webPages: [
+        defineWebPage({
+          name: "About",
+          route: "about",
+          title: "About",
+          sections: [{ body: "Welcome" }]
+        })
+      ],
+      webViews: [
+        defineWebView({
+          name: "Public Updates",
+          doctype: "Article",
+          routeField: "route",
+          titleField: "title",
+          publishedField: "published"
+        }),
+        defineWebView({
+          name: "Member Updates",
+          doctype: "Article",
+          routeField: "route",
+          titleField: "title",
+          publishedField: "published",
+          roles: ["User"]
+        })
+      ],
+      websiteSettings: defineWebsiteSettings({
+        title: "Starter Site",
+        navItems: [
+          { name: "public-updates", label: "Public Updates", webView: "Public Updates" },
+          { name: "member-updates", label: "Member Updates", webView: "Member Updates" }
+        ]
+      })
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+    const queries = new QueryService({ registry, projections: store });
+    const webPages = new WebPageService({ registry });
+    const webViews = new WebViewService({ registry, queries });
+    const app = createResourceApi({
+      registry,
+      documents,
+      queries,
+      webPages,
+      webViews,
+      websiteSettings: new WebsiteSettingsService({ registry, webPages, webViews }),
+      actor: unsafeHeaderActorResolver
+    });
+
+    const guestMetadata = await app.request("/api/meta/website-settings");
+    expect(guestMetadata.status).toBe(200);
+    await expect(guestMetadata.json()).resolves.toMatchObject({
+      data: {
+        navItems: [{ name: "public-updates", href: "/web/Public%20Updates" }]
+      }
+    });
+
+    const userMetadata = await app.request("/api/meta/website-settings", {
+      headers: { "x-cf-frappe-user": "member@example.com", "x-cf-frappe-roles": "User" }
+    });
+    expect(userMetadata.status).toBe(200);
+    await expect(userMetadata.json()).resolves.toMatchObject({
+      data: {
+        navItems: [
+          { name: "public-updates", href: "/web/Public%20Updates" },
+          { name: "member-updates", href: "/web/Member%20Updates" }
         ]
       }
     });

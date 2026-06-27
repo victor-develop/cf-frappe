@@ -225,7 +225,7 @@ describe("web view api", () => {
         navItems: [
           { name: "about", label: "About", pageRoute: "about" },
           { name: "members", label: "Members", pageRoute: "members" },
-          { name: "articles", label: "Articles", href: "/web/Articles" }
+          { name: "articles", label: "Articles", webView: "Articles" }
         ]
       })
     });
@@ -233,13 +233,14 @@ describe("web view api", () => {
     const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
     const queries = new QueryService({ registry, projections: store });
     const webPages = new WebPageService({ registry });
+    const webViews = new WebViewService({ registry, queries });
     const app = createResourceApi({
       registry,
       documents,
       queries,
-      webViews: new WebViewService({ registry, queries }),
+      webViews,
       webPages,
-      websiteSettings: new WebsiteSettingsService({ registry, webPages }),
+      websiteSettings: new WebsiteSettingsService({ registry, webPages, webViews }),
       actor: unsafeHeaderActorResolver
     });
 

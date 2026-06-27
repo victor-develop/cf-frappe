@@ -3,6 +3,7 @@ import {
   defineDocType,
   defineWebForm,
   defineWebPage,
+  defineWebView,
   defineWebsiteSettings,
   defineWebsiteTheme,
   DocumentService,
@@ -11,6 +12,7 @@ import {
   QueryService,
   WebFormService,
   WebPageService,
+  WebViewService,
   WebsiteSettingsService,
   WebsiteThemeService
 } from "../../src";
@@ -21,8 +23,14 @@ describe("WebsiteSettingsService", () => {
     const leadDocType = defineDocType({
       name: "Lead",
       naming: { kind: "field", field: "title" },
-      fields: [{ name: "title", type: "text", required: true }],
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "route", type: "text" },
+        { name: "published", type: "boolean" }
+      ],
       permissions: [
+        { roles: ["Guest"], actions: ["read"] },
+        { roles: ["User"], actions: ["read"] },
         { roles: ["Guest"], actions: ["create"] },
         { roles: ["User"], actions: ["create"] }
       ]
@@ -59,6 +67,23 @@ describe("WebsiteSettingsService", () => {
           fields: [{ field: "title" }]
         })
       ],
+      webViews: [
+        defineWebView({
+          name: "Public Updates",
+          doctype: "Lead",
+          routeField: "route",
+          titleField: "title",
+          publishedField: "published"
+        }),
+        defineWebView({
+          name: "Member Updates",
+          doctype: "Lead",
+          routeField: "route",
+          titleField: "title",
+          publishedField: "published",
+          roles: ["User"]
+        })
+      ],
       websiteThemes: [defineWebsiteTheme({ name: "Starter Theme", tokens: { primaryColor: "#2563eb" } })],
       websiteSettings: defineWebsiteSettings({
         title: "Starter Site",
@@ -70,6 +95,8 @@ describe("WebsiteSettingsService", () => {
           { name: "members", label: "Members", pageRoute: "members" },
           { name: "public-intake", label: "Public Intake", webForm: "Public Intake" },
           { name: "member-intake", label: "Member Intake", webForm: "Member Intake" },
+          { name: "public-updates", label: "Public Updates", webView: "Public Updates" },
+          { name: "member-updates", label: "Member Updates", webView: "Member Updates" },
           { name: "docs", label: "Docs", href: "https://example.com/docs" }
         ]
       })
@@ -79,8 +106,9 @@ describe("WebsiteSettingsService", () => {
     const queries = new QueryService({ registry, projections: store });
     const webForms = new WebFormService({ registry, documents, queries });
     const webPages = new WebPageService({ registry });
+    const webViews = new WebViewService({ registry, queries });
     const websiteThemes = new WebsiteThemeService({ registry });
-    const website = new WebsiteSettingsService({ registry, webPages, webForms, websiteThemes });
+    const website = new WebsiteSettingsService({ registry, webPages, webForms, webViews, websiteThemes });
 
     expect(website.getHomePageRoute(guest)).toBe("about");
     await expect(website.getWebsiteSettings(guest)).resolves.toEqual({
@@ -91,11 +119,20 @@ describe("WebsiteSettingsService", () => {
       navItems: [
         { name: "about", label: "About", href: "/page/about" },
         { name: "public-intake", label: "Public Intake", href: "/web-forms/public/intake" },
+        { name: "public-updates", label: "Public Updates", href: "/web/Public%20Updates" },
         { name: "docs", label: "Docs", href: "https://example.com/docs" }
       ]
     });
     await expect(website.getWebsiteSettings(owner).then((settings) => settings.navItems.map((item) => item.name)))
-      .resolves.toEqual(["about", "members", "public-intake", "member-intake", "docs"]);
+      .resolves.toEqual([
+        "about",
+        "members",
+        "public-intake",
+        "member-intake",
+        "public-updates",
+        "member-updates",
+        "docs"
+      ]);
   });
 
   it("denies unpublished or role-filtered settings", async () => {
