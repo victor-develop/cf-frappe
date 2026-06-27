@@ -82,6 +82,54 @@ describe("PrintService", () => {
     ]);
   });
 
+  it("omits print-hide-if-no-value fields only when their document value is empty", async () => {
+    const { registry, documents, prints } = createServices(["e1"]);
+    registry.registerDocType(defineDocType({
+      name: "Printable Optional",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "empty_note", type: "text", printHideIfNoValue: true },
+        { name: "zero_count", type: "integer", printHideIfNoValue: true },
+        { name: "published", type: "boolean", printHideIfNoValue: true }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read", "create"] }]
+    }));
+    registry.registerPrintFormat(definePrintFormat({
+      name: "Printable Optional Standard",
+      doctype: "Printable Optional",
+      sections: [
+        {
+          fields: [
+            { field: "title", label: "Title" },
+            { field: "empty_note", label: "Empty Note" },
+            { field: "zero_count", label: "Zero Count" },
+            { field: "published", label: "Published" }
+          ]
+        }
+      ],
+      roles: ["User"]
+    }));
+    await documents.create({
+      actor: owner,
+      doctype: "Printable Optional",
+      data: { title: "Optional Memo", empty_note: "", zero_count: 0, published: false }
+    });
+
+    const view = await prints.printDocument(owner, "Printable Optional Standard", "Optional Memo");
+
+    expect(view.hiddenPrintFields).toEqual(["empty_note"]);
+    expect(view.sections).toEqual([
+      {
+        fields: [
+          { field: "title", label: "Title", value: "Optional Memo" },
+          { field: "zero_count", label: "Zero Count", value: 0 },
+          { field: "published", label: "Published", value: false }
+        ]
+      }
+    ]);
+  });
+
   it("builds template-only print view models without field sections", async () => {
     const { registry, documents, prints } = createServices(["e1"]);
     registry.registerPrintFormat(

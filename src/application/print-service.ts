@@ -84,7 +84,7 @@ export class PrintService {
     const letterhead = format.letterhead ? this.getPrintLetterhead(actor, format.letterhead) : undefined;
     const defaultLayout = (await this.printSettings?.defaultsFor(actor))?.settings.defaultLayout;
     const layout = mergePrintLayouts(defaultLayout, format.layout);
-    const hiddenPrintFields = printHiddenFields(doctype);
+    const hiddenPrintFields = printHiddenFields(doctype, document);
     return {
       format: layout === format.layout ? format : { ...format, ...(layout === undefined ? {} : { layout }) },
       ...(letterhead ? { letterhead } : {}),
@@ -131,6 +131,14 @@ function printSectionView(
   };
 }
 
-function printHiddenFields(doctype: DocTypeDefinition): ReadonlySet<string> {
-  return new Set(doctype.fields.filter((field) => field.printHide).map((field) => field.name));
+function printHiddenFields(doctype: DocTypeDefinition, document: DocumentSnapshot): ReadonlySet<string> {
+  return new Set(
+    doctype.fields
+      .filter((field) => field.printHide || (field.printHideIfNoValue && isPrintEmptyValue(document.data[field.name] ?? null)))
+      .map((field) => field.name)
+  );
+}
+
+function isPrintEmptyValue(value: JsonValue): boolean {
+  return value === null || value === "" || (Array.isArray(value) && value.length === 0);
 }

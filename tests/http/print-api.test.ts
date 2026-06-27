@@ -168,6 +168,59 @@ describe("print api", () => {
     expect(templateHtml).not.toContain("Do not print");
   });
 
+  it("omits print-hide-if-no-value DocType fields from section and template HTML only when empty", async () => {
+    const { app, services } = makeApp();
+    services.registry.registerDocType(defineDocType({
+      name: "Printable Optional",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "empty_note", type: "text", printHideIfNoValue: true },
+        { name: "zero_count", type: "integer", printHideIfNoValue: true }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read", "create"] }]
+    }));
+    services.registry.registerPrintFormat(definePrintFormat({
+      name: "Printable Optional Standard",
+      doctype: "Printable Optional",
+      sections: [
+        {
+          fields: [
+            { field: "title", label: "Title" },
+            { field: "empty_note", label: "Empty Note" },
+            { field: "zero_count", label: "Zero Count" }
+          ]
+        }
+      ],
+      roles: ["User"]
+    }));
+    services.registry.registerPrintFormat(definePrintFormat({
+      name: "Printable Optional Template",
+      doctype: "Printable Optional",
+      template: "<p>{{ doc.title }}</p><p>{{ doc.empty_note }}</p><p>{{ doc.zero_count }}</p>",
+      roles: ["User"]
+    }));
+    await services.documents.create({
+      actor: owner,
+      doctype: "Printable Optional",
+      data: { title: "Optional Memo", empty_note: "", zero_count: 0 }
+    });
+
+    const sectionResponse = await app.request("/api/print/Printable%20Optional%20Standard/Optional%20Memo", { headers: userHeaders });
+    const templateResponse = await app.request("/api/print/Printable%20Optional%20Template/Optional%20Memo", { headers: userHeaders });
+
+    expect(sectionResponse.status).toBe(200);
+    const sectionHtml = await sectionResponse.text();
+    expect(sectionHtml).not.toContain("Empty Note");
+    expect(sectionHtml).toContain("Zero Count");
+    expect(sectionHtml).toContain(">0<");
+
+    expect(templateResponse.status).toBe(200);
+    const templateHtml = await templateResponse.text();
+    expect(templateHtml).toContain("Optional Memo");
+    expect(templateHtml).toContain(">0<");
+  });
+
   it("exposes print layout metadata and renders it into printable HTML", async () => {
     const { app, services } = makeApp();
     services.registry.registerPrintFormat(

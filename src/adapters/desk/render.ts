@@ -1650,6 +1650,7 @@ export function renderCustomFieldAdmin(state: CustomFieldAdminState): string {
       ${renderCustomFieldCheckbox("readOnly", "Read Only")}
       ${renderCustomFieldCheckbox("hidden", "Hidden")}
       ${renderCustomFieldCheckbox("printHide", "Print Hide")}
+      ${renderCustomFieldCheckbox("printHideIfNoValue", "Print Hide If Empty")}
       ${renderCustomFieldCheckbox("unique", "Unique")}
       ${renderCustomFieldCheckbox("noCopy", "No Copy")}
       ${renderCustomFieldCheckbox("allowOnSubmit", "Allow On Submit")}
@@ -1721,6 +1722,7 @@ export function renderFieldPropertyAdmin(state: FieldPropertyAdminState): string
       <label class="field"><span>Hidden</span><select name="hidden">${renderBooleanOverrideOptions(overrides.hidden)}</select></label>
       <label class="field wide"><span>Hidden Depends On JSON</span><textarea name="hiddenDependsOn" rows="4">${escapeHtml(overrides.hiddenDependsOn === undefined ? "" : JSON.stringify(overrides.hiddenDependsOn))}</textarea></label>
       <label class="field"><span>Print Hide</span><select name="printHide">${renderBooleanOverrideOptions(overrides.printHide)}</select></label>
+      <label class="field"><span>Print Hide If Empty</span><select name="printHideIfNoValue">${renderBooleanOverrideOptions(overrides.printHideIfNoValue)}</select></label>
       <label class="field"><span>No Copy</span><select name="noCopy">${renderBooleanOverrideOptions(overrides.noCopy)}</select></label>
       <label class="field"><span>Allow On Submit</span><select name="allowOnSubmit">${renderBooleanOverrideOptions(overrides.allowOnSubmit)}</select></label>
       <label class="field"><span>Fetch From</span><input name="fetchFrom" value="${escapeHtml(overrides.fetchFrom ?? "")}" placeholder="link_field.source_field"></label>
@@ -2024,6 +2026,7 @@ function renderFieldPropertyOverrides(overrides: FieldPropertyOverrideState["fie
     overrides.hidden === undefined ? "" : `hidden: ${String(overrides.hidden)}`,
     overrides.hiddenDependsOn === undefined ? "" : `hidden depends on: ${JSON.stringify(overrides.hiddenDependsOn)}`,
     overrides.printHide === undefined ? "" : `print hide: ${String(overrides.printHide)}`,
+    overrides.printHideIfNoValue === undefined ? "" : `print hide if empty: ${String(overrides.printHideIfNoValue)}`,
     overrides.noCopy === undefined ? "" : `no copy: ${String(overrides.noCopy)}`,
     overrides.allowOnSubmit === undefined ? "" : `allow on submit: ${String(overrides.allowOnSubmit)}`,
     overrides.fetchFrom === undefined ? "" : `fetch from: ${overrides.fetchFrom}`,
@@ -2139,6 +2142,7 @@ function renderCustomFieldFlags(field: FieldDefinition): string {
     field.hiddenDependsOn ? "hidden depends on" : "",
     field.hidden ? "hidden" : "",
     field.printHide ? "print hide" : "",
+    field.printHideIfNoValue ? "print hide if empty" : "",
     field.unique ? "unique" : "",
     field.noCopy ? "no copy" : "",
     field.allowOnSubmit ? "allow on submit" : "",

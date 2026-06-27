@@ -46,6 +46,7 @@ interface FieldResponse {
   readonly hidden?: boolean;
   readonly hiddenDependsOn?: unknown;
   readonly printHide?: boolean;
+  readonly printHideIfNoValue?: boolean;
   readonly unique?: boolean;
   readonly noCopy?: boolean;
   readonly allowOnSubmit?: boolean;
@@ -197,6 +198,7 @@ function fieldFlags(field: FieldResponse): readonly string[] {
     ...(field.hidden ? ["hidden"] : []),
     ...(field.hiddenDependsOn ? ["hiddenDependsOn"] : []),
     ...(field.printHide ? ["printHide"] : []),
+    ...(field.printHideIfNoValue ? ["printHideIfNoValue"] : []),
     ...(field.unique ? ["unique"] : []),
     ...(field.noCopy ? ["noCopy"] : []),
     ...(field.allowOnSubmit ? ["allowOnSubmit"] : []),

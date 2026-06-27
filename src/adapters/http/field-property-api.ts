@@ -71,6 +71,7 @@ function overridesValue(value: JsonValue | undefined): FieldPropertyOverrides {
     ...optionalBoolean(value.hidden, "overrides.hidden", "hidden"),
     ...optionalListFilterExpression(value.hiddenDependsOn, "overrides.hiddenDependsOn", "hiddenDependsOn"),
     ...optionalBoolean(value.printHide, "overrides.printHide", "printHide"),
+    ...optionalBoolean(value.printHideIfNoValue, "overrides.printHideIfNoValue", "printHideIfNoValue"),
     ...optionalBoolean(value.noCopy, "overrides.noCopy", "noCopy"),
     ...optionalBoolean(value.allowOnSubmit, "overrides.allowOnSubmit", "allowOnSubmit"),
     ...optionalString(value.fetchFrom, "overrides.fetchFrom", "fetchFrom"),

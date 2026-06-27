@@ -369,6 +369,7 @@ function normalizeField(field: FieldDefinition): PersistedFieldDefinition {
     ...(field.hidden === undefined ? {} : { hidden: field.hidden }),
     ...(field.hiddenDependsOn === undefined ? {} : { hiddenDependsOn: field.hiddenDependsOn }),
     ...(field.printHide === undefined ? {} : { printHide: field.printHide }),
+    ...(field.printHideIfNoValue === undefined ? {} : { printHideIfNoValue: field.printHideIfNoValue }),
     ...(field.unique === undefined ? {} : { unique: field.unique }),
     ...(field.noCopy === undefined ? {} : { noCopy: field.noCopy }),
     ...(field.allowOnSubmit === undefined ? {} : { allowOnSubmit: field.allowOnSubmit }),

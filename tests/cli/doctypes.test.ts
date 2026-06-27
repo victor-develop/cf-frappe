@@ -144,6 +144,7 @@ describe("cf-frappe CLI remote doctypes", () => {
                 readOnlyDependsOn: { field: "workflow_state", value: "Closed" },
                 hiddenDependsOn: { field: "project", operator: "is", value: "not set" },
                 printHide: true,
+                printHideIfNoValue: true,
                 unique: true,
                 noCopy: true,
                 allowOnSubmit: true,
@@ -172,7 +173,7 @@ describe("cf-frappe CLI remote doctypes", () => {
     expect(stdout.text()).toContain("- Task Type fields=3 v4 - Task Type");
     expect(stdout.text()).toContain("Module: Tasks");
     expect(stdout.text()).toContain("Description: Task metadata");
-    expect(stdout.text()).toContain('- title text [required,mandatoryDependsOn,readOnlyDependsOn,hiddenDependsOn,printHide,unique,noCopy,allowOnSubmit,fetchFrom=project.title,fetchIfEmpty,list,search] - Title help "Human-readable task title."');
+    expect(stdout.text()).toContain('- title text [required,mandatoryDependsOn,readOnlyDependsOn,hiddenDependsOn,printHide,printHideIfNoValue,unique,noCopy,allowOnSubmit,fetchFrom=project.title,fetchIfEmpty,list,search] - Title help "Human-readable task title."');
     expect(stdout.text()).toContain("- project link -> Project [filter]");
     expect(stdout.text()).toContain("- items table -> Task Item [hidden]");
     expect(stdout.text()).toContain("Permissions: 1");

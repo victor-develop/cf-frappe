@@ -40,6 +40,7 @@ describe("field property api", () => {
           readOnlyDependsOn: { field: "workflow_state", value: "Closed" },
           hiddenDependsOn: { field: "title", operator: "is", value: "not set" },
           printHide: true,
+          printHideIfNoValue: true,
           noCopy: true,
           allowOnSubmit: true,
           options: ["Low", "High"],
@@ -62,6 +63,7 @@ describe("field property api", () => {
               readOnlyDependsOn: { field: "workflow_state", value: "Closed" },
               hiddenDependsOn: { field: "title", operator: "is", value: "not set" },
               printHide: true,
+              printHideIfNoValue: true,
               noCopy: true,
               allowOnSubmit: true,
               options: ["Low", "High"]
@@ -84,6 +86,7 @@ describe("field property api", () => {
             readOnlyDependsOn: { field: "workflow_state", value: "Closed" },
             hiddenDependsOn: { field: "title", operator: "is", value: "not set" },
             printHide: true,
+            printHideIfNoValue: true,
             noCopy: true,
             allowOnSubmit: true,
             options: ["Low", "High"]
