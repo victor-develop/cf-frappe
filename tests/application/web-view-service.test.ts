@@ -55,7 +55,7 @@ describe("WebViewService", () => {
       doctype: "Blog Post",
       data: {
         title: "Published Post",
-        route: "published-post",
+        route: "docs/published-post",
         published: true,
         summary: "Visible summary",
         internal_notes: "not exposed"
@@ -81,6 +81,16 @@ describe("WebViewService", () => {
         summary: "No route"
       }
     });
+    await documents.create({
+      actor: owner,
+      doctype: "Blog Post",
+      data: {
+        title: "Unsafe Route",
+        route: "../admin",
+        published: true,
+        summary: "Hidden unsafe route"
+      }
+    });
 
     await expect(webViews.listWebViews(guest)).resolves.toMatchObject([{ name: "Blog" }]);
     await expect(webViews.getWebView(guest, "Blog")).resolves.toMatchObject({
@@ -98,15 +108,16 @@ describe("WebViewService", () => {
         {
           doctype: "Blog Post",
           name: "Published Post",
-          route: "published-post",
+          route: "docs/published-post",
           title: "Published Post",
           data: { summary: "Visible summary" }
         }
       ]
     });
-    await expect(webViews.getItem(guest, "Blog", "published-post")).resolves.toMatchObject({
+    await expect(webViews.getItem(guest, "Blog", "docs/published-post")).resolves.toMatchObject({
       item: { title: "Published Post", data: { summary: "Visible summary" } }
     });
+    await expect(webViews.getItem(guest, "Blog", "../admin")).rejects.toMatchObject({ code: "DOCUMENT_NOT_FOUND" });
     await expect(webViews.getItem(guest, "Blog", "draft-post")).rejects.toMatchObject({ code: "DOCUMENT_NOT_FOUND" });
   });
 

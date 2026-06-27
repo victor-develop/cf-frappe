@@ -878,7 +878,7 @@ describe("Desk client runtime", () => {
     expect(runtime.desk.webFormUrl("Lead/Intake")).toBe("/web-forms/Lead%2FIntake");
     expect(runtime.desk.webFormUrl({ name: "Lead Intake", route: "lead/intake" })).toBe("/web-forms/lead/intake");
     expect(runtime.desk.webViewUrl("Articles/View")).toBe("/web/Articles%2FView");
-    expect(runtime.desk.webViewItemUrl("Articles/View", "launch/post")).toBe("/web/Articles%2FView/launch%2Fpost");
+    expect(runtime.desk.webViewItemUrl("Articles/View", "launch/post")).toBe("/web/Articles%2FView/launch/post");
     expect(runtime.desk.webPageUrl("about/company profile")).toBe("/page/about/company%20profile");
     expect(
       runtime.desk.reportUrl("Open Notes", {
@@ -1649,16 +1649,16 @@ describe("Desk client runtime", () => {
       route: "/api/web-view/Articles%2FView?limit=5"
     });
     await expect(runtime.webView.item("Articles/View", "launch/post")).resolves.toEqual({
-      route: "/api/web-view/Articles%2FView/launch%2Fpost"
+      route: "/api/web-view/Articles%2FView/launch/post"
     });
     expect(runtime.webView.url("Articles/View")).toBe("/web/Articles%2FView");
-    expect(runtime.webView.itemUrl("Articles/View", "launch/post")).toBe("/web/Articles%2FView/launch%2Fpost");
+    expect(runtime.webView.itemUrl("Articles/View", "launch/post")).toBe("/web/Articles%2FView/launch/post");
 
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
       "GET /api/meta/web-views",
       "GET /api/meta/web-views/Articles%2FView",
       "GET /api/web-view/Articles%2FView?limit=5",
-      "GET /api/web-view/Articles%2FView/launch%2Fpost"
+      "GET /api/web-view/Articles%2FView/launch/post"
     ]);
     expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin", "same-origin"]);
   });

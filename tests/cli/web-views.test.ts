@@ -34,16 +34,16 @@ describe("cf-frappe CLI remote web views", () => {
       "--url",
       "https://app.example",
       "--web-view",
-      "Articles",
+      "Articles/View",
       "--route",
-      "launch"
+      "news/launch"
     ])).toEqual({
       kind: "web-views",
       action: "item",
       url: "https://app.example",
       headers: [],
-      webView: "Articles",
-      route: "launch"
+      webView: "Articles/View",
+      route: "news/launch"
     });
     expect(parseCliArgs(["web-views", "unknown", "--url", "https://app.example"])).toEqual({
       kind: "invalid",
@@ -82,10 +82,10 @@ describe("cf-frappe CLI remote web views", () => {
           }
         });
       }
-      if (requestUrl.includes("/api/web-view/Articles") && !requestUrl.endsWith("/launch")) {
+      if (requestUrl.includes("/api/web-view/Articles") && !requestUrl.endsWith("/news/launch")) {
         return jsonResponse({
           data: {
-            items: [{ route: "launch", title: "Launch", doctype: "Article", name: "Launch" }],
+            items: [{ route: "news/launch", title: "Launch", doctype: "Article", name: "Launch" }],
             total: 1,
             limit: 2
           }
@@ -93,8 +93,8 @@ describe("cf-frappe CLI remote web views", () => {
       }
       return jsonResponse({
         data: {
-          view: { name: "Articles", doctype: "Article" },
-          item: { route: "launch", title: "Launch", doctype: "Article", name: "Launch" }
+          view: { name: "Articles/View", doctype: "Article" },
+          item: { route: "news/launch", title: "Launch", doctype: "Article", name: "Launch" }
         }
       });
     };
@@ -124,10 +124,10 @@ describe("cf-frappe CLI remote web views", () => {
       cwd: () => process.cwd(),
       fetch
     })).toBe(0);
-    expect(itemsStdout.text()).toContain("launch Article/Launch");
+    expect(itemsStdout.text()).toContain("news/launch Article/Launch");
 
     const itemStdout = textBuffer();
-    expect(await runCli(["web-views", "item", "--url", "https://app.example", "--web-view", "Articles", "--route", "launch"], {
+    expect(await runCli(["web-views", "item", "--url", "https://app.example", "--web-view", "Articles/View", "--route", "news/launch"], {
       stdout: itemStdout,
       stderr: textBuffer(),
       cwd: () => process.cwd(),
@@ -139,7 +139,7 @@ describe("cf-frappe CLI remote web views", () => {
       "GET https://app.example/api/meta/web-views",
       "GET https://app.example/api/meta/web-views/Articles",
       "GET https://app.example/api/web-view/Articles?limit=2",
-      "GET https://app.example/api/web-view/Articles/launch"
+      "GET https://app.example/api/web-view/Articles%2FView/news/launch"
     ]);
   });
 });

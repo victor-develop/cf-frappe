@@ -90,7 +90,7 @@ export async function runRemoteWebViewCommand(
   }
   const data = await requestRemoteWebView(command, io, {
     method: "GET",
-    path: `/api/web-view/${encodeURIComponent(requiredWebView(command))}/${encodeURIComponent(requiredRoute(command))}`
+    path: `/api/web-view/${encodeURIComponent(requiredWebView(command))}/${encodePath(requiredRoute(command))}`
   });
   return formatWebViewItem(command.url, objectData<WebViewItemEnvelope>(data.data, "web view item"));
 }
@@ -186,6 +186,10 @@ function requiredRoute(command: WebViewRemoteCommand): string {
     return command.route;
   }
   throw new WebViewRemoteError("Web view item requires --route");
+}
+
+function encodePath(value: string): string {
+  return value.split("/").map((segment) => encodeURIComponent(segment)).join("/");
 }
 
 function webViewItemsQuery(command: WebViewRemoteCommand): URLSearchParams | undefined {

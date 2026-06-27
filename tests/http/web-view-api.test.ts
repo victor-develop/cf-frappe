@@ -67,12 +67,17 @@ describe("web view api", () => {
     await documents.create({
       actor: defaultOwner,
       doctype: "Article",
-      data: { title: "<Launch>", route: "launch", published: true, body: "Hello <world>" }
+      data: { title: "<Launch>", route: "news/launch", published: true, body: "Hello <world>" }
     });
     await documents.create({
       actor: defaultOwner,
       doctype: "Article",
       data: { title: "Draft", route: "draft", published: false, body: "Hidden" }
+    });
+    await documents.create({
+      actor: defaultOwner,
+      doctype: "Article",
+      data: { title: "Unsafe", route: "bad route", published: true, body: "Hidden unsafe route" }
     });
 
     const listed = await app.request("/api/meta/web-views");
@@ -94,14 +99,14 @@ describe("web view api", () => {
     await expect(items.json()).resolves.toMatchObject({
       data: {
         total: 1,
-        items: [{ route: "launch", title: "<Launch>", data: { body: "Hello <world>" } }]
+        items: [{ route: "news/launch", title: "<Launch>", data: { body: "Hello <world>" } }]
       }
     });
 
-    const item = await app.request("/api/web-view/Articles/launch");
+    const item = await app.request("/api/web-view/Articles/news/launch");
     expect(item.status).toBe(200);
     await expect(item.json()).resolves.toMatchObject({
-      data: { item: { route: "launch", data: { body: "Hello <world>" } } }
+      data: { item: { route: "news/launch", data: { body: "Hello <world>" } } }
     });
 
     const listPage = await app.request("/web/Articles");
@@ -109,15 +114,64 @@ describe("web view api", () => {
     const listHtml = await listPage.text();
     expect(listHtml).toContain("Published articles");
     expect(listHtml).toContain("&lt;Launch&gt;");
+    expect(listHtml).toContain('href="/web/Articles/news/launch"');
+    expect(listHtml).not.toContain("Unsafe");
 
-    const itemPage = await app.request("/web/Articles/launch");
+    const itemPage = await app.request("/web/Articles/news/launch");
     expect(itemPage.status).toBe(200);
     const itemHtml = await itemPage.text();
     expect(itemHtml).toContain("&lt;Launch&gt;");
     expect(itemHtml).toContain("Hello &lt;world&gt;");
 
+    const unsafe = await app.request("/api/web-view/Articles/bad%20route");
+    expect(unsafe.status).toBe(404);
     const draft = await app.request("/api/web-view/Articles/draft");
     expect(draft.status).toBe(404);
+  });
+
+  it("resolves encoded Web View names with nested item routes", async () => {
+    const registry = createRegistry({
+      doctypes: [articleDocType],
+      webViews: [
+        defineWebView({
+          name: "Articles/View",
+          label: "Articles",
+          doctype: "Article",
+          routeField: "route",
+          titleField: "title",
+          publishedField: "published",
+          fields: [{ field: "body", label: "Body" }]
+        })
+      ]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+    const queries = new QueryService({ registry, projections: store });
+    const app = createResourceApi({
+      registry,
+      documents,
+      queries,
+      webViews: new WebViewService({ registry, queries }),
+      actor: unsafeHeaderActorResolver
+    });
+
+    await documents.create({
+      actor: defaultOwner,
+      doctype: "Article",
+      data: { title: "Launch", route: "news/launch", published: true, body: "Nested route" }
+    });
+
+    const item = await app.request("/api/web-view/Articles%2FView/news/launch");
+    expect(item.status).toBe(200);
+    await expect(item.json()).resolves.toMatchObject({
+      data: { item: { route: "news/launch", title: "Launch" } }
+    });
+
+    const itemPage = await app.request("/web/Articles%2FView/news/launch");
+    expect(itemPage.status).toBe(200);
+    const itemHtml = await itemPage.text();
+    expect(itemHtml).toContain("Launch");
+    expect(itemHtml).toContain("Nested route");
   });
 
   it("applies the active Website Theme to public Web View pages", async () => {

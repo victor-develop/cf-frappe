@@ -33,6 +33,11 @@ export function createWebViewApi(options: WebViewApiOptions): Hono {
     return c.json({ data: result });
   });
 
+  app.get("/api/web-view/:webView/:route{.+}", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    return c.json({ data: await options.webViews.getItem(actor, c.req.param("webView"), c.req.param("route")) });
+  });
+
   app.get("/api/web-view/:webView/:route", async (c) => {
     const actor = await options.actor(c.req.raw);
     return c.json({ data: await options.webViews.getItem(actor, c.req.param("webView"), c.req.param("route")) });
@@ -43,6 +48,13 @@ export function createWebViewApi(options: WebViewApiOptions): Hono {
     const metadata = await options.webViews.getWebView(actor, c.req.param("webView"));
     const result = await options.webViews.listItems(actor, metadata.view.name);
     return html(renderWebViewList(metadata, result.items, await resolveWebsitePresentation(options.websiteSettings, actor)));
+  });
+
+  app.get("/web/:webView/:route{.+}", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const metadata = await options.webViews.getWebView(actor, c.req.param("webView"));
+    const result = await options.webViews.getItem(actor, metadata.view.name, c.req.param("route"));
+    return html(renderWebViewItem(metadata, result.item, await resolveWebsitePresentation(options.websiteSettings, actor)));
   });
 
   app.get("/web/:webView/:route", async (c) => {
@@ -63,7 +75,7 @@ function renderWebViewList(
   const title = metadata.view.label ?? metadata.view.name;
   const description = metadata.view.description ? `<p>${escapeHtml(metadata.view.description)}</p>` : "";
   const rows = items
-    .map((item) => `<li><a href="/web/${encodeURIComponent(metadata.view.name)}/${encodeURIComponent(item.route)}">${escapeHtml(item.title)}</a></li>`)
+    .map((item) => `<li><a href="/web/${encodeURIComponent(metadata.view.name)}/${encodePath(item.route)}">${escapeHtml(item.title)}</a></li>`)
     .join("");
   return websitePage(title, `<main><h1>${escapeHtml(title)}</h1>${description}<ul>${rows || "<li>No published items.</li>"}</ul></main>`, presentation);
 }
@@ -91,6 +103,10 @@ function formatValue(value: JsonValue): string {
     return JSON.stringify(value);
   }
   return String(value);
+}
+
+function encodePath(value: string): string {
+  return value.split("/").map((segment) => encodeURIComponent(segment)).join("/");
 }
 
 function html(body: string, status = 200): Response {

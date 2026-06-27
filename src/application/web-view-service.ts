@@ -1,5 +1,6 @@
 import { notFound, permissionDenied } from "../core/errors.js";
 import { assertWebViewMatchesDocType, canReadWebView, type WebViewDefinition } from "../core/web-view.js";
+import { isCanonicalWebPageRoute } from "../core/web-page.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { Actor, DocTypeDefinition, DocumentSnapshot, FieldDefinition, JsonValue, ListDocumentsFilter } from "../core/types.js";
 import type { QueryService } from "./query-service.js";
@@ -99,6 +100,9 @@ export class WebViewService {
 
   async getItem(actor: Actor, webViewName: string, route: string): Promise<{ readonly view: WebViewDefinition; readonly item: WebViewItem }> {
     const metadata = await this.getWebView(actor, webViewName);
+    if (!isCanonicalWebPageRoute(route)) {
+      throw notFound(`Web view '${metadata.view.name}' route '${route}' was not found`);
+    }
     const result = await this.queries.listDocuments(actor, metadata.doctype, {
       filters: [...publishedFilters(metadata), { field: metadata.routeField.field, value: route }],
       limit: 1,
@@ -163,6 +167,9 @@ function itemFromDocument(metadata: WebViewMetadata, document: DocumentSnapshot)
     return undefined;
   }
   const route = routeValue;
+  if (!isCanonicalWebPageRoute(route)) {
+    return undefined;
+  }
   const title = typeof titleValue === "string" && titleValue.trim() ? titleValue : document.name;
   const data: Record<string, JsonValue | undefined> = {};
   for (const field of metadata.fields) {

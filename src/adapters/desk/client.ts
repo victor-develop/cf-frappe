@@ -217,7 +217,7 @@ export function renderDeskClientScript(): string {
   }
 
   function webViewItemPagePath(webView, route) {
-    return webViewPagePath(webView) + "/" + encodePart(route);
+    return webViewPagePath(webView) + "/" + encodePath(route);
   }
 
   function webPagePath(route) {
@@ -405,7 +405,7 @@ export function renderDeskClientScript(): string {
   }
 
   function webViewPath(webView, route, options) {
-    var path = "/api/web-view/" + encodePart(webView) + (route === undefined ? "" : "/" + encodePart(route));
+    var path = "/api/web-view/" + encodePart(webView) + (route === undefined ? "" : "/" + encodePath(route));
     return withQuery(path, webViewParams(options || {}));
   }
 
