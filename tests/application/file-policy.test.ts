@@ -1,15 +1,22 @@
 import {
+  ensureMultipartCompletionMatchesManifest,
+  ensureMultipartPartFitsReservation,
   expectedRenditionContentType,
   fileContentTypeExtension,
   fileRenditionFilename,
   isPreviewableFileContentType,
+  MIN_MULTIPART_FILE_PART_BYTES,
+  multipartPartManifest,
+  multipartPartSize,
   normalizeContentType,
   normalizeDirectUploadExpiry,
   normalizeFileSize,
   objectKey,
   renditionObjectKey,
-  sanitizeFilename
+  sanitizeFilename,
+  upsertMultipartPartManifest
 } from "../../src";
+import type { DocumentSnapshot } from "../../src";
 
 describe("file policy", () => {
   it("normalizes content types for comparison", () => {
@@ -72,4 +79,107 @@ describe("file policy", () => {
       "file rendition key exceeds 1024 bytes"
     );
   });
+
+  it("calculates multipart part sizes without consuming stream bodies", () => {
+    expect(multipartPartSize("hello", undefined)).toBe(5);
+    expect(multipartPartSize(new Uint8Array([1, 2, 3]), undefined)).toBe(3);
+    expect(multipartPartSize(new ReadableStream(), 9)).toBe(9);
+    expect(() => multipartPartSize(new ReadableStream(), undefined)).toThrow(
+      "Multipart upload part size is required for streamed bodies"
+    );
+  });
+
+  it("reads and upserts multipart manifests deterministically", () => {
+    const snapshot = fileSnapshot({
+      multipart_parts: [
+        { partNumber: 2, etag: "two", size: 2 },
+        { partNumber: "bad", etag: "bad", size: 1 },
+        null,
+        { partNumber: 1, etag: "one", size: 1 }
+      ]
+    });
+
+    expect(multipartPartManifest(snapshot)).toEqual([
+      { partNumber: 2, etag: "two", size: 2 },
+      { partNumber: 1, etag: "one", size: 1 }
+    ]);
+    expect(
+      upsertMultipartPartManifest(multipartPartManifest(snapshot), { partNumber: 2, etag: "two-new", size: 4 })
+    ).toEqual([
+      { partNumber: 1, etag: "one", size: 1 },
+      { partNumber: 2, etag: "two-new", size: 4 }
+    ]);
+  });
+
+  it("rejects multipart parts that exceed the reserved file size", () => {
+    const snapshot = fileSnapshot({
+      size: 10,
+      multipart_parts: [{ partNumber: 1, etag: "one", size: 4 }]
+    });
+
+    expect(() => ensureMultipartPartFitsReservation(snapshot, 2, 6)).not.toThrow();
+    expect(() => ensureMultipartPartFitsReservation(snapshot, 2, 7)).toThrow(
+      "Multipart upload part exceeds reserved file size"
+    );
+    expect(() => ensureMultipartPartFitsReservation(snapshot, 1, 10)).not.toThrow();
+  });
+
+  it("validates multipart completion against recorded manifest parts", () => {
+    const snapshot = fileSnapshot({
+      size: MIN_MULTIPART_FILE_PART_BYTES + 3,
+      multipart_parts: [
+        { partNumber: 1, etag: "one", size: MIN_MULTIPART_FILE_PART_BYTES },
+        { partNumber: 2, etag: "two", size: 3 }
+      ]
+    });
+
+    expect(() =>
+      ensureMultipartCompletionMatchesManifest(snapshot, [
+        { partNumber: 2, etag: "two" },
+        { partNumber: 1, etag: "one" }
+      ])
+    ).not.toThrow();
+    expect(() =>
+      ensureMultipartCompletionMatchesManifest(snapshot, [
+        { partNumber: 1, etag: "one" },
+        { partNumber: 2, etag: "wrong" }
+      ])
+    ).toThrow("Multipart upload part 2 was not uploaded");
+    expect(() => ensureMultipartCompletionMatchesManifest({ ...snapshot, data: { ...snapshot.data, size: 1 } }, [
+      { partNumber: 1, etag: "one" },
+      { partNumber: 2, etag: "two" }
+    ])).toThrow("Multipart upload object size mismatch");
+  });
+
+  it("rejects multipart completion that violates R2 part-size rules", () => {
+    const snapshot = fileSnapshot({
+      size: MIN_MULTIPART_FILE_PART_BYTES * 2 + 2,
+      multipart_parts: [
+        { partNumber: 1, etag: "one", size: MIN_MULTIPART_FILE_PART_BYTES },
+        { partNumber: 2, etag: "two", size: MIN_MULTIPART_FILE_PART_BYTES + 1 },
+        { partNumber: 3, etag: "three", size: 1 }
+      ]
+    });
+
+    expect(() =>
+      ensureMultipartCompletionMatchesManifest(snapshot, [
+        { partNumber: 1, etag: "one" },
+        { partNumber: 2, etag: "two" },
+        { partNumber: 3, etag: "three" }
+      ])
+    ).toThrow("Multipart upload parts before the final part must be the same size");
+  });
 });
+
+function fileSnapshot(data: DocumentSnapshot["data"]): DocumentSnapshot {
+  return {
+    tenantId: "acme",
+    doctype: "File",
+    name: "file_multipart",
+    version: 1,
+    docstatus: "draft",
+    data,
+    createdAt: "2026-06-28T00:00:00.000Z",
+    updatedAt: "2026-06-28T00:00:00.000Z"
+  };
+}

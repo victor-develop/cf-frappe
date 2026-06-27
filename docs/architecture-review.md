@@ -80,3 +80,4 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Extracted fetch-from field enrichment from `DocumentService` into the document reference policy with injected readable-target lookup, covering create/update behavior, explicit-field preservation, fetch-if-empty, and unreadable targets.
 - Extracted idempotent assignment/tag/follower collection change planning from `DocumentService` into the document collaboration policy with focused add/remove noop coverage.
 - Extracted file naming, storage key, previewability, declared-size, direct-upload expiry, and rendition content-type planning from `FileService` into a pure file policy module with focused boundary coverage.
+- Extracted multipart manifest parsing, part-size detection, reservation bounds, completion manifest matching, and R2-compatible part-size checks from `FileService` into the file policy with focused coverage.

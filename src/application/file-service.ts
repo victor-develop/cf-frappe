@@ -21,10 +21,6 @@ import {
   type DocumentSnapshot,
   type JsonValue
 } from "../core/types.js";
-import {
-  ensureR2CompatibleMultipartPartSizes,
-  sortedUploadedMultipartParts
-} from "../ports/multipart-file-storage.js";
 import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
 import type { FileScanner, FileScanResult, FileScanSource, FileScanTarget } from "../ports/file-scanner.js";
@@ -49,15 +45,20 @@ import type {
   UploadedMultipartFilePart
 } from "../ports/file-storage.js";
 import {
+  ensureMultipartCompletionMatchesManifest,
+  ensureMultipartPartFitsReservation,
   expectedRenditionContentType,
   fileRenditionFilename,
   isPreviewableFileContentType,
+  multipartPartManifest,
+  multipartPartSize,
   normalizeContentType,
   normalizeDirectUploadExpiry,
   normalizeFileSize,
   objectKey,
   renditionObjectKey,
-  sanitizeFilename
+  sanitizeFilename,
+  upsertMultipartPartManifest
 } from "./file-policy.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 import { cryptoIdGenerator } from "../ports/id-generator.js";
@@ -1932,95 +1933,5 @@ function stringField(snapshot: DocumentSnapshot, field: string): string {
 function ensureExpectedVersion(snapshot: DocumentSnapshot, expectedVersion: number | undefined): void {
   if (expectedVersion !== undefined && snapshot.version !== expectedVersion) {
     throw conflict(`Expected version ${expectedVersion}, found ${snapshot.version}`);
-  }
-}
-
-interface MultipartPartManifestEntry {
-  readonly [key: string]: JsonValue;
-  readonly partNumber: number;
-  readonly etag: string;
-  readonly size: number;
-}
-
-function multipartPartSize(body: MultipartFilePartContent, size: number | undefined): number {
-  if (size !== undefined) {
-    return normalizeFileSize(size);
-  }
-  if (typeof body === "string") {
-    return new TextEncoder().encode(body).byteLength;
-  }
-  if (body instanceof Blob) {
-    return body.size;
-  }
-  if (ArrayBuffer.isView(body)) {
-    return body.byteLength;
-  }
-  if (body instanceof ReadableStream) {
-    throw badRequest("Multipart upload part size is required for streamed bodies");
-  }
-  return body.byteLength;
-}
-
-function multipartPartManifest(snapshot: DocumentSnapshot): readonly MultipartPartManifestEntry[] {
-  const value = snapshot.data.multipart_parts;
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.flatMap((entry): MultipartPartManifestEntry[] => {
-    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-      return [];
-    }
-    const part = entry as Record<string, unknown>;
-    return typeof part.partNumber === "number" &&
-      Number.isInteger(part.partNumber) &&
-      typeof part.etag === "string" &&
-      typeof part.size === "number" &&
-      Number.isInteger(part.size)
-      ? [{ partNumber: part.partNumber, etag: part.etag, size: part.size }]
-      : [];
-  });
-}
-
-function upsertMultipartPartManifest(
-  manifest: readonly MultipartPartManifestEntry[],
-  part: MultipartPartManifestEntry
-): readonly MultipartPartManifestEntry[] {
-  return [
-    ...manifest.filter((entry) => entry.partNumber !== part.partNumber),
-    part
-  ].sort((left, right) => left.partNumber - right.partNumber);
-}
-
-function ensureMultipartPartFitsReservation(
-  snapshot: DocumentSnapshot,
-  partNumber: number,
-  size: number
-): void {
-  const previousTotal = multipartPartManifest(snapshot)
-    .filter((part) => part.partNumber !== partNumber)
-    .reduce((total, part) => total + part.size, 0);
-  if (previousTotal + size > numberData(snapshot, "size")) {
-    throw badRequest("Multipart upload part exceeds reserved file size");
-  }
-}
-
-function ensureMultipartCompletionMatchesManifest(
-  snapshot: DocumentSnapshot,
-  completedParts: readonly UploadedMultipartFilePart[]
-): void {
-  const orderedParts = sortedUploadedMultipartParts(completedParts);
-  const manifest = multipartPartManifest(snapshot);
-  const manifestByPart = new Map(manifest.map((part) => [part.partNumber, part]));
-  let totalSize = 0;
-  for (const completed of orderedParts) {
-    const recorded = manifestByPart.get(completed.partNumber);
-    if (!recorded || recorded.etag !== completed.etag) {
-      throw badRequest(`Multipart upload part ${String(completed.partNumber)} was not uploaded`);
-    }
-    totalSize += recorded.size;
-  }
-  ensureR2CompatibleMultipartPartSizes(orderedParts.map((part) => manifestByPart.get(part.partNumber)?.size ?? 0));
-  if (totalSize !== numberData(snapshot, "size")) {
-    throw badRequest("Multipart upload object size mismatch");
   }
 }
