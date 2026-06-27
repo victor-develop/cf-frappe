@@ -15,9 +15,12 @@ import {
   type NewDomainEvent,
   type TenantId
 } from "../core/types.js";
+import type { RoleEventPayload } from "./role-events.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
+
+export type { RoleEventPayload } from "./role-events.js";
 
 export interface RoleServiceOptions {
   readonly events: EventStore;
@@ -161,7 +164,7 @@ export class RoleService {
     return foldRoleCatalog(tenantId, await this.events.readStream(roleCatalogStream(tenantId)));
   }
 
-  private async appendAndFold<TPayload extends NewDomainEvent["payload"]>(
+  private async appendAndFold<TPayload extends RoleEventPayload>(
     state: RoleCatalogState,
     options: {
       readonly actor: Actor;

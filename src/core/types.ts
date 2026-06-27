@@ -481,25 +481,6 @@ export type CoreDocumentEventPayload =
       readonly settings: DocumentData;
     }
   | {
-      readonly kind: "RoleCreated";
-      readonly role: string;
-      readonly enabled: boolean;
-      readonly description?: string;
-    }
-  | {
-      readonly kind: "RoleDescriptionChanged";
-      readonly role: string;
-      readonly description?: string;
-    }
-  | {
-      readonly kind: "RoleEnabled";
-      readonly role: string;
-    }
-  | {
-      readonly kind: "RoleDisabled";
-      readonly role: string;
-    }
-  | {
       readonly kind: "JobScheduleOverrideSet";
       readonly scheduleId: string;
       readonly enabled: boolean;

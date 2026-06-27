@@ -6,6 +6,7 @@ import {
   roleCatalogStream
 } from "../../src";
 import { createServices, now, owner } from "../helpers";
+import type { DocumentEventPayload, RoleEventPayload } from "../../src";
 
 const admin = {
   id: "admin@example.com",
@@ -14,6 +15,17 @@ const admin = {
 };
 
 describe("RoleService", () => {
+  it("registers role catalog payloads through the domain event extension map", () => {
+    const payload = rolePayload({
+      kind: "RoleCreated",
+      role: "Support Lead",
+      enabled: true,
+      description: "Handles escalations"
+    });
+
+    expect(payload.role).toBe("Support Lead");
+  });
+
   it("creates, updates, disables, and enables roles as catalog events", async () => {
     const { events } = createServices(["unused"]);
     const roles = new RoleService({
@@ -93,3 +105,9 @@ describe("RoleService", () => {
     await expect(roles.get(admin, "Missing")).rejects.toMatchObject({ code: "DOCUMENT_NOT_FOUND" });
   });
 });
+
+function rolePayload(
+  payload: Extract<DocumentEventPayload, { readonly kind: "RoleCreated" }>
+): Extract<RoleEventPayload, { readonly kind: "RoleCreated" }> {
+  return payload;
+}
