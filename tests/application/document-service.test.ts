@@ -16,7 +16,7 @@ import {
   namingSeriesStream,
   uniqueValueStream
 } from "../../src";
-import type { DocTypeDefinition } from "../../src";
+import type { DocTypeDefinition, DocumentEventPayload, DocumentShareEventPayload } from "../../src";
 import {
   createChildTableServices,
   createLinkedServices,
@@ -1737,6 +1737,16 @@ describe("DocumentService", () => {
     ).resolves.toMatchObject({ grants: [] });
   });
 
+  it("registers document share payloads through the domain event extension map", () => {
+    const payload = documentSharePayload({
+      kind: "DocumentShared",
+      userId: "collab@example.com",
+      permissions: ["read", "update"]
+    });
+
+    expect(payload.permissions).toEqual(["read", "update"]);
+  });
+
   it("allows shared users to read, update, and delegate only granted document actions", async () => {
     const { documents, queries } = createServices(["e1", "share-read", "share-update", "share-delegate", "update-1"]);
     const collaborator = { ...owner, id: "collab@example.com" };
@@ -3033,3 +3043,9 @@ describe("DocumentService", () => {
     });
   });
 });
+
+function documentSharePayload(
+  payload: Extract<DocumentEventPayload, { readonly kind: "DocumentShared" }>
+): Extract<DocumentShareEventPayload, { readonly kind: "DocumentShared" }> {
+  return payload;
+}

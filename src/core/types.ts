@@ -370,15 +370,6 @@ export type CoreDocumentEventPayload =
       readonly followerId: string;
     }
   | {
-      readonly kind: "DocumentShared";
-      readonly userId: string;
-      readonly permissions: readonly import("./document-shares.js").DocumentSharePermission[];
-    }
-  | {
-      readonly kind: "DocumentShareRevoked";
-      readonly userId: string;
-    }
-  | {
       readonly kind: "WorkflowTransitioned";
       readonly action: string;
       readonly from: string;

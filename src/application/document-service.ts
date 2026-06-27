@@ -28,6 +28,7 @@ import {
   normalizeValidDocumentShareGrant,
   normalizeValidDocumentShareUserId
 } from "./document-collaboration-policy.js";
+import type { DocumentShareEventPayload } from "./document-share-events.js";
 import {
   allowOnSubmitIssues,
   childTableOriginIssues,
@@ -74,6 +75,8 @@ import {
   validationFailed,
   type FrameworkErrorCode
 } from "../core/errors.js";
+
+export type { DocumentShareEventPayload } from "./document-share-events.js";
 
 export interface DocumentServiceOptions {
   readonly registry: ModelRegistry;
@@ -1172,6 +1175,11 @@ export class DocumentService implements DocumentCommandExecutor {
     if (current && documentShareGrantKey(current) === documentShareGrantKey(grant)) {
       return existing;
     }
+    const payload: DocumentShareEventPayload = {
+      kind: "DocumentShared",
+      userId: grant.userId,
+      permissions: grant.permissions
+    };
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,
@@ -1181,11 +1189,7 @@ export class DocumentService implements DocumentCommandExecutor {
       documentName: command.name,
       actorId: command.actor.id,
       occurredAt: now,
-      payload: {
-        kind: "DocumentShared",
-        userId: grant.userId,
-        permissions: grant.permissions
-      },
+      payload,
       metadata: command.metadata ?? {}
     });
     return this.commitActivityEvent(doctype, existing, stream, event);
@@ -1206,6 +1210,10 @@ export class DocumentService implements DocumentCommandExecutor {
     if (state.grants.every((grant) => grant.userId !== userId)) {
       return existing;
     }
+    const payload: DocumentShareEventPayload = {
+      kind: "DocumentShareRevoked",
+      userId
+    };
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,
@@ -1215,10 +1223,7 @@ export class DocumentService implements DocumentCommandExecutor {
       documentName: command.name,
       actorId: command.actor.id,
       occurredAt: now,
-      payload: {
-        kind: "DocumentShareRevoked",
-        userId
-      },
+      payload,
       metadata: command.metadata ?? {}
     });
     return this.commitActivityEvent(doctype, existing, stream, event);
