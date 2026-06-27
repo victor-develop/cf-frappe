@@ -30,6 +30,13 @@ import {
 } from "./document-collaboration-policy.js";
 import type { DocumentCommandEventPayload } from "./document-command-events.js";
 import type { DocumentCollaborationEventPayload } from "./document-collaboration-events.js";
+import {
+  documentCreatedPayload,
+  documentDeletedPayload,
+  documentStatusChangedPayload,
+  documentUpdatedPayload,
+  snapshotFromDocumentCreatedEvent
+} from "./document-lifecycle-events.js";
 import type { DocumentShareEventPayload } from "./document-share-events.js";
 import {
   allowOnSubmitIssues,
@@ -80,6 +87,7 @@ import {
 
 export type { DocumentCommandEventPayload } from "./document-command-events.js";
 export type { DocumentCollaborationEventPayload } from "./document-collaboration-events.js";
+export type { DocumentLifecycleEventPayload } from "./document-lifecycle-events.js";
 export type { DocumentShareEventPayload } from "./document-share-events.js";
 
 export interface DocumentServiceOptions {
@@ -526,11 +534,7 @@ export class DocumentService implements DocumentCommandExecutor {
       documentName: name,
       actorId: command.actor.id,
       occurredAt: now,
-      payload: {
-        kind: "DocumentCreated",
-        data,
-        docstatus: "draft"
-      },
+      payload: documentCreatedPayload(data, "draft"),
       metadata: command.metadata ?? {}
     });
     const commit = await this.store.commitBatch(
@@ -545,7 +549,7 @@ export class DocumentService implements DocumentCommandExecutor {
       (savedEvents) => {
         const saved = requireSavedEvent(savedEvents, event.id);
         return {
-          snapshot: snapshotFromCreate(saved),
+          snapshot: snapshotFromDocumentCreatedEvent(saved),
           auxiliarySnapshots: uniqueReservationWrites.map((write) =>
             this.projectUniqueReservationWrite(write, requireSavedEvent(savedEvents, write.event.id))
           )
@@ -736,11 +740,7 @@ export class DocumentService implements DocumentCommandExecutor {
       nextReservations,
       now
     );
-    const payload = {
-      kind: "DocumentUpdated" as const,
-      patch: normalizedPatch,
-      ...(unset.length === 0 ? {} : { unset })
-    };
+    const payload = documentUpdatedPayload(normalizedPatch, unset);
     const event = this.newEvent({
       tenantId: options.tenantId,
       stream: options.stream,
@@ -1259,7 +1259,7 @@ export class DocumentService implements DocumentCommandExecutor {
       documentName: command.name,
       actorId: command.actor.id,
       occurredAt: now,
-      payload: { kind: "DocumentDeleted" },
+      payload: documentDeletedPayload(),
       metadata: command.metadata ?? {}
     });
     const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
@@ -1580,7 +1580,7 @@ export class DocumentService implements DocumentCommandExecutor {
       documentName: options.command.name,
       actorId: options.command.actor.id,
       occurredAt: now,
-      payload: { kind: options.payloadKind },
+      payload: documentStatusChangedPayload(options.payloadKind),
       metadata: options.command.metadata ?? {}
     });
     const commit = await this.store.commit(options.stream, options.existing.version, [event], ([saved]) => {
@@ -1904,25 +1904,18 @@ export class DocumentService implements DocumentCommandExecutor {
         actorId: actor.id,
         occurredAt,
         payload: existing
-          ? {
-              kind: "DocumentUpdated",
-              patch: {
-                active: true,
-                documentName: reservation.documentName
-              }
-            }
-          : {
-              kind: "DocumentCreated",
-              data: {
-                doctype: reservation.doctype,
-                field: reservation.field,
-                value: reservation.valueLabel,
-                valueKey: reservation.valueKey,
-                documentName: reservation.documentName,
-                active: true
-              },
-              docstatus: "draft"
-            },
+          ? documentUpdatedPayload({
+              active: true,
+              documentName: reservation.documentName
+            })
+          : documentCreatedPayload({
+              doctype: reservation.doctype,
+              field: reservation.field,
+              value: reservation.valueLabel,
+              valueKey: reservation.valueKey,
+              documentName: reservation.documentName,
+              active: true
+            }, "draft"),
         metadata: { target_doctype: reservation.doctype, target_field: reservation.field }
       })
     }));
@@ -1933,7 +1926,7 @@ export class DocumentService implements DocumentCommandExecutor {
     saved: DomainEvent
   ): DocumentSnapshot {
     if (!write.existing) {
-      return snapshotFromCreate(saved);
+      return snapshotFromDocumentCreatedEvent(saved);
     }
     return {
       ...write.existing,
@@ -1977,10 +1970,7 @@ export class DocumentService implements DocumentCommandExecutor {
           documentName: `${reservation.doctype}:${reservation.field}:${reservation.valueKey}`,
           actorId: actor.id,
           occurredAt,
-          payload: {
-            kind: "DocumentUpdated",
-            patch: { active: false }
-          },
+          payload: documentUpdatedPayload({ active: false }),
           metadata: { target_doctype: reservation.doctype, target_field: reservation.field }
         });
         await this.store.commit(reservation.stream, existing.version, [event], ([saved]) => {
@@ -2063,15 +2053,8 @@ export class DocumentService implements DocumentCommandExecutor {
         actorId: context.actor.id,
         occurredAt: context.now,
         payload: existing
-          ? {
-              kind: "DocumentUpdated",
-              patch: { current: next }
-            }
-          : {
-              kind: "DocumentCreated",
-              data: { doctype: doctype.name, pattern, current: next },
-              docstatus: "draft"
-            },
+          ? documentUpdatedPayload({ current: next })
+          : documentCreatedPayload({ doctype: doctype.name, pattern, current: next }, "draft"),
         metadata: { target_doctype: doctype.name }
       });
       try {
@@ -2080,7 +2063,7 @@ export class DocumentService implements DocumentCommandExecutor {
             throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
           }
           if (!existing) {
-            return snapshotFromCreate(saved);
+            return snapshotFromDocumentCreatedEvent(saved);
           }
           return {
             ...existing,
@@ -2252,22 +2235,6 @@ function numberField(value: unknown): number | undefined {
 
 function isDocumentConflict(error: unknown): boolean {
   return error instanceof FrameworkError && error.code === "DOCUMENT_CONFLICT";
-}
-
-function snapshotFromCreate(event: DomainEvent): DocumentSnapshot {
-  if (event.payload.kind !== "DocumentCreated") {
-    throw new Error("Expected DocumentCreated event");
-  }
-  return {
-    tenantId: event.tenantId,
-    doctype: event.doctype,
-    name: event.documentName,
-    version: event.sequence,
-    docstatus: event.payload.docstatus as DocStatus,
-    data: event.payload.data,
-    createdAt: event.occurredAt,
-    updatedAt: event.occurredAt
-  };
 }
 
 function requireSavedEvent(events: readonly DomainEvent[], id: string): DomainEvent {
