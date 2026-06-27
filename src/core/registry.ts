@@ -24,6 +24,7 @@ import type { ReportDefinition, ReportSummaryDefinition } from "./reports.js";
 import { assertReportDefinition, assertReportFilterValues, assertReportMatchesDocType } from "./reports.js";
 import type { InstalledAppDefinition } from "./app.js";
 import { assertWebFormDefinition, assertWebFormMatchesDocType, defineWebForm, type WebFormDefinition } from "./web-form.js";
+import { assertWebPageDefinition, defineWebPage, type WebPageDefinition } from "./web-page.js";
 import { assertWebViewDefinition, assertWebViewMatchesDocType, defineWebView, type WebViewDefinition } from "./web-view.js";
 import { assertWorkspaceDefinition, defineWorkspace, type WorkspaceDefinition } from "./workspace.js";
 import type {
@@ -65,6 +66,7 @@ export interface RegistryOptions {
   readonly kanbans?: readonly KanbanDefinition[];
   readonly calendars?: readonly CalendarDefinition[];
   readonly webForms?: readonly WebFormDefinition[];
+  readonly webPages?: readonly WebPageDefinition[];
   readonly webViews?: readonly WebViewDefinition[];
   readonly workspaces?: readonly WorkspaceDefinition[];
   readonly clientScripts?: readonly ClientScriptDefinition[];
@@ -82,6 +84,7 @@ export class ModelRegistry {
   private readonly kanbans = new Map<string, KanbanDefinition>();
   private readonly calendars = new Map<string, CalendarDefinition>();
   private readonly webForms = new Map<string, WebFormDefinition>();
+  private readonly webPages = new Map<string, WebPageDefinition>();
   private readonly webViews = new Map<string, WebViewDefinition>();
   private readonly workspaces = new Map<string, WorkspaceDefinition>();
   private readonly clientScripts = new Map<string, ClientScriptDefinition>();
@@ -113,6 +116,9 @@ export class ModelRegistry {
     }
     for (const webForm of options.webForms ?? []) {
       this.registerWebForm(webForm);
+    }
+    for (const webPage of options.webPages ?? []) {
+      this.registerWebPage(webPage);
     }
     for (const webView of options.webViews ?? []) {
       this.registerWebView(webView);
@@ -340,6 +346,22 @@ export class ModelRegistry {
     this.webViews.set(definition.name, definition);
   }
 
+  registerWebPage(webPage: WebPageDefinition): void {
+    const definition = defineWebPage(webPage);
+    if (this.webPages.has(definition.name)) {
+      throw new FrameworkError("WEB_PAGE_DUPLICATE", `Web page '${definition.name}' is already registered`, {
+        status: 409
+      });
+    }
+    if ([...this.webPages.values()].some((page) => page.route === definition.route)) {
+      throw new FrameworkError("WEB_PAGE_DUPLICATE", `Web page route '${definition.route}' is already registered`, {
+        status: 409
+      });
+    }
+    assertWebPageDefinition(definition);
+    this.webPages.set(definition.name, definition);
+  }
+
   registerWorkspace(workspace: WorkspaceDefinition): void {
     const definition = defineWorkspace(workspace);
     if (this.workspaces.has(definition.name)) {
@@ -465,6 +487,20 @@ export class ModelRegistry {
 
   listWebViews(): readonly WebViewDefinition[] {
     return [...this.webViews.values()].sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  getWebPage(webPageName: string): WebPageDefinition {
+    const definition = this.webPages.get(webPageName);
+    if (!definition) {
+      throw new FrameworkError("WEB_PAGE_NOT_FOUND", `Web page '${webPageName}' is not registered`, {
+        status: 404
+      });
+    }
+    return definition;
+  }
+
+  listWebPages(): readonly WebPageDefinition[] {
+    return [...this.webPages.values()].sort((left, right) => left.name.localeCompare(right.name));
   }
 
   getPrintFormat(formatName: string): PrintFormatDefinition {

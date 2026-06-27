@@ -11,6 +11,7 @@ import {
   defineDataPatch,
   defineDocType,
   defineKanban,
+  defineWebPage,
   defineWebForm,
   defineWebView,
   deterministicIds,
@@ -355,6 +356,38 @@ describe("CloudFrappe Worker routing", () => {
     await expect(items.json()).resolves.toMatchObject({ data: { view: { name: "Articles" }, items: [] } });
     expect(page.status).toBe(200);
     await expect(page.text()).resolves.toContain("Published articles");
+  });
+
+  it("mounts metadata Web Page API and public routes through Worker routing", async () => {
+    const registry = createRegistry({
+      webPages: [
+        defineWebPage({
+          name: "About",
+          route: "about",
+          title: "About",
+          description: "Public website page",
+          sections: [{ body: "Built on Cloudflare Workers" }]
+        })
+      ]
+    });
+    const worker = createCloudFrappeWorker({
+      registry,
+      actor: () => ({ id: "guest", roles: ["Guest"], tenantId: "acme" })
+    });
+    const env = {
+      DB: fakeD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const metadata = await worker.fetch!(cfRequest("http://localhost/api/meta/web-pages"), env, fakeExecutionContext());
+    const page = await worker.fetch!(cfRequest("http://localhost/page/about"), env, fakeExecutionContext());
+
+    expect(metadata.status).toBe(200);
+    await expect(metadata.json()).resolves.toMatchObject({
+      data: [{ name: "About", route: "about", title: "About" }]
+    });
+    expect(page.status).toBe(200);
+    await expect(page.text()).resolves.toContain("Built on Cloudflare Workers");
   });
 
   it("enables generated Desk document presence panels when realtime is configured", async () => {

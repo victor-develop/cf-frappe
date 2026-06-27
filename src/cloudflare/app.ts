@@ -35,6 +35,7 @@ import { UserNotificationService } from "../application/user-notification-servic
 import { UserProfileService } from "../application/user-profile-service.js";
 import { UserPermissionService } from "../application/user-permission-service.js";
 import { WebFormService } from "../application/web-form-service.js";
+import { WebPageService } from "../application/web-page-service.js";
 import { WebViewService } from "../application/web-view-service.js";
 import { WorkflowService } from "../application/workflow-service.js";
 import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator.js";
@@ -118,6 +119,7 @@ export interface CloudFrappeRuntimeServices {
   readonly kanbans: KanbanService;
   readonly calendars: CalendarService;
   readonly webForms: WebFormService;
+  readonly webPages: WebPageService;
   readonly webViews: WebViewService;
   readonly roles: RoleService;
   readonly savedReports: SavedReportService;
@@ -398,6 +400,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   const kanbans = new KanbanService({ registry: options.registry, queries: restrictedQueries });
   const calendars = new CalendarService({ registry: options.registry, queries: restrictedQueries });
   const webForms = new WebFormService({ registry: options.registry, documents, queries: restrictedQueries });
+  const webPages = new WebPageService({ registry: options.registry });
   const webViews = new WebViewService({ registry: options.registry, queries: restrictedQueries });
   const roles = new RoleService({
     events,
@@ -438,6 +441,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     kanbans,
     calendars,
     webForms,
+    webPages,
     webViews,
     roles,
     savedReports
@@ -560,6 +564,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     kanbans,
     calendars,
     webForms,
+    webPages,
     webViews,
     roles,
     ...(printPdfRenderer === undefined ? {} : { printPdfRenderer }),

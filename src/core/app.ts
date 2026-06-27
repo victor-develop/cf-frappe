@@ -10,6 +10,7 @@ import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-f
 import type { ReportDefinition } from "./reports.js";
 import type { DocTypeDefinition } from "./types.js";
 import type { WebFormDefinition } from "./web-form.js";
+import type { WebPageDefinition } from "./web-page.js";
 import type { WebViewDefinition } from "./web-view.js";
 import type { WorkspaceDefinition } from "./workspace.js";
 
@@ -27,6 +28,7 @@ export interface FrameworkAppDefinition<TDataPatchResources = unknown> {
   readonly kanbans?: readonly KanbanDefinition[];
   readonly calendars?: readonly CalendarDefinition[];
   readonly webForms?: readonly WebFormDefinition[];
+  readonly webPages?: readonly WebPageDefinition[];
   readonly webViews?: readonly WebViewDefinition[];
   readonly workspaces?: readonly WorkspaceDefinition[];
   readonly clientScripts?: readonly ClientScriptDefinition[];
@@ -59,6 +61,7 @@ export function defineApp<TDataPatchResources = unknown>(
     kanbans: Object.freeze([...(input.kanbans ?? [])]),
     calendars: Object.freeze([...(input.calendars ?? [])]),
     webForms: Object.freeze([...(input.webForms ?? [])]),
+    webPages: Object.freeze([...(input.webPages ?? [])]),
     webViews: Object.freeze([...(input.webViews ?? [])]),
     workspaces: Object.freeze([...(input.workspaces ?? [])]),
     clientScripts: Object.freeze([...(input.clientScripts ?? [])]),
@@ -93,6 +96,7 @@ export function registryOptionsFromApps<TDataPatchResources = unknown>(
     kanbans: orderedApps.flatMap((app) => app.kanbans ?? []),
     calendars: orderedApps.flatMap((app) => app.calendars ?? []),
     webForms: orderedApps.flatMap((app) => app.webForms ?? []),
+    webPages: orderedApps.flatMap((app) => app.webPages ?? []),
     webViews: orderedApps.flatMap((app) => app.webViews ?? []),
     workspaces: orderedApps.flatMap((app) => app.workspaces ?? []),
     clientScripts: orderedApps.flatMap((app) => app.clientScripts ?? []),

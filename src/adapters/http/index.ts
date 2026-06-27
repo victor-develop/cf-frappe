@@ -26,5 +26,6 @@ export * from "./user-account-api.js";
 export * from "./user-permission-api.js";
 export * from "./user-profile-api.js";
 export * from "./web-form-api.js";
+export * from "./web-page-api.js";
 export * from "./web-view-api.js";
 export * from "./workflow-api.js";
