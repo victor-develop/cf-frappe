@@ -1,5 +1,6 @@
 import { badRequest, conflict, notFound } from "../core/errors.js";
 import { documentDeliveryOutboxStream } from "../core/streams.js";
+import type { DocumentDeliveryOutboxTarget } from "./document-delivery-outbox-events.js";
 import type {
   DocumentData,
   DocumentSnapshot,
@@ -11,11 +12,12 @@ import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
 
+export type { DocumentDeliveryOutboxEventPayload, DocumentDeliveryOutboxTarget } from "./document-delivery-outbox-events.js";
+
 const MAX_OUTBOX_APPEND_ATTEMPTS = 5;
 const DEFAULT_CLAIM_LIMIT = 25;
 const MAX_CLAIM_LIMIT = 100;
 
-export type DocumentDeliveryOutboxTarget = "notification" | "realtime" | "email";
 export type DocumentDeliveryOutboxStatus = "pending" | "claimed" | "delivered" | "failed";
 
 export interface DocumentDeliveryOutboxServiceOptions {

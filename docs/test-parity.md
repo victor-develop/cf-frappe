@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the durable document delivery outbox Worker wiring slice:
+As of the domain event payload extension-map slice:
 
 - Vitest files: `156`
-- Vitest cases: `1498`
+- Vitest cases: `1499`
 
 ## Implication
 

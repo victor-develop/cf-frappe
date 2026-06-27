@@ -6,12 +6,28 @@ import {
   fixedClock,
   deterministicIds
 } from "../../src";
-import type { DomainEvent, DocumentSnapshot } from "../../src";
+import type { DocumentDeliveryOutboxEventPayload, DocumentEventPayload, DomainEvent, DocumentSnapshot } from "../../src";
 
 const now = "2026-01-01T00:00:00.000Z";
 const later = "2026-01-01T00:05:00.000Z";
 
 describe("DocumentDeliveryOutboxService", () => {
+  it("registers document delivery outbox payloads through the domain event extension map", () => {
+    const payload = documentDeliveryOutboxPayload({
+      kind: "DocumentDeliveryOutboxEnqueued",
+      outboxId: "evt_source:notification",
+      target: "notification",
+      sourceEventId: "evt_source",
+      sourceEventType: "NoteAssigned",
+      payloadKind: "DocumentAssigned",
+      doctype: "Note",
+      documentName: "One",
+      actorId: "owner@example.com"
+    });
+
+    expect(payload.target).toBe("notification");
+  });
+
   it("enqueues document delivery intents idempotently from committed domain events", async () => {
     const events = new InMemoryDocumentStore();
     const outbox = new DocumentDeliveryOutboxService({
@@ -125,6 +141,12 @@ describe("DocumentDeliveryOutboxService", () => {
     ]);
   });
 });
+
+function documentDeliveryOutboxPayload(
+  payload: Extract<DocumentEventPayload, { readonly kind: "DocumentDeliveryOutboxEnqueued" }>
+): Extract<DocumentDeliveryOutboxEventPayload, { readonly kind: "DocumentDeliveryOutboxEnqueued" }> {
+  return payload;
+}
 
 function domainEvent(): DomainEvent {
   return {
