@@ -42,6 +42,7 @@ export interface FieldDefinition {
   readonly readOnlyDependsOn?: ListFilterExpression;
   readonly hidden?: boolean;
   readonly hiddenDependsOn?: ListFilterExpression;
+  readonly printHide?: boolean;
   readonly unique?: boolean;
   readonly noCopy?: boolean;
   readonly allowOnSubmit?: boolean;
@@ -72,6 +73,7 @@ export interface FieldPropertyOverrides {
   readonly readOnlyDependsOn?: ListFilterExpression;
   readonly hidden?: boolean;
   readonly hiddenDependsOn?: ListFilterExpression;
+  readonly printHide?: boolean;
   readonly noCopy?: boolean;
   readonly allowOnSubmit?: boolean;
   readonly fetchFrom?: string;

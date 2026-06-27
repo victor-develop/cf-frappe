@@ -4146,6 +4146,7 @@ describe("Desk app", () => {
     expect(emptyHtml).toContain('name="mandatoryDependsOn"');
     expect(emptyHtml).toContain('name="readOnlyDependsOn"');
     expect(emptyHtml).toContain('name="hiddenDependsOn"');
+    expect(emptyHtml).toContain('name="printHide"');
     expect(emptyHtml).toContain('name="fetchFrom"');
     expect(emptyHtml).toContain('name="fetchIfEmpty"');
     expect(emptyHtml).toContain('name="defaultValue"');
@@ -4162,6 +4163,7 @@ describe("Desk app", () => {
         mandatoryDependsOn: JSON.stringify({ field: "priority", value: "High" }),
         readOnlyDependsOn: JSON.stringify({ field: "priority", value: "Low" }),
         hiddenDependsOn: JSON.stringify({ field: "priority", operator: "is", value: "not set" }),
+        printHide: "1",
         unique: "1",
         noCopy: "1",
         allowOnSubmit: "1",
@@ -4185,6 +4187,7 @@ describe("Desk app", () => {
             mandatoryDependsOn: { field: "priority", value: "High" },
             readOnlyDependsOn: { field: "priority", value: "Low" },
             hiddenDependsOn: { field: "priority", operator: "is", value: "not set" },
+            printHide: true,
             unique: true,
             noCopy: true,
             allowOnSubmit: true,
@@ -4204,6 +4207,7 @@ describe("Desk app", () => {
     expect(currentHtml).toContain("mandatory depends on");
     expect(currentHtml).toContain("read only depends on");
     expect(currentHtml).toContain("hidden depends on");
+    expect(currentHtml).toContain("print hide");
     expect(currentHtml).toContain("unique");
     expect(currentHtml).toContain("no copy");
     expect(currentHtml).toContain("allow on submit");
@@ -5116,6 +5120,7 @@ describe("Desk app", () => {
     expect(emptyHtml).toContain('name="mandatoryDependsOn"');
     expect(emptyHtml).toContain('name="readOnlyDependsOn"');
     expect(emptyHtml).toContain('name="hiddenDependsOn"');
+    expect(emptyHtml).toContain('name="printHide"');
     expect(emptyHtml).toContain('name="fetchFrom"');
     expect(emptyHtml).toContain('name="fetchIfEmpty"');
     expect(emptyHtml).toContain("No field property overrides configured.");
@@ -5130,6 +5135,7 @@ describe("Desk app", () => {
         mandatoryDependsOn: JSON.stringify({ field: "title", operator: "is", value: "set" }),
         readOnlyDependsOn: JSON.stringify({ field: "workflow_state", value: "Closed" }),
         hiddenDependsOn: JSON.stringify({ field: "title", operator: "is", value: "not set" }),
+        printHide: "true",
         noCopy: "true",
         allowOnSubmit: "true",
         inListFilter: "true",
@@ -5152,6 +5158,7 @@ describe("Desk app", () => {
             mandatoryDependsOn: { field: "title", operator: "is", value: "set" },
             readOnlyDependsOn: { field: "workflow_state", value: "Closed" },
             hiddenDependsOn: { field: "title", operator: "is", value: "not set" },
+            printHide: true,
             noCopy: true,
             allowOnSubmit: true,
             inListFilter: true,
@@ -5169,6 +5176,7 @@ describe("Desk app", () => {
     expect(currentHtml).toContain("mandatory depends on");
     expect(currentHtml).toContain("read only depends on");
     expect(currentHtml).toContain("hidden depends on");
+    expect(currentHtml).toContain("print hide: true");
     expect(currentHtml).toContain("no copy: true");
     expect(currentHtml).toContain("allow on submit: true");
     expect(currentHtml).toContain("options: Low, High");

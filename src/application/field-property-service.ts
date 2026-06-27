@@ -223,6 +223,7 @@ function normalizeOverrides(field: FieldDefinition, overrides: FieldPropertyOver
     ...(overrides.readOnlyDependsOn === undefined ? {} : { readOnlyDependsOn: overrides.readOnlyDependsOn }),
     ...optionalBoolean(overrides.hidden, "hidden", "hidden"),
     ...(overrides.hiddenDependsOn === undefined ? {} : { hiddenDependsOn: overrides.hiddenDependsOn }),
+    ...optionalBoolean(overrides.printHide, "printHide", "printHide"),
     ...optionalBoolean(overrides.noCopy, "noCopy", "noCopy"),
     ...optionalBoolean(overrides.allowOnSubmit, "allowOnSubmit", "allowOnSubmit"),
     ...optionalTrimmedString(overrides.fetchFrom, "fetchFrom", "fetchFrom"),

@@ -1,4 +1,4 @@
-import { PrintService, definePrintFormat, definePrintLetterhead } from "../../src";
+import { PrintService, defineDocType, definePrintFormat, definePrintLetterhead } from "../../src";
 import { createServices, data, guest, owner } from "../helpers";
 
 describe("PrintService", () => {
@@ -33,6 +33,53 @@ describe("PrintService", () => {
         }
       ]
     });
+  });
+
+  it("omits print-hidden DocType fields from section view models", async () => {
+    const { registry, documents, prints } = createServices(["e1"]);
+    registry.registerDocType(defineDocType({
+      name: "Printable Secret",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "public_note", type: "text" },
+        { name: "internal_note", type: "longText", printHide: true }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read", "create"] }]
+    }));
+    registry.registerPrintFormat(definePrintFormat({
+      name: "Printable Secret Standard",
+      doctype: "Printable Secret",
+      sections: [
+        {
+          heading: "Summary",
+          fields: [
+            { field: "title", label: "Title" },
+            { field: "public_note", label: "Public Note" },
+            { field: "internal_note", label: "Internal Note" }
+          ]
+        }
+      ],
+      roles: ["User"]
+    }));
+    await documents.create({
+      actor: owner,
+      doctype: "Printable Secret",
+      data: { title: "Public Memo", public_note: "Share this", internal_note: "Do not print" }
+    });
+
+    const view = await prints.printDocument(owner, "Printable Secret Standard", "Public Memo");
+
+    expect(view.hiddenPrintFields).toEqual(["internal_note"]);
+    expect(view.sections).toEqual([
+      {
+        heading: "Summary",
+        fields: [
+          { field: "title", label: "Title", value: "Public Memo" },
+          { field: "public_note", label: "Public Note", value: "Share this" }
+        ]
+      }
+    ]);
   });
 
   it("builds template-only print view models without field sections", async () => {

@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the conditional hidden field metadata slice:
+As of the print-hide field metadata slice:
 
 - Vitest files: `150`
-- Vitest cases: `1469`
+- Vitest cases: `1471`
 
 ## Implication
 

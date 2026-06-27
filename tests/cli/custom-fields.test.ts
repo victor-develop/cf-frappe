@@ -207,6 +207,7 @@ describe("cf-frappe CLI remote custom fields", () => {
                   mandatoryDependsOn: { field: "status", value: "Open" },
                   readOnlyDependsOn: { field: "status", value: "Closed" },
                   hiddenDependsOn: { field: "status", operator: "is", value: "not set" },
+                  printHide: true,
                   unique: true,
                   noCopy: true,
                   allowOnSubmit: true,
@@ -229,7 +230,7 @@ describe("cf-frappe CLI remote custom fields", () => {
     expect(calls[0]?.headers.get("authorization")).toBe("Bearer test-token");
     expect(stdout.text()).toContain("Custom fields at https://app.example/cf");
     expect(stdout.text()).toContain("DocType: Sales Invoice Tenant: acme/east Version: 2 Total: 1");
-    expect(stdout.text()).toContain('- reviewer enabled type link label "Reviewer" help "Person responsible for review." target User [mandatoryDependsOn,readOnlyDependsOn,hiddenDependsOn,unique,noCopy,allowOnSubmit,fetchFrom=reviewer.full_name,fetchIfEmpty,form]');
+    expect(stdout.text()).toContain('- reviewer enabled type link label "Reviewer" help "Person responsible for review." target User [mandatoryDependsOn,readOnlyDependsOn,hiddenDependsOn,printHide,unique,noCopy,allowOnSubmit,fetchFrom=reviewer.full_name,fetchIfEmpty,form]');
     expect(stdout.text()).toContain("{\"name\":\"reviewer\"");
   });
 
@@ -245,7 +246,7 @@ describe("cf-frappe CLI remote custom fields", () => {
         "--doctype",
         "Task",
         "--field-json",
-        "{\"name\":\"reviewer\",\"type\":\"link\",\"label\":\"Reviewer\",\"description\":\"Person responsible for review.\",\"linkTo\":\"User\",\"mandatoryDependsOn\":{\"field\":\"status\",\"value\":\"Open\"},\"readOnlyDependsOn\":{\"field\":\"status\",\"value\":\"Closed\"},\"hiddenDependsOn\":{\"field\":\"status\",\"operator\":\"is\",\"value\":\"not set\"},\"unique\":true,\"noCopy\":true,\"allowOnSubmit\":true,\"fetchFrom\":\"reviewer.full_name\",\"fetchIfEmpty\":true,\"inFormView\":true,\"defaultValue\":\"owner@example.com\"}",
+        "{\"name\":\"reviewer\",\"type\":\"link\",\"label\":\"Reviewer\",\"description\":\"Person responsible for review.\",\"linkTo\":\"User\",\"mandatoryDependsOn\":{\"field\":\"status\",\"value\":\"Open\"},\"readOnlyDependsOn\":{\"field\":\"status\",\"value\":\"Closed\"},\"hiddenDependsOn\":{\"field\":\"status\",\"operator\":\"is\",\"value\":\"not set\"},\"printHide\":true,\"unique\":true,\"noCopy\":true,\"allowOnSubmit\":true,\"fetchFrom\":\"reviewer.full_name\",\"fetchIfEmpty\":true,\"inFormView\":true,\"defaultValue\":\"owner@example.com\"}",
         "--tenant",
         "acme/east",
         "--expected-version",
@@ -270,6 +271,7 @@ describe("cf-frappe CLI remote custom fields", () => {
                   mandatoryDependsOn: { field: "status", value: "Open" },
                   readOnlyDependsOn: { field: "status", value: "Closed" },
                   hiddenDependsOn: { field: "status", operator: "is", value: "not set" },
+                  printHide: true,
                   unique: true,
                   noCopy: true,
                   allowOnSubmit: true,
@@ -300,6 +302,7 @@ describe("cf-frappe CLI remote custom fields", () => {
         mandatoryDependsOn: { field: "status", value: "Open" },
         readOnlyDependsOn: { field: "status", value: "Closed" },
         hiddenDependsOn: { field: "status", operator: "is", value: "not set" },
+        printHide: true,
         unique: true,
         noCopy: true,
         allowOnSubmit: true,
@@ -312,7 +315,7 @@ describe("cf-frappe CLI remote custom fields", () => {
     }));
     expect(saveStdout.text()).toContain("Saved custom field at https://app.example");
     expect(saveStdout.text()).toContain("Version: 1 Total: 1");
-    expect(saveStdout.text()).toContain('- reviewer enabled type link label "Reviewer" help "Person responsible for review." target User [mandatoryDependsOn,readOnlyDependsOn,hiddenDependsOn,unique,noCopy,allowOnSubmit,fetchFrom=reviewer.full_name,fetchIfEmpty,form]');
+    expect(saveStdout.text()).toContain('- reviewer enabled type link label "Reviewer" help "Person responsible for review." target User [mandatoryDependsOn,readOnlyDependsOn,hiddenDependsOn,printHide,unique,noCopy,allowOnSubmit,fetchFrom=reviewer.full_name,fetchIfEmpty,form]');
 
     const disableCalls: RemoteCall[] = [];
     const disableStdout = textBuffer();

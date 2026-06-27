@@ -9,7 +9,7 @@ import {
   type PrintSectionDefinition
 } from "../core/print-format.js";
 import type { ModelRegistry } from "../core/registry.js";
-import type { Actor, DocumentSnapshot, JsonValue } from "../core/types.js";
+import type { Actor, DocTypeDefinition, DocumentSnapshot, JsonValue } from "../core/types.js";
 import type { PrintSettingsService } from "./print-settings-service.js";
 import { QueryService } from "./query-service.js";
 
@@ -28,6 +28,7 @@ export interface PrintDocumentView {
   readonly format: PrintFormatDefinition;
   readonly letterhead?: PrintLetterheadDefinition;
   readonly document: DocumentSnapshot;
+  readonly hiddenPrintFields: readonly string[];
   readonly sections: readonly PrintSectionView[];
 }
 
@@ -78,15 +79,20 @@ export class PrintService {
 
   async printDocument(actor: Actor, formatName: string, name: string): Promise<PrintDocumentView> {
     const format = this.getPrintFormat(actor, formatName);
+    const doctype = this.registry.get(format.doctype);
     const document = await this.queries.getDocument(actor, format.doctype, name);
     const letterhead = format.letterhead ? this.getPrintLetterhead(actor, format.letterhead) : undefined;
     const defaultLayout = (await this.printSettings?.defaultsFor(actor))?.settings.defaultLayout;
     const layout = mergePrintLayouts(defaultLayout, format.layout);
+    const hiddenPrintFields = printHiddenFields(doctype);
     return {
       format: layout === format.layout ? format : { ...format, ...(layout === undefined ? {} : { layout }) },
       ...(letterhead ? { letterhead } : {}),
       document,
-      sections: (format.sections ?? []).map((section) => printSectionView(section, document))
+      hiddenPrintFields: [...hiddenPrintFields],
+      sections: (format.sections ?? [])
+        .map((section) => printSectionView(section, document, hiddenPrintFields))
+        .filter((section) => section.fields.length > 0)
     };
   }
 
@@ -108,13 +114,23 @@ export class PrintService {
 
 }
 
-function printSectionView(section: PrintSectionDefinition, document: DocumentSnapshot): PrintSectionView {
+function printSectionView(
+  section: PrintSectionDefinition,
+  document: DocumentSnapshot,
+  hiddenPrintFields: ReadonlySet<string>
+): PrintSectionView {
   return {
     ...(section.heading ? { heading: section.heading } : {}),
-    fields: section.fields.map((field) => ({
-      field: field.field,
-      label: field.label ?? field.field,
-      value: document.data[field.field] ?? null
-    }))
+    fields: section.fields
+      .filter((field) => !hiddenPrintFields.has(field.field))
+      .map((field) => ({
+        field: field.field,
+        label: field.label ?? field.field,
+        value: document.data[field.field] ?? null
+      }))
   };
+}
+
+function printHiddenFields(doctype: DocTypeDefinition): ReadonlySet<string> {
+  return new Set(doctype.fields.filter((field) => field.printHide).map((field) => field.name));
 }

@@ -191,6 +191,9 @@ function resolveTemplateValue(path: string, view: PrintDocumentView): JsonValue 
   if (reference.kind === "metadata") {
     return documentMetadata(reference.field, view);
   }
+  if (view.hiddenPrintFields.includes(reference.field)) {
+    return null;
+  }
   return view.document.data[reference.field] ?? null;
 }
 

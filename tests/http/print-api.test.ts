@@ -1,5 +1,6 @@
 import {
   createResourceApi,
+  defineDocType,
   definePrintFormat,
   definePrintLetterhead,
   SYSTEM_MANAGER_ROLE,
@@ -112,6 +113,59 @@ describe("print api", () => {
     expect(html).toContain("Printable");
     expect(html).not.toContain("<script>alert");
     expect(html).toContain("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;");
+  });
+
+  it("omits print-hidden DocType fields from section and template HTML", async () => {
+    const { app, services } = makeApp();
+    services.registry.registerDocType(defineDocType({
+      name: "Printable Secret",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "public_note", type: "text" },
+        { name: "internal_note", type: "longText", printHide: true }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read", "create"] }]
+    }));
+    services.registry.registerPrintFormat(definePrintFormat({
+      name: "Printable Secret Standard",
+      doctype: "Printable Secret",
+      sections: [
+        {
+          fields: [
+            { field: "title", label: "Title" },
+            { field: "public_note", label: "Public Note" },
+            { field: "internal_note", label: "Internal Note" }
+          ]
+        }
+      ],
+      roles: ["User"]
+    }));
+    services.registry.registerPrintFormat(definePrintFormat({
+      name: "Printable Secret Template",
+      doctype: "Printable Secret",
+      template: "<p>{{ doc.title }}</p><p>{{ doc.public_note }}</p><p>{{ doc.internal_note }}</p>",
+      roles: ["User"]
+    }));
+    await services.documents.create({
+      actor: owner,
+      doctype: "Printable Secret",
+      data: { title: "Public Memo", public_note: "Share this", internal_note: "Do not print" }
+    });
+
+    const sectionResponse = await app.request("/api/print/Printable%20Secret%20Standard/Public%20Memo", { headers: userHeaders });
+    const templateResponse = await app.request("/api/print/Printable%20Secret%20Template/Public%20Memo", { headers: userHeaders });
+
+    expect(sectionResponse.status).toBe(200);
+    const sectionHtml = await sectionResponse.text();
+    expect(sectionHtml).toContain("Share this");
+    expect(sectionHtml).not.toContain("Internal Note");
+    expect(sectionHtml).not.toContain("Do not print");
+
+    expect(templateResponse.status).toBe(200);
+    const templateHtml = await templateResponse.text();
+    expect(templateHtml).toContain("Share this");
+    expect(templateHtml).not.toContain("Do not print");
   });
 
   it("exposes print layout metadata and renders it into printable HTML", async () => {
