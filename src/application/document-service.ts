@@ -83,9 +83,10 @@ import {
 } from "./document-naming.js";
 import {
   isEmptyFetchedTarget,
-  isMutableData,
   parseFetchFrom,
-  relatedDocTypeNames
+  relatedDocTypeNames,
+  validateDocumentLinks,
+  type RelatedDocTypeResolver
 } from "./document-reference-policy.js";
 import { resolveTenant } from "./document-tenant-policy.js";
 import {
@@ -159,8 +160,6 @@ export type DocumentServiceDocTypeResolver = (
   base: DocTypeDefinition,
   context: { readonly actor: Actor; readonly tenantId: string }
 ) => DocTypeDefinition | Promise<DocTypeDefinition>;
-
-type RelatedDocTypeResolver = (doctype: string) => DocTypeDefinition | undefined;
 
 interface DocumentServiceDocTypeContext {
   readonly doctype: DocTypeDefinition;
@@ -1728,67 +1727,16 @@ export class DocumentService implements DocumentCommandExecutor {
     data: MutableDocumentData,
     relatedDocType: RelatedDocTypeResolver
   ): Promise<readonly ValidationIssue[]> {
-    return this.validateLinksInData(actor, tenantId, doctype, data, relatedDocType);
-  }
-
-  private async validateLinksInData(
-    actor: Actor,
-    tenantId: string,
-    doctype: DocTypeDefinition,
-    data: MutableDocumentData,
-    relatedDocType: RelatedDocTypeResolver,
-    pathPrefix = ""
-  ): Promise<readonly ValidationIssue[]> {
-    const linkableFields = doctype.fields.filter(
-      (field) =>
-        (field.type === "link" || field.type === "table") &&
-        Object.prototype.hasOwnProperty.call(data, field.name)
-    );
-    if (linkableFields.length === 0) {
-      return [];
-    }
-    const issues = await Promise.all(
-      linkableFields.map(async (field): Promise<readonly ValidationIssue[]> => {
-        const value = data[field.name];
-        const fieldPath = `${pathPrefix}${field.name}`;
-        if (field.type === "table") {
-          if (!Array.isArray(value) || !field.tableOf) {
-            return [];
-          }
-          const child = relatedDocType(field.tableOf);
-          if (!child) {
-            return [];
-          }
-          const rowIssues = await Promise.all(
-            value.map((row, index) =>
-              isMutableData(row)
-                ? this.validateLinksInData(actor, tenantId, child, row, relatedDocType, `${fieldPath}[${index}].`)
-                : Promise.resolve([])
-            )
-          );
-          return rowIssues.flat();
-        }
-        if (typeof value !== "string" || value.length === 0) {
-          return [];
-        }
-        const targetDoctype = relatedDocType(field.linkTo ?? "");
-        if (!targetDoctype) {
-          return [];
-        }
-        const target = await this.readDocumentFromEvents(tenantId, targetDoctype, value);
-        if (target && await this.canReadLinkedDocument(actor, doctype, field, targetDoctype, target)) {
-          return [];
-        }
-        return [
-          {
-            field: fieldPath,
-            code: "link_not_found",
-            message: `Field '${field.name}' references missing ${targetDoctype.name}/${value}`
-          }
-        ];
-      })
-    );
-    return issues.flat();
+    return validateDocumentLinks({
+      doctype,
+      data,
+      relatedDocType,
+      canReadLinkedTarget: async ({ sourceDoctype, field, targetDoctype, targetName }) => {
+        const target = await this.readDocumentFromEvents(tenantId, targetDoctype, targetName);
+        return target !== null &&
+          await this.canReadLinkedDocument(actor, sourceDoctype, field, targetDoctype, target);
+      }
+    });
   }
 
   private async ensureUserPermissionAccess(
