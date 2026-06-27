@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document collaboration event helper module slice:
+As of the document command and share event helper module slice:
 
-- Vitest files: `158`
-- Vitest cases: `1529`
+- Vitest files: `160`
+- Vitest cases: `1533`
 
 ## Implication
 

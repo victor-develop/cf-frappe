@@ -28,7 +28,10 @@ import {
   normalizeValidDocumentShareGrant,
   normalizeValidDocumentShareUserId
 } from "./document-collaboration-policy.js";
-import type { DocumentCommandEventPayload } from "./document-command-events.js";
+import {
+  domainCommandAppliedPayload,
+  workflowTransitionedPayload
+} from "./document-command-events.js";
 import {
   documentActivityRecordedPayload,
   documentAssignmentPayload,
@@ -47,7 +50,10 @@ import {
   documentUpdatedPayload,
   snapshotFromDocumentCreatedEvent
 } from "./document-lifecycle-events.js";
-import type { DocumentShareEventPayload } from "./document-share-events.js";
+import {
+  documentSharedPayload,
+  documentShareRevokedPayload
+} from "./document-share-events.js";
 import {
   allowOnSubmitIssues,
   childTableOriginIssues,
@@ -894,13 +900,12 @@ export class DocumentService implements DocumentCommandExecutor {
     }
 
     const patch: DocumentData = { [workflow.stateField ?? "workflow_state"]: transition.to };
-    const payload: DocumentCommandEventPayload = {
-      kind: "WorkflowTransitioned",
+    const payload = workflowTransitionedPayload({
       action: command.action,
       from: currentState,
       to: transition.to,
       patch
-    };
+    });
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,
@@ -992,12 +997,11 @@ export class DocumentService implements DocumentCommandExecutor {
       throw validationFailed(issues);
     }
 
-    const payload: DocumentCommandEventPayload = {
-      kind: "DomainCommandApplied",
+    const payload = domainCommandAppliedPayload({
       command: command.command,
       input: sanitizedInput,
       patch: patchWithReadOnlyValues
-    };
+    });
     const event = this.newEvent({
       tenantId,
       stream,
@@ -1185,11 +1189,10 @@ export class DocumentService implements DocumentCommandExecutor {
     if (current && documentShareGrantKey(current) === documentShareGrantKey(grant)) {
       return existing;
     }
-    const payload: DocumentShareEventPayload = {
-      kind: "DocumentShared",
+    const payload = documentSharedPayload({
       userId: grant.userId,
       permissions: grant.permissions
-    };
+    });
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,
@@ -1220,10 +1223,7 @@ export class DocumentService implements DocumentCommandExecutor {
     if (state.grants.every((grant) => grant.userId !== userId)) {
       return existing;
     }
-    const payload: DocumentShareEventPayload = {
-      kind: "DocumentShareRevoked",
-      userId
-    };
+    const payload = documentShareRevokedPayload(userId);
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,

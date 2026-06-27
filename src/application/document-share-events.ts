@@ -11,6 +11,27 @@ export type DocumentShareEventPayload =
       readonly userId: string;
     };
 
+export interface DocumentSharePayloadInput {
+  readonly userId: string;
+  readonly permissions: readonly DocumentSharePermission[];
+}
+
+export function documentSharedPayload(
+  input: DocumentSharePayloadInput
+): Extract<DocumentShareEventPayload, { readonly kind: "DocumentShared" }> {
+  return {
+    kind: "DocumentShared",
+    userId: input.userId,
+    permissions: input.permissions
+  };
+}
+
+export function documentShareRevokedPayload(
+  userId: string
+): Extract<DocumentShareEventPayload, { readonly kind: "DocumentShareRevoked" }> {
+  return { kind: "DocumentShareRevoked", userId };
+}
+
 declare module "../core/types.js" {
   interface DomainEventPayloadMap {
     readonly DocumentShared: Extract<
