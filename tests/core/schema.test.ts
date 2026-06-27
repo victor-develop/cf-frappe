@@ -203,6 +203,28 @@ describe("schema", () => {
     ).toThrow(FrameworkError);
   });
 
+  it("validates conditional read-only field metadata from normalized field expressions", () => {
+    const Task = defineDocType({
+      name: "Task",
+      fields: [
+        { name: "status", type: "select", options: ["Draft", "Approved"] },
+        {
+          name: "approval_note",
+          type: "text",
+          readOnlyDependsOn: { field: "status", value: "Approved" }
+        }
+      ]
+    });
+
+    expect(Object.isFrozen(Task.fields[1]?.readOnlyDependsOn)).toBe(true);
+    expect(() =>
+      defineDocType({
+        name: "Bad Read Only",
+        fields: [{ name: "approval_note", type: "text", readOnlyDependsOn: { field: "missing", value: true } }]
+      })
+    ).toThrow(FrameworkError);
+  });
+
   it("validates table rows against child DocType metadata", () => {
     const InvoiceItem = defineDocType({
       name: "Invoice Item",

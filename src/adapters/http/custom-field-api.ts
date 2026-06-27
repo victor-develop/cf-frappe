@@ -69,6 +69,7 @@ function fieldValue(value: JsonValue | undefined): FieldDefinition {
     ...optionalBoolean(value.required, "field.required", "required"),
     ...optionalListFilterExpression(value.mandatoryDependsOn, "field.mandatoryDependsOn", "mandatoryDependsOn"),
     ...optionalBoolean(value.readOnly, "field.readOnly", "readOnly"),
+    ...optionalListFilterExpression(value.readOnlyDependsOn, "field.readOnlyDependsOn", "readOnlyDependsOn"),
     ...optionalBoolean(value.hidden, "field.hidden", "hidden"),
     ...optionalBoolean(value.unique, "field.unique", "unique"),
     ...optionalBoolean(value.noCopy, "field.noCopy", "noCopy"),

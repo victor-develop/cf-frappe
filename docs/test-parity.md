@@ -23,7 +23,7 @@ Observed counts:
 As of the unique field reservation slice:
 
 - Vitest files: `150`
-- Vitest cases: `1465`
+- Vitest cases: `1467`
 
 ## Implication
 

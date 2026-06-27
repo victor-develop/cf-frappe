@@ -39,6 +39,7 @@ export function defineDocType<TData extends DocumentData>(
     assertUniqueFieldDefinition(definition, field);
     assertFetchFieldDefinition(definition, field);
     assertMandatoryDependsOnDefinition(definition, field);
+    assertReadOnlyDependsOnDefinition(definition, field);
     seen.add(field.name);
   }
   assertNamingStrategyDefinition(definition);
@@ -374,6 +375,13 @@ function assertMandatoryDependsOnDefinition(doctype: DocTypeDefinition, field: F
   normalizeListFilterExpression(doctype, field.mandatoryDependsOn, { errorCode: "DOCTYPE_FIELD_INVALID" });
 }
 
+function assertReadOnlyDependsOnDefinition(doctype: DocTypeDefinition, field: FieldDefinition): void {
+  if (field.readOnlyDependsOn === undefined) {
+    return;
+  }
+  normalizeListFilterExpression(doctype, field.readOnlyDependsOn, { errorCode: "DOCTYPE_FIELD_INVALID" });
+}
+
 function freezeFieldDefinition(doctype: DocTypeDefinition, field: FieldDefinition): FieldDefinition {
   return Object.freeze({
     ...field,
@@ -383,6 +391,13 @@ function freezeFieldDefinition(doctype: DocTypeDefinition, field: FieldDefinitio
       : {
           mandatoryDependsOn: freezeListFilterExpression(
             normalizeListFilterExpression(doctype, field.mandatoryDependsOn, { errorCode: "DOCTYPE_FIELD_INVALID" })
+          )
+        }),
+    ...(field.readOnlyDependsOn === undefined
+      ? {}
+      : {
+          readOnlyDependsOn: freezeListFilterExpression(
+            normalizeListFilterExpression(doctype, field.readOnlyDependsOn, { errorCode: "DOCTYPE_FIELD_INVALID" })
           )
         })
   });

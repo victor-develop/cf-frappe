@@ -37,6 +37,7 @@ describe("field property api", () => {
           label: "Urgency",
           description: "Pick the operational urgency.",
           mandatoryDependsOn: { field: "title", operator: "is", value: "set" },
+          readOnlyDependsOn: { field: "workflow_state", value: "Closed" },
           noCopy: true,
           allowOnSubmit: true,
           options: ["Low", "High"],
@@ -56,6 +57,7 @@ describe("field property api", () => {
               label: "Urgency",
               description: "Pick the operational urgency.",
               mandatoryDependsOn: { field: "title", operator: "is", value: "set" },
+              readOnlyDependsOn: { field: "workflow_state", value: "Closed" },
               noCopy: true,
               allowOnSubmit: true,
               options: ["Low", "High"]
@@ -75,6 +77,7 @@ describe("field property api", () => {
             label: "Urgency",
             description: "Pick the operational urgency.",
             mandatoryDependsOn: { field: "title", operator: "is", value: "set" },
+            readOnlyDependsOn: { field: "workflow_state", value: "Closed" },
             noCopy: true,
             allowOnSubmit: true,
             options: ["Low", "High"]

@@ -1641,6 +1641,7 @@ export function renderCustomFieldAdmin(state: CustomFieldAdminState): string {
       <label class="field"><span>Minimum</span><input name="min" type="number" step="any"></label>
       <label class="field"><span>Maximum</span><input name="max" type="number" step="any"></label>
       <label class="field wide"><span>Mandatory Depends On JSON</span><textarea name="mandatoryDependsOn" rows="4"></textarea></label>
+      <label class="field wide"><span>Read Only Depends On JSON</span><textarea name="readOnlyDependsOn" rows="4"></textarea></label>
       <label class="field"><span>Default JSON</span><textarea name="defaultValue"></textarea></label>
     </div>
     <div class="choices">
@@ -1714,6 +1715,7 @@ export function renderFieldPropertyAdmin(state: FieldPropertyAdminState): string
       <label class="field"><span>Required</span><select name="required">${renderBooleanOverrideOptions(overrides.required)}</select></label>
       <label class="field wide"><span>Mandatory Depends On JSON</span><textarea name="mandatoryDependsOn" rows="4">${escapeHtml(overrides.mandatoryDependsOn === undefined ? "" : JSON.stringify(overrides.mandatoryDependsOn))}</textarea></label>
       <label class="field"><span>Read Only</span><select name="readOnly">${renderBooleanOverrideOptions(overrides.readOnly)}</select></label>
+      <label class="field wide"><span>Read Only Depends On JSON</span><textarea name="readOnlyDependsOn" rows="4">${escapeHtml(overrides.readOnlyDependsOn === undefined ? "" : JSON.stringify(overrides.readOnlyDependsOn))}</textarea></label>
       <label class="field"><span>Hidden</span><select name="hidden">${renderBooleanOverrideOptions(overrides.hidden)}</select></label>
       <label class="field"><span>No Copy</span><select name="noCopy">${renderBooleanOverrideOptions(overrides.noCopy)}</select></label>
       <label class="field"><span>Allow On Submit</span><select name="allowOnSubmit">${renderBooleanOverrideOptions(overrides.allowOnSubmit)}</select></label>
@@ -2014,6 +2016,7 @@ function renderFieldPropertyOverrides(overrides: FieldPropertyOverrideState["fie
     overrides.required === undefined ? "" : `required: ${String(overrides.required)}`,
     overrides.mandatoryDependsOn === undefined ? "" : `mandatory depends on: ${JSON.stringify(overrides.mandatoryDependsOn)}`,
     overrides.readOnly === undefined ? "" : `read only: ${String(overrides.readOnly)}`,
+    overrides.readOnlyDependsOn === undefined ? "" : `read only depends on: ${JSON.stringify(overrides.readOnlyDependsOn)}`,
     overrides.hidden === undefined ? "" : `hidden: ${String(overrides.hidden)}`,
     overrides.noCopy === undefined ? "" : `no copy: ${String(overrides.noCopy)}`,
     overrides.allowOnSubmit === undefined ? "" : `allow on submit: ${String(overrides.allowOnSubmit)}`,
@@ -2109,6 +2112,7 @@ function renderCustomFieldDetails(field: FieldDefinition): string {
   return [
     field.description ? `description: ${field.description}` : "",
     field.mandatoryDependsOn ? `mandatory depends on: ${JSON.stringify(field.mandatoryDependsOn)}` : "",
+    field.readOnlyDependsOn ? `read only depends on: ${JSON.stringify(field.readOnlyDependsOn)}` : "",
     field.options && field.options.length > 0 ? `options: ${field.options.join(", ")}` : "",
     field.linkTo ? `link: ${field.linkTo}` : "",
     field.tableOf ? `table: ${field.tableOf}` : "",
@@ -2124,6 +2128,7 @@ function renderCustomFieldFlags(field: FieldDefinition): string {
     field.required ? "required" : "",
     field.mandatoryDependsOn ? "mandatory depends on" : "",
     field.readOnly ? "read only" : "",
+    field.readOnlyDependsOn ? "read only depends on" : "",
     field.hidden ? "hidden" : "",
     field.unique ? "unique" : "",
     field.noCopy ? "no copy" : "",

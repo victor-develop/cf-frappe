@@ -23,6 +23,7 @@ import {
   type DocumentFieldMergePlan,
   type DocumentMergeSnapshot
 } from "../core/document-merge.js";
+import { matchesListFilterExpression } from "../core/list-view.js";
 import { documentStream, namingSeriesStream, uniqueValueStream } from "../core/streams.js";
 import {
   documentMatchesUserPermissions,
@@ -650,7 +651,6 @@ export class DocumentService implements DocumentCommandExecutor {
       options.existing.data,
       options.relatedDocType
     );
-    const readOnlyIssues = readonlyIssues(options.doctype, patchWithoutInternalFields, options.relatedDocType);
     const normalizedPatch = preserveReadOnlyTableValues(
       options.doctype,
       patchWithFetchedFields,
@@ -658,6 +658,13 @@ export class DocumentService implements DocumentCommandExecutor {
       options.relatedDocType
     );
     const data = applyDocumentDataChange(options.existing.data, normalizedPatch, unset);
+    const readOnlyIssues = readonlyIssues(
+      options.doctype,
+      patchWithoutInternalFields,
+      options.relatedDocType,
+      data,
+      unset
+    );
     const validationIssues = await this.validate(
       options.doctype,
       normalizedPatch,
@@ -921,15 +928,16 @@ export class DocumentService implements DocumentCommandExecutor {
       { existing }
     );
     const originIssues = childTableOriginIssues(doctype, patchWithFetchedFields, existing.data, relatedDocType);
-    const readOnlyIssues = commandDefinition.allowReadOnlyFields
-      ? []
-      : readonlyIssues(doctype, patchWithoutInternalFields, relatedDocType);
     const patchWithReadOnlyValues = preserveReadOnlyTableValues(
       doctype,
       patchWithFetchedFields,
       existing,
       relatedDocType
     );
+    const data = applyDocumentDataChange(existing.data, patchWithReadOnlyValues, []);
+    const readOnlyIssues = commandDefinition.allowReadOnlyFields
+      ? []
+      : readonlyIssues(doctype, patchWithoutInternalFields, relatedDocType, data);
     const validationIssues = await this.validate(doctype, patchWithReadOnlyValues, relatedDocType, existing);
     const linkIssues = await this.validateLinks(command.actor, tenantId, doctype, patchWithReadOnlyValues, relatedDocType);
     const issues = [...originIssues, ...readOnlyIssues, ...validationIssues, ...linkIssues];
@@ -2502,16 +2510,37 @@ function relatedDocTypeNames(doctype: DocTypeDefinition): readonly string[] {
 function readonlyIssues(
   doctype: DocTypeDefinition,
   patch: MutableDocumentData,
-  relatedDocType: (doctype: string) => DocTypeDefinition | undefined
+  relatedDocType: (doctype: string) => DocTypeDefinition | undefined,
+  finalData: DocumentData = compactData(patch),
+  unset: readonly string[] = []
 ): readonly ValidationIssue[] {
-  const readonlyFields = new Set(doctype.fields.filter((field) => field.readOnly).map((field) => field.name));
-  const topLevelIssues = Object.keys(patch)
-    .filter((field) => readonlyFields.has(field))
-    .map((field) => ({
-      field,
-      code: "readonly",
-      message: `Field '${field}' is read only`
-    }));
+  const fields = new Map(doctype.fields.map((field) => [field.name, field]));
+  const finalDocument = documentSnapshotForFieldCondition(doctype, finalData);
+  const patchIssues = Object.keys(patch)
+    .flatMap((fieldName) => {
+      const field = fields.get(fieldName);
+      if (!field || !fieldIsReadOnly(field, finalDocument)) {
+        return [];
+      }
+      return [{
+        field: fieldName,
+        code: "readonly",
+        message: `Field '${fieldName}' is read only`
+      }];
+    });
+  const unsetIssues = unset
+    .filter((fieldName) => !Object.prototype.hasOwnProperty.call(patch, fieldName))
+    .flatMap((fieldName) => {
+      const field = fields.get(fieldName);
+      if (!field || field.readOnly === true || !conditionalReadOnlyApplies(field, finalDocument)) {
+        return [];
+      }
+      return [{
+        field: fieldName,
+        code: "readonly",
+        message: `Field '${fieldName}' is read only`
+      }];
+    });
   const childIssues = doctype.fields
     .filter((field) => field.type === "table" && Object.prototype.hasOwnProperty.call(patch, field.name))
     .flatMap((field) => {
@@ -2523,16 +2552,46 @@ function readonlyIssues(
       if (!child) {
         return [];
       }
+      const finalRowsValue = finalData[field.name];
+      const finalRows = Array.isArray(finalRowsValue) ? finalRowsValue : [];
       return value.flatMap((row, index) =>
         isMutableData(row)
-          ? readonlyIssues(child, row, relatedDocType).map((issue) => ({
+          ? readonlyIssues(
+              child,
+              row,
+              relatedDocType,
+              isMutableData(finalRows[index])
+                ? compactData(finalRows[index] as MutableDocumentData)
+                : compactData(row)
+            ).map((issue) => ({
               ...issue,
               field: `${field.name}[${index}]${issue.field ? `.${issue.field}` : ""}`
             }))
           : []
       );
     });
-  return [...topLevelIssues, ...childIssues];
+  return [...patchIssues, ...unsetIssues, ...childIssues];
+}
+
+function fieldIsReadOnly(field: FieldDefinition, document: DocumentSnapshot): boolean {
+  return field.readOnly === true || conditionalReadOnlyApplies(field, document);
+}
+
+function conditionalReadOnlyApplies(field: FieldDefinition, document: DocumentSnapshot): boolean {
+  return field.readOnlyDependsOn !== undefined && matchesListFilterExpression(document, field.readOnlyDependsOn);
+}
+
+function documentSnapshotForFieldCondition(doctype: DocTypeDefinition, data: DocumentData): DocumentSnapshot {
+  return {
+    tenantId: "",
+    doctype: doctype.name,
+    name: "",
+    version: 0,
+    docstatus: "draft",
+    data,
+    createdAt: "",
+    updatedAt: ""
+  };
 }
 
 function allowOnSubmitIssues(

@@ -220,6 +220,7 @@ function normalizeOverrides(field: FieldDefinition, overrides: FieldPropertyOver
     ...optionalBoolean(overrides.required, "required", "required"),
     ...(overrides.mandatoryDependsOn === undefined ? {} : { mandatoryDependsOn: overrides.mandatoryDependsOn }),
     ...optionalBoolean(overrides.readOnly, "readOnly", "readOnly"),
+    ...(overrides.readOnlyDependsOn === undefined ? {} : { readOnlyDependsOn: overrides.readOnlyDependsOn }),
     ...optionalBoolean(overrides.hidden, "hidden", "hidden"),
     ...optionalBoolean(overrides.noCopy, "noCopy", "noCopy"),
     ...optionalBoolean(overrides.allowOnSubmit, "allowOnSubmit", "allowOnSubmit"),

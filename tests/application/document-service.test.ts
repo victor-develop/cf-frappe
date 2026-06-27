@@ -322,6 +322,80 @@ describe("DocumentService", () => {
     });
   });
 
+  it("enforces conditional read-only fields against final update state", async () => {
+    const Approval = defineDocType({
+      name: "Approval",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "status", type: "select", options: ["Draft", "Approved"], defaultValue: "Draft" },
+        {
+          name: "approval_note",
+          type: "text",
+          readOnlyDependsOn: { field: "status", value: "Approved" }
+        }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry: createRegistry({ doctypes: [Approval] }),
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["approval-1", "approval-2", "approval-3", "approval-4"])
+    });
+
+    await documents.create({
+      actor: owner,
+      doctype: "Approval",
+      data: { title: "Expense", approval_note: "Draft note" }
+    });
+    await expect(
+      documents.update({
+        actor: owner,
+        doctype: "Approval",
+        name: "Expense",
+        patch: { approval_note: "Still editable in draft" },
+        expectedVersion: 1
+      })
+    ).resolves.toMatchObject({
+      version: 2,
+      data: { approval_note: "Still editable in draft" }
+    });
+    await expect(
+      documents.update({
+        actor: owner,
+        doctype: "Approval",
+        name: "Expense",
+        patch: { status: "Approved", approval_note: "Too late" },
+        expectedVersion: 2
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "approval_note", code: "readonly" })]
+    });
+    await documents.update({
+      actor: owner,
+      doctype: "Approval",
+      name: "Expense",
+      patch: { status: "Approved" },
+      expectedVersion: 2
+    });
+    await expect(
+      documents.update({
+        actor: owner,
+        doctype: "Approval",
+        name: "Expense",
+        patch: {},
+        unset: ["approval_note"],
+        expectedVersion: 3
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "approval_note", code: "readonly" })]
+    });
+  });
+
   it("uses the event stream, not stale projection state, as the write authority", async () => {
     const { documents, projections } = createServices(["e1", "e2"]);
     await documents.create({ actor: owner, doctype: "Note", data: data() });

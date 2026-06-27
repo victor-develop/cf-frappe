@@ -47,6 +47,7 @@ interface CustomFieldResponse {
   readonly required?: boolean;
   readonly mandatoryDependsOn?: unknown;
   readonly readOnly?: boolean;
+  readonly readOnlyDependsOn?: unknown;
   readonly hidden?: boolean;
   readonly unique?: boolean;
   readonly noCopy?: boolean;
@@ -181,6 +182,7 @@ function fieldFlags(field: CustomFieldResponse): readonly string[] {
     ...(field.required ? ["required"] : []),
     ...(field.mandatoryDependsOn ? ["mandatoryDependsOn"] : []),
     ...(field.readOnly ? ["readOnly"] : []),
+    ...(field.readOnlyDependsOn ? ["readOnlyDependsOn"] : []),
     ...(field.hidden ? ["hidden"] : []),
     ...(field.unique ? ["unique"] : []),
     ...(field.noCopy ? ["noCopy"] : []),
