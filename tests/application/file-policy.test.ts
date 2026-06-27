@@ -13,6 +13,7 @@ import {
   fileContentLength,
   fileContentTypeExtension,
   fileDashboardEntry,
+  fileDashboardListFilters,
   fileDocumentData,
   fileMetadataPatch,
   fileMultipartCompletionStartedPatch,
@@ -36,6 +37,7 @@ import {
   normalizeBulkFileSelections,
   normalizeContentType,
   normalizeDirectUploadExpiry,
+  normalizeFileDashboardFilters,
   normalizeFileDashboardLimit,
   normalizeFileSize,
   objectKey,
@@ -644,6 +646,50 @@ describe("file policy", () => {
     expect(() => normalizeFileDashboardLimit(0)).toThrow("File dashboard limit must be between 1 and 200");
     expect(() => normalizeFileDashboardLimit(201)).toThrow("File dashboard limit must be between 1 and 200");
     expect(() => normalizeFileDashboardLimit(1.5)).toThrow("File dashboard limit must be between 1 and 200");
+  });
+
+  it("normalizes file dashboard filters", () => {
+    expect(normalizeFileDashboardFilters({
+      attachedToDoctype: " Invoice ",
+      attachedToName: "",
+      filename: " invoice ",
+      contentType: " application/pdf ",
+      uploadedBy: " owner@example.com ",
+      storageState: " available ",
+      scanStatus: " clean ",
+      isPrivate: false
+    })).toEqual({
+      attachedToDoctype: "Invoice",
+      filename: "invoice",
+      contentType: "application/pdf",
+      uploadedBy: "owner@example.com",
+      storageState: "available",
+      scanStatus: "clean",
+      isPrivate: false
+    });
+    expect(normalizeFileDashboardFilters({ attachedToDoctype: "   " })).toEqual({});
+  });
+
+  it("maps file dashboard filters to list document filters", () => {
+    expect(fileDashboardListFilters({
+      attachedToDoctype: "Invoice",
+      attachedToName: "INV-1",
+      filename: "invoice",
+      contentType: "pdf",
+      uploadedBy: "owner@example.com",
+      storageState: "available",
+      scanStatus: "clean",
+      isPrivate: true
+    })).toEqual([
+      { field: "attached_to_doctype", operator: "eq", value: "Invoice" },
+      { field: "attached_to_name", operator: "eq", value: "INV-1" },
+      { field: "filename", operator: "contains", value: "invoice" },
+      { field: "content_type", operator: "contains", value: "pdf" },
+      { field: "uploaded_by", operator: "eq", value: "owner@example.com" },
+      { field: "storage_state", operator: "eq", value: "available" },
+      { field: "scan_status", operator: "eq", value: "clean" },
+      { field: "is_private", operator: "eq", value: true }
+    ]);
   });
 
   it("projects file dashboard entries from snapshots", () => {

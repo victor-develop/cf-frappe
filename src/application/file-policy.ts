@@ -1,5 +1,11 @@
 import { badRequest, conflict, FrameworkError } from "../core/errors.js";
-import { DEFAULT_TENANT_ID, type DocumentData, type DocumentSnapshot, type JsonValue } from "../core/types.js";
+import {
+  DEFAULT_TENANT_ID,
+  type DocumentData,
+  type DocumentSnapshot,
+  type JsonValue,
+  type ListDocumentsFilter
+} from "../core/types.js";
 import type {
   FileTransformOverlayPlacement,
   FileTransformOverlaySource,
@@ -534,6 +540,56 @@ export interface FileDashboardEntryView {
   readonly renditions?: readonly FileRenditionView[];
 }
 
+export interface FileDashboardFilterQuery {
+  readonly attachedToDoctype?: string;
+  readonly attachedToName?: string;
+  readonly filename?: string;
+  readonly contentType?: string;
+  readonly uploadedBy?: string;
+  readonly storageState?: string;
+  readonly scanStatus?: string;
+  readonly isPrivate?: boolean;
+}
+
+export interface FileDashboardFilters {
+  readonly attachedToDoctype?: string;
+  readonly attachedToName?: string;
+  readonly filename?: string;
+  readonly contentType?: string;
+  readonly uploadedBy?: string;
+  readonly storageState?: string;
+  readonly scanStatus?: string;
+  readonly isPrivate?: boolean;
+}
+
+export function normalizeFileDashboardFilters(query: FileDashboardFilterQuery): FileDashboardFilters {
+  return {
+    ...optionalTextFilter("attachedToDoctype", query.attachedToDoctype),
+    ...optionalTextFilter("attachedToName", query.attachedToName),
+    ...optionalTextFilter("filename", query.filename),
+    ...optionalTextFilter("contentType", query.contentType),
+    ...optionalTextFilter("uploadedBy", query.uploadedBy),
+    ...optionalTextFilter("storageState", query.storageState),
+    ...optionalTextFilter("scanStatus", query.scanStatus),
+    ...(query.isPrivate === undefined ? {} : { isPrivate: query.isPrivate })
+  };
+}
+
+export function fileDashboardListFilters(filters: FileDashboardFilters): readonly ListDocumentsFilter[] {
+  return [
+    ...fileTextListFilter("attached_to_doctype", "eq", filters.attachedToDoctype),
+    ...fileTextListFilter("attached_to_name", "eq", filters.attachedToName),
+    ...fileTextListFilter("filename", "contains", filters.filename),
+    ...fileTextListFilter("content_type", "contains", filters.contentType),
+    ...fileTextListFilter("uploaded_by", "eq", filters.uploadedBy),
+    ...fileTextListFilter("storage_state", "eq", filters.storageState),
+    ...fileTextListFilter("scan_status", "eq", filters.scanStatus),
+    ...(filters.isPrivate === undefined
+      ? []
+      : [{ field: "is_private", operator: "eq" as const, value: filters.isPrivate }])
+  ];
+}
+
 export function fileRenditions(snapshot: DocumentSnapshot): readonly FileRenditionManifestEntry[] {
   const value = snapshot.data.renditions;
   if (!Array.isArray(value)) {
@@ -753,6 +809,19 @@ function ensureFileObjectKeyFits(key: string, message: string): void {
 function snapshotNumberData(snapshot: DocumentSnapshot, field: string): number {
   const value = snapshot.data[field];
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function optionalTextFilter<TKey extends string>(key: TKey, value: string | undefined): { readonly [K in TKey]?: string } {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed === "" ? {} : { [key]: trimmed } as { readonly [K in TKey]: string };
+}
+
+function fileTextListFilter(
+  field: string,
+  operator: "eq" | "contains",
+  value: string | undefined
+): readonly ListDocumentsFilter[] {
+  return value === undefined ? [] : [{ field, operator, value }];
 }
 
 function isRenditionManifestEntry(value: JsonValue): value is FileRenditionManifestEntry {

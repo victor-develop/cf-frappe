@@ -56,6 +56,7 @@ import {
   failedFileRendition,
   fileContentLength,
   fileDashboardEntry,
+  fileDashboardListFilters,
   fileDocumentData,
   fileMetadataPatch,
   fileMultipartCompletionStartedPatch,
@@ -72,6 +73,7 @@ import {
   multipartPartManifest,
   multipartPartSize,
   normalizeBulkFileSelections,
+  normalizeFileDashboardFilters,
   normalizeFileDashboardLimit,
   normalizeDirectUploadExpiry,
   normalizeFileSize,
@@ -739,42 +741,8 @@ export class FileService {
 
   async dashboard(actor: Actor, query: FileDashboardQuery = {}): Promise<FileDashboard> {
     const limit = normalizeFileDashboardLimit(query.limit);
-    const filters = {
-      ...optionalTextFilter("attachedToDoctype", query.attachedToDoctype),
-      ...optionalTextFilter("attachedToName", query.attachedToName),
-      ...optionalTextFilter("filename", query.filename),
-      ...optionalTextFilter("contentType", query.contentType),
-      ...optionalTextFilter("uploadedBy", query.uploadedBy),
-      ...optionalTextFilter("storageState", query.storageState),
-      ...optionalTextFilter("scanStatus", query.scanStatus),
-      ...(query.isPrivate === undefined ? {} : { isPrivate: query.isPrivate })
-    };
-    const listFilters = [
-      ...(filters.attachedToDoctype === undefined
-        ? []
-        : [{ field: "attached_to_doctype", operator: "eq" as const, value: filters.attachedToDoctype }]),
-      ...(filters.attachedToName === undefined
-        ? []
-        : [{ field: "attached_to_name", operator: "eq" as const, value: filters.attachedToName }]),
-      ...(filters.filename === undefined
-        ? []
-        : [{ field: "filename", operator: "contains" as const, value: filters.filename }]),
-      ...(filters.contentType === undefined
-        ? []
-        : [{ field: "content_type", operator: "contains" as const, value: filters.contentType }]),
-      ...(filters.uploadedBy === undefined
-        ? []
-        : [{ field: "uploaded_by", operator: "eq" as const, value: filters.uploadedBy }]),
-      ...(filters.storageState === undefined
-        ? []
-        : [{ field: "storage_state", operator: "eq" as const, value: filters.storageState }]),
-      ...(filters.scanStatus === undefined
-        ? []
-        : [{ field: "scan_status", operator: "eq" as const, value: filters.scanStatus }]),
-      ...(filters.isPrivate === undefined
-        ? []
-        : [{ field: "is_private", operator: "eq" as const, value: filters.isPrivate }])
-    ];
+    const filters = normalizeFileDashboardFilters(query);
+    const listFilters = fileDashboardListFilters(filters);
     const doctype = this.registry.get(this.fileDoctype);
     const files: FileDashboardEntry[] = [];
     const tenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
@@ -1355,11 +1323,6 @@ export class FileService {
     }
     return result;
   }
-}
-
-function optionalTextFilter<TKey extends string>(key: TKey, value: string | undefined): { readonly [K in TKey]?: string } {
-  const trimmed = value?.trim();
-  return trimmed === undefined || trimmed === "" ? {} : { [key]: trimmed } as { readonly [K in TKey]: string };
 }
 
 function bulkDeleteFailure(name: string, error: unknown): BulkDeleteFileFailure {
