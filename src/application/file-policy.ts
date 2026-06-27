@@ -283,6 +283,71 @@ export function fileScanPatch(result: FileScanResult, checkedAt: string): Docume
   };
 }
 
+export interface FileDocumentDataCommand {
+  readonly filename: string;
+  readonly key: string;
+  readonly contentType: string;
+  readonly size: number;
+  readonly isPrivate: boolean;
+  readonly uploadedBy: string;
+  readonly uploadedAt: string;
+  readonly storageState: "available" | "upload_pending";
+  readonly attachedTo?: {
+    readonly doctype: string;
+    readonly name: string;
+  };
+  readonly directUploadExpiresAt?: string;
+  readonly scannerConfigured?: boolean;
+}
+
+export function fileDocumentData(command: FileDocumentDataCommand): DocumentData {
+  return {
+    filename: command.filename,
+    key: command.key,
+    content_type: command.contentType,
+    size: command.size,
+    is_private: command.isPrivate,
+    uploaded_by: command.uploadedBy,
+    uploaded_at: command.uploadedAt,
+    storage_state: command.storageState,
+    ...(command.directUploadExpiresAt === undefined ? {} : { direct_upload_expires_at: command.directUploadExpiresAt }),
+    ...(command.scannerConfigured === true ? { scan_status: "pending" } : {}),
+    ...(command.attachedTo === undefined
+      ? {}
+      : {
+          attached_to_doctype: command.attachedTo.doctype,
+          attached_to_name: command.attachedTo.name
+        })
+  };
+}
+
+export function fileMultipartUploadDocumentData(data: DocumentData, uploadId: string): DocumentData {
+  return {
+    ...data,
+    multipart_upload_id: uploadId
+  };
+}
+
+export function fileUploadCompletedPatch(object: FileObjectMetadata, scanPatch: DocumentData = {}): DocumentData {
+  return {
+    storage_state: "available",
+    etag: object.httpEtag ?? object.etag,
+    ...scanPatch
+  };
+}
+
+export function fileUploadScanFailedPatch(object: FileObjectMetadata, scanPatch: DocumentData = {}): DocumentData {
+  return {
+    storage_state: "scan_failed",
+    etag: object.httpEtag ?? object.etag,
+    ...scanPatch
+  };
+}
+
+export function fileMultipartCompletionStartedPatch(): DocumentData {
+  return { storage_state: "upload_completing" };
+}
+
 export function fileScanFailureError(result: FileScanResult, snapshot: DocumentSnapshot): FrameworkError {
   const message = fileSnapshotStringData(snapshot, "scan_message") || result.message;
   return new FrameworkError(

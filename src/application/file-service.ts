@@ -56,6 +56,9 @@ import {
   failedFileRendition,
   fileContentLength,
   fileDashboardEntry,
+  fileDocumentData,
+  fileMultipartCompletionStartedPatch,
+  fileMultipartUploadDocumentData,
   fileMultipartUploadId,
   fileRenditionId,
   fileRenditionFilename,
@@ -63,6 +66,8 @@ import {
   fileRenditionView,
   fileScanFailureError,
   fileScanPatch,
+  fileUploadCompletedPatch,
+  fileUploadScanFailedPatch,
   multipartPartManifest,
   multipartPartSize,
   normalizeBulkFileSelections,
@@ -401,22 +406,17 @@ export class FileService {
     await this.validateAttachmentTarget(command.actor, tenantId, command.attachedTo);
     const fileName = this.ids.next("file_");
     const key = objectKey(tenantId, fileName, filename);
-    const data: DocumentData = {
+    const data = fileDocumentData({
       filename,
       key,
-      content_type: contentType,
+      contentType,
       size,
-      is_private: command.isPrivate ?? true,
-      uploaded_by: command.actor.id,
-      uploaded_at: this.clock.now(),
-      storage_state: "available",
-      ...(command.attachedTo
-        ? {
-            attached_to_doctype: command.attachedTo.doctype,
-            attached_to_name: command.attachedTo.name
-          }
-        : {})
-    };
+      isPrivate: command.isPrivate ?? true,
+      uploadedBy: command.actor.id,
+      uploadedAt: this.clock.now(),
+      storageState: "available",
+      ...(command.attachedTo === undefined ? {} : { attachedTo: command.attachedTo })
+    });
     this.preflightCreate(command.actor, data);
     const object = await this.storage.put({
       key,
@@ -453,9 +453,7 @@ export class FileService {
           tenantId,
           data: {
             ...data,
-            storage_state: "scan_failed",
-            etag: object.httpEtag ?? object.etag,
-            ...scanPatch
+            ...fileUploadScanFailedPatch(object, scanPatch)
           },
           eventType: "FileScanFailed",
           metadata: command.metadata ?? {}
@@ -469,8 +467,7 @@ export class FileService {
         tenantId,
         data: {
           ...data,
-          etag: object.httpEtag ?? object.etag,
-          ...scanPatch
+          ...fileUploadCompletedPatch(object, scanPatch)
         },
         metadata: command.metadata ?? {}
       });
@@ -497,24 +494,19 @@ export class FileService {
     const fileName = this.ids.next("file_");
     const key = objectKey(tenantId, fileName, filename);
     const expiresAt = addSeconds(this.clock.now(), normalizeDirectUploadExpiry(command.expiresInSeconds));
-    const data: DocumentData = {
+    const data = fileDocumentData({
       filename,
       key,
-      content_type: contentType,
+      contentType,
       size,
-      is_private: command.isPrivate ?? true,
-      uploaded_by: command.actor.id,
-      uploaded_at: this.clock.now(),
-      storage_state: "upload_pending",
-      direct_upload_expires_at: expiresAt,
-      ...(this.scanner === undefined ? {} : { scan_status: "pending" }),
-      ...(command.attachedTo
-        ? {
-            attached_to_doctype: command.attachedTo.doctype,
-            attached_to_name: command.attachedTo.name
-          }
-        : {})
-    };
+      isPrivate: command.isPrivate ?? true,
+      uploadedBy: command.actor.id,
+      uploadedAt: this.clock.now(),
+      storageState: "upload_pending",
+      directUploadExpiresAt: expiresAt,
+      scannerConfigured: this.scanner !== undefined,
+      ...(command.attachedTo === undefined ? {} : { attachedTo: command.attachedTo })
+    });
     this.preflightCreate(command.actor, data);
     const upload = await this.storage.createDirectUpload({
       key,
@@ -562,11 +554,7 @@ export class FileService {
         doctype: this.fileDoctype,
         name: command.name,
         command: "failScan",
-        input: {
-          storage_state: "scan_failed",
-          etag: object.httpEtag ?? object.etag,
-          ...scanPatch
-        },
+        input: fileUploadScanFailedPatch(object, scanPatch),
         ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
         ...(command.expectedVersion === undefined ? {} : { expectedVersion: command.expectedVersion }),
         metadata: command.metadata ?? {}
@@ -579,11 +567,7 @@ export class FileService {
       doctype: this.fileDoctype,
       name: command.name,
       command: "completeDirectUpload",
-      input: {
-        storage_state: "available",
-        etag: object.httpEtag ?? object.etag,
-        ...scanPatch
-      },
+      input: fileUploadCompletedPatch(object, scanPatch),
       ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
       ...(command.expectedVersion === undefined ? {} : { expectedVersion: command.expectedVersion }),
       metadata: command.metadata ?? {}
@@ -606,24 +590,19 @@ export class FileService {
     const fileName = this.ids.next("file_");
     const key = objectKey(tenantId, fileName, filename);
     const expiresAt = addSeconds(this.clock.now(), normalizeDirectUploadExpiry(command.expiresInSeconds));
-    const baseData: DocumentData = {
+    const baseData = fileDocumentData({
       filename,
       key,
-      content_type: contentType,
+      contentType,
       size,
-      is_private: command.isPrivate ?? true,
-      uploaded_by: command.actor.id,
-      uploaded_at: this.clock.now(),
-      storage_state: "upload_pending",
-      direct_upload_expires_at: expiresAt,
-      ...(this.scanner === undefined ? {} : { scan_status: "pending" }),
-      ...(command.attachedTo
-        ? {
-            attached_to_doctype: command.attachedTo.doctype,
-            attached_to_name: command.attachedTo.name
-          }
-        : {})
-    };
+      isPrivate: command.isPrivate ?? true,
+      uploadedBy: command.actor.id,
+      uploadedAt: this.clock.now(),
+      storageState: "upload_pending",
+      directUploadExpiresAt: expiresAt,
+      scannerConfigured: this.scanner !== undefined,
+      ...(command.attachedTo === undefined ? {} : { attachedTo: command.attachedTo })
+    });
     this.preflightCreate(command.actor, baseData);
     const upload = await this.storage.multipartUploads.createMultipartUpload({
       key,
@@ -640,10 +619,7 @@ export class FileService {
         doctype: this.fileDoctype,
         name: fileName,
         tenantId,
-        data: {
-          ...baseData,
-          multipart_upload_id: upload.uploadId
-        },
+        data: fileMultipartUploadDocumentData(baseData, upload.uploadId),
         eventType: "FileMultipartUploadReserved",
         metadata: command.metadata ?? {}
       });
@@ -697,7 +673,7 @@ export class FileService {
           doctype: this.fileDoctype,
           name: command.name,
           command: "beginMultipartUploadCompletion",
-          input: { storage_state: "upload_completing" },
+          input: fileMultipartCompletionStartedPatch(),
           ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
           ...(command.expectedVersion === undefined ? {} : { expectedVersion: command.expectedVersion }),
           metadata: command.metadata ?? {}
@@ -722,11 +698,7 @@ export class FileService {
         doctype: this.fileDoctype,
         name: command.name,
         command: "failScan",
-        input: {
-          storage_state: "scan_failed",
-          etag: object.httpEtag ?? object.etag,
-          ...scanPatch
-        },
+        input: fileUploadScanFailedPatch(object, scanPatch),
         ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
         expectedVersion: completing.version,
         metadata: command.metadata ?? {}
@@ -739,11 +711,7 @@ export class FileService {
       doctype: this.fileDoctype,
       name: command.name,
       command: "completeMultipartUpload",
-      input: {
-        storage_state: "available",
-        etag: object.httpEtag ?? object.etag,
-        ...scanPatch
-      },
+      input: fileUploadCompletedPatch(object, scanPatch),
       ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
       expectedVersion: completing.version,
       metadata: command.metadata ?? {}

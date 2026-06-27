@@ -13,6 +13,9 @@ import {
   fileContentLength,
   fileContentTypeExtension,
   fileDashboardEntry,
+  fileDocumentData,
+  fileMultipartCompletionStartedPatch,
+  fileMultipartUploadDocumentData,
   fileMultipartUploadId,
   fileRenditionId,
   fileRenditionFilename,
@@ -21,6 +24,8 @@ import {
   fileScanFailureError,
   fileScanPatch,
   fileSnapshotStringData,
+  fileUploadCompletedPatch,
+  fileUploadScanFailedPatch,
   fileTransformOptionsData,
   fileTransformOptionsFromData,
   isPreviewableFileContentType,
@@ -41,7 +46,7 @@ import {
   upsertFileRenditionManifest,
   upsertMultipartPartManifest
 } from "../../src";
-import type { DocumentSnapshot, FileRenditionManifestEntry, FileTransformOverlaySource } from "../../src";
+import type { DocumentSnapshot, FileObjectMetadata, FileRenditionManifestEntry, FileTransformOverlaySource } from "../../src";
 
 describe("file policy", () => {
   it("normalizes content types for comparison", () => {
@@ -429,6 +434,93 @@ describe("file policy", () => {
     });
   });
 
+  it("builds file document data for buffered uploads", () => {
+    expect(fileDocumentData({
+      filename: "invoice.pdf",
+      key: "acme/files/file_1-invoice.pdf",
+      contentType: "application/pdf",
+      size: 42,
+      isPrivate: false,
+      uploadedBy: "owner@example.com",
+      uploadedAt: "2026-06-28T00:00:00.000Z",
+      storageState: "available",
+      attachedTo: { doctype: "Invoice", name: "INV-1" }
+    })).toEqual({
+      filename: "invoice.pdf",
+      key: "acme/files/file_1-invoice.pdf",
+      content_type: "application/pdf",
+      size: 42,
+      is_private: false,
+      uploaded_by: "owner@example.com",
+      uploaded_at: "2026-06-28T00:00:00.000Z",
+      storage_state: "available",
+      attached_to_doctype: "Invoice",
+      attached_to_name: "INV-1"
+    });
+  });
+
+  it("builds pending upload document data with scanner and expiry fields", () => {
+    expect(fileDocumentData({
+      filename: "invoice.pdf",
+      key: "acme/files/file_1-invoice.pdf",
+      contentType: "application/pdf",
+      size: 42,
+      isPrivate: true,
+      uploadedBy: "owner@example.com",
+      uploadedAt: "2026-06-28T00:00:00.000Z",
+      storageState: "upload_pending",
+      directUploadExpiresAt: "2026-06-28T00:15:00.000Z",
+      scannerConfigured: true
+    })).toEqual({
+      filename: "invoice.pdf",
+      key: "acme/files/file_1-invoice.pdf",
+      content_type: "application/pdf",
+      size: 42,
+      is_private: true,
+      uploaded_by: "owner@example.com",
+      uploaded_at: "2026-06-28T00:00:00.000Z",
+      storage_state: "upload_pending",
+      direct_upload_expires_at: "2026-06-28T00:15:00.000Z",
+      scan_status: "pending"
+    });
+  });
+
+  it("adds multipart upload ids to reserved file document data", () => {
+    const data = fileDocumentData({
+      filename: "invoice.pdf",
+      key: "acme/files/file_1-invoice.pdf",
+      contentType: "application/pdf",
+      size: 42,
+      isPrivate: true,
+      uploadedBy: "owner@example.com",
+      uploadedAt: "2026-06-28T00:00:00.000Z",
+      storageState: "upload_pending"
+    });
+
+    expect(fileMultipartUploadDocumentData(data, "upload-1")).toEqual({
+      ...data,
+      multipart_upload_id: "upload-1"
+    });
+  });
+
+  it("builds upload completion and scan-failure patches", () => {
+    const object = fileObject({ etag: "object-etag", httpEtag: '"http-etag"' });
+    const scan = fileScanPatch({ status: "clean" }, "2026-06-28T01:00:00.000Z");
+    expect(fileUploadCompletedPatch(object, scan)).toEqual({
+      storage_state: "available",
+      etag: '"http-etag"',
+      scan_status: "clean",
+      scan_checked_at: "2026-06-28T01:00:00.000Z"
+    });
+    expect(fileUploadScanFailedPatch(fileObject({ etag: "object-etag" }), scan)).toEqual({
+      storage_state: "scan_failed",
+      etag: "object-etag",
+      scan_status: "clean",
+      scan_checked_at: "2026-06-28T01:00:00.000Z"
+    });
+    expect(fileMultipartCompletionStartedPatch()).toEqual({ storage_state: "upload_completing" });
+  });
+
   it("builds file scan failure errors from persisted scan details first", () => {
     const fromSnapshot = fileScanFailureError(
       { status: "infected", message: "scanner fallback" },
@@ -619,14 +711,14 @@ function overlaySource(overrides: Partial<FileTransformOverlaySource> = {}): Fil
   };
 }
 
-function fileObject(overrides: Partial<ReturnType<typeof baseFileObject>> = {}): ReturnType<typeof baseFileObject> {
+function fileObject(overrides: Partial<FileObjectMetadata> = {}): FileObjectMetadata {
   return {
     ...baseFileObject(),
     ...overrides
   };
 }
 
-function baseFileObject() {
+function baseFileObject(): FileObjectMetadata {
   return {
     key: "acme/files/file_object-invoice.txt",
     size: 12,
