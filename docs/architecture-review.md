@@ -86,3 +86,4 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Extracted direct-upload object metadata matching and scanner result patch shaping from `FileService` into the file policy with focused size/content-type and optional scan-field coverage.
 - Extracted file dashboard row projection and limit normalization from `FileService` into the file policy with focused preview, attachment, scan, rendition, and limit coverage.
 - Extracted buffered file content length calculation, required/optional file snapshot string reads, expected-version checks, and scan-failure error shaping from `FileService` into the file policy with focused boundary coverage.
+- Extracted file downloadability, direct-upload and multipart-upload state guards, multipart upload id reads, and delete expected-version rules from `FileService` into the file policy with focused state-machine coverage.

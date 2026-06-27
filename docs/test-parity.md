@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file snapshot policy module slice:
+As of the file state policy module slice:
 
 - Vitest files: `169`
-- Vitest cases: `1616`
+- Vitest cases: `1621`
 
 ## Implication
 

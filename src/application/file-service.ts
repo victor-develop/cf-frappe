@@ -44,20 +44,25 @@ import type {
 } from "../ports/file-storage.js";
 import {
   completeFileRendition,
+  ensureFileAvailableForDownload,
+  ensureFileDeleteExpectedVersion,
   ensureFileExpectedVersion,
+  ensureFileNotDeleteRequested,
+  ensureFilePendingDirectUpload,
+  ensureFilePendingMultipartUpload,
   ensureDirectUploadMatches,
   ensureMultipartCompletionMatchesManifest,
   ensureMultipartPartFitsReservation,
   failedFileRendition,
   fileContentLength,
   fileDashboardEntry,
+  fileMultipartUploadId,
   fileRenditionId,
   fileRenditionFilename,
   fileRenditions,
   fileRenditionView,
   fileScanFailureError,
   fileScanPatch,
-  fileSnapshotStringData,
   multipartPartManifest,
   multipartPartSize,
   normalizeBulkFileSelections,
@@ -537,14 +542,7 @@ export class FileService {
   async completeDirectUpload(command: CompleteDirectUploadCommand): Promise<DocumentSnapshot> {
     const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
     const current = await this.queries.getDocument(command.actor, this.fileDoctype, command.name, tenantId);
-    if (current.data.storage_state === "delete_requested") {
-      throw new FrameworkError("DOCUMENT_DELETED", `${this.fileDoctype}/${command.name} is pending deletion`, {
-        status: 410
-      });
-    }
-    if (current.data.storage_state !== "upload_pending") {
-      throw badRequest(`${this.fileDoctype}/${command.name} is not pending direct upload`);
-    }
+    ensureFilePendingDirectUpload(current);
     const object = await this.storage.head(requireFileSnapshotString(current, "key"));
     if (!object) {
       throw notFound(`${this.fileDoctype}/${command.name} content was not found`);
@@ -874,11 +872,7 @@ export class FileService {
         `Actor '${command.actor.id}' cannot execute updateMetadata on ${this.fileDoctype}/${command.name}`
       );
     }
-    if (current.data.storage_state === "delete_requested") {
-      throw new FrameworkError("DOCUMENT_DELETED", `${this.fileDoctype}/${command.name} is pending deletion`, {
-        status: 410
-      });
-    }
+    ensureFileNotDeleteRequested(current);
     const patch: DocumentData = {
       ...(command.filename === undefined ? {} : { filename: sanitizeFilename(command.filename) }),
       ...(command.isPrivate === undefined ? {} : { is_private: command.isPrivate })
@@ -1198,21 +1192,7 @@ export class FileService {
       command.name,
       command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID
     );
-    if (snapshot.data.storage_state === "upload_pending" || snapshot.data.storage_state === "upload_completing") {
-      throw new FrameworkError("FILE_UPLOAD_PENDING", `${this.fileDoctype}/${command.name} upload has not been finalized`, {
-        status: 409
-      });
-    }
-    if (snapshot.data.storage_state === "scan_failed") {
-      throw new FrameworkError("FILE_SCAN_FAILED", `${this.fileDoctype}/${command.name} did not pass file scanning`, {
-        status: 409
-      });
-    }
-    if (snapshot.data.storage_state === "delete_requested") {
-      throw new FrameworkError("DOCUMENT_DELETED", `${this.fileDoctype}/${command.name} is pending deletion`, {
-        status: 410
-      });
-    }
+    ensureFileAvailableForDownload(snapshot);
     return snapshot;
   }
 
@@ -1332,13 +1312,7 @@ export class FileService {
     if (!can(actor, doctype, "delete", document)) {
       throw permissionDenied(`Actor '${actor.id}' cannot delete ${this.fileDoctype}/${document.name}`);
     }
-    if (
-      expectedVersion !== undefined &&
-      document.version !== expectedVersion &&
-      document.data.storage_state !== "delete_requested"
-    ) {
-      throw conflict(`Expected version ${expectedVersion}, found ${document.version}`);
-    }
+    ensureFileDeleteExpectedVersion(document, expectedVersion);
   }
 
   private async validateAttachmentTarget(
@@ -1365,18 +1339,7 @@ export class FileService {
   ): Promise<DocumentSnapshot> {
     const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
     const current = await this.queries.getDocument(command.actor, this.fileDoctype, command.name, tenantId);
-    if (current.data.storage_state === "delete_requested") {
-      throw new FrameworkError("DOCUMENT_DELETED", `${this.fileDoctype}/${command.name} is pending deletion`, {
-        status: 410
-      });
-    }
-    if (
-      typeof current.data.storage_state !== "string" ||
-      !allowedStates.includes(current.data.storage_state) ||
-      !fileSnapshotStringData(current, "multipart_upload_id")
-    ) {
-      throw badRequest(`${this.fileDoctype}/${command.name} is not pending multipart upload`);
-    }
+    ensureFilePendingMultipartUpload(current, allowedStates);
     const doctype = this.registry.get(this.fileDoctype);
     if (!can(command.actor, doctype, "metadata", current)) {
       throw permissionDenied(
@@ -1387,11 +1350,7 @@ export class FileService {
   }
 
   private multipartUploadId(snapshot: DocumentSnapshot): string {
-    const uploadId = fileSnapshotStringData(snapshot, "multipart_upload_id");
-    if (!uploadId) {
-      throw badRequest(`${snapshot.doctype}/${snapshot.name} has no multipart upload`);
-    }
-    return uploadId;
+    return fileMultipartUploadId(snapshot);
   }
 
   private async completedMultipartObject(command: {

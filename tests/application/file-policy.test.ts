@@ -1,6 +1,10 @@
 import {
   completeFileRendition,
+  ensureFileAvailableForDownload,
+  ensureFileDeleteExpectedVersion,
   ensureFileExpectedVersion,
+  ensureFilePendingDirectUpload,
+  ensureFilePendingMultipartUpload,
   ensureDirectUploadMatches,
   ensureMultipartCompletionMatchesManifest,
   ensureMultipartPartFitsReservation,
@@ -9,6 +13,7 @@ import {
   fileContentLength,
   fileContentTypeExtension,
   fileDashboardEntry,
+  fileMultipartUploadId,
   fileRenditionId,
   fileRenditionFilename,
   fileRenditions,
@@ -452,6 +457,70 @@ describe("file policy", () => {
     expect(() => ensureFileExpectedVersion(snapshot, undefined)).not.toThrow();
     expect(() => ensureFileExpectedVersion(snapshot, 1)).not.toThrow();
     expect(() => ensureFileExpectedVersion(snapshot, 2)).toThrow("Expected version 2, found 1");
+  });
+
+  it("allows downloads only for finalized and safe file states", () => {
+    expect(() => ensureFileAvailableForDownload(fileSnapshot({ storage_state: "available" }))).not.toThrow();
+    expect(() => ensureFileAvailableForDownload(fileSnapshot({ storage_state: "upload_pending" }))).toThrow(
+      "File/file_multipart upload has not been finalized"
+    );
+    expect(() => ensureFileAvailableForDownload(fileSnapshot({ storage_state: "upload_completing" }))).toThrow(
+      "File/file_multipart upload has not been finalized"
+    );
+    expect(() => ensureFileAvailableForDownload(fileSnapshot({ storage_state: "scan_failed" }))).toThrow(
+      "File/file_multipart did not pass file scanning"
+    );
+    expect(() => ensureFileAvailableForDownload(fileSnapshot({ storage_state: "delete_requested" }))).toThrow(
+      "File/file_multipart is pending deletion"
+    );
+  });
+
+  it("validates pending direct-upload file state", () => {
+    expect(() => ensureFilePendingDirectUpload(fileSnapshot({ storage_state: "upload_pending" }))).not.toThrow();
+    expect(() => ensureFilePendingDirectUpload(fileSnapshot({ storage_state: "available" }))).toThrow(
+      "File/file_multipart is not pending direct upload"
+    );
+    expect(() => ensureFilePendingDirectUpload(fileSnapshot({ storage_state: "delete_requested" }))).toThrow(
+      "File/file_multipart is pending deletion"
+    );
+  });
+
+  it("validates pending multipart file state and upload id", () => {
+    expect(() =>
+      ensureFilePendingMultipartUpload(
+        fileSnapshot({ storage_state: "upload_completing", multipart_upload_id: "upload-1" }),
+        ["upload_pending", "upload_completing"]
+      )
+    ).not.toThrow();
+    expect(() =>
+      ensureFilePendingMultipartUpload(fileSnapshot({ storage_state: "upload_pending" }), ["upload_pending"])
+    ).toThrow("File/file_multipart is not pending multipart upload");
+    expect(() =>
+      ensureFilePendingMultipartUpload(
+        fileSnapshot({ storage_state: "available", multipart_upload_id: "upload-1" }),
+        ["upload_pending"]
+      )
+    ).toThrow("File/file_multipart is not pending multipart upload");
+    expect(() =>
+      ensureFilePendingMultipartUpload(
+        fileSnapshot({ storage_state: "delete_requested", multipart_upload_id: "upload-1" }),
+        ["upload_pending"]
+      )
+    ).toThrow("File/file_multipart is pending deletion");
+  });
+
+  it("reads required multipart upload ids", () => {
+    expect(fileMultipartUploadId(fileSnapshot({ multipart_upload_id: "upload-1" }))).toBe("upload-1");
+    expect(() => fileMultipartUploadId(fileSnapshot({}))).toThrow("File/file_multipart has no multipart upload");
+  });
+
+  it("validates delete expected versions while allowing idempotent delete requests", () => {
+    expect(() => ensureFileDeleteExpectedVersion(fileSnapshot({ storage_state: "available" }), undefined)).not.toThrow();
+    expect(() => ensureFileDeleteExpectedVersion(fileSnapshot({ storage_state: "available" }), 1)).not.toThrow();
+    expect(() => ensureFileDeleteExpectedVersion(fileSnapshot({ storage_state: "available" }), 2)).toThrow(
+      "Expected version 2, found 1"
+    );
+    expect(() => ensureFileDeleteExpectedVersion(fileSnapshot({ storage_state: "delete_requested" }), 2)).not.toThrow();
   });
 
   it("normalizes file dashboard limits", () => {

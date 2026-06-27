@@ -311,6 +311,67 @@ export function ensureFileExpectedVersion(snapshot: DocumentSnapshot, expectedVe
   }
 }
 
+export function ensureFileDeleteExpectedVersion(snapshot: DocumentSnapshot, expectedVersion: number | undefined): void {
+  if (
+    expectedVersion !== undefined &&
+    snapshot.version !== expectedVersion &&
+    snapshot.data.storage_state !== "delete_requested"
+  ) {
+    throw conflict(`Expected version ${expectedVersion}, found ${snapshot.version}`);
+  }
+}
+
+export function ensureFileAvailableForDownload(snapshot: DocumentSnapshot): void {
+  if (snapshot.data.storage_state === "upload_pending" || snapshot.data.storage_state === "upload_completing") {
+    throw new FrameworkError("FILE_UPLOAD_PENDING", `${snapshot.doctype}/${snapshot.name} upload has not been finalized`, {
+      status: 409
+    });
+  }
+  if (snapshot.data.storage_state === "scan_failed") {
+    throw new FrameworkError("FILE_SCAN_FAILED", `${snapshot.doctype}/${snapshot.name} did not pass file scanning`, {
+      status: 409
+    });
+  }
+  ensureFileNotDeleteRequested(snapshot);
+}
+
+export function ensureFileNotDeleteRequested(snapshot: DocumentSnapshot): void {
+  if (snapshot.data.storage_state === "delete_requested") {
+    throw new FrameworkError("DOCUMENT_DELETED", `${snapshot.doctype}/${snapshot.name} is pending deletion`, {
+      status: 410
+    });
+  }
+}
+
+export function ensureFilePendingDirectUpload(snapshot: DocumentSnapshot): void {
+  ensureFileNotDeleteRequested(snapshot);
+  if (snapshot.data.storage_state !== "upload_pending") {
+    throw badRequest(`${snapshot.doctype}/${snapshot.name} is not pending direct upload`);
+  }
+}
+
+export function ensureFilePendingMultipartUpload(
+  snapshot: DocumentSnapshot,
+  allowedStates: readonly string[]
+): void {
+  ensureFileNotDeleteRequested(snapshot);
+  if (
+    typeof snapshot.data.storage_state !== "string" ||
+    !allowedStates.includes(snapshot.data.storage_state) ||
+    !fileSnapshotStringData(snapshot, "multipart_upload_id")
+  ) {
+    throw badRequest(`${snapshot.doctype}/${snapshot.name} is not pending multipart upload`);
+  }
+}
+
+export function fileMultipartUploadId(snapshot: DocumentSnapshot): string {
+  const uploadId = fileSnapshotStringData(snapshot, "multipart_upload_id");
+  if (!uploadId) {
+    throw badRequest(`${snapshot.doctype}/${snapshot.name} has no multipart upload`);
+  }
+  return uploadId;
+}
+
 export interface FileRenditionManifestEntry {
   readonly [key: string]: JsonValue;
   readonly id: string;
