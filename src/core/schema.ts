@@ -7,6 +7,7 @@ import type {
   MutableDocumentData,
   ValidationIssue
 } from "./types.js";
+import { normalizeAssignmentRules } from "./assignment-rules.js";
 import { FrameworkError } from "./errors.js";
 import { assertFormViewDefinition } from "./form-view.js";
 import { assertListViewDefinition } from "./list-view.js";
@@ -36,11 +37,13 @@ export function defineDocType<TData extends DocumentData>(
   assertListViewDefinition(definition);
   const formView = definition.formView ? freezeFormView(definition.formView) : undefined;
   const listView = definition.listView ? freezeListView(definition.listView) : undefined;
+  const assignmentRules = normalizeAssignmentRules(definition, definition.assignmentRules);
   return Object.freeze({
     ...definition,
     fields: Object.freeze([...definition.fields]),
     ...(formView ? { formView } : {}),
-    ...(listView ? { listView } : {})
+    ...(listView ? { listView } : {}),
+    ...(assignmentRules ? { assignmentRules } : {})
   });
 }
 

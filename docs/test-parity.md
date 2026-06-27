@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Dashboard compound filter-expression slice:
+As of the metadata-declared assignment rules slice:
 
-- Vitest files: `147`
-- Vitest cases: `1418`
+- Vitest files: `148`
+- Vitest cases: `1426`
 
 ## Implication
 

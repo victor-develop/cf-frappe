@@ -498,7 +498,7 @@ export class DocumentService implements DocumentCommandExecutor {
     });
     const [saved] = commit.events;
     if (saved) {
-      await this.runAfterCommit(doctype, saved, commit.snapshot);
+      return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
     }
     return commit.snapshot;
   }
@@ -660,7 +660,7 @@ export class DocumentService implements DocumentCommandExecutor {
     });
     const [saved] = commit.events;
     if (saved) {
-      await this.runAfterCommit(options.doctype, saved, commit.snapshot);
+      return await this.runAfterCommit(options.doctype, saved, commit.snapshot) ?? commit.snapshot;
     }
     return commit.snapshot;
   }
@@ -796,7 +796,7 @@ export class DocumentService implements DocumentCommandExecutor {
     });
     const [saved] = commit.events;
     if (saved) {
-      await this.runAfterCommit(doctype, saved, commit.snapshot);
+      return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
     }
     return commit.snapshot;
   }
@@ -880,7 +880,7 @@ export class DocumentService implements DocumentCommandExecutor {
     });
     const [saved] = commit.events;
     if (saved) {
-      await this.runAfterCommit(doctype, saved, commit.snapshot);
+      return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
     }
     return commit.snapshot;
   }
@@ -920,7 +920,7 @@ export class DocumentService implements DocumentCommandExecutor {
     });
     const [saved] = commit.events;
     if (saved) {
-      await this.runAfterCommit(doctype, saved, commit.snapshot);
+      return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
     }
     return commit.snapshot;
   }
@@ -967,7 +967,7 @@ export class DocumentService implements DocumentCommandExecutor {
     });
     const [saved] = commit.events;
     if (saved) {
-      await this.runAfterCommit(doctype, saved, commit.snapshot);
+      return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
     }
     return commit.snapshot;
   }
@@ -1138,7 +1138,7 @@ export class DocumentService implements DocumentCommandExecutor {
     });
     const [saved] = commit.events;
     if (saved) {
-      await this.runAfterCommit(doctype, saved, commit.snapshot);
+      return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
     }
     return commit.snapshot;
   }
@@ -1296,7 +1296,7 @@ export class DocumentService implements DocumentCommandExecutor {
     });
     const [saved] = commit.events;
     if (saved) {
-      await this.runAfterCommit(doctype, saved, commit.snapshot);
+      return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
     }
     return commit.snapshot;
   }
@@ -1344,7 +1344,7 @@ export class DocumentService implements DocumentCommandExecutor {
     });
     const [saved] = commit.events;
     if (saved) {
-      await this.runAfterCommit(doctype, saved, commit.snapshot);
+      return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
     }
     return commit.snapshot;
   }
@@ -1392,7 +1392,7 @@ export class DocumentService implements DocumentCommandExecutor {
     });
     const [saved] = commit.events;
     if (saved) {
-      await this.runAfterCommit(doctype, saved, commit.snapshot);
+      return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
     }
     return commit.snapshot;
   }
@@ -1415,7 +1415,7 @@ export class DocumentService implements DocumentCommandExecutor {
     });
     const [saved] = commit.events;
     if (saved) {
-      await this.runAfterCommit(doctype, saved, commit.snapshot);
+      return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
     }
     return commit.snapshot;
   }
@@ -1455,7 +1455,7 @@ export class DocumentService implements DocumentCommandExecutor {
     });
     const [saved] = commit.events;
     if (saved) {
-      await this.runAfterCommit(options.doctype, saved, commit.snapshot);
+      return await this.runAfterCommit(options.doctype, saved, commit.snapshot) ?? commit.snapshot;
     }
     return commit.snapshot;
   }
@@ -1686,7 +1686,7 @@ export class DocumentService implements DocumentCommandExecutor {
     doctype: DocTypeDefinition,
     event: DomainEvent,
     snapshot: DocumentSnapshot | null
-  ): Promise<void> {
+  ): Promise<DocumentSnapshot | null> {
     const context = { doctype, data: snapshot?.data ?? {}, event, snapshot };
     for (const hook of this.registry.hooksFor(doctype.name)) {
       try {
@@ -1700,6 +1700,7 @@ export class DocumentService implements DocumentCommandExecutor {
     } catch (error) {
       await this.onHookError?.(error, event);
     }
+    return this.readDocumentFromEvents(event.tenantId, doctype, event.documentName);
   }
 
   private newEvent<TPayload extends NewDomainEvent["payload"]>(

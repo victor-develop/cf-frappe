@@ -125,6 +125,33 @@ export interface WorkflowDefinition {
   readonly transitions: readonly WorkflowTransition[];
 }
 
+export type AssignmentRuleEventKind =
+  | "DocumentCreated"
+  | "DocumentUpdated"
+  | "DocumentSubmitted"
+  | "DocumentCancelled"
+  | "WorkflowTransitioned"
+  | "DomainCommandApplied";
+
+export type AssignmentRuleAssigneeDefinition =
+  | {
+      readonly kind: "user";
+      readonly userId: string;
+    }
+  | {
+      readonly kind: "field";
+      readonly field: string;
+    };
+
+export interface AssignmentRuleDefinition {
+  readonly name: string;
+  readonly enabled?: boolean;
+  readonly events: readonly AssignmentRuleEventKind[];
+  readonly assignees: readonly AssignmentRuleAssigneeDefinition[];
+  readonly condition?: ListFilterExpression;
+  readonly excludeActor?: boolean;
+}
+
 export type NotificationRuleEventKind =
   | "DocumentCreated"
   | "DocumentUpdated"
@@ -211,6 +238,7 @@ export interface DocTypeDefinition<TData extends DocumentData = DocumentData> {
   readonly listView?: ListViewDefinition;
   readonly permissions?: readonly PermissionRule[];
   readonly workflow?: WorkflowDefinition;
+  readonly assignmentRules?: readonly AssignmentRuleDefinition[];
   readonly commands?: readonly DomainCommandDefinition[];
   readonly naming?: NamingStrategy;
   readonly allowUnknownFields?: boolean;
