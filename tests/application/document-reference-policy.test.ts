@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyFetchedFields,
   defineDocType,
   isEmptyFetchedTarget,
   isMutableData,
   parseFetchFrom,
   relatedDocTypeNames,
-  validateDocumentLinks
+  validateDocumentLinks,
+  type DocumentSnapshot
 } from "../../src";
 
 describe("document reference policy", () => {
@@ -143,4 +145,120 @@ describe("document reference policy", () => {
     expect(issues).toEqual([]);
     expect(accessChecks).toBe(0);
   });
+
+  it("applies fetch-from fields from readable linked targets", async () => {
+    const Project = defineDocType({ name: "Project", fields: [{ name: "title", type: "text" }] });
+    const Task = defineDocType({
+      name: "Task",
+      fields: [
+        { name: "project", type: "link", linkTo: "Project" },
+        { name: "project_title", type: "text", fetchFrom: "project.title" }
+      ]
+    });
+
+    await expect(applyFetchedFields({
+      doctype: Task,
+      data: { project: "PROJ-1" },
+      relatedDocType: (name) => name === "Project" ? Project : undefined,
+      readFetchedTarget: async ({ targetName }) => snapshot("Project", targetName, { title: "Apollo" })
+    })).resolves.toEqual({ project: "PROJ-1", project_title: "Apollo" });
+  });
+
+  it("does not override explicit fetched fields", async () => {
+    const Project = defineDocType({ name: "Project", fields: [{ name: "title", type: "text" }] });
+    const Task = defineDocType({
+      name: "Task",
+      fields: [
+        { name: "project", type: "link", linkTo: "Project" },
+        { name: "project_title", type: "text", fetchFrom: "project.title" }
+      ]
+    });
+    let reads = 0;
+
+    const data = await applyFetchedFields({
+      doctype: Task,
+      data: { project: "PROJ-1", project_title: "Manual" },
+      relatedDocType: (name) => name === "Project" ? Project : undefined,
+      readFetchedTarget: async () => {
+        reads += 1;
+        return snapshot("Project", "PROJ-1", { title: "Apollo" });
+      }
+    });
+
+    expect(data).toEqual({ project: "PROJ-1", project_title: "Manual" });
+    expect(reads).toBe(0);
+  });
+
+  it("updates fetched fields only when the link field changes on existing documents", async () => {
+    const Project = defineDocType({ name: "Project", fields: [{ name: "title", type: "text" }] });
+    const Task = defineDocType({
+      name: "Task",
+      fields: [
+        { name: "project", type: "link", linkTo: "Project" },
+        { name: "project_title", type: "text", fetchFrom: "project.title" }
+      ]
+    });
+    const existing = snapshot("Task", "TASK-1", { project: "PROJ-1", project_title: "Apollo" });
+    let reads = 0;
+
+    await expect(applyFetchedFields({
+      doctype: Task,
+      data: { status: "Open" },
+      relatedDocType: (name) => name === "Project" ? Project : undefined,
+      existing,
+      readFetchedTarget: async () => {
+        reads += 1;
+        return snapshot("Project", "PROJ-2", { title: "Zeus" });
+      }
+    })).resolves.toEqual({ status: "Open" });
+    expect(reads).toBe(0);
+
+    await expect(applyFetchedFields({
+      doctype: Task,
+      data: { project: "PROJ-2" },
+      relatedDocType: (name) => name === "Project" ? Project : undefined,
+      existing,
+      readFetchedTarget: async ({ targetName }) => snapshot("Project", targetName, { title: "Zeus" })
+    })).resolves.toEqual({ project: "PROJ-2", project_title: "Zeus" });
+  });
+
+  it("respects fetch-if-empty and skips unreadable fetched targets", async () => {
+    const Project = defineDocType({ name: "Project", fields: [{ name: "title", type: "text" }] });
+    const Task = defineDocType({
+      name: "Task",
+      fields: [
+        { name: "project", type: "link", linkTo: "Project" },
+        { name: "project_title", type: "text", fetchFrom: "project.title", fetchIfEmpty: true }
+      ]
+    });
+    const existing = snapshot("Task", "TASK-1", { project: "PROJ-1", project_title: "Apollo" });
+
+    await expect(applyFetchedFields({
+      doctype: Task,
+      data: { project: "PROJ-2" },
+      relatedDocType: (name) => name === "Project" ? Project : undefined,
+      existing,
+      readFetchedTarget: async () => snapshot("Project", "PROJ-2", { title: "Zeus" })
+    })).resolves.toEqual({ project: "PROJ-2" });
+
+    await expect(applyFetchedFields({
+      doctype: Task,
+      data: { project: "PROJ-2" },
+      relatedDocType: (name) => name === "Project" ? Project : undefined,
+      readFetchedTarget: async () => null
+    })).resolves.toEqual({ project: "PROJ-2" });
+  });
 });
+
+function snapshot(doctype: string, name: string, data: DocumentSnapshot["data"]): DocumentSnapshot {
+  return {
+    tenantId: "acme",
+    doctype,
+    name,
+    version: 1,
+    docstatus: "draft",
+    data,
+    createdAt: "2026-06-28T01:00:00.000Z",
+    updatedAt: "2026-06-28T01:00:00.000Z"
+  };
+}

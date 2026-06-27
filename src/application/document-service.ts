@@ -87,8 +87,7 @@ import {
   resolveDocumentName
 } from "./document-naming.js";
 import {
-  isEmptyFetchedTarget,
-  parseFetchFrom,
+  applyFetchedFields,
   relatedDocTypeNames,
   validateDocumentLinks,
   type RelatedDocTypeResolver
@@ -1681,46 +1680,19 @@ export class DocumentService implements DocumentCommandExecutor {
     relatedDocType: RelatedDocTypeResolver,
     options: { readonly existing?: DocumentSnapshot } = {}
   ): Promise<DocumentData> {
-    const enriched: MutableDocumentData = { ...data };
-    const explicitFields = new Set(Object.keys(data));
-    const hasExisting = options.existing !== undefined;
-    for (const field of doctype.fields) {
-      if (field.fetchFrom === undefined || explicitFields.has(field.name)) {
-        continue;
+    return applyFetchedFields({
+      doctype,
+      data,
+      relatedDocType,
+      ...(options.existing === undefined ? {} : { existing: options.existing }),
+      readFetchedTarget: async ({ sourceDoctype, field, targetDoctype, targetName }) => {
+        const target = await this.readDocumentFromEvents(tenantId, targetDoctype, targetName);
+        if (!target || !(await this.canReadLinkedDocument(actor, sourceDoctype, field, targetDoctype, target))) {
+          return null;
+        }
+        return target;
       }
-      const fetchPath = parseFetchFrom(field.fetchFrom);
-      if (!fetchPath) {
-        continue;
-      }
-      const linkField = doctype.fields.find((candidate) => candidate.name === fetchPath.linkField);
-      if (!linkField || linkField.type !== "link") {
-        continue;
-      }
-      if (hasExisting && !Object.prototype.hasOwnProperty.call(data, linkField.name)) {
-        continue;
-      }
-      const existingValue = options.existing?.data[field.name];
-      if (field.fetchIfEmpty === true && !isEmptyFetchedTarget(enriched[field.name] ?? existingValue)) {
-        continue;
-      }
-      const linkValue = enriched[linkField.name] ?? options.existing?.data[linkField.name];
-      if (typeof linkValue !== "string" || linkValue.length === 0) {
-        continue;
-      }
-      const targetDoctype = relatedDocType(linkField.linkTo ?? "");
-      if (!targetDoctype) {
-        continue;
-      }
-      const target = await this.readDocumentFromEvents(tenantId, targetDoctype, linkValue);
-      if (!target || !(await this.canReadLinkedDocument(actor, doctype, linkField, targetDoctype, target))) {
-        continue;
-      }
-      const fetchedValue = target.data[fetchPath.sourceField];
-      if (fetchedValue !== undefined) {
-        enriched[field.name] = fetchedValue;
-      }
-    }
-    return compactData(enriched);
+    });
   }
 
   private async validateLinks(
