@@ -19,6 +19,8 @@ import {
 } from "../core/document-merge.js";
 import {
   ensureSharedGrantIsDelegable,
+  collaborationCollectionChange,
+  type CollaborationCollectionAction,
   normalizeActivity,
   normalizeAssigneeId,
   normalizeCommentText,
@@ -1140,54 +1142,54 @@ export class DocumentService implements DocumentCommandExecutor {
   async assign(command: AssignDocumentCommand): Promise<DocumentSnapshot> {
     return this.changeAssignment({
       command,
+      action: "add",
       eventKind: "DocumentAssigned",
-      eventType: (doctype) => doctype.events?.assign ?? `${doctype.name}Assigned`,
-      alreadyDone: (assignees, assigneeId) => assignees.includes(assigneeId)
+      eventType: (doctype) => doctype.events?.assign ?? `${doctype.name}Assigned`
     });
   }
 
   async unassign(command: UnassignDocumentCommand): Promise<DocumentSnapshot> {
     return this.changeAssignment({
       command,
+      action: "remove",
       eventKind: "DocumentUnassigned",
-      eventType: (doctype) => doctype.events?.unassign ?? `${doctype.name}Unassigned`,
-      alreadyDone: (assignees, assigneeId) => !assignees.includes(assigneeId)
+      eventType: (doctype) => doctype.events?.unassign ?? `${doctype.name}Unassigned`
     });
   }
 
   async tag(command: TagDocumentCommand): Promise<DocumentSnapshot> {
     return this.changeTag({
       command,
+      action: "add",
       eventKind: "DocumentTagged",
-      eventType: (doctype) => doctype.events?.tag ?? `${doctype.name}Tagged`,
-      alreadyDone: (tags, tag) => tags.includes(tag)
+      eventType: (doctype) => doctype.events?.tag ?? `${doctype.name}Tagged`
     });
   }
 
   async untag(command: UntagDocumentCommand): Promise<DocumentSnapshot> {
     return this.changeTag({
       command,
+      action: "remove",
       eventKind: "DocumentUntagged",
-      eventType: (doctype) => doctype.events?.untag ?? `${doctype.name}Untagged`,
-      alreadyDone: (tags, tag) => !tags.includes(tag)
+      eventType: (doctype) => doctype.events?.untag ?? `${doctype.name}Untagged`
     });
   }
 
   async follow(command: FollowDocumentCommand): Promise<DocumentSnapshot> {
     return this.changeFollower({
       command,
+      action: "add",
       eventKind: "DocumentFollowed",
-      eventType: (doctype) => doctype.events?.follow ?? `${doctype.name}Followed`,
-      alreadyDone: (followers, followerId) => followers.includes(followerId)
+      eventType: (doctype) => doctype.events?.follow ?? `${doctype.name}Followed`
     });
   }
 
   async unfollow(command: UnfollowDocumentCommand): Promise<DocumentSnapshot> {
     return this.changeFollower({
       command,
+      action: "remove",
       eventKind: "DocumentUnfollowed",
-      eventType: (doctype) => doctype.events?.unfollow ?? `${doctype.name}Unfollowed`,
-      alreadyDone: (followers, followerId) => !followers.includes(followerId)
+      eventType: (doctype) => doctype.events?.unfollow ?? `${doctype.name}Unfollowed`
     });
   }
 
@@ -1420,9 +1422,9 @@ export class DocumentService implements DocumentCommandExecutor {
 
   private async changeAssignment(options: {
     readonly command: AssignDocumentCommand | UnassignDocumentCommand;
+    readonly action: CollaborationCollectionAction;
     readonly eventKind: DocumentAssignmentEventKind;
     readonly eventType: (doctype: DocTypeDefinition) => string;
-    readonly alreadyDone: (assignees: readonly string[], assigneeId: string) => boolean;
   }): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(options.command.actor, options.command.tenantId);
     const doctype = await this.doctypeFor(options.command.actor, options.command.doctype, tenantId);
@@ -1433,11 +1435,15 @@ export class DocumentService implements DocumentCommandExecutor {
     }
     await this.ensureUserPermissionAccess(options.command.actor, doctype, existing);
     ensureExpectedVersion(existing, options.command.expectedVersion);
-    const assigneeId = normalizeAssigneeId(options.command.assignee);
-    if (options.alreadyDone(foldDocumentAssignments(events), assigneeId)) {
+    const change = collaborationCollectionChange(
+      foldDocumentAssignments(events),
+      normalizeAssigneeId(options.command.assignee),
+      options.action
+    );
+    if (change.noop) {
       return existing;
     }
-    const payload = documentAssignmentPayload(options.eventKind, assigneeId);
+    const payload = documentAssignmentPayload(options.eventKind, change.value);
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,
@@ -1469,9 +1475,9 @@ export class DocumentService implements DocumentCommandExecutor {
 
   private async changeTag(options: {
     readonly command: TagDocumentCommand | UntagDocumentCommand;
+    readonly action: CollaborationCollectionAction;
     readonly eventKind: DocumentTagEventKind;
     readonly eventType: (doctype: DocTypeDefinition) => string;
-    readonly alreadyDone: (tags: readonly string[], tag: string) => boolean;
   }): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(options.command.actor, options.command.tenantId);
     const doctype = await this.doctypeFor(options.command.actor, options.command.doctype, tenantId);
@@ -1482,11 +1488,15 @@ export class DocumentService implements DocumentCommandExecutor {
     }
     await this.ensureUserPermissionAccess(options.command.actor, doctype, existing);
     ensureExpectedVersion(existing, options.command.expectedVersion);
-    const tag = normalizeTag(options.command.tag);
-    if (options.alreadyDone(foldDocumentTags(events), tag)) {
+    const change = collaborationCollectionChange(
+      foldDocumentTags(events),
+      normalizeTag(options.command.tag),
+      options.action
+    );
+    if (change.noop) {
       return existing;
     }
-    const payload = documentTagPayload(options.eventKind, tag);
+    const payload = documentTagPayload(options.eventKind, change.value);
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,
@@ -1518,9 +1528,9 @@ export class DocumentService implements DocumentCommandExecutor {
 
   private async changeFollower(options: {
     readonly command: FollowDocumentCommand | UnfollowDocumentCommand;
+    readonly action: CollaborationCollectionAction;
     readonly eventKind: DocumentFollowerEventKind;
     readonly eventType: (doctype: DocTypeDefinition) => string;
-    readonly alreadyDone: (followers: readonly string[], followerId: string) => boolean;
   }): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(options.command.actor, options.command.tenantId);
     const doctype = await this.doctypeFor(options.command.actor, options.command.doctype, tenantId);
@@ -1531,11 +1541,15 @@ export class DocumentService implements DocumentCommandExecutor {
     }
     await this.ensureUserPermissionAccess(options.command.actor, doctype, existing);
     ensureExpectedVersion(existing, options.command.expectedVersion);
-    const followerId = normalizeFollowerId(options.command.follower ?? options.command.actor.id);
-    if (options.alreadyDone(foldDocumentFollowers(events), followerId)) {
+    const change = collaborationCollectionChange(
+      foldDocumentFollowers(events),
+      normalizeFollowerId(options.command.follower ?? options.command.actor.id),
+      options.action
+    );
+    if (change.noop) {
       return existing;
     }
-    const payload = documentFollowerPayload(options.eventKind, followerId);
+    const payload = documentFollowerPayload(options.eventKind, change.value);
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,

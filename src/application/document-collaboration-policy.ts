@@ -35,6 +35,25 @@ export interface NormalizedActivity {
   readonly externalId?: string;
 }
 
+export type CollaborationCollectionAction = "add" | "remove";
+
+export interface CollaborationCollectionChange {
+  readonly value: string;
+  readonly noop: boolean;
+}
+
+export function collaborationCollectionChange(
+  currentValues: readonly string[],
+  value: string,
+  action: CollaborationCollectionAction
+): CollaborationCollectionChange {
+  const exists = currentValues.includes(value);
+  return {
+    value,
+    noop: action === "add" ? exists : !exists
+  };
+}
+
 export function normalizeCommentText(text: string): string {
   const normalized = text.trim();
   if (normalized.length === 0) {

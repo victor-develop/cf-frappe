@@ -1,6 +1,7 @@
 import { defineDocType } from "../../src";
 import type { Actor, DocumentSnapshot } from "../../src";
 import {
+  collaborationCollectionChange,
   ensureSharedGrantIsDelegable,
   normalizeActivity,
   normalizeAssigneeId,
@@ -55,6 +56,25 @@ describe("document collaboration policy", () => {
     expect(() => normalizeAssigneeId(" ")).toThrow("Assignee is required");
     expect(() => normalizeTag(" ")).toThrow("Tag is required");
     expect(() => normalizeFollowerId(" ")).toThrow("Follower is required");
+  });
+
+  it("plans idempotent collaboration collection changes", () => {
+    expect(collaborationCollectionChange(["a@example.com"], "a@example.com", "add")).toEqual({
+      value: "a@example.com",
+      noop: true
+    });
+    expect(collaborationCollectionChange(["a@example.com"], "b@example.com", "add")).toEqual({
+      value: "b@example.com",
+      noop: false
+    });
+    expect(collaborationCollectionChange(["a@example.com"], "a@example.com", "remove")).toEqual({
+      value: "a@example.com",
+      noop: false
+    });
+    expect(collaborationCollectionChange(["a@example.com"], "b@example.com", "remove")).toEqual({
+      value: "b@example.com",
+      noop: true
+    });
   });
 
   it("canonicalizes share grants before DocumentService writes events", () => {
