@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the placeholder field metadata slice:
+As of the document field policy extraction slice:
 
-- Vitest files: `152`
-- Vitest cases: `1476`
+- Vitest files: `153`
+- Vitest cases: `1482`
 
 ## Implication
 
