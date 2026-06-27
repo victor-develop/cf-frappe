@@ -21,6 +21,7 @@ export * from "./application/document-lifecycle-events.js";
 export * from "./application/document-share-events.js";
 export * from "./application/document-service.js";
 export * from "./application/document-naming.js";
+export * from "./application/document-reference-policy.js";
 export * from "./application/document-unique-values.js";
 export * from "./application/document-history-service.js";
 export * from "./application/document-import-service.js";

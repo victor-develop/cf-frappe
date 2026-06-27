@@ -74,6 +74,12 @@ import {
   resolveDocumentName
 } from "./document-naming.js";
 import {
+  isEmptyFetchedTarget,
+  isMutableData,
+  parseFetchFrom,
+  relatedDocTypeNames
+} from "./document-reference-policy.js";
+import {
   allowOnSubmitIssues,
   childTableOriginIssues,
   copyDocumentData,
@@ -105,7 +111,6 @@ import {
   type DocumentSnapshot,
   type DomainEvent,
   type FieldDefinition,
-  type JsonValue,
   type MutableDocumentData,
   type NewDomainEvent,
   type ValidationIssue
@@ -2116,21 +2121,6 @@ function ensureExpectedVersion(existing: DocumentSnapshot, expectedVersion?: num
   }
 }
 
-function parseFetchFrom(fetchFrom: string): { readonly linkField: string; readonly sourceField: string } | undefined {
-  const [linkField, sourceField, extra] = fetchFrom.split(".");
-  if (!linkField || !sourceField || extra !== undefined) {
-    return undefined;
-  }
-  return { linkField, sourceField };
-}
-
-function isEmptyFetchedTarget(value: JsonValue | undefined): boolean {
-  return value === undefined ||
-    value === null ||
-    value === "" ||
-    (Array.isArray(value) && value.length === 0);
-}
-
 function ensureMergeBaseVersion(baseVersion: number): void {
   if (!Number.isSafeInteger(baseVersion) || baseVersion < 0) {
     throw badRequest("baseVersion must be a non-negative integer");
@@ -2170,17 +2160,6 @@ function bulkNamedCommand(command: BulkDocumentsCommand, selection: BulkDocument
   };
 }
 
-function relatedDocTypeNames(doctype: DocTypeDefinition): readonly string[] {
-  return [
-    ...new Set(
-      doctype.fields.flatMap((field) => [
-        ...(field.type === "table" && field.tableOf ? [field.tableOf] : []),
-        ...(field.type === "link" && field.linkTo ? [field.linkTo] : [])
-      ])
-    )
-  ];
-}
-
 function normalizeUnsetFields(fields: readonly string[] | undefined): readonly string[] {
   if (fields === undefined) {
     return [];
@@ -2194,8 +2173,4 @@ function pickCommandFields(fields: readonly string[] | undefined, input: Documen
     return input;
   }
   return Object.fromEntries(fields.map((field) => [field, input[field]]).filter(([, value]) => value !== undefined)) as DocumentData;
-}
-
-function isMutableData(value: unknown): value is MutableDocumentData {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
