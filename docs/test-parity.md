@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the metadata-defined Web Pages slice:
+As of the metadata-defined Website Settings slice:
 
-- Vitest files: `139`
-- Vitest cases: `1371`
+- Vitest files: `143`
+- Vitest cases: `1380`
 
 ## Implication
 

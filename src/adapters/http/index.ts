@@ -28,4 +28,5 @@ export * from "./user-profile-api.js";
 export * from "./web-form-api.js";
 export * from "./web-page-api.js";
 export * from "./web-view-api.js";
+export * from "./website-settings-api.js";
 export * from "./workflow-api.js";

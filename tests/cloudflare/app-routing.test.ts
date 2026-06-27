@@ -14,6 +14,7 @@ import {
   defineWebPage,
   defineWebForm,
   defineWebView,
+  defineWebsiteSettings,
   deterministicIds,
   fixedClock,
   InMemoryDataPatchLog,
@@ -388,6 +389,42 @@ describe("CloudFrappe Worker routing", () => {
     });
     expect(page.status).toBe(200);
     await expect(page.text()).resolves.toContain("Built on Cloudflare Workers");
+  });
+
+  it("mounts Website Settings API and homepage redirect through Worker routing", async () => {
+    const registry = createRegistry({
+      webPages: [
+        defineWebPage({
+          name: "About",
+          route: "about",
+          title: "About",
+          sections: [{ body: "Built on Cloudflare Workers" }]
+        })
+      ],
+      websiteSettings: defineWebsiteSettings({
+        title: "Starter Site",
+        homePageRoute: "about",
+        navItems: [{ name: "about", label: "About", pageRoute: "about" }]
+      })
+    });
+    const worker = createCloudFrappeWorker({
+      registry,
+      actor: () => ({ id: "guest", roles: ["Guest"], tenantId: "acme" })
+    });
+    const env = {
+      DB: fakeD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const metadata = await worker.fetch!(cfRequest("http://localhost/api/meta/website-settings"), env, fakeExecutionContext());
+    const home = await worker.fetch!(cfRequest("http://localhost/"), env, fakeExecutionContext());
+
+    expect(metadata.status).toBe(200);
+    await expect(metadata.json()).resolves.toMatchObject({
+      data: { title: "Starter Site", homePageRoute: "about", navItems: [{ href: "/page/about" }] }
+    });
+    expect(home.status).toBe(302);
+    expect(home.headers.get("location")).toBe("/page/about");
   });
 
   it("enables generated Desk document presence panels when realtime is configured", async () => {

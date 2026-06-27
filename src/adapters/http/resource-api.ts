@@ -38,6 +38,7 @@ import type { UserProfileService } from "../../application/user-profile-service.
 import type { WebFormService } from "../../application/web-form-service.js";
 import type { WebPageService } from "../../application/web-page-service.js";
 import type { WebViewService } from "../../application/web-view-service.js";
+import type { WebsiteSettingsService } from "../../application/website-settings-service.js";
 import type { WorkflowService } from "../../application/workflow-service.js";
 import { badRequest, permissionDenied } from "../../core/errors.js";
 import { can } from "../../core/permissions.js";
@@ -88,6 +89,7 @@ import { createUserProfileApi } from "./user-profile-api.js";
 import { createWebFormApi } from "./web-form-api.js";
 import { createWebPageApi } from "./web-page-api.js";
 import { createWebViewApi } from "./web-view-api.js";
+import { createWebsiteSettingsApi } from "./website-settings-api.js";
 import { createWorkflowApi } from "./workflow-api.js";
 
 export interface ResourceApiOptions {
@@ -114,6 +116,7 @@ export interface ResourceApiOptions {
   readonly webForms?: WebFormService;
   readonly webPages?: WebPageService;
   readonly webViews?: WebViewService;
+  readonly websiteSettings?: WebsiteSettingsService;
   readonly dataPatchQueue?: DataPatchQueuePort;
   readonly dataPatchRollbackQueue?: DataPatchRollbackQueuePort;
   readonly dataPatchRollbackRetryQueue?: DataPatchRollbackRetryQueuePort;
@@ -331,6 +334,16 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       "/",
       createWebPageApi({
         webPages: options.webPages,
+        actor: resolveActor
+      })
+    );
+  }
+
+  if (options.websiteSettings) {
+    app.route(
+      "/",
+      createWebsiteSettingsApi({
+        websiteSettings: options.websiteSettings,
         actor: resolveActor
       })
     );

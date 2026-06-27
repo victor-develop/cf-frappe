@@ -37,6 +37,7 @@ import { UserPermissionService } from "../application/user-permission-service.js
 import { WebFormService } from "../application/web-form-service.js";
 import { WebPageService } from "../application/web-page-service.js";
 import { WebViewService } from "../application/web-view-service.js";
+import { WebsiteSettingsService } from "../application/website-settings-service.js";
 import { WorkflowService } from "../application/workflow-service.js";
 import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator.js";
 import { RoleCatalogUserRoleValidator } from "../application/user-role-validator.js";
@@ -121,6 +122,7 @@ export interface CloudFrappeRuntimeServices {
   readonly webForms: WebFormService;
   readonly webPages: WebPageService;
   readonly webViews: WebViewService;
+  readonly websiteSettings: WebsiteSettingsService;
   readonly roles: RoleService;
   readonly savedReports: SavedReportService;
   readonly dataPatches?: DataPatchAdminPort;
@@ -402,6 +404,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   const webForms = new WebFormService({ registry: options.registry, documents, queries: restrictedQueries });
   const webPages = new WebPageService({ registry: options.registry });
   const webViews = new WebViewService({ registry: options.registry, queries: restrictedQueries });
+  const websiteSettings = new WebsiteSettingsService({ registry: options.registry, webPages });
   const roles = new RoleService({
     events,
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
@@ -443,6 +446,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     webForms,
     webPages,
     webViews,
+    websiteSettings,
     roles,
     savedReports
   };
@@ -566,6 +570,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     webForms,
     webPages,
     webViews,
+    websiteSettings,
     roles,
     ...(printPdfRenderer === undefined ? {} : { printPdfRenderer }),
     actor,

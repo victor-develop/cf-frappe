@@ -54,11 +54,15 @@ export function canReadWebPage(actor: Actor, page: WebPageDefinition): boolean {
 
 function assertRoute(route: string, pageName: string): void {
   assertIdentifier(route, `web page '${pageName}' route`);
-  if (!WEB_PAGE_ROUTE_PATTERN.test(route) || route.includes("..")) {
+  if (!isCanonicalWebPageRoute(route)) {
     throw new FrameworkError("WEB_PAGE_INVALID", `Web page '${pageName}' route must be a safe canonical relative path`, {
       status: 400
     });
   }
+}
+
+export function isCanonicalWebPageRoute(route: string): boolean {
+  return WEB_PAGE_ROUTE_PATTERN.test(route) && !route.includes("..");
 }
 
 function assertIdentifier(value: string, label: string): void {

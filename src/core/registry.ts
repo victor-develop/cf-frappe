@@ -26,6 +26,11 @@ import type { InstalledAppDefinition } from "./app.js";
 import { assertWebFormDefinition, assertWebFormMatchesDocType, defineWebForm, type WebFormDefinition } from "./web-form.js";
 import { assertWebPageDefinition, defineWebPage, type WebPageDefinition } from "./web-page.js";
 import { assertWebViewDefinition, assertWebViewMatchesDocType, defineWebView, type WebViewDefinition } from "./web-view.js";
+import {
+  assertWebsiteSettingsDefinition,
+  defineWebsiteSettings,
+  type WebsiteSettingsDefinition
+} from "./website-settings.js";
 import { assertWorkspaceDefinition, defineWorkspace, type WorkspaceDefinition } from "./workspace.js";
 import type {
   DocTypeDefinition,
@@ -68,6 +73,7 @@ export interface RegistryOptions {
   readonly webForms?: readonly WebFormDefinition[];
   readonly webPages?: readonly WebPageDefinition[];
   readonly webViews?: readonly WebViewDefinition[];
+  readonly websiteSettings?: WebsiteSettingsDefinition | readonly WebsiteSettingsDefinition[];
   readonly workspaces?: readonly WorkspaceDefinition[];
   readonly clientScripts?: readonly ClientScriptDefinition[];
   readonly dataPatches?: readonly DataPatchDefinition[];
@@ -86,6 +92,7 @@ export class ModelRegistry {
   private readonly webForms = new Map<string, WebFormDefinition>();
   private readonly webPages = new Map<string, WebPageDefinition>();
   private readonly webViews = new Map<string, WebViewDefinition>();
+  private websiteSettings: WebsiteSettingsDefinition | undefined;
   private readonly workspaces = new Map<string, WorkspaceDefinition>();
   private readonly clientScripts = new Map<string, ClientScriptDefinition>();
   private readonly dataPatches = new Map<string, DataPatchDefinition>();
@@ -122,6 +129,9 @@ export class ModelRegistry {
     }
     for (const webView of options.webViews ?? []) {
       this.registerWebView(webView);
+    }
+    for (const websiteSettings of websiteSettingsDefinitions(options.websiteSettings)) {
+      this.registerWebsiteSettings(websiteSettings);
     }
     for (const format of options.printFormats ?? []) {
       this.registerPrintFormat(format);
@@ -362,6 +372,18 @@ export class ModelRegistry {
     this.webPages.set(definition.name, definition);
   }
 
+  registerWebsiteSettings(settings: WebsiteSettingsDefinition): void {
+    const definition = defineWebsiteSettings(settings);
+    if (this.websiteSettings !== undefined) {
+      throw new FrameworkError("WEBSITE_SETTINGS_DUPLICATE", "Website settings are already registered", {
+        status: 409
+      });
+    }
+    assertWebsiteSettingsDefinition(definition);
+    this.assertWebsitePageRoutesResolve(definition);
+    this.websiteSettings = definition;
+  }
+
   registerWorkspace(workspace: WorkspaceDefinition): void {
     const definition = defineWorkspace(workspace);
     if (this.workspaces.has(definition.name)) {
@@ -501,6 +523,15 @@ export class ModelRegistry {
 
   listWebPages(): readonly WebPageDefinition[] {
     return [...this.webPages.values()].sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  getWebsiteSettings(): WebsiteSettingsDefinition {
+    if (this.websiteSettings === undefined) {
+      throw new FrameworkError("WEBSITE_SETTINGS_NOT_FOUND", "Website settings are not registered", {
+        status: 404
+      });
+    }
+    return this.websiteSettings;
   }
 
   getPrintFormat(formatName: string): PrintFormatDefinition {
@@ -656,6 +687,23 @@ export class ModelRegistry {
     assertWebViewMatchesDocType(webView, doctype);
   }
 
+  private assertWebsitePageRoutesResolve(settings: WebsiteSettingsDefinition): void {
+    const routes = new Set(this.listWebPages().map((page) => page.route));
+    const referencedRoutes = [
+      ...(settings.homePageRoute === undefined ? [] : [settings.homePageRoute]),
+      ...(settings.navItems ?? []).flatMap((item) => (item.pageRoute === undefined ? [] : [item.pageRoute]))
+    ];
+    for (const route of referencedRoutes) {
+      if (!routes.has(route)) {
+        throw new FrameworkError(
+          "WEBSITE_SETTINGS_INVALID",
+          `Website settings reference unknown Web Page route '${route}'`,
+          { status: 400 }
+        );
+      }
+    }
+  }
+
   private assertDashboardReferencesResolve(dashboard: DashboardDefinition): void {
     for (const card of dashboard.cards) {
       const source = card.source;
@@ -771,6 +819,21 @@ export class ModelRegistry {
 
 export function createRegistry(options: RegistryOptions = {}): ModelRegistry {
   return new ModelRegistry(options);
+}
+
+function websiteSettingsDefinitions(
+  settings: WebsiteSettingsDefinition | readonly WebsiteSettingsDefinition[] | undefined
+): readonly WebsiteSettingsDefinition[] {
+  if (settings === undefined) {
+    return [];
+  }
+  return isWebsiteSettingsArray(settings) ? settings : [settings];
+}
+
+function isWebsiteSettingsArray(
+  settings: WebsiteSettingsDefinition | readonly WebsiteSettingsDefinition[]
+): settings is readonly WebsiteSettingsDefinition[] {
+  return Array.isArray(settings);
 }
 
 function isNumericDashboardAggregateField(field: FieldDefinition): boolean {

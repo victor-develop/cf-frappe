@@ -12,6 +12,7 @@ import type { DocTypeDefinition } from "./types.js";
 import type { WebFormDefinition } from "./web-form.js";
 import type { WebPageDefinition } from "./web-page.js";
 import type { WebViewDefinition } from "./web-view.js";
+import type { WebsiteSettingsDefinition } from "./website-settings.js";
 import type { WorkspaceDefinition } from "./workspace.js";
 
 export interface FrameworkAppDefinition<TDataPatchResources = unknown> {
@@ -30,6 +31,7 @@ export interface FrameworkAppDefinition<TDataPatchResources = unknown> {
   readonly webForms?: readonly WebFormDefinition[];
   readonly webPages?: readonly WebPageDefinition[];
   readonly webViews?: readonly WebViewDefinition[];
+  readonly websiteSettings?: WebsiteSettingsDefinition;
   readonly workspaces?: readonly WorkspaceDefinition[];
   readonly clientScripts?: readonly ClientScriptDefinition[];
   readonly dataPatches?: readonly DataPatchDefinition<TDataPatchResources>[];
@@ -63,6 +65,7 @@ export function defineApp<TDataPatchResources = unknown>(
     webForms: Object.freeze([...(input.webForms ?? [])]),
     webPages: Object.freeze([...(input.webPages ?? [])]),
     webViews: Object.freeze([...(input.webViews ?? [])]),
+    ...(input.websiteSettings === undefined ? {} : { websiteSettings: input.websiteSettings }),
     workspaces: Object.freeze([...(input.workspaces ?? [])]),
     clientScripts: Object.freeze([...(input.clientScripts ?? [])]),
     dataPatches: Object.freeze([...(input.dataPatches ?? [])]),
@@ -98,6 +101,7 @@ export function registryOptionsFromApps<TDataPatchResources = unknown>(
     webForms: orderedApps.flatMap((app) => app.webForms ?? []),
     webPages: orderedApps.flatMap((app) => app.webPages ?? []),
     webViews: orderedApps.flatMap((app) => app.webViews ?? []),
+    websiteSettings: orderedApps.flatMap((app) => (app.websiteSettings === undefined ? [] : [app.websiteSettings])),
     workspaces: orderedApps.flatMap((app) => app.workspaces ?? []),
     clientScripts: orderedApps.flatMap((app) => app.clientScripts ?? []),
     dataPatches: orderedApps.flatMap((app) => app.dataPatches ?? []) as readonly DataPatchDefinition[],
