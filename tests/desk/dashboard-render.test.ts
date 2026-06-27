@@ -2,6 +2,14 @@ import { renderDashboardView, type DashboardRunResult } from "../../src";
 
 describe("Desk dashboard rendering", () => {
   it("links metric cards to their filtered document lists and reports", () => {
+    const filterExpression = {
+      kind: "group",
+      match: "any",
+      filters: [
+        { field: "title", operator: "contains", value: "Visible" },
+        { field: "title", operator: "contains", value: "Escalation" }
+      ]
+    } as const;
     const html = renderDashboardView({
       dashboard: {
         name: "Operations",
@@ -16,7 +24,8 @@ describe("Desk dashboard rendering", () => {
                 { field: "workflow_state", value: "Open" },
                 { field: "title", operator: "ne", value: "" },
                 { field: "priority", operator: "in", value: ["High", "Medium"] }
-              ]
+              ],
+              filterExpression
             }
           },
           {
@@ -43,7 +52,8 @@ describe("Desk dashboard rendering", () => {
               { field: "workflow_state", value: "Open" },
               { field: "title", operator: "ne", value: "" },
               { field: "priority", operator: "in", value: ["High", "Medium"] }
-            ]
+            ],
+            filterExpression
           }
         },
         {
@@ -61,7 +71,7 @@ describe("Desk dashboard rendering", () => {
     } satisfies DashboardRunResult);
 
     expect(html).toContain(
-      '<a class="dashboard-card-link" href="/desk/Note?default_filters=0&amp;filter_workflow_state=Open&amp;filter_title__ne=&amp;empty_filter=filter_title__ne&amp;filter_priority__in=High&amp;filter_priority__in=Medium">'
+      `<a class="dashboard-card-link" href="/desk/Note?default_filters=0&amp;filter_workflow_state=Open&amp;filter_title__ne=&amp;empty_filter=filter_title__ne&amp;filter_priority__in=High&amp;filter_priority__in=Medium&amp;filter_expression=${encodeURIComponent(JSON.stringify(filterExpression))}">`
     );
     expect(html).toContain('<a class="dashboard-card-link" href="/desk/reports/Open%20Notes?filter_priority=">');
   });

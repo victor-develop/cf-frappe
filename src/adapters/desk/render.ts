@@ -896,6 +896,9 @@ function dashboardMetricHref(source: DashboardRunResult["cards"][number]["source
     for (const filter of source.filters ?? []) {
       appendDashboardListFilter(params, filter);
     }
+    if (source.filterExpression !== undefined) {
+      params.set("filter_expression", JSON.stringify(source.filterExpression));
+    }
     return `/desk/${encodeURIComponent(source.doctype)}?${params.toString()}`;
   }
   if (source.kind === "reportSummary") {

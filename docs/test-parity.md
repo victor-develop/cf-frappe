@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Calendar/Kanban compound filter-expression slice:
+As of the Dashboard compound filter-expression slice:
 
 - Vitest files: `147`
-- Vitest cases: `1417`
+- Vitest cases: `1418`
 
 ## Implication
 

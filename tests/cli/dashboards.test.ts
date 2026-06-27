@@ -125,7 +125,14 @@ describe("cf-frappe CLI remote dashboards", () => {
             module: "Tasks",
             roles: ["User"],
             cards: [
-              { name: "open_tasks", source: { kind: "documentCount" }, indicator: "green" }
+              {
+                name: "open_tasks",
+                source: {
+                  kind: "documentCount",
+                  filterExpression: { field: "title", operator: "contains", value: "Visible" }
+                },
+                indicator: "green"
+              }
             ]
           }
         }),
@@ -141,7 +148,7 @@ describe("cf-frappe CLI remote dashboards", () => {
     expect(stdout.text()).toContain("Module: Tasks");
     expect(stdout.text()).toContain("Roles: User");
     expect(stdout.text()).toContain("Cards: 1");
-    expect(stdout.text()).toContain("- open_tasks [documentCount] indicator=green");
+    expect(stdout.text()).toContain("- open_tasks [documentCount] filterExpression=yes indicator=green");
   });
 
   it("runs remote dashboards through the generated dashboard API", async () => {

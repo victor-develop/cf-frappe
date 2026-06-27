@@ -35,7 +35,7 @@ interface DashboardCardResponse {
   readonly label?: string;
   readonly description?: string;
   readonly indicator?: string;
-  readonly source?: { readonly kind?: string };
+  readonly source?: { readonly kind?: string; readonly filterExpression?: unknown };
 }
 
 interface DashboardRunResponse {
@@ -143,7 +143,7 @@ function dashboardCardLines(cards: readonly DashboardCardResponse[]): readonly s
   }
   return [
     `Cards: ${String(cards.length)}`,
-    ...cards.map((card) => `- ${card.name ?? "(unknown)"} ${sourceKind(card)}${card.indicator === undefined ? "" : ` indicator=${card.indicator}`}`)
+    ...cards.map((card) => `- ${card.name ?? "(unknown)"} ${sourceKind(card)}${sourceFilterExpression(card)}${card.indicator === undefined ? "" : ` indicator=${card.indicator}`}`)
   ];
 }
 
@@ -158,6 +158,10 @@ function dashboardRunCardLines(cards: readonly DashboardCardRunResponse[]): read
 
 function sourceKind(card: DashboardCardResponse): string {
   return `[${card.source?.kind ?? "unknown"}]`;
+}
+
+function sourceFilterExpression(card: DashboardCardResponse): string {
+  return card.source?.filterExpression === undefined ? "" : " filterExpression=yes";
 }
 
 function formatValue(value: unknown): string {

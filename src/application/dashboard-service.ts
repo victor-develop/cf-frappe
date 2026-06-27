@@ -8,7 +8,7 @@ import {
   type DashboardIndicatorOperator
 } from "../core/dashboard.js";
 import type { ModelRegistry } from "../core/registry.js";
-import type { Actor, DocumentSnapshot, JsonPrimitive, ListDocumentsFilter } from "../core/types.js";
+import type { Actor, DocumentSnapshot, JsonPrimitive, ListDocumentsFilter, ListFilterExpression } from "../core/types.js";
 import type { QueryService } from "./query-service.js";
 import type { ReportChartResult, ReportFilters, ReportService } from "./report-service.js";
 
@@ -99,7 +99,7 @@ export class DashboardService {
     actor: Actor,
     source: Extract<DashboardCardSourceDefinition, { readonly kind: "documentCount" }>
   ): Promise<number> {
-    return this.foldReadableDocuments(actor, source.doctype, source.filters ?? [], 0, (count) => count + 1);
+    return this.foldReadableDocuments(actor, source.doctype, source.filters ?? [], source.filterExpression, 0, (count) => count + 1);
   }
 
   private async aggregateReadableDocuments(
@@ -107,7 +107,7 @@ export class DashboardService {
     source: Extract<DashboardCardSourceDefinition, { readonly kind: "documentAggregate" }>
   ): Promise<JsonPrimitive> {
     if (source.aggregate === "count") {
-      return this.foldReadableDocuments(actor, source.doctype, source.filters ?? [], 0, (count) => count + 1);
+      return this.foldReadableDocuments(actor, source.doctype, source.filters ?? [], source.filterExpression, 0, (count) => count + 1);
     }
     const field = source.field;
     if (field === undefined) {
@@ -117,6 +117,7 @@ export class DashboardService {
       actor,
       source.doctype,
       source.filters ?? [],
+      source.filterExpression,
       emptyDocumentAggregate(),
       (aggregate, document) => updateDocumentAggregate(aggregate, document.data[field])
     );
@@ -127,6 +128,7 @@ export class DashboardService {
     actor: Actor,
     doctype: string,
     filters: readonly ListDocumentsFilter[],
+    filterExpression: ListFilterExpression | undefined,
     initial: T,
     reducer: (accumulator: T, document: DocumentSnapshot) => T
   ): Promise<T> {
@@ -135,6 +137,7 @@ export class DashboardService {
     for (let offset = 0; ; offset += pageSize) {
       const page = await this.queries.listDocuments(actor, doctype, {
         filters,
+        ...(filterExpression === undefined ? {} : { filterExpression }),
         limit: pageSize,
         offset
       });

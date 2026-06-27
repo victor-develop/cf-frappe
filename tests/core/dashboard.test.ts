@@ -2,6 +2,7 @@ import { createRegistry, defineDashboard, defineDocType, defineReport, Framework
 
 describe("dashboards", () => {
   it("freezes metadata-defined dashboard cards", () => {
+    const states = ["Open", "Closed"] as const;
     const dashboard = defineDashboard({
       name: "Operations",
       roles: ["User"],
@@ -16,7 +17,15 @@ describe("dashboards", () => {
           source: {
             kind: "documentCount",
             doctype: "Note",
-            filters: [{ field: "workflow_state", value: "Open" }]
+            filters: [{ field: "workflow_state", value: "Open" }],
+            filterExpression: {
+              kind: "group",
+              match: "any",
+              filters: [
+                { field: "workflow_state", value: "Open" },
+                { field: "workflow_state", operator: "in", value: states }
+              ]
+            }
           }
         },
         {
@@ -56,9 +65,17 @@ describe("dashboards", () => {
     expect(Object.isFrozen(dashboard.cards[0]?.indicatorRules ?? [])).toBe(true);
     expect(Object.isFrozen(dashboard.cards[0]?.indicatorRules?.[0])).toBe(true);
     expect(Object.isFrozen(dashboard.cards[0]?.source.kind === "documentCount" ? dashboard.cards[0].source.filters : [])).toBe(true);
+    expect(Object.isFrozen(dashboard.cards[0]?.source.kind === "documentCount" ? dashboard.cards[0].source.filterExpression : undefined)).toBe(true);
+    expect(Object.isFrozen(dashboard.cards[0]?.source.kind === "documentCount"
+      ? (dashboard.cards[0].source.filterExpression as { readonly filters: readonly { readonly value?: unknown }[] }).filters[1]?.value
+      : undefined)).toBe(true);
     expect(Object.isFrozen(dashboard.cards[1]?.source.kind === "documentAggregate" ? dashboard.cards[1].source.filters : [])).toBe(true);
     expect(Object.isFrozen(dashboard.cards[2]?.source.kind === "reportSummary" ? dashboard.cards[2].source.filters : {})).toBe(true);
     expect(Object.isFrozen(dashboard.cards[3]?.source.kind === "reportChart" ? dashboard.cards[3].source.filters : {})).toBe(true);
+    (states as unknown as string[]).push("Archived");
+    expect(dashboard.cards[0]?.source.kind === "documentCount"
+      ? (dashboard.cards[0].source.filterExpression as { readonly filters: readonly { readonly value?: unknown }[] }).filters[1]?.value
+      : undefined).toEqual(["Open", "Closed"]);
   });
 
   it("validates dashboard card sources against registered DocTypes and reports", () => {
@@ -228,6 +245,55 @@ describe("dashboards", () => {
         ]
       })
     ).toThrow("must be an integer or number field");
+    expect(() =>
+      defineDashboard({
+        name: "Broken",
+        cards: [
+          {
+            name: "notes",
+            source: { kind: "documentCount", doctype: "Note", filterExpression: "not-an-expression" as never }
+          }
+        ]
+      })
+    ).toThrow("filter expression must be an object");
+    expect(() =>
+      defineDashboard({
+        name: "Broken",
+        cards: [
+          {
+            name: "notes",
+            source: { kind: "documentCount", doctype: "Note", filterExpression: deepDashboardFilterExpression(7) as never }
+          }
+        ]
+      })
+    ).toThrow("List filter expression cannot exceed 5 levels");
+    expect(() =>
+      defineDashboard({
+        name: "Broken",
+        cards: [
+          {
+            name: "notes",
+            source: { kind: "documentCount", doctype: "Note", filterExpression: wideDashboardFilterExpression(65) as never }
+          }
+        ]
+      })
+    ).toThrow("List filter expression cannot exceed 5 levels or 64 nodes");
+    expect(() =>
+      createRegistry({
+        doctypes: [Note],
+        dashboards: [
+          defineDashboard({
+            name: "Broken",
+            cards: [
+              {
+                name: "notes",
+                source: { kind: "documentCount", doctype: "Note", filterExpression: { field: "missing", value: "Open" } }
+              }
+            ]
+          })
+        ]
+      })
+    ).toThrow("Filter field 'missing' is not defined");
     expect(() =>
       defineDashboard({
         name: "Broken",
@@ -495,3 +561,17 @@ describe("dashboards", () => {
     ).toThrow("missing required filter 'priority'");
   });
 });
+
+function deepDashboardFilterExpression(depth: number): unknown {
+  return depth <= 1
+    ? { field: "workflow_state", value: "Open" }
+    : { kind: "group", match: "all", filters: [deepDashboardFilterExpression(depth - 1)] };
+}
+
+function wideDashboardFilterExpression(nodes: number): unknown {
+  return {
+    kind: "group",
+    match: "all",
+    filters: Array.from({ length: nodes }, () => ({ field: "workflow_state", value: "Open" }))
+  };
+}

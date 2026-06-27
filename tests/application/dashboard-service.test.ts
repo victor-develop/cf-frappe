@@ -207,6 +207,80 @@ describe("DashboardService", () => {
     });
   });
 
+  it("applies document card filter expressions through query services", async () => {
+    const registry = createRegistry({
+      doctypes: [noteDocType],
+      dashboards: [
+        defineDashboard({
+          name: "Filtered Metrics",
+          roles: ["User"],
+          cards: [
+            {
+              name: "visible_open",
+              source: {
+                kind: "documentCount",
+                doctype: "Note",
+                filters: [{ field: "workflow_state", value: "Open" }],
+                filterExpression: { field: "title", operator: "contains", value: "Visible" }
+              }
+            },
+            {
+              name: "visible_high_sum",
+              source: {
+                kind: "documentAggregate",
+                doctype: "Note",
+                aggregate: "sum",
+                field: "count",
+                filters: [{ field: "priority", value: "High" }],
+                filterExpression: {
+                  kind: "group",
+                  match: "any",
+                  filters: [
+                    { field: "title", operator: "contains", value: "Visible" },
+                    { field: "title", operator: "contains", value: "Escalation" }
+                  ]
+                }
+              }
+            }
+          ]
+        })
+      ]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+    const queries = new QueryService({ registry, projections: store });
+    const reports = new ReportService({ registry, queries });
+    const dashboards = new DashboardService({ registry, queries, reports });
+
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Visible Open", priority: "High", workflow_state: "Open", count: 7 })
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Hidden Open", priority: "High", workflow_state: "Open", count: 11 })
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Visible Closed", priority: "High", workflow_state: "Closed", count: 3 })
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Escalation Low", priority: "Low", workflow_state: "Open", count: 5 })
+    });
+
+    await expect(dashboards.runDashboard(owner, "Filtered Metrics")).resolves.toMatchObject({
+      cards: [
+        { name: "visible_open", value: 1 },
+        { name: "visible_high_sum", value: 10 }
+      ]
+    });
+  });
+
   it("returns deterministic empty values for document aggregate cards", async () => {
     const registry = createRegistry({
       doctypes: [noteDocType],

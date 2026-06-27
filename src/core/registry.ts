@@ -16,7 +16,7 @@ import {
   type DashboardDefinition
 } from "./dashboard.js";
 import { FrameworkError } from "./errors.js";
-import { normalizeListFilters } from "./list-view.js";
+import { normalizeListFilterExpression, normalizeListFilters } from "./list-view.js";
 import { assertKanbanDefinition, assertKanbanMatchesDocType, defineKanban, type KanbanDefinition } from "./kanban.js";
 import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-format.js";
 import { assertPrintFormatMatchesDocType, assertPrintLetterheadValid } from "./print-format.js";
@@ -809,7 +809,10 @@ export class ModelRegistry {
             { status: 400 }
           );
         }
-        normalizeListFilters(doctype, source.filters ?? []);
+        normalizeListFilters(doctype, source.filters ?? [], { errorCode: "DASHBOARD_INVALID" });
+        if (source.filterExpression !== undefined) {
+          normalizeListFilterExpression(doctype, source.filterExpression, { errorCode: "DASHBOARD_INVALID" });
+        }
         if (source.kind === "documentAggregate") {
           this.assertDashboardDocumentAggregateReferencesResolve(dashboard, card.name, source, doctype);
         }

@@ -1,5 +1,12 @@
 import { FrameworkError } from "./errors.js";
-import { SYSTEM_MANAGER_ROLE, type Actor, type JsonPrimitive, type ListDocumentsFilter } from "./types.js";
+import { assertListFilterExpressionShape, freezeListFilter, freezeListFilterExpression } from "./list-view.js";
+import {
+  SYSTEM_MANAGER_ROLE,
+  type Actor,
+  type JsonPrimitive,
+  type ListDocumentsFilter,
+  type ListFilterExpression
+} from "./types.js";
 
 export type DashboardReportFilters = Readonly<Record<string, JsonPrimitive | undefined>>;
 export type DashboardDocumentAggregate = "count" | "sum" | "avg" | "min" | "max";
@@ -13,6 +20,7 @@ export type DashboardCardSourceDefinition =
       readonly kind: "documentCount";
       readonly doctype: string;
       readonly filters?: readonly ListDocumentsFilter[];
+      readonly filterExpression?: ListFilterExpression;
     }
   | {
       readonly kind: "documentAggregate";
@@ -20,6 +28,7 @@ export type DashboardCardSourceDefinition =
       readonly aggregate: DashboardDocumentAggregate;
       readonly field?: string;
       readonly filters?: readonly ListDocumentsFilter[];
+      readonly filterExpression?: ListFilterExpression;
     }
   | {
       readonly kind: "reportSummary";
@@ -112,10 +121,13 @@ function freezeDashboardCardSource(source: DashboardCardSourceDefinition): Dashb
       ...(source.filters
         ? {
             filters: Object.freeze(
-              source.filters.map((filter) => Object.freeze({ ...filter }))
+              source.filters.map(freezeListFilter)
             )
           }
-        : {})
+        : {}),
+      ...(source.filterExpression === undefined
+        ? {}
+        : { filterExpression: freezeListFilterExpression(source.filterExpression) })
     });
   }
   return Object.freeze({
@@ -128,10 +140,12 @@ function assertDashboardCardSource(dashboardName: string, card: DashboardCardDef
   const source = card.source;
   if (source.kind === "documentCount") {
     assertDashboardIdentifier(source.doctype, `dashboard '${dashboardName}' card '${card.name}' DocType`);
+    assertDashboardDocumentFilterExpression(dashboardName, card);
     return;
   }
   if (source.kind === "documentAggregate") {
     assertDashboardIdentifier(source.doctype, `dashboard '${dashboardName}' card '${card.name}' DocType`);
+    assertDashboardDocumentFilterExpression(dashboardName, card);
     if (!DASHBOARD_DOCUMENT_AGGREGATES.includes(source.aggregate)) {
       throw new FrameworkError(
         "DASHBOARD_INVALID",
@@ -167,6 +181,18 @@ function assertDashboardCardSource(dashboardName: string, card: DashboardCardDef
     `Dashboard '${dashboardName}' card '${card.name}' has invalid source`,
     { status: 400 }
   );
+}
+
+function assertDashboardDocumentFilterExpression(dashboardName: string, card: DashboardCardDefinition): void {
+  if (
+    (card.source.kind === "documentCount" || card.source.kind === "documentAggregate") &&
+    card.source.filterExpression !== undefined
+  ) {
+    assertListFilterExpressionShape(card.source.filterExpression, {
+      errorCode: "DASHBOARD_INVALID",
+      label: `Dashboard '${dashboardName}' card '${card.name}' filter expression`
+    });
+  }
 }
 
 function assertDashboardIndicatorRules(dashboardName: string, card: DashboardCardDefinition): void {
