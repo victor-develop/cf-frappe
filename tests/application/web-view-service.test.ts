@@ -287,6 +287,66 @@ describe("WebViewService", () => {
     });
   });
 
+  it("applies metadata filter expressions with published and route filters", async () => {
+    const registry = createRegistry({
+      doctypes: [BlogPost],
+      webViews: [
+        defineWebView({
+          name: "Blog",
+          doctype: "Blog Post",
+          routeField: "route",
+          titleField: "title",
+          publishedField: "published",
+          filters: [{ field: "audience", value: "Public" }],
+          filterExpression: {
+            kind: "group",
+            match: "any",
+            filters: [
+              { field: "title", operator: "contains", value: "Launch" },
+              { field: "title", operator: "contains", value: "Guide" }
+            ]
+          },
+          orderBy: "title",
+          order: "asc"
+        })
+      ]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+    const queries = new QueryService({ registry, projections: store });
+    const webViews = new WebViewService({ registry, queries });
+
+    for (const data of [
+      { title: "Public Changelog", route: "public-changelog", published: true, audience: "Public" },
+      { title: "Public Guide", route: "public-guide", published: true, audience: "Public" },
+      { title: "Public Launch", route: "public-launch", published: true, audience: "Public" },
+      { title: "Internal Guide", route: "internal-guide", published: true, audience: "Internal" },
+      { title: "Public Draft Guide", route: "public-draft-guide", published: false, audience: "Public" }
+    ]) {
+      await documents.create({ actor: owner, doctype: "Blog Post", data });
+    }
+
+    await expect(webViews.listItems(guest, "Blog")).resolves.toMatchObject({
+      total: 2,
+      items: [
+        { route: "public-guide", title: "Public Guide" },
+        { route: "public-launch", title: "Public Launch" }
+      ]
+    });
+    await expect(webViews.getItem(guest, "Blog", "public-guide")).resolves.toMatchObject({
+      item: { route: "public-guide", title: "Public Guide" }
+    });
+    await expect(webViews.getItem(guest, "Blog", "public-changelog")).rejects.toMatchObject({
+      code: "DOCUMENT_NOT_FOUND"
+    });
+    await expect(webViews.getItem(guest, "Blog", "internal-guide")).rejects.toMatchObject({
+      code: "DOCUMENT_NOT_FOUND"
+    });
+    await expect(webViews.getItem(guest, "Blog", "public-draft-guide")).rejects.toMatchObject({
+      code: "DOCUMENT_NOT_FOUND"
+    });
+  });
+
   it("rejects Web View pagination that exceeds the bounded projection scan budget", async () => {
     const registry = createRegistry({
       doctypes: [BlogPost],

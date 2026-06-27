@@ -1,11 +1,12 @@
 import { FrameworkError } from "./errors.js";
-import { normalizeListFilters, normalizeListOrder } from "./list-view.js";
+import { isListFilterGroup, normalizeListFilterExpression, normalizeListFilters, normalizeListOrder } from "./list-view.js";
 import {
   SYSTEM_MANAGER_ROLE,
   type Actor,
   type DocTypeDefinition,
   type FieldDefinition,
   type ListDocumentsFilter,
+  type ListFilterExpression,
   type ListOrderDirection
 } from "./types.js";
 
@@ -26,6 +27,7 @@ export interface WebViewDefinition {
   readonly publishedField?: string;
   readonly fields?: readonly WebViewFieldDefinition[];
   readonly filters?: readonly ListDocumentsFilter[];
+  readonly filterExpression?: ListFilterExpression;
   readonly pageSize?: number;
   readonly orderBy?: string;
   readonly order?: ListOrderDirection;
@@ -39,7 +41,10 @@ export function defineWebView(definition: WebViewDefinition): WebViewDefinition 
     ...(definition.fields === undefined ? {} : { fields: Object.freeze(definition.fields.map((field) => Object.freeze({ ...field }))) }),
     ...(definition.filters === undefined
       ? {}
-      : { filters: Object.freeze(definition.filters.map(freezeWebViewFilter)) })
+      : { filters: Object.freeze(definition.filters.map(freezeWebViewFilter)) }),
+    ...(definition.filterExpression === undefined
+      ? {}
+      : { filterExpression: freezeWebViewFilterExpression(definition.filterExpression) })
   });
 }
 
@@ -69,6 +74,9 @@ export function assertWebViewDefinition(definition: WebViewDefinition): void {
     }
     seen.add(field.field);
   }
+  if (definition.filterExpression !== undefined) {
+    assertWebViewFilterExpressionShape(definition.name, definition.filterExpression);
+  }
 }
 
 export function assertWebViewMatchesDocType(webView: WebViewDefinition, doctype: DocTypeDefinition): void {
@@ -92,6 +100,9 @@ export function assertWebViewMatchesDocType(webView: WebViewDefinition, doctype:
   normalizeListOrder(doctype, webView.orderBy, webView.order, { errorCode: "WEB_VIEW_INVALID" });
   assertFilterFieldsVisible(webView, doctype);
   normalizeListFilters(doctype, webView.filters ?? [], { errorCode: "WEB_VIEW_INVALID" });
+  if (webView.filterExpression !== undefined) {
+    normalizeListFilterExpression(doctype, webView.filterExpression, { errorCode: "WEB_VIEW_INVALID" });
+  }
   for (const field of webView.fields ?? []) {
     assertDisplayField(webView, doctype, field.field, doctype.fields.find((candidate) => candidate.name === field.field));
   }
@@ -147,14 +158,42 @@ function assertDisplayField(
 
 function assertFilterFieldsVisible(webView: WebViewDefinition, doctype: DocTypeDefinition): void {
   for (const filter of webView.filters ?? []) {
-    const field = doctype.fields.find((candidate) => candidate.name === filter.field);
-    if (field?.hidden) {
-      throw new FrameworkError(
-        "WEB_VIEW_INVALID",
-        `Web view '${webView.name}' filter field '${filter.field}' must not be hidden`,
-        { status: 400 }
-      );
+    assertFilterFieldVisible(webView, doctype, filter.field, "filter");
+  }
+  if (webView.filterExpression !== undefined) {
+    assertFilterExpressionFieldsVisible(webView, doctype, webView.filterExpression);
+  }
+}
+
+function assertFilterExpressionFieldsVisible(
+  webView: WebViewDefinition,
+  doctype: DocTypeDefinition,
+  expression: ListFilterExpression
+): void {
+  if (isListFilterGroup(expression)) {
+    for (const filter of expression.filters) {
+      assertFilterExpressionFieldsVisible(webView, doctype, filter);
     }
+    return;
+  }
+  if (typeof expression.field === "string") {
+    assertFilterFieldVisible(webView, doctype, expression.field, "filter expression");
+  }
+}
+
+function assertFilterFieldVisible(
+  webView: WebViewDefinition,
+  doctype: DocTypeDefinition,
+  fieldName: string,
+  label: "filter" | "filter expression"
+): void {
+  const field = doctype.fields.find((candidate) => candidate.name === fieldName);
+  if (field?.hidden) {
+    throw new FrameworkError(
+      "WEB_VIEW_INVALID",
+      `Web view '${webView.name}' ${label} field '${fieldName}' must not be hidden`,
+      { status: 400 }
+    );
   }
 }
 
@@ -194,9 +233,48 @@ function assertWebViewIdentifier(value: string, label: string): void {
   }
 }
 
+function assertWebViewFilterExpressionShape(webViewName: string, expression: unknown): asserts expression is ListFilterExpression {
+  if (!isRecord(expression)) {
+    throw new FrameworkError("WEB_VIEW_INVALID", `Web view '${webViewName}' filter expression must be an object`, {
+      status: 400
+    });
+  }
+  if (expression.kind === "group") {
+    if (expression.match !== "all" && expression.match !== "any") {
+      throw new FrameworkError("WEB_VIEW_INVALID", "List filter group match must be all or any", { status: 400 });
+    }
+    if (!Array.isArray(expression.filters) || expression.filters.length === 0) {
+      throw new FrameworkError("WEB_VIEW_INVALID", "List filter group must include at least one filter", {
+        status: 400
+      });
+    }
+    for (const filter of expression.filters) {
+      assertWebViewFilterExpressionShape(webViewName, filter);
+    }
+    return;
+  }
+  if (typeof expression.field !== "string") {
+    throw new FrameworkError("WEB_VIEW_INVALID", "Filter field must be a string", { status: 400 });
+  }
+}
+
 function freezeWebViewFilter(filter: ListDocumentsFilter): ListDocumentsFilter {
   return Object.freeze({
     ...filter,
     value: Array.isArray(filter.value) ? Object.freeze([...filter.value]) : filter.value
   });
+}
+
+function freezeWebViewFilterExpression(expression: ListFilterExpression): ListFilterExpression {
+  if (isListFilterGroup(expression)) {
+    return Object.freeze({
+      ...expression,
+      filters: Object.freeze(expression.filters.map(freezeWebViewFilterExpression))
+    });
+  }
+  return freezeWebViewFilter(expression);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

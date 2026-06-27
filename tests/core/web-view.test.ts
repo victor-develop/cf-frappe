@@ -33,6 +33,14 @@ describe("metadata Web Views", () => {
       publishedField: "published",
       fields: [{ field: "body", label: "Article" }],
       filters: [{ field: "category", operator: "in", value: categories }],
+      filterExpression: {
+        kind: "group",
+        match: "any",
+        filters: [
+          { field: "category", value: "News" },
+          { field: "category", operator: "in", value: categories }
+        ]
+      },
       roles: ["Guest"],
       pageSize: 10,
       orderBy: "title",
@@ -45,9 +53,14 @@ describe("metadata Web Views", () => {
     expect(Object.isFrozen(view.filters)).toBe(true);
     expect(Object.isFrozen(view.filters?.[0])).toBe(true);
     expect(Object.isFrozen(view.filters?.[0]?.value)).toBe(true);
+    expect(Object.isFrozen(view.filterExpression)).toBe(true);
+    expect(Object.isFrozen((view.filterExpression as { readonly filters: readonly unknown[] }).filters)).toBe(true);
+    expect(Object.isFrozen((view.filterExpression as { readonly filters: readonly { readonly value?: unknown }[] }).filters[1])).toBe(true);
+    expect(Object.isFrozen((view.filterExpression as { readonly filters: readonly { readonly value?: unknown }[] }).filters[1]?.value)).toBe(true);
     expect(view.filters?.[0]?.value).toEqual(["News", "Docs"]);
     (categories as unknown as string[]).push("Internal");
     expect(view.filters?.[0]?.value).toEqual(["News", "Docs"]);
+    expect((view.filterExpression as { readonly filters: readonly { readonly value?: unknown }[] }).filters[1]?.value).toEqual(["News", "Docs"]);
   });
 
   it("validates web views against registered DocType metadata", () => {
@@ -95,6 +108,24 @@ describe("metadata Web Views", () => {
       defineWebView({ name: "Broken", doctype: "Blog Post", routeField: "route", titleField: "title", orderBy: " " })
     ).toThrow("orderBy field is required");
     expect(() =>
+      defineWebView({
+        name: "Broken",
+        doctype: "Blog Post",
+        routeField: "route",
+        titleField: "title",
+        filterExpression: "not-an-expression" as never
+      })
+    ).toThrow("filter expression must be an object");
+    expect(() =>
+      defineWebView({
+        name: "Broken",
+        doctype: "Blog Post",
+        routeField: "route",
+        titleField: "title",
+        filterExpression: { kind: "group", match: "any" } as never
+      })
+    ).toThrow("List filter group must include at least one filter");
+    expect(() =>
       createRegistry({ doctypes: blogDoctypes, webViews: [defineWebView({ name: "Broken", doctype: "Blog Post", routeField: "route", titleField: "title", orderBy: "missing" })] })
     ).toThrow("orderBy field 'missing' is not defined");
     expect(() =>
@@ -114,6 +145,48 @@ describe("metadata Web Views", () => {
     ).toThrow("filter field 'internal_notes' must not be hidden");
     expect(() =>
       createRegistry({ doctypes: blogDoctypes, webViews: [defineWebView({ name: "Broken", doctype: "Blog Post", routeField: "route", titleField: "title", filters: [{ field: "children", value: "child" }] })] })
+    ).toThrow("Filter field 'children' cannot be a table field");
+    expect(() =>
+      createRegistry({
+        doctypes: blogDoctypes,
+        webViews: [
+          defineWebView({
+            name: "Broken",
+            doctype: "Blog Post",
+            routeField: "route",
+            titleField: "title",
+            filterExpression: { kind: "group", match: "any", filters: [] }
+          })
+        ]
+      })
+    ).toThrow("List filter group must include at least one filter");
+    expect(() =>
+      createRegistry({
+        doctypes: blogDoctypes,
+        webViews: [
+          defineWebView({
+            name: "Broken",
+            doctype: "Blog Post",
+            routeField: "route",
+            titleField: "title",
+            filterExpression: { field: "internal_notes", value: "secret" }
+          })
+        ]
+      })
+    ).toThrow("filter expression field 'internal_notes' must not be hidden");
+    expect(() =>
+      createRegistry({
+        doctypes: blogDoctypes,
+        webViews: [
+          defineWebView({
+            name: "Broken",
+            doctype: "Blog Post",
+            routeField: "route",
+            titleField: "title",
+            filterExpression: { field: "children", value: "child" }
+          })
+        ]
+      })
     ).toThrow("Filter field 'children' cannot be a table field");
   });
 });

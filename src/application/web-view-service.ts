@@ -9,6 +9,7 @@ import type {
   FieldDefinition,
   JsonValue,
   ListDocumentsFilter,
+  ListFilterExpression,
   ListOrderDirection
 } from "../core/types.js";
 import type { QueryService } from "./query-service.js";
@@ -114,6 +115,7 @@ export class WebViewService {
       const pageLimit = Math.min(Math.max(limit + 1, DEFAULT_WEB_VIEW_LIMIT), remainingScan);
       const result = await this.queries.listDocuments(actor, metadata.doctype, {
         filters: webViewFilters(metadata),
+        ...webViewFilterExpressionOption(metadata.view),
         ...webViewOrderOptions(metadata.view),
         limit: pageLimit,
         offset: rawOffset,
@@ -160,6 +162,7 @@ export class WebViewService {
     }
     const result = await this.queries.listDocuments(actor, metadata.doctype, {
       filters: [...webViewFilters(metadata), { field: metadata.routeField.field, value: route }],
+      ...webViewFilterExpressionOption(metadata.view),
       ...webViewOrderOptions(metadata.view),
       limit: 1,
       maxLimit: 1
@@ -218,6 +221,10 @@ function publishedFilters(metadata: WebViewMetadata): readonly ListDocumentsFilt
 
 function webViewFilters(metadata: WebViewMetadata): readonly ListDocumentsFilter[] {
   return [...(metadata.view.filters ?? []), ...publishedFilters(metadata)];
+}
+
+function webViewFilterExpressionOption(webView: WebViewDefinition): { readonly filterExpression?: ListFilterExpression } {
+  return webView.filterExpression === undefined ? {} : { filterExpression: webView.filterExpression };
 }
 
 function webViewOrderOptions(webView: WebViewDefinition): { readonly orderBy?: string; readonly order?: ListOrderDirection } {
