@@ -72,6 +72,8 @@ function fieldValue(value: JsonValue | undefined): FieldDefinition {
     ...optionalBoolean(value.unique, "field.unique", "unique"),
     ...optionalBoolean(value.noCopy, "field.noCopy", "noCopy"),
     ...optionalBoolean(value.allowOnSubmit, "field.allowOnSubmit", "allowOnSubmit"),
+    ...optionalString(value.fetchFrom, "field.fetchFrom", "fetchFrom"),
+    ...optionalBoolean(value.fetchIfEmpty, "field.fetchIfEmpty", "fetchIfEmpty"),
     ...optionalBoolean(value.inFormView, "field.inFormView", "inFormView"),
     ...optionalBoolean(value.inListView, "field.inListView", "inListView"),
     ...optionalBoolean(value.inListFilter, "field.inListFilter", "inListFilter"),

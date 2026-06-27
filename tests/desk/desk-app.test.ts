@@ -4143,6 +4143,8 @@ describe("Desk app", () => {
     expect(emptyHtml).toContain("Custom Fields");
     expect(emptyHtml).toContain('name="doctype"');
     expect(emptyHtml).toContain('name="description"');
+    expect(emptyHtml).toContain('name="fetchFrom"');
+    expect(emptyHtml).toContain('name="fetchIfEmpty"');
     expect(emptyHtml).toContain('name="defaultValue"');
     expect(emptyHtml).toContain("No custom fields configured.");
 
@@ -5099,6 +5101,8 @@ describe("Desk app", () => {
     expect(emptyHtml).toContain("Field Properties");
     expect(emptyHtml).toContain('name="field"');
     expect(emptyHtml).toContain('name="description"');
+    expect(emptyHtml).toContain('name="fetchFrom"');
+    expect(emptyHtml).toContain('name="fetchIfEmpty"');
     expect(emptyHtml).toContain("No field property overrides configured.");
 
     const created = await app.request("/desk/admin/field-properties", {

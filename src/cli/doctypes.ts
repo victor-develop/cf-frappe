@@ -45,6 +45,8 @@ interface FieldResponse {
   readonly unique?: boolean;
   readonly noCopy?: boolean;
   readonly allowOnSubmit?: boolean;
+  readonly fetchFrom?: string;
+  readonly fetchIfEmpty?: boolean;
   readonly inListView?: boolean;
   readonly inListFilter?: boolean;
   readonly inGlobalSearch?: boolean;
@@ -190,6 +192,8 @@ function fieldFlags(field: FieldResponse): readonly string[] {
     ...(field.unique ? ["unique"] : []),
     ...(field.noCopy ? ["noCopy"] : []),
     ...(field.allowOnSubmit ? ["allowOnSubmit"] : []),
+    ...(field.fetchFrom ? [`fetchFrom=${field.fetchFrom}`] : []),
+    ...(field.fetchIfEmpty ? ["fetchIfEmpty"] : []),
     ...(field.inListView ? ["list"] : []),
     ...(field.inListFilter ? ["filter"] : []),
     ...(field.inGlobalSearch ? ["search"] : [])

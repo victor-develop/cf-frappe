@@ -183,6 +183,80 @@ describe("DocumentService", () => {
     ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
   });
 
+  it("fetches linked document field values into command events", async () => {
+    const ProjectTask = defineDocType({
+      name: "Project Task",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "project", type: "link", linkTo: "Project", required: true },
+        { name: "project_title", type: "text", fetchFrom: "project.title" },
+        { name: "initial_project_title", type: "text", fetchFrom: "project.title", fetchIfEmpty: true }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry: createRegistry({ doctypes: [projectDocType, ProjectTask] }),
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["project-1", "project-2", "task-1", "task-2"])
+    });
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Apollo" } });
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Zeus" } });
+
+    const created = await documents.create({
+      actor: owner,
+      doctype: "Project Task",
+      data: { title: "Fetch links", project: "Apollo" }
+    });
+
+    expect(created).toMatchObject({
+      data: {
+        project: "Apollo",
+        project_title: "Apollo",
+        initial_project_title: "Apollo"
+      }
+    });
+    await expect(store.readStream(documentStream("acme", "Project Task", "Fetch links"))).resolves.toMatchObject([
+      {
+        payload: {
+          kind: "DocumentCreated",
+          data: expect.objectContaining({
+            project_title: "Apollo",
+            initial_project_title: "Apollo"
+          })
+        }
+      }
+    ]);
+
+    const updated = await documents.update({
+      actor: owner,
+      doctype: "Project Task",
+      name: "Fetch links",
+      patch: { project: "Zeus" },
+      expectedVersion: 1
+    });
+
+    expect(updated).toMatchObject({
+      version: 2,
+      data: {
+        project: "Zeus",
+        project_title: "Zeus",
+        initial_project_title: "Apollo"
+      }
+    });
+    await expect(store.readStream(documentStream("acme", "Project Task", "Fetch links"))).resolves.toMatchObject([
+      expect.anything(),
+      {
+        payload: {
+          kind: "DocumentUpdated",
+          patch: { project: "Zeus", project_title: "Zeus" }
+        }
+      }
+    ]);
+  });
+
   it("uses the event stream, not stale projection state, as the write authority", async () => {
     const { documents, projections } = createServices(["e1", "e2"]);
     await documents.create({ actor: owner, doctype: "Note", data: data() });

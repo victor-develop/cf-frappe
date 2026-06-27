@@ -50,6 +50,8 @@ interface CustomFieldResponse {
   readonly unique?: boolean;
   readonly noCopy?: boolean;
   readonly allowOnSubmit?: boolean;
+  readonly fetchFrom?: string;
+  readonly fetchIfEmpty?: boolean;
   readonly inFormView?: boolean;
   readonly inListView?: boolean;
   readonly inListFilter?: boolean;
@@ -181,6 +183,8 @@ function fieldFlags(field: CustomFieldResponse): readonly string[] {
     ...(field.unique ? ["unique"] : []),
     ...(field.noCopy ? ["noCopy"] : []),
     ...(field.allowOnSubmit ? ["allowOnSubmit"] : []),
+    ...(field.fetchFrom ? [`fetchFrom=${field.fetchFrom}`] : []),
+    ...(field.fetchIfEmpty ? ["fetchIfEmpty"] : []),
     ...(field.inFormView ? ["form"] : []),
     ...(field.inListView ? ["list"] : []),
     ...(field.inListFilter ? ["filter"] : [])

@@ -133,6 +133,33 @@ describe("schema", () => {
     ).toThrow(FrameworkError);
   });
 
+  it("validates fetch-from field metadata against local link fields", () => {
+    expect(() =>
+      defineDocType({
+        name: "Task",
+        fields: [
+          { name: "project", type: "link", linkTo: "Project" },
+          { name: "project_title", type: "text", fetchFrom: "project.title", fetchIfEmpty: true }
+        ]
+      })
+    ).not.toThrow();
+    expect(() =>
+      defineDocType({
+        name: "Bad Fetch",
+        fields: [
+          { name: "project", type: "text" },
+          { name: "project_title", type: "text", fetchFrom: "project.title" }
+        ]
+      })
+    ).toThrow(FrameworkError);
+    expect(() =>
+      defineDocType({
+        name: "Bad Fetch If Empty",
+        fields: [{ name: "project_title", type: "text", fetchIfEmpty: true }]
+      })
+    ).toThrow(FrameworkError);
+  });
+
   it("validates table rows against child DocType metadata", () => {
     const InvoiceItem = defineDocType({
       name: "Invoice Item",

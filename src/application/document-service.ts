@@ -465,9 +465,17 @@ export class DocumentService implements DocumentCommandExecutor {
 
     const now = this.clock.now();
     const withDefaults = applyDefaults(doctype, command.data, { actor: command.actor, now });
+    const withValidatedHooks = await this.runBeforeValidate(doctype, withDefaults);
+    const withFetchedFields = await this.applyFetchedFields(
+      command.actor,
+      tenantId,
+      doctype,
+      withValidatedHooks,
+      relatedDocType
+    );
     const data = stripInternalTableFields(
       doctype,
-      await this.runBeforeValidate(doctype, withDefaults),
+      withFetchedFields,
       relatedDocType
     );
     const issues = [
@@ -613,26 +621,39 @@ export class DocumentService implements DocumentCommandExecutor {
     const patch = options.prevalidatedPatch ??
       await this.runBeforeValidate(options.doctype, compactData(options.patch), options.existing);
     const patchWithoutInternalFields = stripInternalTableFields(options.doctype, patch, options.relatedDocType);
+    const patchWithFetchedFields = await this.applyFetchedFields(
+      options.command.actor,
+      options.tenantId,
+      options.doctype,
+      patch,
+      options.relatedDocType,
+      { existing: options.existing }
+    );
+    const fetchedPatchWithoutInternalFields = stripInternalTableFields(
+      options.doctype,
+      patchWithFetchedFields,
+      options.relatedDocType
+    );
     const unset = normalizeUnsetFields(options.unset);
     const submittedUpdateIssues = options.existing.docstatus === "submitted"
-      ? allowOnSubmitIssues(options.doctype, patchWithoutInternalFields, unset)
+      ? allowOnSubmitIssues(options.doctype, fetchedPatchWithoutInternalFields, unset)
       : [];
     const unsetIssues = documentUnsetIssues(
       options.doctype,
       unset,
       options.existing.data,
-      patchWithoutInternalFields
+      fetchedPatchWithoutInternalFields
     );
     const originIssues = childTableOriginIssues(
       options.doctype,
-      patch,
+      patchWithFetchedFields,
       options.existing.data,
       options.relatedDocType
     );
     const readOnlyIssues = readonlyIssues(options.doctype, patchWithoutInternalFields, options.relatedDocType);
     const normalizedPatch = preserveReadOnlyTableValues(
       options.doctype,
-      patch,
+      patchWithFetchedFields,
       options.existing,
       options.relatedDocType
     );
@@ -891,13 +912,21 @@ export class DocumentService implements DocumentCommandExecutor {
       : pickCommandFields(commandDefinition.fields, input);
     const normalizedPatch = await this.runBeforeValidate(doctype, compactData(patch), existing);
     const patchWithoutInternalFields = stripInternalTableFields(doctype, normalizedPatch, relatedDocType);
-    const originIssues = childTableOriginIssues(doctype, normalizedPatch, existing.data, relatedDocType);
+    const patchWithFetchedFields = await this.applyFetchedFields(
+      command.actor,
+      tenantId,
+      doctype,
+      normalizedPatch,
+      relatedDocType,
+      { existing }
+    );
+    const originIssues = childTableOriginIssues(doctype, patchWithFetchedFields, existing.data, relatedDocType);
     const readOnlyIssues = commandDefinition.allowReadOnlyFields
       ? []
       : readonlyIssues(doctype, patchWithoutInternalFields, relatedDocType);
     const patchWithReadOnlyValues = preserveReadOnlyTableValues(
       doctype,
-      normalizedPatch,
+      patchWithFetchedFields,
       existing,
       relatedDocType
     );
@@ -1563,6 +1592,56 @@ export class DocumentService implements DocumentCommandExecutor {
     return issues;
   }
 
+  private async applyFetchedFields(
+    actor: Actor,
+    tenantId: string,
+    doctype: DocTypeDefinition,
+    data: MutableDocumentData,
+    relatedDocType: RelatedDocTypeResolver,
+    options: { readonly existing?: DocumentSnapshot } = {}
+  ): Promise<DocumentData> {
+    const enriched: MutableDocumentData = { ...data };
+    const explicitFields = new Set(Object.keys(data));
+    const hasExisting = options.existing !== undefined;
+    for (const field of doctype.fields) {
+      if (field.fetchFrom === undefined || explicitFields.has(field.name)) {
+        continue;
+      }
+      const fetchPath = parseFetchFrom(field.fetchFrom);
+      if (!fetchPath) {
+        continue;
+      }
+      const linkField = doctype.fields.find((candidate) => candidate.name === fetchPath.linkField);
+      if (!linkField || linkField.type !== "link") {
+        continue;
+      }
+      if (hasExisting && !Object.prototype.hasOwnProperty.call(data, linkField.name)) {
+        continue;
+      }
+      const existingValue = options.existing?.data[field.name];
+      if (field.fetchIfEmpty === true && !isEmptyFetchedTarget(enriched[field.name] ?? existingValue)) {
+        continue;
+      }
+      const linkValue = enriched[linkField.name] ?? options.existing?.data[linkField.name];
+      if (typeof linkValue !== "string" || linkValue.length === 0) {
+        continue;
+      }
+      const targetDoctype = relatedDocType(linkField.linkTo ?? "");
+      if (!targetDoctype) {
+        continue;
+      }
+      const target = await this.readDocumentFromEvents(tenantId, targetDoctype, linkValue);
+      if (!target || !(await this.canReadLinkedDocument(actor, doctype, linkField, targetDoctype, target))) {
+        continue;
+      }
+      const fetchedValue = target.data[fetchPath.sourceField];
+      if (fetchedValue !== undefined) {
+        enriched[field.name] = fetchedValue;
+      }
+    }
+    return compactData(enriched);
+  }
+
   private async validateLinks(
     actor: Actor,
     tenantId: string,
@@ -2141,6 +2220,21 @@ function ensureExpectedVersion(existing: DocumentSnapshot, expectedVersion?: num
   if (expectedVersion !== undefined && existing.version !== expectedVersion) {
     throw conflict(`Expected version ${expectedVersion}, found ${existing.version}`);
   }
+}
+
+function parseFetchFrom(fetchFrom: string): { readonly linkField: string; readonly sourceField: string } | undefined {
+  const [linkField, sourceField, extra] = fetchFrom.split(".");
+  if (!linkField || !sourceField || extra !== undefined) {
+    return undefined;
+  }
+  return { linkField, sourceField };
+}
+
+function isEmptyFetchedTarget(value: JsonValue | undefined): boolean {
+  return value === undefined ||
+    value === null ||
+    value === "" ||
+    (Array.isArray(value) && value.length === 0);
 }
 
 function ensureMergeBaseVersion(baseVersion: number): void {

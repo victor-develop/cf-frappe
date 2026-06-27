@@ -31,6 +31,7 @@ export function defineDocType<TData extends DocumentData>(
     assertLinkFieldDefinition(definition, field);
     assertTableFieldDefinition(definition, field);
     assertUniqueFieldDefinition(definition, field);
+    assertFetchFieldDefinition(definition, field);
     seen.add(field.name);
   }
   assertNamingStrategyDefinition(definition);
@@ -304,6 +305,43 @@ function assertUniqueFieldDefinition(doctype: DocTypeDefinition, field: FieldDef
     throw new FrameworkError(
       "DOCTYPE_FIELD_INVALID",
       `Unique field '${field.name}' on ${doctype.name} must be scalar`,
+      { status: 400 }
+    );
+  }
+}
+
+function assertFetchFieldDefinition(doctype: DocTypeDefinition, field: FieldDefinition): void {
+  if (field.fetchIfEmpty === true && field.fetchFrom === undefined) {
+    throw new FrameworkError(
+      "DOCTYPE_FIELD_INVALID",
+      `Field '${field.name}' on ${doctype.name} cannot declare fetchIfEmpty without fetchFrom`,
+      { status: 400 }
+    );
+  }
+  if (field.fetchFrom === undefined) {
+    return;
+  }
+  const [linkFieldName, sourceFieldName, extra] = field.fetchFrom.split(".");
+  if (!linkFieldName || !sourceFieldName || extra !== undefined) {
+    throw new FrameworkError(
+      "DOCTYPE_FIELD_INVALID",
+      `Field '${field.name}' on ${doctype.name} fetchFrom must use linkField.sourceField`,
+      { status: 400 }
+    );
+  }
+  assertIdentifier(sourceFieldName, `fetch source on ${doctype.name}.${field.name}`);
+  const linkField = doctype.fields.find((candidate) => candidate.name === linkFieldName);
+  if (!linkField || linkField.type !== "link") {
+    throw new FrameworkError(
+      "DOCTYPE_FIELD_INVALID",
+      `Field '${field.name}' on ${doctype.name} fetchFrom link field '${linkFieldName}' must be a link field`,
+      { status: 400 }
+    );
+  }
+  if (field.type === "table") {
+    throw new FrameworkError(
+      "DOCTYPE_FIELD_INVALID",
+      `Table field '${field.name}' on ${doctype.name} cannot declare fetchFrom`,
       { status: 400 }
     );
   }

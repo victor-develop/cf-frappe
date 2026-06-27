@@ -1637,6 +1637,7 @@ export function renderCustomFieldAdmin(state: CustomFieldAdminState): string {
       <label class="field"><span>Options</span><input name="options"></label>
       <label class="field"><span>Link To</span><input name="linkTo"></label>
       <label class="field"><span>Table Of</span><input name="tableOf"></label>
+      <label class="field"><span>Fetch From</span><input name="fetchFrom" placeholder="link_field.source_field"></label>
       <label class="field"><span>Minimum</span><input name="min" type="number" step="any"></label>
       <label class="field"><span>Maximum</span><input name="max" type="number" step="any"></label>
       <label class="field"><span>Default JSON</span><textarea name="defaultValue"></textarea></label>
@@ -1648,6 +1649,7 @@ export function renderCustomFieldAdmin(state: CustomFieldAdminState): string {
       ${renderCustomFieldCheckbox("unique", "Unique")}
       ${renderCustomFieldCheckbox("noCopy", "No Copy")}
       ${renderCustomFieldCheckbox("allowOnSubmit", "Allow On Submit")}
+      ${renderCustomFieldCheckbox("fetchIfEmpty", "Fetch If Empty")}
       ${renderCustomFieldCheckbox("inFormView", "Form View")}
       ${renderCustomFieldCheckbox("inListView", "List View")}
       ${renderCustomFieldCheckbox("inListFilter", "List Filter")}
@@ -1713,6 +1715,8 @@ export function renderFieldPropertyAdmin(state: FieldPropertyAdminState): string
       <label class="field"><span>Hidden</span><select name="hidden">${renderBooleanOverrideOptions(overrides.hidden)}</select></label>
       <label class="field"><span>No Copy</span><select name="noCopy">${renderBooleanOverrideOptions(overrides.noCopy)}</select></label>
       <label class="field"><span>Allow On Submit</span><select name="allowOnSubmit">${renderBooleanOverrideOptions(overrides.allowOnSubmit)}</select></label>
+      <label class="field"><span>Fetch From</span><input name="fetchFrom" value="${escapeHtml(overrides.fetchFrom ?? "")}" placeholder="link_field.source_field"></label>
+      <label class="field"><span>Fetch If Empty</span><select name="fetchIfEmpty">${renderBooleanOverrideOptions(overrides.fetchIfEmpty)}</select></label>
       <label class="field"><span>Form View</span><select name="inFormView">${renderBooleanOverrideOptions(overrides.inFormView)}</select></label>
       <label class="field"><span>Global Search</span><select name="inGlobalSearch">${renderBooleanOverrideOptions(overrides.inGlobalSearch)}</select></label>
       <label class="field"><span>List View</span><select name="inListView">${renderBooleanOverrideOptions(overrides.inListView)}</select></label>
@@ -2010,6 +2014,8 @@ function renderFieldPropertyOverrides(overrides: FieldPropertyOverrideState["fie
     overrides.hidden === undefined ? "" : `hidden: ${String(overrides.hidden)}`,
     overrides.noCopy === undefined ? "" : `no copy: ${String(overrides.noCopy)}`,
     overrides.allowOnSubmit === undefined ? "" : `allow on submit: ${String(overrides.allowOnSubmit)}`,
+    overrides.fetchFrom === undefined ? "" : `fetch from: ${overrides.fetchFrom}`,
+    overrides.fetchIfEmpty === undefined ? "" : `fetch if empty: ${String(overrides.fetchIfEmpty)}`,
     overrides.inFormView === undefined ? "" : `form: ${String(overrides.inFormView)}`,
     overrides.inGlobalSearch === undefined ? "" : `search: ${String(overrides.inGlobalSearch)}`,
     overrides.inListView === undefined ? "" : `list: ${String(overrides.inListView)}`,
@@ -2102,6 +2108,7 @@ function renderCustomFieldDetails(field: FieldDefinition): string {
     field.options && field.options.length > 0 ? `options: ${field.options.join(", ")}` : "",
     field.linkTo ? `link: ${field.linkTo}` : "",
     field.tableOf ? `table: ${field.tableOf}` : "",
+    field.fetchFrom ? `fetch from: ${field.fetchFrom}` : "",
     field.min !== undefined ? `min: ${String(field.min)}` : "",
     field.max !== undefined ? `max: ${String(field.max)}` : "",
     field.defaultValue !== undefined ? `default: ${JSON.stringify(field.defaultValue)}` : ""
@@ -2116,6 +2123,8 @@ function renderCustomFieldFlags(field: FieldDefinition): string {
     field.unique ? "unique" : "",
     field.noCopy ? "no copy" : "",
     field.allowOnSubmit ? "allow on submit" : "",
+    field.fetchFrom ? `fetch from ${field.fetchFrom}` : "",
+    field.fetchIfEmpty ? "fetch if empty" : "",
     field.inFormView ? "form" : "",
     field.inListView ? "list" : "",
     field.inListFilter ? "filter" : ""

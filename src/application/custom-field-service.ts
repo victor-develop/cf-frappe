@@ -368,6 +368,8 @@ function normalizeField(field: FieldDefinition): PersistedFieldDefinition {
     ...(field.unique === undefined ? {} : { unique: field.unique }),
     ...(field.noCopy === undefined ? {} : { noCopy: field.noCopy }),
     ...(field.allowOnSubmit === undefined ? {} : { allowOnSubmit: field.allowOnSubmit }),
+    ...(field.fetchFrom === undefined || field.fetchFrom.trim().length === 0 ? {} : { fetchFrom: field.fetchFrom.trim() }),
+    ...(field.fetchIfEmpty === undefined ? {} : { fetchIfEmpty: field.fetchIfEmpty }),
     ...(field.inFormView === undefined ? {} : { inFormView: field.inFormView }),
     ...(field.inListView === undefined ? {} : { inListView: field.inListView }),
     ...(field.inListFilter === undefined ? {} : { inListFilter: field.inListFilter }),

@@ -222,6 +222,8 @@ function normalizeOverrides(field: FieldDefinition, overrides: FieldPropertyOver
     ...optionalBoolean(overrides.hidden, "hidden", "hidden"),
     ...optionalBoolean(overrides.noCopy, "noCopy", "noCopy"),
     ...optionalBoolean(overrides.allowOnSubmit, "allowOnSubmit", "allowOnSubmit"),
+    ...optionalTrimmedString(overrides.fetchFrom, "fetchFrom", "fetchFrom"),
+    ...optionalBoolean(overrides.fetchIfEmpty, "fetchIfEmpty", "fetchIfEmpty"),
     ...optionalBoolean(overrides.inFormView, "inFormView", "inFormView"),
     ...optionalBoolean(overrides.inGlobalSearch, "inGlobalSearch", "inGlobalSearch"),
     ...optionalBoolean(overrides.inListView, "inListView", "inListView"),

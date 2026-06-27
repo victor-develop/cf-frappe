@@ -219,6 +219,8 @@ describe("cf-frappe CLI remote field properties", () => {
                   description: "Pick the operational urgency.",
                   noCopy: true,
                   allowOnSubmit: true,
+                  fetchFrom: "project.title",
+                  fetchIfEmpty: true,
                   required: true,
                   inListFilter: true
                 }
@@ -237,7 +239,7 @@ describe("cf-frappe CLI remote field properties", () => {
     expect(calls[0]?.headers.get("authorization")).toBe("Bearer test-token");
     expect(stdout.text()).toContain("Field property overrides at https://app.example/cf");
     expect(stdout.text()).toContain("DocType: Sales Invoice Tenant: acme/east Version: 2 Total: 1");
-    expect(stdout.text()).toContain("- priority overrides label, description, noCopy, allowOnSubmit, required, inListFilter");
+    expect(stdout.text()).toContain("- priority overrides label, description, noCopy, allowOnSubmit, fetchFrom, fetchIfEmpty, required, inListFilter");
     expect(stdout.text()).toContain("{\"label\":\"Urgency\"");
   });
 
@@ -255,7 +257,7 @@ describe("cf-frappe CLI remote field properties", () => {
         "--field",
         "priority/level",
         "--overrides-json",
-        "{\"label\":\"Urgency\",\"description\":\"Pick the operational urgency.\",\"noCopy\":true,\"allowOnSubmit\":true,\"options\":[\"Low\",\"High\"],\"defaultValue\":\"High\",\"inListFilter\":true}",
+        "{\"label\":\"Urgency\",\"description\":\"Pick the operational urgency.\",\"noCopy\":true,\"allowOnSubmit\":true,\"fetchFrom\":\"project.title\",\"fetchIfEmpty\":true,\"options\":[\"Low\",\"High\"],\"defaultValue\":\"High\",\"inListFilter\":true}",
         "--tenant",
         "acme/east",
         "--expected-version",
@@ -276,6 +278,8 @@ describe("cf-frappe CLI remote field properties", () => {
                   description: "Pick the operational urgency.",
                   noCopy: true,
                   allowOnSubmit: true,
+                  fetchFrom: "project.title",
+                  fetchIfEmpty: true,
                   options: ["Low", "High"],
                   defaultValue: "High",
                   inListFilter: true
@@ -298,6 +302,8 @@ describe("cf-frappe CLI remote field properties", () => {
         description: "Pick the operational urgency.",
         noCopy: true,
         allowOnSubmit: true,
+        fetchFrom: "project.title",
+        fetchIfEmpty: true,
         options: ["Low", "High"],
         defaultValue: "High",
         inListFilter: true
