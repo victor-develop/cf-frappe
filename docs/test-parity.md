@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document collaboration collection policy module slice:
+As of the file policy module slice:
 
-- Vitest files: `168`
-- Vitest cases: `1588`
+- Vitest files: `169`
+- Vitest cases: `1596`
 
 ## Implication
 

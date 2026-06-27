@@ -33,7 +33,7 @@ import type {
   FileService,
   UpdateFileMetadataCommand
 } from "../../application/file-service.js";
-import { isPreviewableFileContentType } from "../../application/file-service.js";
+import { isPreviewableFileContentType } from "../../application/file-policy.js";
 import type { JobHistoryService } from "../../application/job-history-service.js";
 import type { JobRetryPort } from "../../application/job-retry-service.js";
 import type { JobScheduleService } from "../../application/job-schedule-service.js";

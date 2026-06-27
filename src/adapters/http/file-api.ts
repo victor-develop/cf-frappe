@@ -1,9 +1,9 @@
 import { Hono } from "hono";
 import {
-  isPreviewableFileContentType,
   type FileService,
   type UpdateFileMetadataCommand
 } from "../../application/file-service.js";
+import { isPreviewableFileContentType } from "../../application/file-policy.js";
 import type {
   FileTransformFit,
   FileTransformFormat,
