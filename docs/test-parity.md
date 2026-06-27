@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the durable document delivery outbox consumer slice:
+As of the durable document delivery outbox Worker wiring slice:
 
 - Vitest files: `156`
-- Vitest cases: `1497`
+- Vitest cases: `1498`
 
 ## Implication
 

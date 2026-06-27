@@ -1,9 +1,14 @@
 import {
+  createDocumentDeliveryOutboxDrainJob,
   createJobRegistry,
   deterministicIds,
+  D1EventStore,
+  DocumentDeliveryOutboxService,
+  DOCUMENT_DELIVERY_OUTBOX_DRAIN_JOB_NAME,
   fixedClock,
   InMemoryJobExecutionLog,
   InMemoryJobQueue,
+  UserNotificationService,
   type JobMessage,
   type JobQueue
 } from "../../src";
@@ -161,6 +166,84 @@ describe("CloudFrappe Worker jobs", () => {
       expect.any(Function)
     ]);
     expect(messages.every((message) => vi.mocked(message.ack).mock.calls.length === 1)).toBe(true);
+  });
+
+  it("drains durable document delivery outbox records through the Worker queue path", async () => {
+    const env = { DB: fakeD1(), AGGREGATES: fakeNamespace() };
+    const events = new D1EventStore(env.DB);
+    const outbox = new DocumentDeliveryOutboxService({
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["enqueue-notification"])
+    });
+    await outbox.enqueueFromDomainEvent({
+      event: assignmentEvent(),
+      snapshot: taskSnapshot(),
+      targets: ["notification"]
+    });
+    const message = {
+      tenantId: "acme",
+      jobName: DOCUMENT_DELIVERY_OUTBOX_DRAIN_JOB_NAME,
+      payload: { limit: 5, claimId: "claim-notification" },
+      runId: "job_outbox_001",
+      idempotencyKey: "document-delivery-outbox:job_outbox_001",
+      enqueuedAt: now,
+      metadata: {}
+    };
+    const queueMessage = {
+      id: "msg_outbox_001",
+      timestamp: new Date(now),
+      body: message,
+      attempts: 1,
+      ack: vi.fn(),
+      retry: vi.fn()
+    } as unknown as Message<JobMessage>;
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => owner,
+      documentDeliveryOutbox: {
+        clock: fixedClock(now),
+        ids: deterministicIds(["claim-event", "notification-recorded", "delivered-notification"])
+      },
+      jobs: {
+        registry: createJobRegistry<CloudFrappeRuntimeServices>({
+          jobs: [createDocumentDeliveryOutboxDrainJob<CloudFrappeRuntimeServices>()]
+        }),
+        queue: () => new InMemoryJobQueue()
+      }
+    });
+
+    await worker.queue?.(
+      {
+        queue: "jobs",
+        metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
+        messages: [queueMessage],
+        retryAll: vi.fn(),
+        ackAll: vi.fn()
+      },
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(queueMessage.ack).toHaveBeenCalledOnce();
+    expect(queueMessage.retry).not.toHaveBeenCalled();
+    await expect(outbox.list("acme")).resolves.toMatchObject([
+      { id: "evt_assign:notification", status: "delivered", claimId: "claim-notification" }
+    ]);
+    await expect(
+      new UserNotificationService({ events }).inbox(
+        { id: "support@example.com", roles: ["User"], tenantId: "acme" },
+        { includeDismissed: true }
+      )
+    ).resolves.toMatchObject({
+      notifications: [
+        {
+          id: "evt_assign:user:support%40example.com",
+          sourceEventId: "evt_assign",
+          payloadKind: "DocumentAssigned"
+        }
+      ]
+    });
   });
 
   it("allows transient scheduled dispatch failures to retry", async () => {
@@ -444,6 +527,35 @@ function queueMessage(jobName: string, id: string): Message<JobMessage> {
     ack: vi.fn(),
     retry: vi.fn()
   } as unknown as Message<JobMessage>;
+}
+
+function assignmentEvent() {
+  return {
+    id: "evt_assign",
+    tenantId: "acme",
+    stream: "acme:Note:Review",
+    sequence: 1,
+    type: "NoteAssigned",
+    doctype: "Note",
+    documentName: "Review",
+    actorId: "owner@example.com",
+    occurredAt: now,
+    payload: { kind: "DocumentAssigned", assigneeId: "support@example.com" },
+    metadata: {}
+  } as const;
+}
+
+function taskSnapshot() {
+  return {
+    tenantId: "acme",
+    doctype: "Note",
+    name: "Review",
+    version: 1,
+    docstatus: "draft",
+    data: { title: "Review" },
+    createdAt: now,
+    updatedAt: now
+  } as const;
 }
 
 function fakeNamespace(): RpcDurableObjectNamespace<AggregateCoordinatorRpc> {

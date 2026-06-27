@@ -19,6 +19,12 @@ import { JobExecutor } from "../application/job-executor.js";
 import { JobHistoryService } from "../application/job-history-service.js";
 import { JobRetryService } from "../application/job-retry-service.js";
 import { JobScheduleService } from "../application/job-schedule-service.js";
+import {
+  createDocumentDeliveryOutboxDeliveryHandlers,
+  DOCUMENT_DELIVERY_OUTBOX_DRAIN_JOB_NAME,
+  DocumentDeliveryOutboxConsumer
+} from "../application/document-delivery-outbox-consumer.js";
+import { DocumentDeliveryOutboxService } from "../application/document-delivery-outbox-service.js";
 import { KanbanService } from "../application/kanban-service.js";
 import { DocumentHistoryService } from "../application/document-history-service.js";
 import { DocumentShareService } from "../application/document-share-service.js";
@@ -31,6 +37,7 @@ import { RoleService } from "../application/role-service.js";
 import { SavedListFilterService } from "../application/saved-list-filter-service.js";
 import { SavedReportService } from "../application/saved-report-service.js";
 import { NotificationRuleService } from "../application/notification-rule-service.js";
+import type { EmailNotificationService } from "../application/email-notification-service.js";
 import { UserAccountService } from "../application/user-account-service.js";
 import { UserNotificationService } from "../application/user-notification-service.js";
 import { UserProfileService } from "../application/user-profile-service.js";
@@ -130,6 +137,8 @@ export interface CloudFrappeRuntimeServices {
   readonly roles: RoleService;
   readonly savedReports: SavedReportService;
   readonly dataPatches?: DataPatchAdminPort;
+  readonly documentDeliveryOutbox?: DocumentDeliveryOutboxService;
+  readonly documentDeliveryOutboxConsumer?: DocumentDeliveryOutboxConsumer;
   readonly files?: FileService;
   readonly realtime?: RealtimePublisher;
 }
@@ -207,6 +216,19 @@ export interface CloudFrappeJobOptions<
   readonly ids?: IdGenerator;
 }
 
+export interface CloudFrappeDocumentDeliveryOutboxOptions<TEnv extends CloudFrappeEnv = CloudFrappeEnv> {
+  readonly emailNotifications?: (
+    env: TEnv,
+    services: { readonly events: D1EventStore; readonly notificationRules: NotificationRuleService }
+  ) => EmailNotificationService;
+  readonly clock?: Clock;
+  readonly ids?: IdGenerator;
+  readonly retry?: {
+    readonly baseDelaySeconds?: number;
+    readonly maxDelaySeconds?: number;
+  };
+}
+
 export interface CloudFrappeDataPatchOptions<
   TEnv extends CloudFrappeEnv = CloudFrappeEnv,
   TResources = CloudFrappeRuntimeServices
@@ -229,6 +251,7 @@ export interface CloudFrappeWorkerOptions<
   readonly auth?: CloudFrappeAuthOptions<TEnv>;
   readonly files?: CloudFrappeFileOptions<TEnv>;
   readonly realtime?: CloudFrappeRealtimeOptions<TEnv>;
+  readonly documentDeliveryOutbox?: boolean | CloudFrappeDocumentDeliveryOutboxOptions<TEnv>;
   readonly jobs?: CloudFrappeJobOptions<TEnv, TJobResources>;
   readonly dataPatches?: CloudFrappeDataPatchOptions<TEnv, TDataPatchResources>;
   readonly printPdfRenderer?: (env: TEnv, services: CloudFrappeRuntimeServices) => PrintPdfRenderer;
@@ -431,6 +454,35 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     notificationRules,
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
   });
+  const realtime = options.realtime
+    ? new DurableObjectRealtimePublisher(options.realtime.namespace(env))
+    : undefined;
+  const deliveryOutboxOptions = documentDeliveryOutboxOptions(options);
+  const documentDeliveryOutbox = deliveryOutboxOptions
+    ? new DocumentDeliveryOutboxService({
+        events,
+        ...(deliveryOutboxOptions.clock === undefined ? {} : { clock: deliveryOutboxOptions.clock }),
+        ...(deliveryOutboxOptions.ids === undefined ? {} : { ids: deliveryOutboxOptions.ids })
+      })
+    : undefined;
+  const documentDeliveryOutboxEmailNotifications = deliveryOutboxOptions?.emailNotifications?.(env, {
+    events,
+    notificationRules
+  });
+  const documentDeliveryOutboxConsumer = documentDeliveryOutbox && deliveryOutboxOptions
+    ? new DocumentDeliveryOutboxConsumer({
+        outbox: documentDeliveryOutbox,
+        deliveries: createDocumentDeliveryOutboxDeliveryHandlers({
+          notifications,
+          ...(realtime === undefined ? {} : { realtime }),
+          ...(documentDeliveryOutboxEmailNotifications === undefined
+            ? {}
+            : { emailNotifications: documentDeliveryOutboxEmailNotifications })
+        }),
+        ...(deliveryOutboxOptions.clock === undefined ? {} : { clock: deliveryOutboxOptions.clock }),
+        ...(deliveryOutboxOptions.retry === undefined ? {} : { retry: deliveryOutboxOptions.retry })
+      })
+    : undefined;
   const savedReports = new SavedReportService({ registry: options.registry, events, reports });
   const baseServices: Omit<CloudFrappeRuntimeServices, "files"> = {
     registry: options.registry,
@@ -461,7 +513,9 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     websiteSettings,
     websiteThemes,
     roles,
-    savedReports
+    savedReports,
+    ...(documentDeliveryOutbox === undefined ? {} : { documentDeliveryOutbox }),
+    ...(documentDeliveryOutboxConsumer === undefined ? {} : { documentDeliveryOutboxConsumer })
   };
   const files = options.files
     ? new FileService({
@@ -478,9 +532,6 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
       })
     : undefined;
   const services: CloudFrappeRuntimeServices = files ? { ...baseServices, files } : baseServices;
-  const realtime = options.realtime
-    ? new DurableObjectRealtimePublisher(options.realtime.namespace(env))
-    : undefined;
   const servicesWithRealtime: CloudFrappeRuntimeServices = realtime
     ? { ...services, realtime }
     : services;
@@ -503,6 +554,10 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     jobOptions.registry.has(DATA_PATCH_ROLLBACK_RETRY_JOB_NAME);
   const dataPatchJobQueueEnabled =
     dataPatchApplyQueueEnabled || dataPatchRollbackQueueEnabled || dataPatchRollbackRetryQueueEnabled;
+  const documentDeliveryOutboxDrainQueueEnabled =
+    documentDeliveryOutboxConsumer !== undefined &&
+    jobOptions !== undefined &&
+    jobOptions.registry.has(DOCUMENT_DELIVERY_OUTBOX_DRAIN_JOB_NAME);
   const jobHistory = jobExecutionLog && jobOptions
     ? new JobHistoryService({ registry: jobOptions.registry, executionLog: jobExecutionLog })
     : undefined;
@@ -513,7 +568,10 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
         env,
         runtimeServices,
         jobExecutionLog,
-        dataPatchJobQueueEnabled ? ({ dataPatches } as unknown as Partial<TJobResources>) : undefined
+        additionalJobResources<TJobResources>({
+          ...(dataPatchJobQueueEnabled ? { dataPatches } : {}),
+          ...(documentDeliveryOutboxDrainQueueEnabled ? { documentDeliveryOutboxConsumer } : {})
+        })
       )
     : undefined;
   const dataPatchQueue:
@@ -687,6 +745,21 @@ function dataPatchesForEnv<TEnv extends CloudFrappeEnv, TResources>(
     ...(patchOptions?.clock === undefined ? {} : { clock: patchOptions.clock }),
     ...(patchOptions?.ids === undefined ? {} : { ids: patchOptions.ids })
   });
+}
+
+function documentDeliveryOutboxOptions<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResources>(
+  options: CloudFrappeWorkerOptions<TEnv, TJobResources, TDataPatchResources>
+): CloudFrappeDocumentDeliveryOutboxOptions<TEnv> | undefined {
+  if (options.documentDeliveryOutbox === undefined || options.documentDeliveryOutbox === false) {
+    return undefined;
+  }
+  return options.documentDeliveryOutbox === true ? {} : options.documentDeliveryOutbox;
+}
+
+function additionalJobResources<TResources>(resources: Record<string, unknown>): Partial<TResources> | undefined {
+  return Object.keys(resources).length === 0
+    ? undefined
+    : resources as Partial<TResources>;
 }
 
 function jobsForEnv<TEnv extends CloudFrappeEnv, TResources>(

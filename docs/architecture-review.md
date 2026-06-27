@@ -15,7 +15,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - `DocumentService` is too broad. It owns command authorization, validation, link reads, naming, uniqueness, hooks, lifecycle, merge, comments, sharing, assignments, tags, followers, and event construction in one large service.
 - The central event payload union in `src/core/types.ts` is too large and makes every bounded feature edit the same core event type.
 - Uniqueness reservations and document writes are event-sourced, but they are not committed through one multi-stream atomic command boundary.
-- After-commit delivery intents can now be persisted to a durable document delivery outbox and drained through a platform-neutral consumer/job wrapper, but Cloudflare Worker composition and starter wiring still need to install that path by default before this can be considered event-sourcing-first end to end.
+- After-commit delivery intents can now be persisted to a durable document delivery outbox and drained through Worker/Queue composition in generated starters, but broader integration and operational coverage is still needed before this can be considered fully proven end to end.
 - D1 event insertion logic is duplicated between generic event-store and document-store adapters.
 - Test coverage is meaningful for the implemented kernel but remains below the stated Frappe parity target.
 
@@ -32,7 +32,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Replace the monolithic event payload union with bounded event modules or a registry/type-map pattern.
 - Introduce a multi-stream command commit and outbox abstraction for uniqueness reservations, assignment rules, notifications, and realtime delivery.
 - Deduplicate D1 event append serialization behind one shared event writer.
-- Wire the durable delivery outbox consumer into Worker/Queue composition and starter scaffolding with integration tests.
+- Broaden durable delivery outbox integration tests across realtime, email, retry, and starter deployment flows.
 - Continue raising test parity through real adapter and cross-surface contract coverage.
 
 ## Post-Review Progress
@@ -44,3 +44,4 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Added `DocumentStore.commitBatch` and wired document create/update unique-value reservations plus the document event through one multi-stream commit, with D1 and in-memory adapters committing all event streams and projections atomically and focused tests proving failed unique commands no longer leave compensating reservation events.
 - Added an event-sourced document delivery outbox for after-commit notification, realtime, and email delivery intents, with idempotent enqueue, claim/fail/retry/deliver folds, stale-claim protection, composed hook coverage, and deterministic tests.
 - Added a platform-neutral document delivery outbox consumer plus a built-in drain job wrapper, covering handler dispatch, retry scheduling, notification/realtime/queued-email delivery adapters, and job execution with focused tests.
+- Wired the durable delivery outbox into Cloudflare Worker/Queue composition and starter scaffolding, so generated apps can record after-commit delivery intents in the aggregate coordinator and drain them through the built-in queue job.

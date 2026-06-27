@@ -10,6 +10,10 @@ import { DocumentService, bulkDocumentFailure } from "../application/document-se
 import { FieldPropertyService } from "../application/field-property-service.js";
 import { NotificationRuleService } from "../application/notification-rule-service.js";
 import { WorkflowService } from "../application/workflow-service.js";
+import {
+  DocumentDeliveryOutboxService,
+  type DocumentDeliveryOutboxTarget
+} from "../application/document-delivery-outbox-service.js";
 import type { EmailNotificationService } from "../application/email-notification-service.js";
 import type { BulkDocumentCommandFailure } from "../application/document-service.js";
 import { UserPermissionService } from "../application/user-permission-service.js";
@@ -101,6 +105,9 @@ export interface AggregateCoordinatorOptions<Env extends AggregateCoordinatorEnv
     env: Env,
     services: { readonly events: EventStore; readonly notificationRules: NotificationRuleService }
   ) => EmailNotificationDeliveryQueue;
+  readonly documentDeliveryOutbox?: boolean | {
+    readonly targets?: readonly DocumentDeliveryOutboxTarget[];
+  };
   readonly onHookError?: (error: unknown, event: DomainEvent) => void | Promise<void>;
 }
 
@@ -164,12 +171,29 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
       const emailNotificationDeliveryQueue = emailNotifications
         ? options.emailNotificationDeliveryQueue?.(env, { events, notificationRules })
         : undefined;
-      const deliveryHooks = createDocumentDeliveryHooks({
-        ...(options.realtime ? { realtime: options.realtime(env) } : {}),
-        ...(notifications ? { notifications } : {}),
-        ...(emailNotifications ? { emailNotifications } : {}),
-        ...(emailNotificationDeliveryQueue ? { emailNotificationDeliveryQueue } : {})
-      });
+      const realtime = options.realtime?.(env);
+      const deliveryOutbox = options.documentDeliveryOutbox
+        ? new DocumentDeliveryOutboxService({
+            events,
+            ...(options.clock ? { clock: options.clock } : {}),
+            ...(options.ids ? { ids: options.ids } : {})
+          })
+        : undefined;
+      const deliveryHooks = deliveryOutbox
+        ? createDocumentDeliveryHooks({
+            deliveryOutbox,
+            deliveryOutboxTargets: documentDeliveryOutboxTargets(options, {
+              hasNotifications: notifications !== undefined,
+              hasRealtime: realtime !== undefined,
+              hasEmailNotifications: emailNotifications !== undefined
+            })
+          })
+        : createDocumentDeliveryHooks({
+            ...(realtime ? { realtime } : {}),
+            ...(notifications ? { notifications } : {}),
+            ...(emailNotifications ? { emailNotifications } : {}),
+            ...(emailNotificationDeliveryQueue ? { emailNotificationDeliveryQueue } : {})
+          });
       const assignmentRuleActor = options.assignmentRuleActor === undefined
         ? defaultAssignmentRuleActor
         : options.assignmentRuleActor;
@@ -253,6 +277,24 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
       }
     }
   };
+}
+
+function documentDeliveryOutboxTargets(
+  options: Pick<AggregateCoordinatorOptions, "documentDeliveryOutbox">,
+  available: {
+    readonly hasNotifications: boolean;
+    readonly hasRealtime: boolean;
+    readonly hasEmailNotifications: boolean;
+  }
+): readonly DocumentDeliveryOutboxTarget[] {
+  if (typeof options.documentDeliveryOutbox === "object" && options.documentDeliveryOutbox.targets !== undefined) {
+    return options.documentDeliveryOutbox.targets;
+  }
+  return [
+    ...(available.hasNotifications ? ["notification" as const] : []),
+    ...(available.hasRealtime ? ["realtime" as const] : []),
+    ...(available.hasEmailNotifications ? ["email" as const] : [])
+  ];
 }
 
 const defaultAssignmentRuleActor: Actor = Object.freeze({

@@ -1114,6 +1114,7 @@ function signedSessionWorkerTs(): string {
   createDataPatchApplyJob,
   createDataPatchRollbackJob,
   createDataPatchRollbackRetryJob,
+  createDocumentDeliveryOutboxDrainJob,
   createJobRegistry,
   D1JobExecutionLog,
   signedSessionActorResolver,
@@ -1138,14 +1139,16 @@ const guestActor: Actor = {
 };
 
 export class AggregateCoordinator extends createAggregateCoordinatorClass<Env>({
-  registry
+  registry,
+  documentDeliveryOutbox: true
 }) {}
 
 const starterJobs = createJobRegistry<CloudFrappeRuntimeServices>({
   jobs: [
     createDataPatchApplyJob<CloudFrappeRuntimeServices>(),
     createDataPatchRollbackJob<CloudFrappeRuntimeServices>(),
-    createDataPatchRollbackRetryJob<CloudFrappeRuntimeServices>()
+    createDataPatchRollbackRetryJob<CloudFrappeRuntimeServices>(),
+    createDocumentDeliveryOutboxDrainJob<CloudFrappeRuntimeServices>()
   ]
 });
 
@@ -1161,6 +1164,7 @@ export default createCloudFrappeWorker<Env>({
     queue: (env) => new CloudflareJobQueue(env.JOBS),
     executionLog: (env) => new D1JobExecutionLog(env.DB)
   },
+  documentDeliveryOutbox: true,
   files: {
     storage: (env) => new R2FileStorage(env.FILES)
   }
@@ -1173,6 +1177,7 @@ function cloudflareAccessWorkerTs(): string {
   createDataPatchApplyJob,
   createDataPatchRollbackJob,
   createDataPatchRollbackRetryJob,
+  createDocumentDeliveryOutboxDrainJob,
   createJobRegistry,
   D1JobExecutionLog,
   permissionDenied
@@ -1190,14 +1195,16 @@ import { registry } from "./apps";
 type Env = Cloudflare.Env & CloudFrappeEnv;
 
 export class AggregateCoordinator extends createAggregateCoordinatorClass<Env>({
-  registry
+  registry,
+  documentDeliveryOutbox: true
 }) {}
 
 const starterJobs = createJobRegistry<CloudFrappeRuntimeServices>({
   jobs: [
     createDataPatchApplyJob<CloudFrappeRuntimeServices>(),
     createDataPatchRollbackJob<CloudFrappeRuntimeServices>(),
-    createDataPatchRollbackRetryJob<CloudFrappeRuntimeServices>()
+    createDataPatchRollbackRetryJob<CloudFrappeRuntimeServices>(),
+    createDocumentDeliveryOutboxDrainJob<CloudFrappeRuntimeServices>()
   ]
 });
 
@@ -1211,6 +1218,7 @@ export default createCloudFrappeWorker<Env>({
     queue: (env) => new CloudflareJobQueue(env.JOBS),
     executionLog: (env) => new D1JobExecutionLog(env.DB)
   },
+  documentDeliveryOutbox: true,
   files: {
     storage: (env) => new R2FileStorage(env.FILES)
   },
@@ -1234,6 +1242,7 @@ function oidcWorkerTs(): string {
   createDataPatchApplyJob,
   createDataPatchRollbackJob,
   createDataPatchRollbackRetryJob,
+  createDocumentDeliveryOutboxDrainJob,
   createJobRegistry,
   D1JobExecutionLog,
   oidcGroupsRoleMapper,
@@ -1252,14 +1261,16 @@ import { registry } from "./apps";
 type Env = Cloudflare.Env & CloudFrappeEnv;
 
 export class AggregateCoordinator extends createAggregateCoordinatorClass<Env>({
-  registry
+  registry,
+  documentDeliveryOutbox: true
 }) {}
 
 const starterJobs = createJobRegistry<CloudFrappeRuntimeServices>({
   jobs: [
     createDataPatchApplyJob<CloudFrappeRuntimeServices>(),
     createDataPatchRollbackJob<CloudFrappeRuntimeServices>(),
-    createDataPatchRollbackRetryJob<CloudFrappeRuntimeServices>()
+    createDataPatchRollbackRetryJob<CloudFrappeRuntimeServices>(),
+    createDocumentDeliveryOutboxDrainJob<CloudFrappeRuntimeServices>()
   ]
 });
 
@@ -1273,6 +1284,7 @@ export default createCloudFrappeWorker<Env>({
     queue: (env) => new CloudflareJobQueue(env.JOBS),
     executionLog: (env) => new D1JobExecutionLog(env.DB)
   },
+  documentDeliveryOutbox: true,
   files: {
     storage: (env) => new R2FileStorage(env.FILES)
   },
