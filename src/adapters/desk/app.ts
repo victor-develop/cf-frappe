@@ -5142,6 +5142,7 @@ async function parseDeskCustomField(request: Request): Promise<ParsedDeskCustomF
   const type = fieldTypeSearchParamValue(form, "type", "Field type");
   const options = commaListFormValue(form.get("options"));
   const label = stringSearchParamValue(form, "label");
+  const description = stringSearchParamValue(form, "description");
   const linkTo = stringSearchParamValue(form, "linkTo");
   const tableOf = stringSearchParamValue(form, "tableOf");
   const min = optionalNumberSearchParamValue(form, "min", "Minimum");
@@ -5153,6 +5154,7 @@ async function parseDeskCustomField(request: Request): Promise<ParsedDeskCustomF
       name: requiredSearchParamValue(form, "name", "Field name"),
       type,
       ...(label === undefined ? {} : { label }),
+      ...(description === undefined ? {} : { description }),
       ...(form.has("required") ? { required: true } : {}),
       ...(form.has("readOnly") ? { readOnly: true } : {}),
       ...(form.has("hidden") ? { hidden: true } : {}),
@@ -5186,6 +5188,7 @@ async function parseDeskFieldPropertyOverride(request: Request): Promise<ParsedD
   const defaultValue = optionalJsonSearchParamValue(form, "defaultValue", "Default value");
   const overrides = {
     ...optionalStringProperty(form, "label", "label"),
+    ...optionalStringProperty(form, "description", "description"),
     ...optionalBooleanProperty(form, "required", "required", "Required"),
     ...optionalBooleanProperty(form, "readOnly", "readOnly", "Read only"),
     ...optionalBooleanProperty(form, "hidden", "hidden", "Hidden"),

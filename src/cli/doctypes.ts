@@ -37,6 +37,7 @@ interface DocTypeResponse {
 interface FieldResponse {
   readonly name?: string;
   readonly label?: string;
+  readonly description?: string;
   readonly type?: string;
   readonly required?: boolean;
   readonly readOnly?: boolean;
@@ -175,7 +176,8 @@ function fieldLine(field: FieldResponse): string {
   const flags = fieldFlags(field);
   const flagText = flags.length === 0 ? "" : ` [${flags.join(",")}]`;
   const label = field.label === undefined ? "" : ` - ${field.label}`;
-  return `- ${field.name ?? "(unknown)"} ${field.type ?? "unknown"}${targetText}${flagText}${label}`;
+  const description = field.description === undefined ? "" : ` help "${field.description}"`;
+  return `- ${field.name ?? "(unknown)"} ${field.type ?? "unknown"}${targetText}${flagText}${label}${description}`;
 }
 
 function fieldFlags(field: FieldResponse): readonly string[] {

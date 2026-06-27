@@ -4142,6 +4142,7 @@ describe("Desk app", () => {
     const emptyHtml = await empty.text();
     expect(emptyHtml).toContain("Custom Fields");
     expect(emptyHtml).toContain('name="doctype"');
+    expect(emptyHtml).toContain('name="description"');
     expect(emptyHtml).toContain('name="defaultValue"');
     expect(emptyHtml).toContain("No custom fields configured.");
 
@@ -4151,6 +4152,7 @@ describe("Desk app", () => {
         doctype: "Note",
         name: "reviewed",
         label: "Reviewed",
+        description: "Visible after quality review.",
         type: "boolean",
         unique: "1",
         inListView: "1",
@@ -4163,7 +4165,19 @@ describe("Desk app", () => {
     expect(created.headers.get("location")).toBe("/desk/admin/custom-fields?doctype=Note");
     await expect(services.customFields.list(admin, "Note")).resolves.toMatchObject({
       version: 1,
-      fields: [{ field: { name: "reviewed", label: "Reviewed", type: "boolean", unique: true, defaultValue: false }, enabled: true }]
+      fields: [
+        {
+          field: {
+            name: "reviewed",
+            label: "Reviewed",
+            description: "Visible after quality review.",
+            type: "boolean",
+            unique: true,
+            defaultValue: false
+          },
+          enabled: true
+        }
+      ]
     });
 
     const current = await app.request("/desk/admin/custom-fields?doctype=Note");
@@ -4171,6 +4185,7 @@ describe("Desk app", () => {
     const currentHtml = await current.text();
     expect(currentHtml).toContain("reviewed");
     expect(currentHtml).toContain("Reviewed");
+    expect(currentHtml).toContain("description: Visible after quality review.");
     expect(currentHtml).toContain("unique");
     expect(currentHtml).toContain("default: false");
     expect(currentHtml).toContain('action="/desk/admin/custom-fields/Note/reviewed/disable"');
@@ -5077,6 +5092,7 @@ describe("Desk app", () => {
     const emptyHtml = await empty.text();
     expect(emptyHtml).toContain("Field Properties");
     expect(emptyHtml).toContain('name="field"');
+    expect(emptyHtml).toContain('name="description"');
     expect(emptyHtml).toContain("No field property overrides configured.");
 
     const created = await app.request("/desk/admin/field-properties", {
@@ -5085,6 +5101,7 @@ describe("Desk app", () => {
         doctype: "Note",
         fieldName: "priority",
         label: "Urgency",
+        description: "Pick the operational urgency.",
         inListFilter: "true",
         options: "Low, High",
         defaultValue: JSON.stringify("High"),
@@ -5096,16 +5113,31 @@ describe("Desk app", () => {
     expect(created.headers.get("location")).toBe("/desk/admin/field-properties?doctype=Note&field=priority");
     await expect(services.fieldProperties.list(admin, "Note")).resolves.toMatchObject({
       version: 1,
-      fields: [{ fieldName: "priority", overrides: { label: "Urgency", inListFilter: true, options: ["Low", "High"] } }]
+      fields: [
+        {
+          fieldName: "priority",
+          overrides: {
+            label: "Urgency",
+            description: "Pick the operational urgency.",
+            inListFilter: true,
+            options: ["Low", "High"]
+          }
+        }
+      ]
     });
 
     const current = await app.request("/desk/admin/field-properties?doctype=Note&field=priority");
     expect(current.status).toBe(200);
     const currentHtml = await current.text();
     expect(currentHtml).toContain("Urgency");
+    expect(currentHtml).toContain("description: Pick the operational urgency.");
     expect(currentHtml).toContain("options: Low, High");
     expect(currentHtml).toContain('formaction="/desk/admin/field-properties/Note/priority/clear"');
     expect(currentHtml).toContain('name="expectedVersion" value="1"');
+
+    const noteForm = await app.request("/desk/Note/new");
+    expect(noteForm.status).toBe(200);
+    await expect(noteForm.text()).resolves.toContain("Pick the operational urgency.");
 
     const stale = await app.request("/desk/admin/field-properties", {
       method: "POST",
@@ -5140,6 +5172,7 @@ describe("Desk app", () => {
       field: {
         name: "reviewed",
         label: "Reviewed",
+        description: "Visible after quality review.",
         type: "boolean",
         inFormView: true,
         inListView: true,
@@ -5152,6 +5185,7 @@ describe("Desk app", () => {
     expect(form.status).toBe(200);
     const formHtml = await form.text();
     expect(formHtml).toContain("Reviewed");
+    expect(formHtml).toContain("Visible after quality review.");
     expect(formHtml).toContain('name="reviewed"');
 
     const created = await app.request("/desk/Note", {

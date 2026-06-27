@@ -42,6 +42,7 @@ interface CustomFieldEntryResponse {
 interface CustomFieldResponse {
   readonly name: string;
   readonly label?: string;
+  readonly description?: string;
   readonly type?: string;
   readonly required?: boolean;
   readonly readOnly?: boolean;
@@ -161,12 +162,13 @@ function fieldLines(fields: readonly CustomFieldEntryResponse[]): readonly strin
 function fieldLine(entry: CustomFieldEntryResponse): string {
   const field = entry.field;
   const label = field.label === undefined ? "" : ` label "${field.label}"`;
+  const description = field.description === undefined ? "" : ` help "${field.description}"`;
   const target = field.linkTo === undefined && field.tableOf === undefined
     ? ""
     : ` target ${field.linkTo ?? field.tableOf ?? ""}`;
   const flags = fieldFlags(field);
   const flagText = flags.length === 0 ? "" : ` [${flags.join(",")}]`;
-  return `- ${field.name} ${entry.enabled ?? true ? "enabled" : "disabled"} type ${field.type ?? "(unknown)"}${label}${target}${flagText}`;
+  return `- ${field.name} ${entry.enabled ?? true ? "enabled" : "disabled"} type ${field.type ?? "(unknown)"}${label}${description}${target}${flagText}`;
 }
 
 function fieldFlags(field: CustomFieldResponse): readonly string[] {

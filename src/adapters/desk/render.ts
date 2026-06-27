@@ -1632,6 +1632,7 @@ export function renderCustomFieldAdmin(state: CustomFieldAdminState): string {
     <div class="fields">
       <label class="field"><span>Field Name</span><input name="name"></label>
       <label class="field"><span>Label</span><input name="label"></label>
+      <label class="field"><span>Description</span><input name="description"></label>
       <label class="field"><span>Type</span><select name="type">${renderCustomFieldTypeOptions()}</select></label>
       <label class="field"><span>Options</span><input name="options"></label>
       <label class="field"><span>Link To</span><input name="linkTo"></label>
@@ -1704,6 +1705,7 @@ export function renderFieldPropertyAdmin(state: FieldPropertyAdminState): string
     <div class="form-head"><h2>Field Properties</h2><p>v${String(version)}</p></div>
     <div class="fields">
       <label class="field"><span>Label</span><input name="label" value="${escapeHtml(overrides.label ?? "")}"></label>
+      <label class="field"><span>Description</span><input name="description" value="${escapeHtml(overrides.description ?? "")}"></label>
       <label class="field"><span>Required</span><select name="required">${renderBooleanOverrideOptions(overrides.required)}</select></label>
       <label class="field"><span>Read Only</span><select name="readOnly">${renderBooleanOverrideOptions(overrides.readOnly)}</select></label>
       <label class="field"><span>Hidden</span><select name="hidden">${renderBooleanOverrideOptions(overrides.hidden)}</select></label>
@@ -1998,6 +2000,7 @@ function renderBooleanOverrideOptions(value: boolean | undefined): string {
 function renderFieldPropertyOverrides(overrides: FieldPropertyOverrideState["fields"][number]["overrides"]): string {
   return [
     overrides.label === undefined ? "" : `label: ${overrides.label}`,
+    overrides.description === undefined ? "" : `description: ${overrides.description}`,
     overrides.required === undefined ? "" : `required: ${String(overrides.required)}`,
     overrides.readOnly === undefined ? "" : `read only: ${String(overrides.readOnly)}`,
     overrides.hidden === undefined ? "" : `hidden: ${String(overrides.hidden)}`,
@@ -2089,6 +2092,7 @@ function renderCustomFieldCheckbox(name: string, label: string): string {
 
 function renderCustomFieldDetails(field: FieldDefinition): string {
   return [
+    field.description ? `description: ${field.description}` : "",
     field.options && field.options.length > 0 ? `options: ${field.options.join(", ")}` : "",
     field.linkTo ? `link: ${field.linkTo}` : "",
     field.tableOf ? `table: ${field.tableOf}` : "",
@@ -3583,7 +3587,7 @@ function renderField(
   const readonly = field.readOnly || (mode === "update" && field.readOnly) ? " readonly" : "";
   const common = `id="${id}" name="${escapeHtml(field.name)}" data-cf-frappe-field-type="${field.type}"${required}${readonly}`;
   const formatted = formatFormValue(value);
-  const help = field.readOnly ? `<small>Read only</small>` : "";
+  const help = renderFieldHelp(field);
   if (field.type === "table") {
     return renderTableField(field, value, tableDefinition, allLinkOptions, tableDefinitions, field.name, field.name);
   }
@@ -3615,8 +3619,9 @@ function renderTableField(
   inputPath: string
 ): string {
   const label = escapeHtml(field.label ?? field.name);
+  const help = renderFieldHelp(field);
   if (!child) {
-    return `<label class="field" for="field-${slug(field.name)}"><span>${label}${field.required ? " *" : ""}</span><textarea id="field-${slug(field.name)}" name="${escapeHtml(field.name)}" data-cf-frappe-field-type="${field.type}">${escapeHtml(formatFormValue(value))}</textarea></label>`;
+    return `<label class="field" for="field-${slug(field.name)}"><span>${label}${field.required ? " *" : ""}</span><textarea id="field-${slug(field.name)}" name="${escapeHtml(field.name)}" data-cf-frappe-field-type="${field.type}">${escapeHtml(formatFormValue(value))}</textarea>${help}</label>`;
   }
   const rows = Array.isArray(value) ? value.filter(isJsonObject) : [];
   const renderRows = rows.length > 0 ? rows : [{}];
@@ -3649,7 +3654,15 @@ function renderTableField(
         <tbody>${body}${nextRow}</tbody>
       </table>
     </div>
+    ${help}
   </fieldset>`;
+}
+
+function renderFieldHelp(field: FieldDefinition): string {
+  return [
+    field.readOnly ? "Read only" : "",
+    field.description ?? ""
+  ].filter((item) => item.length > 0).map((item) => `<small>${escapeHtml(item)}</small>`).join("");
 }
 
 function renderTableRow(options: {

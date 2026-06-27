@@ -34,6 +34,7 @@ describe("custom field api", () => {
         field: {
           name: "reviewed",
           label: "Reviewed",
+          description: "Show review status on task forms.",
           type: "boolean",
           unique: true,
           inListView: true,
@@ -48,7 +49,15 @@ describe("custom field api", () => {
         version: 1,
         fields: [
           {
-            field: { name: "reviewed", label: "Reviewed", type: "boolean", unique: true, inListView: true, defaultValue: false },
+            field: {
+              name: "reviewed",
+              label: "Reviewed",
+              description: "Show review status on task forms.",
+              type: "boolean",
+              unique: true,
+              inListView: true,
+              defaultValue: false
+            },
             enabled: true
           }
         ]

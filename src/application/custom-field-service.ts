@@ -359,6 +359,9 @@ function normalizeField(field: FieldDefinition): PersistedFieldDefinition {
     name,
     type: field.type,
     ...(label === undefined || label.length === 0 ? {} : { label }),
+    ...(field.description === undefined || field.description.trim().length === 0
+      ? {}
+      : { description: field.description.trim() }),
     ...(field.required === undefined ? {} : { required: field.required }),
     ...(field.readOnly === undefined ? {} : { readOnly: field.readOnly }),
     ...(field.hidden === undefined ? {} : { hidden: field.hidden }),

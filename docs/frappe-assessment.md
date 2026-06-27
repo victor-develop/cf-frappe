@@ -25,9 +25,9 @@ That model is powerful, but it is not event-sourcing first. cf-frappe keeps the 
 | --- | --- | --- |
 | Metadata model | DocTypes | `defineDocType` |
 | Custom fields | Custom Field / Customize Form | event-sourced tenant custom field overlays folded into base DocType metadata by `CustomFieldService`, with generated HTTP/Desk/CLI administration and runtime application to command validation, metadata APIs, form/list views, filters, saved filters, and Worker query/command services |
-| Property setters | Property Setter | event-sourced tenant field property overrides folded after custom fields by `FieldPropertyService`, with generated HTTP/Desk/CLI administration and runtime application to command validation, metadata APIs, form/list/search flags, filters, and Worker query/command services |
+| Property setters | Property Setter | event-sourced tenant field property overrides folded after custom fields by `FieldPropertyService`, with generated HTTP/Desk/CLI administration and runtime application to labels, descriptions, command validation, metadata APIs, form/list/search flags, filters, and Worker query/command services |
 | Naming series | autoname and naming_series | field/provided/uuid strategies plus event-stream-backed series counters |
-| Field validation | DocField rules | built-in field types, required, min/max, select options, and scalar `unique` fields enforced through event-stream-backed value reservations |
+| Field validation | DocField rules | built-in field types, description/help metadata, required, min/max, select options, and scalar `unique` fields enforced through event-stream-backed value reservations |
 | Link fields | Link DocFields | registered DocType targets, event-stream existence checks, generated option lookup API, and Desk select controls |
 | Child tables | Table DocFields and child DocTypes | `type: "table"` fields backed by child DocType row validation, nested link checks, and Desk row grids |
 | Default values | DocField defaults | scalar and function defaults |

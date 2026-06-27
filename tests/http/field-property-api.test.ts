@@ -35,6 +35,7 @@ describe("field property api", () => {
         expectedVersion: 0,
         overrides: {
           label: "Urgency",
+          description: "Pick the operational urgency.",
           options: ["Low", "High"],
           defaultValue: "High",
           inListFilter: true
@@ -45,7 +46,12 @@ describe("field property api", () => {
     await expect(saved.json()).resolves.toMatchObject({
       data: {
         version: 1,
-        fields: [{ fieldName: "priority", overrides: { label: "Urgency", options: ["Low", "High"] } }]
+        fields: [
+          {
+            fieldName: "priority",
+            overrides: { label: "Urgency", description: "Pick the operational urgency.", options: ["Low", "High"] }
+          }
+        ]
       }
     });
 
@@ -54,7 +60,12 @@ describe("field property api", () => {
     await expect(meta.json()).resolves.toMatchObject({
       data: {
         fields: expect.arrayContaining([
-          expect.objectContaining({ name: "priority", label: "Urgency", options: ["Low", "High"] })
+          expect.objectContaining({
+            name: "priority",
+            label: "Urgency",
+            description: "Pick the operational urgency.",
+            options: ["Low", "High"]
+          })
         ])
       }
     });

@@ -34,6 +34,7 @@ export interface FieldDefaultContext {
 export interface FieldDefinition {
   readonly name: string;
   readonly label?: string;
+  readonly description?: string;
   readonly type: FieldType;
   readonly required?: boolean;
   readonly readOnly?: boolean;
@@ -57,6 +58,7 @@ export interface PersistedFieldDefinition extends Omit<FieldDefinition, "default
 
 export interface FieldPropertyOverrides {
   readonly label?: string;
+  readonly description?: string;
   readonly required?: boolean;
   readonly readOnly?: boolean;
   readonly hidden?: boolean;
