@@ -24,6 +24,7 @@ interface WebsiteSettingsResponse {
   readonly title?: string;
   readonly description?: string;
   readonly homePageRoute?: string;
+  readonly homePageHref?: string;
   readonly theme?: {
     readonly name?: string;
     readonly label?: string;
@@ -61,12 +62,22 @@ function formatWebsiteSettings(baseUrl: string, settings: WebsiteSettingsRespons
     `Website settings at ${baseUrl}`,
     `Title: ${settings.title ?? "(untitled)"}`,
     ...(settings.description === undefined ? [] : [`Description: ${settings.description}`]),
-    ...(settings.homePageRoute === undefined ? [] : [`Home: /page/${settings.homePageRoute}`]),
+    ...homeLines(settings),
     ...(settings.theme === undefined ? [] : [`Theme: ${settings.theme.name ?? "(unknown)"}`]),
     `Navigation: ${String(navItems.length)}`,
     ...(navItems.length === 0 ? ["- (none)"] : navItems.map(navItemLine)),
     ""
   ].join("\n");
+}
+
+function homeLines(settings: WebsiteSettingsResponse): readonly string[] {
+  if (settings.homePageHref !== undefined) {
+    return [`Home: ${settings.homePageHref}`];
+  }
+  if (settings.homePageRoute !== undefined) {
+    return [`Home: /page/${settings.homePageRoute}`];
+  }
+  return [];
 }
 
 function navItemLine(item: NonNullable<WebsiteSettingsResponse["navItems"]>[number]): string {

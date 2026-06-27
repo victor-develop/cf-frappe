@@ -37,6 +37,7 @@ describe("cf-frappe CLI remote website settings", () => {
           title: "Starter Site",
           description: "Cloudflare-native starter",
           homePageRoute: "about",
+          homePageHref: "/web/Task%20Updates",
           theme: { name: "Starter Theme", label: "Starter Theme" },
           navItems: [{ name: "about", label: "About", href: "/page/about" }]
         }
@@ -52,7 +53,7 @@ describe("cf-frappe CLI remote website settings", () => {
     })).toBe(0);
 
     expect(stdout.text()).toContain("Title: Starter Site");
-    expect(stdout.text()).toContain("Home: /page/about");
+    expect(stdout.text()).toContain("Home: /web/Task%20Updates");
     expect(stdout.text()).toContain("Theme: Starter Theme");
     expect(stdout.text()).toContain("- About /page/about");
     expect(calls).toEqual(["https://app.example/api/meta/website-settings"]);

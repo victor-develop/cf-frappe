@@ -111,10 +111,12 @@ describe("WebsiteSettingsService", () => {
     const website = new WebsiteSettingsService({ registry, webPages, webForms, webViews, websiteThemes });
 
     expect(website.getHomePageRoute(guest)).toBe("about");
+    await expect(website.getHomePageHref(guest)).resolves.toBe("/page/about");
     await expect(website.getWebsiteSettings(guest)).resolves.toEqual({
       title: "Starter Site",
       description: "Cloudflare-native starter",
       homePageRoute: "about",
+      homePageHref: "/page/about",
       theme: { name: "Starter Theme", tokens: { primaryColor: "#2563eb" } },
       navItems: [
         { name: "about", label: "About", href: "/page/about" },
@@ -133,6 +135,74 @@ describe("WebsiteSettingsService", () => {
         "member-updates",
         "docs"
       ]);
+  });
+
+  it("resolves Web Form, Web View, and safe-link home pages through the same access boundaries", async () => {
+    const Lead = defineDocType({
+      name: "Lead",
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "route", type: "text" },
+        { name: "published", type: "boolean" }
+      ],
+      permissions: [
+        { roles: ["Guest"], actions: ["read", "create"] },
+        { roles: ["User"], actions: ["read", "create"] }
+      ]
+    });
+    const base = {
+      doctypes: [Lead],
+      webPages: [defineWebPage({ name: "About", route: "about", title: "About", sections: [{ body: "Welcome" }] })],
+      webForms: [
+        defineWebForm({
+          name: "Public Intake",
+          route: "public/intake",
+          doctype: "Lead",
+          fields: [{ field: "title" }]
+        }),
+        defineWebForm({
+          name: "Member Intake",
+          route: "member/intake",
+          loginRequired: true,
+          doctype: "Lead",
+          fields: [{ field: "title" }]
+        })
+      ],
+      webViews: [
+        defineWebView({
+          name: "Updates",
+          doctype: "Lead",
+          routeField: "route",
+          titleField: "title",
+          publishedField: "published"
+        })
+      ]
+    } as const;
+
+    const publicForm = websiteFor(createRegistry({
+      ...base,
+      websiteSettings: defineWebsiteSettings({ title: "Starter Site", homePageWebForm: "Public Intake" })
+    }));
+    await expect(publicForm.getHomePageHref(guest)).resolves.toBe("/web-forms/public/intake");
+
+    const memberForm = websiteFor(createRegistry({
+      ...base,
+      websiteSettings: defineWebsiteSettings({ title: "Starter Site", homePageWebForm: "Member Intake" })
+    }));
+    await expect(memberForm.getHomePageHref(guest)).rejects.toMatchObject({ code: "WEBSITE_SETTINGS_NOT_FOUND" });
+    await expect(memberForm.getHomePageHref(owner)).resolves.toBe("/web-forms/member/intake");
+
+    const webView = websiteFor(createRegistry({
+      ...base,
+      websiteSettings: defineWebsiteSettings({ title: "Starter Site", homePageWebView: "Updates" })
+    }));
+    await expect(webView.getHomePageHref(guest)).resolves.toBe("/web/Updates");
+
+    const safeLink = websiteFor(createRegistry({
+      ...base,
+      websiteSettings: defineWebsiteSettings({ title: "Starter Site", homePageHref: "https://example.com/docs" })
+    }));
+    await expect(safeLink.getHomePageHref(guest)).resolves.toBe("https://example.com/docs");
   });
 
   it("denies unpublished or role-filtered settings", async () => {
@@ -160,3 +230,16 @@ describe("WebsiteSettingsService", () => {
       .rejects.toMatchObject({ code: "PERMISSION_DENIED" });
   });
 });
+
+function websiteFor(registry: ReturnType<typeof createRegistry>): WebsiteSettingsService {
+  const store = new InMemoryDocumentStore();
+  const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+  const queries = new QueryService({ registry, projections: store });
+  const webPages = new WebPageService({ registry });
+  return new WebsiteSettingsService({
+    registry,
+    webPages,
+    webForms: new WebFormService({ registry, documents, queries }),
+    webViews: new WebViewService({ registry, queries })
+  });
+}

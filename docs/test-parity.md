@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Web View nested route slice:
+As of the Website Settings homepage target slice:
 
 - Vitest files: `147`
-- Vitest cases: `1408`
+- Vitest cases: `1410`
 
 ## Implication
 

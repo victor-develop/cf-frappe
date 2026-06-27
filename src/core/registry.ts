@@ -405,7 +405,7 @@ export class ModelRegistry {
       });
     }
     assertWebsiteSettingsDefinition(definition);
-    this.assertWebsitePageRoutesResolve(definition);
+    this.assertWebsiteReferencesResolve(definition);
     this.websiteSettings = definition;
   }
 
@@ -747,7 +747,7 @@ export class ModelRegistry {
     assertWebViewMatchesDocType(webView, doctype);
   }
 
-  private assertWebsitePageRoutesResolve(settings: WebsiteSettingsDefinition): void {
+  private assertWebsiteReferencesResolve(settings: WebsiteSettingsDefinition): void {
     if (settings.theme !== undefined && !this.websiteThemes.has(settings.theme)) {
       throw new FrameworkError(
         "WEBSITE_SETTINGS_INVALID",
@@ -769,7 +769,11 @@ export class ModelRegistry {
         );
       }
     }
-    for (const webForm of (settings.navItems ?? []).flatMap((item) => (item.webForm === undefined ? [] : [item.webForm]))) {
+    const referencedWebForms = [
+      ...(settings.homePageWebForm === undefined ? [] : [settings.homePageWebForm]),
+      ...(settings.navItems ?? []).flatMap((item) => (item.webForm === undefined ? [] : [item.webForm]))
+    ];
+    for (const webForm of referencedWebForms) {
       if (!this.webForms.has(webForm)) {
         throw new FrameworkError(
           "WEBSITE_SETTINGS_INVALID",
@@ -778,7 +782,11 @@ export class ModelRegistry {
         );
       }
     }
-    for (const webView of (settings.navItems ?? []).flatMap((item) => (item.webView === undefined ? [] : [item.webView]))) {
+    const referencedWebViews = [
+      ...(settings.homePageWebView === undefined ? [] : [settings.homePageWebView]),
+      ...(settings.navItems ?? []).flatMap((item) => (item.webView === undefined ? [] : [item.webView]))
+    ];
+    for (const webView of referencedWebViews) {
       if (!this.webViews.has(webView)) {
         throw new FrameworkError(
           "WEBSITE_SETTINGS_INVALID",

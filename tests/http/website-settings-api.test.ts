@@ -75,6 +75,7 @@ describe("website settings api", () => {
         title: "Starter Site",
           description: "Cloudflare-native starter",
           homePageRoute: "about",
+          homePageHref: "/page/about",
           navItems: [
             { name: "about", label: "About", href: "/page/about" },
             { name: "intake", label: "Lead Intake", href: "/web-forms/lead/intake" }
@@ -129,6 +130,66 @@ describe("website settings api", () => {
       }
     });
     expect((await hiddenHome.request("/")).status).toBe(404);
+  });
+
+  it("redirects metadata-defined home pages to Web Forms, Web Views, or safe links", async () => {
+    const Lead = defineDocType({
+      name: "Lead",
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "route", type: "text" },
+        { name: "published", type: "boolean" }
+      ],
+      permissions: [
+        { roles: ["Guest"], actions: ["read", "create"] },
+        { roles: ["User"], actions: ["read", "create"] }
+      ]
+    });
+    const base = {
+      doctypes: [Lead],
+      webPages: [defineWebPage({ name: "About", route: "about", title: "About", sections: [{ body: "Welcome" }] })],
+      webForms: [
+        defineWebForm({
+          name: "Lead Intake",
+          route: "lead/intake",
+          doctype: "Lead",
+          fields: [{ field: "title" }]
+        })
+      ],
+      webViews: [
+        defineWebView({
+          name: "Updates",
+          doctype: "Lead",
+          routeField: "route",
+          titleField: "title",
+          publishedField: "published"
+        })
+      ]
+    } as const;
+
+    const formHome = createWebsiteApp(createRegistry({
+      ...base,
+      websiteSettings: defineWebsiteSettings({ title: "Starter Site", homePageWebForm: "Lead Intake" })
+    }));
+    const formRedirect = await formHome.request("/");
+    expect(formRedirect.status).toBe(302);
+    expect(formRedirect.headers.get("location")).toBe("/web-forms/lead/intake");
+
+    const viewHome = createWebsiteApp(createRegistry({
+      ...base,
+      websiteSettings: defineWebsiteSettings({ title: "Starter Site", homePageWebView: "Updates" })
+    }));
+    const viewRedirect = await viewHome.request("/");
+    expect(viewRedirect.status).toBe(302);
+    expect(viewRedirect.headers.get("location")).toBe("/web/Updates");
+
+    const externalHome = createWebsiteApp(createRegistry({
+      ...base,
+      websiteSettings: defineWebsiteSettings({ title: "Starter Site", homePageHref: "https://example.com/docs" })
+    }));
+    const externalRedirect = await externalHome.request("/");
+    expect(externalRedirect.status).toBe(302);
+    expect(externalRedirect.headers.get("location")).toBe("https://example.com/docs");
   });
 
   it("filters Web Form navigation references through Web Form access rules", async () => {
@@ -305,6 +366,25 @@ function createApp(registry: ReturnType<typeof createRegistry>) {
     queries: new QueryService({ registry, projections: store }),
     webPages,
     websiteSettings: new WebsiteSettingsService({ registry, webPages }),
+    actor: unsafeHeaderActorResolver
+  });
+}
+
+function createWebsiteApp(registry: ReturnType<typeof createRegistry>) {
+  const store = new InMemoryDocumentStore();
+  const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+  const queries = new QueryService({ registry, projections: store });
+  const webPages = new WebPageService({ registry });
+  const webForms = new WebFormService({ registry, documents, queries });
+  const webViews = new WebViewService({ registry, queries });
+  return createResourceApi({
+    registry,
+    documents,
+    queries,
+    webPages,
+    webForms,
+    webViews,
+    websiteSettings: new WebsiteSettingsService({ registry, webPages, webForms, webViews }),
     actor: unsafeHeaderActorResolver
   });
 }

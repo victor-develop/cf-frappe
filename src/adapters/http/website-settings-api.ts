@@ -17,7 +17,7 @@ export function createWebsiteSettingsApi(options: WebsiteSettingsApiOptions): Ho
 
   app.get("/", async (c) => {
     const actor = await options.actor(c.req.raw);
-    return c.redirect(`/page/${options.websiteSettings.getHomePageRoute(actor)}`, 302);
+    return c.redirect(await options.websiteSettings.getHomePageHref(actor), 302);
   });
 
   return app;

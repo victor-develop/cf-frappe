@@ -24,6 +24,7 @@ export interface ResolvedWebsiteSettings {
   readonly title: string;
   readonly description?: string;
   readonly homePageRoute?: string;
+  readonly homePageHref?: string;
   readonly theme?: WebsiteThemeDefinition;
   readonly navItems: readonly WebsiteNavigationItem[];
 }
@@ -53,6 +54,7 @@ export class WebsiteSettingsService {
 
   async getWebsiteSettings(actor: Actor): Promise<ResolvedWebsiteSettings> {
     const settings = this.readSettings(actor);
+    const homePageHref = await this.homePageHref(actor, settings);
     const navItems = await Promise.all((settings.navItems ?? []).map((item) => this.resolveNavigationItem(actor, item)));
     return {
       title: settings.title,
@@ -60,11 +62,21 @@ export class WebsiteSettingsService {
       ...(settings.homePageRoute !== undefined && this.canReadPageRoute(actor, settings.homePageRoute)
         ? { homePageRoute: settings.homePageRoute }
         : {}),
+      ...(homePageHref === undefined ? {} : { homePageHref }),
       ...(settings.theme === undefined || this.websiteThemes === undefined
         ? {}
         : { theme: this.websiteThemes.getWebsiteTheme(settings.theme) }),
       navItems: navItems.flat()
     };
+  }
+
+  async getHomePageHref(actor: Actor): Promise<string> {
+    const settings = this.readSettings(actor);
+    const href = await this.homePageHref(actor, settings);
+    if (href === undefined) {
+      throw notFound("Website home page was not found", "WEBSITE_SETTINGS_NOT_FOUND");
+    }
+    return href;
   }
 
   getHomePageRoute(actor: Actor): string {
@@ -73,6 +85,19 @@ export class WebsiteSettingsService {
       throw notFound("Website home page was not found", "WEBSITE_SETTINGS_NOT_FOUND");
     }
     return settings.homePageRoute;
+  }
+
+  private async homePageHref(actor: Actor, settings: WebsiteSettingsDefinition): Promise<string | undefined> {
+    if (settings.homePageRoute !== undefined) {
+      return this.canReadPageRoute(actor, settings.homePageRoute) ? `/page/${settings.homePageRoute}` : undefined;
+    }
+    if (settings.homePageWebForm !== undefined) {
+      return this.webFormHref(actor, settings.homePageWebForm);
+    }
+    if (settings.homePageWebView !== undefined) {
+      return this.webViewHref(actor, settings.homePageWebView);
+    }
+    return settings.homePageHref;
   }
 
   private readSettings(actor: Actor): WebsiteSettingsDefinition {

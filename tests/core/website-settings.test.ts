@@ -98,6 +98,16 @@ describe("metadata Website Settings", () => {
     expect(() =>
       defineWebsiteSettings({
         title: "Bad",
+        homePageRoute: "about",
+        homePageWebForm: "Lead Intake"
+      })
+    ).toThrow("homepage must define at most one");
+    expect(() => defineWebsiteSettings({ title: "Bad", homePageWebForm: " " })).toThrow("homepage Web Form is required");
+    expect(() => defineWebsiteSettings({ title: "Bad", homePageWebView: " " })).toThrow("homepage Web View is required");
+    expect(() => defineWebsiteSettings({ title: "Bad", homePageHref: "/desk/Task" })).toThrow("homepage must define a safe href");
+    expect(() =>
+      defineWebsiteSettings({
+        title: "Bad",
         navItems: [{ name: "bad", label: "Bad", pageRoute: "bad route" }]
       })
     ).toThrow("safe canonical relative path");
@@ -182,7 +192,27 @@ describe("metadata Website Settings", () => {
         webPages: [about],
         websiteSettings: defineWebsiteSettings({
           title: "Bad",
+          homePageWebForm: "Missing Form"
+        })
+      })
+    ).toThrow("unknown Web Form 'Missing Form'");
+    expect(() =>
+      createRegistry({
+        doctypes: [Lead],
+        webPages: [about],
+        websiteSettings: defineWebsiteSettings({
+          title: "Bad",
           navItems: [{ name: "missing", label: "Missing", webView: "Missing View" }]
+        })
+      })
+    ).toThrow("unknown Web View 'Missing View'");
+    expect(() =>
+      createRegistry({
+        doctypes: [Lead],
+        webPages: [about],
+        websiteSettings: defineWebsiteSettings({
+          title: "Bad",
+          homePageWebView: "Missing View"
         })
       })
     ).toThrow("unknown Web View 'Missing View'");

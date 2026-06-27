@@ -17,6 +17,9 @@ export interface WebsiteSettingsDefinition {
   readonly title: string;
   readonly description?: string;
   readonly homePageRoute?: string;
+  readonly homePageWebForm?: string;
+  readonly homePageWebView?: string;
+  readonly homePageHref?: string;
   readonly theme?: string;
   readonly published?: boolean;
   readonly roles?: readonly string[];
@@ -45,9 +48,7 @@ export function defineWebsiteSettings(definition: WebsiteSettingsDefinition): We
 
 export function assertWebsiteSettingsDefinition(definition: WebsiteSettingsDefinition): void {
   assertIdentifier(definition.title, "website title");
-  if (definition.homePageRoute !== undefined) {
-    assertPageRoute(definition.homePageRoute, "website homepage route");
-  }
+  assertHomepageTarget(definition);
   if (definition.theme !== undefined) {
     assertIdentifier(definition.theme, "website theme");
   }
@@ -92,6 +93,36 @@ export function websiteNavigationItemHref(item: WebsiteNavigationItemDefinition)
     return `/web/${encodeURIComponent(item.webView)}`;
   }
   return item.href ?? "";
+}
+
+function assertHomepageTarget(definition: WebsiteSettingsDefinition): void {
+  const targetCount = [
+    definition.homePageRoute,
+    definition.homePageWebForm,
+    definition.homePageWebView,
+    definition.homePageHref
+  ].filter((target) => target !== undefined).length;
+  if (targetCount > 1) {
+    throw new FrameworkError(
+      "WEBSITE_SETTINGS_INVALID",
+      "Website settings homepage must define at most one of homePageRoute, homePageWebForm, homePageWebView, or homePageHref",
+      { status: 400 }
+    );
+  }
+  if (definition.homePageRoute !== undefined) {
+    assertPageRoute(definition.homePageRoute, "website homepage route");
+  }
+  if (definition.homePageWebForm !== undefined) {
+    assertIdentifier(definition.homePageWebForm, "website homepage Web Form");
+  }
+  if (definition.homePageWebView !== undefined) {
+    assertIdentifier(definition.homePageWebView, "website homepage Web View");
+  }
+  if (definition.homePageHref !== undefined && !isSafeWebsiteHref(definition.homePageHref)) {
+    throw new FrameworkError("WEBSITE_SETTINGS_INVALID", "Website settings homepage must define a safe href", {
+      status: 400
+    });
+  }
 }
 
 function assertNavigationTarget(item: WebsiteNavigationItemDefinition): void {
