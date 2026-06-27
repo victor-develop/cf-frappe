@@ -348,6 +348,37 @@ export function fileMultipartCompletionStartedPatch(): DocumentData {
   return { storage_state: "upload_completing" };
 }
 
+export interface FileMetadataPatchCommand {
+  readonly filename?: string;
+  readonly isPrivate?: boolean;
+  readonly attachedTo?:
+    | {
+        readonly doctype: string;
+        readonly name: string;
+      }
+    | null;
+}
+
+export function fileMetadataPatch(command: FileMetadataPatchCommand): DocumentData {
+  const patch: DocumentData = {
+    ...(command.filename === undefined ? {} : { filename: sanitizeFilename(command.filename) }),
+    ...(command.isPrivate === undefined ? {} : { is_private: command.isPrivate })
+  };
+  if (command.attachedTo !== undefined) {
+    if (command.attachedTo === null) {
+      patch.attached_to_doctype = "";
+      patch.attached_to_name = "";
+    } else {
+      patch.attached_to_doctype = command.attachedTo.doctype;
+      patch.attached_to_name = command.attachedTo.name;
+    }
+  }
+  if (Object.keys(patch).length === 0) {
+    throw badRequest("At least one file metadata field must be provided");
+  }
+  return patch;
+}
+
 export function fileScanFailureError(result: FileScanResult, snapshot: DocumentSnapshot): FrameworkError {
   const message = fileSnapshotStringData(snapshot, "scan_message") || result.message;
   return new FrameworkError(

@@ -57,6 +57,7 @@ import {
   fileContentLength,
   fileDashboardEntry,
   fileDocumentData,
+  fileMetadataPatch,
   fileMultipartCompletionStartedPatch,
   fileMultipartUploadDocumentData,
   fileMultipartUploadId,
@@ -841,22 +842,11 @@ export class FileService {
       );
     }
     ensureFileNotDeleteRequested(current);
-    const patch: DocumentData = {
-      ...(command.filename === undefined ? {} : { filename: sanitizeFilename(command.filename) }),
-      ...(command.isPrivate === undefined ? {} : { is_private: command.isPrivate })
-    };
+    const patch = fileMetadataPatch(command);
     if (command.attachedTo !== undefined) {
-      if (command.attachedTo === null) {
-        patch.attached_to_doctype = "";
-        patch.attached_to_name = "";
-      } else {
+      if (command.attachedTo !== null) {
         await this.validateAttachmentTarget(command.actor, tenantId, command.attachedTo);
-        patch.attached_to_doctype = command.attachedTo.doctype;
-        patch.attached_to_name = command.attachedTo.name;
       }
-    }
-    if (Object.keys(patch).length === 0) {
-      throw badRequest("At least one file metadata field must be provided");
     }
     return this.documents.execute({
       actor: command.actor,

@@ -88,3 +88,4 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Extracted buffered file content length calculation, required/optional file snapshot string reads, expected-version checks, and scan-failure error shaping from `FileService` into the file policy with focused boundary coverage.
 - Extracted file downloadability, direct-upload and multipart-upload state guards, multipart upload id reads, and delete expected-version rules from `FileService` into the file policy with focused state-machine coverage.
 - Extracted file document payload construction, upload completion/failure patch shaping, and multipart-completion state patches from `FileService` into the file policy with focused event-input coverage.
+- Extracted file metadata patch construction from `FileService` into the file policy with focused rename, privacy, attach, detach, and empty-patch coverage.

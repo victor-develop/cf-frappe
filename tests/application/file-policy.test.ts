@@ -14,6 +14,7 @@ import {
   fileContentTypeExtension,
   fileDashboardEntry,
   fileDocumentData,
+  fileMetadataPatch,
   fileMultipartCompletionStartedPatch,
   fileMultipartUploadDocumentData,
   fileMultipartUploadId,
@@ -519,6 +520,27 @@ describe("file policy", () => {
       scan_checked_at: "2026-06-28T01:00:00.000Z"
     });
     expect(fileMultipartCompletionStartedPatch()).toEqual({ storage_state: "upload_completing" });
+  });
+
+  it("builds file metadata patches", () => {
+    expect(fileMetadataPatch({
+      filename: " folder/invoice.pdf ",
+      isPrivate: false,
+      attachedTo: { doctype: "Invoice", name: "INV-1" }
+    })).toEqual({
+      filename: "folder-invoice.pdf",
+      is_private: false,
+      attached_to_doctype: "Invoice",
+      attached_to_name: "INV-1"
+    });
+    expect(fileMetadataPatch({ attachedTo: null })).toEqual({
+      attached_to_doctype: "",
+      attached_to_name: ""
+    });
+  });
+
+  it("rejects empty file metadata patches", () => {
+    expect(() => fileMetadataPatch({})).toThrow("At least one file metadata field must be provided");
   });
 
   it("builds file scan failure errors from persisted scan details first", () => {
