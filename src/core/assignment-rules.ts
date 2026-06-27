@@ -5,8 +5,10 @@ import type {
   AssignmentRuleDefinition,
   AssignmentRuleEventKind,
   DocTypeDefinition,
+  DocumentData,
   DocumentSnapshot,
-  DomainEvent
+  DomainEvent,
+  TenantId
 } from "./types.js";
 
 export const ASSIGNMENT_RULE_EVENT_KINDS = Object.freeze([
@@ -24,9 +26,64 @@ export interface AssignmentRuleEvaluationContext {
   readonly rules: readonly AssignmentRuleDefinition[];
 }
 
+export interface AssignmentRuleEntry {
+  readonly tenantId: TenantId;
+  readonly doctypeName: string;
+  readonly rule: AssignmentRuleDefinition;
+  readonly enabled: boolean;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly metadata: DocumentData;
+}
+
+export interface AssignmentRuleState {
+  readonly tenantId: TenantId;
+  readonly doctypeName: string;
+  readonly version: number;
+  readonly rules: readonly AssignmentRuleEntry[];
+}
+
 export interface AssignmentRuleDocumentAssignment {
   readonly assigneeId: string;
   readonly ruleName: string;
+}
+
+export function foldAssignmentRules(
+  tenantId: TenantId,
+  doctypeName: string,
+  events: readonly DomainEvent[]
+): AssignmentRuleState {
+  const rules = new Map<string, AssignmentRuleEntry>();
+  let version = 0;
+  for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
+    if (event.payload.kind !== "AssignmentRuleSaved" && event.payload.kind !== "AssignmentRuleCleared") {
+      continue;
+    }
+    version = Math.max(version, event.sequence);
+    if (event.payload.doctypeName !== doctypeName) {
+      continue;
+    }
+    if (event.payload.kind === "AssignmentRuleSaved") {
+      const existing = rules.get(event.payload.rule.name);
+      rules.set(event.payload.rule.name, {
+        tenantId,
+        doctypeName,
+        rule: event.payload.rule,
+        enabled: event.payload.rule.enabled ?? true,
+        createdAt: existing?.createdAt ?? event.occurredAt,
+        updatedAt: event.occurredAt,
+        metadata: event.metadata
+      });
+      continue;
+    }
+    rules.delete(event.payload.ruleName);
+  }
+  return Object.freeze({
+    tenantId,
+    doctypeName,
+    version,
+    rules: Object.freeze([...rules.values()].sort((left, right) => left.rule.name.localeCompare(right.rule.name)))
+  });
 }
 
 export function normalizeAssignmentRules(

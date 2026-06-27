@@ -1,4 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
+import {
+  AssignmentRuleService,
+  createDocumentAssignmentRuleHooks,
+  type AssignmentRuleActorResolver
+} from "../application/assignment-rule-service.js";
 import { CustomFieldService } from "../application/custom-field-service.js";
 import { DocumentShareService } from "../application/document-share-service.js";
 import { DocumentService, bulkDocumentFailure } from "../application/document-service.js";
@@ -9,7 +14,7 @@ import type { EmailNotificationService } from "../application/email-notification
 import type { BulkDocumentCommandFailure } from "../application/document-service.js";
 import { UserPermissionService } from "../application/user-permission-service.js";
 import { ModelBackedUserPermissionGrantValidator } from "../application/user-permission-grant-validator.js";
-import type { DocTypeDefinition, DomainEvent, DocumentSnapshot } from "../core/types.js";
+import { SYSTEM_MANAGER_ROLE, type Actor, type DocTypeDefinition, type DomainEvent, type DocumentSnapshot } from "../core/types.js";
 import { createDocumentDeliveryHooks, type EmailNotificationDeliveryQueue } from "../application/realtime.js";
 import { UserNotificationService } from "../application/user-notification-service.js";
 import type {
@@ -87,6 +92,7 @@ export interface AggregateCoordinatorOptions<Env extends AggregateCoordinatorEnv
   readonly ids?: IdGenerator;
   readonly realtime?: (env: Env) => RealtimePublisher;
   readonly notifications?: boolean;
+  readonly assignmentRuleActor?: Actor | AssignmentRuleActorResolver | false;
   readonly emailNotifications?: (
     env: Env,
     services: { readonly events: EventStore; readonly notificationRules: NotificationRuleService }
@@ -141,6 +147,12 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
         ...(options.clock ? { clock: options.clock } : {}),
         preNotificationRuleDocTypeResolver: effectiveDocType
       });
+      const assignmentRules = new AssignmentRuleService({
+        registry: options.registry,
+        events,
+        ...(options.clock ? { clock: options.clock } : {}),
+        preAssignmentRuleDocTypeResolver: effectiveDocType
+      });
       const notifications = options.notifications === false
         ? undefined
         : new UserNotificationService({
@@ -158,6 +170,16 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
         ...(emailNotifications ? { emailNotifications } : {}),
         ...(emailNotificationDeliveryQueue ? { emailNotificationDeliveryQueue } : {})
       });
+      const assignmentRuleActor = options.assignmentRuleActor === undefined
+        ? defaultAssignmentRuleActor
+        : options.assignmentRuleActor;
+      const assignmentRuleHooks = assignmentRuleActor === false
+        ? {}
+        : createDocumentAssignmentRuleHooks({
+            documents: { assign: (command) => this.service.assign(command) },
+            actor: assignmentRuleActor,
+            assignmentRules
+          });
       this.service = new DocumentService({
         registry: options.registry,
         store: new D1DocumentStore(env.DB),
@@ -170,7 +192,10 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
         ...(options.clock ? { clock: options.clock } : {}),
         ...(options.ids ? { ids: options.ids } : {}),
         ...(options.onHookError ? { onHookError: options.onHookError } : {}),
-        ...(deliveryHooks.afterCommit ? { afterCommit: deliveryHooks.afterCommit } : {})
+        afterCommit: async (context) => {
+          await assignmentRuleHooks.afterCommit?.(context);
+          await deliveryHooks.afterCommit?.(context);
+        }
       });
     }
 
@@ -229,6 +254,11 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
     }
   };
 }
+
+const defaultAssignmentRuleActor: Actor = Object.freeze({
+  id: "__assignment_rules__",
+  roles: Object.freeze([SYSTEM_MANAGER_ROLE])
+});
 
 function documentNameForFailure(command: AggregateCoordinatorCommand): string {
   return command.kind === "create" ? command.name ?? "_new" : command.name;

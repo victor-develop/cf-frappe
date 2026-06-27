@@ -139,6 +139,8 @@ export function foldDocumentFrom(
       case "WorkflowDefinitionCleared":
       case "NotificationRuleSaved":
       case "NotificationRuleCleared":
+      case "AssignmentRuleSaved":
+      case "AssignmentRuleCleared":
       case "EmailNotificationQueued":
       case "EmailNotificationSent":
       case "EmailNotificationDeliveryClaimed":

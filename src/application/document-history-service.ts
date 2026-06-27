@@ -322,6 +322,8 @@ function diffEvent(
     case "WorkflowDefinitionCleared":
     case "NotificationRuleSaved":
     case "NotificationRuleCleared":
+    case "AssignmentRuleSaved":
+    case "AssignmentRuleCleared":
     case "EmailNotificationQueued":
     case "EmailNotificationSent":
     case "EmailNotificationDeliveryClaimed":
@@ -477,6 +479,10 @@ function summarize(payload: DocumentEventPayload): string {
       return `Saved notification rule ${payload.doctypeName}.${payload.rule.name}`;
     case "NotificationRuleCleared":
       return `Cleared notification rule ${payload.doctypeName}.${payload.ruleName}`;
+    case "AssignmentRuleSaved":
+      return `Saved assignment rule ${payload.doctypeName}.${payload.rule.name}`;
+    case "AssignmentRuleCleared":
+      return `Cleared assignment rule ${payload.doctypeName}.${payload.ruleName}`;
     case "EmailNotificationQueued":
       return `Queued email notification ${payload.messageId}`;
     case "EmailNotificationSent":

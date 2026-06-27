@@ -1,5 +1,8 @@
 import {
+  AssignmentRuleService,
   assignmentRuleAssignmentsFromDomainEvent,
+  assignmentRulesStream,
+  AuditService,
   createDocumentAssignmentRuleHooks,
   createRegistry,
   defineDocType,
@@ -8,10 +11,17 @@ import {
   fixedClock,
   foldDocumentAssignments,
   InMemoryDocumentStore,
+  SYSTEM_MANAGER_ROLE,
   documentStream
 } from "../../src";
 import { manager, now, owner } from "../helpers";
 import type { DocTypeDefinition, DocumentSnapshot, DomainEvent } from "../../src";
+
+const admin = {
+  id: "admin@example.com",
+  roles: [SYSTEM_MANAGER_ROLE, "User"],
+  tenantId: "acme"
+};
 
 describe("assignment rules", () => {
   it("normalizes assignment rule metadata on DocTypes", () => {
@@ -84,6 +94,100 @@ describe("assignment rules", () => {
     ).toThrow(expect.objectContaining({ code: "ASSIGNMENT_RULE_INVALID" }));
   });
 
+  it("saves, clears, and audits runtime assignment rule metadata events", async () => {
+    const events = new InMemoryDocumentStore();
+    const service = new AssignmentRuleService({
+      registry: createRegistry({ doctypes: [ticketDocType()] }),
+      events,
+      ids: deterministicIds(["rule-1", "rule-2"]),
+      clock: fixedClock(now)
+    });
+
+    const saved = await service.save({
+      actor: admin,
+      doctype: "Ticket",
+      rule: {
+        name: "High priority triage",
+        events: ["DocumentCreated"],
+        assignees: [{ kind: "user", userId: "manager@example.com" }],
+        condition: { field: "priority", value: "High" }
+      },
+      expectedVersion: 0
+    });
+    const repeated = await service.save({
+      actor: admin,
+      doctype: "Ticket",
+      rule: {
+        name: "High priority triage",
+        events: ["DocumentCreated"],
+        assignees: [{ kind: "user", userId: "manager@example.com" }],
+        condition: { field: "priority", value: "High" }
+      },
+      expectedVersion: 1
+    });
+    const cleared = await service.clear({
+      actor: admin,
+      doctype: "Ticket",
+      ruleName: "High priority triage",
+      expectedVersion: 1
+    });
+
+    expect(saved).toMatchObject({
+      tenantId: "acme",
+      doctypeName: "Ticket",
+      version: 1,
+      rules: [{ rule: { name: "High priority triage" }, enabled: true }]
+    });
+    expect(repeated.version).toBe(1);
+    expect(cleared).toMatchObject({ version: 2, rules: [] });
+    await expect(events.readStream(assignmentRulesStream("acme"))).resolves.toMatchObject([
+      { id: "evt_rule-1", payload: { kind: "AssignmentRuleSaved", rule: { name: "High priority triage" } } },
+      { id: "evt_rule-2", payload: { kind: "AssignmentRuleCleared", ruleName: "High priority triage" } }
+    ]);
+    await expect(new AuditService({ events }).search(admin, { kind: "AssignmentRuleSaved" })).resolves.toMatchObject({
+      events: [{ payload: { kind: "AssignmentRuleSaved", rule: { name: "High priority triage" } } }]
+    });
+  });
+
+  it("requires admin authority, tenant ownership, expected versions, and valid runtime assignment rule metadata", async () => {
+    const service = new AssignmentRuleService({
+      registry: createRegistry({ doctypes: [ticketDocType()] }),
+      events: new InMemoryDocumentStore(),
+      ids: deterministicIds(["rule-1"])
+    });
+
+    await expect(
+      service.save({
+        actor: owner,
+        doctype: "Ticket",
+        rule: { name: "Denied", events: ["DocumentCreated"], assignees: [{ kind: "user", userId: "manager@example.com" }] }
+      })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+    await expect(
+      service.save({
+        actor: admin,
+        tenantId: "globex",
+        doctype: "Ticket",
+        rule: { name: "Wrong tenant", events: ["DocumentCreated"], assignees: [{ kind: "user", userId: "manager@example.com" }] }
+      })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+    await expect(
+      service.save({
+        actor: admin,
+        doctype: "Ticket",
+        expectedVersion: 1,
+        rule: { name: "Stale", events: ["DocumentCreated"], assignees: [{ kind: "user", userId: "manager@example.com" }] }
+      })
+    ).rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
+    await expect(
+      service.save({
+        actor: admin,
+        doctype: "Ticket",
+        rule: { name: "Bad event", events: ["DocumentAssigned" as never], assignees: [{ kind: "user", userId: "manager@example.com" }] }
+      })
+    ).rejects.toMatchObject({ code: "ASSIGNMENT_RULE_INVALID" });
+  });
+
   it("assigns matching documents through afterCommit hooks", async () => {
     const doctype = ticketDocType({
       assignmentRules: [
@@ -141,6 +245,58 @@ describe("assignment rules", () => {
         }
       }
     ]);
+  });
+
+  it("assigns documents from runtime rules evaluated as of the source event time", async () => {
+    const registry = createRegistry({ doctypes: [ticketDocType()] });
+    const store = new InMemoryDocumentStore();
+    const assignmentRules = new AssignmentRuleService({
+      registry,
+      events: store,
+      ids: deterministicIds(["rule-1"]),
+      clock: fixedClock(now)
+    });
+    let documents: DocumentService;
+    const hooks = createDocumentAssignmentRuleHooks({
+      documents: { assign: (command) => documents.assign(command) },
+      actor: manager,
+      assignmentRules
+    });
+    documents = new DocumentService({
+      registry,
+      store,
+      ids: deterministicIds(["create-1", "assign-1"]),
+      clock: fixedClock(now),
+      ...(hooks.afterCommit === undefined ? {} : { afterCommit: hooks.afterCommit })
+    });
+
+    await assignmentRules.save({
+      actor: admin,
+      doctype: "Ticket",
+      rule: {
+        name: "Runtime triage",
+        events: ["DocumentCreated"],
+        assignees: [{ kind: "user", userId: "manager@example.com" }],
+        condition: { field: "priority", value: "High" }
+      }
+    });
+    const created = await documents.create({
+      actor: owner,
+      doctype: "Ticket",
+      data: { title: "Runtime", priority: "High" }
+    });
+
+    expect(created.version).toBe(2);
+    await expect(store.readStream(documentStream("acme", "Ticket", "Runtime"))).resolves.toMatchObject([
+      { payload: { kind: "DocumentCreated" } },
+      {
+        payload: { kind: "DocumentAssigned", assigneeId: "manager@example.com" },
+        metadata: { assignmentRuleName: "Runtime triage", sourceEventId: "evt_create-1" }
+      }
+    ]);
+    await expect(
+      assignmentRules.assignmentRulesFor("acme", "Ticket", { occurredAt: "2025-12-31T23:59:59.000Z" })
+    ).resolves.toEqual([]);
   });
 
   it("evaluates update conditions and avoids duplicate assignment events", async () => {
@@ -330,6 +486,46 @@ describe("assignment rules", () => {
 
     expect(errors).toEqual([expect.objectContaining({ code: "PERMISSION_DENIED" })]);
     await expect(store.readStream(documentStream("acme", "Ticket", "Unassignable"))).resolves.toHaveLength(1);
+  });
+
+  it("rejects assignment automation actors bound to another tenant", async () => {
+    const doctype = ticketDocType({
+      assignmentRules: [
+        {
+          name: "Cross tenant guard",
+          events: ["DocumentCreated"],
+          assignees: [{ kind: "user", userId: "manager@example.com" }]
+        }
+      ]
+    });
+    const registry = createRegistry({ doctypes: [doctype] });
+    const store = new InMemoryDocumentStore();
+    const errors: unknown[] = [];
+    let documents: DocumentService;
+    const hooks = createDocumentAssignmentRuleHooks({
+      documents: { assign: (command) => documents.assign(command) },
+      actor: { id: "automation@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "globex" },
+      onAssignmentError(error) {
+        errors.push(error);
+      }
+    });
+    documents = new DocumentService({
+      registry,
+      store,
+      ids: deterministicIds(["create-1"]),
+      clock: fixedClock(now),
+      ...(hooks.afterCommit === undefined ? {} : { afterCommit: hooks.afterCommit })
+    });
+
+    await documents.create({ actor: owner, doctype: "Ticket", data: { title: "Tenant Guard" } });
+
+    expect(errors).toEqual([
+      expect.objectContaining({
+        code: "PERMISSION_DENIED",
+        message: "Assignment rule actor 'automation@example.com' cannot assign documents for tenant 'acme'"
+      })
+    ]);
+    await expect(store.readStream(documentStream("acme", "Ticket", "Tenant Guard"))).resolves.toHaveLength(1);
   });
 });
 

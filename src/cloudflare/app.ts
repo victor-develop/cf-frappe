@@ -1,4 +1,5 @@
 import { AuditService } from "../application/audit-service.js";
+import { AssignmentRuleService } from "../application/assignment-rule-service.js";
 import { CalendarService } from "../application/calendar-service.js";
 import { CustomFieldService } from "../application/custom-field-service.js";
 import { DashboardService } from "../application/dashboard-service.js";
@@ -108,6 +109,7 @@ export interface CloudFrappeRuntimeServices {
   readonly userAccounts?: UserAccountService;
   readonly notifications: UserNotificationService;
   readonly notificationRules: NotificationRuleService;
+  readonly assignmentRules: AssignmentRuleService;
   readonly userProfiles?: UserProfileService;
   readonly userPermissions: UserPermissionService;
   readonly customFields: CustomFieldService;
@@ -418,6 +420,12 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles }),
     preNotificationRuleDocTypeResolver: effectiveDocType
   });
+  const assignmentRules = new AssignmentRuleService({
+    registry: options.registry,
+    events,
+    ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles }),
+    preAssignmentRuleDocTypeResolver: effectiveDocType
+  });
   const notifications = new UserNotificationService({
     events,
     notificationRules,
@@ -434,6 +442,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(userAccounts === undefined ? {} : { userAccounts }),
     notifications,
     notificationRules,
+    assignmentRules,
     ...(userProfiles === undefined ? {} : { userProfiles }),
     userPermissions,
     customFields,
@@ -580,6 +589,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(printPdfRenderer === undefined ? {} : { printPdfRenderer }),
     actor,
     notificationRules,
+    assignmentRules,
     ...(options.maxJsonBytes ? { maxJsonBytes: options.maxJsonBytes } : {}),
     ...(files === undefined ? {} : { files }),
     ...(dataPatches === undefined ? {} : { dataPatches }),

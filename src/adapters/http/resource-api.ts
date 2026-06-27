@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { AssignmentRuleService } from "../../application/assignment-rule-service.js";
 import type { AuditService } from "../../application/audit-service.js";
 import type { CalendarService } from "../../application/calendar-service.js";
 import type { CustomFieldService } from "../../application/custom-field-service.js";
@@ -55,6 +56,7 @@ import {
   type WorkspaceShortcutDefinition
 } from "../../core/workspace.js";
 import type { ActorResolver } from "./actor.js";
+import { createAssignmentRuleApi } from "./assignment-rule-api.js";
 import { createAuthApi, type AuthSessionOptions } from "./auth-api.js";
 import { createAuditApi } from "./audit-api.js";
 import { createCalendarApi } from "./calendar-api.js";
@@ -128,6 +130,7 @@ export interface ResourceApiOptions {
   readonly jobSchedules?: JobScheduleService;
   readonly notifications?: UserNotificationService;
   readonly notificationRules?: NotificationRuleService;
+  readonly assignmentRules?: AssignmentRuleService;
   readonly userAccounts?: UserAccountService;
   readonly userProfiles?: UserProfileService;
   readonly auth?: AuthSessionOptions;
@@ -172,6 +175,17 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       "/",
       createNotificationRuleApi({
         notificationRules: options.notificationRules,
+        actor: resolveActor,
+        maxJsonBytes
+      })
+    );
+  }
+
+  if (options.assignmentRules) {
+    app.route(
+      "/",
+      createAssignmentRuleApi({
+        assignmentRules: options.assignmentRules,
         actor: resolveActor,
         maxJsonBytes
       })

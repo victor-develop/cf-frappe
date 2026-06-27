@@ -586,6 +586,16 @@ export type DocumentEventPayload =
       readonly ruleName: string;
     }
   | {
+      readonly kind: "AssignmentRuleSaved";
+      readonly doctypeName: DocTypeName;
+      readonly rule: AssignmentRuleDefinition;
+    }
+  | {
+      readonly kind: "AssignmentRuleCleared";
+      readonly doctypeName: DocTypeName;
+      readonly ruleName: string;
+    }
+  | {
       readonly kind: "EmailNotificationQueued";
       readonly messageId: string;
       readonly sourceEventId: string;

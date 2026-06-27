@@ -75,4 +75,26 @@ describe("createAggregateCoordinatorClass", () => {
 
     expect(queueCreated).toBe(false);
   });
+
+  it("creates assignment-rule write hooks by default and accepts overrides", () => {
+    const DefaultAggregateCoordinator = createAggregateCoordinatorClass({
+      registry: createTestRegistry()
+    });
+    const AggregateCoordinator = createAggregateCoordinatorClass({
+      registry: createTestRegistry(),
+      assignmentRuleActor: {
+        id: "assignment-rules@example.com",
+        roles: ["Task Manager"],
+        tenantId: "acme"
+      }
+    });
+    const DisabledAggregateCoordinator = createAggregateCoordinatorClass({
+      registry: createTestRegistry(),
+      assignmentRuleActor: false
+    });
+
+    expect(() => new DefaultAggregateCoordinator({} as DurableObjectState, { DB: {} as D1Database })).not.toThrow();
+    expect(() => new AggregateCoordinator({} as DurableObjectState, { DB: {} as D1Database })).not.toThrow();
+    expect(() => new DisabledAggregateCoordinator({} as DurableObjectState, { DB: {} as D1Database })).not.toThrow();
+  });
 });
