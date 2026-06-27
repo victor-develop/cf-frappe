@@ -477,10 +477,6 @@ export type CoreDocumentEventPayload =
       readonly profile: DocumentData;
     }
   | {
-      readonly kind: "PrintSettingsChanged";
-      readonly settings: DocumentData;
-    }
-  | {
       readonly kind: "JobScheduleOverrideSet";
       readonly scheduleId: string;
       readonly enabled: boolean;

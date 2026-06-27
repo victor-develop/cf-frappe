@@ -17,9 +17,12 @@ import {
   type NewDomainEvent,
   type TenantId
 } from "../core/types.js";
+import type { PrintSettingsEventPayload } from "./print-settings-events.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
+
+export type { PrintSettingsEventPayload } from "./print-settings-events.js";
 
 export interface PrintSettingsServiceOptions {
   readonly events: EventStore;
@@ -93,7 +96,7 @@ export class PrintSettingsService {
     readonly settings: PrintSettingsPatch;
   }): Promise<readonly DomainEvent[]> {
     const stream = printSettingsStream(options.tenantId);
-    const event: NewDomainEvent = {
+    const event: NewDomainEvent<PrintSettingsEventPayload> = {
       id: this.ids.next("evt_"),
       tenantId: options.tenantId,
       stream,

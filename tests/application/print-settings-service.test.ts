@@ -7,6 +7,7 @@ import {
   printSettingsStream
 } from "../../src";
 import { owner } from "../helpers";
+import type { DocumentEventPayload, PrintSettingsEventPayload } from "../../src";
 
 const admin = {
   id: "admin@example.com",
@@ -15,6 +16,15 @@ const admin = {
 };
 
 describe("PrintSettingsService", () => {
+  it("registers print settings payloads through the domain event extension map", () => {
+    const payload = printSettingsPayload({
+      kind: "PrintSettingsChanged",
+      settings: { defaultLayout: null }
+    });
+
+    expect(payload.settings).toEqual({ defaultLayout: null });
+  });
+
   it("stores tenant print settings changes as append-only events", async () => {
     const events = new InMemoryEventStore();
     const settings = new PrintSettingsService({
@@ -116,3 +126,9 @@ describe("PrintSettingsService", () => {
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });
+
+function printSettingsPayload(
+  payload: Extract<DocumentEventPayload, { readonly kind: "PrintSettingsChanged" }>
+): PrintSettingsEventPayload {
+  return payload;
+}

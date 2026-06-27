@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the role catalog event payload module slice:
+As of the print settings event payload module slice:
 
 - Vitest files: `156`
-- Vitest cases: `1504`
+- Vitest cases: `1505`
 
 ## Implication
 

@@ -51,3 +51,4 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Moved saved list filter event payloads into their own bounded application event module and narrowed the service event factory to that payload type, adding a fourth extension-map contract test.
 - Moved saved report event payloads into their own bounded application event module and narrowed the service event factory to that payload type, adding a fifth extension-map contract test.
 - Moved role catalog event payloads into their own bounded application event module and narrowed `RoleService` append/fold orchestration to that payload type, adding a sixth extension-map contract test.
+- Moved print settings event payloads into their own bounded application event module and typed `PrintSettingsService` event creation to that payload, adding a seventh extension-map contract test.
