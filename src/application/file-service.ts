@@ -23,7 +23,7 @@ import {
 } from "../core/types.js";
 import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
-import type { FileScanner, FileScanResult, FileScanSource, FileScanTarget } from "../ports/file-scanner.js";
+import type { FileScanner, FileScanResult, FileScanSource } from "../ports/file-scanner.js";
 import {
   isTransformableFileContentType,
   normalizeFileTransformOptions,
@@ -44,6 +44,7 @@ import type {
 } from "../ports/file-storage.js";
 import {
   completeFileRendition,
+  ensureValidFileScanResult,
   ensureFileAvailableForDownload,
   ensureFileDeleteExpectedVersion,
   ensureFileExpectedVersion,
@@ -68,6 +69,7 @@ import {
   fileRenditionView,
   fileScanFailureError,
   fileScanPatch,
+  fileScanTarget,
   fileUploadCompletedPatch,
   fileUploadScanFailedPatch,
   multipartPartManifest,
@@ -1306,21 +1308,14 @@ export class FileService {
     if (!this.scanner) {
       return undefined;
     }
-    const target: FileScanTarget = {
+    const result = await this.scanner.scan(fileScanTarget({
       actorId: command.actor.id,
       tenantId: command.tenantId,
-      key: command.object.key,
       filename: command.filename,
-      contentType: command.object.contentType ?? "application/octet-stream",
-      size: command.object.size,
       source: command.source,
-      etag: command.object.etag,
-      ...(command.object.httpEtag === undefined ? {} : { httpEtag: command.object.httpEtag })
-    };
-    const result = await this.scanner.scan(target);
-    if (result.status !== "clean" && result.status !== "infected") {
-      throw badRequest("File scanner returned an invalid status");
-    }
+      object: command.object
+    }));
+    ensureValidFileScanResult(result);
     return result;
   }
 }

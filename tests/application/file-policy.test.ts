@@ -1,5 +1,6 @@
 import {
   completeFileRendition,
+  ensureValidFileScanResult,
   ensureFileAvailableForDownload,
   ensureFileDeleteExpectedVersion,
   ensureFileExpectedVersion,
@@ -25,6 +26,7 @@ import {
   fileRenditionView,
   fileScanFailureError,
   fileScanPatch,
+  fileScanTarget,
   fileSnapshotStringData,
   fileUploadCompletedPatch,
   fileUploadScanFailedPatch,
@@ -435,6 +437,38 @@ describe("file policy", () => {
       scan_engine: "unit-av",
       scan_message: "EICAR"
     });
+  });
+
+  it("builds file scan targets from stored object metadata", () => {
+    const { contentType: _contentType, ...objectWithoutContentType } = fileObject({
+      key: "acme/files/file_1-invoice.pdf",
+      httpEtag: '"http-etag"'
+    });
+    expect(fileScanTarget({
+      actorId: "owner@example.com",
+      tenantId: "acme",
+      filename: "invoice.pdf",
+      source: "direct_upload",
+      object: objectWithoutContentType
+    })).toEqual({
+      actorId: "owner@example.com",
+      tenantId: "acme",
+      key: "acme/files/file_1-invoice.pdf",
+      filename: "invoice.pdf",
+      contentType: "application/octet-stream",
+      size: 12,
+      source: "direct_upload",
+      etag: "object-1",
+      httpEtag: '"http-etag"'
+    });
+  });
+
+  it("validates file scanner result statuses", () => {
+    expect(() => ensureValidFileScanResult({ status: "clean" })).not.toThrow();
+    expect(() => ensureValidFileScanResult({ status: "infected" })).not.toThrow();
+    expect(() => ensureValidFileScanResult({ status: "queued" as "clean" })).toThrow(
+      "File scanner returned an invalid status"
+    );
   });
 
   it("builds file document data for buffered uploads", () => {

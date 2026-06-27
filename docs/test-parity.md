@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file dashboard filter policy module slice:
+As of the file scan target policy module slice:
 
 - Vitest files: `169`
-- Vitest cases: `1629`
+- Vitest cases: `1631`
 
 ## Implication
 

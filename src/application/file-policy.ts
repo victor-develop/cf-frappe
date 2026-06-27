@@ -22,7 +22,7 @@ import type {
   MultipartFilePartContent,
   UploadedMultipartFilePart
 } from "../ports/file-storage.js";
-import type { FileScanResult } from "../ports/file-scanner.js";
+import type { FileScanResult, FileScanSource, FileScanTarget } from "../ports/file-scanner.js";
 
 const PREVIEWABLE_FILE_CONTENT_TYPES = new Set([
   "application/json",
@@ -287,6 +287,32 @@ export function fileScanPatch(result: FileScanResult, checkedAt: string): Docume
     ...(result.engine === undefined || result.engine === "" ? {} : { scan_engine: result.engine }),
     ...(result.message === undefined || result.message === "" ? {} : { scan_message: result.message })
   };
+}
+
+export function fileScanTarget(command: {
+  readonly actorId: string;
+  readonly tenantId: string;
+  readonly filename: string;
+  readonly source: FileScanSource;
+  readonly object: FileObjectMetadata;
+}): FileScanTarget {
+  return {
+    actorId: command.actorId,
+    tenantId: command.tenantId,
+    key: command.object.key,
+    filename: command.filename,
+    contentType: command.object.contentType ?? "application/octet-stream",
+    size: command.object.size,
+    source: command.source,
+    etag: command.object.etag,
+    ...(command.object.httpEtag === undefined ? {} : { httpEtag: command.object.httpEtag })
+  };
+}
+
+export function ensureValidFileScanResult(result: FileScanResult): void {
+  if (result.status !== "clean" && result.status !== "infected") {
+    throw badRequest("File scanner returned an invalid status");
+  }
 }
 
 export interface FileDocumentDataCommand {
