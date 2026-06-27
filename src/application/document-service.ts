@@ -109,6 +109,12 @@ interface UniqueValueReservation {
   readonly documentName: string;
 }
 
+interface UniqueValueReservationWrite {
+  readonly reservation: UniqueValueReservation;
+  readonly existing: DocumentSnapshot | null;
+  readonly event: NewDomainEvent;
+}
+
 export interface CreateDocumentCommand {
   readonly actor: Actor;
   readonly doctype: string;
@@ -500,7 +506,11 @@ export class DocumentService implements DocumentCommandExecutor {
       throw conflict(`${doctype.name}/${name} already exists`);
     }
     const uniqueReservations = uniqueValueReservations(tenantId, doctype, data, name);
-    await this.reserveUniqueValues(command.actor, uniqueReservations, now);
+    const uniqueReservationWrites = await this.planUniqueValueReservationWrites(
+      command.actor,
+      uniqueReservations,
+      now
+    );
     const event = this.newEvent({
       tenantId,
       stream,
@@ -516,19 +526,26 @@ export class DocumentService implements DocumentCommandExecutor {
       },
       metadata: command.metadata ?? {}
     });
-    let commit: Awaited<ReturnType<DocumentStore["commit"]>>;
-    try {
-      commit = await this.store.commit(stream, 0, [event], ([saved]) => {
-        if (!saved) {
-          throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
-        }
-        return snapshotFromCreate(saved);
-      });
-    } catch (error) {
-      await this.releaseUniqueValues(command.actor, uniqueReservations, this.clock.now(), { suppressErrors: true });
-      throw error;
-    }
-    const [saved] = commit.events;
+    const commit = await this.store.commitBatch(
+      [
+        ...uniqueReservationWrites.map((write) => ({
+          stream: write.reservation.stream,
+          expectedVersion: write.existing?.version ?? 0,
+          events: [write.event]
+        })),
+        { stream, expectedVersion: 0, events: [event] }
+      ],
+      (savedEvents) => {
+        const saved = requireSavedEvent(savedEvents, event.id);
+        return {
+          snapshot: snapshotFromCreate(saved),
+          auxiliarySnapshots: uniqueReservationWrites.map((write) =>
+            this.projectUniqueReservationWrite(write, requireSavedEvent(savedEvents, write.event.id))
+          )
+        };
+      }
+    );
+    const saved = commit.events.find((item) => item.id === event.id);
     if (saved) {
       return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
     }
@@ -706,9 +723,12 @@ export class DocumentService implements DocumentCommandExecutor {
       options.existing.data,
       options.existing.name
     );
-    const newlyReserved = withoutReservationKeys(nextReservations, existingReservations);
     const releasedReservations = withoutReservationKeys(existingReservations, nextReservations);
-    await this.reserveUniqueValues(options.command.actor, nextReservations, now);
+    const uniqueReservationWrites = await this.planUniqueValueReservationWrites(
+      options.command.actor,
+      nextReservations,
+      now
+    );
     const payload = {
       kind: "DocumentUpdated" as const,
       patch: normalizedPatch,
@@ -725,24 +745,31 @@ export class DocumentService implements DocumentCommandExecutor {
       payload,
       metadata: options.command.metadata ?? {}
     });
-    let commit: Awaited<ReturnType<DocumentStore["commit"]>>;
-    try {
-      commit = await this.store.commit(options.stream, options.existing.version, [event], ([saved]) => {
-        if (!saved) {
-          throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
-        }
+    const commit = await this.store.commitBatch(
+      [
+        ...uniqueReservationWrites.map((write) => ({
+          stream: write.reservation.stream,
+          expectedVersion: write.existing?.version ?? 0,
+          events: [write.event]
+        })),
+        { stream: options.stream, expectedVersion: options.existing.version, events: [event] }
+      ],
+      (savedEvents) => {
+        const saved = requireSavedEvent(savedEvents, event.id);
         return {
-          ...options.existing,
-          version: saved.sequence,
-          data,
-          updatedAt: saved.occurredAt
+          snapshot: {
+            ...options.existing,
+            version: saved.sequence,
+            data,
+            updatedAt: saved.occurredAt
+          },
+          auxiliarySnapshots: uniqueReservationWrites.map((write) =>
+            this.projectUniqueReservationWrite(write, requireSavedEvent(savedEvents, write.event.id))
+          )
         };
-      });
-    } catch (error) {
-      await this.releaseUniqueValues(options.command.actor, newlyReserved, this.clock.now(), { suppressErrors: true });
-      throw error;
-    }
-    const [saved] = commit.events;
+      }
+    );
+    const saved = commit.events.find((item) => item.id === event.id);
     if (saved) {
       await this.releaseUniqueValues(options.command.actor, releasedReservations, saved.occurredAt, {
         suppressErrors: true
@@ -1830,73 +1857,74 @@ export class DocumentService implements DocumentCommandExecutor {
     return foldDocument(await this.store.readStream(documentStream(tenantId, doctype.name, name)));
   }
 
-  private async reserveUniqueValues(
+  private async planUniqueValueReservationWrites(
     actor: Actor,
     reservations: readonly UniqueValueReservation[],
     occurredAt: string
-  ): Promise<void> {
-    const acquired: UniqueValueReservation[] = [];
-    try {
-      for (const reservation of reservations) {
-        const existing = foldDocument(await this.store.readStream(reservation.stream));
-        const owner = activeUniqueValueOwner(existing);
-        if (owner === reservation.documentName) {
-          continue;
-        }
-        if (owner !== undefined && (await this.uniqueReservationOwnerStillOwnsValue(reservation, owner))) {
-          throw conflict(
-            `Unique field '${reservation.field}' on ${reservation.doctype} already uses value '${reservation.valueLabel}'`
-          );
-        }
-        const event = this.newEvent({
-          tenantId: reservation.tenantId,
-          stream: reservation.stream,
-          type: existing ? "UniqueValueReserved" : "UniqueValueStarted",
-          doctype: UNIQUE_VALUE_DOCTYPE,
-          documentName: `${reservation.doctype}:${reservation.field}:${reservation.valueKey}`,
-          actorId: actor.id,
-          occurredAt,
-          payload: existing
-            ? {
-                kind: "DocumentUpdated",
-                patch: {
-                  active: true,
-                  documentName: reservation.documentName
-                }
-              }
-            : {
-                kind: "DocumentCreated",
-                data: {
-                  doctype: reservation.doctype,
-                  field: reservation.field,
-                  value: reservation.valueLabel,
-                  valueKey: reservation.valueKey,
-                  documentName: reservation.documentName,
-                  active: true
-                },
-                docstatus: "draft"
-              },
-          metadata: { target_doctype: reservation.doctype, target_field: reservation.field }
-        });
-        await this.store.commit(reservation.stream, existing?.version ?? 0, [event], ([saved]) => {
-          if (!saved) {
-            throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
-          }
-          return existing
-            ? {
-                ...existing,
-                version: saved.sequence,
-                data: { ...existing.data, documentName: reservation.documentName, active: true },
-                updatedAt: saved.occurredAt
-              }
-            : snapshotFromCreate(saved);
-        });
-        acquired.push(reservation);
+  ): Promise<readonly UniqueValueReservationWrite[]> {
+    const planned: Array<{ readonly reservation: UniqueValueReservation; readonly existing: DocumentSnapshot | null }> = [];
+    for (const reservation of reservations) {
+      const existing = foldDocument(await this.store.readStream(reservation.stream));
+      const owner = activeUniqueValueOwner(existing);
+      if (owner === reservation.documentName) {
+        continue;
       }
-    } catch (error) {
-      await this.releaseUniqueValues(actor, acquired, this.clock.now(), { suppressErrors: true });
-      throw error;
+      if (owner !== undefined && (await this.uniqueReservationOwnerStillOwnsValue(reservation, owner))) {
+        throw conflict(
+          `Unique field '${reservation.field}' on ${reservation.doctype} already uses value '${reservation.valueLabel}'`
+        );
+      }
+      planned.push({ reservation, existing });
     }
+    return planned.map(({ reservation, existing }) => ({
+      reservation,
+      existing,
+      event: this.newEvent({
+        tenantId: reservation.tenantId,
+        stream: reservation.stream,
+        type: existing ? "UniqueValueReserved" : "UniqueValueStarted",
+        doctype: UNIQUE_VALUE_DOCTYPE,
+        documentName: `${reservation.doctype}:${reservation.field}:${reservation.valueKey}`,
+        actorId: actor.id,
+        occurredAt,
+        payload: existing
+          ? {
+              kind: "DocumentUpdated",
+              patch: {
+                active: true,
+                documentName: reservation.documentName
+              }
+            }
+          : {
+              kind: "DocumentCreated",
+              data: {
+                doctype: reservation.doctype,
+                field: reservation.field,
+                value: reservation.valueLabel,
+                valueKey: reservation.valueKey,
+                documentName: reservation.documentName,
+                active: true
+              },
+              docstatus: "draft"
+            },
+        metadata: { target_doctype: reservation.doctype, target_field: reservation.field }
+      })
+    }));
+  }
+
+  private projectUniqueReservationWrite(
+    write: UniqueValueReservationWrite,
+    saved: DomainEvent
+  ): DocumentSnapshot {
+    if (!write.existing) {
+      return snapshotFromCreate(saved);
+    }
+    return {
+      ...write.existing,
+      version: saved.sequence,
+      data: { ...write.existing.data, documentName: write.reservation.documentName, active: true },
+      updatedAt: saved.occurredAt
+    };
   }
 
   private async uniqueReservationOwnerStillOwnsValue(
@@ -2224,6 +2252,14 @@ function snapshotFromCreate(event: DomainEvent): DocumentSnapshot {
     createdAt: event.occurredAt,
     updatedAt: event.occurredAt
   };
+}
+
+function requireSavedEvent(events: readonly DomainEvent[], id: string): DomainEvent {
+  const event = events.find((item) => item.id === id);
+  if (!event) {
+    throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
+  }
+  return event;
 }
 
 function ensureExpectedVersion(existing: DocumentSnapshot, expectedVersion?: number): void {

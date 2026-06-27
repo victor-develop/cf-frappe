@@ -27,6 +27,51 @@ describe("D1DocumentStore", () => {
     expect(db.documents.get("acme:Note:One")).toMatchObject({ version: 1 });
   });
 
+  it("commits multi-stream events and projections in one batch", async () => {
+    const db = new FakeD1Database();
+    const store = new D1DocumentStore(db as unknown as D1Database);
+    const uniqueStream = "acme:__UniqueValues:Note%3Atitle%3As%3AOne";
+    const uniqueEvent: NewDomainEvent = {
+      ...event,
+      id: "unique1",
+      stream: uniqueStream,
+      type: "UniqueValueStarted",
+      doctype: "__UniqueValues",
+      documentName: "Note:title:s:One",
+      payload: {
+        kind: "DocumentCreated",
+        data: { doctype: "Note", field: "title", value: "One", valueKey: "s:One", documentName: "One", active: true },
+        docstatus: "draft"
+      },
+      metadata: { target_doctype: "Note", target_field: "title" }
+    };
+
+    const commit = await store.commitBatch(
+      [
+        { stream: uniqueStream, expectedVersion: 0, events: [uniqueEvent] },
+        { stream, expectedVersion: 0, events: [event] }
+      ],
+      (saved) => {
+        const uniqueSaved = saved.find((item) => item.id === "unique1")!;
+        const documentSaved = saved.find((item) => item.id === "evt1")!;
+        return {
+          snapshot: snapshotFrom(documentSaved),
+          auxiliarySnapshots: [snapshotFrom(uniqueSaved)]
+        };
+      }
+    );
+
+    expect(commit.events.map((item) => `${item.stream}:${String(item.sequence)}`)).toEqual([
+      `${uniqueStream}:1`,
+      `${stream}:1`
+    ]);
+    expect(commit.snapshot).toMatchObject({ doctype: "Note", name: "One", version: 1 });
+    await expect(store.readStream(uniqueStream)).resolves.toMatchObject([{ id: "unique1", sequence: 1 }]);
+    await expect(store.readStream(stream)).resolves.toMatchObject([{ id: "evt1", sequence: 1 }]);
+    expect(db.documents.get("acme:__UniqueValues:Note:title:s:One")).toMatchObject({ version: 1 });
+    expect(db.documents.get("acme:Note:One")).toMatchObject({ version: 1 });
+  });
+
   it("rolls back event inserts when projection upsert fails", async () => {
     const db = new FakeD1Database({ failDocumentUpsert: true });
     const store = new D1DocumentStore(db as unknown as D1Database);
@@ -35,6 +80,29 @@ describe("D1DocumentStore", () => {
       "projection failed"
     );
     await expect(store.readStream(stream)).resolves.toEqual([]);
+    expect(db.documents.size).toBe(0);
+  });
+
+  it("rolls back multi-stream event inserts when a batch projection upsert fails", async () => {
+    const db = new FakeD1Database({ failDocumentUpsert: true });
+    const store = new D1DocumentStore(db as unknown as D1Database);
+    const otherStream = "acme:Note:Two";
+    const otherEvent = { ...event, id: "evt2", stream: otherStream, documentName: "Two" };
+
+    await expect(
+      store.commitBatch(
+        [
+          { stream, expectedVersion: 0, events: [event] },
+          { stream: otherStream, expectedVersion: 0, events: [otherEvent] }
+        ],
+        ([first, second]) => ({
+          snapshot: snapshotFrom(first!),
+          auxiliarySnapshots: [snapshotFrom(second!)]
+        })
+      )
+    ).rejects.toThrow("projection failed");
+    await expect(store.readStream(stream)).resolves.toEqual([]);
+    await expect(store.readStream(otherStream)).resolves.toEqual([]);
     expect(db.documents.size).toBe(0);
   });
 

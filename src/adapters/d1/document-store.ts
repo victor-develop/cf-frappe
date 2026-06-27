@@ -6,7 +6,13 @@ import type {
   StreamName
 } from "../../core/types.js";
 import type { AuditDocumentEventQuery, AuditEventQuery, AuditEventStore } from "../../ports/audit-event-store.js";
-import type { DocumentCommit, DocumentStore, ReadStreamOptions } from "../../ports/document-store.js";
+import type {
+  DocumentCommit,
+  DocumentCommitBatchEntry,
+  DocumentCommitBatchProjection,
+  DocumentStore,
+  ReadStreamOptions
+} from "../../ports/document-store.js";
 import { auditDocumentEventQuery, auditEventQuery } from "./audit-event-query.js";
 import { isD1ConstraintError } from "./constraint-error.js";
 import { insertEventStatements, sequenceEvents } from "./event-writer.js";
@@ -22,46 +28,36 @@ export class D1DocumentStore implements DocumentStore, AuditEventStore {
     events: readonly NewDomainEvent[],
     project: (events: readonly DomainEvent[]) => DocumentSnapshot
   ): Promise<DocumentCommit> {
-    const current = await this.currentVersion(stream);
-    if (current !== expectedVersion) {
-      throw conflict(`Expected stream '${stream}' at version ${expectedVersion}, found ${current}`);
+    return this.commitBatch([{ stream, expectedVersion, events }], (saved) => ({ snapshot: project(saved) }));
+  }
+
+  async commitBatch(
+    entries: readonly DocumentCommitBatchEntry[],
+    project: (events: readonly DomainEvent[]) => DocumentCommitBatchProjection
+  ): Promise<DocumentCommit> {
+    for (const entry of entries) {
+      const current = await this.currentVersion(entry.stream);
+      if (current !== entry.expectedVersion) {
+        throw conflict(`Expected stream '${entry.stream}' at version ${entry.expectedVersion}, found ${current}`);
+      }
     }
 
-    const saved = sequenceEvents(expectedVersion, events);
-    const snapshot = project(saved);
+    const saved = entries.flatMap((entry) => sequenceEvents(entry.expectedVersion, entry.events));
+    const projection = project(saved);
     try {
       await this.db.batch([
         ...insertEventStatements(this.db, saved),
-        this.db
-          .prepare(
-            `INSERT INTO cf_frappe_documents
-             (tenant_id, doctype, name, version, docstatus, data_json, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(tenant_id, doctype, name)
-             DO UPDATE SET
-               version = excluded.version,
-               docstatus = excluded.docstatus,
-               data_json = excluded.data_json,
-               updated_at = excluded.updated_at`
-          )
-          .bind(
-            snapshot.tenantId,
-            snapshot.doctype,
-            snapshot.name,
-            snapshot.version,
-            snapshot.docstatus,
-            JSON.stringify(snapshot.data),
-            snapshot.createdAt,
-            snapshot.updatedAt
-          )
+        ...[projection.snapshot, ...(projection.auxiliarySnapshots ?? [])].map((snapshot) =>
+          documentUpsertStatement(this.db, snapshot)
+        )
       ]);
     } catch (error) {
       if (isD1ConstraintError(error)) {
-        throw conflict(`Stream '${stream}' changed while committing`);
+        throw conflict("One or more streams changed while committing");
       }
       throw error;
     }
-    return { events: saved, snapshot };
+    return { events: saved, snapshot: projection.snapshot };
   }
 
   async readStream(stream: StreamName, options: ReadStreamOptions = {}): Promise<readonly DomainEvent[]> {
@@ -99,4 +95,29 @@ export class D1DocumentStore implements DocumentStore, AuditEventStore {
       .all<EventRow>();
     return (result.results ?? []).map(eventFromRow);
   }
+}
+
+function documentUpsertStatement(db: D1Database, snapshot: DocumentSnapshot): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO cf_frappe_documents
+       (tenant_id, doctype, name, version, docstatus, data_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(tenant_id, doctype, name)
+       DO UPDATE SET
+         version = excluded.version,
+         docstatus = excluded.docstatus,
+         data_json = excluded.data_json,
+         updated_at = excluded.updated_at`
+    )
+    .bind(
+      snapshot.tenantId,
+      snapshot.doctype,
+      snapshot.name,
+      snapshot.version,
+      snapshot.docstatus,
+      JSON.stringify(snapshot.data),
+      snapshot.createdAt,
+      snapshot.updatedAt
+    );
 }

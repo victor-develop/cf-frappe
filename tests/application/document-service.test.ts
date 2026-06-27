@@ -589,7 +589,7 @@ describe("DocumentService", () => {
     ]);
   });
 
-  it("rolls back unique reservations acquired before a later unique field conflicts", async () => {
+  it("commits unique reservations atomically with documents when a later unique field conflicts", async () => {
     const Account = defineDocType({
       name: "Account",
       naming: { kind: "provided" },
@@ -648,9 +648,7 @@ describe("DocumentService", () => {
     });
     await expect(store.readStream(documentStream("acme", "Account", "failed"))).resolves.toHaveLength(0);
     await expect(store.readStream(uniqueValueStream("acme", "Account", "email", "s:new@example.com"))).resolves.toMatchObject([
-      { type: "UniqueValueStarted", payload: { kind: "DocumentCreated", data: { documentName: "failed", active: true } } },
-      { type: "UniqueValueReleased", payload: { kind: "DocumentUpdated", patch: { active: false } } },
-      { type: "UniqueValueReserved", payload: { kind: "DocumentUpdated", patch: { documentName: "retry", active: true } } }
+      { type: "UniqueValueStarted", payload: { kind: "DocumentCreated", data: { documentName: "retry", active: true } } }
     ]);
   });
 

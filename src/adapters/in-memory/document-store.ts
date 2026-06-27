@@ -10,7 +10,12 @@ import type {
   StreamName,
   TenantId
 } from "../../core/types.js";
-import type { DocumentCommit, DocumentStore } from "../../ports/document-store.js";
+import type {
+  DocumentCommit,
+  DocumentCommitBatchEntry,
+  DocumentCommitBatchProjection,
+  DocumentStore
+} from "../../ports/document-store.js";
 import type { ReadStreamOptions } from "../../ports/document-store.js";
 import type { AuditDocumentEventQuery, AuditEventQuery, AuditEventStore } from "../../ports/audit-event-store.js";
 import type { EventStore } from "../../ports/event-store.js";
@@ -28,10 +33,35 @@ export class InMemoryDocumentStore implements DocumentStore, EventStore, Project
     events: readonly NewDomainEvent[],
     project: (events: readonly DomainEvent[]) => DocumentSnapshot
   ): Promise<DocumentCommit> {
-    const saved = await this.append(stream, expectedVersion, events);
-    const snapshot = project(saved);
-    await this.save(snapshot);
-    return { events: saved, snapshot };
+    return this.commitBatch([{ stream, expectedVersion, events }], (saved) => ({ snapshot: project(saved) }));
+  }
+
+  async commitBatch(
+    entries: readonly DocumentCommitBatchEntry[],
+    project: (events: readonly DomainEvent[]) => DocumentCommitBatchProjection
+  ): Promise<DocumentCommit> {
+    for (const entry of entries) {
+      const current = this.streams.get(entry.stream) ?? [];
+      if (current.length !== entry.expectedVersion) {
+        throw conflict(`Expected stream '${entry.stream}' at version ${entry.expectedVersion}, found ${current.length}`);
+      }
+    }
+    const saved = entries.flatMap((entry) =>
+      entry.events.map((event, index) => ({
+        ...event,
+        sequence: entry.expectedVersion + index + 1
+      }))
+    );
+    const projection = project(saved);
+    for (const entry of entries) {
+      const current = this.streams.get(entry.stream) ?? [];
+      const savedForStream = saved.filter((event) => event.stream === entry.stream);
+      this.streams.set(entry.stream, [...current, ...savedForStream]);
+    }
+    for (const snapshot of [projection.snapshot, ...(projection.auxiliarySnapshots ?? [])]) {
+      await this.save(snapshot);
+    }
+    return { events: saved, snapshot: projection.snapshot };
   }
 
   async append(

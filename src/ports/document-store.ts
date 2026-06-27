@@ -11,6 +11,17 @@ export interface DocumentCommit {
   readonly snapshot: DocumentSnapshot;
 }
 
+export interface DocumentCommitBatchEntry {
+  readonly stream: StreamName;
+  readonly expectedVersion: number;
+  readonly events: readonly NewDomainEvent[];
+}
+
+export interface DocumentCommitBatchProjection {
+  readonly snapshot: DocumentSnapshot;
+  readonly auxiliarySnapshots?: readonly DocumentSnapshot[];
+}
+
 export interface DocumentStore {
   readStream(stream: StreamName, options?: ReadStreamOptions): Promise<readonly DomainEvent[]>;
   commit(
@@ -18,5 +29,9 @@ export interface DocumentStore {
     expectedVersion: number,
     events: readonly NewDomainEvent[],
     project: (events: readonly DomainEvent[]) => DocumentSnapshot
+  ): Promise<DocumentCommit>;
+  commitBatch(
+    entries: readonly DocumentCommitBatchEntry[],
+    project: (events: readonly DomainEvent[]) => DocumentCommitBatchProjection
   ): Promise<DocumentCommit>;
 }

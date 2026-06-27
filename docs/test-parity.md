@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document collaboration policy extraction slice:
+As of the multi-stream document commit slice:
 
 - Vitest files: `154`
-- Vitest cases: `1487`
+- Vitest cases: `1489`
 
 ## Implication
 
