@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document collaboration event payload module slice:
+As of the document command event payload module slice:
 
 - Vitest files: `156`
-- Vitest cases: `1516`
+- Vitest cases: `1517`
 
 ## Implication
 

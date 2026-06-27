@@ -28,6 +28,7 @@ import {
   normalizeValidDocumentShareGrant,
   normalizeValidDocumentShareUserId
 } from "./document-collaboration-policy.js";
+import type { DocumentCommandEventPayload } from "./document-command-events.js";
 import type { DocumentCollaborationEventPayload } from "./document-collaboration-events.js";
 import type { DocumentShareEventPayload } from "./document-share-events.js";
 import {
@@ -77,6 +78,7 @@ import {
   type FrameworkErrorCode
 } from "../core/errors.js";
 
+export type { DocumentCommandEventPayload } from "./document-command-events.js";
 export type { DocumentCollaborationEventPayload } from "./document-collaboration-events.js";
 export type { DocumentShareEventPayload } from "./document-share-events.js";
 
@@ -882,6 +884,13 @@ export class DocumentService implements DocumentCommandExecutor {
     }
 
     const patch: DocumentData = { [workflow.stateField ?? "workflow_state"]: transition.to };
+    const payload: DocumentCommandEventPayload = {
+      kind: "WorkflowTransitioned",
+      action: command.action,
+      from: currentState,
+      to: transition.to,
+      patch
+    };
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,
@@ -893,13 +902,7 @@ export class DocumentService implements DocumentCommandExecutor {
       documentName: command.name,
       actorId: command.actor.id,
       occurredAt: now,
-      payload: {
-        kind: "WorkflowTransitioned",
-        action: command.action,
-        from: currentState,
-        to: transition.to,
-        patch
-      },
+      payload,
       metadata: command.metadata ?? {}
     });
     const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
@@ -979,6 +982,12 @@ export class DocumentService implements DocumentCommandExecutor {
       throw validationFailed(issues);
     }
 
+    const payload: DocumentCommandEventPayload = {
+      kind: "DomainCommandApplied",
+      command: command.command,
+      input: sanitizedInput,
+      patch: patchWithReadOnlyValues
+    };
     const event = this.newEvent({
       tenantId,
       stream,
@@ -987,12 +996,7 @@ export class DocumentService implements DocumentCommandExecutor {
       documentName: command.name,
       actorId: command.actor.id,
       occurredAt: now,
-      payload: {
-        kind: "DomainCommandApplied",
-        command: command.command,
-        input: sanitizedInput,
-        patch: patchWithReadOnlyValues
-      },
+      payload,
       metadata: command.metadata ?? {}
     });
     const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {

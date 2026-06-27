@@ -332,19 +332,6 @@ export type CoreDocumentEventPayload =
     }
   | {
       readonly kind: "DocumentCancelled";
-    }
-  | {
-      readonly kind: "WorkflowTransitioned";
-      readonly action: string;
-      readonly from: string;
-      readonly to: string;
-      readonly patch: DocumentData;
-    }
-  | {
-      readonly kind: "DomainCommandApplied";
-      readonly command: string;
-      readonly input: DocumentData;
-      readonly patch: DocumentData;
     };
 
 export interface DomainEvent<TPayload extends DocumentEventPayload = DocumentEventPayload> {

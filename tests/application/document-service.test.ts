@@ -18,6 +18,7 @@ import {
 } from "../../src";
 import type {
   DocTypeDefinition,
+  DocumentCommandEventPayload,
   DocumentCollaborationEventPayload,
   DocumentEventPayload,
   DocumentShareEventPayload
@@ -2547,6 +2548,18 @@ describe("DocumentService", () => {
     });
   });
 
+  it("registers document command payloads through the domain event extension map", () => {
+    const payload = documentCommandPayload({
+      kind: "WorkflowTransitioned",
+      action: "close",
+      from: "Open",
+      to: "Closed",
+      patch: { workflow_state: "Closed" }
+    });
+
+    expect(payload.to).toBe("Closed");
+  });
+
   it("rejects illegal workflow transitions", async () => {
     const { documents } = createServices(["e1", "e2"]);
     await documents.create({ actor: owner, doctype: "Note", data: data() });
@@ -3068,5 +3081,11 @@ function documentSharePayload(
 function documentCollaborationPayload(
   payload: Extract<DocumentEventPayload, { readonly kind: "DocumentActivityRecorded" }>
 ): Extract<DocumentCollaborationEventPayload, { readonly kind: "DocumentActivityRecorded" }> {
+  return payload;
+}
+
+function documentCommandPayload(
+  payload: Extract<DocumentEventPayload, { readonly kind: "WorkflowTransitioned" }>
+): Extract<DocumentCommandEventPayload, { readonly kind: "WorkflowTransitioned" }> {
   return payload;
 }
