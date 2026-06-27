@@ -158,6 +158,7 @@ describe("cf-frappe CLI scaffold", () => {
     expect(taskApp).toContain('successUrl: "/web/Task%20Updates"');
     expect(taskApp).toContain("webPages: [AboutWebPage]");
     expect(taskApp).toContain("webViews: [TaskUpdatesWebView]");
+    expect(taskApp).toContain('filters: [{ field: "workflow_state", operator: "ne", value: "Done" }]');
     expect(taskApp).toContain('orderBy: "starts_on"');
     expect(taskApp).toContain('order: "desc"');
     expect(taskApp).toContain("websiteSettings: TaskWebsiteSettings");

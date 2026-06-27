@@ -28,6 +28,7 @@ interface WebViewResponse {
   readonly name?: string;
   readonly label?: string;
   readonly doctype?: string;
+  readonly filters?: readonly unknown[];
   readonly orderBy?: string;
   readonly order?: string;
   readonly fields?: readonly { readonly field?: string; readonly label?: string; readonly type?: string }[];
@@ -134,6 +135,7 @@ function formatWebViewMetadata(baseUrl: string, metadata: WebViewMetadataRespons
     `Route field: ${metadata.routeField?.field ?? "(unknown)"}`,
     `Title field: ${metadata.titleField?.field ?? "(unknown)"}`,
     `Order: ${webViewOrderLine(view)}`,
+    `Filters: ${String(Array.isArray(view.filters) ? view.filters.length : 0)}`,
     ...fields.map((field) => `  - ${field.field ?? "(unknown)"} ${field.type ?? "(unknown)"}${field.label === undefined ? "" : ` - ${field.label}`}`),
     ""
   ].join("\n");

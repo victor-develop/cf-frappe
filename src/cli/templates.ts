@@ -774,6 +774,7 @@ export const TaskUpdatesWebView = defineWebView({
   routeField: "route",
   titleField: "title",
   publishedField: "published",
+  filters: [{ field: "workflow_state", operator: "ne", value: "Done" }],
   fields: [
     { field: "priority", label: "Priority" },
     { field: "workflow_state", label: "State" },

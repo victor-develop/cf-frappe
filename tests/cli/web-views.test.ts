@@ -89,7 +89,7 @@ describe("cf-frappe CLI remote web views", () => {
       if (requestUrl.endsWith("/api/meta/web-views/Articles")) {
         return jsonResponse({
           data: {
-            view: { name: "Articles", label: "Articles", orderBy: "title", order: "asc" },
+            view: { name: "Articles", label: "Articles", filters: [{ field: "category", value: "News" }], orderBy: "title", order: "asc" },
             doctype: "Article",
             routeField: { field: "route" },
             titleField: { field: "title" },
@@ -145,6 +145,7 @@ describe("cf-frappe CLI remote web views", () => {
     })).toBe(0);
     expect(getStdout.text()).toContain("Route field: route");
     expect(getStdout.text()).toContain("Order: title asc");
+    expect(getStdout.text()).toContain("Filters: 1");
 
     const orderOnlyStdout = textBuffer();
     expect(await runCli(["web-views", "get", "--url", "https://app.example", "--web-view", "Recent"], {

@@ -18,6 +18,7 @@ const BlogPost = defineDocType({
     { name: "title", type: "text", required: true },
     { name: "route", type: "text" },
     { name: "published", type: "boolean", defaultValue: false },
+    { name: "audience", type: "select", options: ["Public", "Internal"] },
     { name: "summary", type: "longText" },
     { name: "internal_notes", type: "text" }
   ],
@@ -231,6 +232,58 @@ describe("WebViewService", () => {
     await expect(webViews.listItems(guest, "Blog", { limit: 2, offset: 2 })).resolves.toMatchObject({
       items: [{ route: "zulu", title: "Zulu" }],
       hasMore: false
+    });
+  });
+
+  it("applies metadata filters to Web View list and detail items", async () => {
+    const registry = createRegistry({
+      doctypes: [BlogPost],
+      webViews: [
+        defineWebView({
+          name: "Blog",
+          doctype: "Blog Post",
+          routeField: "route",
+          titleField: "title",
+          publishedField: "published",
+          filters: [{ field: "audience", value: "Public" }],
+          orderBy: "title",
+          order: "asc"
+        })
+      ]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+    const queries = new QueryService({ registry, projections: store });
+    const webViews = new WebViewService({ registry, queries });
+
+    await documents.create({
+      actor: owner,
+      doctype: "Blog Post",
+      data: { title: "Public Launch", route: "public-launch", published: true, audience: "Public" }
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Blog Post",
+      data: { title: "Internal Launch", route: "internal-launch", published: true, audience: "Internal" }
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Blog Post",
+      data: { title: "Public Draft", route: "public-draft", published: false, audience: "Public" }
+    });
+
+    await expect(webViews.listItems(guest, "Blog")).resolves.toMatchObject({
+      total: 1,
+      items: [{ route: "public-launch", title: "Public Launch" }]
+    });
+    await expect(webViews.getItem(guest, "Blog", "public-launch")).resolves.toMatchObject({
+      item: { route: "public-launch", title: "Public Launch" }
+    });
+    await expect(webViews.getItem(guest, "Blog", "internal-launch")).rejects.toMatchObject({
+      code: "DOCUMENT_NOT_FOUND"
+    });
+    await expect(webViews.getItem(guest, "Blog", "public-draft")).rejects.toMatchObject({
+      code: "DOCUMENT_NOT_FOUND"
     });
   });
 

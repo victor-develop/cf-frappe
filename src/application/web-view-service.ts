@@ -113,7 +113,7 @@ export class WebViewService {
       }
       const pageLimit = Math.min(Math.max(limit + 1, DEFAULT_WEB_VIEW_LIMIT), remainingScan);
       const result = await this.queries.listDocuments(actor, metadata.doctype, {
-        filters: publishedFilters(metadata),
+        filters: webViewFilters(metadata),
         ...webViewOrderOptions(metadata.view),
         limit: pageLimit,
         offset: rawOffset,
@@ -159,7 +159,7 @@ export class WebViewService {
       throw notFound(`Web view '${metadata.view.name}' route '${route}' was not found`);
     }
     const result = await this.queries.listDocuments(actor, metadata.doctype, {
-      filters: [...publishedFilters(metadata), { field: metadata.routeField.field, value: route }],
+      filters: [...webViewFilters(metadata), { field: metadata.routeField.field, value: route }],
       ...webViewOrderOptions(metadata.view),
       limit: 1,
       maxLimit: 1
@@ -214,6 +214,10 @@ function resolveField(fieldName: string, doctype: DocTypeDefinition, label?: str
 
 function publishedFilters(metadata: WebViewMetadata): readonly ListDocumentsFilter[] {
   return metadata.publishedField === undefined ? [] : [{ field: metadata.publishedField.field, value: true }];
+}
+
+function webViewFilters(metadata: WebViewMetadata): readonly ListDocumentsFilter[] {
+  return [...(metadata.view.filters ?? []), ...publishedFilters(metadata)];
 }
 
 function webViewOrderOptions(webView: WebViewDefinition): { readonly orderBy?: string; readonly order?: ListOrderDirection } {
