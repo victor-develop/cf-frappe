@@ -16,9 +16,12 @@ import {
   type NewDomainEvent,
   type TenantId
 } from "../core/types.js";
+import type { UserNotificationEventPayload } from "./user-notification-events.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
+
+export type { UserNotificationEventPayload } from "./user-notification-events.js";
 
 const DEFAULT_NOTIFICATION_LIMIT = 50;
 const MAX_NOTIFICATION_LIMIT = 200;
@@ -245,7 +248,7 @@ export class UserNotificationService {
   private async appendUserNotificationEvent(
     state: UserNotificationState,
     actor: Actor,
-    payload: Extract<NewDomainEvent["payload"], { readonly kind: "UserNotificationRead" | "UserNotificationDismissed" }>,
+    payload: Extract<UserNotificationEventPayload, { readonly kind: "UserNotificationRead" | "UserNotificationDismissed" }>,
     metadata: DocumentData | undefined
   ): Promise<DomainEvent> {
     const stream = userNotificationsStream(state.tenantId, state.userId);
@@ -389,7 +392,9 @@ function notificationIdentity(notification: DocumentUserNotificationPayload): st
   return `${notification.eventId}:${source}user:${encodeURIComponent(notification.recipientId)}`;
 }
 
-function notificationSubject(payload: Extract<DomainEvent["payload"], { readonly kind: "UserNotificationRecorded" }>): string {
+function notificationSubject(
+  payload: Extract<UserNotificationEventPayload, { readonly kind: "UserNotificationRecorded" }>
+): string {
   if (payload.subject !== undefined) {
     return payload.subject;
   }

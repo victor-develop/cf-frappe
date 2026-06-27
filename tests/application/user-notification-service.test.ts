@@ -7,10 +7,27 @@ import {
   userNotificationsStream
 } from "../../src";
 import { createServices, data, now, owner } from "../helpers";
-import type { DomainEvent, NewDomainEvent, StreamName } from "../../src";
+import type { DocumentEventPayload, DomainEvent, NewDomainEvent, StreamName, UserNotificationEventPayload } from "../../src";
 import type { EventStore } from "../../src/ports/event-store";
 
 describe("UserNotificationService", () => {
+  it("registers user notification payloads through the domain event extension map", () => {
+    const payload = userNotificationPayload({
+      kind: "UserNotificationRecorded",
+      notificationId: "evt_assign:user:support%40example.com",
+      sourceEventId: "evt_assign",
+      eventType: "NoteAssigned",
+      payloadKind: "DocumentAssigned",
+      recipientId: "support@example.com",
+      doctype: "Note",
+      documentName: "My Note",
+      actorId: "owner@example.com",
+      subject: "owner@example.com assigned you to Note My Note"
+    });
+
+    expect(payload.subject).toBe("owner@example.com assigned you to Note My Note");
+  });
+
   it("records redacted user notifications from committed document events", async () => {
     const events = new InMemoryEventStore();
     const notifications = new UserNotificationService({
@@ -161,6 +178,12 @@ function assignmentEvent(id: string, assigneeId: string): DomainEvent {
     payload: { kind: "DocumentAssigned", assigneeId },
     metadata: {}
   };
+}
+
+function userNotificationPayload(
+  payload: Extract<DocumentEventPayload, { readonly kind: "UserNotificationRecorded" }>
+): Extract<UserNotificationEventPayload, { readonly kind: "UserNotificationRecorded" }> {
+  return payload;
 }
 
 class RacingNotificationEventStore implements EventStore {

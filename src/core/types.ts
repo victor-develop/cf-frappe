@@ -481,27 +481,6 @@ export type CoreDocumentEventPayload =
       readonly settings: DocumentData;
     }
   | {
-      readonly kind: "UserNotificationRecorded";
-      readonly notificationId: string;
-      readonly sourceEventId: string;
-      readonly eventType: string;
-      readonly payloadKind: string;
-      readonly recipientId: string;
-      readonly doctype: DocTypeName;
-      readonly documentName: DocumentName;
-      readonly actorId: string;
-      readonly subject?: string;
-      readonly ruleName?: string;
-    }
-  | {
-      readonly kind: "UserNotificationRead";
-      readonly notificationId: string;
-    }
-  | {
-      readonly kind: "UserNotificationDismissed";
-      readonly notificationId: string;
-    }
-  | {
       readonly kind: "RoleCreated";
       readonly role: string;
       readonly enabled: boolean;
