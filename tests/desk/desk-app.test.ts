@@ -4155,6 +4155,7 @@ describe("Desk app", () => {
         description: "Visible after quality review.",
         type: "boolean",
         unique: "1",
+        noCopy: "1",
         inListView: "1",
         defaultValue: "false",
         expectedVersion: "0"
@@ -4173,6 +4174,7 @@ describe("Desk app", () => {
             description: "Visible after quality review.",
             type: "boolean",
             unique: true,
+            noCopy: true,
             defaultValue: false
           },
           enabled: true
@@ -4187,6 +4189,7 @@ describe("Desk app", () => {
     expect(currentHtml).toContain("Reviewed");
     expect(currentHtml).toContain("description: Visible after quality review.");
     expect(currentHtml).toContain("unique");
+    expect(currentHtml).toContain("no copy");
     expect(currentHtml).toContain("default: false");
     expect(currentHtml).toContain('action="/desk/admin/custom-fields/Note/reviewed/disable"');
     expect(currentHtml).toContain('name="expectedVersion" value="1"');
@@ -5102,6 +5105,7 @@ describe("Desk app", () => {
         fieldName: "priority",
         label: "Urgency",
         description: "Pick the operational urgency.",
+        noCopy: "true",
         inListFilter: "true",
         options: "Low, High",
         defaultValue: JSON.stringify("High"),
@@ -5119,6 +5123,7 @@ describe("Desk app", () => {
           overrides: {
             label: "Urgency",
             description: "Pick the operational urgency.",
+            noCopy: true,
             inListFilter: true,
             options: ["Low", "High"]
           }
@@ -5131,6 +5136,7 @@ describe("Desk app", () => {
     const currentHtml = await current.text();
     expect(currentHtml).toContain("Urgency");
     expect(currentHtml).toContain("description: Pick the operational urgency.");
+    expect(currentHtml).toContain("no copy: true");
     expect(currentHtml).toContain("options: Low, High");
     expect(currentHtml).toContain('formaction="/desk/admin/field-properties/Note/priority/clear"');
     expect(currentHtml).toContain('name="expectedVersion" value="1"');

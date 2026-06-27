@@ -2392,6 +2392,61 @@ describe("DocumentService", () => {
     ]);
   });
 
+  it("skips no-copy fields when duplicating unless the command provides a replacement value", async () => {
+    const SecretNote = defineDocType({
+      name: "Secret Note",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "body", type: "longText" },
+        { name: "token", type: "text", noCopy: true }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read", "create"] }]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry: createRegistry({ doctypes: [SecretNote] }),
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["secret-1", "copy-1", "copy-2"])
+    });
+
+    await documents.create({
+      actor: owner,
+      doctype: "Secret Note",
+      data: { title: "Original", body: "Body", token: "source-token" }
+    });
+
+    await expect(
+      documents.duplicate({
+        actor: owner,
+        doctype: "Secret Note",
+        name: "Original",
+        data: { title: "Copy" },
+        expectedVersion: 1
+      })
+    ).resolves.toMatchObject({
+      name: "Copy",
+      data: { title: "Copy", body: "Body" }
+    });
+    await expect(store.readStream(documentStream("acme", "Secret Note", "Copy"))).resolves.toMatchObject([
+      { payload: { kind: "DocumentCreated", data: { title: "Copy", body: "Body" } } }
+    ]);
+
+    await expect(
+      documents.duplicate({
+        actor: owner,
+        doctype: "Secret Note",
+        name: "Original",
+        data: { title: "Copy With Token", token: "new-token" },
+        expectedVersion: 1
+      })
+    ).resolves.toMatchObject({
+      name: "Copy With Token",
+      data: { title: "Copy With Token", body: "Body", token: "new-token" }
+    });
+  });
+
   it("amends cancelled documents through the create event path with amendment provenance", async () => {
     const { documents, events, projections } = createServices(["e1", "e2", "e3", "e4"]);
     await documents.create({ actor: owner, doctype: "Note", data: data({ body: "Original" }) });

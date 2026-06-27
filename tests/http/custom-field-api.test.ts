@@ -37,6 +37,7 @@ describe("custom field api", () => {
           description: "Show review status on task forms.",
           type: "boolean",
           unique: true,
+          noCopy: true,
           inListView: true,
           defaultValue: false
         },
@@ -55,6 +56,7 @@ describe("custom field api", () => {
               description: "Show review status on task forms.",
               type: "boolean",
               unique: true,
+              noCopy: true,
               inListView: true,
               defaultValue: false
             },

@@ -141,6 +141,7 @@ describe("cf-frappe CLI remote doctypes", () => {
                 type: "text",
                 required: true,
                 unique: true,
+                noCopy: true,
                 inListView: true,
                 inGlobalSearch: true
               },
@@ -164,7 +165,7 @@ describe("cf-frappe CLI remote doctypes", () => {
     expect(stdout.text()).toContain("- Task Type fields=3 v4 - Task Type");
     expect(stdout.text()).toContain("Module: Tasks");
     expect(stdout.text()).toContain("Description: Task metadata");
-    expect(stdout.text()).toContain('- title text [required,unique,list,search] - Title help "Human-readable task title."');
+    expect(stdout.text()).toContain('- title text [required,unique,noCopy,list,search] - Title help "Human-readable task title."');
     expect(stdout.text()).toContain("- project link -> Project [filter]");
     expect(stdout.text()).toContain("- items table -> Task Item [hidden]");
     expect(stdout.text()).toContain("Permissions: 1");

@@ -36,6 +36,7 @@ describe("field property api", () => {
         overrides: {
           label: "Urgency",
           description: "Pick the operational urgency.",
+          noCopy: true,
           options: ["Low", "High"],
           defaultValue: "High",
           inListFilter: true
@@ -49,7 +50,12 @@ describe("field property api", () => {
         fields: [
           {
             fieldName: "priority",
-            overrides: { label: "Urgency", description: "Pick the operational urgency.", options: ["Low", "High"] }
+            overrides: {
+              label: "Urgency",
+              description: "Pick the operational urgency.",
+              noCopy: true,
+              options: ["Low", "High"]
+            }
           }
         ]
       }
@@ -64,6 +70,7 @@ describe("field property api", () => {
             name: "priority",
             label: "Urgency",
             description: "Pick the operational urgency.",
+            noCopy: true,
             options: ["Low", "High"]
           })
         ])

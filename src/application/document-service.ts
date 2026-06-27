@@ -723,7 +723,7 @@ export class DocumentService implements DocumentCommandExecutor {
     const data = copyDocumentData(
       doctype,
       {
-        ...existing.data,
+        ...copyDocumentData(doctype, existing.data, relatedDocType, { skipNoCopy: true }),
         ...compactData(command.data ?? {})
       },
       relatedDocType
@@ -2566,10 +2566,15 @@ function stripInternalTableFields(
 function copyDocumentData(
   doctype: DocTypeDefinition,
   data: DocumentData,
-  relatedDocType: (doctype: string) => DocTypeDefinition | undefined
+  relatedDocType: (doctype: string) => DocTypeDefinition | undefined,
+  options: { readonly skipNoCopy?: boolean } = {}
 ): DocumentData {
   const entries = Object.entries(data)
-    .filter(([fieldName]) => !doctype.fields.some((field) => field.name === fieldName && field.readOnly))
+    .filter(([fieldName]) =>
+      !doctype.fields.some((field) =>
+        field.name === fieldName && (field.readOnly || (options.skipNoCopy === true && field.noCopy === true))
+      )
+    )
     .map(([fieldName, value]) => {
       const field = doctype.fields.find((item) => item.name === fieldName);
       if (field?.type !== "table" || !field.tableOf || !Array.isArray(value)) {
@@ -2581,7 +2586,9 @@ function copyDocumentData(
       }
       return [
         fieldName,
-        value.map((row) => isMutableData(row) ? copyDocumentData(child, compactData(row), relatedDocType) : row)
+        value.map((row) =>
+          isMutableData(row) ? copyDocumentData(child, compactData(row), relatedDocType, options) : row
+        )
       ] as const;
     });
   return Object.fromEntries(entries) as DocumentData;

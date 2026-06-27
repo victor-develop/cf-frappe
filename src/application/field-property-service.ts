@@ -220,6 +220,7 @@ function normalizeOverrides(field: FieldDefinition, overrides: FieldPropertyOver
     ...optionalBoolean(overrides.required, "required", "required"),
     ...optionalBoolean(overrides.readOnly, "readOnly", "readOnly"),
     ...optionalBoolean(overrides.hidden, "hidden", "hidden"),
+    ...optionalBoolean(overrides.noCopy, "noCopy", "noCopy"),
     ...optionalBoolean(overrides.inFormView, "inFormView", "inFormView"),
     ...optionalBoolean(overrides.inGlobalSearch, "inGlobalSearch", "inGlobalSearch"),
     ...optionalBoolean(overrides.inListView, "inListView", "inListView"),
