@@ -11,6 +11,7 @@ import {
   type PersistedFieldDefinition,
   type TenantId
 } from "../core/types.js";
+import type { CustomFieldEventPayload } from "./custom-field-events.js";
 import {
   applyCustomFieldsToDocType,
   assertCustomFieldCanExtend,
@@ -21,6 +22,8 @@ import type { ModelRegistry } from "../core/registry.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
+
+export type { CustomFieldEventPayload } from "./custom-field-events.js";
 
 export interface CustomFieldServiceOptions {
   readonly registry: ModelRegistry;
@@ -322,8 +325,8 @@ export class CustomFieldService {
     readonly documentName: string;
     readonly actor: Actor;
     readonly metadata?: DocumentData;
-    readonly payload: NewDomainEvent["payload"];
-  }): NewDomainEvent {
+    readonly payload: CustomFieldEventPayload;
+  }): NewDomainEvent<CustomFieldEventPayload> {
     return {
       id: this.ids.next("evt_"),
       tenantId: options.tenantId,

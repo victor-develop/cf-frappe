@@ -393,16 +393,6 @@ export type CoreDocumentEventPayload =
       readonly applicableDoctypes?: readonly DocTypeName[];
     }
   | {
-      readonly kind: "CustomFieldSaved";
-      readonly doctypeName: DocTypeName;
-      readonly field: PersistedFieldDefinition;
-    }
-  | {
-      readonly kind: "CustomFieldDisabled";
-      readonly doctypeName: DocTypeName;
-      readonly fieldName: string;
-    }
-  | {
       readonly kind: "FieldPropertyOverrideSaved";
       readonly doctypeName: DocTypeName;
       readonly fieldName: string;

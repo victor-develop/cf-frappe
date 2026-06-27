@@ -11,6 +11,7 @@ import {
   InMemoryEventStore,
   SYSTEM_MANAGER_ROLE
 } from "../../src";
+import type { CustomFieldEventPayload, DocumentEventPayload } from "../../src";
 import { owner, now } from "../helpers";
 
 const admin = {
@@ -20,6 +21,16 @@ const admin = {
 };
 
 describe("CustomFieldService", () => {
+  it("registers custom field payloads through the domain event extension map", () => {
+    const payload = customFieldPayload({
+      kind: "CustomFieldSaved",
+      doctypeName: "Note",
+      field: { name: "priority", type: "select", options: ["Low", "High"] }
+    });
+
+    expect(payload.field.name).toBe("priority");
+  });
+
   const Note = defineDocType({
     name: "Note",
     fields: [{ name: "title", type: "text", required: true }]
@@ -763,3 +774,9 @@ describe("CustomFieldService", () => {
     });
   });
 });
+
+function customFieldPayload(
+  payload: Extract<DocumentEventPayload, { readonly kind: "CustomFieldSaved" }>
+): Extract<CustomFieldEventPayload, { readonly kind: "CustomFieldSaved" }> {
+  return payload;
+}
