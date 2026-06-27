@@ -139,6 +139,8 @@ interface DeskClientRuntime {
     readonly calendars: () => Promise<unknown>;
     readonly webForm: (webForm: string) => Promise<unknown>;
     readonly webForms: () => Promise<unknown>;
+    readonly webView: (webView: string) => Promise<unknown>;
+    readonly webViews: () => Promise<unknown>;
     readonly webPage: (webPage: string) => Promise<unknown>;
     readonly webPages: () => Promise<unknown>;
     readonly websiteSettings: () => Promise<unknown>;
@@ -306,6 +308,14 @@ interface DeskClientRuntime {
     readonly submit: (webForm: string, data?: Record<string, unknown>) => Promise<unknown>;
     readonly url: (webForm: string) => string;
   };
+  readonly webView: {
+    readonly get: (webView: string) => Promise<unknown>;
+    readonly item: (webView: string, route: string) => Promise<unknown>;
+    readonly itemUrl: (webView: string, route: string) => string;
+    readonly items: (webView: string, options?: { readonly limit?: number }) => Promise<unknown>;
+    readonly list: () => Promise<unknown>;
+    readonly url: (webView: string) => string;
+  };
   readonly webPage: {
     readonly get: (webPage: string) => Promise<unknown>;
     readonly list: () => Promise<unknown>;
@@ -441,6 +451,8 @@ interface DeskClientRuntime {
     readonly kanbanUrl: (kanban: string) => string;
     readonly calendarUrl: (calendar: string, options?: Record<string, unknown>) => string;
     readonly webFormUrl: (webForm: string) => string;
+    readonly webViewItemUrl: (webView: string, route: string) => string;
+    readonly webViewUrl: (webView: string) => string;
     readonly webPageUrl: (route: string) => string;
     readonly csvUrl: (doctype: string, options?: Record<string, unknown>) => string;
     readonly fileContentUrl: (name: string) => string;
@@ -850,7 +862,7 @@ describe("Desk client runtime", () => {
     expect(runtime.desk.formUrl("Task Type", "TASK/1")).toBe("/desk/Task%20Type/TASK%2F1");
   });
 
-  it("builds Desk workspace, dashboard, kanban, calendar, web form, web page, and report navigation URLs for client scripts", async () => {
+  it("builds Desk workspace, dashboard, kanban, calendar, web form, web view, web page, and report navigation URLs for client scripts", async () => {
     const runtime = evaluateDeskClient();
 
     expect(runtime.desk.workspaceUrl("Team Operations")).toBe("/desk/workspaces/Team%20Operations");
@@ -859,6 +871,8 @@ describe("Desk client runtime", () => {
     expect(runtime.desk.calendarUrl("Operations/Board", { from: "2026-01-01", to: "2026-01-31" }))
       .toBe("/desk/calendars/Operations%2FBoard?from=2026-01-01&to=2026-01-31");
     expect(runtime.desk.webFormUrl("Lead/Intake")).toBe("/web-forms/Lead%2FIntake");
+    expect(runtime.desk.webViewUrl("Articles/View")).toBe("/web/Articles%2FView");
+    expect(runtime.desk.webViewItemUrl("Articles/View", "launch/post")).toBe("/web/Articles%2FView/launch%2Fpost");
     expect(runtime.desk.webPageUrl("about/company profile")).toBe("/page/about/company%20profile");
     expect(
       runtime.desk.reportUrl("Open Notes", {
@@ -1609,6 +1623,37 @@ describe("Desk client runtime", () => {
     expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin"]);
   });
 
+  it("wraps metadata web view APIs", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { route: String(url) } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.webView.list()).resolves.toEqual({ route: "/api/meta/web-views" });
+    await expect(runtime.webView.get("Articles/View")).resolves.toEqual({
+      route: "/api/meta/web-views/Articles%2FView"
+    });
+    await expect(runtime.webView.items("Articles/View", { limit: 5 })).resolves.toEqual({
+      route: "/api/web-view/Articles%2FView?limit=5"
+    });
+    await expect(runtime.webView.item("Articles/View", "launch/post")).resolves.toEqual({
+      route: "/api/web-view/Articles%2FView/launch%2Fpost"
+    });
+    expect(runtime.webView.url("Articles/View")).toBe("/web/Articles%2FView");
+    expect(runtime.webView.itemUrl("Articles/View", "launch/post")).toBe("/web/Articles%2FView/launch%2Fpost");
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/meta/web-views",
+      "GET /api/meta/web-views/Articles%2FView",
+      "GET /api/web-view/Articles%2FView?limit=5",
+      "GET /api/web-view/Articles%2FView/launch%2Fpost"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin", "same-origin"]);
+  });
+
   it("wraps metadata web page APIs", async () => {
     const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
     const runtime = evaluateDeskClient(async (url, init) => {
@@ -1734,6 +1779,27 @@ describe("Desk client runtime", () => {
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
       "GET /api/meta/web-forms",
       "GET /api/meta/web-forms/Lead%20Intake"
+    ]);
+    expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin"]);
+  });
+
+  it("exposes web view metadata through the meta namespace", async () => {
+    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const runtime = evaluateDeskClient(async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ data: { route: String(url) } }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    await expect(runtime.meta.webViews()).resolves.toEqual({ route: "/api/meta/web-views" });
+    await expect(runtime.meta.webView("Articles/View")).resolves.toEqual({
+      route: "/api/meta/web-views/Articles%2FView"
+    });
+
+    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+      "GET /api/meta/web-views",
+      "GET /api/meta/web-views/Articles%2FView"
     ]);
     expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin"]);
   });

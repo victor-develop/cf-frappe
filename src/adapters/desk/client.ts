@@ -199,6 +199,14 @@ export function renderDeskClientScript(): string {
     return "/web-forms/" + encodePart(webForm);
   }
 
+  function webViewPagePath(webView) {
+    return "/web/" + encodePart(webView);
+  }
+
+  function webViewItemPagePath(webView, route) {
+    return webViewPagePath(webView) + "/" + encodePart(route);
+  }
+
   function webPagePath(route) {
     return "/page/" + encodePath(route);
   }
@@ -377,6 +385,15 @@ export function renderDeskClientScript(): string {
 
   function webFormMetaPath(webForm) {
     return "/api/meta/web-forms" + (webForm === undefined ? "" : "/" + encodePart(webForm));
+  }
+
+  function webViewMetaPath(webView) {
+    return "/api/meta/web-views" + (webView === undefined ? "" : "/" + encodePart(webView));
+  }
+
+  function webViewPath(webView, route, options) {
+    var path = "/api/web-view/" + encodePart(webView) + (route === undefined ? "" : "/" + encodePart(route));
+    return withQuery(path, webViewParams(options || {}));
   }
 
   function webPageMetaPath(webPage) {
@@ -988,6 +1005,12 @@ export function renderDeskClientScript(): string {
     var params = {};
     setParam(params, "from", options && options.from);
     setParam(params, "to", options && options.to);
+    setParam(params, "limit", options && options.limit);
+    return params;
+  }
+
+  function webViewParams(options) {
+    var params = {};
     setParam(params, "limit", options && options.limit);
     return params;
   }
@@ -3578,6 +3601,22 @@ export function renderDeskClientScript(): string {
       },
       url: webFormPagePath
     }),
+    webView: Object.freeze({
+      get: function (webView) {
+        return request(webViewMetaPath(webView)).then(unwrapData);
+      },
+      item: function (webView, route) {
+        return request(webViewPath(webView, route)).then(unwrapData);
+      },
+      itemUrl: webViewItemPagePath,
+      items: function (webView, options) {
+        return request(webViewPath(webView, undefined, options || {})).then(unwrapData);
+      },
+      list: function () {
+        return request(webViewMetaPath()).then(unwrapData);
+      },
+      url: webViewPagePath
+    }),
     webPage: Object.freeze({
       get: function (webPage) {
         return request(webPageMetaPath(webPage)).then(unwrapData);
@@ -3744,6 +3783,12 @@ export function renderDeskClientScript(): string {
       },
       webForms: function () {
         return request(webFormMetaPath()).then(unwrapData);
+      },
+      webView: function (webView) {
+        return request(webViewMetaPath(webView)).then(unwrapData);
+      },
+      webViews: function () {
+        return request(webViewMetaPath()).then(unwrapData);
       },
       webPage: function (webPage) {
         return request(webPageMetaPath(webPage)).then(unwrapData);
@@ -4062,6 +4107,8 @@ export function renderDeskClientScript(): string {
       kanbanUrl: deskKanbanPath,
       calendarUrl: deskCalendarPath,
       webFormUrl: webFormPagePath,
+      webViewItemUrl: webViewItemPagePath,
+      webViewUrl: webViewPagePath,
       webPageUrl: webPagePath,
       fileContentUrl: function (name) {
         return deskFilePath(name, "content");
