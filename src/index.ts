@@ -23,6 +23,7 @@ export * from "./application/document-lifecycle-events.js";
 export * from "./application/document-share-events.js";
 export * from "./application/document-service.js";
 export * from "./application/document-naming.js";
+export * from "./application/document-query-policy.js";
 export * from "./application/document-reference-policy.js";
 export * from "./application/document-tenant-policy.js";
 export * from "./application/document-unique-values.js";

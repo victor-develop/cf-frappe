@@ -75,3 +75,4 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Extracted tenant resolution and bulk single-command shaping from `DocumentService` into pure application policy helpers with focused unit coverage.
 - Extracted recursive link validation and nested child-table issue path shaping from `DocumentService` into the document reference policy while keeping target reads and permission checks injected by the service.
 - Extracted document action, visible-document, and linked-target access composition into a shared application access policy reused by document commands and document queries while services retain only share/grant retrieval.
+- Extracted document query presentation shaping for CSV values, link labels, link searches, and global-search results from `QueryService` into a pure application policy with focused unit coverage.
