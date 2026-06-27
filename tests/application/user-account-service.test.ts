@@ -8,7 +8,9 @@ import {
   deterministicIds,
   fixedClock,
   userAccountsStream,
-  type PasswordHasher
+  type DocumentEventPayload,
+  type PasswordHasher,
+  type UserAccountEventPayload
 } from "../../src";
 import { owner } from "../helpers";
 
@@ -19,6 +21,20 @@ const admin = {
 };
 
 describe("UserAccountService", () => {
+  it("registers user account payloads through the domain event extension map", () => {
+    const payload = userAccountPayload({
+      kind: "UserAuthProviderSynced",
+      userId: owner.id,
+      provider: "oidc",
+      subject: "00u_owner",
+      email: "owner@example.com",
+      roles: ["User"],
+      enabled: true
+    });
+
+    expect(payload.provider).toBe("oidc");
+  });
+
   it("creates event-sourced user accounts and authenticates folded actors", async () => {
     const events = new InMemoryEventStore();
     const userAccounts = new UserAccountService({
@@ -803,6 +819,12 @@ describe("UserAccountService", () => {
     ]);
   });
 });
+
+function userAccountPayload(
+  payload: Extract<DocumentEventPayload, { readonly kind: "UserAuthProviderSynced" }>
+): Extract<UserAccountEventPayload, { readonly kind: "UserAuthProviderSynced" }> {
+  return payload;
+}
 
 function deterministicPasswords(): PasswordHasher {
   return {

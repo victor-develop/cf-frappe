@@ -9,6 +9,7 @@ import {
   type NewDomainEvent,
   type TenantId
 } from "../core/types.js";
+import type { UserAccountEventPayload } from "./user-account-events.js";
 import {
   foldUserAccount,
   normalizeUserRoles,
@@ -26,6 +27,8 @@ import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
 import type { PasswordHasher } from "../ports/password-hasher.js";
 import type { UserRoleValidator } from "./user-role-validator.js";
+
+export type { UserAccountEventPayload } from "./user-account-events.js";
 
 const MIN_PASSWORD_LENGTH = 8;
 const DEFAULT_PASSWORD_RESET_EXPIRY_SECONDS = 3_600;
@@ -313,7 +316,7 @@ export class UserAccountService {
         roles: createdRoles,
         enabled,
         ...(typeof verifiedPatch === "string" ? { emailVerifiedAt: verifiedPatch } : {})
-      } satisfies NewDomainEvent["payload"];
+      } satisfies UserAccountEventPayload;
       const linkedPayload = {
         kind: "UserAuthProviderLinked",
         userId,
@@ -323,7 +326,7 @@ export class UserAccountService {
         roles: createdRoles,
         enabled,
         ...(verifiedPatch === undefined ? {} : { emailVerifiedAt: verifiedPatch })
-      } satisfies NewDomainEvent["payload"];
+      } satisfies UserAccountEventPayload;
       const saved = await this.appendEvents({
         tenantId,
         stream: userAccountsStream(tenantId, userId),
@@ -352,7 +355,7 @@ export class UserAccountService {
       ...(roles === undefined ? {} : { roles }),
       ...(command.enabled === undefined ? {} : { enabled: command.enabled }),
       ...(verifiedPatch === undefined ? {} : { emailVerifiedAt: verifiedPatch })
-    } satisfies NewDomainEvent["payload"];
+    } satisfies UserAccountEventPayload;
     if (link !== undefined && !providerSyncChangesState(state, link, payload)) {
       return publicUserAccount(state);
     }
@@ -612,7 +615,7 @@ export class UserAccountService {
     );
   }
 
-  private async appendEvent<TPayload extends NewDomainEvent["payload"]>(options: {
+  private async appendEvent<TPayload extends UserAccountEventPayload>(options: {
     readonly tenantId: TenantId;
     readonly stream: string;
     readonly expectedVersion: number;
@@ -642,14 +645,14 @@ export class UserAccountService {
     readonly metadata: DocumentData | undefined;
     readonly events: readonly {
       readonly type: string;
-      readonly payload: NewDomainEvent["payload"];
+      readonly payload: UserAccountEventPayload;
     }[];
   }) {
     const occurredAt = this.clock.now();
     return this.events.append(
       options.stream,
       options.expectedVersion,
-      options.events.map<NewDomainEvent>((item) => ({
+      options.events.map<NewDomainEvent<UserAccountEventPayload>>((item) => ({
         id: this.ids.next("evt_"),
         tenantId: options.tenantId,
         stream: options.stream,
@@ -664,7 +667,7 @@ export class UserAccountService {
     );
   }
 
-  private async markRecoveryDeliveryFailed<TPayload extends NewDomainEvent["payload"]>(options: {
+  private async markRecoveryDeliveryFailed<TPayload extends UserAccountEventPayload>(options: {
     readonly tenantId: TenantId;
     readonly userId: string;
     readonly expectedVersion: number;
@@ -850,7 +853,7 @@ function providerLink(
 function providerSyncChangesState(
   state: UserAccountState,
   link: UserAuthProviderLink,
-  payload: Extract<NewDomainEvent["payload"], { readonly kind: "UserAuthProviderSynced" | "UserAuthProviderLinked" }>
+  payload: Extract<UserAccountEventPayload, { readonly kind: "UserAuthProviderSynced" | "UserAuthProviderLinked" }>
 ): boolean {
   if (payload.email !== undefined && (state.email !== payload.email || link.email !== payload.email)) {
     return true;

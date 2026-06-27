@@ -53,3 +53,4 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Moved role catalog event payloads into their own bounded application event module and narrowed `RoleService` append/fold orchestration to that payload type, adding a sixth extension-map contract test.
 - Moved print settings event payloads into their own bounded application event module and typed `PrintSettingsService` event creation to that payload, adding a seventh extension-map contract test.
 - Moved user profile event payloads into their own bounded application event module and typed `UserProfileService` event creation to that payload, adding an eighth extension-map contract test.
+- Moved user account, auth-provider, password-recovery, email-verification, role-change, and account-enabled event payloads into their own bounded application event module and narrowed `UserAccountService` append helpers to that payload union, adding a ninth extension-map contract test.
