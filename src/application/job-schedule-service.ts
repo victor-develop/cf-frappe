@@ -10,6 +10,7 @@ import {
   type NewDomainEvent,
   type TenantId
 } from "../core/types.js";
+import type { JobScheduleEventPayload } from "./job-schedule-events.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
@@ -18,6 +19,8 @@ import {
   MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH,
   type JobMessage
 } from "../ports/job-queue.js";
+
+export type { JobScheduleEventPayload } from "./job-schedule-events.js";
 
 export type DynamicJobScheduleValue = (...args: never[]) => unknown;
 
@@ -283,7 +286,7 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       throw badRequest(`Scheduled job '${schedule.jobName}' is not registered`);
     }
     const stream = jobScheduleDefinitionsStream();
-    const event: NewDomainEvent = {
+    const event: NewDomainEvent<JobScheduleEventPayload> = {
       id: this.ids.next("evt_"),
       tenantId,
       stream,
@@ -330,7 +333,7 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       throw notFound(`Job schedule '${scheduleId}' was not found`, "JOB_SCHEDULE_NOT_FOUND");
     }
     const stream = jobScheduleDefinitionsStream();
-    const event: NewDomainEvent = {
+    const event: NewDomainEvent<JobScheduleEventPayload> = {
       id: this.ids.next("evt_"),
       tenantId,
       stream,
@@ -389,7 +392,7 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       return { schedule: this.summaryFor(schedule, index, state) };
     }
     const stream = jobScheduleOverridesStream(tenantId);
-    const event: NewDomainEvent = {
+    const event: NewDomainEvent<JobScheduleEventPayload> = {
       id: this.ids.next("evt_"),
       tenantId,
       stream,
@@ -426,7 +429,7 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       return { schedule: this.summaryFor(schedule, index, state) };
     }
     const stream = jobScheduleOverridesStream(tenantId);
-    const event: NewDomainEvent = {
+    const event: NewDomainEvent<JobScheduleEventPayload> = {
       id: this.ids.next("evt_"),
       tenantId,
       stream,
@@ -491,7 +494,7 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       return { schedule: this.summaryFor(schedule, index, state) };
     }
     const stream = jobScheduleOverridesStream(tenantId);
-    const event: NewDomainEvent = {
+    const event: NewDomainEvent<JobScheduleEventPayload> = {
       id: this.ids.next("evt_"),
       tenantId,
       stream,

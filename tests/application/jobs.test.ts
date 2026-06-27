@@ -19,7 +19,7 @@ import {
   retryableJobError,
   SYSTEM_MANAGER_ROLE
 } from "../../src";
-import type { DocumentData, JobMessage } from "../../src";
+import type { DocumentData, DocumentEventPayload, JobMessage, JobScheduleEventPayload } from "../../src";
 import { now } from "../helpers";
 
 describe("JobDispatcher", () => {
@@ -331,6 +331,20 @@ describe("JobRetryService", () => {
 });
 
 describe("JobScheduleService", () => {
+  it("registers job schedule payloads through the domain event extension map", () => {
+    const payload = jobSchedulePayload({
+      kind: "JobScheduleSaved",
+      scheduleId: "runtime-daily",
+      cron: "15 4 * * *",
+      jobName: "reports.daily",
+      tenantId: "acme",
+      enabled: true,
+      payload: { scope: "daily" }
+    });
+
+    expect(payload.payload?.scope).toBe("daily");
+  });
+
   it("lists tenant-visible schedules with job metadata and dynamic flags", async () => {
     const registry = createJobRegistry({
       jobs: [
@@ -1047,6 +1061,12 @@ describe("JobScheduleService", () => {
     expect(runner).not.toHaveBeenCalled();
   });
 });
+
+function jobSchedulePayload(
+  payload: Extract<DocumentEventPayload, { readonly kind: "JobScheduleSaved" }>
+): Extract<JobScheduleEventPayload, { readonly kind: "JobScheduleSaved" }> {
+  return payload;
+}
 
 describe("job retry classification", () => {
   it("uses exponential backoff for retryable failures", () => {
