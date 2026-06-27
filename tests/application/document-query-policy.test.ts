@@ -2,12 +2,20 @@ import { describe, expect, it } from "vitest";
 
 import {
   compareSearchResults,
+  clampCsvExportLimit,
+  clampLimit,
+  clampSearchLimit,
   defineDocType,
   documentCsvColumns,
+  getField,
+  getLinkField,
   globalSearchCandidates,
   globalSearchMatch,
   labelForLinkedDocument,
   matchesLinkSearch,
+  mergeDefaultFilters,
+  normalizeRequiredSearch,
+  normalizeSearch,
   primitiveCsvValue,
   searchableText,
   toGlobalSearchResult,
@@ -104,6 +112,52 @@ describe("document query policy", () => {
     });
     expect(([older, sameTimeLaterLabel, newer] satisfies GlobalSearchResultItem[]).sort(compareSearchResults))
       .toEqual([newer, older, sameTimeLaterLabel]);
+  });
+
+  it("normalizes query limits for list, CSV, and global search surfaces", () => {
+    expect(clampLimit(undefined)).toBe(50);
+    expect(clampLimit(500, 200)).toBe(200);
+    expect(() => clampLimit(0)).toThrow("limit must be a positive integer");
+
+    expect(clampCsvExportLimit(undefined)).toBe(10_000);
+    expect(clampCsvExportLimit(20_000)).toBe(10_000);
+    expect(() => clampCsvExportLimit(1.5)).toThrow("CSV export limit must be a positive integer");
+
+    expect(clampSearchLimit(undefined)).toBe(20);
+    expect(clampSearchLimit(120)).toBe(100);
+    expect(() => clampSearchLimit(-1)).toThrow("Search limit must be a positive integer");
+  });
+
+  it("looks up fields and rejects non-link fields for link option queries", () => {
+    expect(getField(Article, "summary")).toMatchObject({ name: "summary" });
+    expect(() => getField(Article, "missing")).toThrow("Field 'missing' is not defined on Article");
+    expect(() => getLinkField(Article, "summary")).toThrow("Field 'summary' on Article is not a link field");
+
+    const Task = defineDocType({
+      name: "Task",
+      fields: [{ name: "article", type: "link", linkTo: "Article" }]
+    });
+    expect(getLinkField(Task, "article")).toMatchObject({ name: "article", linkTo: "Article" });
+  });
+
+  it("normalizes search strings and requires non-empty global search terms", () => {
+    expect(normalizeSearch(undefined)).toBeUndefined();
+    expect(normalizeSearch("  Saturn ")).toBe("saturn");
+    expect(normalizeSearch("   ")).toBeUndefined();
+    expect(normalizeRequiredSearch(" Apollo ")).toBe("apollo");
+    expect(() => normalizeRequiredSearch(" ")).toThrow("Search query is required");
+  });
+
+  it("merges default and override list filters through the shared list-filter policy", () => {
+    expect(
+      mergeDefaultFilters(
+        [{ field: "status", operator: "eq", value: "Open" }],
+        [{ field: "priority", operator: "eq", value: "High" }]
+      )
+    ).toEqual([
+      { field: "status", operator: "eq", value: "Open" },
+      { field: "priority", operator: "eq", value: "High" }
+    ]);
   });
 });
 

@@ -1,3 +1,5 @@
+import { badRequest, FrameworkError } from "../core/errors.js";
+import { mergeListFilters } from "../core/list-view.js";
 import type {
   DocTypeDefinition,
   DocumentSnapshot,
@@ -5,8 +7,11 @@ import type {
   GlobalSearchResultItem,
   JsonPrimitive,
   JsonValue,
+  ListDocumentsFilter,
   LinkOption
 } from "../core/types.js";
+
+export const DEFAULT_DOCUMENT_CSV_EXPORT_LIMIT = 10_000;
 
 export interface DocumentCsvColumn {
   readonly label: string;
@@ -17,6 +22,11 @@ export interface GlobalSearchMatch {
   readonly field: string;
   readonly text: string;
 }
+
+export type LinkFieldDefinition = FieldDefinition & {
+  readonly type: "link";
+  readonly linkTo: string;
+};
 
 export function documentCsvColumns(fields: readonly FieldDefinition[]): readonly DocumentCsvColumn[] {
   return [
@@ -142,4 +152,74 @@ export function labelForLinkedDocument(document: DocumentSnapshot, doctype: DocT
 
 export function matchesLinkSearch(option: LinkOption, search: string): boolean {
   return option.value.toLowerCase().includes(search) || option.label.toLowerCase().includes(search);
+}
+
+export function mergeDefaultFilters(
+  defaults: readonly ListDocumentsFilter[],
+  overrides: readonly ListDocumentsFilter[]
+): readonly ListDocumentsFilter[] {
+  return mergeListFilters(defaults, overrides);
+}
+
+export function clampLimit(limit?: number, max = 200): number {
+  if (limit === undefined) {
+    return 50;
+  }
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new FrameworkError("BAD_REQUEST", "limit must be a positive integer", { status: 400 });
+  }
+  return Math.min(limit, max);
+}
+
+export function clampCsvExportLimit(limit?: number): number {
+  if (limit === undefined) {
+    return DEFAULT_DOCUMENT_CSV_EXPORT_LIMIT;
+  }
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw badRequest("CSV export limit must be a positive integer");
+  }
+  return Math.min(limit, DEFAULT_DOCUMENT_CSV_EXPORT_LIMIT);
+}
+
+export function clampSearchLimit(limit?: number): number {
+  if (limit === undefined) {
+    return 20;
+  }
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new FrameworkError("BAD_REQUEST", "Search limit must be a positive integer", { status: 400 });
+  }
+  return Math.min(limit, 100);
+}
+
+export function getField(doctype: DocTypeDefinition, fieldName: string): FieldDefinition {
+  const field = doctype.fields.find((item) => item.name === fieldName);
+  if (!field) {
+    throw new FrameworkError("BAD_REQUEST", `Field '${fieldName}' is not defined on ${doctype.name}`, {
+      status: 400
+    });
+  }
+  return field;
+}
+
+export function getLinkField(doctype: DocTypeDefinition, fieldName: string): LinkFieldDefinition {
+  const field = getField(doctype, fieldName);
+  if (field.type !== "link" || !field.linkTo) {
+    throw new FrameworkError("BAD_REQUEST", `Field '${fieldName}' on ${doctype.name} is not a link field`, {
+      status: 400
+    });
+  }
+  return field as LinkFieldDefinition;
+}
+
+export function normalizeSearch(q: string | undefined): string | undefined {
+  const search = q?.trim().toLowerCase();
+  return search ? search : undefined;
+}
+
+export function normalizeRequiredSearch(q: string | undefined): string {
+  const search = normalizeSearch(q);
+  if (!search) {
+    throw new FrameworkError("BAD_REQUEST", "Search query is required", { status: 400 });
+  }
+  return search;
 }

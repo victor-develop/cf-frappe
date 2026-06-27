@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document query presentation policy module slice:
+As of the document query input policy module slice:
 
 - Vitest files: `168`
-- Vitest cases: `1579`
+- Vitest cases: `1583`
 
 ## Implication
 

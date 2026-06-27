@@ -1,7 +1,6 @@
-import { badRequest, FrameworkError, notFound, permissionDenied } from "../core/errors.js";
+import { notFound, permissionDenied } from "../core/errors.js";
 import { resolveFormView } from "../core/form-view.js";
 import {
-  mergeListFilters,
   normalizeListFilterExpression,
   normalizeListFilters,
   normalizeListOrder,
@@ -43,15 +42,21 @@ import {
 import type { ProjectionStore } from "../ports/projection-store.js";
 import { CSV_CONTENT_TYPE, csvLine, filenamePart } from "./csv.js";
 import {
+  DEFAULT_DOCUMENT_CSV_EXPORT_LIMIT,
+  clampCsvExportLimit,
+  clampLimit,
+  clampSearchLimit,
   compareSearchResults,
   documentCsvColumns,
+  getLinkField,
   globalSearchMatch,
   matchesLinkSearch,
+  mergeDefaultFilters,
+  normalizeRequiredSearch,
+  normalizeSearch,
   toGlobalSearchResult,
   toLinkOption
 } from "./document-query-policy.js";
-
-const DEFAULT_DOCUMENT_CSV_EXPORT_LIMIT = 10_000;
 
 export interface QueryServiceOptions {
   readonly registry: ModelRegistry;
@@ -269,12 +274,7 @@ export class QueryService {
       readonly limit?: number;
     } = {}
   ): Promise<LinkOptionsResult> {
-    const field = getField(doctype, fieldName);
-    if (field.type !== "link" || !field.linkTo) {
-      throw new FrameworkError("BAD_REQUEST", `Field '${fieldName}' on ${doctype.name} is not a link field`, {
-        status: 400
-      });
-    }
+    const field = getLinkField(doctype, fieldName);
     const target = this.registry.get(field.linkTo);
     if (!can(actor, target, "read")) {
       throw permissionDenied(`Actor '${actor.id}' cannot read ${target.name}`);
@@ -560,64 +560,4 @@ export class QueryService {
   ): Promise<readonly DocumentSharePermission[]> {
     return await this.documentShares?.sharedPermissionsFor(actor, document) ?? [];
   }
-}
-
-function mergeDefaultFilters(
-  defaults: readonly ListDocumentsFilter[],
-  overrides: readonly ListDocumentsFilter[]
-): readonly ListDocumentsFilter[] {
-  return mergeListFilters(defaults, overrides);
-}
-
-function clampLimit(limit?: number, max = 200): number {
-  if (limit === undefined) {
-    return 50;
-  }
-  if (!Number.isInteger(limit) || limit < 1) {
-    throw new FrameworkError("BAD_REQUEST", "limit must be a positive integer", { status: 400 });
-  }
-  return Math.min(limit, max);
-}
-
-function clampCsvExportLimit(limit?: number): number {
-  if (limit === undefined) {
-    return DEFAULT_DOCUMENT_CSV_EXPORT_LIMIT;
-  }
-  if (!Number.isInteger(limit) || limit < 1) {
-    throw badRequest("CSV export limit must be a positive integer");
-  }
-  return Math.min(limit, DEFAULT_DOCUMENT_CSV_EXPORT_LIMIT);
-}
-
-function clampSearchLimit(limit?: number): number {
-  if (limit === undefined) {
-    return 20;
-  }
-  if (!Number.isInteger(limit) || limit < 1) {
-    throw new FrameworkError("BAD_REQUEST", "Search limit must be a positive integer", { status: 400 });
-  }
-  return Math.min(limit, 100);
-}
-
-function getField(doctype: DocTypeDefinition, fieldName: string): FieldDefinition {
-  const field = doctype.fields.find((item) => item.name === fieldName);
-  if (!field) {
-    throw new FrameworkError("BAD_REQUEST", `Field '${fieldName}' is not defined on ${doctype.name}`, {
-      status: 400
-    });
-  }
-  return field;
-}
-
-function normalizeSearch(q: string | undefined): string | undefined {
-  const search = q?.trim().toLowerCase();
-  return search ? search : undefined;
-}
-
-function normalizeRequiredSearch(q: string | undefined): string {
-  const search = normalizeSearch(q);
-  if (!search) {
-    throw new FrameworkError("BAD_REQUEST", "Search query is required", { status: 400 });
-  }
-  return search;
 }
