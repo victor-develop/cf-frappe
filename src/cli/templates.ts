@@ -761,6 +761,7 @@ export const TaskIntakeWebForm = defineWebForm({
   ],
   submitLabel: "Create Task",
   successMessage: "Task created.",
+  successUrl: "/web/Task%20Updates",
   roles: ["User", "Task Manager"]
 });
 

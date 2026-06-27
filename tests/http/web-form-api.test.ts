@@ -48,7 +48,8 @@ describe("web form api", () => {
             { field: "accepted" },
             { field: "details" }
           ],
-          successMessage: "Thanks for reaching out."
+          successMessage: "Thanks for reaching out.",
+          successUrl: "/page/thanks"
         })
       ]
     });
@@ -72,7 +73,7 @@ describe("web form api", () => {
     expect(metadata.status).toBe(200);
     await expect(metadata.json()).resolves.toMatchObject({
       data: {
-        form: { name: "Lead Intake", route: "lead/intake" },
+        form: { name: "Lead Intake", route: "lead/intake", successUrl: "/page/thanks" },
         doctype: "Lead",
         fields: expect.arrayContaining([{ field: "title", label: "Name", type: "text", required: true }])
       }
@@ -112,7 +113,9 @@ describe("web form api", () => {
       })
     });
     expect(formSubmit.status).toBe(201);
-    await expect(formSubmit.text()).resolves.toContain("Thanks for reaching out.");
+    const formSubmitHtml = await formSubmit.text();
+    expect(formSubmitHtml).toContain("Thanks for reaching out.");
+    expect(formSubmitHtml).toContain('<a class="web-form-continue" href="/page/thanks">Continue</a>');
     await expect(store.get("default", "Lead", "HTML Lead"))
       .resolves.toMatchObject({
         data: {
@@ -142,7 +145,8 @@ describe("web form api", () => {
           label: "Lead <Intake>",
           doctype: "Lead",
           fields: [{ field: "title", label: "Name", required: true }],
-          successMessage: "Thanks <friend>."
+          successMessage: "Thanks <friend>.",
+          successUrl: "/web/Lead%20Updates"
         })
       ],
       websiteThemes: [
@@ -211,6 +215,7 @@ describe("web form api", () => {
     expect(submitted.status).toBe(201);
     const submittedHtml = await submitted.text();
     expect(submittedHtml).toContain("Thanks &lt;friend&gt;.");
+    expect(submittedHtml).toContain('<a class="web-form-continue" href="/web/Lead%20Updates">Continue</a>');
     expect(submittedHtml).toContain("--cf-frappe-primary: #0f766e");
     expect(submittedHtml).toContain('<a href="/page/about">About</a>');
   });

@@ -20,7 +20,7 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Web Form public route slice:
+As of the Web Form public route and success URL slice:
 
 - Vitest files: `147`
 - Vitest cases: `1401`

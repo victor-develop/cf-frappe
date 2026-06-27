@@ -12,7 +12,8 @@ describe("web form metadata", () => {
         { field: "email", description: "Work email" }
       ],
       submitLabel: "Send",
-      successMessage: "Thanks"
+      successMessage: "Thanks",
+      successUrl: "/page/thanks"
     });
 
     expect(Object.isFrozen(webForm)).toBe(true);
@@ -83,6 +84,14 @@ describe("web form metadata", () => {
       .toThrow("safe canonical relative path");
     expect(() => defineWebForm({ name: "Bad", route: "lead/../admin", doctype: "Lead", fields: [{ field: "title" }] }))
       .toThrow("safe canonical relative path");
+    expect(() => defineWebForm({ name: "Bad", doctype: "Lead", fields: [{ field: "title" }], successUrl: "javascript:alert(1)" }))
+      .toThrow("success URL must be a safe href");
+    expect(() => defineWebForm({ name: "Bad", doctype: "Lead", fields: [{ field: "title" }], successUrl: "/api/resource/Lead" }))
+      .toThrow("success URL must be a safe href");
+    expect(() => defineWebForm({ name: "Bad", doctype: "Lead", fields: [{ field: "title" }], successUrl: "/web/lead?x=1" }))
+      .toThrow("success URL must be a safe href");
+    expect(() => defineWebForm({ name: "Bad", doctype: "Lead", fields: [{ field: "title" }], successUrl: "/web/a/%2e%2e/%2e%2e/api/resource" }))
+      .toThrow("success URL must be a safe href");
     expect(() =>
       createRegistry({
         doctypes: [Lead, LeadChild],

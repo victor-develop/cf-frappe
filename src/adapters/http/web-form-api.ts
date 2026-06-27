@@ -65,34 +65,12 @@ export function createWebFormApi(options: WebFormApiOptions): Hono {
 
   app.post("/web-forms/:webForm{.+}", async (c) => {
     const actor = await options.actor(c.req.raw);
-    const metadata = await getPublicWebForm(options.webForms, actor, c.req.param("webForm"));
-    const formData = await c.req.raw.formData();
-    const result = await options.webForms.submitWebForm(actor, metadata.form.name, {
-      data: dataFromFormData(formData, metadata.fields),
-      metadata: requestMetadata(c.req.raw)
-    });
-    return html(renderWebFormSuccess(
-      metadata.form.label ?? metadata.form.name,
-      result.document.name,
-      metadata.form.successMessage,
-      resolveWebsitePresentation(options.websiteSettings, actor)
-    ), 201);
+    return submitPublicWebForm(options, actor, c.req.raw, c.req.param("webForm"));
   });
 
   app.post("/web-forms/:webForm", async (c) => {
     const actor = await options.actor(c.req.raw);
-    const metadata = await getPublicWebForm(options.webForms, actor, c.req.param("webForm"));
-    const formData = await c.req.raw.formData();
-    const result = await options.webForms.submitWebForm(actor, metadata.form.name, {
-      data: dataFromFormData(formData, metadata.fields),
-      metadata: requestMetadata(c.req.raw)
-    });
-    return html(renderWebFormSuccess(
-      metadata.form.label ?? metadata.form.name,
-      result.document.name,
-      metadata.form.successMessage,
-      resolveWebsitePresentation(options.websiteSettings, actor)
-    ), 201);
+    return submitPublicWebForm(options, actor, c.req.raw, c.req.param("webForm"));
   });
 
   return app;
@@ -191,6 +169,27 @@ async function getPublicWebForm(
   return webForms.getWebForm(actor, identifier);
 }
 
+async function submitPublicWebForm(
+  options: WebFormApiOptions,
+  actor: Actor,
+  request: Request,
+  identifier: string
+): Promise<Response> {
+  const metadata = await getPublicWebForm(options.webForms, actor, identifier);
+  const formData = await request.formData();
+  const result = await options.webForms.submitWebForm(actor, metadata.form.name, {
+    data: dataFromFormData(formData, metadata.fields),
+    metadata: requestMetadata(request)
+  });
+  return html(renderWebFormSuccess(
+    metadata.form.label ?? metadata.form.name,
+    result.document.name,
+    metadata.form.successMessage,
+    metadata.form.successUrl,
+    resolveWebsitePresentation(options.websiteSettings, actor)
+  ), 201);
+}
+
 function webFormPublicHref(form: WebFormListItem): string {
   return `/web-forms/${form.route ?? encodeURIComponent(form.name)}`;
 }
@@ -232,9 +231,11 @@ function renderWebFormSuccess(
   title: string,
   documentName: string,
   message: string | undefined,
+  successUrl: string | undefined,
   presentation: WebsitePresentation
 ): string {
-  return websitePage(title, `<main class="web-form-main"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message ?? "Submitted successfully.")}</p><p>Document: ${escapeHtml(documentName)}</p></main>`, presentation, {
+  const continueLink = successUrl === undefined ? "" : `<p><a class="web-form-continue" href="${escapeHtml(successUrl)}">Continue</a></p>`;
+  return websitePage(title, `<main class="web-form-main"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message ?? "Submitted successfully.")}</p><p>Document: ${escapeHtml(documentName)}</p>${continueLink}</main>`, presentation, {
     styles: WEB_FORM_STYLES
   });
 }
@@ -263,6 +264,7 @@ small, .web-form-list span { color: var(--cf-frappe-muted-text); font-weight: 40
 .checkbox { display: flex; align-items: center; gap: 8px; }
 .checkbox input { width: auto; }
 button { width: fit-content; padding: 10px 14px; border: 0; border-radius: 6px; color: #fff; background: var(--cf-frappe-primary); font: inherit; font-weight: 700; cursor: pointer; }
+.web-form-continue { display: inline-flex; width: fit-content; padding: 10px 14px; border-radius: 6px; color: #fff; background: var(--cf-frappe-primary); font-weight: 700; text-decoration: none; }
 .web-form-list { display: grid; gap: 12px; padding: 0; list-style: none; }
 .web-form-list li { display: grid; gap: 2px; }
 `;

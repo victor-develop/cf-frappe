@@ -30,6 +30,7 @@ interface WebFormResponse {
   readonly route?: string;
   readonly doctype?: string;
   readonly fields?: readonly WebFormFieldResponse[];
+  readonly successUrl?: string;
 }
 
 interface WebFormMetadataResponse {
@@ -137,7 +138,8 @@ function formatWebFormSubmit(baseUrl: string, result: WebFormSubmitResponse): st
 function webFormLine(form: WebFormResponse): string {
   const label = form.label === undefined ? "" : ` - ${form.label}`;
   const route = form.route === undefined ? "" : ` route:${form.route}`;
-  return `- ${form.name ?? "(unknown)"} ${form.doctype ?? "(unknown)"}${label}${route}`;
+  const successUrl = form.successUrl === undefined ? "" : ` success:${form.successUrl}`;
+  return `- ${form.name ?? "(unknown)"} ${form.doctype ?? "(unknown)"}${label}${route}${successUrl}`;
 }
 
 function webFormFieldLine(field: WebFormFieldResponse): string {

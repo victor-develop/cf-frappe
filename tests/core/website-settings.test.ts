@@ -71,6 +71,12 @@ describe("metadata Website Settings", () => {
     expect(() =>
       defineWebsiteSettings({
         title: "Bad",
+        navItems: [{ name: "bad", label: "Bad", href: "/web/a/%2e%2e/%2e%2e/api/resource" }]
+      })
+    ).toThrow("safe href");
+    expect(() =>
+      defineWebsiteSettings({
+        title: "Bad",
         navItems: [{ name: "bad", label: "Bad", href: "/page/about\\x" }]
       })
     ).toThrow("safe href");

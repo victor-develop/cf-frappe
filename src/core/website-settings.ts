@@ -1,8 +1,7 @@
 import { FrameworkError } from "./errors.js";
 import { SYSTEM_MANAGER_ROLE, type Actor } from "./types.js";
+import { isSafeWebsiteHref } from "./website-href.js";
 import { isCanonicalWebPageRoute } from "./web-page.js";
-
-const PUBLIC_WEBSITE_HREF_PATTERN = /^\/(page|web|web-forms)\/[A-Za-z0-9][A-Za-z0-9._~%/-]*$/;
 
 export interface WebsiteNavigationItemDefinition {
   readonly name: string;
@@ -118,25 +117,5 @@ function assertPageRoute(route: string, label: string): void {
 function assertIdentifier(value: string, label: string): void {
   if (!value.trim()) {
     throw new FrameworkError("WEBSITE_SETTINGS_INVALID", `${label} is required`, { status: 400 });
-  }
-}
-
-function isSafeWebsiteHref(value: string): boolean {
-  if (value.startsWith("/")) {
-    return PUBLIC_WEBSITE_HREF_PATTERN.test(value) &&
-      !value.includes("..") &&
-      !value.includes("\\") &&
-      !value.includes("?") &&
-      !value.includes("#") &&
-      !/\s/.test(value);
-  }
-  if (!value.startsWith("https://") && !value.startsWith("http://")) {
-    return false;
-  }
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" || url.protocol === "http:";
-  } catch {
-    return false;
   }
 }

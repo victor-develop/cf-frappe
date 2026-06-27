@@ -155,6 +155,7 @@ describe("cf-frappe CLI scaffold", () => {
     expect(taskApp).toContain("calendars: [TaskCalendar]");
     expect(taskApp).toContain("webForms: [TaskIntakeWebForm]");
     expect(taskApp).toContain('route: "task-intake"');
+    expect(taskApp).toContain('successUrl: "/web/Task%20Updates"');
     expect(taskApp).toContain("webPages: [AboutWebPage]");
     expect(taskApp).toContain("webViews: [TaskUpdatesWebView]");
     expect(taskApp).toContain("websiteSettings: TaskWebsiteSettings");

@@ -1,5 +1,6 @@
 import { FrameworkError } from "./errors.js";
 import { SYSTEM_MANAGER_ROLE, type Actor, type DocTypeDefinition, type FieldDefinition } from "./types.js";
+import { isSafeWebsiteHref } from "./website-href.js";
 import { isCanonicalWebPageRoute } from "./web-page.js";
 
 export interface WebFormFieldDefinition {
@@ -20,6 +21,7 @@ export interface WebFormDefinition {
   readonly fields: readonly WebFormFieldDefinition[];
   readonly submitLabel?: string;
   readonly successMessage?: string;
+  readonly successUrl?: string;
 }
 
 export function defineWebForm(definition: WebFormDefinition): WebFormDefinition {
@@ -36,6 +38,9 @@ export function assertWebFormDefinition(definition: WebFormDefinition): void {
   assertWebFormIdentifier(definition.doctype, `web form '${definition.name}' DocType`);
   if (definition.route !== undefined) {
     assertWebFormRoute(definition.route, definition.name);
+  }
+  if (definition.successUrl !== undefined) {
+    assertWebFormSuccessUrl(definition.successUrl, definition.name);
   }
   if (!Array.isArray(definition.fields) || definition.fields.length === 0) {
     throw new FrameworkError("WEB_FORM_INVALID", `Web form '${definition.name}' fields must not be empty`, {
@@ -58,6 +63,15 @@ function assertWebFormRoute(route: string, formName: string): void {
   assertWebFormIdentifier(route, `web form '${formName}' route`);
   if (!isCanonicalWebPageRoute(route)) {
     throw new FrameworkError("WEB_FORM_INVALID", `Web form '${formName}' route must be a safe canonical relative path`, {
+      status: 400
+    });
+  }
+}
+
+function assertWebFormSuccessUrl(successUrl: string, formName: string): void {
+  assertWebFormIdentifier(successUrl, `web form '${formName}' success URL`);
+  if (!isSafeWebsiteHref(successUrl)) {
+    throw new FrameworkError("WEB_FORM_INVALID", `Web form '${formName}' success URL must be a safe href`, {
       status: 400
     });
   }
