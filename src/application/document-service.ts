@@ -29,6 +29,10 @@ import {
   normalizeValidDocumentShareUserId
 } from "./document-collaboration-policy.js";
 import {
+  bulkDocumentFailure,
+  normalizeBulkDocumentSelections
+} from "./document-bulk-policy.js";
+import {
   domainCommandAppliedPayload,
   workflowTransitionedPayload
 } from "./document-command-events.js";
@@ -120,6 +124,12 @@ export type { DocumentCommandEventPayload } from "./document-command-events.js";
 export type { DocumentCollaborationEventPayload } from "./document-collaboration-events.js";
 export type { DocumentLifecycleEventPayload } from "./document-lifecycle-events.js";
 export type { DocumentShareEventPayload } from "./document-share-events.js";
+export {
+  bulkDeleteDocumentFailure,
+  bulkDocumentFailure,
+  normalizeBulkDeleteDocumentSelections,
+  normalizeBulkDocumentSelections
+} from "./document-bulk-policy.js";
 
 export interface DocumentServiceOptions {
   readonly registry: ModelRegistry;
@@ -2147,64 +2157,6 @@ function ensureDocumentStatus(
       { status: 409 }
     );
   }
-}
-
-const MAX_BULK_DELETE_DOCUMENTS = 100;
-
-export function normalizeBulkDeleteDocumentSelections(
-  documents: readonly BulkDeleteDocumentSelection[]
-): readonly BulkDeleteDocumentSelection[] {
-  return normalizeBulkDocumentSelections(documents);
-}
-
-export function normalizeBulkDocumentSelections(
-  documents: readonly BulkDocumentSelection[]
-): readonly BulkDocumentSelection[] {
-  if (documents.length === 0) {
-    throw badRequest("At least one document must be selected");
-  }
-  if (documents.length > MAX_BULK_DELETE_DOCUMENTS) {
-    throw badRequest(`At most ${String(MAX_BULK_DELETE_DOCUMENTS)} documents can be selected`);
-  }
-  const seen = new Set<string>();
-  return documents.map((document) => {
-    const name = document.name.trim();
-    if (name === "") {
-      throw badRequest("Document name is required");
-    }
-    if (seen.has(name)) {
-      throw badRequest(`Duplicate document selection '${name}'`);
-    }
-    seen.add(name);
-    if (document.expectedVersion !== undefined && !Number.isInteger(document.expectedVersion)) {
-      throw badRequest("expectedVersion must be an integer");
-    }
-    return {
-      name,
-      ...(document.expectedVersion === undefined ? {} : { expectedVersion: document.expectedVersion })
-    };
-  });
-}
-
-export function bulkDeleteDocumentFailure(name: string, error: unknown): BulkDeleteDocumentFailure {
-  return bulkDocumentFailure(name, error);
-}
-
-export function bulkDocumentFailure(name: string, error: unknown): BulkDocumentCommandFailure {
-  if (error instanceof FrameworkError) {
-    return {
-      name,
-      code: error.code,
-      message: error.message,
-      status: error.status
-    };
-  }
-  return {
-    name,
-    code: "UNKNOWN",
-    message: error instanceof Error ? error.message : "Bulk delete failed",
-    status: 500
-  };
 }
 
 function bulkNamedCommand(command: BulkDocumentsCommand, selection: BulkDocumentSelection): BulkDocumentCommand {
