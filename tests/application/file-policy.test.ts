@@ -6,6 +6,7 @@ import {
   expectedRenditionContentType,
   failedFileRendition,
   fileContentTypeExtension,
+  fileDashboardEntry,
   fileRenditionId,
   fileRenditionFilename,
   fileRenditions,
@@ -20,6 +21,7 @@ import {
   normalizeBulkFileSelections,
   normalizeContentType,
   normalizeDirectUploadExpiry,
+  normalizeFileDashboardLimit,
   normalizeFileSize,
   objectKey,
   pendingFileRendition,
@@ -407,6 +409,61 @@ describe("file policy", () => {
       scan_checked_at: "2026-06-28T02:00:00.000Z",
       scan_engine: "unit-av",
       scan_message: "EICAR"
+    });
+  });
+
+  it("normalizes file dashboard limits", () => {
+    expect(normalizeFileDashboardLimit(undefined)).toBe(50);
+    expect(normalizeFileDashboardLimit(1)).toBe(1);
+    expect(normalizeFileDashboardLimit(200)).toBe(200);
+    expect(() => normalizeFileDashboardLimit(0)).toThrow("File dashboard limit must be between 1 and 200");
+    expect(() => normalizeFileDashboardLimit(201)).toThrow("File dashboard limit must be between 1 and 200");
+    expect(() => normalizeFileDashboardLimit(1.5)).toThrow("File dashboard limit must be between 1 and 200");
+  });
+
+  it("projects file dashboard entries from snapshots", () => {
+    const entry = fileDashboardEntry(fileSnapshot({
+      filename: "invoice.pdf",
+      content_type: "application/pdf",
+      size: 123,
+      is_private: false,
+      storage_state: "available",
+      direct_upload_expires_at: "2026-06-28T01:00:00.000Z",
+      scan_status: "clean",
+      scan_checked_at: "2026-06-28T02:00:00.000Z",
+      scan_engine: "unit-av",
+      scan_message: "ok",
+      uploaded_by: "owner@example.com",
+      uploaded_at: "2026-06-28T00:00:00.000Z",
+      attached_to_doctype: "Invoice",
+      attached_to_name: "INV-1",
+      renditions: [renditionEntry("thumb", { status: "available", content_type: "image/webp" })]
+    }));
+
+    expect(entry).toMatchObject({
+      name: "file_multipart",
+      filename: "invoice.pdf",
+      contentType: "application/pdf",
+      size: 123,
+      isPrivate: false,
+      previewable: true,
+      storageState: "available",
+      directUploadExpiresAt: "2026-06-28T01:00:00.000Z",
+      scanStatus: "clean",
+      scanCheckedAt: "2026-06-28T02:00:00.000Z",
+      scanEngine: "unit-av",
+      scanMessage: "ok",
+      uploadedBy: "owner@example.com",
+      uploadedAt: "2026-06-28T00:00:00.000Z",
+      expectedVersion: 1,
+      attachedTo: { doctype: "Invoice", name: "INV-1" },
+      renditions: [expect.objectContaining({ id: "thumb", contentType: "image/webp" })]
+    });
+    expect(fileDashboardEntry(fileSnapshot({ filename: "", content_type: "image/svg+xml" }))).toMatchObject({
+      filename: "file_multipart",
+      isPrivate: true,
+      previewable: false,
+      storageState: "available"
     });
   });
 });

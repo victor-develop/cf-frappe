@@ -312,6 +312,29 @@ export interface FileRenditionView {
   readonly failureMessage?: string;
 }
 
+export interface FileDashboardEntryView {
+  readonly name: string;
+  readonly filename: string;
+  readonly contentType: string;
+  readonly size: number;
+  readonly isPrivate: boolean;
+  readonly previewable: boolean;
+  readonly storageState: string;
+  readonly directUploadExpiresAt?: string;
+  readonly scanStatus?: string;
+  readonly scanCheckedAt?: string;
+  readonly scanEngine?: string;
+  readonly scanMessage?: string;
+  readonly uploadedBy: string;
+  readonly uploadedAt: string;
+  readonly expectedVersion: number;
+  readonly attachedTo?: {
+    readonly doctype: string;
+    readonly name: string;
+  };
+  readonly renditions?: readonly FileRenditionView[];
+}
+
 export function fileRenditions(snapshot: DocumentSnapshot): readonly FileRenditionManifestEntry[] {
   const value = snapshot.data.renditions;
   if (!Array.isArray(value)) {
@@ -323,6 +346,49 @@ export function fileRenditions(snapshot: DocumentSnapshot): readonly FileRenditi
     }
     return [entry];
   });
+}
+
+export function fileDashboardEntry(snapshot: DocumentSnapshot): FileDashboardEntryView {
+  const attachedToDoctype = snapshotStringData(snapshot, "attached_to_doctype");
+  const attachedToName = snapshotStringData(snapshot, "attached_to_name");
+  const contentType = snapshotStringData(snapshot, "content_type");
+  const storageState = snapshotStringData(snapshot, "storage_state") || "available";
+  const renditions = fileRenditions(snapshot).map(fileRenditionView);
+  return {
+    name: snapshot.name,
+    filename: snapshotStringData(snapshot, "filename") || snapshot.name,
+    contentType,
+    size: snapshotNumberData(snapshot, "size"),
+    isPrivate: snapshot.data.is_private !== false,
+    previewable: storageState === "available" && isPreviewableFileContentType(contentType),
+    storageState,
+    ...(snapshotStringData(snapshot, "direct_upload_expires_at")
+      ? { directUploadExpiresAt: snapshotStringData(snapshot, "direct_upload_expires_at") }
+      : {}),
+    ...(snapshotStringData(snapshot, "scan_status") ? { scanStatus: snapshotStringData(snapshot, "scan_status") } : {}),
+    ...(snapshotStringData(snapshot, "scan_checked_at")
+      ? { scanCheckedAt: snapshotStringData(snapshot, "scan_checked_at") }
+      : {}),
+    ...(snapshotStringData(snapshot, "scan_engine") ? { scanEngine: snapshotStringData(snapshot, "scan_engine") } : {}),
+    ...(snapshotStringData(snapshot, "scan_message") ? { scanMessage: snapshotStringData(snapshot, "scan_message") } : {}),
+    uploadedBy: snapshotStringData(snapshot, "uploaded_by"),
+    uploadedAt: snapshotStringData(snapshot, "uploaded_at"),
+    expectedVersion: snapshot.version,
+    ...(renditions.length === 0 ? {} : { renditions }),
+    ...(attachedToDoctype && attachedToName
+      ? { attachedTo: { doctype: attachedToDoctype, name: attachedToName } }
+      : {})
+  };
+}
+
+export function normalizeFileDashboardLimit(limit: number | undefined): number {
+  if (limit === undefined) {
+    return 50;
+  }
+  if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+    throw badRequest("File dashboard limit must be between 1 and 200");
+  }
+  return limit;
 }
 
 export function fileRenditionView(entry: FileRenditionManifestEntry): FileRenditionView {

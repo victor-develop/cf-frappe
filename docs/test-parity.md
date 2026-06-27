@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file upload verification policy module slice:
+As of the file dashboard policy module slice:
 
 - Vitest files: `169`
-- Vitest cases: `1610`
+- Vitest cases: `1612`
 
 ## Implication
 

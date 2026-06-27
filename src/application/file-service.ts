@@ -48,15 +48,16 @@ import {
   ensureMultipartCompletionMatchesManifest,
   ensureMultipartPartFitsReservation,
   failedFileRendition,
+  fileDashboardEntry,
   fileRenditionId,
   fileRenditionFilename,
   fileRenditions,
   fileRenditionView,
   fileScanPatch,
-  isPreviewableFileContentType,
   multipartPartManifest,
   multipartPartSize,
   normalizeBulkFileSelections,
+  normalizeFileDashboardLimit,
   normalizeDirectUploadExpiry,
   normalizeFileSize,
   objectKey,
@@ -765,7 +766,7 @@ export class FileService {
   }
 
   async dashboard(actor: Actor, query: FileDashboardQuery = {}): Promise<FileDashboard> {
-    const limit = normalizeLimit(query.limit);
+    const limit = normalizeFileDashboardLimit(query.limit);
     const filters = {
       ...optionalTextFilter("attachedToDoctype", query.attachedToDoctype),
       ...optionalTextFilter("attachedToName", query.attachedToName),
@@ -1458,55 +1459,9 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function fileDashboardEntry(snapshot: DocumentSnapshot): Omit<FileDashboardEntry, "editable" | "deletable"> {
-  const attachedToDoctype = stringData(snapshot, "attached_to_doctype");
-  const attachedToName = stringData(snapshot, "attached_to_name");
-  const contentType = stringData(snapshot, "content_type");
-  const storageState = stringData(snapshot, "storage_state") || "available";
-  const renditions = fileRenditions(snapshot).map(fileRenditionView);
-  return {
-    name: snapshot.name,
-    filename: stringData(snapshot, "filename") || snapshot.name,
-    contentType,
-    size: numberData(snapshot, "size"),
-    isPrivate: snapshot.data.is_private !== false,
-    previewable: storageState === "available" && isPreviewableFileContentType(contentType),
-    storageState,
-    ...(stringData(snapshot, "direct_upload_expires_at")
-      ? { directUploadExpiresAt: stringData(snapshot, "direct_upload_expires_at") }
-      : {}),
-    ...(stringData(snapshot, "scan_status") ? { scanStatus: stringData(snapshot, "scan_status") } : {}),
-    ...(stringData(snapshot, "scan_checked_at") ? { scanCheckedAt: stringData(snapshot, "scan_checked_at") } : {}),
-    ...(stringData(snapshot, "scan_engine") ? { scanEngine: stringData(snapshot, "scan_engine") } : {}),
-    ...(stringData(snapshot, "scan_message") ? { scanMessage: stringData(snapshot, "scan_message") } : {}),
-    uploadedBy: stringData(snapshot, "uploaded_by"),
-    uploadedAt: stringData(snapshot, "uploaded_at"),
-    expectedVersion: snapshot.version,
-    ...(renditions.length === 0 ? {} : { renditions }),
-    ...(attachedToDoctype && attachedToName
-      ? { attachedTo: { doctype: attachedToDoctype, name: attachedToName } }
-      : {})
-  };
-}
-
 function stringData(snapshot: DocumentSnapshot, field: string): string {
   const value = snapshot.data[field];
   return typeof value === "string" ? value : "";
-}
-
-function numberData(snapshot: DocumentSnapshot, field: string): number {
-  const value = snapshot.data[field];
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-function normalizeLimit(limit: number | undefined): number {
-  if (limit === undefined) {
-    return 50;
-  }
-  if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
-    throw badRequest("File dashboard limit must be between 1 and 200");
-  }
-  return limit;
 }
 
 function byteLength(body: FileContent): number {
