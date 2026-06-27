@@ -2,11 +2,25 @@ import {
   REPORT_FILTER_EXPRESSION_MAX_NODES,
   REPORT_FORMULA_MAX_DEPTH,
   savedReportsStream,
+  type DocumentEventPayload,
   type JsonObject
 } from "../../src";
 import { createServices, data, manager, now, owner } from "../helpers";
+import type { SavedReportEventPayload } from "../../src";
 
 describe("SavedReportService", () => {
+  it("registers saved report payloads through the domain event extension map", () => {
+    const payload = savedReportPayload({
+      kind: "SavedReportSaved",
+      reportId: "report_high",
+      label: "High note report",
+      ownerId: owner.id,
+      definition: { columns: [{ name: "title" }] }
+    });
+
+    expect(payload.definition.columns).toEqual([{ name: "title" }]);
+  });
+
   it("saves normalized user report definitions as events and lists only the actor's reports", async () => {
     const { events, savedReports } = createServices(["create-1"], {
       savedReportIds: ["high", "event-1", "manager", "event-2"]
@@ -443,6 +457,12 @@ describe("SavedReportService", () => {
     });
   });
 });
+
+function savedReportPayload(
+  payload: Extract<DocumentEventPayload, { readonly kind: "SavedReportSaved" }>
+): Extract<SavedReportEventPayload, { readonly kind: "SavedReportSaved" }> {
+  return payload;
+}
 
 function nestedFormulaPayload(depth: number): JsonObject {
   let formula: JsonObject = { operator: "add", left: "count", right: 1 };

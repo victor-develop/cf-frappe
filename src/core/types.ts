@@ -500,18 +500,6 @@ export type CoreDocumentEventPayload =
       readonly role: string;
     }
   | {
-      readonly kind: "SavedReportSaved";
-      readonly reportId: string;
-      readonly label: string;
-      readonly ownerId: string;
-      readonly definition: JsonObject;
-    }
-  | {
-      readonly kind: "SavedReportDeleted";
-      readonly reportId: string;
-      readonly ownerId: string;
-    }
-  | {
       readonly kind: "JobScheduleOverrideSet";
       readonly scheduleId: string;
       readonly enabled: boolean;
