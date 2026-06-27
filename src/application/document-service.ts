@@ -29,7 +29,17 @@ import {
   normalizeValidDocumentShareUserId
 } from "./document-collaboration-policy.js";
 import type { DocumentCommandEventPayload } from "./document-command-events.js";
-import type { DocumentCollaborationEventPayload } from "./document-collaboration-events.js";
+import {
+  documentActivityRecordedPayload,
+  documentAssignmentPayload,
+  documentCommentAddedPayload,
+  documentFollowerPayload,
+  documentTagPayload,
+  type DocumentAssignmentEventKind,
+  type DocumentCollaborationEventPayload,
+  type DocumentFollowerEventKind,
+  type DocumentTagEventKind
+} from "./document-collaboration-events.js";
 import {
   documentCreatedPayload,
   documentDeletedPayload,
@@ -1027,8 +1037,7 @@ export class DocumentService implements DocumentCommandExecutor {
     }
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
-    const text = normalizeCommentText(command.text);
-    const payload: DocumentCollaborationEventPayload = { kind: "DocumentCommentAdded", text };
+    const payload = documentCommentAddedPayload(normalizeCommentText(command.text));
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,
@@ -1069,14 +1078,7 @@ export class DocumentService implements DocumentCommandExecutor {
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
     const activity = normalizeActivity(command);
-    const payload: DocumentCollaborationEventPayload = {
-      kind: "DocumentActivityRecorded",
-      activityType: activity.activityType,
-      subject: activity.subject,
-      ...(activity.detail !== undefined ? { detail: activity.detail } : {}),
-      ...(activity.channel !== undefined ? { channel: activity.channel } : {}),
-      ...(activity.externalId !== undefined ? { externalId: activity.externalId } : {})
-    };
+    const payload = documentActivityRecordedPayload(activity);
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,
@@ -1393,7 +1395,7 @@ export class DocumentService implements DocumentCommandExecutor {
 
   private async changeAssignment(options: {
     readonly command: AssignDocumentCommand | UnassignDocumentCommand;
-    readonly eventKind: Extract<DocumentCollaborationEventPayload, { readonly assigneeId: string }>["kind"];
+    readonly eventKind: DocumentAssignmentEventKind;
     readonly eventType: (doctype: DocTypeDefinition) => string;
     readonly alreadyDone: (assignees: readonly string[], assigneeId: string) => boolean;
   }): Promise<DocumentSnapshot> {
@@ -1410,7 +1412,7 @@ export class DocumentService implements DocumentCommandExecutor {
     if (options.alreadyDone(foldDocumentAssignments(events), assigneeId)) {
       return existing;
     }
-    const payload: DocumentCollaborationEventPayload = { kind: options.eventKind, assigneeId };
+    const payload = documentAssignmentPayload(options.eventKind, assigneeId);
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,
@@ -1442,7 +1444,7 @@ export class DocumentService implements DocumentCommandExecutor {
 
   private async changeTag(options: {
     readonly command: TagDocumentCommand | UntagDocumentCommand;
-    readonly eventKind: Extract<DocumentCollaborationEventPayload, { readonly tag: string }>["kind"];
+    readonly eventKind: DocumentTagEventKind;
     readonly eventType: (doctype: DocTypeDefinition) => string;
     readonly alreadyDone: (tags: readonly string[], tag: string) => boolean;
   }): Promise<DocumentSnapshot> {
@@ -1459,7 +1461,7 @@ export class DocumentService implements DocumentCommandExecutor {
     if (options.alreadyDone(foldDocumentTags(events), tag)) {
       return existing;
     }
-    const payload: DocumentCollaborationEventPayload = { kind: options.eventKind, tag };
+    const payload = documentTagPayload(options.eventKind, tag);
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,
@@ -1491,7 +1493,7 @@ export class DocumentService implements DocumentCommandExecutor {
 
   private async changeFollower(options: {
     readonly command: FollowDocumentCommand | UnfollowDocumentCommand;
-    readonly eventKind: Extract<DocumentCollaborationEventPayload, { readonly followerId: string }>["kind"];
+    readonly eventKind: DocumentFollowerEventKind;
     readonly eventType: (doctype: DocTypeDefinition) => string;
     readonly alreadyDone: (followers: readonly string[], followerId: string) => boolean;
   }): Promise<DocumentSnapshot> {
@@ -1508,7 +1510,7 @@ export class DocumentService implements DocumentCommandExecutor {
     if (options.alreadyDone(foldDocumentFollowers(events), followerId)) {
       return existing;
     }
-    const payload: DocumentCollaborationEventPayload = { kind: options.eventKind, followerId };
+    const payload = documentFollowerPayload(options.eventKind, followerId);
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,
