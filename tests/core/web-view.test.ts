@@ -31,7 +31,9 @@ describe("metadata Web Views", () => {
       publishedField: "published",
       fields: [{ field: "body", label: "Article" }],
       roles: ["Guest"],
-      pageSize: 10
+      pageSize: 10,
+      orderBy: "title",
+      order: "asc"
     });
 
     expect(Object.isFrozen(view)).toBe(true);
@@ -80,5 +82,20 @@ describe("metadata Web Views", () => {
     expect(() =>
       defineWebView({ name: "Broken", doctype: "Blog Post", routeField: "route", titleField: "title", pageSize: 0 })
     ).toThrow("page size");
+    expect(() =>
+      defineWebView({ name: "Broken", doctype: "Blog Post", routeField: "route", titleField: "title", orderBy: " " })
+    ).toThrow("orderBy field is required");
+    expect(() =>
+      createRegistry({ doctypes: blogDoctypes, webViews: [defineWebView({ name: "Broken", doctype: "Blog Post", routeField: "route", titleField: "title", orderBy: "missing" })] })
+    ).toThrow("orderBy field 'missing' is not defined");
+    expect(() =>
+      createRegistry({ doctypes: blogDoctypes, webViews: [defineWebView({ name: "Broken", doctype: "Blog Post", routeField: "route", titleField: "title", orderBy: "internal_notes" })] })
+    ).toThrow("orderBy field 'internal_notes' is hidden");
+    expect(() =>
+      createRegistry({ doctypes: blogDoctypes, webViews: [defineWebView({ name: "Broken", doctype: "Blog Post", routeField: "route", titleField: "title", orderBy: "children" })] })
+    ).toThrow("orderBy field 'children' cannot be a table field");
+    expect(() =>
+      createRegistry({ doctypes: blogDoctypes, webViews: [defineWebView({ name: "Broken", doctype: "Blog Post", routeField: "route", titleField: "title", orderBy: "title", order: "sideways" as never })] })
+    ).toThrow("List order must be asc or desc");
   });
 });

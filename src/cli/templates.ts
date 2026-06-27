@@ -780,6 +780,8 @@ export const TaskUpdatesWebView = defineWebView({
     { field: "description", label: "Update" }
   ],
   roles: ["Guest", "User", "Task Manager"],
+  orderBy: "starts_on",
+  order: "desc",
   pageSize: 20
 });
 

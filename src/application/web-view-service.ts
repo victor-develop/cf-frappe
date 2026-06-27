@@ -2,7 +2,15 @@ import { badRequest, notFound, permissionDenied } from "../core/errors.js";
 import { assertWebViewMatchesDocType, canReadWebView, type WebViewDefinition } from "../core/web-view.js";
 import { isCanonicalWebPageRoute } from "../core/web-page.js";
 import type { ModelRegistry } from "../core/registry.js";
-import type { Actor, DocTypeDefinition, DocumentSnapshot, FieldDefinition, JsonValue, ListDocumentsFilter } from "../core/types.js";
+import type {
+  Actor,
+  DocTypeDefinition,
+  DocumentSnapshot,
+  FieldDefinition,
+  JsonValue,
+  ListDocumentsFilter,
+  ListOrderDirection
+} from "../core/types.js";
 import type { QueryService } from "./query-service.js";
 
 export interface WebViewResolvedField {
@@ -106,6 +114,7 @@ export class WebViewService {
       const pageLimit = Math.min(Math.max(limit + 1, DEFAULT_WEB_VIEW_LIMIT), remainingScan);
       const result = await this.queries.listDocuments(actor, metadata.doctype, {
         filters: publishedFilters(metadata),
+        ...webViewOrderOptions(metadata.view),
         limit: pageLimit,
         offset: rawOffset,
         maxLimit: pageLimit
@@ -151,6 +160,7 @@ export class WebViewService {
     }
     const result = await this.queries.listDocuments(actor, metadata.doctype, {
       filters: [...publishedFilters(metadata), { field: metadata.routeField.field, value: route }],
+      ...webViewOrderOptions(metadata.view),
       limit: 1,
       maxLimit: 1
     });
@@ -204,6 +214,13 @@ function resolveField(fieldName: string, doctype: DocTypeDefinition, label?: str
 
 function publishedFilters(metadata: WebViewMetadata): readonly ListDocumentsFilter[] {
   return metadata.publishedField === undefined ? [] : [{ field: metadata.publishedField.field, value: true }];
+}
+
+function webViewOrderOptions(webView: WebViewDefinition): { readonly orderBy?: string; readonly order?: ListOrderDirection } {
+  return {
+    ...(webView.orderBy === undefined ? {} : { orderBy: webView.orderBy }),
+    ...(webView.order === undefined ? {} : { order: webView.order })
+  };
 }
 
 function itemFromDocument(metadata: WebViewMetadata, document: DocumentSnapshot): WebViewItem | undefined {

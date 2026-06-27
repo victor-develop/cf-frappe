@@ -89,11 +89,21 @@ describe("cf-frappe CLI remote web views", () => {
       if (requestUrl.endsWith("/api/meta/web-views/Articles")) {
         return jsonResponse({
           data: {
-            view: { name: "Articles", label: "Articles" },
+            view: { name: "Articles", label: "Articles", orderBy: "title", order: "asc" },
             doctype: "Article",
             routeField: { field: "route" },
             titleField: { field: "title" },
             fields: [{ field: "body", type: "longText", label: "Body" }]
+          }
+        });
+      }
+      if (requestUrl.endsWith("/api/meta/web-views/Recent")) {
+        return jsonResponse({
+          data: {
+            view: { name: "Recent", label: "Recent", order: "asc" },
+            doctype: "Article",
+            routeField: { field: "route" },
+            titleField: { field: "title" }
           }
         });
       }
@@ -134,6 +144,16 @@ describe("cf-frappe CLI remote web views", () => {
       fetch
     })).toBe(0);
     expect(getStdout.text()).toContain("Route field: route");
+    expect(getStdout.text()).toContain("Order: title asc");
+
+    const orderOnlyStdout = textBuffer();
+    expect(await runCli(["web-views", "get", "--url", "https://app.example", "--web-view", "Recent"], {
+      stdout: orderOnlyStdout,
+      stderr: textBuffer(),
+      cwd: () => process.cwd(),
+      fetch
+    })).toBe(0);
+    expect(orderOnlyStdout.text()).toContain("Order: updatedAt asc");
 
     const itemsStdout = textBuffer();
     expect(await runCli(["web-views", "items", "--url", "https://app.example", "--web-view", "Articles", "--limit", "2", "--offset", "1"], {
@@ -159,6 +179,7 @@ describe("cf-frappe CLI remote web views", () => {
     expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
       "GET https://app.example/api/meta/web-views",
       "GET https://app.example/api/meta/web-views/Articles",
+      "GET https://app.example/api/meta/web-views/Recent",
       "GET https://app.example/api/web-view/Articles?limit=2&offset=1",
       "GET https://app.example/api/web-view/Articles%2FView/news/launch"
     ]);

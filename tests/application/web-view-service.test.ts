@@ -190,6 +190,50 @@ describe("WebViewService", () => {
     });
   });
 
+  it("orders Web View items through metadata before safe pagination", async () => {
+    const registry = createRegistry({
+      doctypes: [BlogPost],
+      webViews: [
+        defineWebView({
+          name: "Blog",
+          doctype: "Blog Post",
+          routeField: "route",
+          titleField: "title",
+          publishedField: "published",
+          orderBy: "title",
+          order: "asc",
+          pageSize: 2
+        })
+      ]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+    const queries = new QueryService({ registry, projections: store });
+    const webViews = new WebViewService({ registry, queries });
+
+    for (const data of [
+      { title: "Zulu", route: "zulu", published: true },
+      { title: "Alpha", route: "alpha", published: true },
+      { title: "Middle", route: "../unsafe", published: true },
+      { title: "Bravo", route: "bravo", published: true }
+    ]) {
+      await documents.create({ actor: owner, doctype: "Blog Post", data });
+    }
+
+    await expect(webViews.listItems(guest, "Blog", { limit: 2 })).resolves.toMatchObject({
+      items: [
+        { route: "alpha", title: "Alpha" },
+        { route: "bravo", title: "Bravo" }
+      ],
+      hasMore: true,
+      nextOffset: 2
+    });
+    await expect(webViews.listItems(guest, "Blog", { limit: 2, offset: 2 })).resolves.toMatchObject({
+      items: [{ route: "zulu", title: "Zulu" }],
+      hasMore: false
+    });
+  });
+
   it("rejects Web View pagination that exceeds the bounded projection scan budget", async () => {
     const registry = createRegistry({
       doctypes: [BlogPost],

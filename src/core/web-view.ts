@@ -1,5 +1,6 @@
 import { FrameworkError } from "./errors.js";
-import { SYSTEM_MANAGER_ROLE, type Actor, type DocTypeDefinition, type FieldDefinition } from "./types.js";
+import { normalizeListOrder } from "./list-view.js";
+import { SYSTEM_MANAGER_ROLE, type Actor, type DocTypeDefinition, type FieldDefinition, type ListOrderDirection } from "./types.js";
 
 export interface WebViewFieldDefinition {
   readonly field: string;
@@ -18,6 +19,8 @@ export interface WebViewDefinition {
   readonly publishedField?: string;
   readonly fields?: readonly WebViewFieldDefinition[];
   readonly pageSize?: number;
+  readonly orderBy?: string;
+  readonly order?: ListOrderDirection;
 }
 
 export function defineWebView(definition: WebViewDefinition): WebViewDefinition {
@@ -41,6 +44,9 @@ export function assertWebViewDefinition(definition: WebViewDefinition): void {
     throw new FrameworkError("WEB_VIEW_INVALID", `Web view '${definition.name}' page size must be a positive integer`, {
       status: 400
     });
+  }
+  if (definition.orderBy !== undefined) {
+    assertWebViewIdentifier(definition.orderBy, `web view '${definition.name}' orderBy field`);
   }
   const seen = new Set<string>();
   for (const field of definition.fields ?? []) {
@@ -72,6 +78,7 @@ export function assertWebViewMatchesDocType(webView: WebViewDefinition, doctype:
       doctype.fields.find((field) => field.name === webView.publishedField)
     );
   }
+  normalizeListOrder(doctype, webView.orderBy, webView.order, { errorCode: "WEB_VIEW_INVALID" });
   for (const field of webView.fields ?? []) {
     assertDisplayField(webView, doctype, field.field, doctype.fields.find((candidate) => candidate.name === field.field));
   }

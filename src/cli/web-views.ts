@@ -28,6 +28,8 @@ interface WebViewResponse {
   readonly name?: string;
   readonly label?: string;
   readonly doctype?: string;
+  readonly orderBy?: string;
+  readonly order?: string;
   readonly fields?: readonly { readonly field?: string; readonly label?: string; readonly type?: string }[];
 }
 
@@ -131,9 +133,17 @@ function formatWebViewMetadata(baseUrl: string, metadata: WebViewMetadataRespons
     webViewLine({ ...view, ...(doctype === undefined ? {} : { doctype }) }),
     `Route field: ${metadata.routeField?.field ?? "(unknown)"}`,
     `Title field: ${metadata.titleField?.field ?? "(unknown)"}`,
+    `Order: ${webViewOrderLine(view)}`,
     ...fields.map((field) => `  - ${field.field ?? "(unknown)"} ${field.type ?? "(unknown)"}${field.label === undefined ? "" : ` - ${field.label}`}`),
     ""
   ].join("\n");
+}
+
+function webViewOrderLine(view: WebViewResponse): string {
+  if (view.orderBy === undefined && view.order === undefined) {
+    return "(default)";
+  }
+  return `${view.orderBy ?? "updatedAt"} ${view.order ?? "desc"}`;
 }
 
 function formatWebViewItems(baseUrl: string, result: WebViewItemsResponse): string {
