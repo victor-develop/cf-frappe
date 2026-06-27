@@ -1640,6 +1640,7 @@ export function renderCustomFieldAdmin(state: CustomFieldAdminState): string {
       <label class="field"><span>Fetch From</span><input name="fetchFrom" placeholder="link_field.source_field"></label>
       <label class="field"><span>Minimum</span><input name="min" type="number" step="any"></label>
       <label class="field"><span>Maximum</span><input name="max" type="number" step="any"></label>
+      <label class="field wide"><span>Mandatory Depends On JSON</span><textarea name="mandatoryDependsOn" rows="4"></textarea></label>
       <label class="field"><span>Default JSON</span><textarea name="defaultValue"></textarea></label>
     </div>
     <div class="choices">
@@ -1711,6 +1712,7 @@ export function renderFieldPropertyAdmin(state: FieldPropertyAdminState): string
       <label class="field"><span>Label</span><input name="label" value="${escapeHtml(overrides.label ?? "")}"></label>
       <label class="field"><span>Description</span><input name="description" value="${escapeHtml(overrides.description ?? "")}"></label>
       <label class="field"><span>Required</span><select name="required">${renderBooleanOverrideOptions(overrides.required)}</select></label>
+      <label class="field wide"><span>Mandatory Depends On JSON</span><textarea name="mandatoryDependsOn" rows="4">${escapeHtml(overrides.mandatoryDependsOn === undefined ? "" : JSON.stringify(overrides.mandatoryDependsOn))}</textarea></label>
       <label class="field"><span>Read Only</span><select name="readOnly">${renderBooleanOverrideOptions(overrides.readOnly)}</select></label>
       <label class="field"><span>Hidden</span><select name="hidden">${renderBooleanOverrideOptions(overrides.hidden)}</select></label>
       <label class="field"><span>No Copy</span><select name="noCopy">${renderBooleanOverrideOptions(overrides.noCopy)}</select></label>
@@ -2010,6 +2012,7 @@ function renderFieldPropertyOverrides(overrides: FieldPropertyOverrideState["fie
     overrides.label === undefined ? "" : `label: ${overrides.label}`,
     overrides.description === undefined ? "" : `description: ${overrides.description}`,
     overrides.required === undefined ? "" : `required: ${String(overrides.required)}`,
+    overrides.mandatoryDependsOn === undefined ? "" : `mandatory depends on: ${JSON.stringify(overrides.mandatoryDependsOn)}`,
     overrides.readOnly === undefined ? "" : `read only: ${String(overrides.readOnly)}`,
     overrides.hidden === undefined ? "" : `hidden: ${String(overrides.hidden)}`,
     overrides.noCopy === undefined ? "" : `no copy: ${String(overrides.noCopy)}`,
@@ -2105,6 +2108,7 @@ function renderCustomFieldCheckbox(name: string, label: string): string {
 function renderCustomFieldDetails(field: FieldDefinition): string {
   return [
     field.description ? `description: ${field.description}` : "",
+    field.mandatoryDependsOn ? `mandatory depends on: ${JSON.stringify(field.mandatoryDependsOn)}` : "",
     field.options && field.options.length > 0 ? `options: ${field.options.join(", ")}` : "",
     field.linkTo ? `link: ${field.linkTo}` : "",
     field.tableOf ? `table: ${field.tableOf}` : "",
@@ -2118,6 +2122,7 @@ function renderCustomFieldDetails(field: FieldDefinition): string {
 function renderCustomFieldFlags(field: FieldDefinition): string {
   return [
     field.required ? "required" : "",
+    field.mandatoryDependsOn ? "mandatory depends on" : "",
     field.readOnly ? "read only" : "",
     field.hidden ? "hidden" : "",
     field.unique ? "unique" : "",

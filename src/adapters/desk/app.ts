@@ -5147,6 +5147,7 @@ async function parseDeskCustomField(request: Request): Promise<ParsedDeskCustomF
   const tableOf = stringSearchParamValue(form, "tableOf");
   const min = optionalNumberSearchParamValue(form, "min", "Minimum");
   const max = optionalNumberSearchParamValue(form, "max", "Maximum");
+  const mandatoryDependsOn = mandatoryDependsOnFormValue(form);
   const defaultValue = optionalJsonSearchParamValue(form, "defaultValue", "Default value");
   return {
     doctype,
@@ -5156,6 +5157,7 @@ async function parseDeskCustomField(request: Request): Promise<ParsedDeskCustomF
       ...(label === undefined ? {} : { label }),
       ...(description === undefined ? {} : { description }),
       ...(form.has("required") ? { required: true } : {}),
+      ...(mandatoryDependsOn === undefined ? {} : { mandatoryDependsOn }),
       ...(form.has("readOnly") ? { readOnly: true } : {}),
       ...(form.has("hidden") ? { hidden: true } : {}),
       ...(form.has("unique") ? { unique: true } : {}),
@@ -5189,11 +5191,13 @@ async function parseDeskFieldPropertyOverride(request: Request): Promise<ParsedD
   const form = await readUrlEncodedDeskForm(request);
   const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
   const options = commaListFormValue(form.get("options"));
+  const mandatoryDependsOn = mandatoryDependsOnFormValue(form);
   const defaultValue = optionalJsonSearchParamValue(form, "defaultValue", "Default value");
   const overrides = {
     ...optionalStringProperty(form, "label", "label"),
     ...optionalStringProperty(form, "description", "description"),
     ...optionalBooleanProperty(form, "required", "required", "Required"),
+    ...(mandatoryDependsOn === undefined ? {} : { mandatoryDependsOn }),
     ...optionalBooleanProperty(form, "readOnly", "readOnly", "Read only"),
     ...optionalBooleanProperty(form, "hidden", "hidden", "Hidden"),
     ...optionalBooleanProperty(form, "noCopy", "noCopy", "No copy"),
@@ -5438,6 +5442,17 @@ function assignmentRuleConditionFormValue(form: URLSearchParams): ListFilterExpr
     return value as unknown as ListFilterExpression;
   }
   throw new FrameworkError("BAD_REQUEST", "Assignment rule condition must be a JSON object", { status: 400 });
+}
+
+function mandatoryDependsOnFormValue(form: URLSearchParams): ListFilterExpression | undefined {
+  const value = optionalJsonSearchParamValue(form, "mandatoryDependsOn", "Mandatory depends on");
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as unknown as ListFilterExpression;
+  }
+  throw new FrameworkError("BAD_REQUEST", "Mandatory depends on must be a JSON object", { status: 400 });
 }
 
 function assignmentRuleAssigneesFormValue(

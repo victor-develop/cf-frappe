@@ -2,6 +2,7 @@ import type {
   Actor,
   DocTypeDefinition,
   DocumentData,
+  DocStatus,
   FieldDefinition,
   JsonValue,
   MutableDocumentData,
@@ -10,7 +11,12 @@ import type {
 import { normalizeAssignmentRules } from "./assignment-rules.js";
 import { FrameworkError } from "./errors.js";
 import { assertFormViewDefinition } from "./form-view.js";
-import { assertListViewDefinition } from "./list-view.js";
+import {
+  assertListViewDefinition,
+  freezeListFilterExpression,
+  matchesListFilterExpression,
+  normalizeListFilterExpression
+} from "./list-view.js";
 
 export interface ValidationOptions {
   readonly partial?: boolean;
@@ -32,6 +38,7 @@ export function defineDocType<TData extends DocumentData>(
     assertTableFieldDefinition(definition, field);
     assertUniqueFieldDefinition(definition, field);
     assertFetchFieldDefinition(definition, field);
+    assertMandatoryDependsOnDefinition(definition, field);
     seen.add(field.name);
   }
   assertNamingStrategyDefinition(definition);
@@ -40,9 +47,10 @@ export function defineDocType<TData extends DocumentData>(
   const formView = definition.formView ? freezeFormView(definition.formView) : undefined;
   const listView = definition.listView ? freezeListView(definition.listView) : undefined;
   const assignmentRules = normalizeAssignmentRules(definition, definition.assignmentRules);
+  const fields = Object.freeze(definition.fields.map((field) => freezeFieldDefinition(definition, field)));
   return Object.freeze({
     ...definition,
-    fields: Object.freeze([...definition.fields]),
+    fields,
     ...(formView ? { formView } : {}),
     ...(listView ? { listView } : {}),
     ...(assignmentRules ? { assignmentRules } : {})
@@ -80,6 +88,7 @@ export function validateDocumentData(
 ): readonly ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const fields = new Map(definition.fields.map((field) => [field.name, field]));
+  const validationDocument = documentSnapshotForValidation(definition, input, options);
 
   if (!definition.allowUnknownFields) {
     for (const key of Object.keys(input)) {
@@ -95,13 +104,24 @@ export function validateDocumentData(
 
   for (const field of definition.fields) {
     const value = input[field.name];
+    const finalValue = validationDocument.data[field.name];
     const isOmitted = value === undefined;
     const isMissing =
       isOmitted ||
       value === null ||
       value === "" ||
       (field.type === "table" && Array.isArray(value) && value.length === 0);
-    if (field.required && isMissing && (!options.partial || !isOmitted)) {
+    const isFinalMissing =
+      finalValue === undefined ||
+      finalValue === null ||
+      finalValue === "" ||
+      (field.type === "table" && Array.isArray(finalValue) && finalValue.length === 0);
+    const mandatoryByDependency = field.mandatoryDependsOn !== undefined &&
+      matchesListFilterExpression(validationDocument, field.mandatoryDependsOn);
+    if (
+      (field.required && isMissing && (!options.partial || !isOmitted)) ||
+      (mandatoryByDependency && isFinalMissing)
+    ) {
       issues.push({
         field: field.name,
         code: "required",
@@ -345,6 +365,44 @@ function assertFetchFieldDefinition(doctype: DocTypeDefinition, field: FieldDefi
       { status: 400 }
     );
   }
+}
+
+function assertMandatoryDependsOnDefinition(doctype: DocTypeDefinition, field: FieldDefinition): void {
+  if (field.mandatoryDependsOn === undefined) {
+    return;
+  }
+  normalizeListFilterExpression(doctype, field.mandatoryDependsOn, { errorCode: "DOCTYPE_FIELD_INVALID" });
+}
+
+function freezeFieldDefinition(doctype: DocTypeDefinition, field: FieldDefinition): FieldDefinition {
+  return Object.freeze({
+    ...field,
+    ...(field.options === undefined ? {} : { options: Object.freeze([...field.options]) }),
+    ...(field.mandatoryDependsOn === undefined
+      ? {}
+      : {
+          mandatoryDependsOn: freezeListFilterExpression(
+            normalizeListFilterExpression(doctype, field.mandatoryDependsOn, { errorCode: "DOCTYPE_FIELD_INVALID" })
+          )
+        })
+  });
+}
+
+function documentSnapshotForValidation(
+  doctype: DocTypeDefinition,
+  input: MutableDocumentData,
+  options: ValidationOptions
+) {
+  return {
+    tenantId: "",
+    doctype: doctype.name,
+    name: "",
+    version: 0,
+    docstatus: "draft" as DocStatus,
+    data: options.existing ? compactData({ ...options.existing, ...input }) : compactData(input),
+    createdAt: "",
+    updatedAt: ""
+  };
 }
 
 function isJsonObject(value: JsonValue): value is Record<string, JsonValue> {

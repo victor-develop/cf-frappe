@@ -4143,6 +4143,7 @@ describe("Desk app", () => {
     expect(emptyHtml).toContain("Custom Fields");
     expect(emptyHtml).toContain('name="doctype"');
     expect(emptyHtml).toContain('name="description"');
+    expect(emptyHtml).toContain('name="mandatoryDependsOn"');
     expect(emptyHtml).toContain('name="fetchFrom"');
     expect(emptyHtml).toContain('name="fetchIfEmpty"');
     expect(emptyHtml).toContain('name="defaultValue"');
@@ -4156,6 +4157,7 @@ describe("Desk app", () => {
         label: "Reviewed",
         description: "Visible after quality review.",
         type: "boolean",
+        mandatoryDependsOn: JSON.stringify({ field: "priority", value: "High" }),
         unique: "1",
         noCopy: "1",
         allowOnSubmit: "1",
@@ -4176,6 +4178,7 @@ describe("Desk app", () => {
             label: "Reviewed",
             description: "Visible after quality review.",
             type: "boolean",
+            mandatoryDependsOn: { field: "priority", value: "High" },
             unique: true,
             noCopy: true,
             allowOnSubmit: true,
@@ -4192,6 +4195,7 @@ describe("Desk app", () => {
     expect(currentHtml).toContain("reviewed");
     expect(currentHtml).toContain("Reviewed");
     expect(currentHtml).toContain("description: Visible after quality review.");
+    expect(currentHtml).toContain("mandatory depends on");
     expect(currentHtml).toContain("unique");
     expect(currentHtml).toContain("no copy");
     expect(currentHtml).toContain("allow on submit");
@@ -5101,6 +5105,7 @@ describe("Desk app", () => {
     expect(emptyHtml).toContain("Field Properties");
     expect(emptyHtml).toContain('name="field"');
     expect(emptyHtml).toContain('name="description"');
+    expect(emptyHtml).toContain('name="mandatoryDependsOn"');
     expect(emptyHtml).toContain('name="fetchFrom"');
     expect(emptyHtml).toContain('name="fetchIfEmpty"');
     expect(emptyHtml).toContain("No field property overrides configured.");
@@ -5112,6 +5117,7 @@ describe("Desk app", () => {
         fieldName: "priority",
         label: "Urgency",
         description: "Pick the operational urgency.",
+        mandatoryDependsOn: JSON.stringify({ field: "title", operator: "is", value: "set" }),
         noCopy: "true",
         allowOnSubmit: "true",
         inListFilter: "true",
@@ -5131,6 +5137,7 @@ describe("Desk app", () => {
           overrides: {
             label: "Urgency",
             description: "Pick the operational urgency.",
+            mandatoryDependsOn: { field: "title", operator: "is", value: "set" },
             noCopy: true,
             allowOnSubmit: true,
             inListFilter: true,
@@ -5145,6 +5152,7 @@ describe("Desk app", () => {
     const currentHtml = await current.text();
     expect(currentHtml).toContain("Urgency");
     expect(currentHtml).toContain("description: Pick the operational urgency.");
+    expect(currentHtml).toContain("mandatory depends on");
     expect(currentHtml).toContain("no copy: true");
     expect(currentHtml).toContain("allow on submit: true");
     expect(currentHtml).toContain("options: Low, High");

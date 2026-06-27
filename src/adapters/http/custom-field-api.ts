@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { CustomFieldService } from "../../application/custom-field-service.js";
 import { badRequest } from "../../core/errors.js";
-import { FIELD_TYPES, type FieldDefinition, type FieldType, type JsonValue } from "../../core/types.js";
+import { FIELD_TYPES, type FieldDefinition, type FieldType, type JsonValue, type ListFilterExpression } from "../../core/types.js";
 import type { ActorResolver } from "./actor.js";
 import { readJsonObject, requestMetadata } from "./request.js";
 
@@ -67,6 +67,7 @@ function fieldValue(value: JsonValue | undefined): FieldDefinition {
     ...optionalString(value.label, "field.label", "label"),
     ...optionalString(value.description, "field.description", "description"),
     ...optionalBoolean(value.required, "field.required", "required"),
+    ...optionalListFilterExpression(value.mandatoryDependsOn, "field.mandatoryDependsOn", "mandatoryDependsOn"),
     ...optionalBoolean(value.readOnly, "field.readOnly", "readOnly"),
     ...optionalBoolean(value.hidden, "field.hidden", "hidden"),
     ...optionalBoolean(value.unique, "field.unique", "unique"),
@@ -91,6 +92,20 @@ function fieldTypeValue(value: JsonValue | undefined): FieldType {
     throw badRequest("field.type is invalid");
   }
   return value as FieldType;
+}
+
+function optionalListFilterExpression<TKey extends string>(
+  value: JsonValue | undefined,
+  field: string,
+  key: TKey
+): { readonly [K in TKey]?: ListFilterExpression } {
+  if (value === undefined) {
+    return {};
+  }
+  if (!isRecord(value)) {
+    throw badRequest(`${field} must be an object`);
+  }
+  return { [key]: value } as unknown as { readonly [K in TKey]: ListFilterExpression };
 }
 
 function requiredString(value: JsonValue | undefined, field: string): string {

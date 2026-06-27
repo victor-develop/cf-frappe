@@ -37,6 +37,7 @@ export interface FieldDefinition {
   readonly description?: string;
   readonly type: FieldType;
   readonly required?: boolean;
+  readonly mandatoryDependsOn?: ListFilterExpression;
   readonly readOnly?: boolean;
   readonly hidden?: boolean;
   readonly unique?: boolean;
@@ -64,6 +65,7 @@ export interface FieldPropertyOverrides {
   readonly label?: string;
   readonly description?: string;
   readonly required?: boolean;
+  readonly mandatoryDependsOn?: ListFilterExpression;
   readonly readOnly?: boolean;
   readonly hidden?: boolean;
   readonly noCopy?: boolean;

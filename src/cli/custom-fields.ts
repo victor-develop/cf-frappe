@@ -45,6 +45,7 @@ interface CustomFieldResponse {
   readonly description?: string;
   readonly type?: string;
   readonly required?: boolean;
+  readonly mandatoryDependsOn?: unknown;
   readonly readOnly?: boolean;
   readonly hidden?: boolean;
   readonly unique?: boolean;
@@ -178,6 +179,7 @@ function fieldLine(entry: CustomFieldEntryResponse): string {
 function fieldFlags(field: CustomFieldResponse): readonly string[] {
   return [
     ...(field.required ? ["required"] : []),
+    ...(field.mandatoryDependsOn ? ["mandatoryDependsOn"] : []),
     ...(field.readOnly ? ["readOnly"] : []),
     ...(field.hidden ? ["hidden"] : []),
     ...(field.unique ? ["unique"] : []),

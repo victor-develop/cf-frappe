@@ -160,6 +160,49 @@ describe("schema", () => {
     ).toThrow(FrameworkError);
   });
 
+  it("validates conditional mandatory fields from normalized field expressions", () => {
+    const Task = defineDocType({
+      name: "Task",
+      fields: [
+        { name: "priority", type: "select", options: ["Low", "High"] },
+        {
+          name: "escalation_reason",
+          type: "text",
+          mandatoryDependsOn: { field: "priority", value: "High" }
+        }
+      ]
+    });
+
+    expect(validateDocumentData(Task, { priority: "Low" })).toEqual([]);
+    expect(validateDocumentData(Task, { priority: "High" })).toEqual([
+      {
+        field: "escalation_reason",
+        code: "required",
+        message: "Field 'escalation_reason' is required"
+      }
+    ]);
+    expect(
+      validateDocumentData(
+        Task,
+        { priority: "High" },
+        { partial: true, existing: { priority: "Low" } }
+      )
+    ).toEqual([
+      {
+        field: "escalation_reason",
+        code: "required",
+        message: "Field 'escalation_reason' is required"
+      }
+    ]);
+    expect(Object.isFrozen(Task.fields[1]?.mandatoryDependsOn)).toBe(true);
+    expect(() =>
+      defineDocType({
+        name: "Bad Mandatory",
+        fields: [{ name: "reason", type: "text", mandatoryDependsOn: { field: "missing", value: true } }]
+      })
+    ).toThrow(FrameworkError);
+  });
+
   it("validates table rows against child DocType metadata", () => {
     const InvoiceItem = defineDocType({
       name: "Invoice Item",

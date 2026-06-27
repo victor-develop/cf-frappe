@@ -36,6 +36,7 @@ describe("field property api", () => {
         overrides: {
           label: "Urgency",
           description: "Pick the operational urgency.",
+          mandatoryDependsOn: { field: "title", operator: "is", value: "set" },
           noCopy: true,
           allowOnSubmit: true,
           options: ["Low", "High"],
@@ -54,6 +55,7 @@ describe("field property api", () => {
             overrides: {
               label: "Urgency",
               description: "Pick the operational urgency.",
+              mandatoryDependsOn: { field: "title", operator: "is", value: "set" },
               noCopy: true,
               allowOnSubmit: true,
               options: ["Low", "High"]
@@ -72,6 +74,7 @@ describe("field property api", () => {
             name: "priority",
             label: "Urgency",
             description: "Pick the operational urgency.",
+            mandatoryDependsOn: { field: "title", operator: "is", value: "set" },
             noCopy: true,
             allowOnSubmit: true,
             options: ["Low", "High"]

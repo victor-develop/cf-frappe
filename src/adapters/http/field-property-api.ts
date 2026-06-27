@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { FieldPropertyService } from "../../application/field-property-service.js";
 import { badRequest } from "../../core/errors.js";
-import type { FieldPropertyOverrides, JsonValue } from "../../core/types.js";
+import type { FieldPropertyOverrides, JsonValue, ListFilterExpression } from "../../core/types.js";
 import type { ActorResolver } from "./actor.js";
 import { readJsonObject, requestMetadata } from "./request.js";
 
@@ -65,6 +65,7 @@ function overridesValue(value: JsonValue | undefined): FieldPropertyOverrides {
     ...optionalString(value.label, "overrides.label", "label"),
     ...optionalString(value.description, "overrides.description", "description"),
     ...optionalBoolean(value.required, "overrides.required", "required"),
+    ...optionalListFilterExpression(value.mandatoryDependsOn, "overrides.mandatoryDependsOn", "mandatoryDependsOn"),
     ...optionalBoolean(value.readOnly, "overrides.readOnly", "readOnly"),
     ...optionalBoolean(value.hidden, "overrides.hidden", "hidden"),
     ...optionalBoolean(value.noCopy, "overrides.noCopy", "noCopy"),
@@ -122,6 +123,20 @@ function optionalStringArray<TKey extends string>(
     throw badRequest(`${field} must be an array of strings`);
   }
   return { [key]: value } as unknown as { readonly [K in TKey]: readonly string[] };
+}
+
+function optionalListFilterExpression<TKey extends string>(
+  value: JsonValue | undefined,
+  field: string,
+  key: TKey
+): { readonly [K in TKey]?: ListFilterExpression } {
+  if (value === undefined) {
+    return {};
+  }
+  if (!isRecord(value)) {
+    throw badRequest(`${field} must be an object`);
+  }
+  return { [key]: value } as unknown as { readonly [K in TKey]: ListFilterExpression };
 }
 
 function optionalNumber<TKey extends string>(

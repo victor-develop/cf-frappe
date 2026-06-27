@@ -257,6 +257,71 @@ describe("DocumentService", () => {
     ]);
   });
 
+  it("enforces conditional mandatory fields through document commands", async () => {
+    const Escalation = defineDocType({
+      name: "Escalation",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "priority", type: "select", options: ["Low", "High"], defaultValue: "Low" },
+        {
+          name: "escalation_reason",
+          type: "text",
+          mandatoryDependsOn: { field: "priority", value: "High" }
+        }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry: createRegistry({ doctypes: [Escalation] }),
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["esc-1", "esc-2", "esc-3"])
+    });
+
+    await expect(
+      documents.create({
+        actor: owner,
+        doctype: "Escalation",
+        data: { title: "Missing reason", priority: "High" }
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "escalation_reason", code: "required" })]
+    });
+
+    await documents.create({
+      actor: owner,
+      doctype: "Escalation",
+      data: { title: "Draft escalation", priority: "Low" }
+    });
+    await expect(
+      documents.update({
+        actor: owner,
+        doctype: "Escalation",
+        name: "Draft escalation",
+        patch: { priority: "High" },
+        expectedVersion: 1
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "escalation_reason", code: "required" })]
+    });
+    await expect(
+      documents.update({
+        actor: owner,
+        doctype: "Escalation",
+        name: "Draft escalation",
+        patch: { priority: "High", escalation_reason: "Customer impact" },
+        expectedVersion: 1
+      })
+    ).resolves.toMatchObject({
+      version: 2,
+      data: { priority: "High", escalation_reason: "Customer impact" }
+    });
+  });
+
   it("uses the event stream, not stale projection state, as the write authority", async () => {
     const { documents, projections } = createServices(["e1", "e2"]);
     await documents.create({ actor: owner, doctype: "Note", data: data() });

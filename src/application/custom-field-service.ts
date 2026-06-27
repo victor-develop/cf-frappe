@@ -363,6 +363,7 @@ function normalizeField(field: FieldDefinition): PersistedFieldDefinition {
       ? {}
       : { description: field.description.trim() }),
     ...(field.required === undefined ? {} : { required: field.required }),
+    ...(field.mandatoryDependsOn === undefined ? {} : { mandatoryDependsOn: field.mandatoryDependsOn }),
     ...(field.readOnly === undefined ? {} : { readOnly: field.readOnly }),
     ...(field.hidden === undefined ? {} : { hidden: field.hidden }),
     ...(field.unique === undefined ? {} : { unique: field.unique }),
