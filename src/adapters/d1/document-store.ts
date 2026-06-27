@@ -9,6 +9,7 @@ import type { AuditDocumentEventQuery, AuditEventQuery, AuditEventStore } from "
 import type { DocumentCommit, DocumentStore, ReadStreamOptions } from "../../ports/document-store.js";
 import { auditDocumentEventQuery, auditEventQuery } from "./audit-event-query.js";
 import { isD1ConstraintError } from "./constraint-error.js";
+import { insertEventStatements, sequenceEvents } from "./event-writer.js";
 import { eventStreamQuery } from "./read-stream-query.js";
 import { eventFromRow, type EventRow } from "./serde.js";
 
@@ -26,34 +27,11 @@ export class D1DocumentStore implements DocumentStore, AuditEventStore {
       throw conflict(`Expected stream '${stream}' at version ${expectedVersion}, found ${current}`);
     }
 
-    const saved = events.map((event, index) => ({
-      ...event,
-      sequence: expectedVersion + index + 1
-    }));
+    const saved = sequenceEvents(expectedVersion, events);
     const snapshot = project(saved);
     try {
       await this.db.batch([
-        ...saved.map((event) =>
-          this.db
-            .prepare(
-              `INSERT INTO cf_frappe_events
-               (id, tenant_id, stream, sequence, type, doctype, document_name, actor_id, occurred_at, payload_json, metadata_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-            )
-            .bind(
-              event.id,
-              event.tenantId,
-              event.stream,
-              event.sequence,
-              event.type,
-              event.doctype,
-              event.documentName,
-              event.actorId,
-              event.occurredAt,
-              JSON.stringify(event.payload),
-              JSON.stringify(event.metadata)
-            )
-        ),
+        ...insertEventStatements(this.db, saved),
         this.db
           .prepare(
             `INSERT INTO cf_frappe_documents

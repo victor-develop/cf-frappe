@@ -34,3 +34,8 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Deduplicate D1 event append serialization behind one shared event writer.
 - Convert after-commit effects to durable event/outbox consumers with retry and idempotency tests.
 - Continue raising test parity through real adapter and cross-surface contract coverage.
+
+## Post-Review Progress
+
+- Added a shared D1 event writer for event sequencing and `cf_frappe_events` insert serialization, now used by both `D1EventStore` and `D1DocumentStore`.
+- Added focused adapter tests for the shared writer so the DRY fix is covered directly, while existing D1 document/event store tests continue to cover behavior through the public ports.
