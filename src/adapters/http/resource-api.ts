@@ -327,6 +327,7 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       "/",
       createWebViewApi({
         webViews: options.webViews,
+        ...(options.websiteSettings === undefined ? {} : { websiteSettings: options.websiteSettings }),
         actor: resolveActor
       })
     );

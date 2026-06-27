@@ -2,12 +2,17 @@ import {
   createRegistry,
   createResourceApi,
   defineDocType,
+  defineWebsiteSettings,
+  defineWebsiteTheme,
   defineWebView,
   DocumentService,
   fixedClock,
   InMemoryDocumentStore,
   QueryService,
   unsafeHeaderActorResolver,
+  WebPageService,
+  WebsiteSettingsService,
+  WebsiteThemeService,
   WebViewService
 } from "../../src";
 import { now, owner } from "../helpers";
@@ -112,5 +117,182 @@ describe("web view api", () => {
 
     const draft = await app.request("/api/web-view/Articles/draft");
     expect(draft.status).toBe(404);
+  });
+
+  it("applies the active Website Theme to public Web View pages", async () => {
+    const registry = createRegistry({
+      doctypes: [articleDocType],
+      webViews: [
+        defineWebView({
+          name: "Articles",
+          label: "Articles",
+          description: "Published articles",
+          doctype: "Article",
+          routeField: "route",
+          titleField: "title",
+          publishedField: "published",
+          fields: [{ field: "body", label: "Body" }]
+        })
+      ],
+      websiteThemes: [
+        defineWebsiteTheme({
+          name: "Starter",
+          fontFamily: "Inter, system-ui",
+          tokens: {
+            primaryColor: "#0f766e",
+            backgroundColor: "#f8fafc",
+            textColor: "#0f172a"
+          }
+        })
+      ],
+      websiteSettings: defineWebsiteSettings({
+        title: "Starter Site",
+        theme: "Starter"
+      })
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+    const queries = new QueryService({ registry, projections: store });
+    const webPages = new WebPageService({ registry });
+    const app = createResourceApi({
+      registry,
+      documents,
+      queries,
+      webViews: new WebViewService({ registry, queries }),
+      webPages,
+      websiteSettings: new WebsiteSettingsService({
+        registry,
+        webPages,
+        websiteThemes: new WebsiteThemeService({ registry })
+      }),
+      websiteThemes: new WebsiteThemeService({ registry }),
+      actor: unsafeHeaderActorResolver
+    });
+
+    await documents.create({
+      actor: defaultOwner,
+      doctype: "Article",
+      data: { title: "Launch", route: "launch", published: true, body: "Hello" }
+    });
+
+    const listPage = await app.request("/web/Articles");
+    expect(listPage.status).toBe(200);
+    const listHtml = await listPage.text();
+    expect(listHtml).toContain("--cf-frappe-primary: #0f766e");
+    expect(listHtml).toContain("--cf-frappe-background: #f8fafc");
+    expect(listHtml).toContain("--cf-frappe-font-family: Inter, system-ui");
+
+    const itemPage = await app.request("/web/Articles/launch");
+    expect(itemPage.status).toBe(200);
+    const itemHtml = await itemPage.text();
+    expect(itemHtml).toContain("--cf-frappe-primary: #0f766e");
+    expect(itemHtml).toContain("--cf-frappe-background: #f8fafc");
+    expect(itemHtml).toContain("--cf-frappe-font-family: Inter, system-ui");
+  });
+
+  it("falls back to default Web View CSS when Website Settings cannot be read", async () => {
+    for (const websiteSettings of [
+      defineWebsiteSettings({
+        title: "Draft Site",
+        theme: "Starter",
+        published: false
+      }),
+      defineWebsiteSettings({
+        title: "Members Site",
+        theme: "Starter",
+        roles: ["User"]
+      })
+    ]) {
+      const registry = createRegistry({
+        doctypes: [articleDocType],
+        webViews: [
+          defineWebView({
+            name: "Articles",
+            label: "Articles",
+            doctype: "Article",
+            routeField: "route",
+            titleField: "title",
+            publishedField: "published",
+            fields: [{ field: "body", label: "Body" }]
+          })
+        ],
+        websiteThemes: [defineWebsiteTheme({ name: "Starter", tokens: { primaryColor: "#0f766e" } })],
+        websiteSettings
+      });
+      const store = new InMemoryDocumentStore();
+      const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+      const queries = new QueryService({ registry, projections: store });
+      const webPages = new WebPageService({ registry });
+      const app = createResourceApi({
+        registry,
+        documents,
+        queries,
+        webViews: new WebViewService({ registry, queries }),
+        webPages,
+        websiteSettings: new WebsiteSettingsService({
+          registry,
+          webPages,
+          websiteThemes: new WebsiteThemeService({ registry })
+        }),
+        websiteThemes: new WebsiteThemeService({ registry }),
+        actor: unsafeHeaderActorResolver
+      });
+
+      await documents.create({
+        actor: defaultOwner,
+        doctype: "Article",
+        data: { title: "Launch", route: "launch", published: true, body: "Hello" }
+      });
+
+      const page = await app.request("/web/Articles");
+      expect(page.status).toBe(200);
+      const html = await page.text();
+      expect(html).toContain("--cf-frappe-primary: #2563eb");
+      expect(html).not.toContain("--cf-frappe-primary: #0f766e");
+    }
+  });
+
+  it("renders public Web View pages with default CSS when Website Settings are absent", async () => {
+    const registry = createRegistry({
+      doctypes: [articleDocType],
+      webViews: [
+        defineWebView({
+          name: "Articles",
+          label: "Articles",
+          doctype: "Article",
+          routeField: "route",
+          titleField: "title",
+          publishedField: "published",
+          fields: [{ field: "body", label: "Body" }]
+        })
+      ]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+    const queries = new QueryService({ registry, projections: store });
+    const webPages = new WebPageService({ registry });
+    const app = createResourceApi({
+      registry,
+      documents,
+      queries,
+      webViews: new WebViewService({ registry, queries }),
+      webPages,
+      websiteSettings: new WebsiteSettingsService({ registry, webPages }),
+      actor: unsafeHeaderActorResolver
+    });
+
+    await documents.create({
+      actor: defaultOwner,
+      doctype: "Article",
+      data: { title: "Launch", route: "launch", published: true, body: "Hello" }
+    });
+
+    const listPage = await app.request("/web/Articles");
+    expect(listPage.status).toBe(200);
+    await expect(listPage.text()).resolves.toContain("--cf-frappe-primary: #2563eb");
+
+    const itemPage = await app.request("/web/Articles/launch");
+    expect(itemPage.status).toBe(200);
+    await expect(itemPage.text()).resolves.toContain("--cf-frappe-primary: #2563eb");
   });
 });
