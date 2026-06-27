@@ -8,7 +8,9 @@ import {
   type WebsiteNavigationItemDefinition,
   type WebsiteSettingsDefinition
 } from "../core/website-settings.js";
+import type { WebsiteThemeDefinition } from "../core/website-theme.js";
 import type { WebPageService } from "./web-page-service.js";
+import type { WebsiteThemeService } from "./website-theme-service.js";
 
 export interface WebsiteNavigationItem {
   readonly name: string;
@@ -20,21 +22,25 @@ export interface ResolvedWebsiteSettings {
   readonly title: string;
   readonly description?: string;
   readonly homePageRoute?: string;
+  readonly theme?: WebsiteThemeDefinition;
   readonly navItems: readonly WebsiteNavigationItem[];
 }
 
 export interface WebsiteSettingsServiceOptions {
   readonly registry: ModelRegistry;
   readonly webPages: Pick<WebPageService, "getWebPageByRoute">;
+  readonly websiteThemes?: Pick<WebsiteThemeService, "getWebsiteTheme">;
 }
 
 export class WebsiteSettingsService {
   private readonly registry: ModelRegistry;
   private readonly webPages: Pick<WebPageService, "getWebPageByRoute">;
+  private readonly websiteThemes: Pick<WebsiteThemeService, "getWebsiteTheme"> | undefined;
 
   constructor(options: WebsiteSettingsServiceOptions) {
     this.registry = options.registry;
     this.webPages = options.webPages;
+    this.websiteThemes = options.websiteThemes;
   }
 
   getWebsiteSettings(actor: Actor): ResolvedWebsiteSettings {
@@ -45,6 +51,9 @@ export class WebsiteSettingsService {
       ...(settings.homePageRoute !== undefined && this.canReadPageRoute(actor, settings.homePageRoute)
         ? { homePageRoute: settings.homePageRoute }
         : {}),
+      ...(settings.theme === undefined || this.websiteThemes === undefined
+        ? {}
+        : { theme: this.websiteThemes.getWebsiteTheme(settings.theme) }),
       navItems: (settings.navItems ?? []).flatMap((item) => this.resolveNavigationItem(actor, item))
     };
   }

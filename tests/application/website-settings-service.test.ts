@@ -1,4 +1,12 @@
-import { createRegistry, defineWebPage, defineWebsiteSettings, WebPageService, WebsiteSettingsService } from "../../src";
+import {
+  createRegistry,
+  defineWebPage,
+  defineWebsiteSettings,
+  defineWebsiteTheme,
+  WebPageService,
+  WebsiteSettingsService,
+  WebsiteThemeService
+} from "../../src";
 import { guest, owner } from "../helpers";
 
 describe("WebsiteSettingsService", () => {
@@ -19,10 +27,12 @@ describe("WebsiteSettingsService", () => {
           sections: [{ body: "Private" }]
         })
       ],
+      websiteThemes: [defineWebsiteTheme({ name: "Starter Theme", tokens: { primaryColor: "#2563eb" } })],
       websiteSettings: defineWebsiteSettings({
         title: "Starter Site",
         description: "Cloudflare-native starter",
         homePageRoute: "about",
+        theme: "Starter Theme",
         navItems: [
           { name: "about", label: "About", pageRoute: "about" },
           { name: "members", label: "Members", pageRoute: "members" },
@@ -31,13 +41,15 @@ describe("WebsiteSettingsService", () => {
       })
     });
     const webPages = new WebPageService({ registry });
-    const website = new WebsiteSettingsService({ registry, webPages });
+    const websiteThemes = new WebsiteThemeService({ registry });
+    const website = new WebsiteSettingsService({ registry, webPages, websiteThemes });
 
     expect(website.getHomePageRoute(guest)).toBe("about");
     expect(website.getWebsiteSettings(guest)).toEqual({
       title: "Starter Site",
       description: "Cloudflare-native starter",
       homePageRoute: "about",
+      theme: { name: "Starter Theme", tokens: { primaryColor: "#2563eb" } },
       navItems: [
         { name: "about", label: "About", href: "/page/about" },
         { name: "docs", label: "Docs", href: "https://example.com/docs" }

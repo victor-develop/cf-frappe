@@ -31,6 +31,7 @@ import {
   defineWebsiteSettings,
   type WebsiteSettingsDefinition
 } from "./website-settings.js";
+import { assertWebsiteThemeDefinition, defineWebsiteTheme, type WebsiteThemeDefinition } from "./website-theme.js";
 import { assertWorkspaceDefinition, defineWorkspace, type WorkspaceDefinition } from "./workspace.js";
 import type {
   DocTypeDefinition,
@@ -74,6 +75,7 @@ export interface RegistryOptions {
   readonly webPages?: readonly WebPageDefinition[];
   readonly webViews?: readonly WebViewDefinition[];
   readonly websiteSettings?: WebsiteSettingsDefinition | readonly WebsiteSettingsDefinition[];
+  readonly websiteThemes?: readonly WebsiteThemeDefinition[];
   readonly workspaces?: readonly WorkspaceDefinition[];
   readonly clientScripts?: readonly ClientScriptDefinition[];
   readonly dataPatches?: readonly DataPatchDefinition[];
@@ -93,6 +95,7 @@ export class ModelRegistry {
   private readonly webPages = new Map<string, WebPageDefinition>();
   private readonly webViews = new Map<string, WebViewDefinition>();
   private websiteSettings: WebsiteSettingsDefinition | undefined;
+  private readonly websiteThemes = new Map<string, WebsiteThemeDefinition>();
   private readonly workspaces = new Map<string, WorkspaceDefinition>();
   private readonly clientScripts = new Map<string, ClientScriptDefinition>();
   private readonly dataPatches = new Map<string, DataPatchDefinition>();
@@ -129,6 +132,9 @@ export class ModelRegistry {
     }
     for (const webView of options.webViews ?? []) {
       this.registerWebView(webView);
+    }
+    for (const websiteTheme of options.websiteThemes ?? []) {
+      this.registerWebsiteTheme(websiteTheme);
     }
     for (const websiteSettings of websiteSettingsDefinitions(options.websiteSettings)) {
       this.registerWebsiteSettings(websiteSettings);
@@ -384,6 +390,17 @@ export class ModelRegistry {
     this.websiteSettings = definition;
   }
 
+  registerWebsiteTheme(theme: WebsiteThemeDefinition): void {
+    const definition = defineWebsiteTheme(theme);
+    if (this.websiteThemes.has(definition.name)) {
+      throw new FrameworkError("WEBSITE_THEME_DUPLICATE", `Website theme '${definition.name}' is already registered`, {
+        status: 409
+      });
+    }
+    assertWebsiteThemeDefinition(definition);
+    this.websiteThemes.set(definition.name, definition);
+  }
+
   registerWorkspace(workspace: WorkspaceDefinition): void {
     const definition = defineWorkspace(workspace);
     if (this.workspaces.has(definition.name)) {
@@ -532,6 +549,20 @@ export class ModelRegistry {
       });
     }
     return this.websiteSettings;
+  }
+
+  getWebsiteTheme(themeName: string): WebsiteThemeDefinition {
+    const definition = this.websiteThemes.get(themeName);
+    if (definition === undefined) {
+      throw new FrameworkError("WEBSITE_THEME_NOT_FOUND", `Website theme '${themeName}' is not registered`, {
+        status: 404
+      });
+    }
+    return definition;
+  }
+
+  listWebsiteThemes(): readonly WebsiteThemeDefinition[] {
+    return [...this.websiteThemes.values()].sort((left, right) => left.name.localeCompare(right.name));
   }
 
   getPrintFormat(formatName: string): PrintFormatDefinition {
@@ -688,6 +719,13 @@ export class ModelRegistry {
   }
 
   private assertWebsitePageRoutesResolve(settings: WebsiteSettingsDefinition): void {
+    if (settings.theme !== undefined && !this.websiteThemes.has(settings.theme)) {
+      throw new FrameworkError(
+        "WEBSITE_SETTINGS_INVALID",
+        `Website settings reference unknown Website Theme '${settings.theme}'`,
+        { status: 400 }
+      );
+    }
     const routes = new Set(this.listWebPages().map((page) => page.route));
     const referencedRoutes = [
       ...(settings.homePageRoute === undefined ? [] : [settings.homePageRoute]),

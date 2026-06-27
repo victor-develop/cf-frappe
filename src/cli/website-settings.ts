@@ -24,6 +24,10 @@ interface WebsiteSettingsResponse {
   readonly title?: string;
   readonly description?: string;
   readonly homePageRoute?: string;
+  readonly theme?: {
+    readonly name?: string;
+    readonly label?: string;
+  };
   readonly navItems?: readonly {
     readonly name?: string;
     readonly label?: string;
@@ -58,6 +62,7 @@ function formatWebsiteSettings(baseUrl: string, settings: WebsiteSettingsRespons
     `Title: ${settings.title ?? "(untitled)"}`,
     ...(settings.description === undefined ? [] : [`Description: ${settings.description}`]),
     ...(settings.homePageRoute === undefined ? [] : [`Home: /page/${settings.homePageRoute}`]),
+    ...(settings.theme === undefined ? [] : [`Theme: ${settings.theme.name ?? "(unknown)"}`]),
     `Navigation: ${String(navItems.length)}`,
     ...(navItems.length === 0 ? ["- (none)"] : navItems.map(navItemLine)),
     ""

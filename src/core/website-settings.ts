@@ -16,6 +16,7 @@ export interface WebsiteSettingsDefinition {
   readonly title: string;
   readonly description?: string;
   readonly homePageRoute?: string;
+  readonly theme?: string;
   readonly published?: boolean;
   readonly roles?: readonly string[];
   readonly navItems?: readonly WebsiteNavigationItemDefinition[];
@@ -45,6 +46,9 @@ export function assertWebsiteSettingsDefinition(definition: WebsiteSettingsDefin
   assertIdentifier(definition.title, "website title");
   if (definition.homePageRoute !== undefined) {
     assertPageRoute(definition.homePageRoute, "website homepage route");
+  }
+  if (definition.theme !== undefined) {
+    assertIdentifier(definition.theme, "website theme");
   }
   const seen = new Set<string>();
   for (const item of definition.navItems ?? []) {

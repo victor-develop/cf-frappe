@@ -15,6 +15,7 @@ import {
   defineWebForm,
   defineWebView,
   defineWebsiteSettings,
+  defineWebsiteTheme,
   deterministicIds,
   fixedClock,
   InMemoryDataPatchLog,
@@ -401,9 +402,11 @@ describe("CloudFrappe Worker routing", () => {
           sections: [{ body: "Built on Cloudflare Workers" }]
         })
       ],
+      websiteThemes: [defineWebsiteTheme({ name: "Starter Theme", tokens: { primaryColor: "#0f766e" } })],
       websiteSettings: defineWebsiteSettings({
         title: "Starter Site",
         homePageRoute: "about",
+        theme: "Starter Theme",
         navItems: [{ name: "about", label: "About", pageRoute: "about" }]
       })
     });
@@ -417,14 +420,20 @@ describe("CloudFrappe Worker routing", () => {
     };
 
     const metadata = await worker.fetch!(cfRequest("http://localhost/api/meta/website-settings"), env, fakeExecutionContext());
+    const theme = await worker.fetch!(cfRequest("http://localhost/api/meta/website-themes/Starter%20Theme"), env, fakeExecutionContext());
     const home = await worker.fetch!(cfRequest("http://localhost/"), env, fakeExecutionContext());
+    const page = await worker.fetch!(cfRequest("http://localhost/page/about"), env, fakeExecutionContext());
 
     expect(metadata.status).toBe(200);
     await expect(metadata.json()).resolves.toMatchObject({
-      data: { title: "Starter Site", homePageRoute: "about", navItems: [{ href: "/page/about" }] }
+      data: { title: "Starter Site", homePageRoute: "about", theme: { name: "Starter Theme" }, navItems: [{ href: "/page/about" }] }
     });
+    expect(theme.status).toBe(200);
+    await expect(theme.json()).resolves.toMatchObject({ data: { name: "Starter Theme" } });
     expect(home.status).toBe(302);
     expect(home.headers.get("location")).toBe("/page/about");
+    expect(page.status).toBe(200);
+    await expect(page.text()).resolves.toContain("--cf-frappe-primary: #0f766e");
   });
 
   it("enables generated Desk document presence panels when realtime is configured", async () => {

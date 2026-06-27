@@ -93,6 +93,13 @@ import {
   type WebsiteSettingsRemoteCommand
 } from "./website-settings.js";
 import {
+  WebsiteThemeRemoteError,
+  runRemoteWebsiteThemeCommand,
+  type WebsiteThemeHeaderOption,
+  type WebsiteThemeRemoteAction,
+  type WebsiteThemeRemoteCommand
+} from "./website-themes.js";
+import {
   WebViewRemoteError,
   runRemoteWebViewCommand,
   type WebViewHeaderOption,
@@ -298,6 +305,7 @@ type ParsedCommand =
   | WebFormRemoteCommand
   | WebPageRemoteCommand
   | WebsiteSettingsRemoteCommand
+  | WebsiteThemeRemoteCommand
   | WebViewRemoteCommand
   | DocTypeRemoteCommand
   | FieldPropertyRemoteCommand
@@ -391,6 +399,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     if (command.kind === "website-settings") {
       io.stdout.write(await runRemoteWebsiteSettingsCommand(command, {
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
+    if (command.kind === "website-themes") {
+      io.stdout.write(await runRemoteWebsiteThemeCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -624,6 +639,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof WebFormRemoteError ||
       error instanceof WebPageRemoteError ||
       error instanceof WebsiteSettingsRemoteError ||
+      error instanceof WebsiteThemeRemoteError ||
       error instanceof WebViewRemoteError ||
       error instanceof DocTypeRemoteError ||
       error instanceof FieldPropertyRemoteError ||
@@ -689,6 +705,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "website-settings") {
     return parseWebsiteSettingsArgs(rest);
+  }
+  if (command === "website-themes") {
+    return parseWebsiteThemesArgs(rest);
   }
   if (command === "web-views") {
     return parseWebViewsArgs(rest);
@@ -3046,6 +3065,98 @@ function parseWebsiteSettingsArgs(argv: readonly string[]): ParsedCommand {
 
 function websiteSettingsAction(value: string): WebsiteSettingsRemoteAction | undefined {
   return value === "get" ? value : undefined;
+}
+
+function parseWebsiteThemesArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = websiteThemeAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown website-themes command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: WebsiteThemeHeaderOption[] = [];
+  let theme: string | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "Website theme");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "Website theme");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--theme") {
+      if (action === "list") {
+        return { kind: "invalid", message: "Cannot use --theme with website-themes list" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      theme = value;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown website-themes ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if (action === "get" && theme === undefined) {
+    return { kind: "invalid", message: "Website theme get requires --theme" };
+  }
+
+  return {
+    kind: "website-themes",
+    action,
+    url,
+    headers,
+    ...(theme === undefined ? {} : { theme })
+  };
+}
+
+function websiteThemeAction(value: string): WebsiteThemeRemoteAction | undefined {
+  return value === "list" || value === "get" ? value : undefined;
 }
 
 function parseWebViewsArgs(argv: readonly string[]): ParsedCommand {
@@ -6430,7 +6541,7 @@ function parseJsonObject(value: string, label: string): Record<string, unknown> 
 function parseLiteralHeader(
   value: string,
   label: string
-): AuditHeaderOption | CustomFieldHeaderOption | DataPatchHeaderOption | DashboardHeaderOption | WebFormHeaderOption | WebPageHeaderOption | WebsiteSettingsHeaderOption | WebViewHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | ProfileHeaderOption | PrintFormatHeaderOption | PrintSettingsHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
+): AuditHeaderOption | CustomFieldHeaderOption | DataPatchHeaderOption | DashboardHeaderOption | WebFormHeaderOption | WebPageHeaderOption | WebsiteSettingsHeaderOption | WebsiteThemeHeaderOption | WebViewHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | ProfileHeaderOption | PrintFormatHeaderOption | PrintSettingsHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
   const separator = value.indexOf(":");
   if (separator < 1) {
     return `${label} header must use 'Name: value' syntax`;
@@ -6449,7 +6560,7 @@ function parseLiteralHeader(
 function parseEnvHeader(
   value: string,
   label: string
-): AuditHeaderOption | CustomFieldHeaderOption | DataPatchHeaderOption | DashboardHeaderOption | WebFormHeaderOption | WebPageHeaderOption | WebsiteSettingsHeaderOption | WebViewHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | ProfileHeaderOption | PrintFormatHeaderOption | PrintSettingsHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
+): AuditHeaderOption | CustomFieldHeaderOption | DataPatchHeaderOption | DashboardHeaderOption | WebFormHeaderOption | WebPageHeaderOption | WebsiteSettingsHeaderOption | WebsiteThemeHeaderOption | WebViewHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | ProfileHeaderOption | PrintFormatHeaderOption | PrintSettingsHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
   const separator = value.indexOf("=");
   if (separator < 1) {
     return `${label} environment header must use 'Name=ENV_VAR' syntax`;
@@ -6806,6 +6917,8 @@ function helpText(): string {
     "  cf-frappe web-pages list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe web-pages get --url <origin> --web-page <page> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe website-settings get --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe website-themes list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe website-themes get --url <origin> --theme <theme> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe web-views list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe web-views get --url <origin> --web-view <view> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe web-views items --url <origin> --web-view <view> [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
