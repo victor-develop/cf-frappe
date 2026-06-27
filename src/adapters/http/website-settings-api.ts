@@ -12,7 +12,7 @@ export function createWebsiteSettingsApi(options: WebsiteSettingsApiOptions): Ho
 
   app.get("/api/meta/website-settings", async (c) => {
     const actor = await options.actor(c.req.raw);
-    return c.json({ data: options.websiteSettings.getWebsiteSettings(actor) });
+    return c.json({ data: await options.websiteSettings.getWebsiteSettings(actor) });
   });
 
   app.get("/", async (c) => {

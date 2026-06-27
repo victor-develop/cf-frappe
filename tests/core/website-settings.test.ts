@@ -1,4 +1,13 @@
-import { createRegistry, createRegistryFromApps, defineApp, defineWebPage, defineWebsiteSettings } from "../../src";
+import {
+  createRegistry,
+  createRegistryFromApps,
+  defineApp,
+  defineDocType,
+  defineWebForm,
+  defineWebPage,
+  defineWebsiteSettings,
+  websiteNavigationItemHref
+} from "../../src";
 
 describe("metadata Website Settings", () => {
   const about = defineWebPage({
@@ -23,20 +32,30 @@ describe("metadata Website Settings", () => {
   });
 
   it("validates singleton settings and referenced web page routes", () => {
+    const Lead = defineDocType({ name: "Lead", fields: [{ name: "title", type: "text" }] });
+    const leadIntake = defineWebForm({
+      name: "Lead Intake",
+      route: "lead/intake",
+      doctype: "Lead",
+      fields: [{ field: "title" }]
+    });
     const settings = defineWebsiteSettings({
       title: "Starter Site",
       homePageRoute: "about",
       navItems: [
         { name: "about", label: "About", pageRoute: "about" },
+        { name: "intake", label: "Lead Intake", webForm: "Lead Intake" },
         { name: "docs", label: "Docs", href: "https://example.com/docs" }
       ]
     });
-    const registry = createRegistry({ webPages: [about], websiteSettings: settings });
+    const registry = createRegistry({ doctypes: [Lead], webForms: [leadIntake], webPages: [about], websiteSettings: settings });
 
     expect(registry.getWebsiteSettings()).toEqual(settings);
-    expect(createRegistryFromApps([defineApp({ name: "website", webPages: [about], websiteSettings: settings })]).getWebsiteSettings())
+    expect(websiteNavigationItemHref({ name: "intake", label: "Lead Intake", webForm: "Lead Intake" }))
+      .toBe("/web-forms/Lead%20Intake");
+    expect(createRegistryFromApps([defineApp({ name: "website", doctypes: [Lead], webForms: [leadIntake], webPages: [about], websiteSettings: settings })]).getWebsiteSettings())
       .toEqual(settings);
-    expect(() => createRegistry({ webPages: [about], websiteSettings: [settings, settings] })).toThrow("already registered");
+    expect(() => createRegistry({ doctypes: [Lead], webForms: [leadIntake], webPages: [about], websiteSettings: [settings, settings] })).toThrow("already registered");
     expect(() => defineWebsiteSettings({ title: "", homePageRoute: "about" })).toThrow("website title is required");
     expect(() =>
       defineWebsiteSettings({
@@ -85,7 +104,13 @@ describe("metadata Website Settings", () => {
         title: "Bad",
         navItems: [{ name: "bad", label: "Bad", pageRoute: "about", href: "/page/about" }]
       })
-    ).toThrow("exactly one of pageRoute or href");
+    ).toThrow("exactly one of pageRoute, webForm, or href");
+    expect(() =>
+      defineWebsiteSettings({
+        title: "Bad",
+        navItems: [{ name: "bad", label: "Bad", webForm: " " }]
+      })
+    ).toThrow("Web Form is required");
     expect(() =>
       defineWebsiteSettings({
         title: "Bad",
@@ -97,5 +122,15 @@ describe("metadata Website Settings", () => {
     ).toThrow("duplicate navigation item 'about'");
     expect(() => createRegistry({ webPages: [about], websiteSettings: defineWebsiteSettings({ title: "Bad", homePageRoute: "missing" }) }))
       .toThrow("unknown Web Page route 'missing'");
+    expect(() =>
+      createRegistry({
+        doctypes: [Lead],
+        webPages: [about],
+        websiteSettings: defineWebsiteSettings({
+          title: "Bad",
+          navItems: [{ name: "missing", label: "Missing", webForm: "Missing Form" }]
+        })
+      })
+    ).toThrow("unknown Web Form 'Missing Form'");
   });
 });

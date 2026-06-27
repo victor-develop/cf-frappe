@@ -769,6 +769,15 @@ export class ModelRegistry {
         );
       }
     }
+    for (const webForm of (settings.navItems ?? []).flatMap((item) => (item.webForm === undefined ? [] : [item.webForm]))) {
+      if (!this.webForms.has(webForm)) {
+        throw new FrameworkError(
+          "WEBSITE_SETTINGS_INVALID",
+          `Website settings reference unknown Web Form '${webForm}'`,
+          { status: 400 }
+        );
+      }
+    }
   }
 
   private assertDashboardReferencesResolve(dashboard: DashboardDefinition): void {

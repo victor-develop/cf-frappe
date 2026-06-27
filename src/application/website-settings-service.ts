@@ -9,6 +9,7 @@ import {
   type WebsiteSettingsDefinition
 } from "../core/website-settings.js";
 import type { WebsiteThemeDefinition } from "../core/website-theme.js";
+import type { WebFormService } from "./web-form-service.js";
 import type { WebPageService } from "./web-page-service.js";
 import type { WebsiteThemeService } from "./website-theme-service.js";
 
@@ -29,22 +30,26 @@ export interface ResolvedWebsiteSettings {
 export interface WebsiteSettingsServiceOptions {
   readonly registry: ModelRegistry;
   readonly webPages: Pick<WebPageService, "getWebPageByRoute">;
+  readonly webForms?: Pick<WebFormService, "getWebForm">;
   readonly websiteThemes?: Pick<WebsiteThemeService, "getWebsiteTheme">;
 }
 
 export class WebsiteSettingsService {
   private readonly registry: ModelRegistry;
   private readonly webPages: Pick<WebPageService, "getWebPageByRoute">;
+  private readonly webForms: Pick<WebFormService, "getWebForm"> | undefined;
   private readonly websiteThemes: Pick<WebsiteThemeService, "getWebsiteTheme"> | undefined;
 
   constructor(options: WebsiteSettingsServiceOptions) {
     this.registry = options.registry;
     this.webPages = options.webPages;
+    this.webForms = options.webForms;
     this.websiteThemes = options.websiteThemes;
   }
 
-  getWebsiteSettings(actor: Actor): ResolvedWebsiteSettings {
+  async getWebsiteSettings(actor: Actor): Promise<ResolvedWebsiteSettings> {
     const settings = this.readSettings(actor);
+    const navItems = await Promise.all((settings.navItems ?? []).map((item) => this.resolveNavigationItem(actor, item)));
     return {
       title: settings.title,
       ...(settings.description === undefined ? {} : { description: settings.description }),
@@ -54,7 +59,7 @@ export class WebsiteSettingsService {
       ...(settings.theme === undefined || this.websiteThemes === undefined
         ? {}
         : { theme: this.websiteThemes.getWebsiteTheme(settings.theme) }),
-      navItems: (settings.navItems ?? []).flatMap((item) => this.resolveNavigationItem(actor, item))
+      navItems: navItems.flat()
     };
   }
 
@@ -74,20 +79,31 @@ export class WebsiteSettingsService {
     return settings;
   }
 
-  private resolveNavigationItem(
+  private async resolveNavigationItem(
     actor: Actor,
     item: WebsiteNavigationItemDefinition
-  ): readonly WebsiteNavigationItem[] {
+  ): Promise<readonly WebsiteNavigationItem[]> {
     if (!canReadWebsiteNavigationItem(actor, item) || !this.canReadPageRoute(actor, item.pageRoute)) {
+      return [];
+    }
+    const href = await this.navigationItemHref(actor, item);
+    if (href === undefined) {
       return [];
     }
     return [
       {
         name: item.name,
         label: item.label,
-        href: websiteNavigationItemHref(item)
+        href
       }
     ];
+  }
+
+  private async navigationItemHref(actor: Actor, item: WebsiteNavigationItemDefinition): Promise<string | undefined> {
+    if (item.webForm !== undefined) {
+      return this.webFormHref(actor, item.webForm);
+    }
+    return websiteNavigationItemHref(item);
   }
 
   private canReadPageRoute(actor: Actor, route: string | undefined): boolean {
@@ -100,6 +116,21 @@ export class WebsiteSettingsService {
     } catch (error) {
       if (isExpectedAccessMiss(error)) {
         return false;
+      }
+      throw error;
+    }
+  }
+
+  private async webFormHref(actor: Actor, webFormName: string): Promise<string | undefined> {
+    if (this.webForms === undefined) {
+      return undefined;
+    }
+    try {
+      const metadata = await this.webForms.getWebForm(actor, webFormName);
+      return `/web-forms/${metadata.form.route ?? encodeURIComponent(metadata.form.name)}`;
+    } catch (error) {
+      if (isExpectedAccessMiss(error)) {
+        return undefined;
       }
       throw error;
     }

@@ -42,14 +42,14 @@ export function createWebViewApi(options: WebViewApiOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const metadata = await options.webViews.getWebView(actor, c.req.param("webView"));
     const result = await options.webViews.listItems(actor, metadata.view.name);
-    return html(renderWebViewList(metadata, result.items, resolveWebsitePresentation(options.websiteSettings, actor)));
+    return html(renderWebViewList(metadata, result.items, await resolveWebsitePresentation(options.websiteSettings, actor)));
   });
 
   app.get("/web/:webView/:route", async (c) => {
     const actor = await options.actor(c.req.raw);
     const metadata = await options.webViews.getWebView(actor, c.req.param("webView"));
     const result = await options.webViews.getItem(actor, metadata.view.name, c.req.param("route"));
-    return html(renderWebViewItem(metadata, result.item, resolveWebsitePresentation(options.websiteSettings, actor)));
+    return html(renderWebViewItem(metadata, result.item, await resolveWebsitePresentation(options.websiteSettings, actor)));
   });
 
   return app;

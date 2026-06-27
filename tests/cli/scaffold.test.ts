@@ -191,6 +191,7 @@ describe("cf-frappe CLI scaffold", () => {
     expect(taskApp).toContain('theme: "Starter Theme"');
     expect(taskApp).toContain('primaryColor: "#2563eb"');
     expect(taskApp).toContain('name: "task-updates", label: "Task Updates", href: "/web/Task%20Updates"');
+    expect(taskApp).toContain('name: "task-intake", label: "Task Intake", webForm: "Task Intake"');
     expect(taskApp).toContain('route: "review-generated-desk-workspace"');
     expect(taskApp).toContain("published: true");
     expect(taskApp).toContain('kind: "notifications"');

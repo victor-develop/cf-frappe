@@ -326,7 +326,7 @@ describe("web form api", () => {
         theme: "Starter",
         navItems: [
           { name: "about", label: "About", pageRoute: "about" },
-          { name: "intake", label: "<Intake>", href: "/web-forms/lead/intake" }
+          { name: "intake", label: "<Intake>", webForm: "Lead Intake" }
         ]
       })
     });
@@ -344,6 +344,7 @@ describe("web form api", () => {
       websiteSettings: new WebsiteSettingsService({
         registry,
         webPages,
+        webForms,
         websiteThemes: new WebsiteThemeService({ registry })
       }),
       websiteThemes: new WebsiteThemeService({ registry }),

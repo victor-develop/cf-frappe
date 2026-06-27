@@ -825,7 +825,7 @@ export const TaskWebsiteSettings = defineWebsiteSettings({
   navItems: [
     { name: "about", label: "About", pageRoute: "about" },
     { name: "task-updates", label: "Task Updates", href: "/web/Task%20Updates" },
-    { name: "task-intake", label: "Task Intake", href: "/web-forms/task-intake", roles: ["User", "Task Manager"] }
+    { name: "task-intake", label: "Task Intake", webForm: "Task Intake", roles: ["User", "Task Manager"] }
   ],
   roles: ["Guest", "User", "Task Manager"]
 });

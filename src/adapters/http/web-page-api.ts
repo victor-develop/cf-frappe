@@ -25,12 +25,12 @@ export function createWebPageApi(options: WebPageApiOptions): Hono {
 
   app.get("/page/:route{.+}", async (c) => {
     const actor = await options.actor(c.req.raw);
-    return html(renderWebPage(options.webPages.getWebPageByRoute(actor, c.req.param("route")), resolveWebsitePresentation(options.websiteSettings, actor)));
+    return html(renderWebPage(options.webPages.getWebPageByRoute(actor, c.req.param("route")), await resolveWebsitePresentation(options.websiteSettings, actor)));
   });
 
   app.get("/page/:route", async (c) => {
     const actor = await options.actor(c.req.raw);
-    return html(renderWebPage(options.webPages.getWebPageByRoute(actor, c.req.param("route")), resolveWebsitePresentation(options.websiteSettings, actor)));
+    return html(renderWebPage(options.webPages.getWebPageByRoute(actor, c.req.param("route")), await resolveWebsitePresentation(options.websiteSettings, actor)));
   });
 
   return app;

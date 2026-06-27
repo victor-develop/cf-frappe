@@ -407,7 +407,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   const webPages = new WebPageService({ registry: options.registry });
   const webViews = new WebViewService({ registry: options.registry, queries: restrictedQueries });
   const websiteThemes = new WebsiteThemeService({ registry: options.registry });
-  const websiteSettings = new WebsiteSettingsService({ registry: options.registry, webPages, websiteThemes });
+  const websiteSettings = new WebsiteSettingsService({ registry: options.registry, webPages, webForms, websiteThemes });
   const roles = new RoleService({
     events,
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })

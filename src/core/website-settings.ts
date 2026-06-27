@@ -7,6 +7,7 @@ export interface WebsiteNavigationItemDefinition {
   readonly name: string;
   readonly label: string;
   readonly pageRoute?: string;
+  readonly webForm?: string;
   readonly href?: string;
   readonly roles?: readonly string[];
 }
@@ -80,21 +81,29 @@ export function canReadWebsiteNavigationItem(actor: Actor, item: WebsiteNavigati
 }
 
 export function websiteNavigationItemHref(item: WebsiteNavigationItemDefinition): string {
-  return item.pageRoute === undefined ? item.href ?? "" : `/page/${item.pageRoute}`;
+  if (item.pageRoute !== undefined) {
+    return `/page/${item.pageRoute}`;
+  }
+  if (item.webForm !== undefined) {
+    return `/web-forms/${encodeURIComponent(item.webForm)}`;
+  }
+  return item.href ?? "";
 }
 
 function assertNavigationTarget(item: WebsiteNavigationItemDefinition): void {
-  const hasPageRoute = item.pageRoute !== undefined;
-  const hasHref = item.href !== undefined;
-  if (hasPageRoute === hasHref) {
+  const targetCount = [item.pageRoute, item.webForm, item.href].filter((target) => target !== undefined).length;
+  if (targetCount !== 1) {
     throw new FrameworkError(
       "WEBSITE_SETTINGS_INVALID",
-      `Website navigation item '${item.name}' must define exactly one of pageRoute or href`,
+      `Website navigation item '${item.name}' must define exactly one of pageRoute, webForm, or href`,
       { status: 400 }
     );
   }
   if (item.pageRoute !== undefined) {
     assertPageRoute(item.pageRoute, `website navigation item '${item.name}' page route`);
+  }
+  if (item.webForm !== undefined) {
+    assertIdentifier(item.webForm, `website navigation item '${item.name}' Web Form`);
   }
   if (item.href !== undefined && !isSafeWebsiteHref(item.href)) {
     throw new FrameworkError(

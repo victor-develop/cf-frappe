@@ -1,6 +1,8 @@
 import {
   createRegistry,
   createResourceApi,
+  defineDocType,
+  defineWebForm,
   defineWebPage,
   defineWebsiteSettings,
   DocumentService,
@@ -8,6 +10,7 @@ import {
   InMemoryDocumentStore,
   QueryService,
   unsafeHeaderActorResolver,
+  WebFormService,
   WebPageService,
   WebsiteSettingsService
 } from "../../src";
@@ -15,7 +18,13 @@ import { now } from "../helpers";
 
 describe("website settings api", () => {
   it("serves metadata and redirects the configured home page", async () => {
+    const Lead = defineDocType({
+      name: "Lead",
+      fields: [{ name: "title", type: "text", required: true }],
+      permissions: [{ roles: ["Guest"], actions: ["create"] }]
+    });
     const registry = createRegistry({
+      doctypes: [Lead],
       webPages: [
         defineWebPage({
           name: "About",
@@ -24,21 +33,36 @@ describe("website settings api", () => {
           sections: [{ body: "Welcome" }]
         })
       ],
+      webForms: [
+        defineWebForm({
+          name: "Lead Intake",
+          route: "lead/intake",
+          doctype: "Lead",
+          fields: [{ field: "title" }]
+        })
+      ],
       websiteSettings: defineWebsiteSettings({
         title: "Starter Site",
         description: "Cloudflare-native starter",
         homePageRoute: "about",
-        navItems: [{ name: "about", label: "About", pageRoute: "about" }]
+        navItems: [
+          { name: "about", label: "About", pageRoute: "about" },
+          { name: "intake", label: "Lead Intake", webForm: "Lead Intake" }
+        ]
       })
     });
     const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+    const queries = new QueryService({ registry, projections: store });
+    const webForms = new WebFormService({ registry, documents, queries });
     const webPages = new WebPageService({ registry });
     const app = createResourceApi({
       registry,
-      documents: new DocumentService({ registry, store, clock: fixedClock(now) }),
-      queries: new QueryService({ registry, projections: store }),
+      documents,
+      queries,
+      webForms,
       webPages,
-      websiteSettings: new WebsiteSettingsService({ registry, webPages }),
+      websiteSettings: new WebsiteSettingsService({ registry, webPages, webForms }),
       actor: unsafeHeaderActorResolver
     });
 
@@ -47,11 +71,14 @@ describe("website settings api", () => {
     await expect(metadata.json()).resolves.toEqual({
       data: {
         title: "Starter Site",
-        description: "Cloudflare-native starter",
-        homePageRoute: "about",
-        navItems: [{ name: "about", label: "About", href: "/page/about" }]
-      }
-    });
+          description: "Cloudflare-native starter",
+          homePageRoute: "about",
+          navItems: [
+            { name: "about", label: "About", href: "/page/about" },
+            { name: "intake", label: "Lead Intake", href: "/web-forms/lead/intake" }
+          ]
+        }
+      });
 
     const home = await app.request("/");
     expect(home.status).toBe(302);
@@ -100,6 +127,85 @@ describe("website settings api", () => {
       }
     });
     expect((await hiddenHome.request("/")).status).toBe(404);
+  });
+
+  it("filters Web Form navigation references through Web Form access rules", async () => {
+    const Lead = defineDocType({
+      name: "Lead",
+      fields: [{ name: "title", type: "text", required: true }],
+      permissions: [
+        { roles: ["Guest"], actions: ["create"] },
+        { roles: ["User"], actions: ["create"] }
+      ]
+    });
+    const registry = createRegistry({
+      doctypes: [Lead],
+      webPages: [
+        defineWebPage({
+          name: "About",
+          route: "about",
+          title: "About",
+          sections: [{ body: "Welcome" }]
+        })
+      ],
+      webForms: [
+        defineWebForm({
+          name: "Public Intake",
+          route: "public/intake",
+          doctype: "Lead",
+          fields: [{ field: "title" }]
+        }),
+        defineWebForm({
+          name: "Member Intake",
+          route: "member/intake",
+          loginRequired: true,
+          doctype: "Lead",
+          fields: [{ field: "title" }]
+        })
+      ],
+      websiteSettings: defineWebsiteSettings({
+        title: "Starter Site",
+        navItems: [
+          { name: "public-intake", label: "Public Intake", webForm: "Public Intake" },
+          { name: "member-intake", label: "Member Intake", webForm: "Member Intake" }
+        ]
+      })
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+    const queries = new QueryService({ registry, projections: store });
+    const webForms = new WebFormService({ registry, documents, queries });
+    const webPages = new WebPageService({ registry });
+    const app = createResourceApi({
+      registry,
+      documents,
+      queries,
+      webForms,
+      webPages,
+      websiteSettings: new WebsiteSettingsService({ registry, webPages, webForms }),
+      actor: unsafeHeaderActorResolver
+    });
+
+    const guestMetadata = await app.request("/api/meta/website-settings");
+    expect(guestMetadata.status).toBe(200);
+    await expect(guestMetadata.json()).resolves.toMatchObject({
+      data: {
+        navItems: [{ name: "public-intake", href: "/web-forms/public/intake" }]
+      }
+    });
+
+    const userMetadata = await app.request("/api/meta/website-settings", {
+      headers: { "x-cf-frappe-user": "member@example.com", "x-cf-frappe-roles": "User" }
+    });
+    expect(userMetadata.status).toBe(200);
+    await expect(userMetadata.json()).resolves.toMatchObject({
+      data: {
+        navItems: [
+          { name: "public-intake", href: "/web-forms/public/intake" },
+          { name: "member-intake", href: "/web-forms/member/intake" }
+        ]
+      }
+    });
   });
 });
 

@@ -36,12 +36,12 @@ ${options.styles ?? ""}
 </style></head><body>${renderNavigation(presentation)}${body}</body></html>`;
 }
 
-export function resolveWebsitePresentation(
+export async function resolveWebsitePresentation(
   settings: WebsiteSettingsReader | undefined,
   actor: Actor
-): WebsitePresentation {
+): Promise<WebsitePresentation> {
   try {
-    const resolved = settings?.getWebsiteSettings(actor);
+    const resolved = await settings?.getWebsiteSettings(actor);
     return resolved === undefined
       ? DEFAULT_WEBSITE_PRESENTATION
       : {

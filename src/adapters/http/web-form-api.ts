@@ -48,19 +48,19 @@ export function createWebFormApi(options: WebFormApiOptions): Hono {
       label: form.label ?? form.name,
       ...(form.route === undefined ? {} : { route: form.route }),
       description: form.description ?? form.module ?? ""
-    })), resolveWebsitePresentation(options.websiteSettings, actor)));
+    })), await resolveWebsitePresentation(options.websiteSettings, actor)));
   });
 
   app.get("/web-forms/:webForm{.+}", async (c) => {
     const actor = await options.actor(c.req.raw);
     const metadata = await getPublicWebForm(options.webForms, actor, c.req.param("webForm"));
-    return html(renderWebForm(metadata, resolveWebsitePresentation(options.websiteSettings, actor)));
+    return html(renderWebForm(metadata, await resolveWebsitePresentation(options.websiteSettings, actor)));
   });
 
   app.get("/web-forms/:webForm", async (c) => {
     const actor = await options.actor(c.req.raw);
     const metadata = await getPublicWebForm(options.webForms, actor, c.req.param("webForm"));
-    return html(renderWebForm(metadata, resolveWebsitePresentation(options.websiteSettings, actor)));
+    return html(renderWebForm(metadata, await resolveWebsitePresentation(options.websiteSettings, actor)));
   });
 
   app.post("/web-forms/:webForm{.+}", async (c) => {
@@ -186,7 +186,7 @@ async function submitPublicWebForm(
     result.document.name,
     metadata.form.successMessage,
     metadata.form.successUrl,
-    resolveWebsitePresentation(options.websiteSettings, actor)
+    await resolveWebsitePresentation(options.websiteSettings, actor)
   ), 201);
 }
 
