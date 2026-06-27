@@ -41,6 +41,7 @@ interface FieldResponse {
   readonly required?: boolean;
   readonly readOnly?: boolean;
   readonly hidden?: boolean;
+  readonly unique?: boolean;
   readonly inListView?: boolean;
   readonly inListFilter?: boolean;
   readonly inGlobalSearch?: boolean;
@@ -182,6 +183,7 @@ function fieldFlags(field: FieldResponse): readonly string[] {
     ...(field.required ? ["required"] : []),
     ...(field.readOnly ? ["readOnly"] : []),
     ...(field.hidden ? ["hidden"] : []),
+    ...(field.unique ? ["unique"] : []),
     ...(field.inListView ? ["list"] : []),
     ...(field.inListFilter ? ["filter"] : []),
     ...(field.inGlobalSearch ? ["search"] : [])

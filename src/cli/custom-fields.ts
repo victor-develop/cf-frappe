@@ -46,6 +46,7 @@ interface CustomFieldResponse {
   readonly required?: boolean;
   readonly readOnly?: boolean;
   readonly hidden?: boolean;
+  readonly unique?: boolean;
   readonly inFormView?: boolean;
   readonly inListView?: boolean;
   readonly inListFilter?: boolean;
@@ -163,7 +164,21 @@ function fieldLine(entry: CustomFieldEntryResponse): string {
   const target = field.linkTo === undefined && field.tableOf === undefined
     ? ""
     : ` target ${field.linkTo ?? field.tableOf ?? ""}`;
-  return `- ${field.name} ${entry.enabled ?? true ? "enabled" : "disabled"} type ${field.type ?? "(unknown)"}${label}${target}`;
+  const flags = fieldFlags(field);
+  const flagText = flags.length === 0 ? "" : ` [${flags.join(",")}]`;
+  return `- ${field.name} ${entry.enabled ?? true ? "enabled" : "disabled"} type ${field.type ?? "(unknown)"}${label}${target}${flagText}`;
+}
+
+function fieldFlags(field: CustomFieldResponse): readonly string[] {
+  return [
+    ...(field.required ? ["required"] : []),
+    ...(field.readOnly ? ["readOnly"] : []),
+    ...(field.hidden ? ["hidden"] : []),
+    ...(field.unique ? ["unique"] : []),
+    ...(field.inFormView ? ["form"] : []),
+    ...(field.inListView ? ["list"] : []),
+    ...(field.inListFilter ? ["filter"] : [])
+  ];
 }
 
 function requiredField(command: CustomFieldRemoteCommand): Record<string, unknown> {
