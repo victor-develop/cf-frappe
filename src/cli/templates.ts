@@ -256,7 +256,7 @@ npm run d1:migrate:local
 npm run dev
 \`\`\`
 
-Open \`/desk\` for the generated Desk UI, the \`Tasks\` workspace, the \`Task Calendar\`, the \`Task Board\`, the \`Task Dashboard\`, the \`Task Intake\` Web Form, and the file manager at \`/desk/files\`; run the \`tasks.seed_starter_tasks\` data patch when you want sample Task records and the starter Task owner notification rule in a fresh environment. Use \`/api/meta/doctypes/Task\` and \`/api/meta/web-forms/Task%20Intake\` for metadata APIs. ${authLocalReadme(input.auth)}
+Open \`/desk\` for the generated Desk UI, the \`Tasks\` workspace, the \`Task Calendar\`, the \`Task Board\`, the \`Task Dashboard\`, the \`Task Intake\` Web Form, the \`Task Updates\` Web View, and the file manager at \`/desk/files\`; run the \`tasks.seed_starter_tasks\` data patch when you want sample Task records and the starter Task owner notification rule in a fresh environment. Use \`/api/meta/doctypes/Task\`, \`/api/meta/web-forms/Task%20Intake\`, and \`/api/meta/web-views/Task%20Updates\` for metadata APIs. ${authLocalReadme(input.auth)}
 The generated R2 binding supports buffered Desk uploads immediately. Add a \`directUploads\` signer to \`R2FileStorage\` before enabling signed browser direct-upload targets.
 Client scripts live under \`public/assets\`; add them with \`defineClientScript(...)\` in files under \`src/apps\`.
 ${authProviderReadme(input.auth)}
@@ -334,6 +334,10 @@ npx cf-frappe kanbans run --url https://your-worker.example --kanban "Task Board
 npx cf-frappe web-forms list --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe web-forms get --url https://your-worker.example --web-form "Task Intake" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe web-forms submit --url https://your-worker.example --web-form "Task Intake" --data-json '{"title":"Follow up from intake","priority":"Medium","description":"Created through the generated Web Form."}' --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe web-views list --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe web-views get --url https://your-worker.example --web-view "Task Updates" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe web-views items --url https://your-worker.example --web-view "Task Updates" --limit 10 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe web-views item --url https://your-worker.example --web-view "Task Updates" --route review-generated-desk-workspace --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe workspaces list --url https://your-worker.example --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe workspaces get --url https://your-worker.example --workspace Tasks --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe print-formats list --url https://your-worker.example --doctype Task --header-env Authorization=CF_FRAPPE_AUTH
@@ -540,7 +544,7 @@ For OIDC deployments, replace the placeholder \`OIDC_ISSUER\`, \`OIDC_AUD\`, and
 }
 
 function taskAppTs(): string {
-  return `import { defineApp, defineCalendar, defineClientScript, defineDashboard, defineDataPatch, defineDocType, defineKanban, definePrintFormat, defineReport, defineWebForm, defineWorkspace } from "cf-frappe";
+  return `import { defineApp, defineCalendar, defineClientScript, defineDashboard, defineDataPatch, defineDocType, defineKanban, definePrintFormat, defineReport, defineWebForm, defineWebView, defineWorkspace } from "cf-frappe";
 import type { CloudFrappeRuntimeServices } from "cf-frappe/cloudflare";
 
 export const Task = defineDocType({
@@ -562,6 +566,17 @@ export const Task = defineDocType({
       name: "description",
       label: "Description",
       type: "longText"
+    },
+    {
+      name: "route",
+      label: "Web Route",
+      type: "text"
+    },
+    {
+      name: "published",
+      label: "Published",
+      type: "boolean",
+      defaultValue: false
     },
     {
       name: "priority",
@@ -600,6 +615,7 @@ export const Task = defineDocType({
   formView: {
     sections: [
       { heading: "Task", columns: 1, fields: ["title", "priority", "workflow_state", "starts_on"] },
+      { heading: "Website", columns: 1, fields: ["route", "published"] },
       { heading: "Details", columns: 1, fields: ["description"] }
     ]
   },
@@ -742,6 +758,24 @@ export const TaskIntakeWebForm = defineWebForm({
   roles: ["User", "Task Manager"]
 });
 
+export const TaskUpdatesWebView = defineWebView({
+  name: "Task Updates",
+  label: "Task Updates",
+  module: "Desk",
+  description: "Published starter task updates rendered from permissioned projections.",
+  doctype: "Task",
+  routeField: "route",
+  titleField: "title",
+  publishedField: "published",
+  fields: [
+    { field: "priority", label: "Priority" },
+    { field: "workflow_state", label: "State" },
+    { field: "description", label: "Update" }
+  ],
+  roles: ["Guest", "User", "Task Manager"],
+  pageSize: 20
+});
+
 export const TaskWorkspace = defineWorkspace({
   name: "Tasks",
   label: "Tasks",
@@ -759,7 +793,8 @@ export const TaskWorkspace = defineWorkspace({
         { name: "task-calendar", label: "Task Calendar", kind: "calendar", target: "Task Calendar" },
         { name: "task-board", label: "Task Board", kind: "kanban", target: "Task Board" },
         { name: "task-dashboard", label: "Task Dashboard", kind: "dashboard", target: "Task Dashboard" },
-        { name: "task-intake", label: "Task Intake", kind: "url", href: "/web-forms/Task%20Intake", roles: ["User", "Task Manager"] }
+        { name: "task-intake", label: "Task Intake", kind: "url", href: "/web-forms/Task%20Intake", roles: ["User", "Task Manager"] },
+        { name: "task-updates", label: "Task Updates", kind: "url", href: "/web/Task%20Updates" }
       ]
     },
     {
@@ -789,6 +824,8 @@ const STARTER_TASK_AUTOMATION_ACTOR = {
 const STARTER_TASK_SEED_RECORDS = [
   {
     title: "Review generated Desk workspace",
+    route: "review-generated-desk-workspace",
+    published: true,
     priority: "High",
     workflow_state: "Open",
     starts_on: "2026-01-10",
@@ -797,6 +834,8 @@ const STARTER_TASK_SEED_RECORDS = [
   },
   {
     title: "Deploy to Cloudflare Workers",
+    route: "deploy-to-cloudflare-workers",
+    published: true,
     priority: "Medium",
     workflow_state: "Doing",
     starts_on: "2026-01-15",
@@ -952,6 +991,7 @@ export const taskApp = defineApp({
   kanbans: [TaskKanban],
   calendars: [TaskCalendar],
   webForms: [TaskIntakeWebForm],
+  webViews: [TaskUpdatesWebView],
   workspaces: [TaskWorkspace],
   dataPatches: [StarterTaskSeedData],
   clientScripts: [TaskFormScript],

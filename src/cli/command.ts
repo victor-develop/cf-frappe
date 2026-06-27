@@ -79,6 +79,13 @@ import {
   type WebFormRemoteCommand
 } from "./web-forms.js";
 import {
+  WebViewRemoteError,
+  runRemoteWebViewCommand,
+  type WebViewHeaderOption,
+  type WebViewRemoteAction,
+  type WebViewRemoteCommand
+} from "./web-views.js";
+import {
   DocTypeRemoteError,
   runRemoteDocTypeCommand,
   type DocTypeHeaderOption,
@@ -275,6 +282,7 @@ type ParsedCommand =
   | CalendarRemoteCommand
   | KanbanRemoteCommand
   | WebFormRemoteCommand
+  | WebViewRemoteCommand
   | DocTypeRemoteCommand
   | FieldPropertyRemoteCommand
   | JobRemoteCommand
@@ -353,6 +361,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     if (command.kind === "web-forms") {
       io.stdout.write(await runRemoteWebFormCommand(command, {
+        ...(io.env === undefined ? {} : { env: io.env }),
+        ...(io.fetch === undefined ? {} : { fetch: io.fetch })
+      }));
+      return 0;
+    }
+    if (command.kind === "web-views") {
+      io.stdout.write(await runRemoteWebViewCommand(command, {
         ...(io.env === undefined ? {} : { env: io.env }),
         ...(io.fetch === undefined ? {} : { fetch: io.fetch })
       }));
@@ -577,6 +592,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       error instanceof CalendarRemoteError ||
       error instanceof KanbanRemoteError ||
       error instanceof WebFormRemoteError ||
+      error instanceof WebViewRemoteError ||
       error instanceof DocTypeRemoteError ||
       error instanceof FieldPropertyRemoteError ||
       error instanceof JobRemoteError ||
@@ -635,6 +651,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedCommand {
   }
   if (command === "web-forms") {
     return parseWebFormsArgs(rest);
+  }
+  if (command === "web-views") {
+    return parseWebViewsArgs(rest);
   }
   if (command === "doctypes") {
     return parseDoctypesArgs(rest);
@@ -2822,6 +2841,133 @@ function parseWebFormsArgs(argv: readonly string[]): ParsedCommand {
 
 function webFormAction(value: string): WebFormRemoteAction | undefined {
   return value === "list" || value === "get" || value === "submit" ? value : undefined;
+}
+
+function parseWebViewsArgs(argv: readonly string[]): ParsedCommand {
+  const [subcommand, ...rest] = argv;
+  if (subcommand === undefined || subcommand === "--help" || subcommand === "-h") {
+    return { kind: "help" };
+  }
+  const action = webViewAction(subcommand);
+  if (action === undefined) {
+    return { kind: "invalid", message: `Unknown web-views command '${subcommand}'` };
+  }
+
+  let url: string | undefined;
+  const headers: WebViewHeaderOption[] = [];
+  let webView: string | undefined;
+  let route: string | undefined;
+  let limit: number | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return { kind: "help" };
+    }
+    if (arg === "--url") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      url = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--header") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseLiteralHeader(value, "Web view");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--header-env") {
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parseEnvHeader(value, "Web view");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      headers.push(parsed);
+      index += 1;
+      continue;
+    }
+    if (arg === "--web-view") {
+      if (action === "list") {
+        return { kind: "invalid", message: "Cannot use --web-view with web-views list" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      webView = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--route") {
+      if (action !== "item") {
+        return { kind: "invalid", message: `Cannot use --route with web-views ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      route = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--limit") {
+      if (action !== "items") {
+        return { kind: "invalid", message: `Cannot use --limit with web-views ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      const parsed = parsePositiveInteger(value, "Web view limit");
+      if (typeof parsed === "string") {
+        return { kind: "invalid", message: parsed };
+      }
+      limit = parsed;
+      index += 1;
+      continue;
+    }
+    return { kind: "invalid", message: `Unknown web-views ${action} option '${arg}'` };
+  }
+
+  if (url === undefined) {
+    return { kind: "invalid", message: "Missing value for --url" };
+  }
+  if (action !== "list" && webView === undefined) {
+    return { kind: "invalid", message: `Web view ${action} requires --web-view` };
+  }
+  if (action === "item" && route === undefined) {
+    return { kind: "invalid", message: "Web view item requires --route" };
+  }
+
+  return {
+    kind: "web-views",
+    action,
+    url,
+    headers,
+    ...(webView === undefined ? {} : { webView }),
+    ...(route === undefined ? {} : { route }),
+    ...(limit === undefined ? {} : { limit })
+  };
+}
+
+function webViewAction(value: string): WebViewRemoteAction | undefined {
+  return value === "list" || value === "get" || value === "items" || value === "item" ? value : undefined;
 }
 
 function parseKanbansArgs(argv: readonly string[]): ParsedCommand {
@@ -6079,7 +6225,7 @@ function parseJsonObject(value: string, label: string): Record<string, unknown> 
 function parseLiteralHeader(
   value: string,
   label: string
-): AuditHeaderOption | CustomFieldHeaderOption | DataPatchHeaderOption | DashboardHeaderOption | WebFormHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | ProfileHeaderOption | PrintFormatHeaderOption | PrintSettingsHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
+): AuditHeaderOption | CustomFieldHeaderOption | DataPatchHeaderOption | DashboardHeaderOption | WebFormHeaderOption | WebViewHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | ProfileHeaderOption | PrintFormatHeaderOption | PrintSettingsHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
   const separator = value.indexOf(":");
   if (separator < 1) {
     return `${label} header must use 'Name: value' syntax`;
@@ -6098,7 +6244,7 @@ function parseLiteralHeader(
 function parseEnvHeader(
   value: string,
   label: string
-): AuditHeaderOption | CustomFieldHeaderOption | DataPatchHeaderOption | DashboardHeaderOption | WebFormHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | ProfileHeaderOption | PrintFormatHeaderOption | PrintSettingsHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
+): AuditHeaderOption | CustomFieldHeaderOption | DataPatchHeaderOption | DashboardHeaderOption | WebFormHeaderOption | WebViewHeaderOption | FieldPropertyHeaderOption | JobHeaderOption | NotificationRuleHeaderOption | FileHeaderOption | ResourceHeaderOption | ProfileHeaderOption | PrintFormatHeaderOption | PrintSettingsHeaderOption | RoleHeaderOption | UserHeaderOption | WorkflowHeaderOption | string {
   const separator = value.indexOf("=");
   if (separator < 1) {
     return `${label} environment header must use 'Name=ENV_VAR' syntax`;
@@ -6452,6 +6598,10 @@ function helpText(): string {
     "  cf-frappe web-forms list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe web-forms get --url <origin> --web-form <form> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe web-forms submit --url <origin> --web-form <form> [--data-json <json>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe web-views list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe web-views get --url <origin> --web-view <view> [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe web-views items --url <origin> --web-view <view> [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe web-views item --url <origin> --web-view <view> --route <route> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe doctypes list --url <origin> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe doctypes get --url <origin> --doctype <doctype> [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe doctypes list-view --url <origin> --doctype <doctype> [--header <name:value>] [--header-env <name=ENV>]",

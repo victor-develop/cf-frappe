@@ -36,6 +36,7 @@ import type { NotificationRuleService } from "../../application/notification-rul
 import type { UserPermissionService } from "../../application/user-permission-service.js";
 import type { UserProfileService } from "../../application/user-profile-service.js";
 import type { WebFormService } from "../../application/web-form-service.js";
+import type { WebViewService } from "../../application/web-view-service.js";
 import type { WorkflowService } from "../../application/workflow-service.js";
 import { badRequest, permissionDenied } from "../../core/errors.js";
 import { can } from "../../core/permissions.js";
@@ -84,6 +85,7 @@ import { createUserAccountApi } from "./user-account-api.js";
 import { createUserPermissionApi } from "./user-permission-api.js";
 import { createUserProfileApi } from "./user-profile-api.js";
 import { createWebFormApi } from "./web-form-api.js";
+import { createWebViewApi } from "./web-view-api.js";
 import { createWorkflowApi } from "./workflow-api.js";
 
 export interface ResourceApiOptions {
@@ -108,6 +110,7 @@ export interface ResourceApiOptions {
   readonly kanbans?: KanbanService;
   readonly calendars?: CalendarService;
   readonly webForms?: WebFormService;
+  readonly webViews?: WebViewService;
   readonly dataPatchQueue?: DataPatchQueuePort;
   readonly dataPatchRollbackQueue?: DataPatchRollbackQueuePort;
   readonly dataPatchRollbackRetryQueue?: DataPatchRollbackRetryQueuePort;
@@ -306,6 +309,16 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
         webForms: options.webForms,
         actor: resolveActor,
         maxJsonBytes
+      })
+    );
+  }
+
+  if (options.webViews) {
+    app.route(
+      "/",
+      createWebViewApi({
+        webViews: options.webViews,
+        actor: resolveActor
       })
     );
   }

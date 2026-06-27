@@ -10,6 +10,7 @@ import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-f
 import type { ReportDefinition } from "./reports.js";
 import type { DocTypeDefinition } from "./types.js";
 import type { WebFormDefinition } from "./web-form.js";
+import type { WebViewDefinition } from "./web-view.js";
 import type { WorkspaceDefinition } from "./workspace.js";
 
 export interface FrameworkAppDefinition<TDataPatchResources = unknown> {
@@ -26,6 +27,7 @@ export interface FrameworkAppDefinition<TDataPatchResources = unknown> {
   readonly kanbans?: readonly KanbanDefinition[];
   readonly calendars?: readonly CalendarDefinition[];
   readonly webForms?: readonly WebFormDefinition[];
+  readonly webViews?: readonly WebViewDefinition[];
   readonly workspaces?: readonly WorkspaceDefinition[];
   readonly clientScripts?: readonly ClientScriptDefinition[];
   readonly dataPatches?: readonly DataPatchDefinition<TDataPatchResources>[];
@@ -57,6 +59,7 @@ export function defineApp<TDataPatchResources = unknown>(
     kanbans: Object.freeze([...(input.kanbans ?? [])]),
     calendars: Object.freeze([...(input.calendars ?? [])]),
     webForms: Object.freeze([...(input.webForms ?? [])]),
+    webViews: Object.freeze([...(input.webViews ?? [])]),
     workspaces: Object.freeze([...(input.workspaces ?? [])]),
     clientScripts: Object.freeze([...(input.clientScripts ?? [])]),
     dataPatches: Object.freeze([...(input.dataPatches ?? [])]),
@@ -90,6 +93,7 @@ export function registryOptionsFromApps<TDataPatchResources = unknown>(
     kanbans: orderedApps.flatMap((app) => app.kanbans ?? []),
     calendars: orderedApps.flatMap((app) => app.calendars ?? []),
     webForms: orderedApps.flatMap((app) => app.webForms ?? []),
+    webViews: orderedApps.flatMap((app) => app.webViews ?? []),
     workspaces: orderedApps.flatMap((app) => app.workspaces ?? []),
     clientScripts: orderedApps.flatMap((app) => app.clientScripts ?? []),
     dataPatches: orderedApps.flatMap((app) => app.dataPatches ?? []) as readonly DataPatchDefinition[],

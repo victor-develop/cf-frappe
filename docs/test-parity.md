@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the metadata-defined Web Forms slice:
+As of the metadata-defined Web Views slice:
 
-- Vitest files: `131`
-- Vitest cases: `1354`
+- Vitest files: `135`
+- Vitest cases: `1363`
 
 ## Implication
 

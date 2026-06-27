@@ -12,6 +12,7 @@ import {
   defineDocType,
   defineKanban,
   defineWebForm,
+  defineWebView,
   deterministicIds,
   fixedClock,
   InMemoryDataPatchLog,
@@ -304,6 +305,56 @@ describe("CloudFrappe Worker routing", () => {
         data: { title: "Worker Lead", email: "worker@example.com" }
       })
     ]);
+  });
+
+  it("mounts metadata Web View API and public routes through Worker routing", async () => {
+    const Article = defineDocType({
+      name: "Article",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "route", type: "text", required: true },
+        { name: "published", type: "boolean" },
+        { name: "body", type: "longText" }
+      ],
+      permissions: [{ roles: ["Guest"], actions: ["read"] }]
+    });
+    const registry = createRegistry({
+      doctypes: [Article],
+      webViews: [
+        defineWebView({
+          name: "Articles",
+          label: "Articles",
+          description: "Published articles",
+          doctype: "Article",
+          routeField: "route",
+          titleField: "title",
+          publishedField: "published",
+          fields: [{ field: "body" }]
+        })
+      ]
+    });
+    const worker = createCloudFrappeWorker({
+      registry,
+      actor: () => ({ id: "guest", roles: ["Guest"], tenantId: "acme" })
+    });
+    const env = {
+      DB: fakeD1(),
+      AGGREGATES: fakeNamespace()
+    };
+
+    const metadata = await worker.fetch!(cfRequest("http://localhost/api/meta/web-views"), env, fakeExecutionContext());
+    const items = await worker.fetch!(cfRequest("http://localhost/api/web-view/Articles"), env, fakeExecutionContext());
+    const page = await worker.fetch!(cfRequest("http://localhost/web/Articles"), env, fakeExecutionContext());
+
+    expect(metadata.status).toBe(200);
+    await expect(metadata.json()).resolves.toMatchObject({
+      data: [{ name: "Articles", doctype: "Article", routeField: "route" }]
+    });
+    expect(items.status).toBe(200);
+    await expect(items.json()).resolves.toMatchObject({ data: { view: { name: "Articles" }, items: [] } });
+    expect(page.status).toBe(200);
+    await expect(page.text()).resolves.toContain("Published articles");
   });
 
   it("enables generated Desk document presence panels when realtime is configured", async () => {
