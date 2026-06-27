@@ -81,3 +81,4 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Extracted idempotent assignment/tag/follower collection change planning from `DocumentService` into the document collaboration policy with focused add/remove noop coverage.
 - Extracted file naming, storage key, previewability, declared-size, direct-upload expiry, and rendition content-type planning from `FileService` into a pure file policy module with focused boundary coverage.
 - Extracted multipart manifest parsing, part-size detection, reservation bounds, completion manifest matching, and R2-compatible part-size checks from `FileService` into the file policy with focused coverage.
+- Extracted persisted rendition manifest parsing, view projection, transform option serialization, source/overlay matching, deterministic rendition id generation, and pending/failed/completed manifest transitions from `FileService` into the file policy with focused coverage.

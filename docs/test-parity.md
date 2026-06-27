@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file multipart policy module slice:
+As of the file rendition policy module slice:
 
 - Vitest files: `169`
-- Vitest cases: `1601`
+- Vitest cases: `1606`
 
 ## Implication
 
