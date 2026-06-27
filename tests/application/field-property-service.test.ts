@@ -10,8 +10,10 @@ import {
   InMemoryDocumentStore,
   QueryService,
   SYSTEM_MANAGER_ROLE,
+  type DocumentEventPayload,
   type DocTypeDefinition
 } from "../../src";
+import type { FieldPropertyEventPayload } from "../../src";
 import { data, noteDocType, now, owner } from "../helpers";
 
 const admin = {
@@ -21,6 +23,17 @@ const admin = {
 };
 
 describe("FieldPropertyService", () => {
+  it("registers field property payloads through the domain event extension map", () => {
+    const payload = fieldPropertyPayload({
+      kind: "FieldPropertyOverrideSaved",
+      doctypeName: "Note",
+      fieldName: "priority",
+      overrides: { label: "Urgency" }
+    });
+
+    expect(payload.overrides.label).toBe("Urgency");
+  });
+
   it("saves, clears, and audits field property override events", async () => {
     const events = new InMemoryDocumentStore();
     const service = new FieldPropertyService({
@@ -232,3 +245,9 @@ describe("FieldPropertyService", () => {
     });
   });
 });
+
+function fieldPropertyPayload(
+  payload: Extract<DocumentEventPayload, { readonly kind: "FieldPropertyOverrideSaved" }>
+): Extract<FieldPropertyEventPayload, { readonly kind: "FieldPropertyOverrideSaved" }> {
+  return payload;
+}

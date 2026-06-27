@@ -17,10 +17,13 @@ import {
   type NewDomainEvent,
   type TenantId
 } from "../core/types.js";
+import type { FieldPropertyEventPayload } from "./field-property-events.js";
 import type { ModelRegistry } from "../core/registry.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
+
+export type { FieldPropertyEventPayload } from "./field-property-events.js";
 
 export type PrePropertyDocTypeResolver = (
   base: DocTypeDefinition,
@@ -162,7 +165,7 @@ export class FieldPropertyService {
     return this.prePropertyDocTypeResolver ? await this.prePropertyDocTypeResolver(base, { tenantId }) : base;
   }
 
-  private async appendAndFold<TPayload extends NewDomainEvent["payload"]>(
+  private async appendAndFold<TPayload extends FieldPropertyEventPayload>(
     state: FieldPropertyOverrideState,
     options: {
       readonly actor: Actor;

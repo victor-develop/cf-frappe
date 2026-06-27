@@ -393,17 +393,6 @@ export type CoreDocumentEventPayload =
       readonly applicableDoctypes?: readonly DocTypeName[];
     }
   | {
-      readonly kind: "FieldPropertyOverrideSaved";
-      readonly doctypeName: DocTypeName;
-      readonly fieldName: string;
-      readonly overrides: FieldPropertyOverrides;
-    }
-  | {
-      readonly kind: "FieldPropertyOverrideCleared";
-      readonly doctypeName: DocTypeName;
-      readonly fieldName: string;
-    }
-  | {
       readonly kind: "WorkflowDefinitionSaved";
       readonly doctypeName: DocTypeName;
       readonly workflow: WorkflowDefinition;

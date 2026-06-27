@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the custom field event payload module slice:
+As of the field property event payload module slice:
 
 - Vitest files: `156`
-- Vitest cases: `1509`
+- Vitest cases: `1510`
 
 ## Implication
 
