@@ -180,6 +180,7 @@ export class DocumentDeliveryOutboxService {
       const existing = this.requireRecord(state, command.outboxId);
       ensureClaimed(existing, command.claimId);
       return {
+        recordIds: [command.outboxId],
         events: [{
           id: this.ids.next("evt_"),
           tenantId: command.tenantId,
