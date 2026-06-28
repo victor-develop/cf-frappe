@@ -68,6 +68,34 @@ describe("DataPatchRunner", () => {
     await expect(runner.pendingPatches()).rejects.toMatchObject({ code: "DATA_PATCH_FAILED" });
   });
 
+  it("records non-JSON patch results as failed journals", async () => {
+    const log = new InMemoryDataPatchLog();
+    const runner = new DataPatchRunner({
+      log,
+      resources: {},
+      patches: [
+        defineDataPatch({
+          id: "bad.result",
+          checksum: "v1",
+          run: () => Number.POSITIVE_INFINITY
+        })
+      ],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-bad"])
+    });
+
+    await expect(runner.apply()).rejects.toThrow("Data patch result must be JSON-serializable");
+    await expect(log.recordedDataPatches()).resolves.toEqual([
+      {
+        id: "bad.result",
+        checksum: "v1",
+        failedAt: now,
+        error: "Data patch result must be JSON-serializable",
+        status: "failed"
+      }
+    ]);
+  });
+
   it("rolls back applied patches once and records rollback results", async () => {
     const resources = { applied: [] as string[], rolledBack: [] as string[] };
     const log = new InMemoryDataPatchLog();
@@ -198,6 +226,41 @@ describe("DataPatchRunner", () => {
     ]);
     await expect(runner.apply()).rejects.toMatchObject({ code: "DATA_PATCH_ROLLBACK_FAILED" });
     await expect(runner.pendingPatches()).rejects.toMatchObject({ code: "DATA_PATCH_ROLLBACK_FAILED" });
+  });
+
+  it("records non-JSON rollback results as rollback failed journals", async () => {
+    const log = new InMemoryDataPatchLog();
+    const runner = new DataPatchRunner({
+      log,
+      resources: {},
+      patches: [
+        defineDataPatch({
+          id: "bad.rollback.result",
+          checksum: "v1",
+          run: () => ({ applied: true }),
+          rollback: {
+            run: () => ({ nested: undefined }) as never
+          }
+        })
+      ],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-bad", "rollback-bad"])
+    });
+
+    await runner.apply();
+
+    await expect(runner.rollback()).rejects.toThrow("Data patch rollback result must be JSON-serializable");
+    await expect(log.recordedDataPatches()).resolves.toEqual([
+      {
+        id: "bad.rollback.result",
+        checksum: "v1",
+        appliedAt: now,
+        result: { applied: true },
+        rollbackFailedAt: now,
+        rollbackError: "Data patch rollback result must be JSON-serializable",
+        status: "rollback_failed"
+      }
+    ]);
   });
 
   it("rejects duplicate patches, checksum drift, and concurrent claims", async () => {

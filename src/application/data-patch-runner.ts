@@ -1,5 +1,6 @@
 import { defineDataPatch, type DataPatchDefinition } from "../core/data-patch.js";
-import { FrameworkError } from "../core/errors.js";
+import { badRequest, FrameworkError } from "../core/errors.js";
+import { isJsonValue } from "../core/json.js";
 import type { JsonValue } from "../core/types.js";
 import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
@@ -121,7 +122,7 @@ export class DataPatchRunner<TResources = unknown> {
 
       let result: JsonValue | undefined;
       try {
-        result = normalizeResult(await patch.run({ resources: this.resources }));
+        result = normalizeResult(await patch.run({ resources: this.resources }), "Data patch result");
       } catch (error) {
         await this.log.failDataPatch({
           id: patch.id,
@@ -241,7 +242,7 @@ export class DataPatchRunner<TResources = unknown> {
     }
     let result: JsonValue | undefined;
     try {
-      result = normalizeResult(await patch.rollback.run({ resources: this.resources }));
+      result = normalizeResult(await patch.rollback.run({ resources: this.resources }), "Data patch rollback result");
     } catch (error) {
       await this.log.failDataPatchRollback({
         id: patch.id,
@@ -365,8 +366,14 @@ function assertChecksumValueMatches<TResources>(patch: DataPatchDefinition<TReso
   }
 }
 
-function normalizeResult(result: JsonValue | void): JsonValue | undefined {
-  return result === undefined ? undefined : result;
+function normalizeResult(result: JsonValue | void, label: string): JsonValue | undefined {
+  if (result === undefined) {
+    return undefined;
+  }
+  if (!isJsonValue(result)) {
+    throw badRequest(`${label} must be JSON-serializable`);
+  }
+  return result;
 }
 
 function errorMessage(error: unknown): string {
