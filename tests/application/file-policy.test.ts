@@ -31,6 +31,7 @@ import {
   fileBulkDeleteEntryCommand,
   fileBulkDeleteFailure,
   fileBulkFailure,
+  fileBulkMetadataUpdateFailure,
   fileBulkMetadataUpdateEntryCommand,
   fileBufferedUploadDocumentCreateCommand,
   fileBufferedUploadDocumentData,
@@ -1219,6 +1220,15 @@ describe("file policy", () => {
     });
     expect(fileBulkFailure("file_c", "bad", "Bulk metadata update failed")).toEqual({
       name: "file_c",
+      code: "UNKNOWN",
+      message: "Bulk metadata update failed",
+      status: 500
+    });
+  });
+
+  it("maps bulk metadata update failures without service state", () => {
+    expect(fileBulkMetadataUpdateFailure("file_a", "bad")).toEqual({
+      name: "file_a",
       code: "UNKNOWN",
       message: "Bulk metadata update failed",
       status: 500

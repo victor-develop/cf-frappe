@@ -565,6 +565,10 @@ export function fileBulkDeleteFailure(name: string, error: unknown): ReturnType<
   return fileBulkFailure(name, error, "Bulk delete failed");
 }
 
+export function fileBulkMetadataUpdateFailure(name: string, error: unknown): ReturnType<typeof fileBulkFailure> {
+  return fileBulkFailure(name, error, "Bulk metadata update failed");
+}
+
 export function ensureDirectUploadMatches(
   snapshot: DocumentSnapshot,
   object: FileObjectMetadata,

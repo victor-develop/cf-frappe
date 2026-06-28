@@ -64,7 +64,7 @@ import {
   fileBufferedUploadDocumentCreateCommand,
   fileBulkDeleteEntryCommand,
   fileBulkDeleteFailure,
-  fileBulkFailure,
+  fileBulkMetadataUpdateFailure,
   fileBulkMetadataUpdateEntryCommand,
   fileBufferedUploadPutObjectCommand,
   fileAttachedToCommandOption,
@@ -1087,7 +1087,7 @@ export class FileService {
         }));
         updated.push({ name: selection.name, snapshot });
       } catch (error) {
-        failed.push(fileBulkFailure(selection.name, error, "Bulk metadata update failed"));
+        failed.push(fileBulkMetadataUpdateFailure(selection.name, error));
       }
     }
     return { updated, failed };

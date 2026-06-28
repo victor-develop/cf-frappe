@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file bulk metadata update entry command policy slice:
+As of the file bulk metadata update failure policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1705`
-- Remaining gap to Frappe static markers: `1079`
+- Vitest cases: `1706`
+- Remaining gap to Frappe static markers: `1078`
 
 ## Implication
 
