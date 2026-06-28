@@ -1331,6 +1331,33 @@ export function fileDeletedDocumentCommand(snapshot: DocumentSnapshot): FileDele
   };
 }
 
+export interface FileDeletedExecuteCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly tenantId?: string;
+  readonly expectedVersion: number;
+  readonly metadata: DocumentData;
+}
+
+export function fileDeletedExecuteCommand(command: {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly tenantId?: string | undefined;
+  readonly metadata?: DocumentData | undefined;
+  readonly deleted: FileDeletedDocumentCommand;
+}): FileDeletedExecuteCommand {
+  return {
+    actor: command.actor,
+    doctype: command.doctype,
+    name: command.name,
+    ...fileTenantCommandOption(command.tenantId),
+    expectedVersion: command.deleted.expectedVersion,
+    metadata: fileCommandMetadata(command.metadata)
+  };
+}
+
 export function isFileMultipartCompletionStarted(snapshot: DocumentSnapshot): boolean {
   return snapshot.data.storage_state === "upload_completing";
 }

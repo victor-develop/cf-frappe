@@ -43,6 +43,7 @@ import {
   fileDashboardListFilters,
   fileDeleteRequestedExecuteCommand,
   fileDeleteRequestedDocumentCommand,
+  fileDeletedExecuteCommand,
   fileDeletedDocumentCommand,
   fileDirectUploadDocumentCreateCommand,
   fileDocumentData,
@@ -2141,6 +2142,31 @@ describe("file policy", () => {
       version: 5
     })).toEqual({
       expectedVersion: 5
+    });
+  });
+
+  it("builds delete execute command inputs", () => {
+    const actor = { id: "manager@example.com", roles: ["File Manager"], tenantId: "actor-tenant" };
+    const metadata = { source: "file-delete" };
+    const deleted = fileDeletedDocumentCommand({
+      ...fileSnapshot({ storage_state: "delete_requested" }),
+      version: 5
+    });
+
+    expect(fileDeletedExecuteCommand({
+      actor,
+      doctype: "File",
+      name: "FILE-1",
+      tenantId: "tenant-a",
+      metadata,
+      deleted
+    })).toEqual({
+      actor,
+      doctype: "File",
+      name: "FILE-1",
+      tenantId: "tenant-a",
+      expectedVersion: 5,
+      metadata
     });
   });
 

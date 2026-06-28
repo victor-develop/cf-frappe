@@ -74,6 +74,7 @@ import {
   fileBufferedUploadDocumentData,
   fileDeleteRequestedExecuteCommand,
   fileDeleteRequestedDocumentCommand,
+  fileDeletedExecuteCommand,
   fileDeletedDocumentCommand,
   fileDirectUploadDocumentCreateCommand,
   fileMetadataUpdateExecuteCommand,
@@ -1037,14 +1038,14 @@ export class FileService {
         : current;
     await this.deleteFileObjects(deleteRequested);
     const deleted = fileDeletedDocumentCommand(deleteRequested);
-    const snapshot = await this.documents.delete({
+    const snapshot = await this.documents.delete(fileDeletedExecuteCommand({
       actor: command.actor,
       doctype: this.fileDoctype,
       name: command.name,
-      ...fileTenantCommandOption(command.tenantId),
-      expectedVersion: deleted.expectedVersion,
-      metadata: fileCommandMetadata(command.metadata)
-    });
+      tenantId: command.tenantId,
+      metadata: command.metadata,
+      deleted
+    }));
     return snapshot;
   }
 
