@@ -1,4 +1,5 @@
 import { FrameworkError } from "../../core/errors.js";
+import { isJsonValue } from "../../core/json.js";
 import type { JsonValue } from "../../core/types.js";
 import type {
   AppliedDataPatch,
@@ -470,19 +471,6 @@ function parseJsonValue(id: string, field: "result_json" | "rollback_result_json
     // Fall through to the journal corruption error below.
   }
   throw new FrameworkError("DATA_PATCH_INVALID", `Data patch '${id}' has invalid ${field}`, { status: 409 });
-}
-
-function isJsonValue(value: unknown): value is JsonValue {
-  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return true;
-  }
-  if (Array.isArray(value)) {
-    return value.every(isJsonValue);
-  }
-  if (isRecord(value)) {
-    return Object.values(value).every(isJsonValue);
-  }
-  return false;
 }
 
 function rollbackPendingDataPatchFromRow(row: DataPatchRow): RollbackPendingDataPatch {

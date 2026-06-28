@@ -537,6 +537,55 @@ describe("D1DataPatchLog", () => {
       status: 409
     });
   });
+
+  it("rejects stored D1 journal apply results with non-finite JSON numbers", async () => {
+    const db = new FakeD1Database();
+    const log = new D1DataPatchLog(db as unknown as D1Database);
+    db.patches.set("bad.result", {
+      checksum: "v1",
+      status: "applied",
+      claim_id: "claim-1",
+      claimed_at: now,
+      applied_at: now,
+      failed_at: null,
+      error: null,
+      result_json: "1e999",
+      result_present: 1
+    });
+
+    await expect(log.appliedDataPatches()).rejects.toMatchObject({
+      code: "DATA_PATCH_INVALID",
+      status: 409
+    });
+  });
+
+  it("rejects stored D1 journal rollback results with non-finite JSON numbers", async () => {
+    const db = new FakeD1Database();
+    const log = new D1DataPatchLog(db as unknown as D1Database);
+    db.patches.set("bad.rollback_result", {
+      checksum: "v1",
+      status: "rolled_back",
+      claim_id: "claim-1",
+      claimed_at: now,
+      applied_at: now,
+      failed_at: null,
+      error: null,
+      result_json: null,
+      result_present: 0,
+      rollback_claim_id: "claim-rollback",
+      rollback_claimed_at: now,
+      rolled_back_at: now,
+      rollback_failed_at: null,
+      rollback_error: null,
+      rollback_result_json: "1e999",
+      rollback_result_present: 1
+    });
+
+    await expect(log.recordedDataPatches()).rejects.toMatchObject({
+      code: "DATA_PATCH_INVALID",
+      status: 409
+    });
+  });
 });
 
 class FakeD1Database {
