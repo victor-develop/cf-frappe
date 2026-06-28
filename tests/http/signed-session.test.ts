@@ -86,6 +86,19 @@ describe("signed session actor resolver", () => {
     });
   });
 
+  it("rejects unsafe max-age values when issuing signed session cookies", async () => {
+    await expect(
+      createSignedSessionCookie(actor, {
+        secret: "test-secret",
+        now: () => 1_000,
+        maxAgeSeconds: Number.MAX_SAFE_INTEGER + 1
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Session maxAgeSeconds must be a positive integer"
+    });
+  });
+
   it("rejects tampered and expired sessions", async () => {
     const cookie = await createSignedSessionCookie(actor, {
       secret: "test-secret",

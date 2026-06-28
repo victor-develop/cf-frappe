@@ -71,7 +71,7 @@ export async function createSignedSessionCookie(
   options: CreateSignedSessionCookieOptions
 ): Promise<string> {
   ensureSecret(options.secret);
-  if (!Number.isInteger(options.maxAgeSeconds) || options.maxAgeSeconds < 1) {
+  if (!Number.isSafeInteger(options.maxAgeSeconds) || options.maxAgeSeconds < 1) {
     throw badRequest("Session maxAgeSeconds must be a positive integer");
   }
   const now = currentSeconds(options.now);

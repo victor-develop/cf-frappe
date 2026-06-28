@@ -120,6 +120,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Extracted persisted rendition manifest parsing, view projection, transform option serialization, source/overlay matching, deterministic rendition id generation, and pending/failed/completed manifest transitions from `FileService` into the file policy with focused coverage.
 - Guarded signed-session actor normalization so blank actor ids cannot be issued into signed session cookies, with focused HTTP boundary coverage.
 - Guarded signed-session account-version normalization so unsafe JavaScript integers cannot become session revalidation versions, with focused HTTP boundary coverage.
+- Guarded signed-session max-age normalization so unsafe JavaScript integers cannot become cookie max-age or expiry values, with focused HTTP boundary coverage.
 - Extracted selected-file bulk operation normalization from `FileService` into the file policy, covering trimming, duplicates, expected-version validation, empty selections, and the bounded 100-file limit.
 - Extracted direct-upload object metadata matching and scanner result patch shaping from `FileService` into the file policy with focused size/content-type and optional scan-field coverage.
 - Extracted file dashboard row projection and limit normalization from `FileService` into the file policy with focused preview, attachment, scan, rendition, and limit coverage.
