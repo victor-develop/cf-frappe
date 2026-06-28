@@ -37,6 +37,9 @@ import {
   fileBulkDeleteOutcomeResult,
   fileBulkDeleteResult,
   fileBulkFailure,
+  fileBulkMetadataFailedOutcome,
+  fileBulkMetadataOutcomeResult,
+  fileBulkMetadataUpdatedOutcome,
   fileBulkMetadataUpdateFailure,
   fileBulkMetadataUpdateEntryCommand,
   fileBulkMetadataUpdateResult,
@@ -1938,6 +1941,28 @@ describe("file policy", () => {
     })).toEqual({
       updated: [updated],
       failed: [failed]
+    });
+  });
+
+  it("groups bulk metadata update outcomes into final results", () => {
+    const snapshot = fileSnapshot({ filename: "updated.pdf" });
+    const updated = fileBulkMetadataUpdatedOutcome({
+      selection: { name: "file_updated" },
+      snapshot
+    });
+    const failed = fileBulkMetadataFailedOutcome({
+      selection: { name: "file_locked" },
+      error: new Error("locked")
+    });
+
+    expect(fileBulkMetadataOutcomeResult([updated, failed])).toEqual({
+      updated: [{ name: "file_updated", snapshot }],
+      failed: [{
+        name: "file_locked",
+        code: "UNKNOWN",
+        message: "locked",
+        status: 500
+      }]
     });
   });
 

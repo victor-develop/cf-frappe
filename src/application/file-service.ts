@@ -62,10 +62,10 @@ import {
   fileBulkDeleteEntryCommand,
   fileBulkDeleteFailedOutcome,
   fileBulkDeleteOutcomeResult,
-  fileBulkMetadataUpdateFailure,
+  fileBulkMetadataFailedOutcome,
+  fileBulkMetadataOutcomeResult,
+  fileBulkMetadataUpdatedOutcome,
   fileBulkMetadataUpdateEntryCommand,
-  fileBulkMetadataUpdateResult,
-  fileBulkUpdatedEntry,
   fileBufferedUploadCreatePlan,
   fileBufferedUploadStoragePlan,
   fileCommandTenantId,
@@ -139,6 +139,7 @@ import {
   sanitizeFilename,
   shouldContinueFileDashboardScan,
   type FileBulkDeleteOutcome,
+  type FileBulkMetadataUpdateOutcome,
   type FileRenditionManifestEntry,
 } from "./file-policy.js";
 import type { IdGenerator } from "../ports/id-generator.js";
@@ -1055,8 +1056,7 @@ export class FileService {
   async bulkUpdateMetadata(command: BulkUpdateFileMetadataCommand): Promise<BulkUpdateFileMetadataResult> {
     const selections = normalizeBulkFileSelections(command.files);
     ensureFileMetadataPatchProvided(command);
-    const updated: BulkUpdatedFile[] = [];
-    const failed: BulkUpdateFileMetadataFailure[] = [];
+    const outcomes: FileBulkMetadataUpdateOutcome[] = [];
     for (const selection of selections) {
       try {
         const snapshot = await this.updateMetadata(fileBulkMetadataUpdateEntryCommand({
@@ -1066,12 +1066,12 @@ export class FileService {
           selection,
           patch: command
         }));
-        updated.push(fileBulkUpdatedEntry({ name: selection.name, snapshot }));
+        outcomes.push(fileBulkMetadataUpdatedOutcome({ selection, snapshot }));
       } catch (error) {
-        failed.push(fileBulkMetadataUpdateFailure(selection.name, error));
+        outcomes.push(fileBulkMetadataFailedOutcome({ selection, error }));
       }
     }
-    return fileBulkMetadataUpdateResult({ updated, failed });
+    return fileBulkMetadataOutcomeResult(outcomes);
   }
 
   private preflightCreate(actor: Actor, data: DocumentData): void {

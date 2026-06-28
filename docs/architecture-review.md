@@ -190,4 +190,5 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized upload, download, prepared-upload, and multipart-part result shaping in file policy so ordinary file orchestration no longer composes success DTOs inline.
 - Centralized bulk success entry and final result shaping in file policy so bulk delete and metadata orchestration no longer compose outcome DTOs inline.
 - Centralized bulk delete outcome aggregation in file policy so bulk delete orchestration no longer splits per-file success and failure outcomes into result arrays inline.
+- Centralized bulk metadata update outcome aggregation in file policy so bulk metadata orchestration no longer splits per-file success and failure outcomes into result arrays inline.
 - Centralized delete document-command intent shaping in file policy so abort and final delete orchestration no longer derive current snapshot version guards inline.

@@ -681,6 +681,54 @@ export function fileBulkMetadataUpdateResult(command: {
   };
 }
 
+export type FileBulkMetadataUpdateOutcome =
+  | {
+      readonly kind: "updated";
+      readonly updated: ReturnType<typeof fileBulkUpdatedEntry>;
+    }
+  | {
+      readonly kind: "failed";
+      readonly failed: ReturnType<typeof fileBulkMetadataUpdateFailure>;
+    };
+
+export function fileBulkMetadataUpdatedOutcome(command: {
+  readonly selection: BulkFileSelectionPolicyInput;
+  readonly snapshot: DocumentSnapshot;
+}): FileBulkMetadataUpdateOutcome {
+  return {
+    kind: "updated",
+    updated: fileBulkUpdatedEntry({
+      name: command.selection.name,
+      snapshot: command.snapshot
+    })
+  };
+}
+
+export function fileBulkMetadataFailedOutcome(command: {
+  readonly selection: BulkFileSelectionPolicyInput;
+  readonly error: unknown;
+}): FileBulkMetadataUpdateOutcome {
+  return {
+    kind: "failed",
+    failed: fileBulkMetadataUpdateFailure(command.selection.name, command.error)
+  };
+}
+
+export function fileBulkMetadataOutcomeResult(
+  outcomes: readonly FileBulkMetadataUpdateOutcome[]
+): ReturnType<typeof fileBulkMetadataUpdateResult> {
+  const updated: ReturnType<typeof fileBulkUpdatedEntry>[] = [];
+  const failed: ReturnType<typeof fileBulkMetadataUpdateFailure>[] = [];
+  for (const outcome of outcomes) {
+    if (outcome.kind === "updated") {
+      updated.push(outcome.updated);
+    } else {
+      failed.push(outcome.failed);
+    }
+  }
+  return fileBulkMetadataUpdateResult({ updated, failed });
+}
+
 export function ignoreFileCleanupFailure(_error: unknown): undefined {
   return undefined;
 }
