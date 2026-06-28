@@ -65,6 +65,7 @@ import {
   fileBulkDeleteEntryCommand,
   fileBulkDeleteFailure,
   fileBulkFailure,
+  fileBulkMetadataUpdateEntryCommand,
   fileBufferedUploadPutObjectCommand,
   fileAttachedToCommandOption,
   fileCommandMetadata,
@@ -1077,15 +1078,13 @@ export class FileService {
     const failed: BulkUpdateFileMetadataFailure[] = [];
     for (const selection of selections) {
       try {
-        const snapshot = await this.updateMetadata({
+        const snapshot = await this.updateMetadata(fileBulkMetadataUpdateEntryCommand({
           actor: command.actor,
-          name: selection.name,
-          ...fileIsPrivateCommandOption(command.isPrivate),
-          ...fileAttachedToCommandOption(command.attachedTo),
-          ...fileExpectedVersionCommandOption(selection.expectedVersion),
-          ...fileTenantCommandOption(command.tenantId),
-          metadata: fileCommandMetadata(command.metadata)
-        });
+          tenantId: command.tenantId,
+          metadata: command.metadata,
+          selection,
+          patch: command
+        }));
         updated.push({ name: selection.name, snapshot });
       } catch (error) {
         failed.push(fileBulkFailure(selection.name, error, "Bulk metadata update failed"));

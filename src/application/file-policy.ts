@@ -506,6 +506,39 @@ export function fileBulkDeleteEntryCommand(command: {
   };
 }
 
+export interface FileBulkMetadataUpdateEntryCommand {
+  readonly actor: Actor;
+  readonly name: string;
+  readonly tenantId?: string;
+  readonly isPrivate?: boolean;
+  readonly attachedTo?:
+    | {
+        readonly doctype: string;
+        readonly name: string;
+      }
+    | null;
+  readonly expectedVersion?: number;
+  readonly metadata: DocumentData;
+}
+
+export function fileBulkMetadataUpdateEntryCommand(command: {
+  readonly actor: Actor;
+  readonly tenantId?: string | undefined;
+  readonly metadata?: DocumentData | undefined;
+  readonly selection: BulkFileSelectionPolicyInput;
+  readonly patch: FileMetadataPatchCommand;
+}): FileBulkMetadataUpdateEntryCommand {
+  return {
+    actor: command.actor,
+    name: command.selection.name,
+    ...fileIsPrivateCommandOption(command.patch.isPrivate),
+    ...fileAttachedToCommandOption(command.patch.attachedTo),
+    ...fileExpectedVersionCommandOption(command.selection.expectedVersion),
+    ...fileTenantCommandOption(command.tenantId),
+    metadata: fileCommandMetadata(command.metadata)
+  };
+}
+
 export function fileBulkFailure(name: string, error: unknown, fallback: string): {
   readonly name: string;
   readonly code: FrameworkError["code"] | "UNKNOWN";

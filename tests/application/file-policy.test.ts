@@ -31,6 +31,7 @@ import {
   fileBulkDeleteEntryCommand,
   fileBulkDeleteFailure,
   fileBulkFailure,
+  fileBulkMetadataUpdateEntryCommand,
   fileBufferedUploadDocumentCreateCommand,
   fileBufferedUploadDocumentData,
   fileBufferedUploadPutObjectCommand,
@@ -1158,6 +1159,31 @@ describe("file policy", () => {
     })).toEqual({
       actor,
       name: "file_a",
+      tenantId: "tenant-a",
+      expectedVersion: 2,
+      metadata
+    });
+  });
+
+  it("builds bulk metadata update entry commands", () => {
+    const actor = { id: "manager@example.com", roles: ["File Manager"], tenantId: "actor-tenant" };
+    const metadata = { source: "bulk-metadata" };
+    const selection = normalizeBulkFileSelections([{ name: " file_a ", expectedVersion: 2 }])[0]!;
+
+    expect(fileBulkMetadataUpdateEntryCommand({
+      actor,
+      tenantId: "tenant-a",
+      metadata,
+      selection,
+      patch: {
+        isPrivate: false,
+        attachedTo: { doctype: "Invoice", name: "INV-1" }
+      }
+    })).toEqual({
+      actor,
+      name: "file_a",
+      isPrivate: false,
+      attachedTo: { doctype: "Invoice", name: "INV-1" },
       tenantId: "tenant-a",
       expectedVersion: 2,
       metadata
