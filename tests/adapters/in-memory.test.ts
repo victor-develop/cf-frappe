@@ -1,5 +1,6 @@
 import {
   conflict,
+  createInMemoryAccountRecoveryNotifier,
   documentStream,
   InMemoryDataPatchLog,
   InMemoryEventStore,
@@ -22,6 +23,60 @@ describe("in-memory adapters", () => {
     payload: { kind: "DocumentCreated", data: { title: "One" }, docstatus: "draft" },
     metadata: {}
   };
+
+  it("snapshots password reset recovery messages by value", () => {
+    const notifier = createInMemoryAccountRecoveryNotifier();
+    const message = {
+      tenantId: "acme",
+      userId: "owner@example.com",
+      email: "owner@example.com",
+      token: "reset-token",
+      expiresAt: "2026-01-01T00:15:00.000Z"
+    };
+
+    notifier.sendPasswordReset(message);
+    message.token = "mutated-token";
+
+    const [read] = notifier.passwordResetMessages;
+    (read as { token: string }).token = "read-token";
+
+    expect(notifier.passwordResetMessages).toEqual([
+      {
+        tenantId: "acme",
+        userId: "owner@example.com",
+        email: "owner@example.com",
+        token: "reset-token",
+        expiresAt: "2026-01-01T00:15:00.000Z"
+      }
+    ]);
+  });
+
+  it("snapshots email verification recovery messages by value", () => {
+    const notifier = createInMemoryAccountRecoveryNotifier();
+    const message = {
+      tenantId: "acme",
+      userId: "owner@example.com",
+      email: "owner@example.com",
+      token: "verify-token",
+      expiresAt: "2026-01-01T00:10:00.000Z"
+    };
+
+    notifier.sendEmailVerification(message);
+    message.email = "mutated@example.com";
+
+    const [read] = notifier.emailVerificationMessages;
+    (read as { email: string }).email = "read@example.com";
+
+    expect(notifier.emailVerificationMessages).toEqual([
+      {
+        tenantId: "acme",
+        userId: "owner@example.com",
+        email: "owner@example.com",
+        token: "verify-token",
+        expiresAt: "2026-01-01T00:10:00.000Z"
+      }
+    ]);
+  });
 
   it("assigns stream sequence numbers on append", async () => {
     const store = new InMemoryEventStore();
