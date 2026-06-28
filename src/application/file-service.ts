@@ -66,7 +66,7 @@ import {
   fileBulkMetadataUpdateResult,
   fileBulkUpdatedEntry,
   fileBufferedUploadCreatePlan,
-  fileBufferedUploadPutObjectCommand,
+  fileBufferedUploadStoragePlan,
   fileCommandTenantId,
   fileContentLength,
   fileDashboardBatchLimit,
@@ -78,7 +78,6 @@ import {
   fileReadableDashboardCandidate,
   fileReadableDashboardEntries,
   fileDashboardSystemActor,
-  fileBufferedUploadDocumentData,
   fileDownloadedTransformObjectCommand,
   fileDeleteRequestedExecuteCommand,
   fileDeleteRequestedDocumentCommand,
@@ -117,7 +116,6 @@ import {
   fileObjectScanTarget,
   fileScanFailureError,
   fileExpectedVersionCommandOption,
-  fileUploadDocumentDataCommand,
   fileUploadCompletionExecuteCommand,
   fileUploadCompletionPlan,
   fileUploadContentType,
@@ -466,26 +464,20 @@ export class FileService {
     await this.validateAttachmentTarget(command.actor, tenantId, command.attachedTo);
     const fileName = this.ids.next("file_");
     const key = objectKey(tenantId, fileName, filename);
-    const data = fileBufferedUploadDocumentData(fileUploadDocumentDataCommand({
+    const upload = fileBufferedUploadStoragePlan({
       filename,
       key,
+      body: command.body,
       contentType,
       size,
+      tenantId,
       isPrivate: command.isPrivate,
       uploadedBy: command.actor.id,
       uploadedAt: this.clock.now(),
       attachedTo: command.attachedTo
-    }));
-    this.preflightCreate(command.actor, data);
-    const object = await this.storage.put(fileBufferedUploadPutObjectCommand({
-      key,
-      body: command.body,
-      contentType,
-      filename,
-      size,
-      tenantId,
-      uploadedBy: command.actor.id
-    }));
+    });
+    this.preflightCreate(command.actor, upload.data);
+    const object = await this.storage.put(upload.put);
     let scan: FileScanResult | undefined;
     try {
       scan = await this.scanObject({
@@ -502,7 +494,7 @@ export class FileService {
 
     try {
       const plan = fileBufferedUploadCreatePlan({
-        data,
+        data: upload.data,
         object,
         scan,
         checkedAt: this.clock.now()

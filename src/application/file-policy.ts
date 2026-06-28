@@ -738,6 +738,47 @@ export function fileBufferedUploadPutObjectCommand(command: {
   };
 }
 
+export function fileBufferedUploadStoragePlan(command: {
+  readonly key: string;
+  readonly body: FileContent;
+  readonly contentType: string;
+  readonly filename: string;
+  readonly size: number;
+  readonly tenantId: string;
+  readonly isPrivate?: boolean | undefined;
+  readonly uploadedBy: string;
+  readonly uploadedAt: string;
+  readonly attachedTo?: {
+    readonly doctype: string;
+    readonly name: string;
+  } | undefined;
+}): {
+  readonly data: DocumentData;
+  readonly put: PutFileObjectCommand;
+} {
+  return {
+    data: fileBufferedUploadDocumentData(fileUploadDocumentDataCommand({
+      filename: command.filename,
+      key: command.key,
+      contentType: command.contentType,
+      size: command.size,
+      isPrivate: command.isPrivate,
+      uploadedBy: command.uploadedBy,
+      uploadedAt: command.uploadedAt,
+      attachedTo: command.attachedTo
+    })),
+    put: fileBufferedUploadPutObjectCommand({
+      key: command.key,
+      body: command.body,
+      contentType: command.contentType,
+      filename: command.filename,
+      size: command.size,
+      tenantId: command.tenantId,
+      uploadedBy: command.uploadedBy
+    })
+  };
+}
+
 export function fileDirectUploadReservationCommand(command: {
   readonly key: string;
   readonly contentType: string;

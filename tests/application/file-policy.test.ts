@@ -41,6 +41,7 @@ import {
   fileBufferedUploadCreatePlan,
   fileBufferedUploadDocumentCreateCommand,
   fileBufferedUploadDocumentData,
+  fileBufferedUploadStoragePlan,
   fileBufferedUploadPutObjectCommand,
   fileCompletedMultipartObjectReadPlan,
   fileCommandMetadata,
@@ -2043,6 +2044,42 @@ describe("file policy", () => {
       contentType: "application/pdf",
       filename: "invoice.pdf",
       customMetadata: { tenantId: "acme", uploadedBy: "owner@example.com" }
+    });
+  });
+
+  it("plans buffered-upload storage data and put commands together", () => {
+    expect(fileBufferedUploadStoragePlan({
+      key: "acme/files/file_1-invoice.pdf",
+      body: "hello",
+      contentType: "application/pdf",
+      filename: "invoice.pdf",
+      size: 5,
+      tenantId: "acme",
+      isPrivate: false,
+      uploadedBy: "owner@example.com",
+      uploadedAt: "2026-06-28T00:00:00.000Z",
+      attachedTo: { doctype: "Invoice", name: "INV-1" }
+    })).toEqual({
+      data: {
+        filename: "invoice.pdf",
+        key: "acme/files/file_1-invoice.pdf",
+        content_type: "application/pdf",
+        size: 5,
+        is_private: false,
+        uploaded_by: "owner@example.com",
+        uploaded_at: "2026-06-28T00:00:00.000Z",
+        storage_state: "available",
+        attached_to_doctype: "Invoice",
+        attached_to_name: "INV-1"
+      },
+      put: {
+        key: "acme/files/file_1-invoice.pdf",
+        body: "hello",
+        contentType: "application/pdf",
+        filename: "invoice.pdf",
+        size: 5,
+        customMetadata: { tenantId: "acme", uploadedBy: "owner@example.com" }
+      }
     });
   });
 
