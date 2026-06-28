@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the realtime relative-route normalization coverage slice:
+As of the starter setup-script coverage slice:
 
 - Vitest files: `173`
-- Vitest cases: `1963`
-- Remaining gap to Frappe static markers: `821`
+- Vitest cases: `1964`
+- Remaining gap to Frappe static markers: `820`
 
 ## Implication
 

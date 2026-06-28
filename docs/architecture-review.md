@@ -38,6 +38,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Added starter setup-script coverage so generated Cloudflare apps expose one-command local preparation, session-secret setup, and first remote deployment scripts instead of leaving the deployment sequence only in prose.
 - Added realtime relative-route normalization coverage so Worker websocket subscriptions, Worker presence snapshots, and Desk client URL helpers agree when realtime is configured as `rt` or `rt/`.
 - Added realtime root-route mount coverage so Worker websocket subscriptions, Worker presence snapshots, and Desk client URL helpers agree when realtime is configured at `/`.
 - Added Worker realtime trailing-route normalization coverage so configured routes with a trailing slash serve websocket subscriptions and presence snapshots through the same topic boundary.

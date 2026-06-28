@@ -89,7 +89,10 @@ function packageJson(input: StarterProjectTemplateInput): string {
         "d1:migrate:remote": `wrangler d1 migrations apply ${input.databaseName} --remote`,
         "r2:create": `wrangler r2 bucket create ${input.projectName}-files`,
         "queue:create": `wrangler queues create ${input.projectName}-jobs`,
-        "resources:create": "npm run d1:create && npm run r2:create && npm run queue:create"
+        "resources:create": "npm run d1:create && npm run r2:create && npm run queue:create",
+        "setup:local": "npm run cf:types && npm run d1:generate && npm run d1:migrate:local",
+        "secret:session": "wrangler secret put SESSION_SECRET",
+        "deploy:first": "npm run cf:types && npm run d1:generate && npm run d1:migrate:remote && npm run deploy"
       },
       dependencies: {
         "cf-frappe": `^${input.cfFrappeVersion}`
@@ -250,9 +253,7 @@ Cloudflare-native cf-frappe starter app with D1 projections, R2-backed file atta
 \`\`\`bash
 npm install
 cp .dev.vars.example .dev.vars
-npm run cf:types
-npm run d1:generate
-npm run d1:migrate:local
+npm run setup:local
 npm run dev
 \`\`\`
 
@@ -282,6 +283,13 @@ npm run resources:create
 \`\`\`
 
 Copy the returned D1 \`database_id\` into the \`replace-with-d1-database-id\` placeholder in \`wrangler.jsonc\` before running remote migrations or deploys.
+
+After the D1 id is set, save the production session secret and run the first remote migration plus deploy sequence:
+
+\`\`\`bash
+npm run secret:session
+npm run deploy:first
+\`\`\`
 
 Registered data patches can be inspected and run against a deployed Worker through the admin API. Keep secret auth material in environment variables and pass it with \`--header-env\`. Assuming \`CF_FRAPPE_AUTH\` is already exported by your shell secret manager or CI secret store:
 
@@ -483,9 +491,8 @@ npm run resources:create
 Copy the returned D1 \`database_id\` into the \`replace-with-d1-database-id\` placeholder in \`wrangler.jsonc\`, then set the production session secret with Wrangler's interactive prompt:
 
 \`\`\`bash
-wrangler secret put SESSION_SECRET
-npm run d1:migrate:remote
-npm run deploy
+npm run secret:session
+npm run deploy:first
 \`\`\`
 ${authProviderDeployReadme(input.auth)}
 

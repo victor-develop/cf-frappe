@@ -422,6 +422,35 @@ describe("cf-frappe CLI scaffold", () => {
     );
   });
 
+  it("generates starter setup scripts for local and first remote deploy flows", async () => {
+    const target = join(tempRoot, "Setup Scripts App");
+
+    await scaffoldProject({
+      targetDirectory: target,
+      compatibilityDate: "2026-06-22",
+      cfFrappeVersion: "0.1.0",
+      nodeTypesVersion: "^26.0.0",
+      typescriptVersion: "^5.7.2",
+      wranglerVersion: "^4.103.0"
+    });
+
+    const packageJson = JSON.parse(await readFile(join(target, "package.json"), "utf8")) as {
+      readonly scripts: Record<string, string>;
+    };
+    expect(packageJson.scripts["setup:local"]).toBe(
+      "npm run cf:types && npm run d1:generate && npm run d1:migrate:local"
+    );
+    expect(packageJson.scripts["secret:session"]).toBe("wrangler secret put SESSION_SECRET");
+    expect(packageJson.scripts["deploy:first"]).toBe(
+      "npm run cf:types && npm run d1:generate && npm run d1:migrate:remote && npm run deploy"
+    );
+
+    const readmeText = await readFile(join(target, "README.md"), "utf8");
+    expect(readmeText).toContain("npm run setup:local");
+    expect(readmeText).toContain("npm run secret:session");
+    expect(readmeText).toContain("npm run deploy:first");
+  });
+
   it("creates a Cloudflare Access-backed starter app", async () => {
     const target = join(tempRoot, "Access App");
 
