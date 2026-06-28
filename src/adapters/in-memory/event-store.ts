@@ -3,6 +3,7 @@ import type { DomainEvent, NewDomainEvent, StreamName } from "../../core/types.j
 import type { AuditDocumentEventQuery, AuditEventQuery, AuditEventStore } from "../../ports/audit-event-store.js";
 import type { EventStore } from "../../ports/event-store.js";
 import type { ReadStreamOptions } from "../../ports/document-store.js";
+import { cloneDomainEvent, sequenceEvents } from "../../core/domain-events.js";
 import { readInMemoryAuditDocumentEvents, searchInMemoryAuditEvents } from "./audit-events.js";
 
 export class InMemoryEventStore implements EventStore, AuditEventStore {
@@ -17,11 +18,8 @@ export class InMemoryEventStore implements EventStore, AuditEventStore {
     if (current.length !== expectedVersion) {
       throw conflict(`Expected stream '${stream}' at version ${expectedVersion}, found ${current.length}`);
     }
-    const saved = events.map((event, index) => ({
-      ...event,
-      sequence: expectedVersion + index + 1
-    }));
-    this.streams.set(stream, [...current, ...saved]);
+    const saved = sequenceEvents(expectedVersion, events);
+    this.streams.set(stream, [...current, ...saved.map(cloneDomainEvent)]);
     return saved;
   }
 
@@ -31,7 +29,8 @@ export class InMemoryEventStore implements EventStore, AuditEventStore {
       .filter((event) => options.maxSequence === undefined || event.sequence <= options.maxSequence)
       .filter((event) => payloadKinds === undefined || payloadKinds.has(event.payload.kind))
       .sort((left, right) => left.sequence - right.sequence);
-    return options.limit === undefined ? events : events.slice(Math.max(0, events.length - options.limit));
+    const page = options.limit === undefined ? events : events.slice(Math.max(0, events.length - options.limit));
+    return page.map(cloneDomainEvent);
   }
 
   async currentVersion(stream: StreamName): Promise<number> {
@@ -39,11 +38,11 @@ export class InMemoryEventStore implements EventStore, AuditEventStore {
   }
 
   async searchEvents(query: AuditEventQuery): Promise<readonly DomainEvent[]> {
-    return searchInMemoryAuditEvents(this.streams.values(), query);
+    return searchInMemoryAuditEvents(this.streams.values(), query).map(cloneDomainEvent);
   }
 
   async readDocumentEvents(query: AuditDocumentEventQuery): Promise<readonly DomainEvent[]> {
-    return readInMemoryAuditDocumentEvents(this.streams, query);
+    return readInMemoryAuditDocumentEvents(this.streams, query).map(cloneDomainEvent);
   }
 
   clear(): void {

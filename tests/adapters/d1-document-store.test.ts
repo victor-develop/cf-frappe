@@ -245,6 +245,37 @@ describe("D1DocumentStore", () => {
     });
   });
 
+  it("rejects non-JSON D1 event payloads before writing rows", async () => {
+    const db = new FakeD1Database();
+    const store = new D1EventStore(db as unknown as D1Database);
+
+    await expect(
+      store.append(stream, 0, [
+        {
+          ...event,
+          payload: { kind: "DocumentUpdated", patch: { count: Number.POSITIVE_INFINITY } } as never
+        }
+      ])
+    ).rejects.toMatchObject({
+      code: "EVENT_INVALID",
+      status: 409
+    });
+    expect(db.events).toEqual([]);
+  });
+
+  it("rejects non-JSON D1 event metadata before writing rows", async () => {
+    const db = new FakeD1Database();
+    const store = new D1EventStore(db as unknown as D1Database);
+
+    await expect(
+      store.append(stream, 0, [{ ...event, metadata: { count: Number.POSITIVE_INFINITY } as never }])
+    ).rejects.toMatchObject({
+      code: "EVENT_INVALID",
+      status: 409
+    });
+    expect(db.events).toEqual([]);
+  });
+
   it("translates event append constraint races into document conflicts", async () => {
     const db = new FakeD1Database({ failEventInsertAsConstraint: true });
     const store = new D1EventStore(db as unknown as D1Database);

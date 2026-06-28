@@ -1,16 +1,10 @@
-import type { DomainEvent, NewDomainEvent } from "../../core/types.js";
+import { cloneDomainEvent } from "../../core/domain-events.js";
+import type { DomainEvent } from "../../core/types.js";
 
-export function sequenceEvents(
-  expectedVersion: number,
-  events: readonly NewDomainEvent[]
-): readonly DomainEvent[] {
-  return events.map((event, index) => ({
-    ...event,
-    sequence: expectedVersion + index + 1
-  }));
-}
+export { sequenceEvents } from "../../core/domain-events.js";
 
 export function insertEventStatement(db: D1Database, event: DomainEvent): D1PreparedStatement {
+  const normalized = cloneDomainEvent(event);
   return db
     .prepare(
       `INSERT INTO cf_frappe_events
@@ -18,17 +12,17 @@ export function insertEventStatement(db: D1Database, event: DomainEvent): D1Prep
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
-      event.id,
-      event.tenantId,
-      event.stream,
-      event.sequence,
-      event.type,
-      event.doctype,
-      event.documentName,
-      event.actorId,
-      event.occurredAt,
-      JSON.stringify(event.payload),
-      JSON.stringify(event.metadata)
+      normalized.id,
+      normalized.tenantId,
+      normalized.stream,
+      normalized.sequence,
+      normalized.type,
+      normalized.doctype,
+      normalized.documentName,
+      normalized.actorId,
+      normalized.occurredAt,
+      JSON.stringify(normalized.payload),
+      JSON.stringify(normalized.metadata)
     );
 }
 

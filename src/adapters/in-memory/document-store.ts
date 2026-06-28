@@ -20,6 +20,7 @@ import type { ReadStreamOptions } from "../../ports/document-store.js";
 import type { AuditDocumentEventQuery, AuditEventQuery, AuditEventStore } from "../../ports/audit-event-store.js";
 import type { EventStore } from "../../ports/event-store.js";
 import type { ProjectionStore } from "../../ports/projection-store.js";
+import { cloneDomainEvent, sequenceEvents } from "../../core/domain-events.js";
 import { readInMemoryAuditDocumentEvents, searchInMemoryAuditEvents } from "./audit-events.js";
 import { compareListDocuments, matchesListFilterExpression, matchesListFilters } from "./list-filters.js";
 
@@ -46,17 +47,12 @@ export class InMemoryDocumentStore implements DocumentStore, EventStore, Project
         throw conflict(`Expected stream '${entry.stream}' at version ${entry.expectedVersion}, found ${current.length}`);
       }
     }
-    const saved = entries.flatMap((entry) =>
-      entry.events.map((event, index) => ({
-        ...event,
-        sequence: entry.expectedVersion + index + 1
-      }))
-    );
+    const saved = entries.flatMap((entry) => sequenceEvents(entry.expectedVersion, entry.events));
     const projection = project(saved);
     for (const entry of entries) {
       const current = this.streams.get(entry.stream) ?? [];
       const savedForStream = saved.filter((event) => event.stream === entry.stream);
-      this.streams.set(entry.stream, [...current, ...savedForStream]);
+      this.streams.set(entry.stream, [...current, ...savedForStream.map(cloneDomainEvent)]);
     }
     for (const snapshot of [projection.snapshot, ...(projection.auxiliarySnapshots ?? [])]) {
       await this.save(snapshot);
@@ -73,11 +69,8 @@ export class InMemoryDocumentStore implements DocumentStore, EventStore, Project
     if (current.length !== expectedVersion) {
       throw conflict(`Expected stream '${stream}' at version ${expectedVersion}, found ${current.length}`);
     }
-    const saved = events.map((event, index) => ({
-      ...event,
-      sequence: expectedVersion + index + 1
-    }));
-    this.streams.set(stream, [...current, ...saved]);
+    const saved = sequenceEvents(expectedVersion, events);
+    this.streams.set(stream, [...current, ...saved.map(cloneDomainEvent)]);
     return saved;
   }
 
@@ -87,7 +80,8 @@ export class InMemoryDocumentStore implements DocumentStore, EventStore, Project
       .filter((event) => options.maxSequence === undefined || event.sequence <= options.maxSequence)
       .filter((event) => payloadKinds === undefined || payloadKinds.has(event.payload.kind))
       .sort((left, right) => left.sequence - right.sequence);
-    return options.limit === undefined ? events : events.slice(Math.max(0, events.length - options.limit));
+    const page = options.limit === undefined ? events : events.slice(Math.max(0, events.length - options.limit));
+    return page.map(cloneDomainEvent);
   }
 
   async currentVersion(stream: StreamName): Promise<number> {
@@ -95,11 +89,11 @@ export class InMemoryDocumentStore implements DocumentStore, EventStore, Project
   }
 
   async searchEvents(query: AuditEventQuery): Promise<readonly DomainEvent[]> {
-    return searchInMemoryAuditEvents(this.streams.values(), query);
+    return searchInMemoryAuditEvents(this.streams.values(), query).map(cloneDomainEvent);
   }
 
   async readDocumentEvents(query: AuditDocumentEventQuery): Promise<readonly DomainEvent[]> {
-    return readInMemoryAuditDocumentEvents(this.streams, query);
+    return readInMemoryAuditDocumentEvents(this.streams, query).map(cloneDomainEvent);
   }
 
   async get(

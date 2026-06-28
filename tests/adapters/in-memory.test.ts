@@ -22,6 +22,51 @@ describe("in-memory adapters", () => {
     await expect(store.append(stream, 0, [event])).resolves.toMatchObject([{ sequence: 1 }]);
   });
 
+  it("snapshots event payloads and metadata by value on append and read", async () => {
+    const store = new InMemoryEventStore();
+    const payload = { kind: "DocumentUpdated", patch: { title: "One" } };
+    const metadata = { source: "test" };
+    const [saved] = await store.append(stream, 0, [{ ...event, payload: payload as never, metadata }]);
+
+    payload.patch.title = "mutated";
+    metadata.source = "mutated";
+    (saved!.payload as unknown as { patch: { title: string } }).patch.title = "returned mutation";
+    (saved!.metadata as DocumentData).source = "returned mutation";
+
+    const [read] = await store.readStream(stream);
+    expect(read).toMatchObject({
+      payload: { kind: "DocumentUpdated", patch: { title: "One" } },
+      metadata: { source: "test" }
+    });
+
+    (read!.payload as unknown as { patch: { title: string } }).patch.title = "read mutation";
+    (read!.metadata as DocumentData).source = "read mutation";
+
+    await expect(store.readStream(stream)).resolves.toMatchObject([
+      {
+        payload: { kind: "DocumentUpdated", patch: { title: "One" } },
+        metadata: { source: "test" }
+      }
+    ]);
+  });
+
+  it("rejects non-JSON event payloads before appending", async () => {
+    const store = new InMemoryEventStore();
+
+    await expect(
+      store.append(stream, 0, [
+        {
+          ...event,
+          payload: { kind: "DocumentUpdated", patch: { count: Number.POSITIVE_INFINITY } } as never
+        }
+      ])
+    ).rejects.toMatchObject({
+      code: "EVENT_INVALID",
+      status: 409
+    });
+    await expect(store.readStream(stream)).resolves.toEqual([]);
+  });
+
   it("filters stream reads by payload kind before limiting", async () => {
     const store = new InMemoryEventStore();
     await store.append(stream, 0, [

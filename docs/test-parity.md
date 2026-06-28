@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the core event folding JSON-clone slice:
+As of the domain event writer JSON-clone slice:
 
 - Vitest files: `171`
-- Vitest cases: `1850`
-- Remaining gap to Frappe static markers: `934`
+- Vitest cases: `1854`
+- Remaining gap to Frappe static markers: `930`
 
 ## Implication
 
