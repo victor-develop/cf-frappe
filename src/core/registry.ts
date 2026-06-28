@@ -469,7 +469,7 @@ export class ModelRegistry {
   }
 
   listApps(): readonly InstalledAppDefinition[] {
-    return Object.freeze([...this.apps.values()]);
+    return listDefinitionsInRegistrationOrder(this.apps.values());
   }
 
   getReport(reportName: string): ReportDefinition {
@@ -641,7 +641,7 @@ export class ModelRegistry {
   }
 
   listDataPatches(): readonly DataPatchDefinition[] {
-    return Object.freeze([...this.dataPatches.values()]);
+    return listDefinitionsInRegistrationOrder(this.dataPatches.values());
   }
 
   getWorkspace(workspaceName: string): WorkspaceDefinition {
@@ -958,6 +958,10 @@ function customReportSummaryIsNumeric(report: ReportDefinition, summary: ReportS
 
 function listDefinitionsByName<T extends { readonly name: string }>(definitions: Iterable<T>): readonly T[] {
   return Object.freeze([...definitions].sort((left, right) => left.name.localeCompare(right.name)));
+}
+
+function listDefinitionsInRegistrationOrder<T>(definitions: Iterable<T>): readonly T[] {
+  return Object.freeze([...definitions]);
 }
 
 const emptyHooks: readonly DocumentHooks[] = Object.freeze([]);

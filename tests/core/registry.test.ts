@@ -42,6 +42,21 @@ describe("registry", () => {
     expect(Object.isFrozen(secondList)).toBe(true);
   });
 
+  it("returns fresh frozen data patch snapshots in registration order", () => {
+    const registry = createRegistry({
+      dataPatches: [defineDataPatch({ id: "notes.seed", checksum: "v1", run: () => ({ seeded: true }) })]
+    });
+
+    const firstList = registry.listDataPatches();
+    registry.registerDataPatch(defineDataPatch({ id: "notes.backfill", checksum: "v1", run: () => ({ touched: 0 }) }));
+    const secondList = registry.listDataPatches();
+
+    expect(firstList.map((patch) => patch.id)).toEqual(["notes.seed"]);
+    expect(secondList.map((patch) => patch.id)).toEqual(["notes.seed", "notes.backfill"]);
+    expect(Object.isFrozen(firstList)).toBe(true);
+    expect(Object.isFrozen(secondList)).toBe(true);
+  });
+
   it("snapshots registered app metadata by value", () => {
     const modules = ["Notes"];
     const dependencies = ["core"];

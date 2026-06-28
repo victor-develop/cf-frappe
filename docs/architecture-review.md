@@ -268,6 +268,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized downloaded object read planning in file policy so file download orchestration no longer derives primary object keys inline.
 - Centralized downloaded rendition object read planning in file policy so rendition download orchestration no longer derives storage keys from manifest entries inline.
 - Centralized multipart completion snapshot selection in file policy so multipart completion orchestration no longer chooses between current and begin-completion snapshots inline.
+- Centralized registration-order registry list snapshots so app and data-patch read models keep deterministic registration order while sharing one frozen snapshot helper.
 - Centralized installed-app metadata snapshotting so app composition and direct registry registration share one assert/clone/freeze boundary for app identity, modules, and dependencies.
 - Centralized named registry list snapshots behind one helper so read-model list APIs consistently return sorted frozen snapshots without repeated collection logic.
 - Guarded app dependency ordering with a frozen install-order result so composition callers cannot mutate the resolved app graph before registry construction.
