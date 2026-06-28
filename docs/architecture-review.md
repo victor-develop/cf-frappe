@@ -157,6 +157,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Guarded in-memory account-recovery notifications with snapshot reads, preserving notifier-port boundaries by keeping recorded password-reset and email-verification messages private.
 - Guarded R2 custom metadata with string-record normalization, preserving R2 object metadata boundaries before put, multipart create, and direct-upload signing.
 - Guarded job dispatch payloads and metadata with JSON cloning, preserving Queue boundary semantics for returned job messages before queue adapters persist them.
+- Guarded job handler results with JSON cloning, preserving job executor outcome and execution-history boundary semantics after handler return values are validated.
 - Extracted selected-file bulk operation normalization from `FileService` into the file policy, covering trimming, duplicates, expected-version validation, empty selections, and the bounded 100-file limit.
 - Extracted direct-upload object metadata matching and scanner result patch shaping from `FileService` into the file policy with focused size/content-type and optional scan-field coverage.
 - Extracted file dashboard row projection and limit normalization from `FileService` into the file policy with focused preview, attachment, scan, rendition, and limit coverage.

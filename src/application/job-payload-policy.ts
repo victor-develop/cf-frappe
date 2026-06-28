@@ -17,5 +17,5 @@ export function normalizeJobHandlerResult(value: JobHandlerResult): JsonValue | 
   if (!isJsonValue(value)) {
     throw badRequest("Job result must be JSON-serializable");
   }
-  return value;
+  return cloneJsonValue(value);
 }

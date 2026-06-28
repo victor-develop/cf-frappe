@@ -26,6 +26,7 @@ import type {
   EventStore,
   JobMessage,
   JobScheduleEventPayload,
+  JsonValue,
   NewDomainEvent,
   ReadStreamOptions,
   StreamName
@@ -314,6 +315,47 @@ describe("JobExecutor", () => {
       error: "Job result must be JSON-serializable"
     });
     await expect(executionLog.get("reports.weekly:2026-W01")).resolves.not.toHaveProperty("result");
+  });
+
+  it("snapshots job handler results by value", async () => {
+    const handlerResult = { summary: { delivered: 1 }, tags: ["weekly"] };
+    const registry = createJobRegistry({
+      jobs: [{ name: "reports.weekly", handler: () => handlerResult }]
+    });
+    const executionLog = new InMemoryJobExecutionLog();
+    const executor = new JobExecutor({
+      registry,
+      resources: {},
+      executionLog,
+      clock: fixedClock(now)
+    });
+    const message = {
+      jobName: "reports.weekly",
+      payload: { week: "2026-W01" },
+      runId: "job_001",
+      idempotencyKey: "reports.weekly:2026-W01",
+      enqueuedAt: now,
+      metadata: {}
+    };
+
+    const outcome = await executor.execute(message);
+
+    handlerResult.summary.delivered = 2;
+    handlerResult.tags.push("mutated");
+    expect(outcome).toEqual({
+      status: "succeeded",
+      result: { summary: { delivered: 1 }, tags: ["weekly"] }
+    });
+
+    if (outcome.status === "succeeded" && typeof outcome.result === "object" && outcome.result !== null) {
+      ((outcome.result as DocumentData).summary as DocumentData).delivered = 3;
+      ((outcome.result as DocumentData).tags as JsonValue[]).push("returned");
+    }
+
+    await expect(executionLog.get("reports.weekly:2026-W01")).resolves.toMatchObject({
+      status: "succeeded",
+      result: { summary: { delivered: 1 }, tags: ["weekly"] }
+    });
   });
 });
 
