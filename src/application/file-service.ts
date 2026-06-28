@@ -62,6 +62,7 @@ import {
   canUploadFile,
   fileCompletedRenditionManifestCommandName,
   fileBufferedUploadDocumentCreateCommand,
+  fileBulkDeleteEntryCommand,
   fileBulkDeleteFailure,
   fileBulkFailure,
   fileBufferedUploadPutObjectCommand,
@@ -1055,13 +1056,12 @@ export class FileService {
     const failed: BulkDeleteFileFailure[] = [];
     for (const selection of selections) {
       try {
-        const snapshot = await this.delete({
+        const snapshot = await this.delete(fileBulkDeleteEntryCommand({
           actor: command.actor,
-          name: selection.name,
-          ...fileExpectedVersionCommandOption(selection.expectedVersion),
-          ...fileTenantCommandOption(command.tenantId),
-          metadata: fileCommandMetadata(command.metadata)
-        });
+          tenantId: command.tenantId,
+          metadata: command.metadata,
+          selection
+        }));
         deleted.push({ name: selection.name, snapshot });
       } catch (error) {
         failed.push(fileBulkDeleteFailure(selection.name, error));

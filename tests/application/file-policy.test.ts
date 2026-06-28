@@ -28,6 +28,7 @@ import {
   failedFileRendition,
   failedFileRenditionForError,
   fileAttachedToCommandOption,
+  fileBulkDeleteEntryCommand,
   fileBulkDeleteFailure,
   fileBulkFailure,
   fileBufferedUploadDocumentCreateCommand,
@@ -1142,6 +1143,25 @@ describe("file policy", () => {
       { name: "file_a", expectedVersion: 2 },
       { name: "file_b" }
     ]);
+  });
+
+  it("builds bulk delete entry commands", () => {
+    const actor = { id: "manager@example.com", roles: ["File Manager"], tenantId: "actor-tenant" };
+    const metadata = { source: "bulk-delete" };
+    const selection = normalizeBulkFileSelections([{ name: " file_a ", expectedVersion: 2 }])[0]!;
+
+    expect(fileBulkDeleteEntryCommand({
+      actor,
+      tenantId: "tenant-a",
+      metadata,
+      selection
+    })).toEqual({
+      actor,
+      name: "file_a",
+      tenantId: "tenant-a",
+      expectedVersion: 2,
+      metadata
+    });
   });
 
   it("rejects invalid bulk file selections", () => {

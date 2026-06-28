@@ -483,6 +483,29 @@ export function normalizeBulkFileSelections<TSelection extends BulkFileSelection
   });
 }
 
+export interface FileBulkDeleteEntryCommand {
+  readonly actor: Actor;
+  readonly name: string;
+  readonly tenantId?: string;
+  readonly expectedVersion?: number;
+  readonly metadata: DocumentData;
+}
+
+export function fileBulkDeleteEntryCommand(command: {
+  readonly actor: Actor;
+  readonly tenantId?: string | undefined;
+  readonly metadata?: DocumentData | undefined;
+  readonly selection: BulkFileSelectionPolicyInput;
+}): FileBulkDeleteEntryCommand {
+  return {
+    actor: command.actor,
+    name: command.selection.name,
+    ...fileExpectedVersionCommandOption(command.selection.expectedVersion),
+    ...fileTenantCommandOption(command.tenantId),
+    metadata: fileCommandMetadata(command.metadata)
+  };
+}
+
 export function fileBulkFailure(name: string, error: unknown, fallback: string): {
   readonly name: string;
   readonly code: FrameworkError["code"] | "UNKNOWN";
