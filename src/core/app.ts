@@ -10,7 +10,7 @@ import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-f
 import type { ReportDefinition } from "./reports.js";
 import type { DocTypeDefinition } from "./types.js";
 import type { WebFormDefinition } from "./web-form.js";
-import type { WebPageDefinition } from "./web-page.js";
+import { defineWebPage, type WebPageDefinition } from "./web-page.js";
 import type { WebViewDefinition } from "./web-view.js";
 import { defineWebsiteSettings, type WebsiteSettingsDefinition } from "./website-settings.js";
 import { defineWebsiteTheme, type WebsiteThemeDefinition } from "./website-theme.js";
@@ -65,7 +65,7 @@ export function defineApp<TDataPatchResources = unknown>(
     kanbans: Object.freeze([...(input.kanbans ?? [])]),
     calendars: Object.freeze([...(input.calendars ?? [])]),
     webForms: Object.freeze([...(input.webForms ?? [])]),
-    webPages: Object.freeze([...(input.webPages ?? [])]),
+    webPages: Object.freeze((input.webPages ?? []).map(defineWebPage)),
     webViews: Object.freeze([...(input.webViews ?? [])]),
     ...(input.websiteSettings === undefined ? {} : { websiteSettings: defineWebsiteSettings(input.websiteSettings) }),
     websiteThemes: Object.freeze((input.websiteThemes ?? []).map(defineWebsiteTheme)),

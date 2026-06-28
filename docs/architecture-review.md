@@ -268,6 +268,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized downloaded object read planning in file policy so file download orchestration no longer derives primary object keys inline.
 - Centralized downloaded rendition object read planning in file policy so rendition download orchestration no longer derives storage keys from manifest entries inline.
 - Centralized multipart completion snapshot selection in file policy so multipart completion orchestration no longer chooses between current and begin-completion snapshots inline.
+- Guarded app manifest Web Page metadata with cloned page definitions, preserving website route registration after app definition.
 - Guarded app manifest workspace metadata with cloned workspace definitions, preserving Desk navigation contracts after app definition.
 - Guarded app manifest client script and data patch metadata with cloned executable definitions, preserving browser script routing and migration execution after app definition.
 - Guarded app manifest Website Theme metadata with cloned theme token definitions, preserving app-defined site rendering contracts after app definition.

@@ -332,6 +332,36 @@ describe("app manifests", () => {
     expect(Object.isFrozen(app.workspaces?.[0]?.sections[0]?.shortcuts[0]?.roles)).toBe(true);
   });
 
+  it("snapshots app manifest Web Page metadata by value", () => {
+    const roles = ["Guest"];
+    const page = {
+      name: "About",
+      route: "about",
+      title: "About",
+      roles,
+      sections: [{ heading: "Intro", body: "Original body" }]
+    };
+    const app = defineApp({
+      name: "website",
+      webPages: [page]
+    });
+
+    roles[0] = "User";
+    page.sections[0]!.body = "Mutated body";
+    page.sections.push({ heading: "Injected", body: "Injected body" });
+
+    expect(app.webPages?.[0]?.roles).toEqual(["Guest"]);
+    expect(app.webPages?.[0]?.sections).toEqual([{ heading: "Intro", body: "Original body" }]);
+    expect(registryOptionsFromApps([app]).webPages?.[0]?.sections).toEqual([
+      { heading: "Intro", body: "Original body" }
+    ]);
+    expect(Object.isFrozen(app.webPages)).toBe(true);
+    expect(Object.isFrozen(app.webPages?.[0])).toBe(true);
+    expect(Object.isFrozen(app.webPages?.[0]?.roles)).toBe(true);
+    expect(Object.isFrozen(app.webPages?.[0]?.sections)).toBe(true);
+    expect(Object.isFrozen(app.webPages?.[0]?.sections[0])).toBe(true);
+  });
+
   it("validates app names at the manifest boundary", () => {
     expect(() => defineApp({ name: "" })).toThrow(FrameworkError);
     expect(() => defineApp({ name: "Bad Name" })).toThrow("Invalid app name");
