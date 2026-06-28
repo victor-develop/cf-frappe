@@ -41,6 +41,7 @@ import {
   fileRenditionFilename,
   fileRenditionManifestPatch,
   fileRenditionPutObjectCommand,
+  fileRenditionSnapshotPutObjectCommand,
   fileRenditionSnapshotManifestPatch,
   fileRenditions,
   fileRenditionView,
@@ -577,6 +578,36 @@ describe("file policy", () => {
       customMetadata: {
         tenantId: "acme",
         sourceFile: "file_photo",
+        sourceEtag: '"source-http"',
+        renditionId: "w64-f-webp"
+      }
+    });
+  });
+
+  it("builds rendition storage put commands from source snapshots", () => {
+    const body = new ReadableStream<Uint8Array>();
+    const pending = renditionEntry("w64-f-webp", {
+      key: "acme/file-renditions/file/w64-f-webp-attempt.webp"
+    });
+
+    expect(fileRenditionSnapshotPutObjectCommand({
+      pending,
+      transform: {
+        body,
+        contentType: "image/webp"
+      },
+      source: fileSnapshot({ filename: "photo.png" }),
+      tenantId: "acme",
+      sourceEtag: '"source-http"',
+      renditionId: "w64-f-webp"
+    })).toEqual({
+      key: "acme/file-renditions/file/w64-f-webp-attempt.webp",
+      body,
+      contentType: "image/webp",
+      filename: "photo.png.w64-f-webp.webp",
+      customMetadata: {
+        tenantId: "acme",
+        sourceFile: "file_multipart",
         sourceEtag: '"source-http"',
         renditionId: "w64-f-webp"
       }

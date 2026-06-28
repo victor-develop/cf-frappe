@@ -72,7 +72,7 @@ import {
   fileObjectSourceEtag,
   fileRenditionGenerationReservation,
   fileRenditionId,
-  fileRenditionPutObjectCommand,
+  fileRenditionSnapshotPutObjectCommand,
   fileRenditionSnapshotManifestPatch,
   fileRenditionView,
   fileScanFailureError,
@@ -895,12 +895,11 @@ export class FileService {
         ...(overlay === undefined ? {} : { overlay })
       });
       object = await this.storage.put(
-        fileRenditionPutObjectCommand({
+        fileRenditionSnapshotPutObjectCommand({
           pending,
           transform,
-          sourceFilename: fileSnapshotFilename(downloaded.snapshot),
+          source: downloaded.snapshot,
           tenantId,
-          sourceFile: downloaded.snapshot.name,
           sourceEtag,
           renditionId
         })

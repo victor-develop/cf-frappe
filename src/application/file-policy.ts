@@ -417,6 +417,25 @@ export function fileRenditionPutObjectCommand(command: {
   };
 }
 
+export function fileRenditionSnapshotPutObjectCommand(command: {
+  readonly pending: FileRenditionManifestEntry;
+  readonly transform: TransformedFileObject;
+  readonly source: DocumentSnapshot;
+  readonly tenantId: string;
+  readonly sourceEtag: string;
+  readonly renditionId: string;
+}): PutFileObjectCommand {
+  return fileRenditionPutObjectCommand({
+    pending: command.pending,
+    transform: command.transform,
+    sourceFilename: fileSnapshotFilename(command.source),
+    tenantId: command.tenantId,
+    sourceFile: command.source.name,
+    sourceEtag: command.sourceEtag,
+    renditionId: command.renditionId
+  });
+}
+
 export function ensureValidFileScanResult(result: FileScanResult): void {
   if (result.status !== "clean" && result.status !== "infected") {
     throw badRequest("File scanner returned an invalid status");

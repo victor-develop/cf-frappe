@@ -25,7 +25,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - D1 document commits batch immutable event insertion with projection updates.
 - DocType metadata validation and registry reference checks are centralized.
 - Tests assert domain event names separately from reducer payload kinds.
-- File rendition generation now delegates reusable-rendition selection, pending reservation patch planning, and latest-snapshot manifest update patch planning to pure policy functions while `FileService` keeps I/O orchestration.
+- File rendition generation now delegates reusable-rendition selection, pending reservation patch planning, latest-snapshot manifest update patch planning, and snapshot-based rendition storage command planning to pure policy functions while `FileService` keeps I/O orchestration.
 
 ## Next Fixes
 
