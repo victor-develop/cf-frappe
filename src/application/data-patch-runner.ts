@@ -57,7 +57,7 @@ export class DataPatchRunner<TResources = unknown> {
     this.clock = options.clock ?? systemClock;
     this.ids = options.ids ?? cryptoIdGenerator;
     this.log = options.log;
-    this.patches = Object.freeze([...(options.patches ?? [])]);
+    this.patches = snapshotDataPatchDefinitions(options.patches ?? []);
     this.resources = options.resources;
   }
 
@@ -282,6 +282,12 @@ function normalizePatches<TResources>(
     seen.add(definition.id);
     return definition;
   });
+}
+
+function snapshotDataPatchDefinitions<TResources>(
+  patches: readonly DataPatchDefinition<TResources>[]
+): readonly DataPatchDefinition<TResources>[] {
+  return Object.freeze(patches.map((patch) => defineDataPatch(patch)));
 }
 
 function normalizeSinglePatch<TResources>(

@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the registry hook option snapshot slice:
+As of the data-patch runner definition snapshot slice:
 
 - Vitest files: `173`
-- Vitest cases: `1928`
-- Remaining gap to Frappe static markers: `856`
+- Vitest cases: `1929`
+- Remaining gap to Frappe static markers: `855`
 
 ## Implication
 

@@ -268,6 +268,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized downloaded object read planning in file policy so file download orchestration no longer derives primary object keys inline.
 - Centralized downloaded rendition object read planning in file policy so rendition download orchestration no longer derives storage keys from manifest entries inline.
 - Centralized multipart completion snapshot selection in file policy so multipart completion orchestration no longer chooses between current and begin-completion snapshots inline.
+- Snapshotted `DataPatchRunner` configured patch definitions at construction so delayed plan/apply/rollback execution cannot observe caller mutation of app-declared patch ids, checksums, or handlers.
 - Routed registry hook option composition through the core document-hook snapshot helper so app-composed registry options keep the same frozen hook-entry boundary as app manifests.
 - Routed application hook factories through the core document-hook snapshot helper so realtime, delivery, email, notification, and assignment-rule hooks all return frozen hook definitions.
 - Moved application hook consumers onto the core document-hook contract so document services, realtime hooks, and assignment-rule hooks no longer depend on registry internals for event hook types.
