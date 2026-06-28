@@ -49,6 +49,7 @@ import {
   fileDeletedExecuteCommand,
   fileDeletedDocumentCommand,
   fileDirectUploadDocumentCreateCommand,
+  fileDocumentCreateCommand,
   fileDocumentData,
   fileMetadataPatch,
   fileMetadataUpdateExecuteCommand,
@@ -1636,6 +1637,56 @@ describe("file policy", () => {
         multipart_upload_id: "upload-1"
       },
       eventType: "FileMultipartUploadReserved"
+    });
+  });
+
+  it("builds file document create command inputs", () => {
+    const actor = { id: "uploader@example.com", roles: ["File Manager"], tenantId: "actor-tenant" };
+    const metadata = { source: "file-ui" };
+    const direct = fileDirectUploadDocumentCreateCommand({
+      filename: "invoice.pdf",
+      key: "acme/files/file_1-invoice.pdf",
+      contentType: "application/pdf",
+      size: 42,
+      uploadedBy: "owner@example.com",
+      uploadedAt: "2026-06-28T00:00:00.000Z",
+      directUploadExpiresAt: "2026-06-28T00:15:00.000Z",
+      scannerConfigured: true
+    });
+
+    expect(fileDocumentCreateCommand({
+      actor,
+      doctype: "File",
+      name: "FILE-1",
+      tenantId: "tenant-a",
+      metadata,
+      create: direct
+    })).toEqual({
+      actor,
+      doctype: "File",
+      name: "FILE-1",
+      tenantId: "tenant-a",
+      data: direct.data,
+      eventType: "FileDirectUploadReserved",
+      metadata
+    });
+
+    const buffered = fileBufferedUploadDocumentCreateCommand({
+      data: { filename: "invoice.pdf", storage_state: "available" },
+      object: fileObject({ etag: "object-etag" })
+    });
+
+    expect(fileDocumentCreateCommand({
+      actor,
+      doctype: "File",
+      name: "FILE-2",
+      create: buffered
+    })).toEqual({
+      actor,
+      doctype: "File",
+      name: "FILE-2",
+      data: buffered.data,
+      metadata: {}
     });
   });
 

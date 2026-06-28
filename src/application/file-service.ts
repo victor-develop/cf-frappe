@@ -78,6 +78,7 @@ import {
   fileDeleteRequestedDocumentCommand,
   fileDeletedExecuteCommand,
   fileDeletedDocumentCommand,
+  fileDocumentCreateCommand,
   fileDirectUploadDocumentCreateCommand,
   fileMetadataUpdateExecuteCommand,
   fileMetadataUpdateDocumentCommand,
@@ -497,26 +498,24 @@ export class FileService {
         infected: isInfectedFileScanResult(scan)
       });
       if (isInfectedFileScanResult(scan)) {
-        const snapshot = await this.documents.create({
+        const snapshot = await this.documents.create(fileDocumentCreateCommand({
           actor: command.actor,
           doctype: this.fileDoctype,
           name: fileName,
           tenantId,
-          data: create.data,
-          ...(create.eventType === undefined ? {} : { eventType: create.eventType }),
-          metadata: fileCommandMetadata(command.metadata)
-        });
+          metadata: command.metadata,
+          create
+        }));
         throw fileScanFailureError(scan, snapshot);
       }
-      const snapshot = await this.documents.create({
+      const snapshot = await this.documents.create(fileDocumentCreateCommand({
         actor: command.actor,
         doctype: this.fileDoctype,
         name: fileName,
         tenantId,
-        data: create.data,
-        ...(create.eventType === undefined ? {} : { eventType: create.eventType }),
-        metadata: fileCommandMetadata(command.metadata)
-      });
+        metadata: command.metadata,
+        create
+      }));
       return { snapshot, object };
     } catch (error) {
       await this.storage.delete(key).catch(() => undefined);
@@ -558,15 +557,14 @@ export class FileService {
       tenantId,
       uploadedBy: command.actor.id
     }));
-    const snapshot = await this.documents.create({
+    const snapshot = await this.documents.create(fileDocumentCreateCommand({
       actor: command.actor,
       doctype: this.fileDoctype,
       name: fileName,
       tenantId,
-      data: create.data,
-      eventType: create.eventType,
-      metadata: fileCommandMetadata(command.metadata)
-    });
+      metadata: command.metadata,
+      create
+    }));
     return { snapshot, upload };
   }
 
@@ -654,15 +652,14 @@ export class FileService {
         upload: uploadData,
         uploadId: upload.uploadId
       });
-      const snapshot = await this.documents.create({
+      const snapshot = await this.documents.create(fileDocumentCreateCommand({
         actor: command.actor,
         doctype: this.fileDoctype,
         name: fileName,
         tenantId,
-        data: create.data,
-        eventType: create.eventType,
-        metadata: fileCommandMetadata(command.metadata)
-      });
+        metadata: command.metadata,
+        create
+      }));
       return { snapshot, upload };
     } catch (error) {
       await multipartUploads.abortMultipartUpload(fileMultipartUploadAbortCommand({

@@ -989,6 +989,40 @@ export function fileBufferedUploadDocumentCreateCommand(command: {
   };
 }
 
+export type FileDocumentCreateIntent =
+  | FileBufferedUploadDocumentCreateCommand
+  | FileDirectUploadDocumentCreateCommand
+  | FileMultipartUploadDocumentCreateCommand;
+
+export interface FileDocumentCreateCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly tenantId?: string;
+  readonly data: DocumentData;
+  readonly eventType?: "FileDirectUploadReserved" | "FileMultipartUploadReserved" | "FileScanFailed";
+  readonly metadata: DocumentData;
+}
+
+export function fileDocumentCreateCommand(command: {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly tenantId?: string | undefined;
+  readonly metadata?: DocumentData | undefined;
+  readonly create: FileDocumentCreateIntent;
+}): FileDocumentCreateCommand {
+  return {
+    actor: command.actor,
+    doctype: command.doctype,
+    name: command.name,
+    ...fileTenantCommandOption(command.tenantId),
+    data: command.create.data,
+    ...(command.create.eventType === undefined ? {} : { eventType: command.create.eventType }),
+    metadata: fileCommandMetadata(command.metadata)
+  };
+}
+
 export type FileUploadCompletionDocumentCommandName =
   | "completeDirectUpload"
   | "completeMultipartUpload"
