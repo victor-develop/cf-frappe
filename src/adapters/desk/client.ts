@@ -2773,7 +2773,8 @@ export function renderDeskClientScript(): string {
   }
 
   function realtimePresenceUrl(topic, options) {
-    return withQuery(realtimeRouteFromOptions(options) + "/presence", { topic: topic });
+    var route = realtimeRouteFromOptions(options);
+    return withQuery((route === "/" ? "" : route) + "/presence", { topic: topic });
   }
 
   function realtimePresence(topic, options) {

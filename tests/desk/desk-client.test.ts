@@ -4263,6 +4263,12 @@ describe("Desk client runtime", () => {
     expect(runtime.realtime.presenceUrl("document:acme:Task:TASK-1", { realtimeRoute: "/rt" })).toBe(
       "/rt/presence?topic=document%3Aacme%3ATask%3ATASK-1"
     );
+    expect(runtime.realtime.documentUrl("Task", "TASK-1", { tenantId: "acme", realtimeRoute: "/" })).toBe(
+      "wss://app.example/?topic=document%3Aacme%3ATask%3ATASK-1"
+    );
+    expect(runtime.realtime.presenceUrl("document:acme:Task:TASK-1", { realtimeRoute: "/" })).toBe(
+      "/presence?topic=document%3Aacme%3ATask%3ATASK-1"
+    );
   });
 
   it("fetches authorized realtime presence snapshots for Desk collaboration surfaces", async () => {

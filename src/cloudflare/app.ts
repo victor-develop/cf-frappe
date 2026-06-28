@@ -996,15 +996,21 @@ async function handleRealtimeRequest<TEnv extends CloudFrappeEnv, TJobResources,
 }
 
 function isRealtimePath(pathname: string, route = "/api/realtime"): boolean {
-  return pathname === normalizedRealtimeRoute(route) || isRealtimePresencePath(pathname, route);
+  return pathname === normalizedRealtimeRoute(route) || pathname === realtimePresenceRoute(route);
 }
 
 function isRealtimePresencePath(pathname: string, route = "/api/realtime"): boolean {
-  return pathname === `${normalizedRealtimeRoute(route)}/presence`;
+  return pathname === realtimePresenceRoute(route);
 }
 
 function normalizedRealtimeRoute(route = "/api/realtime"): string {
-  return route.replace(/\/$/, "");
+  const normalized = route.replace(/\/$/, "");
+  return normalized === "" ? "/" : normalized;
+}
+
+function realtimePresenceRoute(route = "/api/realtime"): string {
+  const baseRoute = normalizedRealtimeRoute(route);
+  return baseRoute === "/" ? "/presence" : `${baseRoute}/presence`;
 }
 
 function rawQueryValue(url: URL, key: string): string | undefined {
