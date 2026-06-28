@@ -147,6 +147,17 @@ describe("app manifests", () => {
     );
   });
 
+  it("returns a frozen app install order", () => {
+    const core = defineApp({ name: "core" });
+    const notes = defineApp({ name: "notes", dependencies: ["core"] });
+
+    const ordered = resolveAppInstallOrder([notes, core]);
+
+    expect(ordered.map((app) => app.name)).toEqual(["core", "notes"]);
+    expect(Object.isFrozen(ordered)).toBe(true);
+    expect(() => (ordered as unknown as unknown[]).push(defineApp({ name: "injected" }))).toThrow(TypeError);
+  });
+
   it("normalizes registry options without requiring consumers to use ModelRegistry directly", () => {
     const hook = {};
     const app = defineApp({

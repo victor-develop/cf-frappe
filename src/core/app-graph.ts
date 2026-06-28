@@ -23,7 +23,7 @@ export function resolveAppDependencyOrder<T extends AppDependencyNode>(apps: rea
   for (const app of apps) {
     visitApp(app, byName, visiting, visited, ordered);
   }
-  return ordered;
+  return Object.freeze(ordered);
 }
 
 function visitApp<T extends AppDependencyNode>(
