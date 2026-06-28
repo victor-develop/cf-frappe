@@ -51,11 +51,11 @@ import {
   documentCsvColumns,
   getLinkField,
   globalSearchMatch,
-  matchesLinkSearch,
   mergeDefaultFilters,
   normalizeRequiredSearch,
   normalizeSearch,
   planDocumentReadProjection,
+  planLinkOptionCandidate,
   planProjectionPageScan,
   toGlobalSearchResult,
   toLinkOption
@@ -437,9 +437,15 @@ export class QueryService {
           continue;
         }
         const option = toLinkOption(document, target);
-        if (!search || matchesLinkSearch(option, search)) {
+        const candidate = planLinkOptionCandidate({
+          option,
+          search,
+          currentCount: matches.length,
+          limit
+        });
+        if (candidate.status !== "skip") {
           matches.push(option);
-          if (matches.length >= limit) {
+          if (candidate.status === "add-and-complete") {
             return matches;
           }
         }

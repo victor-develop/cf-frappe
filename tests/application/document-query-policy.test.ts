@@ -17,6 +17,7 @@ import {
   normalizeRequiredSearch,
   normalizeSearch,
   planDocumentReadProjection,
+  planLinkOptionCandidate,
   planProjectionPageScan,
   primitiveCsvValue,
   searchableText,
@@ -117,6 +118,39 @@ describe("document query policy", () => {
     expect(matchesLinkSearch(option, "art")).toBe(true);
     expect(matchesLinkSearch(option, "launch")).toBe(true);
     expect(matchesLinkSearch(option, "missing")).toBe(false);
+  });
+
+  it("plans link-option candidates that do not match search as skipped", () => {
+    expect(
+      planLinkOptionCandidate({
+        option: toLinkOption(article, Article),
+        search: "missing",
+        currentCount: 0,
+        limit: 2
+      })
+    ).toEqual({ status: "skip" });
+  });
+
+  it("plans matching link-option candidates as additions before the limit", () => {
+    expect(
+      planLinkOptionCandidate({
+        option: toLinkOption(article, Article),
+        search: "launch",
+        currentCount: 0,
+        limit: 2
+      })
+    ).toEqual({ status: "add" });
+  });
+
+  it("plans matching link-option candidates as complete when they fill the limit", () => {
+    expect(
+      planLinkOptionCandidate({
+        option: toLinkOption(article, Article),
+        search: undefined,
+        currentCount: 1,
+        limit: 2
+      })
+    ).toEqual({ status: "add-and-complete" });
   });
 
   it("finds global-search candidates from names, titles, naming fields, and flagged fields", () => {

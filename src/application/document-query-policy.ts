@@ -31,6 +31,11 @@ export type ProjectionPageScanDecision =
   | { readonly status: "complete" }
   | { readonly status: "continue"; readonly nextOffset: number };
 
+export type LinkOptionCandidateDecision =
+  | { readonly status: "skip" }
+  | { readonly status: "add" }
+  | { readonly status: "add-and-complete" };
+
 export type LinkFieldDefinition = FieldDefinition & {
   readonly type: "link";
   readonly linkTo: string;
@@ -184,6 +189,20 @@ export function labelForLinkedDocument(document: DocumentSnapshot, doctype: DocT
 
 export function matchesLinkSearch(option: LinkOption, search: string): boolean {
   return option.value.toLowerCase().includes(search) || option.label.toLowerCase().includes(search);
+}
+
+export function planLinkOptionCandidate(input: {
+  readonly option: LinkOption;
+  readonly search: string | undefined;
+  readonly currentCount: number;
+  readonly limit: number;
+}): LinkOptionCandidateDecision {
+  if (input.search && !matchesLinkSearch(input.option, input.search)) {
+    return { status: "skip" };
+  }
+  return input.currentCount + 1 >= input.limit
+    ? { status: "add-and-complete" }
+    : { status: "add" };
 }
 
 export function mergeDefaultFilters(
