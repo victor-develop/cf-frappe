@@ -132,7 +132,7 @@ function validateRegisteredClaims(
 
 function parseJwtHeader(headerPart: string, tokenLabel: string): JwtHeader {
   const value = parseJwtJson(headerPart, "header", tokenLabel);
-  if (!isRecord(value) || typeof value.alg !== "string" || typeof value.kid !== "string") {
+  if (!isRecord(value) || !isNonBlankString(value.alg) || !isNonBlankString(value.kid)) {
     throw permissionDenied(`${tokenLabel} header is invalid`);
   }
   return {
