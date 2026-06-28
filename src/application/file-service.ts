@@ -71,6 +71,7 @@ import {
   fileDashboardBatchLimit,
   fileDashboardEntryWithPermissions,
   fileDashboardListFilters,
+  fileReadableDashboardEntries,
   fileDashboardSystemActor,
   fileBufferedUploadDocumentData,
   fileDeleteRequestedExecuteCommand,
@@ -803,11 +804,7 @@ export class FileService {
           readable: await this.queries.canReadDocument(actor, doctype, snapshot)
         }))
       );
-      files.push(
-        ...readable
-          .filter((entry) => entry.readable)
-          .map(({ snapshot }) => fileDashboardEntryWithPermissions({ actor, doctype, snapshot }))
-      );
+      files.push(...fileReadableDashboardEntries({ actor, doctype, readable }));
       offset += batchLimit;
     } while (files.length < limit && offset < total);
     return {

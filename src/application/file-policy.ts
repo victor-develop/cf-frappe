@@ -1723,6 +1723,23 @@ export function fileDashboardEntryWithPermissions(command: {
   };
 }
 
+export function fileReadableDashboardEntries(command: {
+  readonly actor: Actor;
+  readonly doctype: DocTypeDefinition;
+  readonly readable: readonly {
+    readonly snapshot: DocumentSnapshot;
+    readonly readable: boolean;
+  }[];
+}): readonly (FileDashboardEntryView & { readonly editable: boolean; readonly deletable: boolean })[] {
+  return command.readable
+    .filter((entry) => entry.readable)
+    .map(({ snapshot }) => fileDashboardEntryWithPermissions({
+      actor: command.actor,
+      doctype: command.doctype,
+      snapshot
+    }));
+}
+
 export function canUploadFile(actor: Actor, doctype: DocTypeDefinition): boolean {
   return can(actor, doctype, "create");
 }

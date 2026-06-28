@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file dashboard batch-limit policy slice:
+As of the readable file dashboard entry policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1712`
-- Remaining gap to Frappe static markers: `1072`
+- Vitest cases: `1713`
+- Remaining gap to Frappe static markers: `1071`
 
 ## Implication
 

@@ -91,6 +91,7 @@ import {
   fileRenditionSnapshotManifestPatch,
   fileRenditions,
   fileRenditionView,
+  fileReadableDashboardEntries,
   fileScanFailureError,
   fileScanPatch,
   fileScanTarget,
@@ -2522,6 +2523,30 @@ describe("file policy", () => {
     });
     expect(canUploadFile({ id: "manager@example.com", roles: ["File Manager"] }, doctype)).toBe(true);
     expect(canUploadFile({ id: "viewer@example.com", roles: ["File Viewer"] }, doctype)).toBe(false);
+  });
+
+  it("filters readable file dashboard entries before permission projection", () => {
+    const doctype: DocTypeDefinition = {
+      name: "File",
+      fields: [],
+      permissions: [{ roles: ["File Manager"], actions: ["metadata", "delete"] }]
+    };
+    const actor = { id: "manager@example.com", roles: ["File Manager"] };
+
+    expect(fileReadableDashboardEntries({
+      actor,
+      doctype,
+      readable: [
+        { snapshot: fileSnapshot({ filename: "visible.pdf", content_type: "application/pdf" }), readable: true },
+        { snapshot: fileSnapshot({ filename: "hidden.pdf", content_type: "application/pdf" }), readable: false }
+      ]
+    })).toEqual([
+      expect.objectContaining({
+        filename: "visible.pdf",
+        editable: true,
+        deletable: true
+      })
+    ]);
   });
 });
 
