@@ -392,6 +392,42 @@ describe("app manifests", () => {
     expect(Object.isFrozen(app.webForms?.[0]?.fields[0])).toBe(true);
   });
 
+  it("snapshots app manifest Web View metadata by value", () => {
+    const roles = ["Guest"];
+    const view = {
+      name: "Task Updates",
+      roles,
+      doctype: "Task",
+      routeField: "slug",
+      titleField: "title",
+      fields: [{ field: "title", label: "Title" }],
+      filters: [{ field: "published", operator: "eq" as const, value: true }]
+    };
+    const app = defineApp({
+      name: "tasks",
+      webViews: [view]
+    });
+
+    roles[0] = "User";
+    view.fields[0]!.label = "Mutated";
+    view.fields.push({ field: "status", label: "Status" });
+    view.filters[0]!.value = false;
+
+    expect(app.webViews?.[0]?.roles).toEqual(["Guest"]);
+    expect(app.webViews?.[0]?.fields).toEqual([{ field: "title", label: "Title" }]);
+    expect(app.webViews?.[0]?.filters).toEqual([{ field: "published", operator: "eq", value: true }]);
+    expect(registryOptionsFromApps([app]).webViews?.[0]?.filters).toEqual([
+      { field: "published", operator: "eq", value: true }
+    ]);
+    expect(Object.isFrozen(app.webViews)).toBe(true);
+    expect(Object.isFrozen(app.webViews?.[0])).toBe(true);
+    expect(Object.isFrozen(app.webViews?.[0]?.roles)).toBe(true);
+    expect(Object.isFrozen(app.webViews?.[0]?.fields)).toBe(true);
+    expect(Object.isFrozen(app.webViews?.[0]?.fields?.[0])).toBe(true);
+    expect(Object.isFrozen(app.webViews?.[0]?.filters)).toBe(true);
+    expect(Object.isFrozen(app.webViews?.[0]?.filters?.[0])).toBe(true);
+  });
+
   it("validates app names at the manifest boundary", () => {
     expect(() => defineApp({ name: "" })).toThrow(FrameworkError);
     expect(() => defineApp({ name: "Bad Name" })).toThrow("Invalid app name");

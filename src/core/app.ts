@@ -11,7 +11,7 @@ import type { ReportDefinition } from "./reports.js";
 import type { DocTypeDefinition } from "./types.js";
 import { defineWebForm, type WebFormDefinition } from "./web-form.js";
 import { defineWebPage, type WebPageDefinition } from "./web-page.js";
-import type { WebViewDefinition } from "./web-view.js";
+import { defineWebView, type WebViewDefinition } from "./web-view.js";
 import { defineWebsiteSettings, type WebsiteSettingsDefinition } from "./website-settings.js";
 import { defineWebsiteTheme, type WebsiteThemeDefinition } from "./website-theme.js";
 import { defineWorkspace, type WorkspaceDefinition } from "./workspace.js";
@@ -66,7 +66,7 @@ export function defineApp<TDataPatchResources = unknown>(
     calendars: Object.freeze([...(input.calendars ?? [])]),
     webForms: Object.freeze((input.webForms ?? []).map(defineWebForm)),
     webPages: Object.freeze((input.webPages ?? []).map(defineWebPage)),
-    webViews: Object.freeze([...(input.webViews ?? [])]),
+    webViews: Object.freeze((input.webViews ?? []).map(defineWebView)),
     ...(input.websiteSettings === undefined ? {} : { websiteSettings: defineWebsiteSettings(input.websiteSettings) }),
     websiteThemes: Object.freeze((input.websiteThemes ?? []).map(defineWebsiteTheme)),
     workspaces: Object.freeze((input.workspaces ?? []).map(defineWorkspace)),
