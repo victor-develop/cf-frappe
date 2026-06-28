@@ -90,3 +90,11 @@ export function requireLiveDocumentSnapshot(input: {
   }
   return input.snapshot;
 }
+
+export function requireSavedEvent(events: readonly DomainEvent[], id: string): DomainEvent {
+  const event = events.find((item) => item.id === id);
+  if (!event) {
+    throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
+  }
+  return event;
+}

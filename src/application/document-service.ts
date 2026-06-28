@@ -60,6 +60,7 @@ import {
   documentDeletedPayload,
   documentStatusChangedPayload,
   requireLiveDocumentSnapshot,
+  requireSavedEvent,
   snapshotFromCommittedDocumentEvent,
   snapshotFromDocumentCreatedEvent
 } from "./document-lifecycle-events.js";
@@ -1911,12 +1912,4 @@ export class DocumentService implements DocumentCommandExecutor {
 
 function isDocumentConflict(error: unknown): boolean {
   return error instanceof FrameworkError && error.code === "DOCUMENT_CONFLICT";
-}
-
-function requireSavedEvent(events: readonly DomainEvent[], id: string): DomainEvent {
-  const event = events.find((item) => item.id === id);
-  if (!event) {
-    throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
-  }
-  return event;
 }

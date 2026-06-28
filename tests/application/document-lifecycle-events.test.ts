@@ -6,6 +6,7 @@ import {
   documentStatusChangedPayload,
   documentUpdatedPayload,
   requireLiveDocumentSnapshot,
+  requireSavedEvent,
   snapshotFromCommittedDocumentEvent,
   snapshotFromDocumentCreatedEvent,
   type DocumentLifecycleEventPayload,
@@ -118,6 +119,16 @@ describe("document lifecycle events", () => {
         documentName: "NOTE-1"
       })
     ).toThrow("Note/NOTE-1 was deleted");
+  });
+
+  it("requires saved events by id after batch commits", () => {
+    expect(requireSavedEvent([createdEvent, updatedEvent], "evt_4")).toBe(updatedEvent);
+  });
+
+  it("rejects missing saved events after batch commits", () => {
+    expect(() => requireSavedEvent([createdEvent], "evt_missing")).toThrow(
+      "Event store did not return saved event"
+    );
   });
 });
 
