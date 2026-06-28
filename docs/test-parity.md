@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the scanner port guard policy slice:
+As of the CSV parser row-access hardening slice:
 
-- Vitest files: `169`
-- Vitest cases: `1778`
-- Remaining gap to Frappe static markers: `1006`
+- Vitest files: `170`
+- Vitest cases: `1780`
+- Remaining gap to Frappe static markers: `1004`
 
 ## Implication
 

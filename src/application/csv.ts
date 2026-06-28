@@ -20,10 +20,7 @@ export function csvLine(values: readonly (JsonValue | undefined)[]): string {
 export function parseCsv(text: string): ParsedCsv {
   const parsedRows = parseCsvCells(text);
   const nonEmptyRows = trimTrailingEmptyRows(parsedRows);
-  if (nonEmptyRows.length === 0) {
-    throw badRequest("CSV import requires a header row");
-  }
-  const headerRow = nonEmptyRows[0]!;
+  const headerRow = requireCsvHeaderRow(nonEmptyRows);
   const rows = nonEmptyRows.slice(1);
   const headers = headerRow.cells.map((header, index) => normalizeHeader(header, index));
   validateHeaders(headers);
@@ -118,10 +115,22 @@ function parseCsvCells(text: string): ParsedCsvRow[] {
 
 function trimTrailingEmptyRows(rows: readonly ParsedCsvRow[]): readonly ParsedCsvRow[] {
   let end = rows.length;
-  while (end > 0 && rows[end - 1]!.cells.every((cell) => cell === "")) {
+  while (end > 0) {
+    const row = rows[end - 1];
+    if (row === undefined || !row.cells.every((cell) => cell === "")) {
+      break;
+    }
     end -= 1;
   }
   return rows.slice(0, end);
+}
+
+function requireCsvHeaderRow(rows: readonly ParsedCsvRow[]): ParsedCsvRow {
+  const header = rows[0];
+  if (header === undefined) {
+    throw badRequest("CSV import requires a header row");
+  }
+  return header;
 }
 
 function validateHeaders(headers: readonly string[]): void {

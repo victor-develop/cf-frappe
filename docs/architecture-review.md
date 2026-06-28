@@ -136,6 +136,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Extracted file metadata patch construction from `FileService` into the file policy with focused rename, privacy, attach, detach, and empty-patch coverage.
 - Extracted file dashboard query normalization and list-filter mapping from `FileService` into the file policy with focused trimming, boolean, equality, and contains-filter coverage.
 - Extracted file scanner target construction and scanner result-status validation from `FileService` into the file policy with focused default content-type and invalid-status coverage.
+- Hardened CSV parser row access so header and trailing-empty-row handling no longer rely on array non-null assertions.
 - Extracted available-rendition reuse selection and duplicate pending-rendition rejection from `FileService` into the file policy with focused source and overlay identity coverage.
 - Centralized file transformability rejection in the file policy so direct transforms, persisted renditions, and overlay-source transforms share one tested content-type guard.
 - Moved upload byte-limit checks and reservation-expiry timestamp planning into file policy so buffered, direct, and multipart upload flows share the same tested boundary rules.
