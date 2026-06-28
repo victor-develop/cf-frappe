@@ -802,6 +802,20 @@ export function filePendingUploadDocumentData(command: FilePendingUploadDocument
   });
 }
 
+export interface FileDirectUploadDocumentCreateCommand {
+  readonly data: DocumentData;
+  readonly eventType: "FileDirectUploadReserved";
+}
+
+export function fileDirectUploadDocumentCreateCommand(
+  command: FilePendingUploadDocumentDataCommand
+): FileDirectUploadDocumentCreateCommand {
+  return {
+    data: filePendingUploadDocumentData(command),
+    eventType: "FileDirectUploadReserved"
+  };
+}
+
 export function fileMultipartUploadDocumentData(data: DocumentData, uploadId: string): DocumentData {
   return {
     ...data,

@@ -72,6 +72,7 @@ import {
   fileDashboardListFilters,
   fileBufferedUploadDocumentData,
   fileDeleteRequestedDocumentCommand,
+  fileDirectUploadDocumentCreateCommand,
   fileMetadataUpdateDocumentCommand,
   fileMultipartAbortCommand,
   fileMultipartCompletionStartedDocumentCommand,
@@ -522,7 +523,7 @@ export class FileService {
     const fileName = this.ids.next("file_");
     const key = objectKey(tenantId, fileName, filename);
     const expiresAt = fileUploadExpiresAt(this.clock.now(), command.expiresInSeconds);
-    const data = filePendingUploadDocumentData({
+    const create = fileDirectUploadDocumentCreateCommand({
       filename,
       key,
       contentType,
@@ -534,7 +535,7 @@ export class FileService {
       scannerConfigured: this.scanner !== undefined,
       ...fileAttachedToCommandOption(command.attachedTo)
     });
-    this.preflightCreate(command.actor, data);
+    this.preflightCreate(command.actor, create.data);
     const upload = await createDirectUpload(fileDirectUploadReservationCommand({
       key,
       contentType,
@@ -549,8 +550,8 @@ export class FileService {
       doctype: this.fileDoctype,
       name: fileName,
       tenantId,
-      data,
-      eventType: "FileDirectUploadReserved",
+      data: create.data,
+      eventType: create.eventType,
       metadata: fileCommandMetadata(command.metadata)
     });
     return { snapshot, upload };

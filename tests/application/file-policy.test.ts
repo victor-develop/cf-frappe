@@ -41,6 +41,7 @@ import {
   fileDashboardEntryWithPermissions,
   fileDashboardListFilters,
   fileDeleteRequestedDocumentCommand,
+  fileDirectUploadDocumentCreateCommand,
   fileDocumentData,
   fileMetadataPatch,
   fileMetadataUpdateDocumentCommand,
@@ -1340,6 +1341,37 @@ describe("file policy", () => {
       storage_state: "upload_pending",
       direct_upload_expires_at: "2026-06-28T00:15:00.000Z",
       scan_status: "pending"
+    });
+  });
+
+  it("builds direct-upload document create intents", () => {
+    expect(fileDirectUploadDocumentCreateCommand({
+      filename: "invoice.pdf",
+      key: "acme/files/file_1-invoice.pdf",
+      contentType: "application/pdf",
+      size: 42,
+      isPrivate: false,
+      uploadedBy: "owner@example.com",
+      uploadedAt: "2026-06-28T00:00:00.000Z",
+      directUploadExpiresAt: "2026-06-28T00:15:00.000Z",
+      scannerConfigured: true,
+      attachedTo: { doctype: "Invoice", name: "INV-1" }
+    })).toEqual({
+      data: {
+        filename: "invoice.pdf",
+        key: "acme/files/file_1-invoice.pdf",
+        content_type: "application/pdf",
+        size: 42,
+        is_private: false,
+        uploaded_by: "owner@example.com",
+        uploaded_at: "2026-06-28T00:00:00.000Z",
+        storage_state: "upload_pending",
+        direct_upload_expires_at: "2026-06-28T00:15:00.000Z",
+        scan_status: "pending",
+        attached_to_doctype: "Invoice",
+        attached_to_name: "INV-1"
+      },
+      eventType: "FileDirectUploadReserved"
     });
   });
 
