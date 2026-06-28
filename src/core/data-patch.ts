@@ -28,7 +28,10 @@ export function defineDataPatch<TResources = unknown>(
 ): DataPatchDefinition<TResources> {
   assertDataPatchId(definition.id);
   assertDataPatchChecksum(definition.checksum, definition.id);
-  return Object.freeze({ ...definition });
+  return Object.freeze({
+    ...definition,
+    ...(definition.rollback === undefined ? {} : { rollback: Object.freeze({ ...definition.rollback }) })
+  });
 }
 
 export function assertDataPatchId(id: string): void {

@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the report metadata clone slice:
+As of the data patch rollback metadata clone slice:
 
-- Vitest files: `171`
-- Vitest cases: `1893`
-- Remaining gap to Frappe static markers: `891`
+- Vitest files: `172`
+- Vitest cases: `1895`
+- Remaining gap to Frappe static markers: `889`
 
 ## Implication
 
