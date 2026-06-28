@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file transformability policy module slice:
+As of the file upload bound and expiry policy module slice:
 
 - Vitest files: `169`
-- Vitest cases: `1634`
+- Vitest cases: `1635`
 
 ## Implication
 

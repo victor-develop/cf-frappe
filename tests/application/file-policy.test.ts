@@ -2,6 +2,7 @@ import {
   availableFileRenditionForSource,
   completeFileRendition,
   ensureFileContentTypeTransformable,
+  ensureFileSizeWithinLimit,
   ensureNoPendingFileRenditionForSource,
   ensureValidFileScanResult,
   ensureFileAvailableForDownload,
@@ -32,6 +33,7 @@ import {
   fileScanTarget,
   fileSnapshotStringData,
   fileUploadCompletedPatch,
+  fileUploadExpiresAt,
   fileUploadScanFailedPatch,
   fileTransformOptionsData,
   fileTransformOptionsFromData,
@@ -83,12 +85,20 @@ describe("file policy", () => {
     expect(() => normalizeFileSize(1.5)).toThrow("size must be a non-negative integer");
   });
 
-  it("normalizes direct upload expiry windows", () => {
+  it("rejects files above configured upload byte limits", () => {
+    expect(() => ensureFileSizeWithinLimit(4, 4)).not.toThrow();
+    expect(() => ensureFileSizeWithinLimit(5, 4)).toThrow("File exceeds 4 bytes");
+  });
+
+  it("plans direct upload expiry windows", () => {
     expect(normalizeDirectUploadExpiry(undefined)).toBe(900);
     expect(normalizeDirectUploadExpiry(60)).toBe(60);
     expect(normalizeDirectUploadExpiry(604800)).toBe(604800);
     expect(() => normalizeDirectUploadExpiry(59)).toThrow("expiresInSeconds must be between 60 and 604800 seconds");
     expect(() => normalizeDirectUploadExpiry(604801)).toThrow("expiresInSeconds must be between 60 and 604800 seconds");
+    expect(fileUploadExpiresAt("2026-06-28T00:00:00.000Z", 60)).toBe("2026-06-28T00:01:00.000Z");
+    expect(fileUploadExpiresAt("2026-06-28T00:00:00.000Z", undefined)).toBe("2026-06-28T00:15:00.000Z");
+    expect(() => fileUploadExpiresAt("not-a-date", 60)).toThrow("clock returned an invalid timestamp");
   });
 
   it("sanitizes filenames without leaking path separators", () => {

@@ -44,6 +44,7 @@ import {
   availableFileRenditionForSource,
   completeFileRendition,
   ensureFileContentTypeTransformable,
+  ensureFileSizeWithinLimit,
   ensureNoPendingFileRenditionForSource,
   ensureValidFileScanResult,
   ensureFileAvailableForDownload,
@@ -72,13 +73,13 @@ import {
   fileScanPatch,
   fileScanTarget,
   fileUploadCompletedPatch,
+  fileUploadExpiresAt,
   fileUploadScanFailedPatch,
   multipartPartManifest,
   multipartPartSize,
   normalizeBulkFileSelections,
   normalizeFileDashboardFilters,
   normalizeFileDashboardLimit,
-  normalizeDirectUploadExpiry,
   normalizeFileSize,
   objectKey,
   pendingFileRendition,
@@ -402,9 +403,7 @@ export class FileService {
   async upload(command: UploadFileCommand): Promise<UploadedFile> {
     const filename = sanitizeFilename(command.filename);
     const size = fileContentLength(command.body);
-    if (size > this.maxFileBytes) {
-      throw badRequest(`File exceeds ${this.maxFileBytes} bytes`);
-    }
+    ensureFileSizeWithinLimit(size, this.maxFileBytes);
 
     const contentType = command.contentType ?? "application/octet-stream";
     const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
@@ -489,16 +488,14 @@ export class FileService {
     }
     const filename = sanitizeFilename(command.filename);
     const size = normalizeFileSize(command.size);
-    if (size > this.maxFileBytes) {
-      throw badRequest(`File exceeds ${this.maxFileBytes} bytes`);
-    }
+    ensureFileSizeWithinLimit(size, this.maxFileBytes);
 
     const contentType = command.contentType ?? "application/octet-stream";
     const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
     await this.validateAttachmentTarget(command.actor, tenantId, command.attachedTo);
     const fileName = this.ids.next("file_");
     const key = objectKey(tenantId, fileName, filename);
-    const expiresAt = addSeconds(this.clock.now(), normalizeDirectUploadExpiry(command.expiresInSeconds));
+    const expiresAt = fileUploadExpiresAt(this.clock.now(), command.expiresInSeconds);
     const data = fileDocumentData({
       filename,
       key,
@@ -585,16 +582,14 @@ export class FileService {
     }
     const filename = sanitizeFilename(command.filename);
     const size = normalizeFileSize(command.size);
-    if (size > this.maxFileBytes) {
-      throw badRequest(`File exceeds ${this.maxFileBytes} bytes`);
-    }
+    ensureFileSizeWithinLimit(size, this.maxFileBytes);
 
     const contentType = command.contentType ?? "application/octet-stream";
     const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
     await this.validateAttachmentTarget(command.actor, tenantId, command.attachedTo);
     const fileName = this.ids.next("file_");
     const key = objectKey(tenantId, fileName, filename);
-    const expiresAt = addSeconds(this.clock.now(), normalizeDirectUploadExpiry(command.expiresInSeconds));
+    const expiresAt = fileUploadExpiresAt(this.clock.now(), command.expiresInSeconds);
     const baseData = fileDocumentData({
       filename,
       key,
@@ -1324,12 +1319,4 @@ function bulkFileFailure(name: string, error: unknown, fallback: string): BulkDe
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function addSeconds(isoTimestamp: string, seconds: number): string {
-  const timestamp = Date.parse(isoTimestamp);
-  if (!Number.isFinite(timestamp)) {
-    throw badRequest("clock returned an invalid timestamp");
-  }
-  return new Date(timestamp + seconds * 1000).toISOString();
 }

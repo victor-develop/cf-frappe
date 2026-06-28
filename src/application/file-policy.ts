@@ -58,6 +58,12 @@ export function normalizeFileSize(size: number): number {
   return size;
 }
 
+export function ensureFileSizeWithinLimit(size: number, maxFileBytes: number): void {
+  if (size > maxFileBytes) {
+    throw badRequest(`File exceeds ${String(maxFileBytes)} bytes`);
+  }
+}
+
 export function normalizeDirectUploadExpiry(expiresInSeconds: number | undefined): number {
   if (expiresInSeconds === undefined) {
     return 15 * 60;
@@ -66,6 +72,14 @@ export function normalizeDirectUploadExpiry(expiresInSeconds: number | undefined
     throw badRequest("expiresInSeconds must be between 60 and 604800 seconds");
   }
   return expiresInSeconds;
+}
+
+export function fileUploadExpiresAt(now: string, expiresInSeconds: number | undefined): string {
+  const timestamp = Date.parse(now);
+  if (!Number.isFinite(timestamp)) {
+    throw badRequest("clock returned an invalid timestamp");
+  }
+  return new Date(timestamp + normalizeDirectUploadExpiry(expiresInSeconds) * 1000).toISOString();
 }
 
 export function sanitizeFilename(value: string): string {
