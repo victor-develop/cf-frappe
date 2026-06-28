@@ -2183,6 +2183,14 @@ describe("file policy", () => {
     });
   });
 
+  it("requires persisted file object keys for upload scan-failure cleanup decisions", () => {
+    expect(() => fileUploadScanFailureDecision({
+      snapshot: fileSnapshot({}),
+      infected: true,
+      scan: { status: "infected", message: "signature" }
+    })).toThrow("File/file_multipart has no key");
+  });
+
   it("validates direct upload object metadata against its reservation", () => {
     const snapshot = fileSnapshot({
       size: 12,

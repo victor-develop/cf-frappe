@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the upload scan-failure decision policy slice:
+As of the buffered upload scan-failure decision reuse slice:
 
 - Vitest files: `169`
-- Vitest cases: `1776`
-- Remaining gap to Frappe static markers: `1008`
+- Vitest cases: `1777`
+- Remaining gap to Frappe static markers: `1007`
 
 ## Implication
 

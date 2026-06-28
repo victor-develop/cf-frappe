@@ -59,7 +59,6 @@ import {
   fileCompletedMultipartObjectHeadReadPlan,
   fileCompletedMultipartObjectPlan,
   fileCompletedMultipartObjectReadPlan,
-  fileInfectedScanFailure,
   fileDirectUploadObjectHeadReadPlan,
   fileBulkDeleteDeletedOutcome,
   fileBulkDeleteEntryCommand,
@@ -496,6 +495,7 @@ export class FileService {
       throw error;
     }
 
+    let uploadFailureCleanup: { readonly deleteKeys: readonly string[] } | undefined;
     try {
       const plan = fileBufferedUploadCreatePlan({
         data: upload.data,
@@ -503,18 +503,6 @@ export class FileService {
         scan,
         checkedAt: this.clock.now()
       });
-      const failureScan = fileInfectedScanFailure({ infected: plan.infected, scan });
-      if (failureScan !== undefined) {
-        const snapshot = await this.documents.create(fileDocumentCreateCommand({
-          actor: command.actor,
-          doctype: this.fileDoctype,
-          name: fileName,
-          tenantId,
-          metadata: command.metadata,
-          create: plan.create
-        }));
-        throw fileScanFailureError(failureScan, snapshot);
-      }
       const snapshot = await this.documents.create(fileDocumentCreateCommand({
         actor: command.actor,
         doctype: this.fileDoctype,
@@ -523,9 +511,14 @@ export class FileService {
         metadata: command.metadata,
         create: plan.create
       }));
+      const scanFailure = fileUploadScanFailureDecision({ snapshot, infected: plan.infected, scan });
+      if (scanFailure.kind === "fail") {
+        uploadFailureCleanup = scanFailure.cleanup;
+        throw fileScanFailureError(scanFailure.failure, snapshot);
+      }
       return fileUploadedResult({ snapshot, object });
     } catch (error) {
-      await this.deleteFileObjectsIgnoringFailures(fileBufferedUploadFailureCleanupPlan({ key }));
+      await this.deleteFileObjectsIgnoringFailures(uploadFailureCleanup ?? fileBufferedUploadFailureCleanupPlan({ key }));
       throw error;
     }
   }
