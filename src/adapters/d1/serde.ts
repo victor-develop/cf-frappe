@@ -43,7 +43,7 @@ export interface JobExecutionRow {
 }
 
 export function eventFromRow(row: EventRow): DomainEvent {
-  const payload = JSON.parse(row.payload_json) as DomainEvent["payload"];
+  const payload = parseEventPayload(row);
   return {
     id: row.id,
     tenantId: row.tenant_id,
@@ -55,7 +55,7 @@ export function eventFromRow(row: EventRow): DomainEvent {
     actorId: row.actor_id,
     occurredAt: row.occurred_at,
     payload,
-    metadata: JSON.parse(row.metadata_json) as DocumentData
+    metadata: parseEventDocumentData(row, "metadata_json", row.metadata_json)
   };
 }
 
@@ -66,7 +66,7 @@ export function documentFromRow(row: DocumentRow): DocumentSnapshot {
     name: row.name,
     version: row.version,
     docstatus: row.docstatus,
-    data: JSON.parse(row.data_json) as DocumentData,
+    data: parseDocumentData(row, row.data_json),
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -145,5 +145,47 @@ function isJsonValue(value: unknown): value is JsonValue {
 }
 
 function isJsonRecord(value: unknown): value is DocumentData {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === "object" && value !== null && !Array.isArray(value) && Object.values(value).every(isJsonValue);
+}
+
+function parseEventPayload(row: EventRow): DomainEvent["payload"] {
+  try {
+    const parsed: unknown = JSON.parse(row.payload_json);
+    if (isDomainEventPayload(parsed)) {
+      return parsed;
+    }
+  } catch {
+    // Fall through to the framework boundary error below.
+  }
+  throw new FrameworkError("D1_EVENT_INVALID", `D1 event '${row.id}' has invalid payload_json`, { status: 409 });
+}
+
+function parseEventDocumentData(row: EventRow, field: "metadata_json", value: string): DocumentData {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (isJsonRecord(parsed)) {
+      return parsed;
+    }
+  } catch {
+    // Fall through to the framework boundary error below.
+  }
+  throw new FrameworkError("D1_EVENT_INVALID", `D1 event '${row.id}' has invalid ${field}`, { status: 409 });
+}
+
+function parseDocumentData(row: DocumentRow, value: string): DocumentData {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (isJsonRecord(parsed)) {
+      return parsed;
+    }
+  } catch {
+    // Fall through to the framework boundary error below.
+  }
+  throw new FrameworkError("D1_DOCUMENT_INVALID", `D1 document '${row.doctype}/${row.name}' has invalid data_json`, {
+    status: 409
+  });
+}
+
+function isDomainEventPayload(value: unknown): value is DomainEvent["payload"] {
+  return isJsonRecord(value) && typeof value.kind === "string";
 }

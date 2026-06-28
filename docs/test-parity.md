@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the D1 job execution JSON evidence boundary slice:
+As of the D1 event and projection JSON evidence boundary slice:
 
 - Vitest files: `170`
-- Vitest cases: `1806`
-- Remaining gap to Frappe static markers: `978`
+- Vitest cases: `1808`
+- Remaining gap to Frappe static markers: `976`
 
 ## Implication
 

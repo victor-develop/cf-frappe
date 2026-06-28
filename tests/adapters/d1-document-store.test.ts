@@ -212,6 +212,26 @@ describe("D1DocumentStore", () => {
     expect(read?.params).toEqual([stream, 2]);
   });
 
+  it("rejects invalid stored D1 event JSON rows", async () => {
+    const db = new FakeD1Database();
+    const store = new D1EventStore(db as unknown as D1Database);
+    await store.append(stream, 0, [event]);
+    const row = db.events[0]!;
+
+    row.payload_json = "[]";
+    await expect(store.readStream(stream)).rejects.toMatchObject({
+      code: "D1_EVENT_INVALID",
+      status: 409
+    });
+
+    row.payload_json = JSON.stringify(event.payload);
+    row.metadata_json = "{";
+    await expect(store.readStream(stream)).rejects.toMatchObject({
+      code: "D1_EVENT_INVALID",
+      status: 409
+    });
+  });
+
   it("translates event append constraint races into document conflicts", async () => {
     const db = new FakeD1Database({ failEventInsertAsConstraint: true });
     const store = new D1EventStore(db as unknown as D1Database);

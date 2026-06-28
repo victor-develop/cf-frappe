@@ -25,6 +25,18 @@ describe("D1ProjectionStore", () => {
     expect(count?.params).toEqual(["acme", "Note", "High"]);
   });
 
+  it("rejects invalid stored D1 projection JSON rows", async () => {
+    const db = new FakeD1Database([
+      { ...documentRow({ name: "D1 Bad", data: { title: "D1 Bad" } }), data_json: "[" }
+    ]);
+    const store = new D1ProjectionStore(db as unknown as D1Database);
+
+    await expect(store.get("acme", "Note", "D1 Bad")).rejects.toMatchObject({
+      code: "D1_DOCUMENT_INVALID",
+      status: 409
+    });
+  });
+
   it("escapes contains filter values before binding LIKE parameters", async () => {
     const db = new FakeD1Database([
       documentRow({ name: "D1 Sale", data: { title: "50%_Off", priority: "High" } })
@@ -490,6 +502,11 @@ class FakeD1PreparedStatement {
   bind(...params: readonly unknown[]): FakeD1PreparedStatement {
     this.params = params;
     return this;
+  }
+
+  async first(): Promise<FakeDocumentRow | null> {
+    const [tenantId, doctype, name] = this.params;
+    return this.db.rows.find((row) => row.tenant_id === tenantId && row.doctype === doctype && row.name === name) ?? null;
   }
 
   async all(): Promise<FakeD1Result> {
