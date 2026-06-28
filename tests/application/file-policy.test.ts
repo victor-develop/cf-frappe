@@ -77,6 +77,7 @@ import {
   fileDeleteFinalizationPlan,
   fileDeleteStorageCleanupPlan,
   fileDirectUploadDocumentCreateCommand,
+  fileDirectUploadObjectHeadReadPlan,
   fileDirectUploadReservationPlan,
   fileDocumentCreateCommand,
   fileDocumentData,
@@ -2113,6 +2114,15 @@ describe("file policy", () => {
     expect(() => ensureDirectUploadMatches(snapshot, { ...object, contentType: "application/pdf" }, "Multipart upload")).toThrow(
       "Multipart upload object content type mismatch"
     );
+  });
+
+  it("plans direct-upload object head reads from the file snapshot", () => {
+    expect(fileDirectUploadObjectHeadReadPlan(fileSnapshot({
+      key: "acme/files/file_1-invoice.pdf"
+    }))).toEqual({
+      key: "acme/files/file_1-invoice.pdf"
+    });
+    expect(() => fileDirectUploadObjectHeadReadPlan(fileSnapshot({}))).toThrow("File/file_multipart has no key");
   });
 
   it("plans file scan patches without persisting empty optional scanner fields", () => {

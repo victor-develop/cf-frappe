@@ -59,6 +59,7 @@ import {
   fileCompletedMultipartObjectHeadReadPlan,
   fileCompletedMultipartObjectPlan,
   fileCompletedMultipartObjectReadPlan,
+  fileDirectUploadObjectHeadReadPlan,
   fileBulkDeleteDeletedOutcome,
   fileBulkDeleteEntryCommand,
   fileBulkDeleteFailedOutcome,
@@ -564,8 +565,9 @@ export class FileService {
     const tenantId = fileCommandTenantId(command.actor, command.tenantId);
     const current = await this.queries.getDocument(command.actor, this.fileDoctype, command.name, tenantId);
     ensureFilePendingDirectUpload(current);
+    const head = fileDirectUploadObjectHeadReadPlan(current);
     const object = requireFileObjectMetadata(
-      await this.storage.head(filePrimaryObjectKey(current)),
+      await this.storage.head(head.key),
       this.fileDoctype,
       command.name
     );

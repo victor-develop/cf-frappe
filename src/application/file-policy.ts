@@ -781,6 +781,14 @@ export function ensureDirectUploadMatches(
   }
 }
 
+export function fileDirectUploadObjectHeadReadPlan(snapshot: DocumentSnapshot): {
+  readonly key: string;
+} {
+  return {
+    key: filePrimaryObjectKey(snapshot)
+  };
+}
+
 export function fileScanPatch(result: FileScanResult, checkedAt: string): DocumentData {
   return {
     scan_status: result.status,
