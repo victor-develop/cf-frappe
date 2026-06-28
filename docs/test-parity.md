@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file rendition put command policy module slice:
+As of the file rendition manifest patch policy module slice:
 
 - Vitest files: `169`
-- Vitest cases: `1645`
+- Vitest cases: `1646`
 
 ## Implication
 

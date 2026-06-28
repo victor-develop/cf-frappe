@@ -997,6 +997,15 @@ export function upsertFileRenditionManifest(
   ].sort((left, right) => left.id.localeCompare(right.id));
 }
 
+export function fileRenditionManifestPatch(
+  manifest: readonly FileRenditionManifestEntry[],
+  rendition: FileRenditionManifestEntry
+): DocumentData {
+  return {
+    renditions: upsertFileRenditionManifest(manifest, rendition)
+  };
+}
+
 function ensureFileObjectKeyFits(key: string, message: string): void {
   if (new TextEncoder().encode(key).byteLength > 1024) {
     throw badRequest(message);

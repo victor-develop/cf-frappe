@@ -70,6 +70,7 @@ import {
   fileObjectKeysForDelete,
   fileObjectSourceEtag,
   fileRenditionId,
+  fileRenditionManifestPatch,
   fileRenditionPutObjectCommand,
   fileRenditions,
   fileRenditionView,
@@ -93,7 +94,6 @@ import {
   requireFileSnapshotString,
   sanitizeFilename,
   type FileRenditionManifestEntry,
-  upsertFileRenditionManifest,
   upsertMultipartPartManifest
 } from "./file-policy.js";
 import type { IdGenerator } from "../ports/id-generator.js";
@@ -882,9 +882,7 @@ export class FileService {
       doctype: this.fileDoctype,
       name: command.name,
       command: "reserveRendition",
-      input: {
-        renditions: upsertFileRenditionManifest(currentRenditions, pending)
-      },
+      input: fileRenditionManifestPatch(currentRenditions, pending),
       ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
       expectedVersion: downloaded.snapshot.version,
       metadata: command.metadata ?? {}
@@ -1145,9 +1143,7 @@ export class FileService {
       doctype: this.fileDoctype,
       name: command.source.name,
       command: command.command,
-      input: {
-        renditions: upsertFileRenditionManifest(fileRenditions(latest), command.rendition)
-      },
+      input: fileRenditionManifestPatch(fileRenditions(latest), command.rendition),
       ...(command.source.tenantId === undefined ? {} : { tenantId: command.source.tenantId }),
       expectedVersion: latest.version,
       metadata: command.source.metadata ?? {}

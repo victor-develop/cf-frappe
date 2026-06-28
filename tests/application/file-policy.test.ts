@@ -33,6 +33,7 @@ import {
   fileRenditionObjectCustomMetadata,
   fileRenditionId,
   fileRenditionFilename,
+  fileRenditionManifestPatch,
   fileRenditionPutObjectCommand,
   fileRenditions,
   fileRenditionView,
@@ -588,6 +589,15 @@ describe("file policy", () => {
         renditionEntry("overflow")
       )
     ).toThrow("At most 32 renditions can be stored per file");
+  });
+
+  it("builds rendition manifest document patches", () => {
+    expect(fileRenditionManifestPatch([renditionEntry("b")], renditionEntry("a"))).toEqual({
+      renditions: [renditionEntry("a"), renditionEntry("b")]
+    });
+    expect(fileRenditionManifestPatch([renditionEntry("a")], renditionEntry("a", { status: "failed" }))).toEqual({
+      renditions: [renditionEntry("a", { status: "failed" })]
+    });
   });
 
   it("normalizes bulk file selections", () => {
