@@ -5,6 +5,7 @@ import {
   documentDeletedPayload,
   documentStatusChangedPayload,
   documentUpdatedPayload,
+  requireFirstSavedEvent,
   requireLiveDocumentSnapshot,
   requireSavedEvent,
   snapshotFromCommittedDocumentEvent,
@@ -129,6 +130,14 @@ describe("document lifecycle events", () => {
     expect(() => requireSavedEvent([createdEvent], "evt_missing")).toThrow(
       "Event store did not return saved event"
     );
+  });
+
+  it("requires the first saved event after single-event commits", () => {
+    expect(requireFirstSavedEvent([createdEvent, updatedEvent])).toBe(createdEvent);
+  });
+
+  it("rejects empty saved-event commits", () => {
+    expect(() => requireFirstSavedEvent([])).toThrow("Event store did not return saved event");
   });
 });
 

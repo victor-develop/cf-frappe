@@ -98,3 +98,11 @@ export function requireSavedEvent(events: readonly DomainEvent[], id: string): D
   }
   return event;
 }
+
+export function requireFirstSavedEvent(events: readonly DomainEvent[]): DomainEvent {
+  const [event] = events;
+  if (!event) {
+    throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
+  }
+  return event;
+}

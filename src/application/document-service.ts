@@ -59,6 +59,7 @@ import {
 import {
   documentDeletedPayload,
   documentStatusChangedPayload,
+  requireFirstSavedEvent,
   requireLiveDocumentSnapshot,
   requireSavedEvent,
   snapshotFromCommittedDocumentEvent,
@@ -931,10 +932,8 @@ export class DocumentService implements DocumentCommandExecutor {
       payload,
       metadata: command.metadata ?? {}
     });
-    const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
-      if (!saved) {
-        throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
-      }
+    const commit = await this.store.commit(stream, existing.version, [event], (savedEvents) => {
+      const saved = requireFirstSavedEvent(savedEvents);
       return snapshotFromCommittedDocumentEvent(existing, saved, {
         data: { ...existing.data, ...plan.patch }
       });
@@ -1020,10 +1019,8 @@ export class DocumentService implements DocumentCommandExecutor {
       payload,
       metadata: command.metadata ?? {}
     });
-    const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
-      if (!saved) {
-        throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
-      }
+    const commit = await this.store.commit(stream, existing.version, [event], (savedEvents) => {
+      const saved = requireFirstSavedEvent(savedEvents);
       return snapshotFromCommittedDocumentEvent(existing, saved, {
         data: { ...existing.data, ...patchWithReadOnlyValues }
       });
@@ -1230,10 +1227,8 @@ export class DocumentService implements DocumentCommandExecutor {
       payload: documentDeletedPayload(),
       metadata: command.metadata ?? {}
     });
-    const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
-      if (!saved) {
-        throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
-      }
+    const commit = await this.store.commit(stream, existing.version, [event], (savedEvents) => {
+      const saved = requireFirstSavedEvent(savedEvents);
       return snapshotFromCommittedDocumentEvent(existing, saved, { docstatus: plan.nextStatus });
     });
     const [saved] = commit.events;
@@ -1474,10 +1469,8 @@ export class DocumentService implements DocumentCommandExecutor {
     stream: string,
     event: NewDomainEvent
   ): Promise<DocumentSnapshot> {
-    const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
-      if (!saved) {
-        throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
-      }
+    const commit = await this.store.commit(stream, existing.version, [event], (savedEvents) => {
+      const saved = requireFirstSavedEvent(savedEvents);
       return snapshotFromCommittedDocumentEvent(existing, saved);
     });
     const [saved] = commit.events;
@@ -1509,10 +1502,8 @@ export class DocumentService implements DocumentCommandExecutor {
       payload: documentStatusChangedPayload(options.payloadKind),
       metadata: options.command.metadata ?? {}
     });
-    const commit = await this.store.commit(options.stream, options.existing.version, [event], ([saved]) => {
-      if (!saved) {
-        throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
-      }
+    const commit = await this.store.commit(options.stream, options.existing.version, [event], (savedEvents) => {
+      const saved = requireFirstSavedEvent(savedEvents);
       return snapshotFromCommittedDocumentEvent(options.existing, saved, { docstatus: options.nextStatus });
     });
     const [saved] = commit.events;
@@ -1801,10 +1792,8 @@ export class DocumentService implements DocumentCommandExecutor {
           payload: eventPlan.payload,
           metadata: eventPlan.metadata
         });
-        await this.store.commit(reservation.stream, existing.version, [event], ([saved]) => {
-          if (!saved) {
-            throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
-          }
+        await this.store.commit(reservation.stream, existing.version, [event], (savedEvents) => {
+          const saved = requireFirstSavedEvent(savedEvents);
           return snapshotFromCommittedDocumentEvent(existing, saved, {
             data: { ...existing.data, active: false }
           });
@@ -1887,10 +1876,8 @@ export class DocumentService implements DocumentCommandExecutor {
         metadata: eventPlan.metadata
       });
       try {
-        await this.store.commit(stream, existing?.version ?? 0, [event], ([saved]) => {
-          if (!saved) {
-            throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
-          }
+        await this.store.commit(stream, existing?.version ?? 0, [event], (savedEvents) => {
+          const saved = requireFirstSavedEvent(savedEvents);
           if (!existing) {
             return snapshotFromDocumentCreatedEvent(saved);
           }
