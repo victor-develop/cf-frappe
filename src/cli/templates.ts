@@ -138,6 +138,10 @@ function wranglerJsonc(input: StarterProjectTemplateInput): string {
       {
         "name": "AGGREGATES",
         "class_name": "AggregateCoordinator"
+      },
+      {
+        "name": "REALTIME",
+        "class_name": "RealtimeHub"
       }
     ]
   },
@@ -160,7 +164,7 @@ function wranglerJsonc(input: StarterProjectTemplateInput): string {
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["AggregateCoordinator"]
+      "new_sqlite_classes": ["AggregateCoordinator", "RealtimeHub"]
     }
   ],
 ${authVarsJsonc(input)}  "secrets": {
@@ -258,6 +262,7 @@ npm run dev
 \`\`\`
 
 Open \`/\` for the generated website homepage, \`/desk\` for the generated Desk UI, the \`Tasks\` workspace, the \`Task Calendar\`, the \`Task Board\`, the \`Task Dashboard\`, the \`Task Intake\` Web Form at \`/web-forms/task-intake\`, the \`Task Updates\` Web View, the \`About\` Web Page, and the file manager at \`/desk/files\`; run the \`tasks.seed_starter_tasks\` data patch when you want sample Task records and the starter Task owner notification rule in a fresh environment. Use \`/api/meta/doctypes/Task\`, \`/api/meta/web-forms/Task%20Intake\`, \`/api/meta/web-views/Task%20Updates\`, \`/api/meta/web-pages/About\`, \`/api/meta/website-settings\`, and \`/api/meta/website-themes/Starter Theme\` for metadata APIs. ${authLocalReadme(input.auth)}
+Realtime document updates and presence are enabled at \`/api/realtime\` through the generated \`REALTIME\` Durable Object binding.
 The generated R2 binding supports buffered Desk uploads immediately. Add a \`directUploads\` signer to \`R2FileStorage\` before enabling signed browser direct-upload targets.
 Client scripts live under \`public/assets\`; add them with \`defineClientScript(...)\` in files under \`src/apps\`.
 ${authProviderReadme(input.auth)}
@@ -1119,13 +1124,20 @@ import {
   CloudflareJobQueue,
   createAggregateCoordinatorClass,
   createCloudFrappeWorker,
+  createRealtimeHubClass,
+  DurableObjectRealtimePublisher,
   R2FileStorage,
   type CloudFrappeEnv,
-  type CloudFrappeRuntimeServices
+  type CloudFrappeRuntimeServices,
+  type RealtimeHubNamespace
 } from "cf-frappe/cloudflare";
 import { registry } from "./apps";
 
-type Env = Cloudflare.Env & CloudFrappeEnv;
+interface RealtimeEnv {
+  readonly REALTIME: RealtimeHubNamespace;
+}
+
+type Env = Cloudflare.Env & CloudFrappeEnv & RealtimeEnv;
 
 const guestActor: Actor = {
   id: "guest",
@@ -1135,8 +1147,11 @@ const guestActor: Actor = {
 
 export class AggregateCoordinator extends createAggregateCoordinatorClass<Env>({
   registry,
-  documentDeliveryOutbox: true
+  documentDeliveryOutbox: true,
+  realtime: (env) => new DurableObjectRealtimePublisher(env.REALTIME)
 }) {}
+
+export class RealtimeHub extends createRealtimeHubClass() {}
 
 const starterJobs = createJobRegistry<CloudFrappeRuntimeServices>({
   jobs: [
@@ -1160,6 +1175,9 @@ export default createCloudFrappeWorker<Env>({
     executionLog: (env) => new D1JobExecutionLog(env.DB)
   },
   documentDeliveryOutbox: true,
+  realtime: {
+    namespace: (env) => env.REALTIME
+  },
   files: {
     storage: (env) => new R2FileStorage(env.FILES)
   }
@@ -1181,18 +1199,28 @@ import {
   CloudflareJobQueue,
   createAggregateCoordinatorClass,
   createCloudFrappeWorker,
+  createRealtimeHubClass,
+  DurableObjectRealtimePublisher,
   R2FileStorage,
   type CloudFrappeEnv,
-  type CloudFrappeRuntimeServices
+  type CloudFrappeRuntimeServices,
+  type RealtimeHubNamespace
 } from "cf-frappe/cloudflare";
 import { registry } from "./apps";
 
-type Env = Cloudflare.Env & CloudFrappeEnv;
+interface RealtimeEnv {
+  readonly REALTIME: RealtimeHubNamespace;
+}
+
+type Env = Cloudflare.Env & CloudFrappeEnv & RealtimeEnv;
 
 export class AggregateCoordinator extends createAggregateCoordinatorClass<Env>({
   registry,
-  documentDeliveryOutbox: true
+  documentDeliveryOutbox: true,
+  realtime: (env) => new DurableObjectRealtimePublisher(env.REALTIME)
 }) {}
+
+export class RealtimeHub extends createRealtimeHubClass() {}
 
 const starterJobs = createJobRegistry<CloudFrappeRuntimeServices>({
   jobs: [
@@ -1214,6 +1242,9 @@ export default createCloudFrappeWorker<Env>({
     executionLog: (env) => new D1JobExecutionLog(env.DB)
   },
   documentDeliveryOutbox: true,
+  realtime: {
+    namespace: (env) => env.REALTIME
+  },
   files: {
     storage: (env) => new R2FileStorage(env.FILES)
   },
@@ -1247,18 +1278,28 @@ import {
   CloudflareJobQueue,
   createAggregateCoordinatorClass,
   createCloudFrappeWorker,
+  createRealtimeHubClass,
+  DurableObjectRealtimePublisher,
   R2FileStorage,
   type CloudFrappeEnv,
-  type CloudFrappeRuntimeServices
+  type CloudFrappeRuntimeServices,
+  type RealtimeHubNamespace
 } from "cf-frappe/cloudflare";
 import { registry } from "./apps";
 
-type Env = Cloudflare.Env & CloudFrappeEnv;
+interface RealtimeEnv {
+  readonly REALTIME: RealtimeHubNamespace;
+}
+
+type Env = Cloudflare.Env & CloudFrappeEnv & RealtimeEnv;
 
 export class AggregateCoordinator extends createAggregateCoordinatorClass<Env>({
   registry,
-  documentDeliveryOutbox: true
+  documentDeliveryOutbox: true,
+  realtime: (env) => new DurableObjectRealtimePublisher(env.REALTIME)
 }) {}
+
+export class RealtimeHub extends createRealtimeHubClass() {}
 
 const starterJobs = createJobRegistry<CloudFrappeRuntimeServices>({
   jobs: [
@@ -1280,6 +1321,9 @@ export default createCloudFrappeWorker<Env>({
     executionLog: (env) => new D1JobExecutionLog(env.DB)
   },
   documentDeliveryOutbox: true,
+  realtime: {
+    namespace: (env) => env.REALTIME
+  },
   files: {
     storage: (env) => new R2FileStorage(env.FILES)
   },

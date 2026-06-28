@@ -38,6 +38,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Added starter realtime wiring coverage so generated Cloudflare apps include a RealtimeHub Durable Object binding/class, aggregate realtime publisher, Worker websocket/presence route config, and README guidance for `/api/realtime`.
 - Added starter deployment-guidance coverage so generated app READMEs keep resource creation, D1 id replacement, session-secret setup, and first remote deploy in one ordered deployment section.
 - Added starter setup-script coverage so generated Cloudflare apps expose one-command local preparation, session-secret setup, and first remote deployment scripts instead of leaving the deployment sequence only in prose.
 - Added realtime relative-route normalization coverage so Worker websocket subscriptions, Worker presence snapshots, and Desk client URL helpers agree when realtime is configured as `rt` or `rt/`.
