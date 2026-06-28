@@ -30,6 +30,7 @@ import {
   fileMultipartUploadDocumentData,
   fileMultipartUploadId,
   fileObjectKeysForDelete,
+  fileObjectKeysForScanFailureCleanup,
   fileObjectContentType,
   fileObjectSourceEtag,
   filePrimaryObjectKey,
@@ -463,6 +464,19 @@ describe("file policy", () => {
     expect(fileObjectKeysForDelete(snapshot)).toEqual([
       "acme/files/file_multipart-original.png",
       "acme/file-renditions/file/thumb.webp"
+    ]);
+  });
+
+  it("plans primary file object cleanup after scan failures", () => {
+    const snapshot = fileSnapshot({
+      key: "acme/files/file_multipart-original.png",
+      renditions: [
+        renditionEntry("thumb", { key: "acme/file-renditions/file/thumb.webp" })
+      ]
+    });
+
+    expect(fileObjectKeysForScanFailureCleanup(snapshot)).toEqual([
+      "acme/files/file_multipart-original.png"
     ]);
   });
 

@@ -885,6 +885,10 @@ export function fileObjectKeysForDelete(snapshot: DocumentSnapshot): readonly st
   ];
 }
 
+export function fileObjectKeysForScanFailureCleanup(snapshot: DocumentSnapshot): readonly string[] {
+  return [filePrimaryObjectKey(snapshot)];
+}
+
 export function fileTransformOptionsFromData(data: DocumentData): FileTransformOptions {
   const fit = typeof data.fit === "string" ? data.fit as NonNullable<FileTransformOptions["fit"]> : undefined;
   const format = typeof data.format === "string" ? data.format as NonNullable<FileTransformOptions["format"]> : undefined;

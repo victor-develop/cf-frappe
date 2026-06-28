@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the primary file object-key policy module slice:
+As of the scan-failure cleanup key policy module slice:
 
 - Vitest files: `169`
-- Vitest cases: `1659`
+- Vitest cases: `1660`
 
 ## Implication
 

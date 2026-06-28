@@ -69,6 +69,7 @@ import {
   fileMultipartUploadDocumentData,
   fileMultipartUploadId,
   fileObjectKeysForDelete,
+  fileObjectKeysForScanFailureCleanup,
   filePrimaryObjectKey,
   fileObjectSourceEtag,
   fileRenditionId,
@@ -563,7 +564,7 @@ export class FileService {
         ...(command.expectedVersion === undefined ? {} : { expectedVersion: command.expectedVersion }),
         metadata: command.metadata ?? {}
       });
-      await this.storage.delete(filePrimaryObjectKey(current)).catch(() => undefined);
+      await this.deleteFileObjectsForScanFailure(current);
       throw fileScanFailureError(scan, snapshot);
     }
     return this.documents.execute({
@@ -661,7 +662,6 @@ export class FileService {
   async completeMultipartUpload(command: CompleteMultipartUploadCommand): Promise<DocumentSnapshot> {
     const multipartUploads = this.requireMultipartUploads();
     const current = await this.multipartUploadSnapshot(command, ensureFilePendingMultipartCompletion);
-    const key = filePrimaryObjectKey(current);
     ensureMultipartCompletionMatchesManifest(current, command.parts);
     const completing = shouldStartFileMultipartCompletion(current)
       ? await this.documents.execute({
@@ -700,7 +700,7 @@ export class FileService {
         expectedVersion: completing.version,
         metadata: command.metadata ?? {}
       });
-      await this.storage.delete(key).catch(() => undefined);
+      await this.deleteFileObjectsForScanFailure(completing);
       throw fileScanFailureError(scan, snapshot);
     }
     return this.documents.execute({
@@ -1152,6 +1152,12 @@ export class FileService {
   private async deleteFileObjects(snapshot: DocumentSnapshot): Promise<void> {
     for (const key of fileObjectKeysForDelete(snapshot)) {
       await this.storage.delete(key);
+    }
+  }
+
+  private async deleteFileObjectsForScanFailure(snapshot: DocumentSnapshot): Promise<void> {
+    for (const key of fileObjectKeysForScanFailureCleanup(snapshot)) {
+      await this.storage.delete(key).catch(() => undefined);
     }
   }
 
