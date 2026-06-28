@@ -1397,6 +1397,40 @@ describe("FileService", () => {
     ).rejects.toMatchObject({ code: "DOCUMENT_NOT_FOUND" });
   });
 
+  it("records multipart abort delete metadata through the policy-shaped command", async () => {
+    const services = createFileServices(["reserve", "part", "delete"], ["multipart"]);
+    const prepared = await services.files.prepareMultipartUpload({
+      actor: owner,
+      filename: "cancel-with-metadata.bin",
+      size: 4,
+      contentType: "application/octet-stream"
+    });
+    const part = await services.files.uploadMultipartPart({
+      actor: owner,
+      name: prepared.snapshot.name,
+      partNumber: 1,
+      body: "data"
+    });
+
+    await services.files.abortMultipartUpload({
+      actor: owner,
+      name: prepared.snapshot.name,
+      tenantId: "acme",
+      expectedVersion: part.snapshot.version,
+      metadata: { source: "multipart-abort" }
+    });
+
+    await expect(services.store.readStream(documentStream("acme", "File", prepared.snapshot.name))).resolves.toMatchObject([
+      { type: "FileMultipartUploadReserved" },
+      { type: "FileMultipartPartUploaded" },
+      {
+        type: "FileDeleted",
+        payload: { kind: "DocumentDeleted" },
+        metadata: { source: "multipart-abort" }
+      }
+    ]);
+  });
+
   it("validates metadata attachment targets before appending file metadata events", async () => {
     const services = createFileServices(["create-1", "metadata-1"], ["object-1"]);
     const uploaded = await services.files.upload({

@@ -68,7 +68,6 @@ import {
   fileBulkMetadataUpdateEntryCommand,
   fileBufferedUploadPutObjectCommand,
   fileAttachedToCommandOption,
-  fileCommandMetadata,
   fileCommandTenantId,
   fileContentLength,
   fileDashboardEntryWithPermissions,
@@ -115,7 +114,6 @@ import {
   filePendingUploadDocumentData,
   fileMultipartUploadAbortCommand,
   fileMultipartUploadReservationCommand,
-  fileTenantCommandOption,
   fileTransformOverlayCommandOption,
   fileTransformObjectCommand,
   fileTransformOverlaySource,
@@ -768,14 +766,14 @@ export class FileService {
       uploadId: this.multipartUploadId(current)
     }));
     const deleted = fileDeletedDocumentCommand(current);
-    return this.documents.delete({
+    return this.documents.delete(fileDeletedExecuteCommand({
       actor: command.actor,
       doctype: this.fileDoctype,
       name: command.name,
-      ...fileTenantCommandOption(command.tenantId),
-      expectedVersion: deleted.expectedVersion,
-      metadata: fileCommandMetadata(command.metadata)
-    });
+      tenantId: command.tenantId,
+      metadata: command.metadata,
+      deleted
+    }));
   }
 
   async dashboard(actor: Actor, query: FileDashboardQuery = {}): Promise<FileDashboard> {
