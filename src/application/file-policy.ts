@@ -814,6 +814,16 @@ export type FileCompletedMultipartObjectPlan =
       readonly command: CompleteMultipartFileUploadCommand;
     };
 
+export function fileCompletedMultipartObjectReadPlan(snapshot: DocumentSnapshot): {
+  readonly key: string;
+  readonly uploadId: string;
+} {
+  return {
+    key: filePrimaryObjectKey(snapshot),
+    uploadId: fileMultipartUploadId(snapshot)
+  };
+}
+
 export function fileCompletedMultipartObjectPlan(command: {
   readonly snapshot: DocumentSnapshot;
   readonly uploadId: string;

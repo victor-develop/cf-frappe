@@ -41,6 +41,7 @@ import {
   fileBufferedUploadDocumentCreateCommand,
   fileBufferedUploadDocumentData,
   fileBufferedUploadPutObjectCommand,
+  fileCompletedMultipartObjectReadPlan,
   fileCommandMetadata,
   fileCommandTenantId,
   fileCompletedMultipartObjectPlan,
@@ -2107,6 +2108,24 @@ describe("file policy", () => {
         parts
       }
     });
+  });
+
+  it("plans completed multipart object storage reads from the file snapshot", () => {
+    expect(fileCompletedMultipartObjectReadPlan(
+      fileSnapshot({
+        key: "acme/files/file_1-invoice.pdf",
+        multipart_upload_id: "upload-1"
+      })
+    )).toEqual({
+      key: "acme/files/file_1-invoice.pdf",
+      uploadId: "upload-1"
+    });
+    expect(() => fileCompletedMultipartObjectReadPlan(fileSnapshot({ multipart_upload_id: "upload-1" }))).toThrow(
+      "File/file_multipart has no key"
+    );
+    expect(() => fileCompletedMultipartObjectReadPlan(fileSnapshot({ key: "acme/files/file_1-invoice.pdf" }))).toThrow(
+      "File/file_multipart has no multipart upload"
+    );
   });
 
   it("builds rendition object storage custom metadata", () => {

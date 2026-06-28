@@ -45,6 +45,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Added `DocumentStore.commitBatch` and wired document create/update unique-value reservations plus the document event through one multi-stream commit, with D1 and in-memory adapters committing all event streams and projections atomically and focused tests proving failed unique commands no longer leave compensating reservation events.
 - Centralized readable file dashboard candidate shaping in file policy so dashboard orchestration no longer composes permission-check DTOs inline.
 - Centralized multipart completed-object reuse versus storage-completion planning in file policy so multipart orchestration no longer owns idempotent completion branching.
+- Centralized multipart completed-object read planning in file policy so multipart orchestration no longer derives object keys or upload ids before storage reads inline.
 - Centralized attachment target validation planning in file policy so create/update metadata orchestration no longer branches on absent, cleared, and present attachment targets inline.
 - Centralized transform overlay resolution planning in file policy so transform orchestration no longer interprets absent versus resolvable overlay options inline.
 - Centralized generated-rendition reuse storage planning in file policy so rendition orchestration no longer branches over reusable manifest entries and storage existence inline.

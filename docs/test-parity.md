@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the object scanner target policy slice:
+As of the multipart completion object read policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1744`
-- Remaining gap to Frappe static markers: `1040`
+- Vitest cases: `1745`
+- Remaining gap to Frappe static markers: `1039`
 
 ## Implication
 

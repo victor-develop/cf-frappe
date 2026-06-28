@@ -59,6 +59,7 @@ import {
   fileBulkDeletedEntry,
   fileCompletedRenditionManifestRecord,
   fileCompletedMultipartObjectPlan,
+  fileCompletedMultipartObjectReadPlan,
   fileBufferedUploadDocumentCreateCommand,
   fileBulkDeleteEntryCommand,
   fileBulkDeleteFailure,
@@ -1259,12 +1260,12 @@ export class FileService {
     readonly snapshot: DocumentSnapshot;
     readonly parts: readonly UploadedMultipartFilePart[];
   }): Promise<FileObjectMetadata> {
-    const key = filePrimaryObjectKey(command.snapshot);
+    const read = fileCompletedMultipartObjectReadPlan(command.snapshot);
     const plan = fileCompletedMultipartObjectPlan({
       snapshot: command.snapshot,
-      uploadId: this.multipartUploadId(command.snapshot),
+      uploadId: read.uploadId,
       parts: command.parts,
-      existing: await this.storage.head(key)
+      existing: await this.storage.head(read.key)
     });
     if (plan.kind === "reuse") {
       return plan.object;
