@@ -505,6 +505,80 @@ describe("JobRetryService", () => {
     ]);
   });
 
+  it("snapshots retried job payloads and metadata independently from returned records", async () => {
+    const registry = createJobRegistry({
+      jobs: [{ name: "email.digest", handler: () => undefined }]
+    });
+    const queue = new InMemoryJobQueue();
+    const executionLog = new InMemoryJobExecutionLog();
+    const retry = new JobRetryService({
+      executionLog,
+      dispatcher: new JobDispatcher({
+        registry,
+        queue,
+        clock: fixedClock(now),
+        ids: deterministicIds(["retry-snapshot"])
+      }),
+      clock: fixedClock(now)
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const payload = { account: "acme", nested: { count: 1 } };
+    const metadata = { source: "cron", nested: { attempt: 1 } };
+    const failedMessage = jobMessage("email.digest", "job_001", "acme", {
+      payload,
+      metadata
+    });
+
+    await executionLog.begin(failedMessage, "2026-01-01T00:00:00.000Z");
+    payload.nested.count = 2;
+    metadata.source = "mutated";
+    metadata.nested.attempt = 2;
+    await executionLog.fail(failedMessage, "2026-01-01T00:01:00.000Z", "smtp timeout");
+    const result = await retry.retry(admin, "email.digest:job_001");
+
+    expect(result).toMatchObject({
+      original: {
+        payload: { account: "acme", nested: { count: 1 } },
+        metadata: { source: "cron", nested: { attempt: 1 } }
+      },
+      message: {
+        payload: { account: "acme", nested: { count: 1 } },
+        metadata: {
+          source: "cron",
+          nested: { attempt: 1 },
+          retriedAt: now,
+          retriedBy: "admin@example.com",
+          retriedFromRunId: "job_001"
+        }
+      }
+    });
+
+    (result.original.payload!.nested as DocumentData).count = 3;
+    (result.original.metadata!.nested as DocumentData).attempt = 3;
+    (result.message.payload.nested as DocumentData).count = 4;
+    (result.message.metadata.nested as DocumentData).attempt = 4;
+    result.message.metadata.source = "returned";
+
+    await expect(executionLog.get("email.digest:job_001", { tenantId: "acme" })).resolves.toMatchObject({
+      payload: { account: "acme", nested: { count: 1 } },
+      metadata: { source: "cron", nested: { attempt: 1 } }
+    });
+    expect(queue.queued()).toMatchObject([
+      {
+        message: {
+          payload: { account: "acme", nested: { count: 1 } },
+          metadata: {
+            source: "cron",
+            nested: { attempt: 1 },
+            retriedAt: now,
+            retriedBy: "admin@example.com",
+            retriedFromRunId: "job_001"
+          }
+        }
+      }
+    ]);
+  });
+
   it("rejects retry attempts for non-failed or cross-tenant executions", async () => {
     const registry = createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] });
     const queue = new InMemoryJobQueue();

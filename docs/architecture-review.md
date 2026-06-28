@@ -268,6 +268,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized downloaded object read planning in file policy so file download orchestration no longer derives primary object keys inline.
 - Centralized downloaded rendition object read planning in file policy so rendition download orchestration no longer derives storage keys from manifest entries inline.
 - Centralized multipart completion snapshot selection in file policy so multipart completion orchestration no longer chooses between current and begin-completion snapshots inline.
+- Added job retry snapshot coverage so failed execution payloads and metadata are requeued from execution-log snapshots without caller, returned-record, or returned-message mutation leaking into durable retry intent.
 - Added rollback and rollback-retry enqueue regression coverage for data-patch job messages so queued Cloudflare-style jobs snapshot actor roles, selected patch ids, retry patch ids, and metadata independently from caller mutation and returned-message mutation.
 - Added service-level regression coverage for data-patch catalog snapshots so dashboard, apply, and rollback flows keep using construction-time patch metadata and handlers after caller-side mutation.
 - Snapshotted `DataPatchRunner` configured patch definitions at construction so delayed plan/apply/rollback execution cannot observe caller mutation of app-declared patch ids, checksums, or handlers.
