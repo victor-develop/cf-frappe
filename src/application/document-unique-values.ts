@@ -35,6 +35,15 @@ export interface UniqueValueEventPlan {
   readonly metadata: DocumentData;
 }
 
+export type UniqueValueReservationWriteDecision =
+  | { readonly status: "skip" }
+  | { readonly status: "conflict"; readonly message: string }
+  | {
+      readonly status: "reserve";
+      readonly reservation: UniqueValueReservation;
+      readonly existing: DocumentSnapshot | null;
+    };
+
 export interface UniqueValueReservationWriteProjection {
   readonly reservation: UniqueValueReservation;
   readonly existing: DocumentSnapshot | null;
@@ -170,6 +179,28 @@ export function planUniqueValueReleaseEvent(reservation: UniqueValueReservation)
     documentName: uniqueValueDocumentName(reservation),
     payload: documentUpdatedPayload({ active: false }),
     metadata: uniqueValueEventMetadata(reservation)
+  };
+}
+
+export function planUniqueValueReservationWriteDecision(input: {
+  readonly reservation: UniqueValueReservation;
+  readonly existing: DocumentSnapshot | null;
+  readonly ownerStillOwnsValue: boolean;
+}): UniqueValueReservationWriteDecision {
+  const owner = activeUniqueValueOwner(input.existing);
+  if (owner === input.reservation.documentName) {
+    return { status: "skip" };
+  }
+  if (owner !== undefined && input.ownerStillOwnsValue) {
+    return {
+      status: "conflict",
+      message: `Unique field '${input.reservation.field}' on ${input.reservation.doctype} already uses value '${input.reservation.valueLabel}'`
+    };
+  }
+  return {
+    status: "reserve",
+    reservation: input.reservation,
+    existing: input.existing
   };
 }
 

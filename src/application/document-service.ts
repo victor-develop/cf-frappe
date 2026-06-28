@@ -67,6 +67,7 @@ import {
 } from "./document-lifecycle-events.js";
 import {
   activeUniqueValueOwner,
+  planUniqueValueReservationWriteDecision,
   planUniqueValueReleaseEvent,
   planUniqueValueReservationEvent,
   projectUniqueValueReleaseWrite,
@@ -1708,15 +1709,21 @@ export class DocumentService implements DocumentCommandExecutor {
     for (const reservation of reservations) {
       const existing = foldDocument(await this.store.readStream(reservation.stream));
       const owner = activeUniqueValueOwner(existing);
-      if (owner === reservation.documentName) {
+      const ownerStillOwnsValue = owner !== undefined && owner !== reservation.documentName
+        ? await this.uniqueReservationOwnerStillOwnsValue(reservation, owner)
+        : false;
+      const decision = planUniqueValueReservationWriteDecision({
+        reservation,
+        existing,
+        ownerStillOwnsValue
+      });
+      if (decision.status === "skip") {
         continue;
       }
-      if (owner !== undefined && (await this.uniqueReservationOwnerStillOwnsValue(reservation, owner))) {
-        throw conflict(
-          `Unique field '${reservation.field}' on ${reservation.doctype} already uses value '${reservation.valueLabel}'`
-        );
+      if (decision.status === "conflict") {
+        throw conflict(decision.message);
       }
-      planned.push({ reservation, existing });
+      planned.push({ reservation: decision.reservation, existing: decision.existing });
     }
     return planned.map(({ reservation, existing }) => {
       const eventPlan = planUniqueValueReservationEvent(reservation, existing);

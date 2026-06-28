@@ -4,6 +4,7 @@ import {
   activeUniqueValueOwner,
   canonicalUniqueValue,
   defineDocType,
+  planUniqueValueReservationWriteDecision,
   planUniqueValueReleaseEvent,
   planUniqueValueReservationEvent,
   projectUniqueValueReleaseWrite,
@@ -136,6 +137,46 @@ describe("document unique values", () => {
       payload: { kind: "DocumentUpdated", patch: { active: false } },
       metadata: { target_doctype: "Contact", target_field: "email" }
     });
+  });
+
+  it("skips reservation writes when the active owner already matches the document", () => {
+    const reservation = reservationFor("ada@example.com");
+
+    expect(
+      planUniqueValueReservationWriteDecision({
+        reservation,
+        existing: uniqueValueSnapshot({ documentName: "ada", active: true }),
+        ownerStillOwnsValue: true
+      })
+    ).toEqual({ status: "skip" });
+  });
+
+  it("rejects reservation writes when another active owner still holds the unique value", () => {
+    const reservation = reservationFor("ada@example.com");
+
+    expect(
+      planUniqueValueReservationWriteDecision({
+        reservation,
+        existing: uniqueValueSnapshot({ documentName: "grace", active: true }),
+        ownerStillOwnsValue: true
+      })
+    ).toEqual({
+      status: "conflict",
+      message: "Unique field 'email' on Contact already uses value 'ada@example.com'"
+    });
+  });
+
+  it("plans reservation writes when an old owner no longer holds the unique value", () => {
+    const reservation = reservationFor("ada@example.com");
+    const existing = uniqueValueSnapshot({ documentName: "grace", active: true });
+
+    expect(
+      planUniqueValueReservationWriteDecision({
+        reservation,
+        existing,
+        ownerStillOwnsValue: false
+      })
+    ).toEqual({ status: "reserve", reservation, existing });
   });
 
   it("projects new unique-value reservation writes from saved create events", () => {
