@@ -779,6 +779,38 @@ export function fileMultipartCompletionCommand(command: {
   };
 }
 
+export type FileCompletedMultipartObjectPlan =
+  | {
+      readonly kind: "reuse";
+      readonly object: FileObjectMetadata;
+    }
+  | {
+      readonly kind: "complete";
+      readonly command: CompleteMultipartFileUploadCommand;
+    };
+
+export function fileCompletedMultipartObjectPlan(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly uploadId: string;
+  readonly parts: readonly UploadedMultipartFilePart[];
+  readonly existing?: FileObjectMetadata | null;
+}): FileCompletedMultipartObjectPlan {
+  if (command.existing) {
+    return {
+      kind: "reuse",
+      object: command.existing
+    };
+  }
+  return {
+    kind: "complete",
+    command: fileMultipartCompletionCommand({
+      snapshot: command.snapshot,
+      uploadId: command.uploadId,
+      parts: command.parts
+    })
+  };
+}
+
 export function fileMultipartAbortCommand(command: {
   readonly snapshot: DocumentSnapshot;
   readonly uploadId: string;

@@ -42,6 +42,7 @@ import {
   fileBufferedUploadPutObjectCommand,
   fileCommandMetadata,
   fileCommandTenantId,
+  fileCompletedMultipartObjectPlan,
   fileCompletedRenditionManifestCommandName,
   fileContentLength,
   fileContentTypeExtension,
@@ -1646,6 +1647,34 @@ describe("file policy", () => {
     })).toEqual({
       key: "acme/files/file_2-failed.pdf",
       uploadId: "upload-2"
+    });
+  });
+
+  it("plans completed multipart object reuse before storage completion", () => {
+    const snapshot = fileSnapshot({ key: "acme/files/file_1-invoice.pdf" });
+    const parts = [{ partNumber: 1, etag: "part-1" }];
+
+    expect(fileCompletedMultipartObjectPlan({
+      snapshot,
+      uploadId: "upload-1",
+      parts,
+      existing: fileObject({ key: "acme/files/file_1-invoice.pdf" })
+    })).toEqual({
+      kind: "reuse",
+      object: fileObject({ key: "acme/files/file_1-invoice.pdf" })
+    });
+    expect(fileCompletedMultipartObjectPlan({
+      snapshot,
+      uploadId: "upload-1",
+      parts,
+      existing: null
+    })).toEqual({
+      kind: "complete",
+      command: {
+        key: "acme/files/file_1-invoice.pdf",
+        uploadId: "upload-1",
+        parts
+      }
     });
   });
 

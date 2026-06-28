@@ -58,6 +58,7 @@ import {
   requireStoredFileRenditionObject,
   fileBulkDeletedEntry,
   fileCompletedRenditionManifestCommandName,
+  fileCompletedMultipartObjectPlan,
   fileBufferedUploadDocumentCreateCommand,
   fileBulkDeleteEntryCommand,
   fileBulkDeleteFailure,
@@ -1255,15 +1256,16 @@ export class FileService {
     readonly parts: readonly UploadedMultipartFilePart[];
   }): Promise<FileObjectMetadata> {
     const key = filePrimaryObjectKey(command.snapshot);
-    const existing = await this.storage.head(key);
-    if (existing) {
-      return existing;
-    }
-    return command.multipartUploads.completeMultipartUpload(fileMultipartCompletionCommand({
+    const plan = fileCompletedMultipartObjectPlan({
       snapshot: command.snapshot,
       uploadId: this.multipartUploadId(command.snapshot),
-      parts: command.parts
-    }));
+      parts: command.parts,
+      existing: await this.storage.head(key)
+    });
+    if (plan.kind === "reuse") {
+      return plan.object;
+    }
+    return command.multipartUploads.completeMultipartUpload(plan.command);
   }
 
   private async scanObject(command: {
