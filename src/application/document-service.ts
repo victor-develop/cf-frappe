@@ -10,7 +10,6 @@ import {
   type DocumentSharePermission,
   type DocumentShareProvider
 } from "../core/document-shares.js";
-import { can } from "../core/permissions.js";
 import { applyDefaults, compactData, validateDocumentData } from "../core/schema.js";
 import {
   planDocumentFieldMerge,
@@ -36,6 +35,8 @@ import {
   canReadLinkedDocumentTarget,
   canUseDocumentAction,
   documentSatisfiesUserPermissions,
+  planDocTypeActionAccess,
+  planDocumentActionAccess,
   planDocumentSharedPermissionLookup
 } from "./document-access-policy.js";
 import {
@@ -130,6 +131,7 @@ import {
   type FieldDefinition,
   type MutableDocumentData,
   type NewDomainEvent,
+  type PermissionAction,
   type ValidationIssue
 } from "../core/types.js";
 import {
@@ -528,9 +530,7 @@ export class DocumentService implements DocumentCommandExecutor {
   async create(command: CreateDocumentCommand): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(command.actor, command.tenantId);
     const { doctype, relatedDocType } = await this.doctypeContext(command.actor, command.doctype, tenantId);
-    if (!can(command.actor, doctype, "create")) {
-      throw permissionDenied(`Actor '${command.actor.id}' cannot create ${doctype.name}`);
-    }
+    this.ensureDocTypeActionAccess(command.actor, doctype, "create");
     ensureCreateNameAllowed(doctype, command.name);
 
     const now = this.clock.now();
@@ -906,9 +906,7 @@ export class DocumentService implements DocumentCommandExecutor {
     }
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
-    if (!can(command.actor, doctype, "transition", existing)) {
-      throw permissionDenied(`Actor '${command.actor.id}' cannot transition ${doctype.name}/${command.name}`);
-    }
+    this.ensureDocumentActionAccess(command.actor, doctype, "transition", existing);
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
     ensureDocumentStatus(existing, ["draft"], "transition");
@@ -1035,9 +1033,7 @@ export class DocumentService implements DocumentCommandExecutor {
     const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
-    if (!can(command.actor, doctype, "comment", existing)) {
-      throw permissionDenied(`Actor '${command.actor.id}' cannot comment on ${doctype.name}/${command.name}`);
-    }
+    this.ensureDocumentActionAccess(command.actor, doctype, "comment", existing, "comment on");
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
     const plan = planDocumentCommentPolicy(doctype, command.text);
@@ -1061,9 +1057,7 @@ export class DocumentService implements DocumentCommandExecutor {
     const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
-    if (!can(command.actor, doctype, "activity", existing)) {
-      throw permissionDenied(`Actor '${command.actor.id}' cannot record activity on ${doctype.name}/${command.name}`);
-    }
+    this.ensureDocumentActionAccess(command.actor, doctype, "activity", existing, "record activity on");
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
     const plan = planDocumentActivityPolicy(doctype, command);
@@ -1215,9 +1209,7 @@ export class DocumentService implements DocumentCommandExecutor {
     const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
-    if (!can(command.actor, doctype, "delete", existing)) {
-      throw permissionDenied(`Actor '${command.actor.id}' cannot delete ${doctype.name}/${command.name}`);
-    }
+    this.ensureDocumentActionAccess(command.actor, doctype, "delete", existing);
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
     const plan = planDocumentDeletePolicy(doctype);
@@ -1272,9 +1264,7 @@ export class DocumentService implements DocumentCommandExecutor {
     const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
-    if (!can(command.actor, doctype, "submit", existing)) {
-      throw permissionDenied(`Actor '${command.actor.id}' cannot submit ${doctype.name}/${command.name}`);
-    }
+    this.ensureDocumentActionAccess(command.actor, doctype, "submit", existing);
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
     const plan = planDocumentStatusChangePolicy(doctype, "submit");
@@ -1296,9 +1286,7 @@ export class DocumentService implements DocumentCommandExecutor {
     const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
-    if (!can(command.actor, doctype, "cancel", existing)) {
-      throw permissionDenied(`Actor '${command.actor.id}' cannot cancel ${doctype.name}/${command.name}`);
-    }
+    this.ensureDocumentActionAccess(command.actor, doctype, "cancel", existing);
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
     const plan = planDocumentStatusChangePolicy(doctype, "cancel");
@@ -1365,9 +1353,7 @@ export class DocumentService implements DocumentCommandExecutor {
     const doctype = await this.doctypeFor(options.command.actor, options.command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, options.command.name);
     const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, options.command.name);
-    if (!can(options.command.actor, doctype, "assign", existing)) {
-      throw permissionDenied(`Actor '${options.command.actor.id}' cannot assign ${doctype.name}/${options.command.name}`);
-    }
+    this.ensureDocumentActionAccess(options.command.actor, doctype, "assign", existing);
     await this.ensureUserPermissionAccess(options.command.actor, doctype, existing);
     ensureExpectedVersion(existing, options.command.expectedVersion);
     const plan = planDocumentAssignmentChangePolicy({
@@ -1402,9 +1388,7 @@ export class DocumentService implements DocumentCommandExecutor {
     const doctype = await this.doctypeFor(options.command.actor, options.command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, options.command.name);
     const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, options.command.name);
-    if (!can(options.command.actor, doctype, "tag", existing)) {
-      throw permissionDenied(`Actor '${options.command.actor.id}' cannot tag ${doctype.name}/${options.command.name}`);
-    }
+    this.ensureDocumentActionAccess(options.command.actor, doctype, "tag", existing);
     await this.ensureUserPermissionAccess(options.command.actor, doctype, existing);
     ensureExpectedVersion(existing, options.command.expectedVersion);
     const plan = planDocumentTagChangePolicy({
@@ -1439,9 +1423,7 @@ export class DocumentService implements DocumentCommandExecutor {
     const doctype = await this.doctypeFor(options.command.actor, options.command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, options.command.name);
     const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, options.command.name);
-    if (!can(options.command.actor, doctype, "follow", existing)) {
-      throw permissionDenied(`Actor '${options.command.actor.id}' cannot follow ${doctype.name}/${options.command.name}`);
-    }
+    this.ensureDocumentActionAccess(options.command.actor, doctype, "follow", existing);
     await this.ensureUserPermissionAccess(options.command.actor, doctype, existing);
     ensureExpectedVersion(existing, options.command.expectedVersion);
     const plan = planDocumentFollowerChangePolicy({
@@ -1645,7 +1627,7 @@ export class DocumentService implements DocumentCommandExecutor {
   private async canActOnDocument(
     actor: Actor,
     doctype: DocTypeDefinition,
-    action: Parameters<typeof can>[2],
+    action: PermissionAction,
     document: DocumentSnapshot
   ): Promise<boolean> {
     const sharedPermissions = await this.sharedPermissionsForAction(actor, doctype, action, document);
@@ -1661,13 +1643,43 @@ export class DocumentService implements DocumentCommandExecutor {
   private async sharedPermissionsForAction(
     actor: Actor,
     doctype: DocTypeDefinition,
-    action: Parameters<typeof can>[2],
+    action: PermissionAction,
     document: DocumentSnapshot
   ): Promise<readonly DocumentSharePermission[]> {
     const lookup = planDocumentSharedPermissionLookup({ actor, doctype, action, document });
     return lookup.status === "read-shares"
       ? (await this.documentShares?.sharedPermissionsFor(actor, document)) ?? []
       : lookup.sharedPermissions;
+  }
+
+  private ensureDocTypeActionAccess(
+    actor: Actor,
+    doctype: DocTypeDefinition,
+    action: PermissionAction
+  ): void {
+    const decision = planDocTypeActionAccess({ actor, doctype, action });
+    if (decision.status === "deny") {
+      throw permissionDenied(decision.message);
+    }
+  }
+
+  private ensureDocumentActionAccess(
+    actor: Actor,
+    doctype: DocTypeDefinition,
+    action: PermissionAction,
+    document: DocumentSnapshot,
+    deniedAction?: string
+  ): void {
+    const decision = planDocumentActionAccess({
+      actor,
+      doctype,
+      action,
+      document,
+      ...(deniedAction === undefined ? {} : { deniedAction })
+    });
+    if (decision.status === "deny") {
+      throw permissionDenied(decision.message);
+    }
   }
 
   private async doctypeContext(

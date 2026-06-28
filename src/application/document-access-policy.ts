@@ -34,6 +34,10 @@ export type DocTypeActionAccessDecision =
   | { readonly status: "allow" }
   | { readonly status: "deny"; readonly message: string };
 
+export type DocumentActionAccessDecision =
+  | { readonly status: "allow" }
+  | { readonly status: "deny"; readonly message: string };
+
 export type DocumentSharedPermissionLookup =
   | { readonly status: "skip"; readonly sharedPermissions: readonly [] }
   | { readonly status: "read-shares" };
@@ -57,6 +61,23 @@ export function planDocTypeActionAccess(
 export function canUseDocumentAction(options: DocumentActionAccessOptions): boolean {
   return can(options.actor, options.doctype, options.action, options.document) ||
     documentShareAllows(options.sharedPermissions ?? [], options.action);
+}
+
+export function planDocumentActionAccess(
+  options: DocumentActionAccessOptions & {
+    readonly deniedAction?: string;
+    readonly documentLabel?: string;
+  }
+): DocumentActionAccessDecision {
+  if (canUseDocumentAction(options)) {
+    return { status: "allow" };
+  }
+  const deniedAction = options.deniedAction ?? options.action;
+  const documentLabel = options.documentLabel ?? `${options.doctype.name}/${options.document.name}`;
+  return {
+    status: "deny",
+    message: `Actor '${options.actor.id}' cannot ${deniedAction} ${documentLabel}`
+  };
 }
 
 export function planDocumentSharedPermissionLookup(

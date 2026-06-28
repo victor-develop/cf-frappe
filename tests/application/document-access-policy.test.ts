@@ -8,6 +8,7 @@ import {
   defineDocType,
   documentSatisfiesUserPermissions,
   planDocTypeActionAccess,
+  planDocumentActionAccess,
   planDocumentSharedPermissionLookup,
   type Actor,
   type DocumentSnapshot
@@ -57,6 +58,12 @@ describe("document access policy", () => {
       action: "update",
       document: task
     })).toBe(true);
+    expect(planDocumentActionAccess({
+      actor: reader,
+      doctype: Task,
+      action: "update",
+      document: task
+    })).toEqual({ status: "allow" });
   });
 
   it("allows document actions through shared document permissions", () => {
@@ -67,6 +74,13 @@ describe("document access policy", () => {
       document: task,
       sharedPermissions: ["read", "update"]
     })).toBe(true);
+    expect(planDocumentActionAccess({
+      actor: collaborator,
+      doctype: Task,
+      action: "update",
+      document: task,
+      sharedPermissions: ["read", "update"]
+    })).toEqual({ status: "allow" });
     expect(canUseDocumentAction({
       actor: collaborator,
       doctype: Task,
@@ -74,6 +88,31 @@ describe("document access policy", () => {
       document: task,
       sharedPermissions: ["read", "update"]
     })).toBe(false);
+  });
+
+  it("plans document action denial messages from the protected document", () => {
+    expect(planDocumentActionAccess({
+      actor: collaborator,
+      doctype: Task,
+      action: "delete",
+      document: task
+    })).toEqual({
+      status: "deny",
+      message: "Actor 'collab@example.com' cannot delete Task/TASK-1"
+    });
+  });
+
+  it("supports command-specific denied verbs without leaking service formatting", () => {
+    expect(planDocumentActionAccess({
+      actor: collaborator,
+      doctype: Task,
+      action: "comment",
+      document: task,
+      deniedAction: "comment on"
+    })).toEqual({
+      status: "deny",
+      message: "Actor 'collab@example.com' cannot comment on Task/TASK-1"
+    });
   });
 
   it("skips shared-permission lookup when static permissions already allow the action", () => {
