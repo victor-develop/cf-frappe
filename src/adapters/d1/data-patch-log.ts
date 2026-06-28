@@ -1,5 +1,5 @@
 import { FrameworkError } from "../../core/errors.js";
-import { isJsonValue } from "../../core/json.js";
+import { cloneJsonValue, isJsonValue } from "../../core/json.js";
 import type { JsonValue } from "../../core/types.js";
 import type {
   AppliedDataPatch,
@@ -116,7 +116,7 @@ export class D1DataPatchLog implements DataPatchLog {
       )
       .bind(
         patch.appliedAt,
-        patch.result === undefined ? null : JSON.stringify(patch.result),
+        serializedPatchResult(patch.id, "result_json", patch.result),
         patch.result === undefined ? 0 : 1,
         patch.id,
         patch.checksum,
@@ -251,7 +251,7 @@ export class D1DataPatchLog implements DataPatchLog {
       )
       .bind(
         patch.rolledBackAt,
-        patch.result === undefined ? null : JSON.stringify(patch.result),
+        serializedPatchResult(patch.id, "rollback_result_json", patch.result),
         patch.result === undefined ? 0 : 1,
         patch.id,
         patch.checksum,
@@ -471,6 +471,20 @@ function parseJsonValue(id: string, field: "result_json" | "rollback_result_json
     // Fall through to the journal corruption error below.
   }
   throw new FrameworkError("DATA_PATCH_INVALID", `Data patch '${id}' has invalid ${field}`, { status: 409 });
+}
+
+function serializedPatchResult(
+  id: string,
+  field: "result_json" | "rollback_result_json",
+  value: JsonValue | undefined
+): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (!isJsonValue(value)) {
+    throw new FrameworkError("DATA_PATCH_INVALID", `Data patch '${id}' has invalid ${field}`, { status: 409 });
+  }
+  return JSON.stringify(cloneJsonValue(value));
 }
 
 function rollbackPendingDataPatchFromRow(row: DataPatchRow): RollbackPendingDataPatch {

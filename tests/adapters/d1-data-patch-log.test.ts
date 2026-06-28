@@ -586,6 +586,71 @@ describe("D1DataPatchLog", () => {
       status: 409
     });
   });
+
+  it("rejects non-JSON D1 journal apply results before writing rows", async () => {
+    const db = new FakeD1Database();
+    const log = new D1DataPatchLog(db as unknown as D1Database);
+    await log.claimDataPatch({ id: "bad.apply", checksum: "v1", claimId: "claim-1", claimedAt: now });
+
+    await expect(log.completeDataPatch({
+      id: "bad.apply",
+      checksum: "v1",
+      claimId: "claim-1",
+      appliedAt: now,
+      result: Number.POSITIVE_INFINITY as never
+    })).rejects.toMatchObject({
+      code: "DATA_PATCH_INVALID",
+      status: 409
+    });
+    await expect(log.recordedDataPatches()).resolves.toEqual([
+      {
+        id: "bad.apply",
+        checksum: "v1",
+        claimedAt: now,
+        status: "pending"
+      }
+    ]);
+  });
+
+  it("rejects non-JSON D1 journal rollback results before writing rows", async () => {
+    const db = new FakeD1Database();
+    const log = new D1DataPatchLog(db as unknown as D1Database);
+    await log.claimDataPatch({ id: "bad.rollback", checksum: "v1", claimId: "claim-apply", claimedAt: now });
+    await log.completeDataPatch({
+      id: "bad.rollback",
+      checksum: "v1",
+      claimId: "claim-apply",
+      appliedAt: now,
+      result: { touched: 1 }
+    });
+    await log.claimDataPatchRollback({
+      id: "bad.rollback",
+      checksum: "v1",
+      claimId: "claim-rollback",
+      claimedAt: now
+    });
+
+    await expect(log.completeDataPatchRollback({
+      id: "bad.rollback",
+      checksum: "v1",
+      claimId: "claim-rollback",
+      rolledBackAt: now,
+      result: Number.POSITIVE_INFINITY as never
+    })).rejects.toMatchObject({
+      code: "DATA_PATCH_INVALID",
+      status: 409
+    });
+    await expect(log.recordedDataPatches()).resolves.toEqual([
+      {
+        id: "bad.rollback",
+        checksum: "v1",
+        appliedAt: now,
+        result: { touched: 1 },
+        rollbackClaimedAt: now,
+        status: "rollback_pending"
+      }
+    ]);
+  });
 });
 
 class FakeD1Database {
