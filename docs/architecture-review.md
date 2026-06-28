@@ -268,6 +268,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized downloaded object read planning in file policy so file download orchestration no longer derives primary object keys inline.
 - Centralized downloaded rendition object read planning in file policy so rendition download orchestration no longer derives storage keys from manifest entries inline.
 - Centralized multipart completion snapshot selection in file policy so multipart completion orchestration no longer chooses between current and begin-completion snapshots inline.
+- Added D1 data patch journal snapshot coverage so Cloudflare D1-backed apply and rollback results preserve JSON values independently from caller and returned-record mutation.
 - Added D1 job execution log snapshot coverage across begin, complete, list, and get so Cloudflare D1-backed Queue execution history preserves payloads, metadata, and results by value.
 - Added in-memory job execution log snapshot coverage across begin, complete, list, and get so Queue execution history stores message payloads, metadata, and results by value.
 - Added job retry snapshot coverage so failed execution payloads and metadata are requeued from execution-log snapshots without caller, returned-record, or returned-message mutation leaking into durable retry intent.

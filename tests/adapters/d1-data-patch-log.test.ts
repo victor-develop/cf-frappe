@@ -1,4 +1,5 @@
 import { D1DataPatchLog } from "../../src";
+import type { DocumentData, JsonValue } from "../../src";
 import { now } from "../helpers";
 
 describe("D1DataPatchLog", () => {
@@ -87,6 +88,74 @@ describe("D1DataPatchLog", () => {
       }
     ]);
     expect(db.executedSql.some((sql) => sql.includes("CREATE TABLE IF NOT EXISTS cf_frappe_data_patches"))).toBe(true);
+  });
+
+  it("snapshots D1 data patch apply and rollback results by value", async () => {
+    const db = new FakeD1Database();
+    const log = new D1DataPatchLog(db as unknown as D1Database);
+    const applyResult = { touched: { count: 1 }, ids: ["one"] };
+
+    await log.claimDataPatch({ id: "accounts.seed", checksum: "v1", claimId: "claim-apply", claimedAt: now });
+    await log.completeDataPatch({
+      id: "accounts.seed",
+      checksum: "v1",
+      claimId: "claim-apply",
+      appliedAt: now,
+      result: applyResult
+    });
+    applyResult.touched.count = 2;
+    applyResult.ids.push("mutated");
+
+    const [applied] = await log.appliedDataPatches();
+    expect(applied).toMatchObject({
+      id: "accounts.seed",
+      result: { touched: { count: 1 }, ids: ["one"] }
+    });
+    ((applied!.result as DocumentData).touched as DocumentData).count = 3;
+    ((applied!.result as DocumentData).ids as JsonValue[]).push("returned");
+
+    await expect(log.recordedDataPatches()).resolves.toMatchObject([
+      {
+        id: "accounts.seed",
+        result: { touched: { count: 1 }, ids: ["one"] }
+      }
+    ]);
+
+    await log.claimDataPatchRollback({
+      id: "accounts.seed",
+      checksum: "v1",
+      claimId: "claim-rollback",
+      claimedAt: now
+    });
+    const rollbackResult = { undone: { count: 1 }, ids: ["one"] };
+    await log.completeDataPatchRollback({
+      id: "accounts.seed",
+      checksum: "v1",
+      claimId: "claim-rollback",
+      rolledBackAt: now,
+      result: rollbackResult
+    });
+    rollbackResult.undone.count = 2;
+    rollbackResult.ids.push("mutated");
+
+    const [rolledBack] = await log.recordedDataPatches();
+    expect(rolledBack).toMatchObject({
+      id: "accounts.seed",
+      result: { touched: { count: 1 }, ids: ["one"] },
+      rollbackResult: { undone: { count: 1 }, ids: ["one"] }
+    });
+    const returnedRollback = rolledBack as { result: JsonValue; rollbackResult: JsonValue };
+    ((returnedRollback.result as DocumentData).touched as DocumentData).count = 4;
+    ((returnedRollback.rollbackResult as DocumentData).undone as DocumentData).count = 4;
+    ((returnedRollback.rollbackResult as DocumentData).ids as JsonValue[]).push("returned");
+
+    await expect(log.recordedDataPatches()).resolves.toMatchObject([
+      {
+        id: "accounts.seed",
+        result: { touched: { count: 1 }, ids: ["one"] },
+        rollbackResult: { undone: { count: 1 }, ids: ["one"] }
+      }
+    ]);
   });
 
   it("returns pending and failed claim states without taking ownership", async () => {
