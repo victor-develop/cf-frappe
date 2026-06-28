@@ -130,6 +130,7 @@ import {
   fileIsPrivateCommandOption,
   fileUploadCompletionDocumentCommand,
   fileUploadCompletionExecuteCommand,
+  fileUploadCompletionPlan,
   fileUploadCompletedPatch,
   fileUploadCompletedDocumentData,
   fileUploadContentType,
@@ -2553,6 +2554,59 @@ describe("file policy", () => {
         scan_checked_at: "2026-06-28T01:00:00.000Z"
       },
       expectedVersion: 4
+    });
+  });
+
+  it("plans upload completion commands from scan outcomes", () => {
+    const object = fileObject({ etag: "object-etag", httpEtag: '"http-etag"' });
+
+    expect(fileUploadCompletionPlan({
+      uploadCommand: "completeDirectUpload",
+      object,
+      scan: { status: "clean", engine: "clam", checkedAt: "2026-06-28T01:02:00.000Z" },
+      checkedAt: "2026-06-28T01:00:00.000Z",
+      expectedVersion: 3
+    })).toEqual({
+      scanPatch: {
+        scan_status: "clean",
+        scan_checked_at: "2026-06-28T01:02:00.000Z",
+        scan_engine: "clam"
+      },
+      infected: false,
+      completion: {
+        command: "completeDirectUpload",
+        input: {
+          storage_state: "available",
+          etag: '"http-etag"',
+          scan_status: "clean",
+          scan_checked_at: "2026-06-28T01:02:00.000Z",
+          scan_engine: "clam"
+        },
+        expectedVersion: 3
+      }
+    });
+    expect(fileUploadCompletionPlan({
+      uploadCommand: "completeMultipartUpload",
+      object,
+      scan: { status: "infected", message: "signature" },
+      checkedAt: "2026-06-28T01:00:00.000Z"
+    })).toEqual({
+      scanPatch: {
+        scan_status: "infected",
+        scan_checked_at: "2026-06-28T01:00:00.000Z",
+        scan_message: "signature"
+      },
+      infected: true,
+      completion: {
+        command: "failScan",
+        input: {
+          storage_state: "scan_failed",
+          etag: '"http-etag"',
+          scan_status: "infected",
+          scan_checked_at: "2026-06-28T01:00:00.000Z",
+          scan_message: "signature"
+        }
+      }
     });
   });
 

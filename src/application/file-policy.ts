@@ -1441,6 +1441,32 @@ export function fileUploadCompletionDocumentCommand(command: {
   };
 }
 
+export function fileUploadCompletionPlan(command: {
+  readonly uploadCommand: Exclude<FileUploadCompletionDocumentCommandName, "failScan">;
+  readonly object: FileObjectMetadata;
+  readonly scan?: FileScanResult | undefined;
+  readonly checkedAt: string;
+  readonly expectedVersion?: number | undefined;
+}): {
+  readonly scanPatch: DocumentData;
+  readonly infected: boolean;
+  readonly completion: FileUploadCompletionDocumentCommand;
+} {
+  const scanPatch = optionalFileScanPatch(command.scan, command.checkedAt);
+  const infected = isInfectedFileScanResult(command.scan);
+  return {
+    scanPatch,
+    infected,
+    completion: fileUploadCompletionDocumentCommand({
+      uploadCommand: command.uploadCommand,
+      object: command.object,
+      scanPatch,
+      infected,
+      ...fileExpectedVersionCommandOption(command.expectedVersion)
+    })
+  };
+}
+
 export interface FileUploadCompletionExecuteCommand {
   readonly actor: Actor;
   readonly doctype: string;

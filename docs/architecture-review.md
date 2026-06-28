@@ -48,6 +48,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized multipart completed-object read planning in file policy so multipart orchestration no longer derives object keys or upload ids before storage reads inline.
 - Centralized multipart part upload planning in file policy so multipart orchestration no longer derives upload ids, part sizes, reservation guards, and storage upload commands inline.
 - Centralized multipart abort planning in file policy so multipart orchestration no longer composes expected-version guards, storage abort commands, and delete document intents inline.
+- Centralized upload completion planning in file policy so direct and multipart completion orchestration no longer duplicate scan-patch, infected-state, and completion-command selection inline.
 - Centralized attachment target validation planning in file policy so create/update metadata orchestration no longer branches on absent, cleared, and present attachment targets inline.
 - Centralized transform overlay resolution planning in file policy so transform orchestration no longer interprets absent versus resolvable overlay options inline.
 - Centralized generated-rendition reuse storage planning in file policy so rendition orchestration no longer branches over reusable manifest entries and storage existence inline.
