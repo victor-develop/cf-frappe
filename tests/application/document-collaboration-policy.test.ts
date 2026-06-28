@@ -14,6 +14,8 @@ import {
   planDocumentAssignmentChangePolicy,
   planDocumentCommentPolicy,
   planDocumentFollowerChangePolicy,
+  planDocumentSharePolicy,
+  planDocumentShareRevocationPolicy,
   planDocumentTagChangePolicy
 } from "../../src/application/document-collaboration-policy";
 
@@ -35,7 +37,9 @@ const CustomEventsNote = defineDocType({
     tag: "NoteLabelAdded",
     untag: "NoteLabelRemoved",
     follow: "NoteWatched",
-    unfollow: "NoteUnwatched"
+    unfollow: "NoteUnwatched",
+    share: "NoteShareGranted",
+    unshare: "NoteShareRemoved"
   }
 });
 
@@ -224,6 +228,65 @@ describe("document collaboration policy", () => {
       .toThrow("Share permissions are required");
     expect(() => normalizeValidDocumentShareGrant({ userId: "collab@example.com", permissions: ["admin"] }))
       .toThrow("Share permissions are invalid: admin");
+  });
+
+  it("plans share grant events with canonical permissions and noop detection", () => {
+    expect(
+      planDocumentSharePolicy({
+        doctype: CustomEventsNote,
+        currentGrants: [],
+        command: {
+          userId: " collab@example.com ",
+          permissions: ["write", "share", "read"]
+        }
+      })
+    ).toEqual({
+      grant: {
+        userId: "collab@example.com",
+        permissions: ["read", "share", "update"]
+      },
+      noop: false,
+      eventType: "NoteShareGranted",
+      payload: {
+        kind: "DocumentShared",
+        userId: "collab@example.com",
+        permissions: ["read", "share", "update"]
+      }
+    });
+
+    expect(
+      planDocumentSharePolicy({
+        doctype: CustomEventsNote,
+        currentGrants: [{ userId: "collab@example.com", permissions: ["read", "share", "update"] }],
+        command: {
+          userId: "collab@example.com",
+          permissions: ["share", "read", "update"]
+        }
+      })
+    ).toMatchObject({ noop: true, eventType: "NoteShareGranted" });
+  });
+
+  it("plans share revocation events with noop detection", () => {
+    expect(
+      planDocumentShareRevocationPolicy({
+        doctype: Note,
+        currentGrants: [{ userId: "collab@example.com", permissions: ["read"] }],
+        userId: " collab@example.com "
+      })
+    ).toEqual({
+      userId: "collab@example.com",
+      noop: false,
+      eventType: "NoteShareRevoked",
+      payload: { kind: "DocumentShareRevoked", userId: "collab@example.com" }
+    });
+
+    expect(
+      planDocumentShareRevocationPolicy({
+        doctype: CustomEventsNote,
+        currentGrants: [],
+        userId: "missing@example.com"
+      })
+    ).toMatchObject({ userId: "missing@example.com", noop: true, eventType: "NoteShareRemoved" });
   });
 
   it("blocks delegated share grants outside the actor's current shared permissions", () => {

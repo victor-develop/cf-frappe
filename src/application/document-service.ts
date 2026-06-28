@@ -7,7 +7,6 @@ import {
 } from "../core/events.js";
 import {
   documentShareAllows,
-  documentShareGrantKey,
   foldDocumentShares,
   type DocumentShareProvider
 } from "../core/document-shares.js";
@@ -24,9 +23,9 @@ import {
   planDocumentAssignmentChangePolicy,
   planDocumentCommentPolicy,
   planDocumentFollowerChangePolicy,
+  planDocumentSharePolicy,
+  planDocumentShareRevocationPolicy,
   planDocumentTagChangePolicy,
-  normalizeValidDocumentShareGrant,
-  normalizeValidDocumentShareUserId
 } from "./document-collaboration-policy.js";
 import {
   bulkNamedCommand,
@@ -61,10 +60,6 @@ import {
   documentUpdatedPayload,
   snapshotFromDocumentCreatedEvent
 } from "./document-lifecycle-events.js";
-import {
-  documentSharedPayload,
-  documentShareRevokedPayload
-} from "./document-share-events.js";
 import {
   activeUniqueValueOwner,
   releasedUniqueValueReservations,
@@ -1165,29 +1160,28 @@ export class DocumentService implements DocumentCommandExecutor {
     }
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
-    const grant = normalizeValidDocumentShareGrant(command);
-    if (!staticShareAllowed) {
-      ensureSharedGrantIsDelegable(command.actor, doctype, existing, sharedPermissions, grant);
-    }
     const state = foldDocumentShares(tenantId, doctype.name, command.name, events);
-    const current = state.grants.find((item) => item.userId === grant.userId);
-    if (current && documentShareGrantKey(current) === documentShareGrantKey(grant)) {
+    const plan = planDocumentSharePolicy({
+      doctype,
+      currentGrants: state.grants,
+      command
+    });
+    if (!staticShareAllowed) {
+      ensureSharedGrantIsDelegable(command.actor, doctype, existing, sharedPermissions, plan.grant);
+    }
+    if (plan.noop) {
       return existing;
     }
-    const payload = documentSharedPayload({
-      userId: grant.userId,
-      permissions: grant.permissions
-    });
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,
       stream,
-      type: doctype.events?.share ?? `${doctype.name}Shared`,
+      type: plan.eventType,
       doctype: doctype.name,
       documentName: command.name,
       actorId: command.actor.id,
       occurredAt: now,
-      payload,
+      payload: plan.payload,
       metadata: command.metadata ?? {}
     });
     return this.commitActivityEvent(doctype, existing, stream, event);
@@ -1203,22 +1197,25 @@ export class DocumentService implements DocumentCommandExecutor {
     }
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
-    const userId = normalizeValidDocumentShareUserId(command.userId);
     const state = foldDocumentShares(tenantId, doctype.name, command.name, events);
-    if (state.grants.every((grant) => grant.userId !== userId)) {
+    const plan = planDocumentShareRevocationPolicy({
+      doctype,
+      currentGrants: state.grants,
+      userId: command.userId
+    });
+    if (plan.noop) {
       return existing;
     }
-    const payload = documentShareRevokedPayload(userId);
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,
       stream,
-      type: doctype.events?.unshare ?? `${doctype.name}ShareRevoked`,
+      type: plan.eventType,
       doctype: doctype.name,
       documentName: command.name,
       actorId: command.actor.id,
       occurredAt: now,
-      payload,
+      payload: plan.payload,
       metadata: command.metadata ?? {}
     });
     return this.commitActivityEvent(doctype, existing, stream, event);

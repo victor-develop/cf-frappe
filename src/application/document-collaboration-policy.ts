@@ -1,4 +1,5 @@
 import {
+  documentShareGrantKey,
   invalidDocumentSharePermissions,
   normalizeDocumentShareGrant,
   normalizeDocumentShareUserId,
@@ -15,6 +16,11 @@ import {
   documentTagPayload,
   type DocumentCollaborationEventPayload
 } from "./document-collaboration-events.js";
+import {
+  documentSharedPayload,
+  documentShareRevokedPayload,
+  type DocumentShareEventPayload
+} from "./document-share-events.js";
 
 const MAX_COMMENT_TEXT_LENGTH = 5000;
 const MAX_ACTIVITY_TYPE_LENGTH = 64;
@@ -58,6 +64,20 @@ export interface DocumentCollaborationEventPlan {
 export interface DocumentCollaborationCollectionPlan extends DocumentCollaborationEventPlan {
   readonly value: string;
   readonly noop: boolean;
+}
+
+export interface DocumentShareEventPlan {
+  readonly eventType: string;
+  readonly payload: DocumentShareEventPayload;
+  readonly noop: boolean;
+}
+
+export interface DocumentShareGrantPlan extends DocumentShareEventPlan {
+  readonly grant: DocumentShareGrant;
+}
+
+export interface DocumentShareRevocationPlan extends DocumentShareEventPlan {
+  readonly userId: string;
 }
 
 export function collaborationCollectionChange(
@@ -248,6 +268,27 @@ export function normalizeValidDocumentShareGrant(command: {
   return grant;
 }
 
+export function planDocumentSharePolicy(input: {
+  readonly doctype: DocTypeDefinition;
+  readonly currentGrants: readonly DocumentShareGrant[];
+  readonly command: {
+    readonly userId: string;
+    readonly permissions: readonly string[];
+  };
+}): DocumentShareGrantPlan {
+  const grant = normalizeValidDocumentShareGrant(input.command);
+  const current = input.currentGrants.find((item) => item.userId === grant.userId);
+  return {
+    grant,
+    noop: current !== undefined && documentShareGrantKey(current) === documentShareGrantKey(grant),
+    eventType: input.doctype.events?.share ?? `${input.doctype.name}Shared`,
+    payload: documentSharedPayload({
+      userId: grant.userId,
+      permissions: grant.permissions
+    })
+  };
+}
+
 export function normalizeValidDocumentShareUserId(userId: string): string {
   const normalized = normalizeDocumentShareUserId(userId);
   if (normalized.length === 0) {
@@ -257,6 +298,20 @@ export function normalizeValidDocumentShareUserId(userId: string): string {
     throw badRequest(`Share user exceeds ${MAX_SHARE_USER_ID_LENGTH} characters`);
   }
   return normalized;
+}
+
+export function planDocumentShareRevocationPolicy(input: {
+  readonly doctype: DocTypeDefinition;
+  readonly currentGrants: readonly DocumentShareGrant[];
+  readonly userId: string;
+}): DocumentShareRevocationPlan {
+  const userId = normalizeValidDocumentShareUserId(input.userId);
+  return {
+    userId,
+    noop: input.currentGrants.every((grant) => grant.userId !== userId),
+    eventType: input.doctype.events?.unshare ?? `${input.doctype.name}ShareRevoked`,
+    payload: documentShareRevokedPayload(userId)
+  };
 }
 
 export function ensureSharedGrantIsDelegable(
