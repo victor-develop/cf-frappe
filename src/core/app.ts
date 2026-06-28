@@ -4,12 +4,11 @@ import { defineCalendar, type CalendarDefinition } from "./calendar.js";
 import { defineClientScript, type ClientScriptDefinition } from "./client-script.js";
 import { defineDashboard, type DashboardDefinition } from "./dashboard.js";
 import { defineDataPatch, type DataPatchDefinition } from "./data-patch.js";
+import { defineDocumentHooks, type DocumentHooks } from "./document-hooks.js";
 import { defineKanban, type KanbanDefinition } from "./kanban.js";
 import { defineInstalledApp, type InstalledAppDefinition } from "./installed-app.js";
 import {
   createRegistry,
-  defineDocumentHooks,
-  type DocumentHooks,
   type ModelRegistry,
   type RegistryOptions
 } from "./registry.js";

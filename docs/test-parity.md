@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the registry registration-order snapshot helper slice:
+As of the document hook helper extraction slice:
 
-- Vitest files: `172`
-- Vitest cases: `1923`
-- Remaining gap to Frappe static markers: `861`
+- Vitest files: `173`
+- Vitest cases: `1924`
+- Remaining gap to Frappe static markers: `860`
 
 ## Implication
 
