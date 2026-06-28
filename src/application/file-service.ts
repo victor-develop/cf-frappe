@@ -112,7 +112,7 @@ import {
   fileRenditionId,
   fileRenditionManifestExecuteCommand,
   fileRenditionReservationExecuteCommand,
-  fileRenditionSnapshotPutObjectCommand,
+  fileGeneratedRenditionStoragePutCommand,
   fileScanFailureError,
   fileScanTarget,
   fileExpectedVersionCommandOption,
@@ -946,7 +946,7 @@ export class FileService {
         ...fileTransformOverlayCommandOption(overlay)
       });
       object = await this.storage.put(
-        fileRenditionSnapshotPutObjectCommand({
+        fileGeneratedRenditionStoragePutCommand({
           pending,
           transform,
           source: downloaded.snapshot,

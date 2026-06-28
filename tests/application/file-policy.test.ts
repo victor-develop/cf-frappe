@@ -90,6 +90,7 @@ import {
   filePreparedMultipartUploadResult,
   fileDirectUploadReservationCommand,
   fileSnapshotFilename,
+  fileGeneratedRenditionStoragePutCommand,
   fileGeneratedRenditionReservationPlan,
   fileRenditionGenerationReservation,
   fileRenditionObjectCustomMetadata,
@@ -1140,6 +1141,38 @@ describe("file policy", () => {
       body,
       contentType: "image/webp",
       filename: "photo.png.w64-f-webp.webp",
+      customMetadata: {
+        tenantId: "acme",
+        sourceFile: "file_multipart",
+        sourceEtag: '"source-http"',
+        renditionId: "w64-f-webp"
+      }
+    });
+  });
+
+  it("plans generated rendition storage put commands", () => {
+    const body = new ReadableStream<Uint8Array>();
+    const pending = renditionEntry("w64-f-webp", {
+      key: "acme/file-renditions/file/w64-f-webp-attempt.webp"
+    });
+
+    expect(fileGeneratedRenditionStoragePutCommand({
+      pending,
+      transform: {
+        body,
+        contentType: "image/webp",
+        contentLength: 123
+      },
+      source: fileSnapshot({ filename: "photo.png" }),
+      tenantId: "acme",
+      sourceEtag: '"source-http"',
+      renditionId: "w64-f-webp"
+    })).toEqual({
+      key: "acme/file-renditions/file/w64-f-webp-attempt.webp",
+      body,
+      contentType: "image/webp",
+      filename: "photo.png.w64-f-webp.webp",
+      size: 123,
       customMetadata: {
         tenantId: "acme",
         sourceFile: "file_multipart",

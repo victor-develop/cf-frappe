@@ -897,6 +897,17 @@ export function fileRenditionSnapshotPutObjectCommand(command: {
   });
 }
 
+export function fileGeneratedRenditionStoragePutCommand(command: {
+  readonly pending: FileRenditionManifestEntry;
+  readonly transform: TransformedFileObject;
+  readonly source: DocumentSnapshot;
+  readonly tenantId: string;
+  readonly sourceEtag: string;
+  readonly renditionId: string;
+}): PutFileObjectCommand {
+  return fileRenditionSnapshotPutObjectCommand(command);
+}
+
 export function fileTransformObjectCommand(command: {
   readonly actorId: string;
   readonly tenantId: string;
