@@ -35,6 +35,7 @@ import {
   fileObjectSourceEtag,
   filePrimaryObjectKey,
   fileSnapshotFilename,
+  fileRenditionGenerationReservation,
   fileRenditionObjectCustomMetadata,
   fileRenditionId,
   fileRenditionFilename,
@@ -78,6 +79,7 @@ import {
   requireFileSnapshotString,
   renditionObjectKey,
   renditionSourcesMatch,
+  reusableFileRenditionForGeneration,
   sanitizeFilename,
   shouldRequestFileDelete,
   shouldStartFileMultipartCompletion,
@@ -609,13 +611,33 @@ describe("file policy", () => {
       source_etag: "source-1",
       overlay_file: overlay.file,
       overlay_key: overlay.key,
-      overlay_etag: overlay.etag
+      overlay_etag: "overlay-1"
     });
     expect(availableFileRenditionForSource([
       renditionEntry("thumb", { status: "available", source_etag: "source-2" }),
       available
     ], "thumb", "source-1", overlay)).toBe(available);
     expect(availableFileRenditionForSource([available], "thumb", "source-2", overlay)).toBeUndefined();
+  });
+
+  it("selects reusable generated file renditions from snapshots", () => {
+    const overlay = overlaySource({ key: "overlay-key", etag: "overlay-1" });
+    const available = renditionEntry("thumb", {
+      status: "available",
+      source_etag: "source-1",
+      overlay_file: overlay.file,
+      overlay_key: overlay.key,
+      overlay_etag: "overlay-1"
+    });
+    const snapshot = fileSnapshot({
+      renditions: [
+        renditionEntry("thumb", { status: "pending", source_etag: "source-1" }),
+        available
+      ]
+    });
+
+    expect(reusableFileRenditionForGeneration(snapshot, "thumb", "source-1", overlay)).toBe(available);
+    expect(reusableFileRenditionForGeneration(snapshot, "thumb", "source-2", overlay)).toBeUndefined();
   });
 
   it("rejects duplicate pending file rendition generation", () => {
@@ -627,6 +649,36 @@ describe("file policy", () => {
       "File rendition 'thumb' is already being generated"
     );
     expect(() => ensureNoPendingFileRenditionForSource([pending], "thumb", "source-2", undefined)).not.toThrow();
+  });
+
+  it("plans file rendition reservations as pending manifest patches", () => {
+    const snapshot = fileSnapshot({
+      content_type: "image/png",
+      renditions: [renditionEntry("existing")]
+    });
+    const reservation = fileRenditionGenerationReservation({
+      snapshot,
+      tenantId: "acme",
+      id: "w64-f-webp",
+      attemptId: "attempt-1",
+      sourceEtag: "source-1",
+      options: { width: 64, format: "webp" },
+      requestedAt: "2026-06-28T00:00:00.000Z",
+      requestedBy: "owner@example.com"
+    });
+
+    expect(reservation.pending).toMatchObject({
+      id: "w64-f-webp",
+      key: "acme/file-renditions/file_multipart/w64-f-webp-attempt-1.webp",
+      status: "pending",
+      source_etag: "source-1"
+    });
+    expect(reservation.patch).toEqual({
+      renditions: [
+        renditionEntry("existing"),
+        reservation.pending
+      ]
+    });
   });
 
   it("builds deterministic rendition ids and caps unique rendition manifests", async () => {

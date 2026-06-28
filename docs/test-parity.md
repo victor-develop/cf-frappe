@@ -20,10 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file snapshot filename policy module slice:
+As of the file rendition generation reservation policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1661`
+- Vitest cases: `1663`
+- Remaining gap to Frappe static markers: `1121`
 
 ## Implication
 

@@ -41,12 +41,10 @@ import type {
   UploadedMultipartFilePart
 } from "../ports/file-storage.js";
 import {
-  availableFileRenditionForSource,
   availableFileRenditionForDownload,
   completeFileRendition,
   ensureFileSizeWithinLimit,
   ensureFileObjectTransformable,
-  ensureNoPendingFileRenditionForSource,
   ensureValidFileScanResult,
   ensureFileAvailableForDownload,
   ensureFileDeleteExpectedVersion,
@@ -72,6 +70,7 @@ import {
   fileObjectKeysForScanFailureCleanup,
   filePrimaryObjectKey,
   fileObjectSourceEtag,
+  fileRenditionGenerationReservation,
   fileRenditionId,
   fileRenditionManifestPatch,
   fileRenditionPutObjectCommand,
@@ -98,8 +97,8 @@ import {
   normalizeFileSize,
   objectKey,
   optionalFileScanPatch,
-  pendingFileRendition,
   requireFileSnapshotString,
+  reusableFileRenditionForGeneration,
   sanitizeFilename,
   shouldRequestFileDelete,
   shouldStartFileMultipartCompletion,
@@ -855,8 +854,7 @@ export class FileService {
     });
     const sourceEtag = fileObjectSourceEtag(downloaded.object.metadata);
     const renditionId = await fileRenditionId(options);
-    const currentRenditions = fileRenditions(downloaded.snapshot);
-    const existing = availableFileRenditionForSource(currentRenditions, renditionId, sourceEtag, overlay);
+    const existing = reusableFileRenditionForGeneration(downloaded.snapshot, renditionId, sourceEtag, overlay);
     if (existing && await this.storage.head(existing.key)) {
       return {
         snapshot: downloaded.snapshot,
@@ -865,8 +863,7 @@ export class FileService {
       };
     }
 
-    ensureNoPendingFileRenditionForSource(currentRenditions, renditionId, sourceEtag, overlay);
-    const pending = pendingFileRendition({
+    const reservation = fileRenditionGenerationReservation({
       snapshot: downloaded.snapshot,
       tenantId,
       id: renditionId,
@@ -877,12 +874,13 @@ export class FileService {
       requestedAt: this.clock.now(),
       requestedBy: command.actor.id
     });
+    const { pending } = reservation;
     await this.documents.execute({
       actor: command.actor,
       doctype: this.fileDoctype,
       name: command.name,
       command: "reserveRendition",
-      input: fileRenditionManifestPatch(currentRenditions, pending),
+      input: reservation.patch,
       ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
       expectedVersion: downloaded.snapshot.version,
       metadata: command.metadata ?? {}

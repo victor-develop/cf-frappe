@@ -1040,6 +1040,15 @@ export function availableFileRenditionForSource(
   );
 }
 
+export function reusableFileRenditionForGeneration(
+  snapshot: DocumentSnapshot,
+  renditionId: string,
+  sourceEtag: string,
+  overlay: FileTransformOverlaySource | undefined
+): FileRenditionManifestEntry | undefined {
+  return availableFileRenditionForSource(fileRenditions(snapshot), renditionId, sourceEtag, overlay);
+}
+
 export function ensureNoPendingFileRenditionForSource(
   renditions: readonly FileRenditionManifestEntry[],
   renditionId: string,
@@ -1088,6 +1097,31 @@ export function fileRenditionManifestPatch(
 ): DocumentData {
   return {
     renditions: upsertFileRenditionManifest(manifest, rendition)
+  };
+}
+
+export interface FileRenditionGenerationReservation {
+  readonly pending: FileRenditionManifestEntry;
+  readonly patch: DocumentData;
+}
+
+export function fileRenditionGenerationReservation(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly tenantId: string;
+  readonly id: string;
+  readonly attemptId: string;
+  readonly sourceEtag: string;
+  readonly overlay?: FileTransformOverlaySource;
+  readonly options: FileTransformOptions;
+  readonly requestedAt: string;
+  readonly requestedBy: string;
+}): FileRenditionGenerationReservation {
+  const manifest = fileRenditions(command.snapshot);
+  ensureNoPendingFileRenditionForSource(manifest, command.id, command.sourceEtag, command.overlay);
+  const pending = pendingFileRendition(command);
+  return {
+    pending,
+    patch: fileRenditionManifestPatch(manifest, pending)
   };
 }
 
