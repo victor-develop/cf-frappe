@@ -46,7 +46,7 @@ import {
   ensureFileObjectTransformable,
   ensureValidFileScanResult,
   ensureFileAvailableForDownload,
-  ensureFileDeleteExpectedVersion,
+  ensureFileDeleteAllowed,
   ensureFileExpectedVersion,
   ensureFileNotDeleteRequested,
   ensureFilePendingDirectUpload,
@@ -1161,10 +1161,13 @@ export class FileService {
 
   private preflightDelete(actor: Actor, document: DocumentSnapshot, expectedVersion?: number): void {
     const doctype = this.registry.get(this.fileDoctype);
-    if (!can(actor, doctype, "delete", document)) {
-      throw permissionDenied(`Actor '${actor.id}' cannot delete ${this.fileDoctype}/${document.name}`);
-    }
-    ensureFileDeleteExpectedVersion(document, expectedVersion);
+    ensureFileDeleteAllowed({
+      actor,
+      doctype,
+      fileDoctype: this.fileDoctype,
+      snapshot: document,
+      ...(expectedVersion === undefined ? {} : { expectedVersion })
+    });
   }
 
   private async validateAttachmentTarget(

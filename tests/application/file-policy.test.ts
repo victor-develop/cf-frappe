@@ -8,6 +8,7 @@ import {
   ensureNoPendingFileRenditionForSource,
   ensureValidFileScanResult,
   ensureFileAvailableForDownload,
+  ensureFileDeleteAllowed,
   ensureFileDeleteExpectedVersion,
   ensureFileExpectedVersion,
   ensureFilePendingDirectUpload,
@@ -93,6 +94,7 @@ import {
   FrameworkError
 } from "../../src";
 import type {
+  DocTypeDefinition,
   DocumentSnapshot,
   FileObjectMetadata,
   FileRenditionManifestEntry,
@@ -1196,6 +1198,37 @@ describe("file policy", () => {
       "Expected version 2, found 1"
     );
     expect(() => ensureFileDeleteExpectedVersion(fileSnapshot({ storage_state: "delete_requested" }), 2)).not.toThrow();
+  });
+
+  it("validates file delete permissions and expected versions together", () => {
+    const doctype: DocTypeDefinition = {
+      name: "File",
+      fields: [],
+      permissions: [{ roles: ["File Manager"], actions: ["delete"] }]
+    };
+    const snapshot = fileSnapshot({ storage_state: "available" });
+
+    expect(() => ensureFileDeleteAllowed({
+      actor: { id: "manager@example.com", roles: ["File Manager"] },
+      doctype,
+      fileDoctype: "File",
+      snapshot,
+      expectedVersion: 1
+    })).not.toThrow();
+    expect(() => ensureFileDeleteAllowed({
+      actor: { id: "reader@example.com", roles: ["Reader"] },
+      doctype,
+      fileDoctype: "File",
+      snapshot,
+      expectedVersion: 1
+    })).toThrow("Actor 'reader@example.com' cannot delete File/file_multipart");
+    expect(() => ensureFileDeleteAllowed({
+      actor: { id: "manager@example.com", roles: ["File Manager"] },
+      doctype,
+      fileDoctype: "File",
+      snapshot,
+      expectedVersion: 2
+    })).toThrow("Expected version 2, found 1");
   });
 
   it("identifies files with delete already requested", () => {

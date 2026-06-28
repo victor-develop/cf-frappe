@@ -1,6 +1,9 @@
-import { badRequest, conflict, FrameworkError, notFound } from "../core/errors.js";
+import { badRequest, conflict, FrameworkError, notFound, permissionDenied } from "../core/errors.js";
+import { can } from "../core/permissions.js";
 import {
   DEFAULT_TENANT_ID,
+  type Actor,
+  type DocTypeDefinition,
   type DocumentData,
   type DocumentSnapshot,
   type JsonValue,
@@ -630,6 +633,19 @@ export function ensureFileDeleteExpectedVersion(snapshot: DocumentSnapshot, expe
   ) {
     throw conflict(`Expected version ${expectedVersion}, found ${snapshot.version}`);
   }
+}
+
+export function ensureFileDeleteAllowed(command: {
+  readonly actor: Actor;
+  readonly doctype: DocTypeDefinition;
+  readonly fileDoctype: string;
+  readonly snapshot: DocumentSnapshot;
+  readonly expectedVersion?: number;
+}): void {
+  if (!can(command.actor, command.doctype, "delete", command.snapshot)) {
+    throw permissionDenied(`Actor '${command.actor.id}' cannot delete ${command.fileDoctype}/${command.snapshot.name}`);
+  }
+  ensureFileDeleteExpectedVersion(command.snapshot, command.expectedVersion);
 }
 
 export function ensureFileAvailableForDownload(snapshot: DocumentSnapshot): void {
