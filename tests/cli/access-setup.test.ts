@@ -38,6 +38,32 @@ describe("cf-frappe Cloudflare Access setup CLI", () => {
     });
   });
 
+  it("parses zone-scoped Cloudflare Access setup plans without account scope fallback", () => {
+    expect(parseCliArgs([
+      "access",
+      "plan",
+      "--zone-id",
+      "zone_123",
+      "--team-domain",
+      "team.cloudflareaccess.com",
+      "--name",
+      "Demo Admin",
+      "--domain",
+      "admin.example.com",
+      "--email",
+      "owner@example.com"
+    ])).toEqual({
+      kind: "access-setup",
+      action: "plan",
+      scope: { kind: "zone", id: "zone_123" },
+      teamDomain: "team.cloudflareaccess.com",
+      name: "Demo Admin",
+      domain: "admin.example.com",
+      policyName: "Demo Admin allow",
+      includes: [{ kind: "email", email: "owner@example.com" }]
+    });
+  });
+
   it("prints reviewable Cloudflare Access application and policy plans", async () => {
     const stdout = textBuffer();
     const exitCode = await runCli([

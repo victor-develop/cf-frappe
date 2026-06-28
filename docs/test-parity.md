@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the email outbox claim id boundary slice:
+As of the Cloudflare Access setup scope boundary slice:
 
 - Vitest files: `170`
-- Vitest cases: `1798`
-- Remaining gap to Frappe static markers: `986`
+- Vitest cases: `1799`
+- Remaining gap to Frappe static markers: `985`
 
 ## Implication
 

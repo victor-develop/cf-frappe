@@ -1138,15 +1138,10 @@ function parseAccessArgs(argv: readonly string[]): ParsedCommand {
     return { kind: "invalid", message: `Unknown access ${subcommand} option '${arg}'` };
   }
 
-  if (accountId !== undefined && zoneId !== undefined) {
-    return { kind: "invalid", message: "Provide only one of --account-id or --zone-id" };
+  const scope = parseCloudflareAccessSetupScope(accountId, zoneId);
+  if (scope.kind === "invalid") {
+    return scope;
   }
-  if (accountId === undefined && zoneId === undefined) {
-    return { kind: "invalid", message: "Cloudflare Access setup requires --account-id or --zone-id" };
-  }
-  const scope: CloudflareAccessSetupScope = accountId === undefined
-    ? { kind: "zone", id: zoneId! }
-    : { kind: "account", id: accountId };
   if (name === undefined) {
     return { kind: "invalid", message: "Cloudflare Access setup requires --name" };
   }
@@ -1176,6 +1171,22 @@ function parseAccessArgs(argv: readonly string[]): ParsedCommand {
     ...(apiTokenEnv === undefined ? {} : { apiTokenEnv }),
     ...(apiBaseUrl === undefined ? {} : { apiBaseUrl })
   };
+}
+
+function parseCloudflareAccessSetupScope(
+  accountId: string | undefined,
+  zoneId: string | undefined
+): CloudflareAccessSetupScope | InvalidCommand {
+  if (accountId !== undefined && zoneId !== undefined) {
+    return { kind: "invalid", message: "Provide only one of --account-id or --zone-id" };
+  }
+  if (accountId !== undefined) {
+    return { kind: "account", id: accountId };
+  }
+  if (zoneId !== undefined) {
+    return { kind: "zone", id: zoneId };
+  }
+  return { kind: "invalid", message: "Cloudflare Access setup requires --account-id or --zone-id" };
 }
 
 function parseCustomFieldsArgs(argv: readonly string[]): ParsedCommand {
