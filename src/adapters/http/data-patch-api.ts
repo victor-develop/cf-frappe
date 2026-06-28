@@ -96,18 +96,19 @@ export function createDataPatchApi(options: DataPatchApiOptions): Hono {
     return c.json({ data }, 201);
   });
 
-  if (options.dataPatchQueue) {
+  const dataPatchQueue = options.dataPatchQueue;
+  if (dataPatchQueue) {
     app.post("/api/data-patches/enqueue", async (c) => {
       const actor = await options.actor(c.req.raw);
       const enqueueOptions = await dataPatchQueueOptions(c.req.raw, maxJsonBytes);
-      const data = await options.dataPatchQueue!.enqueue(actor, enqueueOptions);
+      const data = await dataPatchQueue.enqueue(actor, enqueueOptions);
       return c.json({ data }, 202);
     });
 
     app.post("/api/data-patches/:id/enqueue", async (c) => {
       const actor = await options.actor(c.req.raw);
       const enqueueOptions = await dataPatchQueueOptions(c.req.raw, maxJsonBytes, { includePatchIds: false });
-      const data = await options.dataPatchQueue!.enqueue(actor, {
+      const data = await dataPatchQueue.enqueue(actor, {
         ...enqueueOptions,
         patchIds: [c.req.param("id")]
       });
@@ -115,18 +116,19 @@ export function createDataPatchApi(options: DataPatchApiOptions): Hono {
     });
   }
 
-  if (options.dataPatchRollbackQueue) {
+  const dataPatchRollbackQueue = options.dataPatchRollbackQueue;
+  if (dataPatchRollbackQueue) {
     app.post("/api/data-patches/rollback-enqueue", async (c) => {
       const actor = await options.actor(c.req.raw);
       const enqueueOptions = await dataPatchRollbackQueueOptions(c.req.raw, maxJsonBytes);
-      const data = await options.dataPatchRollbackQueue!.enqueueRollback(actor, enqueueOptions);
+      const data = await dataPatchRollbackQueue.enqueueRollback(actor, enqueueOptions);
       return c.json({ data }, 202);
     });
 
     app.post("/api/data-patches/:id/rollback-enqueue", async (c) => {
       const actor = await options.actor(c.req.raw);
       const enqueueOptions = await dataPatchRollbackQueueOptions(c.req.raw, maxJsonBytes, { includePatchIds: false });
-      const data = await options.dataPatchRollbackQueue!.enqueueRollback(actor, {
+      const data = await dataPatchRollbackQueue.enqueueRollback(actor, {
         ...enqueueOptions,
         patchIds: [c.req.param("id")]
       });
@@ -134,11 +136,12 @@ export function createDataPatchApi(options: DataPatchApiOptions): Hono {
     });
   }
 
-  if (options.dataPatchRollbackRetryQueue) {
+  const dataPatchRollbackRetryQueue = options.dataPatchRollbackRetryQueue;
+  if (dataPatchRollbackRetryQueue) {
     app.post("/api/data-patches/:id/rollback-retry-enqueue", async (c) => {
       const actor = await options.actor(c.req.raw);
       const enqueueOptions = await dataPatchRollbackRetryQueueOptions(c.req.raw, maxJsonBytes);
-      const data = await options.dataPatchRollbackRetryQueue!.enqueueRollbackRetry(
+      const data = await dataPatchRollbackRetryQueue.enqueueRollbackRetry(
         actor,
         c.req.param("id"),
         enqueueOptions

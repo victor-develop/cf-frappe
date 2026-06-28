@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Worker auth composition boundary slice:
+As of the data patch queue route capability slice:
 
 - Vitest files: `170`
-- Vitest cases: `1793`
-- Remaining gap to Frappe static markers: `991`
+- Vitest cases: `1794`
+- Remaining gap to Frappe static markers: `990`
 
 ## Implication
 

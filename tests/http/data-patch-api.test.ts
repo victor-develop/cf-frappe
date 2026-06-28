@@ -810,4 +810,49 @@ describe("data patch api", () => {
     expect(hiddenRollback.status).toBe(404);
     expect(hiddenRollbackRetry.status).toBe(404);
   });
+
+  it("mounts only the configured data patch queue capabilities", async () => {
+    const services = createServices();
+    const dataPatches = new DataPatchService({
+      log: new InMemoryDataPatchLog(),
+      resources: {},
+      patches: [defineDataPatch({ id: "core.seed", checksum: "v1", run: () => undefined })],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-seed"])
+    });
+    const registry = createJobRegistry({ jobs: [createDataPatchApplyJob()] });
+    const app = createResourceApi({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: unsafeHeaderActorResolver,
+      dataPatches,
+      dataPatchQueue: new DataPatchQueueService({
+        dataPatches,
+        dispatcher: new JobDispatcher({
+          registry,
+          queue: new InMemoryJobQueue(),
+          clock: fixedClock(now),
+          ids: deterministicIds(["patch-apply-only"])
+        })
+      })
+    });
+
+    const apply = await app.request("/api/data-patches/core.seed/enqueue", {
+      method: "POST",
+      headers: adminHeaders
+    });
+    const rollback = await app.request("/api/data-patches/core.seed/rollback-enqueue", {
+      method: "POST",
+      headers: adminHeaders
+    });
+    const rollbackRetry = await app.request("/api/data-patches/core.seed/rollback-retry-enqueue", {
+      method: "POST",
+      headers: adminHeaders
+    });
+
+    expect(apply.status).toBe(202);
+    expect(rollback.status).toBe(404);
+    expect(rollbackRetry.status).toBe(404);
+  });
 });
