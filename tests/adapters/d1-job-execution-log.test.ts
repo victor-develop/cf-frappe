@@ -106,6 +106,31 @@ describe("D1JobExecutionLog", () => {
     expect(statement?.sql).toContain("ORDER BY started_at DESC, idempotency_key ASC LIMIT ?");
     expect(statement?.params).toEqual(["default", "failed", 5]);
   });
+
+  it("rejects invalid stored D1 job execution JSON", async () => {
+    const db = new FakeD1Database();
+    const log = new D1JobExecutionLog(db as unknown as D1Database);
+    const key = recordKey("default", "jobs.bad:run_001");
+    const row = corruptRow({ idempotency_key: "jobs.bad:run_001", payload_json: "[]" });
+    db.corruptRows.set(key, row);
+
+    await expect(log.get("jobs.bad:run_001", { tenantId: "default" })).rejects.toMatchObject({
+      code: "JOB_EXECUTION_INVALID",
+      status: 409
+    });
+
+    db.corruptRows.set(key, { ...row, payload_json: "{}", metadata_json: "{" });
+    await expect(log.get("jobs.bad:run_001", { tenantId: "default" })).rejects.toMatchObject({
+      code: "JOB_EXECUTION_INVALID",
+      status: 409
+    });
+
+    db.corruptRows.set(key, { ...row, payload_json: "{}", metadata_json: "{}", result_json: "{" });
+    await expect(log.get("jobs.bad:run_001", { tenantId: "default" })).rejects.toMatchObject({
+      code: "JOB_EXECUTION_INVALID",
+      status: 409
+    });
+  });
 });
 
 function jobMessage(
@@ -127,6 +152,7 @@ function jobMessage(
 
 class FakeD1Database {
   readonly records = new Map<string, JobExecutionRecord>();
+  readonly corruptRows = new Map<string, JobExecutionRow>();
   readonly statements: FakeD1PreparedStatement[] = [];
 
   prepare(sql: string): FakeD1PreparedStatement {
@@ -176,6 +202,12 @@ class FakeD1PreparedStatement {
     const hasTenant = this.sql.includes("tenant_id = ? AND idempotency_key = ?");
     const tenantId = hasTenant ? String(this.params[0]) : undefined;
     const idempotencyKey = String(this.params[hasTenant ? 1 : 0]);
+    const corruptRow = tenantId === undefined
+      ? [...this.db.corruptRows.values()].find((item) => item.idempotency_key === idempotencyKey)
+      : this.db.corruptRows.get(recordKey(tenantId, idempotencyKey));
+    if (corruptRow !== undefined) {
+      return corruptRow;
+    }
     const record = tenantId === undefined
       ? [...this.db.records.values()].find((item) => item.idempotencyKey === idempotencyKey)
       : this.db.records.get(recordKey(tenantId, idempotencyKey));
@@ -268,6 +300,24 @@ function rowFromRecord(record: JobExecutionRecord): JobExecutionRow {
     finished_at: record.finishedAt ?? null,
     result_json: record.result === undefined ? null : JSON.stringify(record.result),
     error: record.error ?? null
+  };
+}
+
+function corruptRow(overrides: Partial<JobExecutionRow>): JobExecutionRow {
+  return {
+    tenant_id: "default",
+    idempotency_key: "jobs.bad:run_001",
+    job_name: "jobs.bad",
+    run_id: "run_001",
+    payload_json: "{}",
+    metadata_json: "{}",
+    enqueued_at: now,
+    status: "succeeded",
+    started_at: now,
+    finished_at: now,
+    result_json: null,
+    error: null,
+    ...overrides
   };
 }
 

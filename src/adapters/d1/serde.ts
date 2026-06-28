@@ -1,3 +1,4 @@
+import { FrameworkError } from "../../core/errors.js";
 import type { DocumentData, DocumentSnapshot, DomainEvent, JsonValue } from "../../core/types.js";
 import type { JobExecutionRecord } from "../../ports/job-execution-log.js";
 
@@ -72,9 +73,9 @@ export function documentFromRow(row: DocumentRow): DocumentSnapshot {
 }
 
 export function jobExecutionFromRow(row: JobExecutionRow): JobExecutionRecord {
-  const result = row.result_json === null ? undefined : JSON.parse(row.result_json) as JsonValue;
-  const payload = row.payload_json === null ? undefined : JSON.parse(row.payload_json) as JobExecutionRecord["payload"];
-  const metadata = row.metadata_json === null ? undefined : JSON.parse(row.metadata_json) as JobExecutionRecord["metadata"];
+  const result = row.result_json === null ? undefined : parseJobJsonValue(row, "result_json", row.result_json);
+  const payload = row.payload_json === null ? undefined : parseJobDocumentData(row, "payload_json", row.payload_json);
+  const metadata = row.metadata_json === null ? undefined : parseJobDocumentData(row, "metadata_json", row.metadata_json);
   return {
     idempotencyKey: row.idempotency_key,
     tenantId: row.tenant_id,
@@ -89,4 +90,60 @@ export function jobExecutionFromRow(row: JobExecutionRow): JobExecutionRecord {
     ...(result === undefined ? {} : { result }),
     ...(row.error === null ? {} : { error: row.error })
   };
+}
+
+function parseJobDocumentData(
+  row: JobExecutionRow,
+  field: "payload_json" | "metadata_json",
+  value: string
+): DocumentData {
+  const parsed = parseJobJsonValue(row, field, value);
+  if (isJsonRecord(parsed)) {
+    return parsed;
+  }
+  throw invalidJobExecutionJson(row, field);
+}
+
+function parseJobJsonValue(
+  row: JobExecutionRow,
+  field: "payload_json" | "metadata_json" | "result_json",
+  value: string
+): JsonValue {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (isJsonValue(parsed)) {
+      return parsed;
+    }
+  } catch {
+    // Fall through to the framework boundary error below.
+  }
+  throw invalidJobExecutionJson(row, field);
+}
+
+function invalidJobExecutionJson(
+  row: JobExecutionRow,
+  field: "payload_json" | "metadata_json" | "result_json"
+): FrameworkError {
+  return new FrameworkError(
+    "JOB_EXECUTION_INVALID",
+    `Job execution '${row.idempotency_key}' has invalid ${field}`,
+    { status: 409 }
+  );
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.every(isJsonValue);
+  }
+  if (isJsonRecord(value)) {
+    return Object.values(value).every(isJsonValue);
+  }
+  return false;
+}
+
+function isJsonRecord(value: unknown): value is DocumentData {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
