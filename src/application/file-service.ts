@@ -85,6 +85,7 @@ import {
   fileDeleteRequestedDocumentCommand,
   fileDeletedExecuteCommand,
   fileDeletedDocumentCommand,
+  fileResolvedTransformOverlaySource,
   fileDownloadedRenditionResult,
   fileDocumentCreateCommand,
   fileDirectUploadDocumentCreateCommand,
@@ -128,8 +129,8 @@ import {
   fileMultipartUploadAbortCommand,
   fileMultipartUploadReservationCommand,
   fileTransformOverlayCommandOption,
+  fileTransformOverlayObjectReadPlan,
   fileTransformOverlayResolutionPlan,
-  fileTransformOverlaySource,
   fileTransformedFileResult,
   fileUploadedMultipartPartResult,
   fileUploadedResult,
@@ -1162,9 +1163,12 @@ export class FileService {
       name: plan.overlay.file,
       tenantId: command.tenantId
     });
-    const key = filePrimaryObjectKey(snapshot);
-    const object = requireStoredFileObject(await this.storage.get(key), this.fileDoctype, plan.overlay.file);
-    return fileTransformOverlaySource(snapshot, object, plan.overlay);
+    const read = fileTransformOverlayObjectReadPlan({
+      snapshot,
+      overlay: plan.overlay
+    });
+    const object = requireStoredFileObject(await this.storage.get(read.key), this.fileDoctype, read.file);
+    return fileResolvedTransformOverlaySource({ snapshot, object, plan: read });
   }
 
   private async recordRenditionManifest(command: {

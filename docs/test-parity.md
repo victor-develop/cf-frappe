@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the downloaded transform command policy slice:
+As of the transform-overlay source read policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1742`
-- Remaining gap to Frappe static markers: `1042`
+- Vitest cases: `1743`
+- Remaining gap to Frappe static markers: `1041`
 
 ## Implication
 

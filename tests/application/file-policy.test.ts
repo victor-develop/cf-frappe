@@ -141,9 +141,11 @@ import {
   fileTenantCommandOption,
   fileDownloadedTransformObjectCommand,
   fileTransformOverlayCommandOption,
+  fileTransformOverlayObjectReadPlan,
   fileTransformOverlayResolutionPlan,
   fileTransformObjectCommand,
   fileTransformOverlaySource,
+  fileResolvedTransformOverlaySource,
   fileTransformedFileResult,
   fileTransformOptionsData,
   fileTransformOptionsFromData,
@@ -886,6 +888,47 @@ describe("file policy", () => {
         metadata: fileObject({ contentType: "text/plain" })
       }, { file: "file_badge" })
     ).toThrow("File overlay 'file_badge' cannot be transformed");
+  });
+
+  it("plans transform overlay object reads and resolved sources", () => {
+    const body = new ReadableStream<Uint8Array>();
+    const snapshot = fileSnapshot({
+      filename: "badge.png",
+      content_type: "image/png",
+      key: "acme/files/file_badge-badge.png"
+    });
+    const object: StoredFileObject = {
+      body,
+      metadata: fileObject({
+        key: "acme/files/file_badge-badge.png",
+        contentType: "image/webp"
+      })
+    };
+    const overlay = {
+      file: "file_badge",
+      placement: "bottom-right" as const,
+      opacity: 0.5,
+      width: 32
+    };
+    const plan = fileTransformOverlayObjectReadPlan({ snapshot, overlay });
+
+    expect(plan).toEqual({
+      file: "file_badge",
+      key: "acme/files/file_badge-badge.png",
+      overlay
+    });
+    expect(fileResolvedTransformOverlaySource({ snapshot, object, plan })).toEqual({
+      file: "file_badge",
+      key: "acme/files/file_badge-badge.png",
+      filename: "badge.png",
+      contentType: "image/webp",
+      size: 12,
+      body,
+      etag: "object-1",
+      placement: "bottom-right",
+      opacity: 0.5,
+      width: 32
+    });
   });
 
   it("reads rendition manifests and projects browser-safe views", () => {

@@ -2216,6 +2216,31 @@ export function fileTransformOverlaySource(
   };
 }
 
+export interface FileTransformOverlayObjectReadPlan {
+  readonly file: string;
+  readonly key: string;
+  readonly overlay: NonNullable<FileTransformOptions["overlay"]>;
+}
+
+export function fileTransformOverlayObjectReadPlan(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly overlay: NonNullable<FileTransformOptions["overlay"]>;
+}): FileTransformOverlayObjectReadPlan {
+  return {
+    file: command.overlay.file,
+    key: filePrimaryObjectKey(command.snapshot),
+    overlay: command.overlay
+  };
+}
+
+export function fileResolvedTransformOverlaySource(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly object: StoredFileObject;
+  readonly plan: FileTransformOverlayObjectReadPlan;
+}): FileTransformOverlaySource {
+  return fileTransformOverlaySource(command.snapshot, command.object, command.plan.overlay);
+}
+
 export type FileTransformOverlayResolutionPlan =
   | {
       readonly kind: "none";
