@@ -227,7 +227,7 @@ function ensureSecret(secret: string): void {
 }
 
 function normalizeAccountVersion(value: unknown): number {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
     throw permissionDenied("Session account version is invalid");
   }
   return value;

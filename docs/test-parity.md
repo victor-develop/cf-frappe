@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the signed-session actor id boundary slice:
+As of the signed-session account-version safe-integer boundary slice:
 
 - Vitest files: `170`
-- Vitest cases: `1811`
-- Remaining gap to Frappe static markers: `973`
+- Vitest cases: `1812`
+- Remaining gap to Frappe static markers: `972`
 
 ## Implication
 

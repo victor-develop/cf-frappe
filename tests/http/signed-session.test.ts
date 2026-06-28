@@ -72,6 +72,20 @@ describe("signed session actor resolver", () => {
     });
   });
 
+  it("rejects unsafe account versions when issuing signed session cookies", async () => {
+    await expect(
+      createSignedSessionCookie(actor, {
+        secret: "test-secret",
+        now: () => 1_000,
+        maxAgeSeconds: 3_600,
+        accountVersion: Number.MAX_SAFE_INTEGER + 1
+      })
+    ).rejects.toMatchObject({
+      code: "PERMISSION_DENIED",
+      message: "Session account version is invalid"
+    });
+  });
+
   it("rejects tampered and expired sessions", async () => {
     const cookie = await createSignedSessionCookie(actor, {
       secret: "test-secret",
