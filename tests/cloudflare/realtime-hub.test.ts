@@ -9,6 +9,7 @@ import {
   DOCUMENT_SHARED_DRAFT_EVENT_TYPE,
   DOCUMENT_SHARED_DRAFT_MESSAGE_TYPE,
   REALTIME_COLLABORATION_MESSAGE_TYPE,
+  type DocumentData,
   type RealtimeEvent
 } from "../../src";
 import { now } from "../helpers";
@@ -45,6 +46,52 @@ describe("DurableObjectRealtimePublisher", () => {
     await expect(publisher.publish(event)).resolves.toEqual({ delivered: 4 });
     expect(names).toEqual(["tenant:acme", "doctype:acme:Note"]);
     expect(published).toEqual([event, event]);
+  });
+
+  it("snapshots events per Durable Object topic publish", async () => {
+    const observed: RealtimeEvent[] = [];
+    const names: string[] = [];
+    const publisher = new DurableObjectRealtimePublisher({
+      idFromName(name) {
+        names.push(name);
+        return name as unknown as DurableObjectId;
+      },
+      get() {
+        return {
+          async fetch() {
+            return new Response(null, { status: 101 });
+          },
+          async presence() {
+            return { topic: "tenant:acme", connections: [] };
+          },
+          async publish(_topic, event) {
+            observed.push(JSON.parse(JSON.stringify(event)) as RealtimeEvent);
+            ((event.payload as DocumentData).nested as DocumentData).count = 99;
+            (event.topics as string[]).push("mutated");
+            return 1;
+          },
+          async replay() {
+            return { topic: "tenant:acme", events: [], nextCursor: null };
+          }
+        };
+      }
+    } satisfies RealtimeHubNamespace);
+    const event: RealtimeEvent = {
+      ...realtimeEvent(["tenant:acme", "doctype:acme:Note"]),
+      payload: { nested: { count: 1 } }
+    };
+
+    await expect(publisher.publish(event)).resolves.toEqual({ delivered: 2 });
+
+    expect(names).toEqual(["tenant:acme", "doctype:acme:Note"]);
+    expect(observed).toEqual([
+      { ...event, payload: { nested: { count: 1 } } },
+      { ...event, payload: { nested: { count: 1 } } }
+    ]);
+    expect(event).toMatchObject({
+      topics: ["tenant:acme", "doctype:acme:Note"],
+      payload: { nested: { count: 1 } }
+    });
   });
 });
 

@@ -1,6 +1,4 @@
-import type { RealtimeEvent } from "../../core/realtime.js";
-import { badRequest } from "../../core/errors.js";
-import { cloneJsonValue, isJsonValue } from "../../core/json.js";
+import { cloneRealtimeEvent, type RealtimeEvent } from "../../core/realtime.js";
 import type { RealtimePublisher, RealtimePublishResult } from "../../ports/realtime.js";
 
 export class InMemoryRealtimePublisher implements RealtimePublisher {
@@ -19,15 +17,4 @@ export class InMemoryRealtimePublisher implements RealtimePublisher {
   clear(): void {
     this.published.length = 0;
   }
-}
-
-function cloneRealtimeEvent(event: RealtimeEvent): RealtimeEvent {
-  if (!isJsonValue(event.payload)) {
-    throw badRequest("Realtime event payload must be JSON-serializable");
-  }
-  return {
-    ...event,
-    topics: [...event.topics],
-    payload: cloneJsonValue(event.payload)
-  };
 }

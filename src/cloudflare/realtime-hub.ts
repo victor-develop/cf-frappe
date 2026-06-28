@@ -4,6 +4,7 @@ import {
   DOCUMENT_FIELD_EDIT_MESSAGE_TYPE,
   DOCUMENT_SHARED_DRAFT_MESSAGE_TYPE,
   REALTIME_COLLABORATION_MESSAGE_TYPE,
+  cloneRealtimeEvent,
   realtimeEventFromDocumentFieldEdit,
   realtimeEventFromDocumentSharedDraft,
   type RealtimeEvent,
@@ -113,7 +114,7 @@ export class DurableObjectRealtimePublisher implements RealtimePublisher {
 
   private publishToTopic(topic: RealtimeTopic, event: RealtimeEvent): Promise<number> {
     const id = this.namespace.idFromName(topic);
-    return this.namespace.get(id).publish(topic, event);
+    return this.namespace.get(id).publish(topic, cloneRealtimeEvent(event));
   }
 }
 
@@ -355,6 +356,7 @@ function storeRealtimeEvent(
   if (!rememberReplayTopic(sql, topic)) {
     throw new Error("Realtime hub topic mismatch");
   }
+  const stored = cloneRealtimeEvent(event);
   const row = sql.exec<{ sequence: number }>(
     `
       INSERT INTO realtime_events (topic, event_id, event_type, occurred_at, event_json)
@@ -362,10 +364,10 @@ function storeRealtimeEvent(
       RETURNING sequence
     `,
     topic,
-    event.id,
-    event.type,
-    event.occurredAt,
-    JSON.stringify(event)
+    stored.id,
+    stored.type,
+    stored.occurredAt,
+    JSON.stringify(stored)
   ).one();
   pruneReplayEvents(sql, retentionLimit);
   return row.sequence;

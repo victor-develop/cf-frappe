@@ -6,7 +6,8 @@ import {
   type DomainEvent,
   type JsonValue
 } from "./types.js";
-import { isJsonValue } from "./json.js";
+import { badRequest } from "./errors.js";
+import { cloneJsonValue, isJsonValue } from "./json.js";
 import { documentUserNotificationsFromDomainEvent } from "./notifications.js";
 export { documentUserNotificationsFromDomainEvent } from "./notifications.js";
 export type { DocumentUserNotificationPayload } from "./notifications.js";
@@ -20,6 +21,17 @@ export interface RealtimeEvent {
   readonly tenantId: string;
   readonly occurredAt: string;
   readonly payload: JsonValue;
+}
+
+export function cloneRealtimeEvent(event: RealtimeEvent): RealtimeEvent {
+  if (!isJsonValue(event.payload)) {
+    throw badRequest("Realtime event payload must be JSON-serializable");
+  }
+  return {
+    ...event,
+    topics: [...event.topics],
+    payload: cloneJsonValue(event.payload)
+  };
 }
 
 export type RealtimeTopicScope =
