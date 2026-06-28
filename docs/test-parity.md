@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the frozen app install-order slice:
+As of the registry list snapshot helper slice:
 
 - Vitest files: `172`
-- Vitest cases: `1920`
-- Remaining gap to Frappe static markers: `864`
+- Vitest cases: `1921`
+- Remaining gap to Frappe static markers: `863`
 
 ## Implication
 

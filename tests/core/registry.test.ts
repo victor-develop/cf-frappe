@@ -27,6 +27,21 @@ describe("registry", () => {
     );
   });
 
+  it("returns fresh frozen registry list snapshots", () => {
+    const registry = createRegistry({
+      doctypes: [defineDocType({ name: "Alpha", fields: [] })]
+    });
+
+    const firstList = registry.list();
+    registry.registerDocType(defineDocType({ name: "Zulu", fields: [] }));
+    const secondList = registry.list();
+
+    expect(firstList.map((doctype) => doctype.name)).toEqual(["Alpha"]);
+    expect(secondList.map((doctype) => doctype.name)).toEqual(["Alpha", "Zulu"]);
+    expect(Object.isFrozen(firstList)).toBe(true);
+    expect(Object.isFrozen(secondList)).toBe(true);
+  });
+
   it("throws a framework error for unknown doctypes", () => {
     const registry = createRegistry();
 

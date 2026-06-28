@@ -471,7 +471,7 @@ export class ModelRegistry {
   }
 
   list(): readonly DocTypeDefinition[] {
-    return Object.freeze([...this.doctypes.values()].sort((left, right) => left.name.localeCompare(right.name)));
+    return listDefinitionsByName(this.doctypes.values());
   }
 
   listApps(): readonly InstalledAppDefinition[] {
@@ -489,7 +489,7 @@ export class ModelRegistry {
   }
 
   listReports(): readonly ReportDefinition[] {
-    return Object.freeze([...this.reports.values()].sort((left, right) => left.name.localeCompare(right.name)));
+    return listDefinitionsByName(this.reports.values());
   }
 
   getDashboard(dashboardName: string): DashboardDefinition {
@@ -503,7 +503,7 @@ export class ModelRegistry {
   }
 
   listDashboards(): readonly DashboardDefinition[] {
-    return Object.freeze([...this.dashboards.values()].sort((left, right) => left.name.localeCompare(right.name)));
+    return listDefinitionsByName(this.dashboards.values());
   }
 
   getKanban(kanbanName: string): KanbanDefinition {
@@ -517,7 +517,7 @@ export class ModelRegistry {
   }
 
   listKanbans(): readonly KanbanDefinition[] {
-    return Object.freeze([...this.kanbans.values()].sort((left, right) => left.name.localeCompare(right.name)));
+    return listDefinitionsByName(this.kanbans.values());
   }
 
   getCalendar(calendarName: string): CalendarDefinition {
@@ -531,7 +531,7 @@ export class ModelRegistry {
   }
 
   listCalendars(): readonly CalendarDefinition[] {
-    return Object.freeze([...this.calendars.values()].sort((left, right) => left.name.localeCompare(right.name)));
+    return listDefinitionsByName(this.calendars.values());
   }
 
   getWebForm(webFormName: string): WebFormDefinition {
@@ -555,7 +555,7 @@ export class ModelRegistry {
   }
 
   listWebForms(): readonly WebFormDefinition[] {
-    return Object.freeze([...this.webForms.values()].sort((left, right) => left.name.localeCompare(right.name)));
+    return listDefinitionsByName(this.webForms.values());
   }
 
   getWebView(webViewName: string): WebViewDefinition {
@@ -569,7 +569,7 @@ export class ModelRegistry {
   }
 
   listWebViews(): readonly WebViewDefinition[] {
-    return Object.freeze([...this.webViews.values()].sort((left, right) => left.name.localeCompare(right.name)));
+    return listDefinitionsByName(this.webViews.values());
   }
 
   getWebPage(webPageName: string): WebPageDefinition {
@@ -583,7 +583,7 @@ export class ModelRegistry {
   }
 
   listWebPages(): readonly WebPageDefinition[] {
-    return Object.freeze([...this.webPages.values()].sort((left, right) => left.name.localeCompare(right.name)));
+    return listDefinitionsByName(this.webPages.values());
   }
 
   getWebsiteSettings(): WebsiteSettingsDefinition {
@@ -606,7 +606,7 @@ export class ModelRegistry {
   }
 
   listWebsiteThemes(): readonly WebsiteThemeDefinition[] {
-    return Object.freeze([...this.websiteThemes.values()].sort((left, right) => left.name.localeCompare(right.name)));
+    return listDefinitionsByName(this.websiteThemes.values());
   }
 
   getPrintFormat(formatName: string): PrintFormatDefinition {
@@ -620,7 +620,7 @@ export class ModelRegistry {
   }
 
   listPrintFormats(): readonly PrintFormatDefinition[] {
-    return Object.freeze([...this.printFormats.values()].sort((left, right) => left.name.localeCompare(right.name)));
+    return listDefinitionsByName(this.printFormats.values());
   }
 
   getPrintLetterhead(letterheadName: string): PrintLetterheadDefinition {
@@ -634,17 +634,16 @@ export class ModelRegistry {
   }
 
   listPrintLetterheads(): readonly PrintLetterheadDefinition[] {
-    return Object.freeze([...this.letterheads.values()].sort((left, right) => left.name.localeCompare(right.name)));
+    return listDefinitionsByName(this.letterheads.values());
   }
 
   listClientScripts(
     doctype?: string,
     scope?: Exclude<ClientScriptScope, "both">
   ): readonly ClientScriptDefinition[] {
-    return Object.freeze([...this.clientScripts.values()]
+    return listDefinitionsByName([...this.clientScripts.values()]
       .filter((script) => doctype === undefined || script.doctype === doctype)
-      .filter((script) => scope === undefined || clientScriptAppliesTo(script, scope))
-      .sort((left, right) => left.name.localeCompare(right.name)));
+      .filter((script) => scope === undefined || clientScriptAppliesTo(script, scope)));
   }
 
   listDataPatches(): readonly DataPatchDefinition[] {
@@ -662,7 +661,7 @@ export class ModelRegistry {
   }
 
   listWorkspaces(): readonly WorkspaceDefinition[] {
-    return Object.freeze([...this.workspaces.values()].sort((left, right) => left.name.localeCompare(right.name)));
+    return listDefinitionsByName(this.workspaces.values());
   }
 
   hooksFor(doctype: string): readonly DocumentHooks[] {
@@ -961,6 +960,10 @@ function customReportSummaryIsNumeric(report: ReportDefinition, summary: ReportS
   }
   const column = report.columns.find((candidate) => candidate.formula === undefined && (candidate.field ?? candidate.name) === field);
   return column?.type === "integer" || column?.type === "number";
+}
+
+function listDefinitionsByName<T extends { readonly name: string }>(definitions: Iterable<T>): readonly T[] {
+  return Object.freeze([...definitions].sort((left, right) => left.name.localeCompare(right.name)));
 }
 
 const emptyHooks: readonly DocumentHooks[] = Object.freeze([]);
