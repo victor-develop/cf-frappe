@@ -149,6 +149,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized bounded report ordered-row heap access in a named invariant so top-N CSV export no longer relies on array non-null assertions inside sift/swap operations.
 - Centralized report min/max summary candidate selection in a named invariant so summary reduction no longer relies on a non-null array seed after filtering null and missing values.
 - Centralized configured job schedule lookup in a named invariant so dispatch and override flows no longer rely on array non-null assertions after schedule-id resolution.
+- Centralized Worker auth composition around explicit auth and Cloudflare Access options so Access/OIDC account-sync routing no longer relies on non-null assertions after provider checks.
 - Extracted available-rendition reuse selection and duplicate pending-rendition rejection from `FileService` into the file policy with focused source and overlay identity coverage.
 - Centralized file transformability rejection in the file policy so direct transforms, persisted renditions, and overlay-source transforms share one tested content-type guard.
 - Moved upload byte-limit checks and reservation-expiry timestamp planning into file policy so buffered, direct, and multipart upload flows share the same tested boundary rules.

@@ -840,15 +840,16 @@ function actorResolverForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPa
         fallback: appActor
       })
     : appActor;
-  if (!userAccounts || (!options.auth?.cloudflareAccess && !options.auth?.oidc)) {
+  const auth = options.auth;
+  if (!userAccounts || auth === undefined || (!auth.cloudflareAccess && !auth.oidc)) {
     return sessionOrAppActor;
   }
-  const accessActor = options.auth.cloudflareAccess
-    ? accessAccountSyncActorResolverForEnv(options.auth, env, userAccounts, sessionOrAppActor)
+  const accessActor = auth.cloudflareAccess
+    ? accessAccountSyncActorResolverForEnv(auth, auth.cloudflareAccess, env, userAccounts, sessionOrAppActor)
     : undefined;
-  const oidcActors = oidcOptions(options.auth.oidc).map((oidc) => ({
+  const oidcActors = oidcOptions(auth.oidc).map((oidc) => ({
     tokenSource: oidc.tokenSource,
-    actor: oidcAccountSyncActorResolverForEnv(options.auth!, env, userAccounts, sessionOrAppActor, oidc)
+    actor: oidcAccountSyncActorResolverForEnv(auth, env, userAccounts, sessionOrAppActor, oidc)
   }));
   return async (request) => {
     if (accessActor && hasCloudflareAccessToken(request)) {
@@ -874,11 +875,11 @@ function actorResolverForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPa
 
 function accessAccountSyncActorResolverForEnv<TEnv extends CloudFrappeEnv>(
   auth: CloudFrappeAuthOptions<TEnv>,
+  access: CloudFrappeAccessAccountSyncOptions<TEnv>,
   env: TEnv,
   userAccounts: UserAccountService,
   fallback: ActorResolver
 ): ActorResolver {
-  const access = auth.cloudflareAccess!;
   return cloudflareAccessAccountSyncActorResolver({
     ...access,
     teamDomain: valueForEnv(access.teamDomain, env),

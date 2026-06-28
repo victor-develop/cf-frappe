@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the configured job schedule lookup invariant slice:
+As of the Worker auth composition boundary slice:
 
 - Vitest files: `170`
-- Vitest cases: `1792`
-- Remaining gap to Frappe static markers: `992`
+- Vitest cases: `1793`
+- Remaining gap to Frappe static markers: `991`
 
 ## Implication
 

@@ -1836,6 +1836,37 @@ describe("CloudFrappe Worker routing", () => {
     });
   });
 
+  it("falls back to the base actor when Worker auth has no account-sync token", async () => {
+    const worker = createCloudFrappeWorker<CloudFrappeAuthTestEnv>({
+      registry: createTestRegistry(),
+      actor: () => ({ id: "guest", roles: ["Guest"], tenantId: "acme", email: "guest@example.com" }),
+      auth: {
+        sessionSecret: (env) => env.SESSION_SECRET,
+        sessionMaxAgeSeconds: 60,
+        secure: false,
+        passwords: deterministicPasswords(),
+        clock: fixedClock(now)
+      }
+    });
+    const env = {
+      DB: fakeEventD1(),
+      AGGREGATES: fakeNamespace(),
+      SESSION_SECRET: "edge-secret"
+    };
+
+    const me = await worker.fetch!(cfRequest("http://localhost/api/auth/me"), env, fakeExecutionContext());
+
+    expect(me.status).toBe(200);
+    await expect(me.json()).resolves.toMatchObject({
+      data: {
+        id: "guest",
+        roles: ["Guest"],
+        tenantId: "acme",
+        email: "guest@example.com"
+      }
+    });
+  });
+
   it("prefers Cloudflare Access identity over a conflicting signed session", async () => {
     const signing = await createJwtSigner();
     const staleCookie = await createSignedSessionCookie(
