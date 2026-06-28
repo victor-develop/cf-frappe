@@ -5,8 +5,8 @@ import {
   type AssignmentRuleState,
   type AssignmentRuleDocumentAssignment
 } from "../core/assignment-rules.js";
+import type { AfterCommitContext, DocumentHooks } from "../core/document-hooks.js";
 import { conflict, FrameworkError, permissionDenied } from "../core/errors.js";
-import type { DocumentHooks, AfterCommitContext } from "../core/registry.js";
 import { assignmentRulesStream } from "../core/streams.js";
 import {
   DEFAULT_TENANT_ID,

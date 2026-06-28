@@ -109,8 +109,8 @@ import {
   type UserPermissionProvider
 } from "../core/user-permissions.js";
 import { allowedWorkflowTransitions, currentWorkflowState } from "../core/workflow.js";
+import type { AfterCommitContext } from "../core/document-hooks.js";
 import type { ModelRegistry } from "../core/registry.js";
-import type { AfterCommitContext } from "../core/registry.js";
 import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
 import type { DocumentStore } from "../ports/document-store.js";

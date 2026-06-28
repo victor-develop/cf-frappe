@@ -1,4 +1,4 @@
-import type { DocumentHooks } from "../core/registry.js";
+import type { DocumentHooks } from "../core/document-hooks.js";
 import { realtimeEventFromDomainEvent, realtimeUserNotificationsFromDomainEvent } from "../core/realtime.js";
 import type { DocumentData, DocumentSnapshot, DomainEvent, TenantId } from "../core/types.js";
 import type { RealtimePublisher } from "../ports/realtime.js";
