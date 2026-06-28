@@ -54,3 +54,22 @@ export function snapshotFromDocumentCreatedEvent(event: DomainEvent): DocumentSn
     updatedAt: event.occurredAt
   };
 }
+
+export interface CommittedDocumentSnapshotProjection {
+  readonly data?: DocumentData | undefined;
+  readonly docstatus?: DocStatus | undefined;
+}
+
+export function snapshotFromCommittedDocumentEvent(
+  existing: DocumentSnapshot,
+  event: DomainEvent,
+  projection: CommittedDocumentSnapshotProjection = {}
+): DocumentSnapshot {
+  return {
+    ...existing,
+    version: event.sequence,
+    ...(projection.docstatus !== undefined ? { docstatus: projection.docstatus } : {}),
+    ...(projection.data !== undefined ? { data: projection.data } : {}),
+    updatedAt: event.occurredAt
+  };
+}

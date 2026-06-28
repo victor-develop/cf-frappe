@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the naming-series event planning slice:
+As of the committed document snapshot projection slice:
 
 - Vitest files: `173`
-- Vitest cases: `1997`
-- Remaining gap to Frappe static markers: `787`
+- Vitest cases: `1999`
+- Remaining gap to Frappe static markers: `785`
 
 ## Implication
 

@@ -59,6 +59,7 @@ import {
 import {
   documentDeletedPayload,
   documentStatusChangedPayload,
+  snapshotFromCommittedDocumentEvent,
   snapshotFromDocumentCreatedEvent
 } from "./document-lifecycle-events.js";
 import {
@@ -806,12 +807,7 @@ export class DocumentService implements DocumentCommandExecutor {
       (savedEvents) => {
         const saved = requireSavedEvent(savedEvents, event.id);
         return {
-          snapshot: {
-            ...options.existing,
-            version: saved.sequence,
-            data,
-            updatedAt: saved.occurredAt
-          },
+          snapshot: snapshotFromCommittedDocumentEvent(options.existing, saved, { data }),
           auxiliarySnapshots: uniqueReservationWrites.map((write) =>
             this.projectUniqueReservationWrite(write, requireSavedEvent(savedEvents, write.event.id))
           )
@@ -932,12 +928,9 @@ export class DocumentService implements DocumentCommandExecutor {
       if (!saved) {
         throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
       }
-      return {
-        ...existing,
-        version: saved.sequence,
-        data: { ...existing.data, ...plan.patch },
-        updatedAt: saved.occurredAt
-      };
+      return snapshotFromCommittedDocumentEvent(existing, saved, {
+        data: { ...existing.data, ...plan.patch }
+      });
     });
     const [saved] = commit.events;
     if (saved) {
@@ -1024,12 +1017,9 @@ export class DocumentService implements DocumentCommandExecutor {
       if (!saved) {
         throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
       }
-      return {
-        ...existing,
-        version: saved.sequence,
-        data: { ...existing.data, ...patchWithReadOnlyValues },
-        updatedAt: saved.occurredAt
-      };
+      return snapshotFromCommittedDocumentEvent(existing, saved, {
+        data: { ...existing.data, ...patchWithReadOnlyValues }
+      });
     });
     const [saved] = commit.events;
     if (saved) {
@@ -1061,21 +1051,7 @@ export class DocumentService implements DocumentCommandExecutor {
       payload: plan.payload,
       metadata: command.metadata ?? {}
     });
-    const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
-      if (!saved) {
-        throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
-      }
-      return {
-        ...existing,
-        version: saved.sequence,
-        updatedAt: saved.occurredAt
-      };
-    });
-    const [saved] = commit.events;
-    if (saved) {
-      return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
-    }
-    return commit.snapshot;
+    return this.commitDocumentEvent(doctype, existing, stream, event);
   }
 
   async recordActivity(command: RecordDocumentActivityCommand): Promise<DocumentSnapshot> {
@@ -1101,21 +1077,7 @@ export class DocumentService implements DocumentCommandExecutor {
       payload: plan.payload,
       metadata: command.metadata ?? {}
     });
-    const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
-      if (!saved) {
-        throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
-      }
-      return {
-        ...existing,
-        version: saved.sequence,
-        updatedAt: saved.occurredAt
-      };
-    });
-    const [saved] = commit.events;
-    if (saved) {
-      return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
-    }
-    return commit.snapshot;
+    return this.commitDocumentEvent(doctype, existing, stream, event);
   }
 
   async assign(command: AssignDocumentCommand): Promise<DocumentSnapshot> {
@@ -1198,7 +1160,7 @@ export class DocumentService implements DocumentCommandExecutor {
       payload: plan.payload,
       metadata: command.metadata ?? {}
     });
-    return this.commitActivityEvent(doctype, existing, stream, event);
+    return this.commitDocumentEvent(doctype, existing, stream, event);
   }
 
   async revokeShare(command: RevokeDocumentShareCommand): Promise<DocumentSnapshot> {
@@ -1232,7 +1194,7 @@ export class DocumentService implements DocumentCommandExecutor {
       payload: plan.payload,
       metadata: command.metadata ?? {}
     });
-    return this.commitActivityEvent(doctype, existing, stream, event);
+    return this.commitDocumentEvent(doctype, existing, stream, event);
   }
 
   async delete(command: DeleteDocumentCommand): Promise<DocumentSnapshot> {
@@ -1265,12 +1227,7 @@ export class DocumentService implements DocumentCommandExecutor {
       if (!saved) {
         throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
       }
-      return {
-        ...existing,
-        version: saved.sequence,
-        docstatus: plan.nextStatus,
-        updatedAt: saved.occurredAt
-      };
+      return snapshotFromCommittedDocumentEvent(existing, saved, { docstatus: plan.nextStatus });
     });
     const [saved] = commit.events;
     if (saved) {
@@ -1426,21 +1383,7 @@ export class DocumentService implements DocumentCommandExecutor {
       payload: plan.payload,
       metadata: options.command.metadata ?? {}
     });
-    const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
-      if (!saved) {
-        throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
-      }
-      return {
-        ...existing,
-        version: saved.sequence,
-        updatedAt: saved.occurredAt
-      };
-    });
-    const [saved] = commit.events;
-    if (saved) {
-      return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
-    }
-    return commit.snapshot;
+    return this.commitDocumentEvent(doctype, existing, stream, event);
   }
 
   private async changeTag(options: {
@@ -1477,21 +1420,7 @@ export class DocumentService implements DocumentCommandExecutor {
       payload: plan.payload,
       metadata: options.command.metadata ?? {}
     });
-    const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
-      if (!saved) {
-        throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
-      }
-      return {
-        ...existing,
-        version: saved.sequence,
-        updatedAt: saved.occurredAt
-      };
-    });
-    const [saved] = commit.events;
-    if (saved) {
-      return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
-    }
-    return commit.snapshot;
+    return this.commitDocumentEvent(doctype, existing, stream, event);
   }
 
   private async changeFollower(options: {
@@ -1529,24 +1458,10 @@ export class DocumentService implements DocumentCommandExecutor {
       payload: plan.payload,
       metadata: options.command.metadata ?? {}
     });
-    const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
-      if (!saved) {
-        throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
-      }
-      return {
-        ...existing,
-        version: saved.sequence,
-        updatedAt: saved.occurredAt
-      };
-    });
-    const [saved] = commit.events;
-    if (saved) {
-      return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
-    }
-    return commit.snapshot;
+    return this.commitDocumentEvent(doctype, existing, stream, event);
   }
 
-  private async commitActivityEvent(
+  private async commitDocumentEvent(
     doctype: DocTypeDefinition,
     existing: DocumentSnapshot,
     stream: string,
@@ -1556,11 +1471,7 @@ export class DocumentService implements DocumentCommandExecutor {
       if (!saved) {
         throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
       }
-      return {
-        ...existing,
-        version: saved.sequence,
-        updatedAt: saved.occurredAt
-      };
+      return snapshotFromCommittedDocumentEvent(existing, saved);
     });
     const [saved] = commit.events;
     if (saved) {
@@ -1595,12 +1506,7 @@ export class DocumentService implements DocumentCommandExecutor {
       if (!saved) {
         throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
       }
-      return {
-        ...options.existing,
-        version: saved.sequence,
-        docstatus: options.nextStatus,
-        updatedAt: saved.occurredAt
-      };
+      return snapshotFromCommittedDocumentEvent(options.existing, saved, { docstatus: options.nextStatus });
     });
     const [saved] = commit.events;
     if (saved) {
@@ -1855,12 +1761,9 @@ export class DocumentService implements DocumentCommandExecutor {
     if (!write.existing) {
       return snapshotFromDocumentCreatedEvent(saved);
     }
-    return {
-      ...write.existing,
-      version: saved.sequence,
-      data: { ...write.existing.data, documentName: write.reservation.documentName, active: true },
-      updatedAt: saved.occurredAt
-    };
+    return snapshotFromCommittedDocumentEvent(write.existing, saved, {
+      data: { ...write.existing.data, documentName: write.reservation.documentName, active: true }
+    });
   }
 
   private async uniqueReservationOwnerStillOwnsValue(
@@ -1901,12 +1804,9 @@ export class DocumentService implements DocumentCommandExecutor {
           if (!saved) {
             throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
           }
-          return {
-            ...existing,
-            version: saved.sequence,
-            data: { ...existing.data, active: false },
-            updatedAt: saved.occurredAt
-          };
+          return snapshotFromCommittedDocumentEvent(existing, saved, {
+            data: { ...existing.data, active: false }
+          });
         });
       } catch (error) {
         if (!options.suppressErrors) {
@@ -1993,12 +1893,9 @@ export class DocumentService implements DocumentCommandExecutor {
           if (!existing) {
             return snapshotFromDocumentCreatedEvent(saved);
           }
-          return {
-            ...existing,
-            version: saved.sequence,
-            data: { ...existing.data, current: next },
-            updatedAt: saved.occurredAt
-          };
+          return snapshotFromCommittedDocumentEvent(existing, saved, {
+            data: { ...existing.data, current: next }
+          });
         });
         return renderNamingSeries(pattern, next);
       } catch (error) {
