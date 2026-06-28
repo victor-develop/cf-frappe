@@ -215,6 +215,83 @@ describe("CloudFrappe Worker realtime", () => {
     expect(fetches).toEqual([]);
   });
 
+  it("rejects realtime websocket requests without upgrade before authorization or hub access", async () => {
+    const topics: string[] = [];
+    const fetches: Request[] = [];
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => {
+        throw new Error("Actor should not be resolved for invalid realtime websocket requests");
+      },
+      realtime: { namespace: () => fakeRealtimeNamespace(topics, fetches) }
+    });
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/api/realtime?topic=document:acme:Note:My%20Note"),
+      { DB: fakeD1(), AGGREGATES: fakeAggregateNamespace() },
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(426);
+    expect(await response.text()).toBe("Expected WebSocket upgrade");
+    expect(topics).toEqual([]);
+    expect(fetches).toEqual([]);
+  });
+
+  it("rejects realtime requests without topics before authorization or hub access", async () => {
+    const topics: string[] = [];
+    const fetches: Request[] = [];
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => {
+        throw new Error("Actor should not be resolved for missing realtime topics");
+      },
+      realtime: { namespace: () => fakeRealtimeNamespace(topics, fetches) }
+    });
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/api/realtime", {
+        headers: { upgrade: "websocket" }
+      }),
+      { DB: fakeD1(), AGGREGATES: fakeAggregateNamespace() },
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "BAD_REQUEST", message: "topic is required" }
+    });
+    expect(topics).toEqual([]);
+    expect(fetches).toEqual([]);
+  });
+
+  it("rejects invalid realtime topics before authorization or hub access", async () => {
+    const topics: string[] = [];
+    const fetches: Request[] = [];
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => {
+        throw new Error("Actor should not be resolved for invalid realtime topics");
+      },
+      realtime: { namespace: () => fakeRealtimeNamespace(topics, fetches) }
+    });
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/api/realtime?topic=document:acme:Note", {
+        headers: { upgrade: "websocket" }
+      }),
+      { DB: fakeD1(), AGGREGATES: fakeAggregateNamespace() },
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "BAD_REQUEST", message: "topic is invalid" }
+    });
+    expect(topics).toEqual([]);
+    expect(fetches).toEqual([]);
+  });
+
   it("rejects doctype realtime subscriptions from non-system actors", async () => {
     const topics: string[] = [];
     const fetches: Request[] = [];

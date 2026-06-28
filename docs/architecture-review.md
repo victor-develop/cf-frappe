@@ -268,6 +268,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized downloaded object read planning in file policy so file download orchestration no longer derives primary object keys inline.
 - Centralized downloaded rendition object read planning in file policy so rendition download orchestration no longer derives storage keys from manifest entries inline.
 - Centralized multipart completion snapshot selection in file policy so multipart completion orchestration no longer chooses between current and begin-completion snapshots inline.
+- Added Worker realtime ingress guard coverage so non-upgrade, missing-topic, and invalid-topic requests are rejected before auth or Durable Object access.
 - Added Durable Object collaboration failure-boundary coverage so missing socket identity stays local to the sender and failed peer delivery emits corrected presence.
 - Added realtime event clone-boundary coverage so adapter fan-out copies topics and nested payloads by value and rejects non-JSON payloads before delivery.
 - Added realtime collaboration payload snapshot coverage so transient field-edit values and shared-draft patches are cloned before fan-out and cannot leak caller or returned-event mutation.

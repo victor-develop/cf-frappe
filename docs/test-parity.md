@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Durable Object collaboration failure-boundary coverage slice:
+As of the Worker realtime ingress guard coverage slice:
 
 - Vitest files: `173`
-- Vitest cases: `1948`
-- Remaining gap to Frappe static markers: `836`
+- Vitest cases: `1951`
+- Remaining gap to Frappe static markers: `833`
 
 ## Implication
 
