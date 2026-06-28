@@ -87,6 +87,7 @@ import {
   fileUploadScanFailedPatch,
   fileTransformOverlaySource,
   fileTransformSource,
+  fileSnapshotFilename,
   isInfectedFileScanResult,
   multipartPartManifest,
   multipartPartManifestPatch,
@@ -548,7 +549,7 @@ export class FileService {
     const scan = await this.scanObject({
       actor: command.actor,
       tenantId,
-      filename: requireFileSnapshotString(current, "filename"),
+      filename: fileSnapshotFilename(current),
       source: "direct_upload",
       object
     });
@@ -684,7 +685,7 @@ export class FileService {
     const scan = await this.scanObject({
       actor: command.actor,
       tenantId: command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID,
-      filename: requireFileSnapshotString(completing, "filename"),
+      filename: fileSnapshotFilename(completing),
       source: "multipart_upload",
       object
     });
@@ -900,7 +901,7 @@ export class FileService {
         fileRenditionPutObjectCommand({
           pending,
           transform,
-          sourceFilename: requireFileSnapshotString(downloaded.snapshot, "filename"),
+          sourceFilename: fileSnapshotFilename(downloaded.snapshot),
           tenantId,
           sourceFile: downloaded.snapshot.name,
           sourceEtag,

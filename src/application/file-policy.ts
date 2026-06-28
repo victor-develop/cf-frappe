@@ -876,6 +876,10 @@ export function filePrimaryObjectKey(snapshot: DocumentSnapshot): string {
   return requireFileSnapshotString(snapshot, "key");
 }
 
+export function fileSnapshotFilename(snapshot: DocumentSnapshot): string {
+  return requireFileSnapshotString(snapshot, "filename");
+}
+
 export function fileObjectKeysForDelete(snapshot: DocumentSnapshot): readonly string[] {
   return [
     ...new Set([
@@ -908,7 +912,7 @@ export function fileTransformOptionsFromData(data: DocumentData): FileTransformO
 export function fileTransformSource(snapshot: DocumentSnapshot, object: StoredFileObject): FileTransformSource {
   return {
     key: object.metadata.key,
-    filename: requireFileSnapshotString(snapshot, "filename"),
+    filename: fileSnapshotFilename(snapshot),
     contentType: fileObjectContentType(snapshot, object.metadata),
     size: object.metadata.size,
     body: object.body,

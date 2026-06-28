@@ -100,6 +100,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Extracted delete-request event planning into the file policy so delete remains idempotent without `FileService` deriving request necessity from storage state.
 - Extracted primary file object-key reads into the file policy so `FileService` no longer reads the persisted `key` field directly for storage operations.
 - Extracted scan-failure cleanup key planning into the file policy so failed upload compensation deletes the intended primary object without broadening into rendition cleanup.
+- Extracted persisted file-name reads into the file policy so scan targets, transform sources, and rendition storage commands share one filename boundary.
 - Extracted rendition manifest patch shaping from `FileService` into the file policy so rendition reservation/completion/failure commands reuse one pure document patch boundary.
 - Extracted multipart part manifest patch shaping from `FileService` into the file policy so part-upload commands reuse the same pure manifest write boundary as manifest parsing/upserts.
 - Extracted file metadata patch construction from `FileService` into the file policy with focused rename, privacy, attach, detach, and empty-patch coverage.

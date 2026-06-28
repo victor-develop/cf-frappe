@@ -34,6 +34,7 @@ import {
   fileObjectContentType,
   fileObjectSourceEtag,
   filePrimaryObjectKey,
+  fileSnapshotFilename,
   fileRenditionObjectCustomMetadata,
   fileRenditionId,
   fileRenditionFilename,
@@ -485,6 +486,11 @@ describe("file policy", () => {
       "acme/files/file_multipart-original.png"
     );
     expect(() => filePrimaryObjectKey(fileSnapshot({}))).toThrow("File/file_multipart has no key");
+  });
+
+  it("reads persisted file names", () => {
+    expect(fileSnapshotFilename(fileSnapshot({ filename: "invoice.pdf" }))).toBe("invoice.pdf");
+    expect(() => fileSnapshotFilename(fileSnapshot({}))).toThrow("File/file_multipart has no filename");
   });
 
   it("plans pending, failed, and completed file renditions", () => {
