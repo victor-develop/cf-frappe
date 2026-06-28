@@ -96,6 +96,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Extracted upload-pending state classification into the file policy so direct-upload and download guards read the same named state predicate.
 - Extracted scan-failed state classification into the file policy so download guards no longer compare persisted storage-state strings inline.
 - Extracted multipart operation state-set guards into the file policy so `FileService` no longer passes raw storage-state arrays for part upload, completion, or abort flows.
+- Extracted multipart completion-start event planning into the file policy so `FileService` asks whether to append the begin-completion event instead of deriving that from storage-state checks.
 - Extracted rendition manifest patch shaping from `FileService` into the file policy so rendition reservation/completion/failure commands reuse one pure document patch boundary.
 - Extracted multipart part manifest patch shaping from `FileService` into the file policy so part-upload commands reuse the same pure manifest write boundary as manifest parsing/upserts.
 - Extracted file metadata patch construction from `FileService` into the file policy with focused rename, privacy, attach, detach, and empty-patch coverage.

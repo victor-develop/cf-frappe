@@ -510,6 +510,10 @@ export function fileMultipartCompletionStartedPatch(): DocumentData {
   return { storage_state: "upload_completing" };
 }
 
+export function shouldStartFileMultipartCompletion(snapshot: DocumentSnapshot): boolean {
+  return !isFileMultipartCompletionStarted(snapshot);
+}
+
 export interface FileMetadataPatchCommand {
   readonly filename?: string;
   readonly isPrivate?: boolean;

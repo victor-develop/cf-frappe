@@ -86,7 +86,6 @@ import {
   fileTransformOverlaySource,
   fileTransformSource,
   isFileDeleteRequested,
-  isFileMultipartCompletionStarted,
   isInfectedFileScanResult,
   multipartPartManifest,
   multipartPartManifestPatch,
@@ -100,6 +99,7 @@ import {
   pendingFileRendition,
   requireFileSnapshotString,
   sanitizeFilename,
+  shouldStartFileMultipartCompletion,
   type FileRenditionManifestEntry,
 } from "./file-policy.js";
 import type { IdGenerator } from "../ports/id-generator.js";
@@ -662,9 +662,8 @@ export class FileService {
     const current = await this.multipartUploadSnapshot(command, ensureFilePendingMultipartCompletion);
     const key = requireFileSnapshotString(current, "key");
     ensureMultipartCompletionMatchesManifest(current, command.parts);
-    const completing = isFileMultipartCompletionStarted(current)
-      ? current
-      : await this.documents.execute({
+    const completing = shouldStartFileMultipartCompletion(current)
+      ? await this.documents.execute({
           actor: command.actor,
           doctype: this.fileDoctype,
           name: command.name,
@@ -673,7 +672,8 @@ export class FileService {
           ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
           ...(command.expectedVersion === undefined ? {} : { expectedVersion: command.expectedVersion }),
           metadata: command.metadata ?? {}
-        });
+        })
+      : current;
     const object = await this.completedMultipartObject({
       multipartUploads,
       snapshot: completing,

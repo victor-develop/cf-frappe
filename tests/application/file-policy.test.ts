@@ -76,6 +76,7 @@ import {
   renditionObjectKey,
   renditionSourcesMatch,
   sanitizeFilename,
+  shouldStartFileMultipartCompletion,
   upsertFileRenditionManifest,
   upsertMultipartPartManifest
 } from "../../src";
@@ -1029,6 +1030,11 @@ describe("file policy", () => {
   it("identifies multipart files already completing", () => {
     expect(isFileMultipartCompletionStarted(fileSnapshot({ storage_state: "upload_pending" }))).toBe(false);
     expect(isFileMultipartCompletionStarted(fileSnapshot({ storage_state: "upload_completing" }))).toBe(true);
+  });
+
+  it("plans multipart completion start events only before completion has started", () => {
+    expect(shouldStartFileMultipartCompletion(fileSnapshot({ storage_state: "upload_pending" }))).toBe(true);
+    expect(shouldStartFileMultipartCompletion(fileSnapshot({ storage_state: "upload_completing" }))).toBe(false);
   });
 
   it("identifies files still pending upload finalization", () => {

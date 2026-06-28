@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the multipart operation state-set guard policy module slice:
+As of the multipart completion-start event policy module slice:
 
 - Vitest files: `169`
-- Vitest cases: `1656`
+- Vitest cases: `1657`
 
 ## Implication
 
