@@ -1,4 +1,5 @@
 import {
+  canReadReport,
   createRegistry,
   defineDocType,
   defineReport,
@@ -88,6 +89,36 @@ describe("reports", () => {
 
     expect(rangeDefault).toEqual([2, 8]);
     expect(Object.isFrozen(rangeDefault)).toBe(true);
+  });
+
+  it("snapshots report roles and summary metadata by value", () => {
+    const roles = ["Analyst"];
+    const topSummary = { name: "total_count", aggregate: "sum", field: "count", type: "integer" } as const;
+    const groupSummary = { name: "rows", aggregate: "count" } as const;
+    const report = defineReport({
+      name: "Summary Snapshot",
+      doctype: "Note",
+      roles,
+      columns: [{ name: "count" }],
+      summaries: [topSummary],
+      groups: [{ name: "by_priority", field: "priority", summaries: [groupSummary] }]
+    });
+
+    roles.push("Guest");
+    (topSummary as unknown as { aggregate: "count"; field?: string }).aggregate = "count";
+    delete (topSummary as unknown as { field?: string }).field;
+    (groupSummary as unknown as { name: string }).name = "mutated_rows";
+
+    expect(report.roles).toEqual(["Analyst"]);
+    expect(report.summaries).toEqual([{ name: "total_count", aggregate: "sum", field: "count", type: "integer" }]);
+    expect(report.groups?.[0]?.summaries).toEqual([{ name: "rows", aggregate: "count" }]);
+    expect(canReadReport({ id: "analyst@example.com", roles: ["Analyst"] }, report)).toBe(true);
+    expect(canReadReport({ id: "guest@example.com", roles: ["Guest"] }, report)).toBe(false);
+    expect(Object.isFrozen(report.roles)).toBe(true);
+    expect(Object.isFrozen(report.summaries)).toBe(true);
+    expect(Object.isFrozen(report.summaries?.[0])).toBe(true);
+    expect(Object.isFrozen(report.groups?.[0]?.summaries)).toBe(true);
+    expect(Object.isFrozen(report.groups?.[0]?.summaries[0])).toBe(true);
   });
 
   it("validates report summary and group fields against the DocType", () => {

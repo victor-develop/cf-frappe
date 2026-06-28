@@ -143,13 +143,13 @@ export function defineReport(definition: ReportDefinition): ReportDefinition {
       })
     )
   );
-  const summaries = definition.summaries ? Object.freeze([...definition.summaries]) : undefined;
+  const summaries = definition.summaries ? Object.freeze(definition.summaries.map(freezeReportSummary)) : undefined;
   const groups = definition.groups
     ? Object.freeze(
         definition.groups.map((group) =>
           Object.freeze({
             ...group,
-            summaries: Object.freeze([...group.summaries])
+            summaries: Object.freeze(group.summaries.map(freezeReportSummary))
           })
         )
       )
@@ -172,7 +172,8 @@ export function defineReport(definition: ReportDefinition): ReportDefinition {
     ...(filterExpression === undefined ? {} : { filterExpression }),
     ...(summaries ? { summaries } : {}),
     ...(groups ? { groups } : {}),
-    ...(charts ? { charts } : {})
+    ...(charts ? { charts } : {}),
+    ...(definition.roles ? { roles: Object.freeze([...definition.roles]) } : {})
   });
 }
 
@@ -1033,6 +1034,10 @@ function freezeReportFormulaOperand(
 
 function isReportFormulaDefinition(operand: ReportFormulaOperand): operand is ReportFormulaDefinition {
   return typeof operand === "object" && operand !== null && !Array.isArray(operand);
+}
+
+function freezeReportSummary(summary: ReportSummaryDefinition): ReportSummaryDefinition {
+  return Object.freeze({ ...summary });
 }
 
 function freezeReportFilterExpression(expression: ReportFilterExpression): ReportFilterExpression {
