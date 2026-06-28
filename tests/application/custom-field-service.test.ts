@@ -335,6 +335,37 @@ describe("CustomFieldService", () => {
     });
   });
 
+  it("normalizes custom field link and table targets before persisting metadata events", async () => {
+    const ProjectItem = defineDocType({
+      name: "Project Item",
+      fields: [{ name: "title", type: "text" }]
+    });
+    const service = new CustomFieldService({
+      registry: createRegistry({ doctypes: [Note, Project, ProjectItem] }),
+      events: new InMemoryEventStore(),
+      ids: deterministicIds(["field-1", "field-2"]),
+      clock: fixedClock(now)
+    });
+
+    const linked = await service.saveField({
+      actor: admin,
+      doctype: "Note",
+      field: { name: "project", type: "link", linkTo: " Project " }
+    });
+    const tabled = await service.saveField({
+      actor: admin,
+      doctype: "Note",
+      expectedVersion: 1,
+      field: { name: "items", type: "table", tableOf: " Project Item " }
+    });
+
+    expect(linked.fields[0]?.field).toMatchObject({ name: "project", linkTo: "Project" });
+    expect(tabled.fields).toEqual([
+      expect.objectContaining({ field: expect.objectContaining({ name: "items", tableOf: "Project Item" }) }),
+      expect.objectContaining({ field: expect.objectContaining({ name: "project", linkTo: "Project" }) })
+    ]);
+  });
+
   it("validates custom field default values before persisting metadata events", async () => {
     const events = new InMemoryEventStore();
     const service = new CustomFieldService({

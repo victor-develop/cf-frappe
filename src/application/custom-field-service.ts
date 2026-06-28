@@ -354,6 +354,8 @@ export class CustomFieldService {
 function normalizeField(field: FieldDefinition): PersistedFieldDefinition {
   const name = normalizeRequired(field.name, "Custom field name");
   const label = field.label?.trim();
+  const linkTo = trimmedOptional(field.linkTo);
+  const tableOf = trimmedOptional(field.tableOf);
   if (typeof field.defaultValue === "function") {
     throw new FrameworkError(
       "CUSTOM_FIELD_INVALID",
@@ -388,11 +390,19 @@ function normalizeField(field: FieldDefinition): PersistedFieldDefinition {
     ...(field.inListView === undefined ? {} : { inListView: field.inListView }),
     ...(field.inListFilter === undefined ? {} : { inListFilter: field.inListFilter }),
     ...customFieldOptions(field),
-    ...(field.linkTo === undefined ? {} : { linkTo: field.linkTo }),
-    ...(field.tableOf === undefined ? {} : { tableOf: field.tableOf }),
+    ...(linkTo === undefined ? {} : { linkTo }),
+    ...(tableOf === undefined ? {} : { tableOf }),
     ...customFieldBounds(name, field),
     ...(field.defaultValue === undefined ? {} : { defaultValue: field.defaultValue })
   });
+}
+
+function trimmedOptional(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
 }
 
 function normalizeRequired(value: string, label: string): string {
