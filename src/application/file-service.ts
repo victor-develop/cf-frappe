@@ -113,7 +113,7 @@ import {
   fileRenditionManifestExecuteCommand,
   fileRenditionReservationExecuteCommand,
   fileRenditionReservationDocumentCommand,
-  fileFailedRenditionManifestCommandName,
+  fileFailedRenditionManifestRecord,
   fileRenditionSnapshotPutObjectCommand,
   fileScanFailureError,
   fileScanTarget,
@@ -136,7 +136,6 @@ import {
   fileUploadedMultipartPartResult,
   fileUploadedResult,
   fileSnapshotFilename,
-  failedFileRenditionForError,
   ignoreFileCleanupFailure,
   isInfectedFileScanResult,
   multipartPartSize,
@@ -984,13 +983,14 @@ export class FileService {
       if (cleanupKey) {
         await this.storage.delete(cleanupKey).catch(ignoreFileCleanupFailure);
       }
+      const failed = fileFailedRenditionManifestRecord({
+        pending,
+        error
+      });
       await this.recordRenditionManifest({
         source: command,
-        command: fileFailedRenditionManifestCommandName(),
-        rendition: failedFileRenditionForError({
-          pending,
-          error
-        })
+        command: failed.command,
+        rendition: failed.rendition
       }).catch(() => undefined);
       throw error;
     }

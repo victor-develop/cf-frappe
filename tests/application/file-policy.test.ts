@@ -113,6 +113,7 @@ import {
   fileScanTarget,
   fileSnapshotStringData,
   fileExpectedVersionCommandOption,
+  fileFailedRenditionManifestRecord,
   fileFailedRenditionManifestCommandName,
   fileStorageSupportsDirectUpload,
   fileUploadDocumentDataCommand,
@@ -1016,6 +1017,30 @@ describe("file policy", () => {
     expect(failedFileRenditionForError({ pending, error: "unknown failure" })).toMatchObject({
       status: "failed",
       failure_message: "unknown failure"
+    });
+  });
+
+  it("builds failed rendition manifest records from thrown values", () => {
+    const pending = pendingFileRendition({
+      snapshot: fileSnapshot({ content_type: "image/png" }),
+      tenantId: "acme",
+      id: "w64-f-webp",
+      attemptId: "attempt/1",
+      sourceEtag: "source-1",
+      options: { width: 64, format: "webp" },
+      requestedAt: "2026-06-28T00:00:00.000Z",
+      requestedBy: "owner@example.com"
+    });
+
+    expect(fileFailedRenditionManifestRecord({
+      pending,
+      error: new Error("transform exploded")
+    })).toMatchObject({
+      command: "failRendition",
+      rendition: {
+        status: "failed",
+        failure_message: "transform exploded"
+      }
     });
   });
 

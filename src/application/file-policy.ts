@@ -2219,6 +2219,19 @@ export function failedFileRenditionForError(command: {
   });
 }
 
+export function fileFailedRenditionManifestRecord(command: {
+  readonly pending: FileRenditionManifestEntry;
+  readonly error: unknown;
+}): {
+  readonly command: "failRendition";
+  readonly rendition: FileRenditionManifestEntry;
+} {
+  return {
+    command: "failRendition",
+    rendition: failedFileRenditionForError(command)
+  };
+}
+
 export function completeFileRendition(command: {
   readonly pending: FileRenditionManifestEntry;
   readonly object: FileObjectMetadata;
