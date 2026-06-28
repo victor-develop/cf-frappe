@@ -59,6 +59,7 @@ import {
 import {
   documentDeletedPayload,
   documentStatusChangedPayload,
+  requireLiveDocumentSnapshot,
   snapshotFromCommittedDocumentEvent,
   snapshotFromDocumentCreatedEvent
 } from "./document-lifecycle-events.js";
@@ -126,7 +127,6 @@ import {
 import {
   conflict,
   FrameworkError,
-  notFound,
   permissionDenied,
   validationFailed,
   type FrameworkErrorCode
@@ -1344,14 +1344,14 @@ export class DocumentService implements DocumentCommandExecutor {
     name: string
   ): Promise<{ readonly snapshot: DocumentSnapshot; readonly events: readonly DomainEvent[] }> {
     const events = await this.store.readStream(stream);
-    const existing = foldDocument(events);
-    if (!existing) {
-      throw notFound(`${doctype.name}/${name} was not found`);
-    }
-    if (existing.docstatus === "deleted") {
-      throw new FrameworkError("DOCUMENT_DELETED", `${doctype.name}/${name} was deleted`, { status: 410 });
-    }
-    return { snapshot: existing, events };
+    return {
+      snapshot: requireLiveDocumentSnapshot({
+        snapshot: foldDocument(events),
+        doctypeName: doctype.name,
+        documentName: name
+      }),
+      events
+    };
   }
 
   private async changeAssignment(options: {

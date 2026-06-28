@@ -5,6 +5,7 @@ import type {
   DocumentSnapshot,
   DomainEvent
 } from "../core/types.js";
+import { FrameworkError, notFound } from "../core/errors.js";
 
 export type DocumentLifecycleEventPayload = CoreDocumentEventPayload;
 
@@ -72,4 +73,20 @@ export function snapshotFromCommittedDocumentEvent(
     ...(projection.data !== undefined ? { data: projection.data } : {}),
     updatedAt: event.occurredAt
   };
+}
+
+export function requireLiveDocumentSnapshot(input: {
+  readonly snapshot: DocumentSnapshot | null;
+  readonly doctypeName: string;
+  readonly documentName: string;
+}): DocumentSnapshot {
+  if (!input.snapshot) {
+    throw notFound(`${input.doctypeName}/${input.documentName} was not found`);
+  }
+  if (input.snapshot.docstatus === "deleted") {
+    throw new FrameworkError("DOCUMENT_DELETED", `${input.doctypeName}/${input.documentName} was deleted`, {
+      status: 410
+    });
+  }
+  return input.snapshot;
 }

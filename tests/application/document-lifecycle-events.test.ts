@@ -5,6 +5,7 @@ import {
   documentDeletedPayload,
   documentStatusChangedPayload,
   documentUpdatedPayload,
+  requireLiveDocumentSnapshot,
   snapshotFromCommittedDocumentEvent,
   snapshotFromDocumentCreatedEvent,
   type DocumentLifecycleEventPayload,
@@ -87,6 +88,36 @@ describe("document lifecycle events", () => {
       data: { title: "Submitted" },
       updatedAt: "2026-06-28T02:00:00.000Z"
     });
+  });
+
+  it("requires live document snapshots after event-stream folds", () => {
+    expect(
+      requireLiveDocumentSnapshot({
+        snapshot: existingSnapshot,
+        doctypeName: "Note",
+        documentName: "NOTE-1"
+      })
+    ).toBe(existingSnapshot);
+  });
+
+  it("rejects missing folded document snapshots", () => {
+    expect(() =>
+      requireLiveDocumentSnapshot({
+        snapshot: null,
+        doctypeName: "Note",
+        documentName: "NOTE-404"
+      })
+    ).toThrow("Note/NOTE-404 was not found");
+  });
+
+  it("rejects deleted folded document snapshots", () => {
+    expect(() =>
+      requireLiveDocumentSnapshot({
+        snapshot: { ...existingSnapshot, docstatus: "deleted" },
+        doctypeName: "Note",
+        documentName: "NOTE-1"
+      })
+    ).toThrow("Note/NOTE-1 was deleted");
   });
 });
 

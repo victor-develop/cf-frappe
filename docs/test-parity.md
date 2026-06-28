@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document hook context policy slice:
+As of the live document fold guard slice:
 
 - Vitest files: `173`
-- Vitest cases: `2002`
-- Remaining gap to Frappe static markers: `782`
+- Vitest cases: `2005`
+- Remaining gap to Frappe static markers: `779`
 
 ## Implication
 
