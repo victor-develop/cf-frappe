@@ -16,6 +16,7 @@ import {
   type DashboardDefinition
 } from "./dashboard.js";
 import { FrameworkError } from "./errors.js";
+import { defineInstalledApp, type InstalledAppDefinition } from "./installed-app.js";
 import { normalizeListFilterExpression, normalizeListFilters } from "./list-view.js";
 import { assertKanbanDefinition, assertKanbanMatchesDocType, defineKanban, type KanbanDefinition } from "./kanban.js";
 import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-format.js";
@@ -26,7 +27,6 @@ import {
 } from "./print-format.js";
 import type { ReportDefinition, ReportSummaryDefinition } from "./reports.js";
 import { assertReportFilterValues, assertReportMatchesDocType, defineReport } from "./reports.js";
-import type { InstalledAppDefinition } from "./app.js";
 import { assertWebFormDefinition, assertWebFormMatchesDocType, defineWebForm, type WebFormDefinition } from "./web-form.js";
 import { assertWebPageDefinition, defineWebPage, type WebPageDefinition } from "./web-page.js";
 import { assertWebViewDefinition, assertWebViewMatchesDocType, defineWebView, type WebViewDefinition } from "./web-view.js";
@@ -189,13 +189,7 @@ export class ModelRegistry {
         status: 409
       });
     }
-    this.apps.set(app.name, Object.freeze({
-      name: app.name,
-      ...(app.label === undefined ? {} : { label: app.label }),
-      ...(app.version === undefined ? {} : { version: app.version }),
-      modules: Object.freeze([...(app.modules ?? [])]),
-      dependencies: Object.freeze([...(app.dependencies ?? [])])
-    }));
+    this.apps.set(app.name, defineInstalledApp(app));
   }
 
   registerDocType(doctype: DocTypeDefinition): void {

@@ -5,6 +5,7 @@ import { defineClientScript, type ClientScriptDefinition } from "./client-script
 import { defineDashboard, type DashboardDefinition } from "./dashboard.js";
 import { defineDataPatch, type DataPatchDefinition } from "./data-patch.js";
 import { defineKanban, type KanbanDefinition } from "./kanban.js";
+import { defineInstalledApp, type InstalledAppDefinition } from "./installed-app.js";
 import {
   createRegistry,
   defineDocumentHooks,
@@ -28,6 +29,8 @@ import { defineWebsiteSettings, type WebsiteSettingsDefinition } from "./website
 import { defineWebsiteTheme, type WebsiteThemeDefinition } from "./website-theme.js";
 import { defineWorkspace, type WorkspaceDefinition } from "./workspace.js";
 
+export type { InstalledAppDefinition } from "./installed-app.js";
+
 export interface FrameworkAppDefinition<TDataPatchResources = unknown> {
   readonly name: string;
   readonly label?: string;
@@ -50,14 +53,6 @@ export interface FrameworkAppDefinition<TDataPatchResources = unknown> {
   readonly clientScripts?: readonly ClientScriptDefinition[];
   readonly dataPatches?: readonly DataPatchDefinition<TDataPatchResources>[];
   readonly hooks?: Readonly<Record<string, readonly DocumentHooks[]>>;
-}
-
-export interface InstalledAppDefinition {
-  readonly name: string;
-  readonly label?: string;
-  readonly version?: string;
-  readonly modules: readonly string[];
-  readonly dependencies: readonly string[];
 }
 
 export function defineApp<TDataPatchResources = unknown>(
@@ -105,7 +100,7 @@ export function registryOptionsFromApps<TDataPatchResources = unknown>(
     }
   }
   return Object.freeze({
-    apps: Object.freeze(orderedApps.map(installedAppFromDefinition)),
+    apps: Object.freeze(orderedApps.map(defineInstalledApp)),
     doctypes: Object.freeze(orderedApps.flatMap((app) => app.doctypes ?? [])),
     letterheads: Object.freeze(orderedApps.flatMap((app) => app.letterheads ?? [])),
     printFormats: Object.freeze(orderedApps.flatMap((app) => app.printFormats ?? [])),
@@ -131,18 +126,6 @@ export function resolveAppInstallOrder<TDataPatchResources = unknown>(
   apps: readonly FrameworkAppDefinition<TDataPatchResources>[]
 ): readonly FrameworkAppDefinition<TDataPatchResources>[] {
   return resolveAppDependencyOrder(apps.map((app) => defineApp<TDataPatchResources>(app)));
-}
-
-function installedAppFromDefinition<TDataPatchResources>(
-  app: FrameworkAppDefinition<TDataPatchResources>
-): InstalledAppDefinition {
-  return Object.freeze({
-    name: app.name,
-    ...(app.label === undefined ? {} : { label: app.label }),
-    ...(app.version === undefined ? {} : { version: app.version }),
-    modules: Object.freeze([...(app.modules ?? [])]),
-    dependencies: Object.freeze([...(app.dependencies ?? [])])
-  });
 }
 
 function freezeHooks(hooks: Readonly<Record<string, readonly DocumentHooks[]>>): Readonly<Record<string, readonly DocumentHooks[]>> {

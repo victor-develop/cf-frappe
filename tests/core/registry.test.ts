@@ -42,6 +42,23 @@ describe("registry", () => {
     expect(Object.isFrozen(secondList)).toBe(true);
   });
 
+  it("snapshots registered app metadata by value", () => {
+    const modules = ["Notes"];
+    const dependencies = ["core"];
+    const registry = createRegistry({ apps: [{ name: "core", modules: ["Core"], dependencies: [] }] });
+
+    registry.registerApp({ name: "notes", label: "Notes", version: "1.0.0", modules, dependencies });
+    modules[0] = "Mutated";
+    dependencies[0] = "mutated";
+
+    expect(registry.listApps()).toEqual([
+      { name: "core", modules: ["Core"], dependencies: [] },
+      { name: "notes", label: "Notes", version: "1.0.0", modules: ["Notes"], dependencies: ["core"] }
+    ]);
+    expect(Object.isFrozen(registry.listApps()[1]?.modules)).toBe(true);
+    expect(Object.isFrozen(registry.listApps()[1]?.dependencies)).toBe(true);
+  });
+
   it("throws a framework error for unknown doctypes", () => {
     const registry = createRegistry();
 
