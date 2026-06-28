@@ -79,6 +79,7 @@ import {
   fileMultipartAbortCommand,
   fileMultipartCompletionStartedDocumentCommand,
   fileMultipartCompletionCommand,
+  fileMultipartPartRecordedExecuteCommand,
   fileMultipartPartRecordedDocumentCommand,
   fileMultipartPartUploadCommand,
   fileMultipartUploadDocumentCreateCommand,
@@ -682,16 +683,14 @@ export class FileService {
       part,
       size
     });
-    const snapshot = await this.documents.execute({
+    const snapshot = await this.documents.execute(fileMultipartPartRecordedExecuteCommand({
       actor: command.actor,
       doctype: this.fileDoctype,
       name: command.name,
-      command: recorded.command,
-      input: recorded.input,
-      ...fileTenantCommandOption(command.tenantId),
-      expectedVersion: recorded.expectedVersion,
-      metadata: fileCommandMetadata(command.metadata)
-    });
+      tenantId: command.tenantId,
+      metadata: command.metadata,
+      recorded
+    }));
     return { part, snapshot };
   }
 

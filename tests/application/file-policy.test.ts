@@ -51,6 +51,7 @@ import {
   fileMultipartCompletionStartedDocumentCommand,
   fileMultipartCompletionStartedPatch,
   fileMultipartCompletionCommand,
+  fileMultipartPartRecordedExecuteCommand,
   fileMultipartPartRecordedDocumentCommand,
   fileMultipartPartUploadCommand,
   fileMultipartUploadDocumentCreateCommand,
@@ -423,6 +424,41 @@ describe("file policy", () => {
         ]
       },
       expectedVersion: 1
+    });
+  });
+
+  it("builds multipart part record execute command inputs", () => {
+    const actor = { id: "uploader@example.com", roles: ["File Manager"], tenantId: "actor-tenant" };
+    const metadata = { source: "multipart-part" };
+    const recorded = fileMultipartPartRecordedDocumentCommand({
+      snapshot: fileSnapshot({
+        multipart_parts: [{ partNumber: 1, etag: "one", size: 5 }]
+      }),
+      part: { partNumber: 2, etag: "two" },
+      size: 7
+    });
+
+    expect(fileMultipartPartRecordedExecuteCommand({
+      actor,
+      doctype: "File",
+      name: "FILE-1",
+      tenantId: "tenant-a",
+      metadata,
+      recorded
+    })).toEqual({
+      actor,
+      doctype: "File",
+      name: "FILE-1",
+      command: "recordMultipartPart",
+      input: {
+        multipart_parts: [
+          { partNumber: 1, etag: "one", size: 5 },
+          { partNumber: 2, etag: "two", size: 7 }
+        ]
+      },
+      tenantId: "tenant-a",
+      expectedVersion: 1,
+      metadata
     });
   });
 

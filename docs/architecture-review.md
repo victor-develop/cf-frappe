@@ -138,4 +138,5 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized rendition result document-command name shaping in file policy so persisted rendition success/failure orchestration no longer derives completeRendition or failRendition command names inline.
 - Centralized rendition manifest execute-command shaping in file policy so persisted rendition success/failure orchestration no longer composes actor, tenant, metadata, expected-version, or document input inline.
 - Centralized upload completion execute-command shaping in file policy so direct and multipart upload finalization no longer duplicate actor, tenant, metadata, expected-version, or document input composition inline.
+- Centralized multipart part record execute-command shaping in file policy so part upload orchestration no longer composes actor, tenant, metadata, expected-version, or manifest input inline.
 - Centralized delete document-command intent shaping in file policy so abort and final delete orchestration no longer derive current snapshot version guards inline.

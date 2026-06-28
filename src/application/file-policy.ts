@@ -384,6 +384,37 @@ export function fileMultipartPartRecordedDocumentCommand(command: {
   };
 }
 
+export interface FileMultipartPartRecordedExecuteCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly command: "recordMultipartPart";
+  readonly input: DocumentData;
+  readonly tenantId?: string;
+  readonly expectedVersion: number;
+  readonly metadata: DocumentData;
+}
+
+export function fileMultipartPartRecordedExecuteCommand(command: {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly tenantId?: string | undefined;
+  readonly metadata?: DocumentData | undefined;
+  readonly recorded: FileMultipartPartRecordedDocumentCommand;
+}): FileMultipartPartRecordedExecuteCommand {
+  return {
+    actor: command.actor,
+    doctype: command.doctype,
+    name: command.name,
+    command: command.recorded.command,
+    input: command.recorded.input,
+    ...fileTenantCommandOption(command.tenantId),
+    expectedVersion: command.recorded.expectedVersion,
+    metadata: fileCommandMetadata(command.metadata)
+  };
+}
+
 export function ensureMultipartPartFitsReservation(
   snapshot: DocumentSnapshot,
   partNumber: number,
