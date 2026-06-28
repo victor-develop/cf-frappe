@@ -13,7 +13,7 @@ import {
   type TenantId
 } from "../core/types.js";
 import type { CustomFieldEventPayload } from "./custom-field-events.js";
-import { isJsonValue } from "../core/json.js";
+import { cloneJsonValue, isJsonValue } from "../core/json.js";
 import {
   applyCustomFieldsToDocType,
   assertCustomFieldCanExtend,
@@ -358,12 +358,16 @@ function normalizeField(field: FieldDefinition): PersistedFieldDefinition {
   const label = field.label?.trim();
   const linkTo = trimmedOptional(field.linkTo);
   const tableOf = trimmedOptional(field.tableOf);
-  if (field.defaultValue !== undefined && !isJsonValue(field.defaultValue)) {
-    throw new FrameworkError(
-      "CUSTOM_FIELD_INVALID",
-      `Custom field '${name}' defaultValue must be JSON-serializable`,
-      { status: 400 }
-    );
+  let defaultValue: PersistedFieldDefinition["defaultValue"];
+  if (field.defaultValue !== undefined) {
+    if (!isJsonValue(field.defaultValue)) {
+      throw new FrameworkError(
+        "CUSTOM_FIELD_INVALID",
+        `Custom field '${name}' defaultValue must be JSON-serializable`,
+        { status: 400 }
+      );
+    }
+    defaultValue = cloneJsonValue(field.defaultValue);
   }
   return Object.freeze({
     name,
@@ -395,7 +399,7 @@ function normalizeField(field: FieldDefinition): PersistedFieldDefinition {
     ...(linkTo === undefined ? {} : { linkTo }),
     ...(tableOf === undefined ? {} : { tableOf }),
     ...customFieldBounds(name, field),
-    ...(field.defaultValue === undefined ? {} : { defaultValue: field.defaultValue })
+    ...(defaultValue === undefined ? {} : { defaultValue })
   });
 }
 

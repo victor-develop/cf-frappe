@@ -11,7 +11,7 @@ import {
   InMemoryEventStore,
   SYSTEM_MANAGER_ROLE
 } from "../../src";
-import type { CustomFieldEventPayload, DocumentEventPayload } from "../../src";
+import type { CustomFieldEventPayload, DocumentData, DocumentEventPayload } from "../../src";
 import { owner, now } from "../helpers";
 
 const admin = {
@@ -442,6 +442,36 @@ describe("CustomFieldService", () => {
       message: "Field 'priority' must be one of Low, High"
     });
     await expect(events.readStream(customFieldsCatalogStream("acme"))).resolves.toHaveLength(1);
+  });
+
+  it("snapshots custom-field JSON default values by value", async () => {
+    const events = new InMemoryEventStore();
+    const service = new CustomFieldService({
+      registry: createRegistry({ doctypes: [Note] }),
+      events,
+      ids: deterministicIds(["field-1"]),
+      clock: fixedClock(now)
+    });
+    const defaultValue = { nested: { enabled: true } };
+
+    const saved = await service.saveField({
+      actor: admin,
+      doctype: "Note",
+      field: { name: "json_payload", type: "json", defaultValue }
+    });
+
+    defaultValue.nested.enabled = false;
+    expect(saved.fields[0]?.field.defaultValue).toEqual({ nested: { enabled: true } });
+
+    ((saved.fields[0]!.field.defaultValue as DocumentData).nested as DocumentData).enabled = false;
+    await expect(events.readStream(customFieldsCatalogStream("acme"))).resolves.toMatchObject([
+      {
+        payload: {
+          kind: "CustomFieldSaved",
+          field: { name: "json_payload", defaultValue: { nested: { enabled: true } } }
+        }
+      }
+    ]);
   });
 
   it("validates custom field numeric bounds before persisting metadata events", async () => {
