@@ -1,5 +1,5 @@
 import { D1DocumentStore, D1EventStore } from "../../src";
-import type { DocumentSnapshot, NewDomainEvent } from "../../src";
+import type { DocumentData, DocumentEventPayload, DocumentSnapshot, JsonValue, NewDomainEvent } from "../../src";
 
 describe("D1DocumentStore", () => {
   const stream = "acme:Note:One";
@@ -123,6 +123,50 @@ describe("D1DocumentStore", () => {
     expect(read?.sql).toContain("sequence <= ?");
     expect(read?.sql).toContain("ORDER BY sequence DESC LIMIT ?");
     expect(read?.params).toEqual([stream, 3, 2]);
+  });
+
+  it("snapshots D1 event payloads and metadata across append and reads", async () => {
+    const db = new FakeD1Database();
+    const store = new D1EventStore(db as unknown as D1Database);
+    const payload: Extract<DocumentEventPayload, { readonly kind: "DocumentUpdated" }> = {
+      kind: "DocumentUpdated",
+      patch: { title: "One", tags: ["first"] }
+    };
+    const metadata = { source: "desk", nested: { attempt: 1 } };
+    const [saved] = await store.append(stream, 0, [
+      {
+        ...event,
+        id: "evt-snapshot",
+        type: "NoteUpdated",
+        payload,
+        metadata
+      }
+    ]);
+
+    payload.patch.title = "mutated";
+    (payload.patch.tags as JsonValue[]).push("caller");
+    metadata.source = "mutated";
+    metadata.nested.attempt = 2;
+    ((saved!.payload as DocumentData).patch as DocumentData).title = "returned";
+    (((saved!.payload as DocumentData).patch as DocumentData).tags as JsonValue[]).push("returned");
+    (saved!.metadata as DocumentData).source = "returned";
+
+    const [firstRead] = await store.readStream(stream);
+    expect(firstRead).toMatchObject({
+      payload: { kind: "DocumentUpdated", patch: { title: "One", tags: ["first"] } },
+      metadata: { source: "desk", nested: { attempt: 1 } }
+    });
+
+    ((firstRead!.payload as DocumentData).patch as DocumentData).title = "read";
+    (((firstRead!.payload as DocumentData).patch as DocumentData).tags as JsonValue[]).push("read");
+    (firstRead!.metadata as DocumentData).source = "read";
+
+    await expect(store.searchEvents({ tenantId: "acme", payloadKinds: ["DocumentUpdated"], limit: 1 })).resolves.toMatchObject([
+      {
+        payload: { kind: "DocumentUpdated", patch: { title: "One", tags: ["first"] } },
+        metadata: { source: "desk", nested: { attempt: 1 } }
+      }
+    ]);
   });
 
   it("filters stream reads by payload kind in SQL", async () => {
