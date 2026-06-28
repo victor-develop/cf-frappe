@@ -2890,20 +2890,32 @@ export function fileGeneratedRenditionFailureCleanupKey(
   return object?.key;
 }
 
+export function fileGeneratedRenditionFailureCleanupPlan(
+  object: FileObjectMetadata | undefined
+): {
+  readonly deleteKeys: readonly string[];
+} {
+  const cleanupKey = fileGeneratedRenditionFailureCleanupKey(object);
+  return {
+    deleteKeys: cleanupKey === undefined ? [] : [cleanupKey]
+  };
+}
+
 export function fileGeneratedRenditionFailurePlan(command: {
   readonly pending: FileRenditionManifestEntry;
   readonly object: FileObjectMetadata | undefined;
   readonly error: unknown;
 }): {
-  readonly cleanupKey?: string;
+  readonly cleanup: {
+    readonly deleteKeys: readonly string[];
+  };
   readonly failed: {
     readonly command: "failRendition";
     readonly rendition: FileRenditionManifestEntry;
   };
 } {
-  const cleanupKey = fileGeneratedRenditionFailureCleanupKey(command.object);
   return {
-    ...(cleanupKey === undefined ? {} : { cleanupKey }),
+    cleanup: fileGeneratedRenditionFailureCleanupPlan(command.object),
     failed: fileFailedRenditionManifestRecord({
       pending: command.pending,
       error: command.error

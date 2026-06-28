@@ -118,6 +118,7 @@ import {
   fileGeneratedRenditionCompletionResult,
   fileGeneratedRenditionResult,
   fileGeneratedRenditionFailureCleanupKey,
+  fileGeneratedRenditionFailureCleanupPlan,
   fileGeneratedRenditionFailurePlan,
   fileGeneratedRenditionReuseDecision,
   fileGeneratedRenditionReuseResult,
@@ -1526,6 +1527,15 @@ describe("file policy", () => {
     }))).toBe("acme/file-renditions/file/thumb.webp");
   });
 
+  it("plans generated rendition failure cleanup as delete-key batches", () => {
+    expect(fileGeneratedRenditionFailureCleanupPlan(undefined)).toEqual({ deleteKeys: [] });
+    expect(fileGeneratedRenditionFailureCleanupPlan(fileObject({
+      key: "acme/file-renditions/file/thumb.webp"
+    }))).toEqual({
+      deleteKeys: ["acme/file-renditions/file/thumb.webp"]
+    });
+  });
+
   it("plans generated rendition failure cleanup and manifest records", () => {
     const pending = pendingFileRendition({
       snapshot: fileSnapshot({ content_type: "image/png" }),
@@ -1545,7 +1555,9 @@ describe("file policy", () => {
       }),
       error: new Error("transform exploded")
     })).toMatchObject({
-      cleanupKey: pending.key,
+      cleanup: {
+        deleteKeys: [pending.key]
+      },
       failed: {
         command: "failRendition",
         rendition: {
@@ -1568,7 +1580,7 @@ describe("file policy", () => {
         }
       }
     });
-    expect(beforeWrite.cleanupKey).toBeUndefined();
+    expect(beforeWrite.cleanup).toEqual({ deleteKeys: [] });
   });
 
   it("rejects duplicate pending file rendition generation", () => {

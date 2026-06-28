@@ -939,9 +939,7 @@ export class FileService {
         object,
         error
       });
-      if (failure.cleanupKey) {
-        await this.storage.delete(failure.cleanupKey).catch(ignoreFileCleanupFailure);
-      }
+      await this.deleteFileObjectsIgnoringFailures(failure.cleanup);
       await this.recordRenditionManifest({
         source: command,
         command: failure.failed.command,
