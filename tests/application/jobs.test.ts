@@ -243,6 +243,44 @@ describe("JobDispatcher", () => {
 });
 
 describe("JobExecutor", () => {
+  it("snapshots in-memory job execution records across writes and reads", async () => {
+    const executionLog = new InMemoryJobExecutionLog();
+    const message = jobMessage("reports.weekly", "job_001", "acme", {
+      payload: { week: "2026-W01", nested: { count: 1 } },
+      metadata: { source: "queue", nested: { attempt: 1 } }
+    });
+    const result = { summary: { delivered: 1 }, tags: ["weekly"] };
+
+    const started = await executionLog.begin(message, "2026-01-01T00:00:00.000Z");
+    (message.payload.nested as DocumentData).count = 2;
+    (message.metadata.nested as DocumentData).attempt = 2;
+    if (started.status === "started") {
+      (started.record.payload!.nested as DocumentData).count = 3;
+      (started.record.metadata!.nested as DocumentData).attempt = 3;
+    }
+    await executionLog.complete(message, "2026-01-01T00:01:00.000Z", result);
+    result.summary.delivered = 2;
+    result.tags.push("mutated");
+
+    const [listed] = await executionLog.list({ tenantId: "acme" });
+    expect(listed).toMatchObject({
+      payload: { week: "2026-W01", nested: { count: 1 } },
+      metadata: { source: "queue", nested: { attempt: 1 } },
+      result: { summary: { delivered: 1 }, tags: ["weekly"] }
+    });
+
+    (listed!.payload!.nested as DocumentData).count = 4;
+    (listed!.metadata!.nested as DocumentData).attempt = 4;
+    ((listed!.result as DocumentData).summary as DocumentData).delivered = 4;
+    ((listed!.result as DocumentData).tags as JsonValue[]).push("listed");
+
+    await expect(executionLog.get("reports.weekly:job_001", { tenantId: "acme" })).resolves.toMatchObject({
+      payload: { week: "2026-W01", nested: { count: 1 } },
+      metadata: { source: "queue", nested: { attempt: 1 } },
+      result: { summary: { delivered: 1 }, tags: ["weekly"] }
+    });
+  });
+
   it("passes job context and skips duplicate idempotency keys", async () => {
     const handler = vi.fn(() => "done");
     const registry = createJobRegistry<{ readonly service: string }>({

@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the job retry snapshot slice:
+As of the job execution log snapshot slice:
 
 - Vitest files: `173`
-- Vitest cases: `1934`
-- Remaining gap to Frappe static markers: `850`
+- Vitest cases: `1935`
+- Remaining gap to Frappe static markers: `849`
 
 ## Implication
 
