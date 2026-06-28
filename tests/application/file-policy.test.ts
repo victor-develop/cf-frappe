@@ -49,6 +49,7 @@ import {
   fileDashboardEntry,
   fileDashboardEntryWithPermissions,
   fileDashboardListFilters,
+  fileDashboardResult,
   fileDashboardSystemActor,
   fileDownloadedResult,
   fileDownloadedRenditionResult,
@@ -107,6 +108,7 @@ import {
   fileSnapshotStringData,
   fileExpectedVersionCommandOption,
   fileFailedRenditionManifestCommandName,
+  fileStorageSupportsDirectUpload,
   fileUploadDocumentDataCommand,
   fileIsPrivateCommandOption,
   fileUploadCompletionDocumentCommand,
@@ -2579,6 +2581,21 @@ describe("file policy", () => {
     expect(fileDashboardBatchLimit(125)).toBe(125);
   });
 
+  it("detects direct upload support from file storage ports", () => {
+    expect(fileStorageSupportsDirectUpload({})).toBe(false);
+    expect(fileStorageSupportsDirectUpload({
+      async createDirectUpload(command) {
+        return {
+          method: "PUT",
+          key: command.key,
+          url: `https://uploads.example/${command.key}`,
+          headers: {},
+          expiresAt: command.expiresAt
+        };
+      }
+    })).toBe(true);
+  });
+
   it("normalizes file dashboard filters", () => {
     expect(normalizeFileDashboardFilters({
       attachedToDoctype: " Invoice ",
@@ -2735,6 +2752,50 @@ describe("file policy", () => {
       { name: "FILE-1" },
       { name: "FILE-2" }
     ]);
+  });
+
+  it("builds final file dashboard results", () => {
+    const doctype: DocTypeDefinition = {
+      name: "File",
+      fields: [],
+      permissions: [{ roles: ["File Manager"], actions: ["create"] }]
+    };
+    const filters = { filename: "invoice", isPrivate: false };
+    const files = [
+      { name: "FILE-1" },
+      { name: "FILE-2" },
+      { name: "FILE-3" }
+    ];
+
+    expect(fileDashboardResult({
+      actor: { id: "manager@example.com", roles: ["File Manager"] },
+      doctype,
+      storage: {
+        async createDirectUpload(command) {
+          return {
+            method: "PUT",
+            key: command.key,
+            url: `https://uploads.example/${command.key}`,
+            headers: {},
+            expiresAt: command.expiresAt
+          };
+        }
+      },
+      maxUploadBytes: 1024,
+      files,
+      limit: 2,
+      filters
+    })).toEqual({
+      canUpload: true,
+      directUpload: true,
+      maxUploadBytes: 1024,
+      files: [
+        { name: "FILE-1" },
+        { name: "FILE-2" }
+      ],
+      limit: 2,
+      filters
+    });
   });
 });
 

@@ -58,7 +58,6 @@ import {
   requireMultipartFileUploads,
   requireStoredFileObject,
   requireStoredFileRenditionObject,
-  canUploadFile,
   fileBulkDeletedEntry,
   fileCompletedRenditionManifestCommandName,
   fileBufferedUploadDocumentCreateCommand,
@@ -75,9 +74,9 @@ import {
   fileDashboardBatchLimit,
   fileDashboardEntryWithPermissions,
   fileDashboardListFilters,
+  fileDashboardResult,
   fileDownloadedResult,
   fileReadableDashboardEntries,
-  fileVisibleDashboardEntries,
   fileDashboardSystemActor,
   fileBufferedUploadDocumentData,
   fileDeleteRequestedExecuteCommand,
@@ -819,14 +818,15 @@ export class FileService {
       files.push(...fileReadableDashboardEntries({ actor, doctype, readable }));
       offset += batchLimit;
     } while (files.length < limit && offset < total);
-    return {
-      canUpload: canUploadFile(actor, doctype),
-      directUpload: typeof this.storage.createDirectUpload === "function",
+    return fileDashboardResult({
+      actor,
+      doctype,
+      storage: this.storage,
       maxUploadBytes: this.maxFileBytes,
-      files: fileVisibleDashboardEntries(files, limit),
+      files,
       limit,
       filters
-    };
+    });
   }
 
   async get(actor: Actor, name: string, tenantId?: string): Promise<FileDashboardEntry> {

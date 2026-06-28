@@ -1915,6 +1915,38 @@ export function canUploadFile(actor: Actor, doctype: DocTypeDefinition): boolean
   return can(actor, doctype, "create");
 }
 
+export function fileStorageSupportsDirectUpload(
+  storage: Pick<FileStorage, "createDirectUpload">
+): boolean {
+  return typeof storage.createDirectUpload === "function";
+}
+
+export function fileDashboardResult<TEntry>(command: {
+  readonly actor: Actor;
+  readonly doctype: DocTypeDefinition;
+  readonly storage: Pick<FileStorage, "createDirectUpload">;
+  readonly maxUploadBytes: number;
+  readonly files: readonly TEntry[];
+  readonly limit: number;
+  readonly filters: FileDashboardFilters;
+}): {
+  readonly canUpload: boolean;
+  readonly directUpload: boolean;
+  readonly maxUploadBytes: number;
+  readonly files: readonly TEntry[];
+  readonly limit: number;
+  readonly filters: FileDashboardFilters;
+} {
+  return {
+    canUpload: canUploadFile(command.actor, command.doctype),
+    directUpload: fileStorageSupportsDirectUpload(command.storage),
+    maxUploadBytes: command.maxUploadBytes,
+    files: fileVisibleDashboardEntries(command.files, command.limit),
+    limit: command.limit,
+    filters: command.filters
+  };
+}
+
 export function fileDashboardSystemActor(tenantId: string): Actor {
   return { id: "__file_dashboard__", roles: [SYSTEM_MANAGER_ROLE], tenantId };
 }

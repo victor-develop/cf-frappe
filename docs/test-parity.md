@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the upload and download result shaping policy slice:
+As of the dashboard result shaping policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1722`
-- Remaining gap to Frappe static markers: `1062`
+- Vitest cases: `1724`
+- Remaining gap to Frappe static markers: `1060`
 
 ## Implication
 
