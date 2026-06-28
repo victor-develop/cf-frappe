@@ -65,6 +65,8 @@ import {
 } from "./document-lifecycle-events.js";
 import {
   activeUniqueValueOwner,
+  planUniqueValueReleaseEvent,
+  planUniqueValueReservationEvent,
   releasedUniqueValueReservations,
   uniqueReservationOwnerStillOwnsValue,
   uniqueValueReservations,
@@ -1827,33 +1829,24 @@ export class DocumentService implements DocumentCommandExecutor {
       }
       planned.push({ reservation, existing });
     }
-    return planned.map(({ reservation, existing }) => ({
-      reservation,
-      existing,
-      event: this.newEvent({
-        tenantId: reservation.tenantId,
-        stream: reservation.stream,
-        type: existing ? "UniqueValueReserved" : "UniqueValueStarted",
-        doctype: UNIQUE_VALUE_DOCTYPE,
-        documentName: `${reservation.doctype}:${reservation.field}:${reservation.valueKey}`,
-        actorId: actor.id,
-        occurredAt,
-        payload: existing
-          ? documentUpdatedPayload({
-              active: true,
-              documentName: reservation.documentName
-            })
-          : documentCreatedPayload({
-              doctype: reservation.doctype,
-              field: reservation.field,
-              value: reservation.valueLabel,
-              valueKey: reservation.valueKey,
-              documentName: reservation.documentName,
-              active: true
-            }, "draft"),
-        metadata: { target_doctype: reservation.doctype, target_field: reservation.field }
-      })
-    }));
+    return planned.map(({ reservation, existing }) => {
+      const eventPlan = planUniqueValueReservationEvent(reservation, existing);
+      return {
+        reservation,
+        existing,
+        event: this.newEvent({
+          tenantId: reservation.tenantId,
+          stream: reservation.stream,
+          type: eventPlan.eventType,
+          doctype: UNIQUE_VALUE_DOCTYPE,
+          documentName: eventPlan.documentName,
+          actorId: actor.id,
+          occurredAt,
+          payload: eventPlan.payload,
+          metadata: eventPlan.metadata
+        })
+      };
+    });
   }
 
   private projectUniqueReservationWrite(
@@ -1893,16 +1886,17 @@ export class DocumentService implements DocumentCommandExecutor {
         if (!existing || activeUniqueValueOwner(existing) !== reservation.documentName) {
           continue;
         }
+        const eventPlan = planUniqueValueReleaseEvent(reservation);
         const event = this.newEvent({
           tenantId: existing.tenantId,
           stream: reservation.stream,
-          type: "UniqueValueReleased",
+          type: eventPlan.eventType,
           doctype: UNIQUE_VALUE_DOCTYPE,
-          documentName: `${reservation.doctype}:${reservation.field}:${reservation.valueKey}`,
+          documentName: eventPlan.documentName,
           actorId: actor.id,
           occurredAt,
-          payload: documentUpdatedPayload({ active: false }),
-          metadata: { target_doctype: reservation.doctype, target_field: reservation.field }
+          payload: eventPlan.payload,
+          metadata: eventPlan.metadata
         });
         await this.store.commit(reservation.stream, existing.version, [event], ([saved]) => {
           if (!saved) {

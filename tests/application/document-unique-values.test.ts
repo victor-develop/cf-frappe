@@ -4,6 +4,8 @@ import {
   activeUniqueValueOwner,
   canonicalUniqueValue,
   defineDocType,
+  planUniqueValueReleaseEvent,
+  planUniqueValueReservationEvent,
   releasedUniqueValueReservations,
   uniqueReservationOwnerStillOwnsValue,
   uniqueValueReservations,
@@ -93,6 +95,44 @@ describe("document unique values", () => {
     const age = { ...email, stream: "acme:__UniqueValues:Contact%3Aage%3An%3A36", field: "age", valueKey: "n:36" };
 
     expect(releasedUniqueValueReservations([email, age], [email])).toEqual([age]);
+  });
+
+  it("plans unique-value reservation start and transfer events", () => {
+    const reservation = reservationFor("ada@example.com");
+
+    expect(planUniqueValueReservationEvent(reservation, null)).toEqual({
+      eventType: "UniqueValueStarted",
+      documentName: "Contact:email:s:ada@example.com",
+      payload: {
+        kind: "DocumentCreated",
+        data: {
+          doctype: "Contact",
+          field: "email",
+          value: "ada@example.com",
+          valueKey: "s:ada@example.com",
+          documentName: "ada",
+          active: true
+        },
+        docstatus: "draft"
+      },
+      metadata: { target_doctype: "Contact", target_field: "email" }
+    });
+
+    expect(planUniqueValueReservationEvent({ ...reservation, documentName: "grace" }, uniqueValueSnapshot({}))).toEqual({
+      eventType: "UniqueValueReserved",
+      documentName: "Contact:email:s:ada@example.com",
+      payload: { kind: "DocumentUpdated", patch: { active: true, documentName: "grace" } },
+      metadata: { target_doctype: "Contact", target_field: "email" }
+    });
+  });
+
+  it("plans unique-value release events", () => {
+    expect(planUniqueValueReleaseEvent(reservationFor("ada@example.com"))).toEqual({
+      eventType: "UniqueValueReleased",
+      documentName: "Contact:email:s:ada@example.com",
+      payload: { kind: "DocumentUpdated", patch: { active: false } },
+      metadata: { target_doctype: "Contact", target_field: "email" }
+    });
   });
 });
 

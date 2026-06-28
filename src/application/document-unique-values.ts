@@ -6,6 +6,11 @@ import type {
   JsonValue
 } from "../core/types.js";
 import { validationFailed } from "../core/errors.js";
+import {
+  documentCreatedPayload,
+  documentUpdatedPayload,
+  type DocumentLifecycleEventPayload
+} from "./document-lifecycle-events.js";
 
 export const UNIQUE_VALUE_DOCTYPE = "__UniqueValues";
 const MAX_UNIQUE_VALUE_KEY_LENGTH = 512;
@@ -18,6 +23,13 @@ export interface UniqueValueReservation {
   readonly valueKey: string;
   readonly valueLabel: string;
   readonly documentName: string;
+}
+
+export interface UniqueValueEventPlan {
+  readonly eventType: "UniqueValueStarted" | "UniqueValueReserved" | "UniqueValueReleased";
+  readonly documentName: string;
+  readonly payload: Extract<DocumentLifecycleEventPayload, { readonly kind: "DocumentCreated" | "DocumentUpdated" }>;
+  readonly metadata: DocumentData;
 }
 
 export function uniqueValueReservations(
@@ -107,6 +119,46 @@ export function uniqueValueReservationKey(reservation: UniqueValueReservation): 
   return `${reservation.stream}\u0000${reservation.documentName}`;
 }
 
+export function planUniqueValueReservationEvent(
+  reservation: UniqueValueReservation,
+  existing: DocumentSnapshot | null
+): UniqueValueEventPlan {
+  const documentName = uniqueValueDocumentName(reservation);
+  if (existing) {
+    return {
+      eventType: "UniqueValueReserved",
+      documentName,
+      payload: documentUpdatedPayload({
+        active: true,
+        documentName: reservation.documentName
+      }),
+      metadata: uniqueValueEventMetadata(reservation)
+    };
+  }
+  return {
+    eventType: "UniqueValueStarted",
+    documentName,
+    payload: documentCreatedPayload({
+      doctype: reservation.doctype,
+      field: reservation.field,
+      value: reservation.valueLabel,
+      valueKey: reservation.valueKey,
+      documentName: reservation.documentName,
+      active: true
+    }, "draft"),
+    metadata: uniqueValueEventMetadata(reservation)
+  };
+}
+
+export function planUniqueValueReleaseEvent(reservation: UniqueValueReservation): UniqueValueEventPlan {
+  return {
+    eventType: "UniqueValueReleased",
+    documentName: uniqueValueDocumentName(reservation),
+    payload: documentUpdatedPayload({ active: false }),
+    metadata: uniqueValueEventMetadata(reservation)
+  };
+}
+
 function boundedUniqueValue(
   key: string,
   label: string,
@@ -122,4 +174,12 @@ function boundedUniqueValue(
     ]);
   }
   return { key, label };
+}
+
+function uniqueValueDocumentName(reservation: UniqueValueReservation): string {
+  return `${reservation.doctype}:${reservation.field}:${reservation.valueKey}`;
+}
+
+function uniqueValueEventMetadata(reservation: UniqueValueReservation): DocumentData {
+  return { target_doctype: reservation.doctype, target_field: reservation.field };
 }
