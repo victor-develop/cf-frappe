@@ -584,7 +584,7 @@ export function ensureFileDeleteExpectedVersion(snapshot: DocumentSnapshot, expe
 }
 
 export function ensureFileAvailableForDownload(snapshot: DocumentSnapshot): void {
-  if (snapshot.data.storage_state === "upload_pending" || snapshot.data.storage_state === "upload_completing") {
+  if (snapshot.data.storage_state === "upload_pending" || isFileMultipartCompletionStarted(snapshot)) {
     throw new FrameworkError("FILE_UPLOAD_PENDING", `${snapshot.doctype}/${snapshot.name} upload has not been finalized`, {
       status: 409
     });
@@ -607,6 +607,10 @@ export function ensureFileNotDeleteRequested(snapshot: DocumentSnapshot): void {
 
 export function isFileDeleteRequested(snapshot: DocumentSnapshot): boolean {
   return snapshot.data.storage_state === "delete_requested";
+}
+
+export function isFileMultipartCompletionStarted(snapshot: DocumentSnapshot): boolean {
+  return snapshot.data.storage_state === "upload_completing";
 }
 
 export function ensureFilePendingDirectUpload(snapshot: DocumentSnapshot): void {

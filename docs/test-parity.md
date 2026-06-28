@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the delete-requested file state predicate policy module slice:
+As of the multipart-completing file state predicate policy module slice:
 
 - Vitest files: `169`
-- Vitest cases: `1651`
+- Vitest cases: `1652`
 
 ## Implication
 

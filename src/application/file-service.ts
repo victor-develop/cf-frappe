@@ -85,6 +85,7 @@ import {
   fileTransformOverlaySource,
   fileTransformSource,
   isFileDeleteRequested,
+  isFileMultipartCompletionStarted,
   isInfectedFileScanResult,
   multipartPartManifest,
   multipartPartManifestPatch,
@@ -660,7 +661,7 @@ export class FileService {
     const current = await this.multipartUploadSnapshot(command, ["upload_pending", "upload_completing"]);
     const key = requireFileSnapshotString(current, "key");
     ensureMultipartCompletionMatchesManifest(current, command.parts);
-    const completing = current.data.storage_state === "upload_completing"
+    const completing = isFileMultipartCompletionStarted(current)
       ? current
       : await this.documents.execute({
           actor: command.actor,
