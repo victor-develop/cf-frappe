@@ -1114,6 +1114,93 @@ describe("DataPatchService", () => {
     expect(resources.touched).toEqual(["first"]);
   });
 
+  it("snapshots data patch enqueue actors, options, and metadata by value", async () => {
+    const resources = { touched: [] as string[] };
+    const service = new DataPatchService({
+      log: new InMemoryDataPatchLog(),
+      resources,
+      patches: [
+        defineDataPatch<typeof resources>({
+          id: "core.first",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.touched.push("first");
+          }
+        }),
+        defineDataPatch<typeof resources>({
+          id: "crm.second",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.touched.push("second");
+          }
+        })
+      ]
+    });
+    const queue = new InMemoryJobQueue();
+    const queueService = new DataPatchQueueService({
+      dataPatches: service,
+      dispatcher: new JobDispatcher({
+        registry: createJobRegistry({ jobs: [createDataPatchApplyJob()] }),
+        queue,
+        clock: fixedClock(now),
+        ids: deterministicIds(["patch-snapshot"])
+      })
+    });
+    const roles = [SYSTEM_MANAGER_ROLE];
+    const actor = { id: "admin@example.com", roles, tenantId: "acme" };
+    const patchIds = ["core.first"];
+    const metadata = { source: "test", nested: { attempt: 1 } };
+    const result = await queueService.enqueue(actor, {
+      patchIds,
+      idempotencyKey: "patches:snapshot",
+      metadata
+    });
+
+    roles[0] = "Guest";
+    patchIds[0] = "core.mutated";
+    metadata.source = "mutated";
+    metadata.nested.attempt = 2;
+
+    expect(result.plan).toEqual({
+      patchIds: ["core.first"],
+      requestedPatchIds: ["core.first"]
+    });
+    expect(result.message).toMatchObject({
+      payload: {
+        actor: { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },
+        patchIds: ["core.first"]
+      },
+      metadata: {
+        source: "test",
+        nested: { attempt: 1 },
+        dispatchSource: "data-patches",
+        requestedBy: "admin@example.com"
+      }
+    });
+
+    (result.message.payload.actor.roles as string[])[0] = "Mutated";
+    (result.message.payload.patchIds as string[])[0] = "core.returned";
+    (result.message.metadata.nested as { attempt: number }).attempt = 3;
+    result.message.metadata.source = "returned";
+
+    expect(queue.queued()).toMatchObject([
+      {
+        message: {
+          payload: {
+            actor: { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },
+            patchIds: ["core.first"]
+          },
+          metadata: {
+            source: "test",
+            nested: { attempt: 1 },
+            dispatchSource: "data-patches",
+            requestedBy: "admin@example.com"
+          }
+        }
+      }
+    ]);
+  });
+
   it("enqueues validated data patch rollback plans and executes them through the built-in job", async () => {
     const resources = { applied: [] as string[], rolledBack: [] as string[] };
     const log = new InMemoryDataPatchLog();
