@@ -1011,6 +1011,21 @@ export function fileGeneratedRenditionResult(command: {
   };
 }
 
+export function fileGeneratedRenditionReuseResult(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly reuse: Extract<FileGeneratedRenditionReuseStoragePlan, { readonly kind: "check" }>;
+}): {
+  readonly snapshot: DocumentSnapshot;
+  readonly rendition: FileRenditionView;
+  readonly created: boolean;
+} {
+  return fileGeneratedRenditionResult({
+    snapshot: command.snapshot,
+    rendition: command.reuse.rendition,
+    created: false
+  });
+}
+
 export function fileDownloadedRenditionResult(command: {
   readonly snapshot: DocumentSnapshot;
   readonly rendition: FileRenditionManifestEntry;

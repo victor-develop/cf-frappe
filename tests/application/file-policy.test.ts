@@ -96,6 +96,7 @@ import {
   fileRenditionFilename,
   fileGeneratedRenditionResult,
   fileGeneratedRenditionFailureCleanupKey,
+  fileGeneratedRenditionReuseResult,
   fileGeneratedRenditionReuseStoragePlan,
   fileRenditionManifestPatch,
   fileRenditionManifestDocumentCommand,
@@ -1227,6 +1228,46 @@ describe("file policy", () => {
       renditionId: "thumb",
       sourceEtag: "source-2"
     })).toEqual({ kind: "skip" });
+  });
+
+  it("builds generated rendition reuse results", () => {
+    const available = renditionEntry("thumb", {
+      key: "acme/file-renditions/file/thumb.webp",
+      status: "available",
+      source_etag: "source-1",
+      content_type: "image/webp",
+      size: 42,
+      generated_at: "2026-06-28T01:00:00.000Z",
+      generated_by: "owner@example.com"
+    });
+    const snapshot = fileSnapshot({
+      renditions: [available]
+    });
+
+    expect(fileGeneratedRenditionReuseResult({
+      snapshot,
+      reuse: {
+        kind: "check",
+        key: available.key,
+        rendition: available
+      }
+    })).toEqual({
+      snapshot,
+      rendition: {
+        id: "thumb",
+        key: "acme/file-renditions/file/thumb.webp",
+        status: "available",
+        options: {},
+        requestedAt: "2026-06-28T00:00:00.000Z",
+        requestedBy: "owner@example.com",
+        sourceEtag: "source-1",
+        contentType: "image/webp",
+        size: 42,
+        generatedAt: "2026-06-28T01:00:00.000Z",
+        generatedBy: "owner@example.com"
+      },
+      created: false
+    });
   });
 
   it("selects generated rendition failure cleanup keys only after object writes", () => {

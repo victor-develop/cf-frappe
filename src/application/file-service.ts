@@ -107,6 +107,7 @@ import {
   filePreparedMultipartUploadResult,
   fileRenditionGenerationReservation,
   fileGeneratedRenditionFailureCleanupKey,
+  fileGeneratedRenditionReuseResult,
   fileGeneratedRenditionReuseStoragePlan,
   fileRenditionId,
   fileRenditionManifestExecuteCommand,
@@ -909,10 +910,9 @@ export class FileService {
       ...fileTransformOverlayCommandOption(overlay)
     });
     if (reuse.kind === "check" && await this.storage.head(reuse.key)) {
-      return fileGeneratedRenditionResult({
+      return fileGeneratedRenditionReuseResult({
         snapshot: downloaded.snapshot,
-        rendition: reuse.rendition,
-        created: false
+        reuse
       });
     }
 
