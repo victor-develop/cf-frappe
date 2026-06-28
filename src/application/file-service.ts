@@ -89,7 +89,7 @@ import {
   fileObjectSourceEtag,
   fileRenditionGenerationReservation,
   fileRenditionId,
-  fileRenditionManifestDocumentCommand,
+  fileRenditionManifestExecuteCommand,
   fileRenditionReservationDocumentCommand,
   fileFailedRenditionManifestCommandName,
   fileRenditionSnapshotPutObjectCommand,
@@ -1177,21 +1177,16 @@ export class FileService {
       command.source.name,
       fileCommandTenantId(command.source.actor, command.source.tenantId)
     );
-    const documentCommand = fileRenditionManifestDocumentCommand({
-      snapshot: latest,
-      command: command.command,
-      rendition: command.rendition
-    });
-    return this.documents.execute({
+    return this.documents.execute(fileRenditionManifestExecuteCommand({
       actor: command.source.actor,
       doctype: this.fileDoctype,
       name: command.source.name,
-      command: documentCommand.command,
-      input: documentCommand.input,
-      ...fileTenantCommandOption(command.source.tenantId),
-      expectedVersion: documentCommand.expectedVersion,
-      metadata: fileCommandMetadata(command.source.metadata)
-    });
+      tenantId: command.source.tenantId,
+      metadata: command.source.metadata,
+      snapshot: latest,
+      command: command.command,
+      rendition: command.rendition
+    }));
   }
 
   private async deleteFileObjects(snapshot: DocumentSnapshot): Promise<void> {

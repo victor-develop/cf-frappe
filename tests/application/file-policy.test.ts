@@ -71,6 +71,7 @@ import {
   fileRenditionFilename,
   fileRenditionManifestPatch,
   fileRenditionManifestDocumentCommand,
+  fileRenditionManifestExecuteCommand,
   fileRenditionPutObjectCommand,
   fileRenditionReservationDocumentCommand,
   fileRenditionSnapshotPutObjectCommand,
@@ -1056,6 +1057,39 @@ describe("file policy", () => {
         ]
       },
       expectedVersion: 7
+    });
+  });
+
+  it("builds rendition manifest execute command inputs", () => {
+    const actor = { id: "renderer@example.com", roles: ["File Manager"], tenantId: "actor-tenant" };
+    const metadata = { source: "rendition-worker" };
+    const replacement = renditionEntry("thumb", { status: "available" });
+
+    expect(fileRenditionManifestExecuteCommand({
+      actor,
+      doctype: "File",
+      name: "FILE-1",
+      tenantId: "tenant-a",
+      metadata,
+      snapshot: {
+        ...fileSnapshot({
+          renditions: [renditionEntry("thumb", { status: "pending" })]
+        }),
+        version: 8
+      },
+      command: "completeRendition",
+      rendition: replacement
+    })).toEqual({
+      actor,
+      doctype: "File",
+      name: "FILE-1",
+      command: "completeRendition",
+      input: {
+        renditions: [replacement]
+      },
+      tenantId: "tenant-a",
+      expectedVersion: 8,
+      metadata
     });
   });
 

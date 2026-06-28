@@ -1720,6 +1720,44 @@ export function fileRenditionManifestDocumentCommand(command: {
   };
 }
 
+export interface FileRenditionManifestExecuteCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly command: FileRenditionManifestDocumentCommandName;
+  readonly input: DocumentData;
+  readonly tenantId?: string;
+  readonly expectedVersion: number;
+  readonly metadata: DocumentData;
+}
+
+export function fileRenditionManifestExecuteCommand(command: {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly tenantId?: string | undefined;
+  readonly metadata?: DocumentData | undefined;
+  readonly snapshot: DocumentSnapshot;
+  readonly command: FileRenditionManifestDocumentCommandName;
+  readonly rendition: FileRenditionManifestEntry;
+}): FileRenditionManifestExecuteCommand {
+  const documentCommand = fileRenditionManifestDocumentCommand({
+    snapshot: command.snapshot,
+    command: command.command,
+    rendition: command.rendition
+  });
+  return {
+    actor: command.actor,
+    doctype: command.doctype,
+    name: command.name,
+    command: documentCommand.command,
+    input: documentCommand.input,
+    ...fileTenantCommandOption(command.tenantId),
+    expectedVersion: documentCommand.expectedVersion,
+    metadata: fileCommandMetadata(command.metadata)
+  };
+}
+
 export interface FileRenditionGenerationReservation {
   readonly pending: FileRenditionManifestEntry;
   readonly patch: DocumentData;
