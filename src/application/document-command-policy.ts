@@ -169,6 +169,24 @@ export function planDocumentStatusChangePolicy(
   };
 }
 
+export interface DocumentDeletePolicyPlan {
+  readonly allowedStatus: readonly DocStatus[];
+  readonly nextStatus: "deleted";
+  readonly eventType: string;
+  readonly payloadKind: "DocumentDeleted";
+}
+
+export function planDocumentDeletePolicy(
+  doctype: Pick<DocTypeDefinition, "name" | "events">
+): DocumentDeletePolicyPlan {
+  return {
+    allowedStatus: ["draft", "cancelled"],
+    nextStatus: "deleted",
+    eventType: doctype.events?.delete ?? `${doctype.name}Deleted`,
+    payloadKind: "DocumentDeleted"
+  };
+}
+
 export type DocumentCopyAction = "duplicate" | "amend";
 
 export interface DocumentCopyPolicyPlan {

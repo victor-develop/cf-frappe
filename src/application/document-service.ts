@@ -45,6 +45,7 @@ import {
   normalizeUnsetFields,
   canExecuteDomainCommandForRoles,
   planDocumentCopyPolicy,
+  planDocumentDeletePolicy,
   planDocumentStatusChangePolicy,
   planDomainCommandPolicy,
   planWorkflowTransitionPolicy
@@ -1231,14 +1232,15 @@ export class DocumentService implements DocumentCommandExecutor {
     }
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
-    ensureDocumentStatus(existing, ["draft", "cancelled"], "delete");
+    const plan = planDocumentDeletePolicy(doctype);
+    ensureDocumentStatus(existing, plan.allowedStatus, "delete");
 
     const now = this.clock.now();
     const uniqueReservations = uniqueValueReservations(tenantId, doctype, existing.data, existing.name);
     const event = this.newEvent({
       tenantId,
       stream,
-      type: doctype.events?.delete ?? `${doctype.name}Deleted`,
+      type: plan.eventType,
       doctype: doctype.name,
       documentName: command.name,
       actorId: command.actor.id,
@@ -1253,7 +1255,7 @@ export class DocumentService implements DocumentCommandExecutor {
       return {
         ...existing,
         version: saved.sequence,
-        docstatus: "deleted" as const,
+        docstatus: plan.nextStatus,
         updatedAt: saved.occurredAt
       };
     });

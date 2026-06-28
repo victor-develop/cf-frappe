@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document share event planning slice:
+As of the document delete lifecycle planning slice:
 
 - Vitest files: `173`
-- Vitest cases: `1987`
-- Remaining gap to Frappe static markers: `797`
+- Vitest cases: `1989`
+- Remaining gap to Frappe static markers: `795`
 
 ## Implication
 

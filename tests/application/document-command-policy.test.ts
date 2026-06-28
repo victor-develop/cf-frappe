@@ -8,6 +8,7 @@ import {
   mergeSnapshotFromDocument,
   normalizeUnsetFields,
   planDocumentCopyPolicy,
+  planDocumentDeletePolicy,
   planDocumentStatusChangePolicy,
   planDomainCommandPolicy,
   planWorkflowTransitionPolicy,
@@ -221,6 +222,24 @@ describe("document command policy", () => {
       nextStatus: "cancelled",
       eventType: "NoteWasCancelled",
       payloadKind: "DocumentCancelled"
+    });
+  });
+
+  it("plans delete lifecycle changes with default event names", () => {
+    expect(planDocumentDeletePolicy({ name: "Note" })).toEqual({
+      allowedStatus: ["draft", "cancelled"],
+      nextStatus: "deleted",
+      eventType: "NoteDeleted",
+      payloadKind: "DocumentDeleted"
+    });
+  });
+
+  it("plans delete lifecycle changes with custom event names", () => {
+    expect(planDocumentDeletePolicy({ name: "Note", events: { delete: "NoteWasDeleted" } })).toEqual({
+      allowedStatus: ["draft", "cancelled"],
+      nextStatus: "deleted",
+      eventType: "NoteWasDeleted",
+      payloadKind: "DocumentDeleted"
     });
   });
 
