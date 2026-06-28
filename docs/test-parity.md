@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file metadata patch guard policy module slice:
+As of the file object content identity policy module slice:
 
 - Vitest files: `169`
-- Vitest cases: `1642`
+- Vitest cases: `1644`
 
 ## Implication
 

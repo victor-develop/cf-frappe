@@ -98,3 +98,4 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Moved transform source and overlay-source shaping into file policy so transformer ports receive a single tested projection from stored file snapshots and objects.
 - Centralized upload and rendition object storage custom-metadata construction in file policy so storage adapters receive one tested metadata contract.
 - Shared file metadata patch presence validation between single-file and bulk metadata updates through the file policy.
+- Centralized file object content-type fallback, transformability checks, and source-etag selection in file policy.

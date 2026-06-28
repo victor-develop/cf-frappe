@@ -3,6 +3,7 @@ import {
   availableFileRenditionForDownload,
   completeFileRendition,
   ensureFileContentTypeTransformable,
+  ensureFileObjectTransformable,
   ensureFileSizeWithinLimit,
   ensureNoPendingFileRenditionForSource,
   ensureValidFileScanResult,
@@ -27,6 +28,8 @@ import {
   fileMultipartUploadDocumentData,
   fileMultipartUploadId,
   fileObjectKeysForDelete,
+  fileObjectContentType,
+  fileObjectSourceEtag,
   fileRenditionObjectCustomMetadata,
   fileRenditionId,
   fileRenditionFilename,
@@ -88,6 +91,23 @@ describe("file policy", () => {
     expect(() => ensureFileContentTypeTransformable("image/png", "File 'file_image'")).not.toThrow();
     expect(() => ensureFileContentTypeTransformable("text/plain", "File 'file_text'")).toThrow(
       "File 'file_text' cannot be transformed"
+    );
+  });
+
+  it("reads file object content types from object metadata before snapshots", () => {
+    const snapshot = fileSnapshot({ content_type: "image/png" });
+    expect(fileObjectContentType(snapshot, fileObject({ contentType: "image/webp" }))).toBe("image/webp");
+    const { contentType: _contentType, ...withoutContentType } = fileObject({});
+    expect(fileObjectContentType(snapshot, withoutContentType)).toBe("image/png");
+  });
+
+  it("selects file object source etags and transformability", () => {
+    const snapshot = fileSnapshot({ content_type: "image/png" });
+    expect(fileObjectSourceEtag(fileObject({ etag: "object-etag", httpEtag: '"http-etag"' }))).toBe('"http-etag"');
+    expect(fileObjectSourceEtag(fileObject({ etag: "object-etag" }))).toBe("object-etag");
+    expect(() => ensureFileObjectTransformable(snapshot, fileObject({ contentType: "image/jpeg" }), "File 'image'")).not.toThrow();
+    expect(() => ensureFileObjectTransformable(snapshot, fileObject({ contentType: "text/plain" }), "File 'text'")).toThrow(
+      "File 'text' cannot be transformed"
     );
   });
 

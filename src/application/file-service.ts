@@ -44,8 +44,8 @@ import {
   availableFileRenditionForSource,
   availableFileRenditionForDownload,
   completeFileRendition,
-  ensureFileContentTypeTransformable,
   ensureFileSizeWithinLimit,
+  ensureFileObjectTransformable,
   ensureNoPendingFileRenditionForSource,
   ensureValidFileScanResult,
   ensureFileAvailableForDownload,
@@ -68,6 +68,7 @@ import {
   fileMultipartUploadDocumentData,
   fileMultipartUploadId,
   fileObjectKeysForDelete,
+  fileObjectSourceEtag,
   fileRenditionObjectCustomMetadata,
   fileRenditionId,
   fileRenditionFilename,
@@ -839,9 +840,7 @@ export class FileService {
     }
     const downloaded = await this.download(command);
     const options = normalizeFileTransformOptions(command.options);
-    const sourceContentType = downloaded.object.metadata.contentType ??
-      requireFileSnapshotString(downloaded.snapshot, "content_type");
-    ensureFileContentTypeTransformable(sourceContentType, `File '${downloaded.snapshot.name}'`);
+    ensureFileObjectTransformable(downloaded.snapshot, downloaded.object.metadata, `File '${downloaded.snapshot.name}'`);
     const doctype = this.registry.get(this.fileDoctype);
     if (!can(command.actor, doctype, "rendition", downloaded.snapshot)) {
       throw permissionDenied(
@@ -855,7 +854,7 @@ export class FileService {
       tenantId,
       options
     });
-    const sourceEtag = downloaded.object.metadata.httpEtag ?? downloaded.object.metadata.etag;
+    const sourceEtag = fileObjectSourceEtag(downloaded.object.metadata);
     const renditionId = await fileRenditionId(options);
     const currentRenditions = fileRenditions(downloaded.snapshot);
     const existing = availableFileRenditionForSource(currentRenditions, renditionId, sourceEtag, overlay);
@@ -971,9 +970,7 @@ export class FileService {
     }
     const downloaded = await this.download(command);
     const options = normalizeFileTransformOptions(command.options);
-    const contentType = downloaded.object.metadata.contentType ??
-      requireFileSnapshotString(downloaded.snapshot, "content_type");
-    ensureFileContentTypeTransformable(contentType, `File '${downloaded.snapshot.name}'`);
+    ensureFileObjectTransformable(downloaded.snapshot, downloaded.object.metadata, `File '${downloaded.snapshot.name}'`);
     const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
     this.validateTransformOptions(options);
     const overlay = await this.resolveTransformOverlay({

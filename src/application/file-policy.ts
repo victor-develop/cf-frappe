@@ -53,6 +53,22 @@ export function ensureFileContentTypeTransformable(contentType: string, fileLabe
   }
 }
 
+export function fileObjectContentType(snapshot: DocumentSnapshot, object: FileObjectMetadata): string {
+  return object.contentType ?? requireFileSnapshotString(snapshot, "content_type");
+}
+
+export function fileObjectSourceEtag(object: FileObjectMetadata): string {
+  return object.httpEtag ?? object.etag;
+}
+
+export function ensureFileObjectTransformable(
+  snapshot: DocumentSnapshot,
+  object: FileObjectMetadata,
+  fileLabel: string
+): void {
+  ensureFileContentTypeTransformable(fileObjectContentType(snapshot, object), fileLabel);
+}
+
 export function normalizeFileSize(size: number): number {
   if (!Number.isInteger(size) || size < 0) {
     throw badRequest("size must be a non-negative integer");
@@ -786,7 +802,7 @@ export function fileTransformSource(snapshot: DocumentSnapshot, object: StoredFi
   return {
     key: object.metadata.key,
     filename: requireFileSnapshotString(snapshot, "filename"),
-    contentType: object.metadata.contentType ?? requireFileSnapshotString(snapshot, "content_type"),
+    contentType: fileObjectContentType(snapshot, object.metadata),
     size: object.metadata.size,
     body: object.body,
     etag: object.metadata.etag,
