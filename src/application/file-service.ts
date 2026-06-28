@@ -102,8 +102,8 @@ import {
   fileUploadScanFailedPatch,
   fileTenantCommandOption,
   fileTransformOverlayCommandOption,
+  fileTransformObjectCommand,
   fileTransformOverlaySource,
-  fileTransformSource,
   fileSnapshotFilename,
   failedFileRenditionForError,
   isInfectedFileScanResult,
@@ -1095,13 +1095,14 @@ export class FileService {
     readonly options: FileTransformOptions;
     readonly overlay?: FileTransformOverlaySource;
   }): Promise<TransformedFileObject> {
-    return command.transformer.transform({
+    return command.transformer.transform(fileTransformObjectCommand({
       actorId: command.actor.id,
       tenantId: command.tenantId,
-      source: fileTransformSource(command.downloaded.snapshot, command.downloaded.object),
+      snapshot: command.downloaded.snapshot,
+      object: command.downloaded.object,
       options: command.options,
       ...fileTransformOverlayCommandOption(command.overlay)
-    });
+    }));
   }
 
   private validateTransformOptions(options: FileTransformOptions): void {

@@ -16,6 +16,7 @@ import type {
   FileTransformOverlaySource,
   FileTransformer,
   FileTransformOptions,
+  TransformFileObjectCommand,
   TransformedFileObject,
   FileTransformWatermarkPlacement
 } from "../ports/file-transformer.js";
@@ -681,6 +682,23 @@ export function fileRenditionSnapshotPutObjectCommand(command: {
     sourceEtag: command.sourceEtag,
     renditionId: command.renditionId
   });
+}
+
+export function fileTransformObjectCommand(command: {
+  readonly actorId: string;
+  readonly tenantId: string;
+  readonly snapshot: DocumentSnapshot;
+  readonly object: StoredFileObject;
+  readonly options: FileTransformOptions;
+  readonly overlay?: FileTransformOverlaySource;
+}): TransformFileObjectCommand {
+  return {
+    actorId: command.actorId,
+    tenantId: command.tenantId,
+    source: fileTransformSource(command.snapshot, command.object),
+    options: command.options,
+    ...fileTransformOverlayCommandOption(command.overlay)
+  };
 }
 
 export function ensureValidFileScanResult(result: FileScanResult): void {
