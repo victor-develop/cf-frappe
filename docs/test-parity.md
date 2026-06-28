@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file upload completion command policy slice:
+As of the file multipart part record command policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1685`
-- Remaining gap to Frappe static markers: `1099`
+- Vitest cases: `1686`
+- Remaining gap to Frappe static markers: `1098`
 
 ## Implication
 

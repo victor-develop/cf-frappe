@@ -74,6 +74,7 @@ import {
   fileMultipartAbortCommand,
   fileMultipartCompletionStartedPatch,
   fileMultipartCompletionCommand,
+  fileMultipartPartRecordedDocumentCommand,
   fileMultipartPartUploadCommand,
   fileMultipartUploadDocumentData,
   fileMultipartUploadId,
@@ -106,8 +107,6 @@ import {
   fileSnapshotFilename,
   failedFileRenditionForError,
   isInfectedFileScanResult,
-  multipartPartManifest,
-  multipartPartManifestPatch,
   multipartPartSize,
   normalizeBulkFileSelections,
   normalizeFileDashboardFilters,
@@ -666,18 +665,19 @@ export class FileService {
       partNumber: command.partNumber,
       body: command.body
     }));
+    const recorded = fileMultipartPartRecordedDocumentCommand({
+      snapshot: current,
+      part,
+      size
+    });
     const snapshot = await this.documents.execute({
       actor: command.actor,
       doctype: this.fileDoctype,
       name: command.name,
-      command: "recordMultipartPart",
-      input: multipartPartManifestPatch(multipartPartManifest(current), {
-        partNumber: part.partNumber,
-        etag: part.etag,
-        size
-      }),
+      command: recorded.command,
+      input: recorded.input,
       ...fileTenantCommandOption(command.tenantId),
-      expectedVersion: current.version,
+      expectedVersion: recorded.expectedVersion,
       metadata: fileCommandMetadata(command.metadata)
     });
     return { part, snapshot };

@@ -44,6 +44,7 @@ import {
   fileMultipartAbortCommand,
   fileMultipartCompletionStartedPatch,
   fileMultipartCompletionCommand,
+  fileMultipartPartRecordedDocumentCommand,
   fileMultipartPartUploadCommand,
   fileMultipartUploadDocumentData,
   fileMultipartUploadAbortCommand,
@@ -388,6 +389,27 @@ describe("file policy", () => {
       { partNumber: 1, etag: "one", size: 1 }
     ], { partNumber: 1, etag: "one-new", size: 3 })).toEqual({
       multipart_parts: [{ partNumber: 1, etag: "one-new", size: 3 }]
+    });
+  });
+
+  it("builds multipart part record document command intents", () => {
+    const snapshot = fileSnapshot({
+      multipart_parts: [{ partNumber: 1, etag: "one", size: 5 }]
+    });
+
+    expect(fileMultipartPartRecordedDocumentCommand({
+      snapshot,
+      part: { partNumber: 2, etag: "two" },
+      size: 7
+    })).toEqual({
+      command: "recordMultipartPart",
+      input: {
+        multipart_parts: [
+          { partNumber: 1, etag: "one", size: 5 },
+          { partNumber: 2, etag: "two", size: 7 }
+        ]
+      },
+      expectedVersion: 1
     });
   });
 

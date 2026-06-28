@@ -362,6 +362,28 @@ export function multipartPartManifestPatch(
   };
 }
 
+export interface FileMultipartPartRecordedDocumentCommand {
+  readonly command: "recordMultipartPart";
+  readonly input: DocumentData;
+  readonly expectedVersion: number;
+}
+
+export function fileMultipartPartRecordedDocumentCommand(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly part: UploadedMultipartFilePart;
+  readonly size: number;
+}): FileMultipartPartRecordedDocumentCommand {
+  return {
+    command: "recordMultipartPart",
+    input: multipartPartManifestPatch(multipartPartManifest(command.snapshot), {
+      partNumber: command.part.partNumber,
+      etag: command.part.etag,
+      size: command.size
+    }),
+    expectedVersion: command.snapshot.version
+  };
+}
+
 export function ensureMultipartPartFitsReservation(
   snapshot: DocumentSnapshot,
   partNumber: number,
