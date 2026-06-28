@@ -29,6 +29,7 @@ import {
   failedFileRenditionForError,
   fileAttachedToCommandOption,
   fileAttachmentTargetForValidation,
+  fileAttachmentValidationPlan,
   fileBulkDeletedEntry,
   fileBulkDeleteDeletedOutcome,
   fileBulkDeleteEntryCommand,
@@ -266,6 +267,32 @@ describe("file policy", () => {
     expect(fileAttachmentTargetForValidation(undefined)).toBeUndefined();
     expect(fileAttachmentTargetForValidation(null)).toBeUndefined();
     expect(fileAttachmentTargetForValidation(attachedTo)).toBe(attachedTo);
+  });
+
+  it("plans attachment validation document reads", () => {
+    const actor = { id: "owner@example.com", roles: ["File Manager"], tenantId: "actor-tenant" };
+    const attachedTo = { doctype: "Invoice", name: "INV-1" };
+
+    expect(fileAttachmentValidationPlan({
+      actor,
+      tenantId: "acme",
+      attachedTo: undefined
+    })).toEqual({ kind: "skip" });
+    expect(fileAttachmentValidationPlan({
+      actor,
+      tenantId: "acme",
+      attachedTo: null
+    })).toEqual({ kind: "skip" });
+    expect(fileAttachmentValidationPlan({
+      actor,
+      tenantId: "acme",
+      attachedTo
+    })).toEqual({
+      kind: "validate",
+      actor,
+      tenantId: "acme",
+      target: attachedTo
+    });
   });
 
   it("shapes optional file privacy and transform overlay command options", () => {

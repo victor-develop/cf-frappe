@@ -89,6 +89,40 @@ export function fileAttachmentTargetForValidation<TAttachedTo extends {
   return attachedTo === undefined || attachedTo === null ? undefined : attachedTo;
 }
 
+export type FileAttachmentValidationPlan<TAttachedTo extends {
+  readonly doctype: string;
+  readonly name: string;
+}> =
+  | {
+      readonly kind: "skip";
+    }
+  | {
+      readonly kind: "validate";
+      readonly actor: Actor;
+      readonly tenantId: string;
+      readonly target: TAttachedTo;
+    };
+
+export function fileAttachmentValidationPlan<TAttachedTo extends {
+  readonly doctype: string;
+  readonly name: string;
+}>(command: {
+  readonly actor: Actor;
+  readonly tenantId: string;
+  readonly attachedTo: TAttachedTo | null | undefined;
+}): FileAttachmentValidationPlan<TAttachedTo> {
+  const target = fileAttachmentTargetForValidation(command.attachedTo);
+  if (target === undefined) {
+    return { kind: "skip" };
+  }
+  return {
+    kind: "validate",
+    actor: command.actor,
+    tenantId: command.tenantId,
+    target
+  };
+}
+
 export function fileIsPrivateCommandOption(isPrivate: boolean | undefined): { readonly isPrivate?: boolean } {
   return isPrivate === undefined ? {} : { isPrivate };
 }

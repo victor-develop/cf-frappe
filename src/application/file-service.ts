@@ -47,7 +47,7 @@ import {
   ensureFileMetadataPatchProvided,
   ensureDirectUploadMatches,
   ensureMultipartCompletionMatchesManifest,
-  fileAttachmentTargetForValidation,
+  fileAttachmentValidationPlan,
   fileBufferedUploadFailureCleanupPlan,
   requireDirectFileUploadCreator,
   requireFileObjectMetadata,
@@ -820,10 +820,7 @@ export class FileService {
       snapshot: current
     });
     const update = fileMetadataUpdateDocumentCommand(command);
-    const attachmentTarget = fileAttachmentTargetForValidation(command.attachedTo);
-    if (attachmentTarget) {
-      await this.validateAttachmentTarget(command.actor, tenantId, attachmentTarget);
-    }
+    await this.validateAttachmentTarget(command.actor, tenantId, command.attachedTo);
     return this.documents.execute(fileMetadataUpdateExecuteCommand({
       actor: command.actor,
       doctype: this.fileDoctype,
@@ -1178,13 +1175,13 @@ export class FileService {
   private async validateAttachmentTarget(
     actor: Actor,
     tenantId: string,
-    attachedTo: UploadFileCommand["attachedTo"] | undefined
+    attachedTo: UploadFileCommand["attachedTo"] | null | undefined
   ): Promise<void> {
-    const attachmentTarget = fileAttachmentTargetForValidation(attachedTo);
-    if (!attachmentTarget) {
+    const plan = fileAttachmentValidationPlan({ actor, tenantId, attachedTo });
+    if (plan.kind === "skip") {
       return;
     }
-    await this.queries.getDocument(actor, attachmentTarget.doctype, attachmentTarget.name, tenantId);
+    await this.queries.getDocument(plan.actor, plan.target.doctype, plan.target.name, plan.tenantId);
   }
 
   private requireMultipartUploads(): NonNullable<FileStorage["multipartUploads"]> {
