@@ -85,8 +85,8 @@ import {
   fileObjectSourceEtag,
   fileRenditionGenerationReservation,
   fileRenditionId,
+  fileRenditionManifestDocumentCommand,
   fileRenditionSnapshotPutObjectCommand,
-  fileRenditionSnapshotManifestPatch,
   fileRenditionView,
   fileScanFailureError,
   fileScanTarget,
@@ -1154,14 +1154,19 @@ export class FileService {
       command.source.name,
       fileCommandTenantId(command.source.actor, command.source.tenantId)
     );
+    const documentCommand = fileRenditionManifestDocumentCommand({
+      snapshot: latest,
+      command: command.command,
+      rendition: command.rendition
+    });
     return this.documents.execute({
       actor: command.source.actor,
       doctype: this.fileDoctype,
       name: command.source.name,
-      command: command.command,
-      input: fileRenditionSnapshotManifestPatch(latest, command.rendition),
+      command: documentCommand.command,
+      input: documentCommand.input,
       ...fileTenantCommandOption(command.source.tenantId),
-      expectedVersion: latest.version,
+      expectedVersion: documentCommand.expectedVersion,
       metadata: fileCommandMetadata(command.source.metadata)
     });
   }

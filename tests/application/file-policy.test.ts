@@ -64,6 +64,7 @@ import {
   fileRenditionId,
   fileRenditionFilename,
   fileRenditionManifestPatch,
+  fileRenditionManifestDocumentCommand,
   fileRenditionPutObjectCommand,
   fileRenditionSnapshotPutObjectCommand,
   fileRenditionSnapshotManifestPatch,
@@ -986,6 +987,33 @@ describe("file policy", () => {
         renditionEntry("detail"),
         replacement
       ]
+    });
+  });
+
+  it("builds rendition manifest document command intents", () => {
+    const replacement = renditionEntry("thumb", { status: "available" });
+
+    expect(fileRenditionManifestDocumentCommand({
+      snapshot: {
+        ...fileSnapshot({
+          renditions: [
+            renditionEntry("thumb", { status: "pending" }),
+            renditionEntry("detail")
+          ]
+        }),
+        version: 7
+      },
+      command: "completeRendition",
+      rendition: replacement
+    })).toEqual({
+      command: "completeRendition",
+      input: {
+        renditions: [
+          renditionEntry("detail"),
+          replacement
+        ]
+      },
+      expectedVersion: 7
     });
   });
 

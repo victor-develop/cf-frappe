@@ -1611,6 +1611,26 @@ export function fileRenditionSnapshotManifestPatch(
   return fileRenditionManifestPatch(fileRenditions(snapshot), rendition);
 }
 
+export type FileRenditionManifestDocumentCommandName = "completeRendition" | "failRendition";
+
+export interface FileRenditionManifestDocumentCommand {
+  readonly command: FileRenditionManifestDocumentCommandName;
+  readonly input: DocumentData;
+  readonly expectedVersion: number;
+}
+
+export function fileRenditionManifestDocumentCommand(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly command: FileRenditionManifestDocumentCommandName;
+  readonly rendition: FileRenditionManifestEntry;
+}): FileRenditionManifestDocumentCommand {
+  return {
+    command: command.command,
+    input: fileRenditionSnapshotManifestPatch(command.snapshot, command.rendition),
+    expectedVersion: command.snapshot.version
+  };
+}
+
 export interface FileRenditionGenerationReservation {
   readonly pending: FileRenditionManifestEntry;
   readonly patch: DocumentData;
