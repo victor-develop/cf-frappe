@@ -1,3 +1,5 @@
+import { FrameworkError } from "./errors.js";
+import { cloneJsonValue, isJsonValue } from "./json.js";
 import type { DocumentData, DocumentSnapshot, DomainEvent } from "./types.js";
 
 export function foldDocument(events: readonly DomainEvent[]): DocumentSnapshot | null {
@@ -214,7 +216,10 @@ export function applyDocumentDataChange(
 }
 
 function cloneData<TData extends DocumentData>(data: TData): TData {
-  return JSON.parse(JSON.stringify(data)) as TData;
+  if (typeof data !== "object" || data === null || Array.isArray(data) || !isJsonValue(data)) {
+    throw new FrameworkError("EVENT_INVALID", "Document event data must be a JSON object", { status: 409 });
+  }
+  return cloneJsonValue(data) as TData;
 }
 
 function cloneSnapshot(snapshot: DocumentSnapshot): DocumentSnapshot {

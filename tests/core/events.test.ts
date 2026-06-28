@@ -66,6 +66,46 @@ describe("event folding", () => {
     expect(foldDocument(events)?.data).not.toHaveProperty("legacy");
   });
 
+  it("rejects non-JSON document create data before folding projections", () => {
+    const events: DomainEvent[] = [
+      {
+        ...base,
+        sequence: 1,
+        type: "DocumentCreated",
+        payload: {
+          kind: "DocumentCreated",
+          data: { count: Number.POSITIVE_INFINITY } as never,
+          docstatus: "draft"
+        }
+      }
+    ];
+
+    expect(() => foldDocument(events)).toThrow("Document event data must be a JSON object");
+  });
+
+  it("rejects non-JSON document update patches before folding projections", () => {
+    const events: DomainEvent[] = [
+      {
+        ...base,
+        sequence: 1,
+        type: "DocumentCreated",
+        payload: { kind: "DocumentCreated", data: { title: "One" }, docstatus: "draft" }
+      },
+      {
+        ...base,
+        id: "evt2",
+        sequence: 2,
+        type: "DocumentUpdated",
+        payload: {
+          kind: "DocumentUpdated",
+          patch: { count: Number.POSITIVE_INFINITY } as never
+        }
+      }
+    ];
+
+    expect(() => foldDocument(events)).toThrow("Document event data must be a JSON object");
+  });
+
   it("marks a document deleted without losing its data", () => {
     const events: DomainEvent[] = [
       {
