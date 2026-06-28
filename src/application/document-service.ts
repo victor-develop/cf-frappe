@@ -57,10 +57,8 @@ import {
   workflowTransitionedPayload
 } from "./document-command-events.js";
 import {
-  documentCreatedPayload,
   documentDeletedPayload,
   documentStatusChangedPayload,
-  documentUpdatedPayload,
   snapshotFromDocumentCreatedEvent
 } from "./document-lifecycle-events.js";
 import {
@@ -77,6 +75,7 @@ import {
   ensureCreateNameAllowed,
   namingSeriesCurrentValue,
   NAMING_SERIES_DOCTYPE,
+  planNamingSeriesEvent,
   renderNamingSeries,
   resolveDocumentName
 } from "./document-naming.js";
@@ -1969,18 +1968,22 @@ export class DocumentService implements DocumentCommandExecutor {
       const existing = foldDocument(await this.store.readStream(stream));
       const current = namingSeriesCurrentValue(existing?.data.current) ?? 0;
       const next = current + 1;
+      const eventPlan = planNamingSeriesEvent({
+        doctypeName: doctype.name,
+        pattern,
+        next,
+        existing
+      });
       const event = this.newEvent({
         tenantId: context.tenantId,
         stream,
-        type: existing ? "NamingSeriesAdvanced" : "NamingSeriesStarted",
+        type: eventPlan.eventType,
         doctype: NAMING_SERIES_DOCTYPE,
-        documentName: `${doctype.name}:${pattern}`,
+        documentName: eventPlan.documentName,
         actorId: context.actor.id,
         occurredAt: context.now,
-        payload: existing
-          ? documentUpdatedPayload({ current: next })
-          : documentCreatedPayload({ doctype: doctype.name, pattern, current: next }, "draft"),
-        metadata: { target_doctype: doctype.name }
+        payload: eventPlan.payload,
+        metadata: eventPlan.metadata
       });
       try {
         await this.store.commit(stream, existing?.version ?? 0, [event], ([saved]) => {

@@ -5,8 +5,10 @@ import {
   deterministicIds,
   ensureCreateNameAllowed,
   namingSeriesCurrentValue,
+  planNamingSeriesEvent,
   renderNamingSeries,
-  resolveDocumentName
+  resolveDocumentName,
+  type DocumentSnapshot
 } from "../../src";
 
 describe("document naming", () => {
@@ -65,4 +67,53 @@ describe("document naming", () => {
     expect(namingSeriesCurrentValue(1.5)).toBeUndefined();
     expect(namingSeriesCurrentValue("3")).toBeUndefined();
   });
+
+  it("plans naming series start events", () => {
+    expect(
+      planNamingSeriesEvent({
+        doctypeName: "Ticket",
+        pattern: "TICK-.####",
+        next: 1,
+        existing: null
+      })
+    ).toEqual({
+      eventType: "NamingSeriesStarted",
+      documentName: "Ticket:TICK-.####",
+      payload: {
+        kind: "DocumentCreated",
+        data: { doctype: "Ticket", pattern: "TICK-.####", current: 1 },
+        docstatus: "draft"
+      },
+      metadata: { target_doctype: "Ticket" }
+    });
+  });
+
+  it("plans naming series advance events", () => {
+    expect(
+      planNamingSeriesEvent({
+        doctypeName: "Ticket",
+        pattern: "TICK-.####",
+        next: 2,
+        existing: namingSeriesSnapshot(1)
+      })
+    ).toEqual({
+      eventType: "NamingSeriesAdvanced",
+      documentName: "Ticket:TICK-.####",
+      payload: { kind: "DocumentUpdated", patch: { current: 2 } },
+      metadata: { target_doctype: "Ticket" }
+    });
+  });
 });
+
+function namingSeriesSnapshot(current: number): DocumentSnapshot {
+  return {
+    tenantId: "acme",
+    doctype: "__NamingSeries",
+    name: "Ticket:TICK-.####",
+    version: 1,
+    docstatus: "draft",
+    data: { doctype: "Ticket", pattern: "TICK-.####", current },
+    createdAt: "2026-06-28T01:00:00.000Z",
+    updatedAt: "2026-06-28T01:00:00.000Z"
+  };
+}

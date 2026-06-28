@@ -1,8 +1,20 @@
 import { FrameworkError, validationFailed } from "../core/errors.js";
-import type { DocTypeDefinition, DocumentData } from "../core/types.js";
+import type { DocTypeDefinition, DocumentData, DocumentSnapshot } from "../core/types.js";
 import type { IdGenerator } from "../ports/id-generator.js";
+import {
+  documentCreatedPayload,
+  documentUpdatedPayload,
+  type DocumentLifecycleEventPayload
+} from "./document-lifecycle-events.js";
 
 export const NAMING_SERIES_DOCTYPE = "__NamingSeries";
+
+export interface NamingSeriesEventPlan {
+  readonly eventType: "NamingSeriesStarted" | "NamingSeriesAdvanced";
+  readonly documentName: string;
+  readonly payload: Extract<DocumentLifecycleEventPayload, { readonly kind: "DocumentCreated" | "DocumentUpdated" }>;
+  readonly metadata: DocumentData;
+}
 
 export function resolveDocumentName(
   doctype: DocTypeDefinition,
@@ -58,4 +70,20 @@ export function renderNamingSeries(pattern: string, value: number): string {
 
 export function namingSeriesCurrentValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+export function planNamingSeriesEvent(input: {
+  readonly doctypeName: string;
+  readonly pattern: string;
+  readonly next: number;
+  readonly existing: DocumentSnapshot | null;
+}): NamingSeriesEventPlan {
+  return {
+    eventType: input.existing ? "NamingSeriesAdvanced" : "NamingSeriesStarted",
+    documentName: `${input.doctypeName}:${input.pattern}`,
+    payload: input.existing
+      ? documentUpdatedPayload({ current: input.next })
+      : documentCreatedPayload({ doctype: input.doctypeName, pattern: input.pattern, current: input.next }, "draft"),
+    metadata: { target_doctype: input.doctypeName }
+  };
 }
