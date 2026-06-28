@@ -186,6 +186,34 @@ describe("JobExecutor", () => {
       result: "done"
     });
   });
+
+  it("records non-JSON job handler results as failed executions", async () => {
+    const registry = createJobRegistry({
+      jobs: [{ name: "reports.weekly", handler: () => Number.POSITIVE_INFINITY }]
+    });
+    const executionLog = new InMemoryJobExecutionLog();
+    const executor = new JobExecutor({
+      registry,
+      resources: {},
+      executionLog,
+      clock: fixedClock(now)
+    });
+    const message = {
+      jobName: "reports.weekly",
+      payload: { week: "2026-W01" },
+      runId: "job_001",
+      idempotencyKey: "reports.weekly:2026-W01",
+      enqueuedAt: now,
+      metadata: {}
+    };
+
+    await expect(executor.execute(message)).rejects.toThrow("Job result must be JSON-serializable");
+    await expect(executionLog.get("reports.weekly:2026-W01")).resolves.toMatchObject({
+      status: "failed",
+      error: "Job result must be JSON-serializable"
+    });
+    await expect(executionLog.get("reports.weekly:2026-W01")).resolves.not.toHaveProperty("result");
+  });
 });
 
 describe("JobHistoryService", () => {

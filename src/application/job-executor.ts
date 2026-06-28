@@ -4,6 +4,7 @@ import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
 import type { JobExecutionLog } from "../ports/job-execution-log.js";
 import type { JobMessage } from "../ports/job-queue.js";
+import { normalizeJobHandlerResult } from "./job-payload-policy.js";
 
 export interface JobExecutorOptions<TResources = unknown> {
   readonly registry: JobRegistry<TResources>;
@@ -53,8 +54,9 @@ export class JobExecutor<TResources = unknown> {
         metadata: message.metadata,
         resources: this.resources
       });
-      await this.executionLog?.complete(message, this.clock.now(), result === undefined ? undefined : result);
-      return { status: "succeeded", result };
+      const normalizedResult = normalizeJobHandlerResult(result);
+      await this.executionLog?.complete(message, this.clock.now(), normalizedResult);
+      return { status: "succeeded", result: normalizedResult };
     } catch (error) {
       await this.executionLog?.fail(message, this.clock.now(), error);
       throw error;
