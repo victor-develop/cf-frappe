@@ -1,3 +1,5 @@
+import { FrameworkError } from "../../core/errors.js";
+import { cloneJsonValue, isJsonValue } from "../../core/json.js";
 import { DEFAULT_TENANT_ID, type JsonValue } from "../../core/types.js";
 import type {
   JobExecutionBeginResult,
@@ -91,6 +93,7 @@ export class D1JobExecutionLog implements JobExecutionLog {
   }
 
   private async save(record: JobExecutionRecord): Promise<void> {
+    const normalized = cloneRecord(record);
     await this.db
       .prepare(
         `INSERT INTO cf_frappe_job_executions
@@ -110,18 +113,18 @@ export class D1JobExecutionLog implements JobExecutionLog {
            error = excluded.error`
       )
       .bind(
-        record.tenantId,
-        record.idempotencyKey,
-        record.jobName,
-        record.runId,
-        record.payload === undefined ? null : JSON.stringify(record.payload),
-        record.metadata === undefined ? null : JSON.stringify(record.metadata),
-        record.enqueuedAt ?? null,
-        record.status,
-        record.startedAt,
-        record.finishedAt ?? null,
-        record.result === undefined ? null : JSON.stringify(record.result),
-        record.error ?? null
+        normalized.tenantId,
+        normalized.idempotencyKey,
+        normalized.jobName,
+        normalized.runId,
+        normalized.payload === undefined ? null : JSON.stringify(normalized.payload),
+        normalized.metadata === undefined ? null : JSON.stringify(normalized.metadata),
+        normalized.enqueuedAt ?? null,
+        normalized.status,
+        normalized.startedAt,
+        normalized.finishedAt ?? null,
+        normalized.result === undefined ? null : JSON.stringify(normalized.result),
+        normalized.error ?? null
       )
       .run();
   }
@@ -131,6 +134,8 @@ export class D1JobExecutionLog implements JobExecutionLog {
     tenantId: string,
     startedAt: string
   ): Promise<JobExecutionRecord | undefined> {
+    const payload = cloneJson(message.payload);
+    const metadata = cloneJson(message.metadata);
     const row = await this.db
       .prepare(
         `INSERT INTO cf_frappe_job_executions
@@ -156,14 +161,40 @@ export class D1JobExecutionLog implements JobExecutionLog {
         message.idempotencyKey,
         message.jobName,
         message.runId,
-        JSON.stringify(message.payload),
-        JSON.stringify(message.metadata),
+        JSON.stringify(payload),
+        JSON.stringify(metadata),
         message.enqueuedAt,
         startedAt
       )
       .first<JobExecutionRow>();
     return row ? jobExecutionFromRow(row) : undefined;
   }
+}
+
+function cloneRecord(record: JobExecutionRecord): JobExecutionRecord {
+  return {
+    tenantId: record.tenantId,
+    idempotencyKey: record.idempotencyKey,
+    jobName: record.jobName,
+    runId: record.runId,
+    ...(record.payload === undefined ? {} : { payload: cloneJson(record.payload) }),
+    ...(record.metadata === undefined ? {} : { metadata: cloneJson(record.metadata) }),
+    ...(record.enqueuedAt === undefined ? {} : { enqueuedAt: record.enqueuedAt }),
+    status: record.status,
+    startedAt: record.startedAt,
+    ...(record.finishedAt === undefined ? {} : { finishedAt: record.finishedAt }),
+    ...(record.result === undefined ? {} : { result: cloneJson(record.result) }),
+    ...(record.error === undefined ? {} : { error: record.error })
+  };
+}
+
+function cloneJson<TValue extends JsonValue>(value: TValue): TValue {
+  if (!isJsonValue(value)) {
+    throw new FrameworkError("JOB_EXECUTION_INVALID", "Job execution history JSON value is invalid", {
+      status: 409
+    });
+  }
+  return cloneJsonValue(value) as TValue;
 }
 
 interface PreparedJobExecutionQuery {

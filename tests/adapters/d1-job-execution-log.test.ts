@@ -143,6 +143,49 @@ describe("D1JobExecutionLog", () => {
       status: 409
     });
   });
+
+  it("rejects non-JSON D1 job execution payloads before claiming", async () => {
+    const db = new FakeD1Database();
+    const log = new D1JobExecutionLog(db as unknown as D1Database);
+    const message = jobMessage("jobs.bad", "run_001", "default", {
+      payload: { count: Number.POSITIVE_INFINITY } as never
+    });
+
+    await expect(log.begin(message, now)).rejects.toMatchObject({
+      code: "JOB_EXECUTION_INVALID",
+      status: 409
+    });
+    expect(db.records.size).toBe(0);
+  });
+
+  it("rejects non-JSON D1 job execution metadata before claiming", async () => {
+    const db = new FakeD1Database();
+    const log = new D1JobExecutionLog(db as unknown as D1Database);
+    const message = jobMessage("jobs.bad", "run_001", "default", {
+      metadata: { count: Number.POSITIVE_INFINITY } as never
+    });
+
+    await expect(log.begin(message, now)).rejects.toMatchObject({
+      code: "JOB_EXECUTION_INVALID",
+      status: 409
+    });
+    expect(db.records.size).toBe(0);
+  });
+
+  it("rejects non-JSON D1 job execution results before completing", async () => {
+    const db = new FakeD1Database();
+    const log = new D1JobExecutionLog(db as unknown as D1Database);
+    const message = jobMessage("jobs.bad", "run_001", "default");
+
+    await log.begin(message, now);
+    await expect(log.complete(message, "2026-01-01T00:01:00.000Z", Number.POSITIVE_INFINITY as never)).rejects.toMatchObject({
+      code: "JOB_EXECUTION_INVALID",
+      status: 409
+    });
+    await expect(log.get(message.idempotencyKey, { tenantId: "default" })).resolves.toMatchObject({
+      status: "running"
+    });
+  });
 });
 
 function jobMessage(

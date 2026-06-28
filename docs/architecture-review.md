@@ -148,6 +148,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Replaced stringify-based document event projection cloning with the shared guarded JSON clone, rejecting non-JSON create data and update patches before projection folds can silently coerce event payloads.
 - Centralized domain event sequencing through a guarded JSON clone, rejecting non-JSON event payloads and metadata before in-memory or D1 append and returning cloned in-memory event reads.
 - Centralized document snapshot cloning for projection stores, rejecting non-JSON projection data before in-memory or D1 writes and returning cloned in-memory read models.
+- Guarded D1 job execution history writes with JSON cloning, rejecting non-JSON payloads, metadata, and results before durable job rows can silently coerce values.
 - Extracted selected-file bulk operation normalization from `FileService` into the file policy, covering trimming, duplicates, expected-version validation, empty selections, and the bounded 100-file limit.
 - Extracted direct-upload object metadata matching and scanner result patch shaping from `FileService` into the file policy with focused size/content-type and optional scan-field coverage.
 - Extracted file dashboard row projection and limit normalization from `FileService` into the file policy with focused preview, attachment, scan, rendition, and limit coverage.
