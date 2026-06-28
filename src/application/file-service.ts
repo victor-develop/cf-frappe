@@ -115,8 +115,8 @@ import {
   fileRenditionManifestExecuteCommand,
   fileRenditionReservationExecuteCommand,
   fileGeneratedRenditionStoragePutCommand,
+  fileObjectScanTarget,
   fileScanFailureError,
-  fileScanTarget,
   fileExpectedVersionCommandOption,
   fileUploadDocumentDataCommand,
   fileUploadCompletionDocumentCommand,
@@ -1282,8 +1282,8 @@ export class FileService {
     if (!this.scanner) {
       return undefined;
     }
-    const result = await this.scanner.scan(fileScanTarget({
-      actorId: command.actor.id,
+    const result = await this.scanner.scan(fileObjectScanTarget({
+      actor: command.actor,
       tenantId: command.tenantId,
       filename: command.filename,
       source: command.source,

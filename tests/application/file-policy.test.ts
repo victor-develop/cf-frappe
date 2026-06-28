@@ -114,6 +114,7 @@ import {
   fileRenditionView,
   fileReadableDashboardCandidate,
   fileReadableDashboardEntries,
+  fileObjectScanTarget,
   fileScanFailureError,
   fileScanPatch,
   fileScanTarget,
@@ -1942,6 +1943,30 @@ describe("file policy", () => {
     });
     expect(fileScanTarget({
       actorId: "owner@example.com",
+      tenantId: "acme",
+      filename: "invoice.pdf",
+      source: "direct_upload",
+      object: objectWithoutContentType
+    })).toEqual({
+      actorId: "owner@example.com",
+      tenantId: "acme",
+      key: "acme/files/file_1-invoice.pdf",
+      filename: "invoice.pdf",
+      contentType: "application/octet-stream",
+      size: 12,
+      source: "direct_upload",
+      etag: "object-1",
+      httpEtag: '"http-etag"'
+    });
+  });
+
+  it("builds object scan targets from actors and stored object metadata", () => {
+    const { contentType: _contentType, ...objectWithoutContentType } = fileObject({
+      key: "acme/files/file_1-invoice.pdf",
+      httpEtag: '"http-etag"'
+    });
+    expect(fileObjectScanTarget({
+      actor: { id: "owner@example.com" },
       tenantId: "acme",
       filename: "invoice.pdf",
       source: "direct_upload",

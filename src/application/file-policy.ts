@@ -690,6 +690,22 @@ export function fileScanTarget(command: {
   };
 }
 
+export function fileObjectScanTarget(command: {
+  readonly actor: Pick<Actor, "id">;
+  readonly tenantId: string;
+  readonly filename: string;
+  readonly source: FileScanSource;
+  readonly object: FileObjectMetadata;
+}): FileScanTarget {
+  return fileScanTarget({
+    actorId: command.actor.id,
+    tenantId: command.tenantId,
+    filename: command.filename,
+    source: command.source,
+    object: command.object
+  });
+}
+
 export function fileUploadObjectCustomMetadata(command: {
   readonly tenantId: string;
   readonly uploadedBy: string;
