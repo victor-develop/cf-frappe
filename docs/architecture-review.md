@@ -38,6 +38,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Added Worker realtime trailing-route normalization coverage so configured routes with a trailing slash serve websocket subscriptions and presence snapshots through the same topic boundary.
 - Added a shared D1 event writer for event sequencing and `cf_frappe_events` insert serialization, now used by both `D1EventStore` and `D1DocumentStore`.
 - Added focused adapter tests for the shared writer so the DRY fix is covered directly, while existing D1 document/event store tests continue to cover behavior through the public ports.
 - Extracted pure document field mutation policy from `DocumentService` into `src/application/document-field-policy.ts`, covering readonly, allow-on-submit, unset safety, child-row origin validation, read-only child table value preservation, internal child-row field stripping, and duplicate/amend copy shaping behind focused unit tests.

@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Worker realtime custom-route coverage slice:
+As of the Worker realtime trailing-route normalization coverage slice:
 
 - Vitest files: `173`
-- Vitest cases: `1956`
-- Remaining gap to Frappe static markers: `828`
+- Vitest cases: `1958`
+- Remaining gap to Frappe static markers: `826`
 
 ## Implication
 
