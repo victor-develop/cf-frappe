@@ -31,9 +31,11 @@ import type {
   CompleteMultipartFileUploadCommand,
   CreateDirectFileUploadCommand,
   CreateMultipartFileUploadCommand,
+  DirectFileUpload,
   FileContent,
   FileObjectMetadata,
   FileStorage,
+  MultipartFileUpload,
   MultipartFileStorage,
   MultipartFilePartContent,
   PutFileObjectCommand,
@@ -864,6 +866,71 @@ export function fileTransformObjectCommand(command: {
     source: fileTransformSource(command.snapshot, command.object),
     options: command.options,
     ...fileTransformOverlayCommandOption(command.overlay)
+  };
+}
+
+export function fileUploadedResult(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly object: FileObjectMetadata;
+}): {
+  readonly snapshot: DocumentSnapshot;
+  readonly object: FileObjectMetadata;
+} {
+  return {
+    snapshot: command.snapshot,
+    object: command.object
+  };
+}
+
+export function filePreparedDirectUploadResult(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly upload: DirectFileUpload;
+}): {
+  readonly snapshot: DocumentSnapshot;
+  readonly upload: DirectFileUpload;
+} {
+  return {
+    snapshot: command.snapshot,
+    upload: command.upload
+  };
+}
+
+export function filePreparedMultipartUploadResult(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly upload: MultipartFileUpload;
+}): {
+  readonly snapshot: DocumentSnapshot;
+  readonly upload: MultipartFileUpload;
+} {
+  return {
+    snapshot: command.snapshot,
+    upload: command.upload
+  };
+}
+
+export function fileUploadedMultipartPartResult(command: {
+  readonly part: UploadedMultipartFilePart;
+  readonly snapshot: DocumentSnapshot;
+}): {
+  readonly part: UploadedMultipartFilePart;
+  readonly snapshot: DocumentSnapshot;
+} {
+  return {
+    part: command.part,
+    snapshot: command.snapshot
+  };
+}
+
+export function fileDownloadedResult(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly object: StoredFileObject;
+}): {
+  readonly snapshot: DocumentSnapshot;
+  readonly object: StoredFileObject;
+} {
+  return {
+    snapshot: command.snapshot,
+    object: command.object
   };
 }
 

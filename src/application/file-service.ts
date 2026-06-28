@@ -75,6 +75,7 @@ import {
   fileDashboardBatchLimit,
   fileDashboardEntryWithPermissions,
   fileDashboardListFilters,
+  fileDownloadedResult,
   fileReadableDashboardEntries,
   fileVisibleDashboardEntries,
   fileDashboardSystemActor,
@@ -102,6 +103,8 @@ import {
   fileObjectKeysForScanFailureCleanup,
   filePrimaryObjectKey,
   fileObjectSourceEtag,
+  filePreparedDirectUploadResult,
+  filePreparedMultipartUploadResult,
   fileRenditionGenerationReservation,
   fileRenditionId,
   fileRenditionManifestExecuteCommand,
@@ -126,6 +129,8 @@ import {
   fileTransformObjectCommand,
   fileTransformOverlaySource,
   fileTransformedFileResult,
+  fileUploadedMultipartPartResult,
+  fileUploadedResult,
   fileSnapshotFilename,
   failedFileRenditionForError,
   isInfectedFileScanResult,
@@ -523,7 +528,7 @@ export class FileService {
         metadata: command.metadata,
         create
       }));
-      return { snapshot, object };
+      return fileUploadedResult({ snapshot, object });
     } catch (error) {
       await this.storage.delete(key).catch(() => undefined);
       throw error;
@@ -573,7 +578,7 @@ export class FileService {
       metadata: command.metadata,
       create
     }));
-    return { snapshot, upload };
+    return filePreparedDirectUploadResult({ snapshot, upload });
   }
 
   async completeDirectUpload(command: CompleteDirectUploadCommand): Promise<DocumentSnapshot> {
@@ -668,7 +673,7 @@ export class FileService {
         metadata: command.metadata,
         create
       }));
-      return { snapshot, upload };
+      return filePreparedMultipartUploadResult({ snapshot, upload });
     } catch (error) {
       await multipartUploads.abortMultipartUpload(fileMultipartUploadAbortCommand({
         key,
@@ -703,7 +708,7 @@ export class FileService {
       metadata: command.metadata,
       recorded
     }));
-    return { part, snapshot };
+    return fileUploadedMultipartPartResult({ part, snapshot });
   }
 
   async completeMultipartUpload(command: CompleteMultipartUploadCommand): Promise<DocumentSnapshot> {
@@ -865,7 +870,7 @@ export class FileService {
     const snapshot = await this.availableFileSnapshot(command);
     const key = filePrimaryObjectKey(snapshot);
     const object = requireStoredFileObject(await this.storage.get(key), this.fileDoctype, command.name);
-    return { snapshot, object };
+    return fileDownloadedResult({ snapshot, object });
   }
 
   async generateRendition(command: GenerateFileRenditionCommand): Promise<GeneratedFileRendition> {

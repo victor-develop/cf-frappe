@@ -50,6 +50,7 @@ import {
   fileDashboardEntryWithPermissions,
   fileDashboardListFilters,
   fileDashboardSystemActor,
+  fileDownloadedResult,
   fileDownloadedRenditionResult,
   fileDeleteRequestedExecuteCommand,
   fileDeleteRequestedDocumentCommand,
@@ -80,6 +81,8 @@ import {
   filePendingUploadDocumentDataCommand,
   filePendingUploadDocumentData,
   filePrimaryObjectKey,
+  filePreparedDirectUploadResult,
+  filePreparedMultipartUploadResult,
   fileDirectUploadReservationCommand,
   fileSnapshotFilename,
   fileRenditionGenerationReservation,
@@ -115,6 +118,8 @@ import {
   fileUploadIsPrivate,
   fileVisibleDashboardEntries,
   fileUploadObjectCustomMetadata,
+  fileUploadedMultipartPartResult,
+  fileUploadedResult,
   fileMultipartUploadReservationCommand,
   fileUploadScanFailedDocumentData,
   fileUploadScanFailedPatch,
@@ -653,6 +658,55 @@ describe("file policy", () => {
       snapshot,
       object: object.metadata,
       transform
+    });
+  });
+
+  it("builds uploaded and downloaded file results", () => {
+    const snapshot = fileSnapshot({ filename: "invoice.pdf" });
+    const metadata = fileObject({ key: "acme/files/file_invoice-invoice.pdf" });
+    const object = storedFileObject(metadata);
+
+    expect(fileUploadedResult({ snapshot, object: metadata })).toEqual({
+      snapshot,
+      object: metadata
+    });
+    expect(fileDownloadedResult({ snapshot, object })).toEqual({
+      snapshot,
+      object
+    });
+  });
+
+  it("builds prepared direct and multipart upload results", () => {
+    const snapshot = fileSnapshot({ filename: "large.bin" });
+    const directUpload = {
+      method: "PUT" as const,
+      key: "acme/files/file_large-large.bin",
+      url: "https://uploads.example/file_large",
+      headers: { "content-type": "application/octet-stream" },
+      expiresAt: "2026-06-28T00:15:00.000Z"
+    };
+    const multipartUpload = {
+      key: "acme/files/file_large-large.bin",
+      uploadId: "upload-1"
+    };
+
+    expect(filePreparedDirectUploadResult({ snapshot, upload: directUpload })).toEqual({
+      snapshot,
+      upload: directUpload
+    });
+    expect(filePreparedMultipartUploadResult({ snapshot, upload: multipartUpload })).toEqual({
+      snapshot,
+      upload: multipartUpload
+    });
+  });
+
+  it("builds uploaded multipart part results", () => {
+    const snapshot = fileSnapshot({ filename: "large.bin" });
+    const part = { partNumber: 2, etag: "part-2" };
+
+    expect(fileUploadedMultipartPartResult({ part, snapshot })).toEqual({
+      part,
+      snapshot
     });
   });
 
