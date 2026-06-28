@@ -27,6 +27,8 @@ import {
 import type {
   FileContent,
   FileObjectMetadata,
+  FileStorage,
+  MultipartFileStorage,
   MultipartFilePartContent,
   PutFileObjectCommand,
   StoredFileObject,
@@ -65,6 +67,24 @@ export function requireFileTransformer(transformer: FileTransformer | undefined)
     throw badRequest("File transforms are not configured");
   }
   return transformer;
+}
+
+export function requireDirectFileUploadCreator(
+  createDirectUpload: FileStorage["createDirectUpload"] | undefined
+): NonNullable<FileStorage["createDirectUpload"]> {
+  if (!createDirectUpload) {
+    throw badRequest("Direct uploads are not supported by this file storage");
+  }
+  return createDirectUpload;
+}
+
+export function requireMultipartFileUploads(
+  multipartUploads: FileStorage["multipartUploads"] | undefined
+): MultipartFileStorage {
+  if (!multipartUploads) {
+    throw badRequest("Multipart uploads are not supported by this file storage");
+  }
+  return multipartUploads;
 }
 
 export function fileObjectContentType(snapshot: DocumentSnapshot, object: FileObjectMetadata): string {

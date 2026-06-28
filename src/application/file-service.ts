@@ -55,7 +55,9 @@ import {
   ensureDirectUploadMatches,
   ensureMultipartCompletionMatchesManifest,
   ensureMultipartPartFitsReservation,
+  requireDirectFileUploadCreator,
   requireFileTransformer,
+  requireMultipartFileUploads,
   canUploadFile,
   fileBulkDeleteFailure,
   fileBulkFailure,
@@ -490,9 +492,7 @@ export class FileService {
   }
 
   async prepareDirectUpload(command: PrepareDirectUploadCommand): Promise<PreparedDirectUpload> {
-    if (!this.storage.createDirectUpload) {
-      throw badRequest("Direct uploads are not supported by this file storage");
-    }
+    const createDirectUpload = requireDirectFileUploadCreator(this.storage.createDirectUpload);
     const filename = sanitizeFilename(command.filename);
     const size = normalizeFileSize(command.size);
     ensureFileSizeWithinLimit(size, this.maxFileBytes);
@@ -517,7 +517,7 @@ export class FileService {
       ...(command.attachedTo === undefined ? {} : { attachedTo: command.attachedTo })
     });
     this.preflightCreate(command.actor, data);
-    const upload = await this.storage.createDirectUpload({
+    const upload = await createDirectUpload({
       key,
       contentType,
       filename,
@@ -581,9 +581,7 @@ export class FileService {
   }
 
   async prepareMultipartUpload(command: PrepareMultipartUploadCommand): Promise<PreparedMultipartUpload> {
-    if (!this.storage.multipartUploads) {
-      throw badRequest("Multipart uploads are not supported by this file storage");
-    }
+    const multipartUploads = requireMultipartFileUploads(this.storage.multipartUploads);
     const filename = sanitizeFilename(command.filename);
     const size = normalizeFileSize(command.size);
     ensureFileSizeWithinLimit(size, this.maxFileBytes);
@@ -608,7 +606,7 @@ export class FileService {
       ...(command.attachedTo === undefined ? {} : { attachedTo: command.attachedTo })
     });
     this.preflightCreate(command.actor, baseData);
-    const upload = await this.storage.multipartUploads.createMultipartUpload({
+    const upload = await multipartUploads.createMultipartUpload({
       key,
       contentType,
       filename,
@@ -626,7 +624,7 @@ export class FileService {
       });
       return { snapshot, upload };
     } catch (error) {
-      await this.storage.multipartUploads.abortMultipartUpload({ key, uploadId: upload.uploadId }).catch(() => undefined);
+      await multipartUploads.abortMultipartUpload({ key, uploadId: upload.uploadId }).catch(() => undefined);
       throw error;
     }
   }
@@ -1171,10 +1169,7 @@ export class FileService {
   }
 
   private requireMultipartUploads(): NonNullable<FileStorage["multipartUploads"]> {
-    if (!this.storage.multipartUploads) {
-      throw badRequest("Multipart uploads are not supported by this file storage");
-    }
-    return this.storage.multipartUploads;
+    return requireMultipartFileUploads(this.storage.multipartUploads);
   }
 
   private async multipartUploadSnapshot(

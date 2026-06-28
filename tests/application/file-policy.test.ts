@@ -88,8 +88,10 @@ import {
   objectKey,
   optionalFileScanPatch,
   pendingFileRendition,
+  requireDirectFileUploadCreator,
   requireFileSnapshotString,
   requireFileTransformer,
+  requireMultipartFileUploads,
   renditionObjectKey,
   renditionSourcesMatch,
   reusableFileRenditionForGeneration,
@@ -103,6 +105,7 @@ import {
 import type {
   DocTypeDefinition,
   DocumentSnapshot,
+  FileStorage,
   FileObjectMetadata,
   FileRenditionManifestEntry,
   FileTransformer,
@@ -142,6 +145,43 @@ describe("file policy", () => {
 
     expect(requireFileTransformer(transformer)).toBe(transformer);
     expect(() => requireFileTransformer(undefined)).toThrow("File transforms are not configured");
+  });
+
+  it("requires configured direct and multipart upload storage capabilities", () => {
+    const createDirectUpload: NonNullable<FileStorage["createDirectUpload"]> = async (command) => ({
+      method: "PUT",
+      key: command.key,
+      url: `https://uploads.example/${command.key}`,
+      headers: {},
+      expiresAt: command.expiresAt
+    });
+    const multipartUploads: NonNullable<FileStorage["multipartUploads"]> = {
+      async createMultipartUpload(command) {
+        return { key: command.key, uploadId: "upload-1" };
+      },
+      async uploadMultipartPart(command) {
+        return { partNumber: command.partNumber, etag: "etag-1" };
+      },
+      async completeMultipartUpload(command) {
+        return {
+          key: command.key,
+          size: 1,
+          etag: "etag-final",
+          uploadedAt: "2026-06-28T00:00:00.000Z",
+          customMetadata: {}
+        };
+      },
+      async abortMultipartUpload() {}
+    };
+
+    expect(requireDirectFileUploadCreator(createDirectUpload)).toBe(createDirectUpload);
+    expect(requireMultipartFileUploads(multipartUploads)).toBe(multipartUploads);
+    expect(() => requireDirectFileUploadCreator(undefined)).toThrow(
+      "Direct uploads are not supported by this file storage"
+    );
+    expect(() => requireMultipartFileUploads(undefined)).toThrow(
+      "Multipart uploads are not supported by this file storage"
+    );
   });
 
   it("reads file object content types from object metadata before snapshots", () => {
