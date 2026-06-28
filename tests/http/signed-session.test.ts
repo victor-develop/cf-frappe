@@ -56,6 +56,22 @@ describe("signed session actor resolver", () => {
     await expect(resolver(new Request("http://localhost", { headers: { cookie } }))).resolves.toEqual(unicodeActor);
   });
 
+  it("rejects blank actor ids when issuing signed session cookies", async () => {
+    await expect(
+      createSignedSessionCookie(
+        { ...actor, id: " \t " },
+        {
+          secret: "test-secret",
+          now: () => 1_000,
+          maxAgeSeconds: 3_600
+        }
+      )
+    ).rejects.toMatchObject({
+      code: "PERMISSION_DENIED",
+      message: "Session actor id is invalid"
+    });
+  });
+
   it("rejects tampered and expired sessions", async () => {
     const cookie = await createSignedSessionCookie(actor, {
       secret: "test-secret",

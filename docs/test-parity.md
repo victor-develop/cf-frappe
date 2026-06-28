@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Durable Object realtime websocket JSON evidence boundary slice:
+As of the signed-session actor id boundary slice:
 
 - Vitest files: `170`
-- Vitest cases: `1810`
-- Remaining gap to Frappe static markers: `974`
+- Vitest cases: `1811`
+- Remaining gap to Frappe static markers: `973`
 
 ## Implication
 

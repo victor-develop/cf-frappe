@@ -172,6 +172,9 @@ function normalizeActor(value: unknown): Actor {
   if (!isRecord(value) || typeof value.id !== "string" || !Array.isArray(value.roles)) {
     throw permissionDenied("Session actor is invalid");
   }
+  if (value.id.trim().length === 0) {
+    throw permissionDenied("Session actor id is invalid");
+  }
   const roles = value.roles.filter((role): role is string => typeof role === "string" && role.trim().length > 0);
   if (roles.length !== value.roles.length || roles.length === 0) {
     throw permissionDenied("Session actor roles are invalid");
