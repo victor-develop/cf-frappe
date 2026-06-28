@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the field-property default-value serialization slice:
+As of the shared metadata JSON-boundary slice:
 
-- Vitest files: `170`
-- Vitest cases: `1828`
-- Remaining gap to Frappe static markers: `956`
+- Vitest files: `171`
+- Vitest cases: `1832`
+- Remaining gap to Frappe static markers: `952`
 
 ## Implication
 

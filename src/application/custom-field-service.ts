@@ -13,6 +13,7 @@ import {
   type TenantId
 } from "../core/types.js";
 import type { CustomFieldEventPayload } from "./custom-field-events.js";
+import { isJsonValue } from "../core/json.js";
 import {
   applyCustomFieldsToDocType,
   assertCustomFieldCanExtend,
@@ -357,7 +358,7 @@ function normalizeField(field: FieldDefinition): PersistedFieldDefinition {
   const label = field.label?.trim();
   const linkTo = trimmedOptional(field.linkTo);
   const tableOf = trimmedOptional(field.tableOf);
-  if (typeof field.defaultValue === "function") {
+  if (field.defaultValue !== undefined && !isJsonValue(field.defaultValue)) {
     throw new FrameworkError(
       "CUSTOM_FIELD_INVALID",
       `Custom field '${name}' defaultValue must be JSON-serializable`,

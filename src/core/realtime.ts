@@ -6,6 +6,7 @@ import {
   type DomainEvent,
   type JsonValue
 } from "./types.js";
+import { isJsonValue } from "./json.js";
 import { documentUserNotificationsFromDomainEvent } from "./notifications.js";
 export { documentUserNotificationsFromDomainEvent } from "./notifications.js";
 export type { DocumentUserNotificationPayload } from "./notifications.js";
@@ -252,7 +253,7 @@ function documentFieldEditMessage(value: unknown): DocumentFieldEditMessage | nu
   if (value.editing !== undefined && typeof value.editing !== "boolean") {
     return null;
   }
-  if (Object.prototype.hasOwnProperty.call(value, "value") && !isJsonValue(value.value)) {
+  if (Object.prototype.hasOwnProperty.call(value, "value") && !isJsonValue(value.value, { maxDepth: 8 })) {
     return null;
   }
   const message: {
@@ -330,7 +331,7 @@ function documentSharedDraftPatch(value: unknown): Readonly<Record<string, JsonV
   const patch: Record<string, JsonValue> = {};
   for (const [rawField, fieldValue] of Object.entries(value)) {
     const field = documentSharedDraftField(rawField);
-    if (!field || Object.prototype.hasOwnProperty.call(patch, field) || !isJsonValue(fieldValue)) {
+    if (!field || Object.prototype.hasOwnProperty.call(patch, field) || !isJsonValue(fieldValue, { maxDepth: 8 })) {
       return null;
     }
     patch[field] = fieldValue;
@@ -356,25 +357,6 @@ function documentSharedDraftUnset(value: unknown): readonly string[] | null {
 function documentSharedDraftField(value: string): string | null {
   const field = value.trim();
   return field.length > 0 && field.length <= 256 ? field : null;
-}
-
-function isJsonValue(value: unknown, depth = 0): value is JsonValue {
-  if (value === null || typeof value === "string" || typeof value === "boolean") {
-    return true;
-  }
-  if (typeof value === "number") {
-    return Number.isFinite(value);
-  }
-  if (depth > 8) {
-    return false;
-  }
-  if (Array.isArray(value)) {
-    return value.every((item) => isJsonValue(item, depth + 1));
-  }
-  if (!isRecord(value)) {
-    return false;
-  }
-  return Object.values(value).every((item) => isJsonValue(item, depth + 1));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

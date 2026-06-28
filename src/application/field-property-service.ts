@@ -18,6 +18,7 @@ import {
   type TenantId
 } from "../core/types.js";
 import type { FieldPropertyEventPayload } from "./field-property-events.js";
+import { isJsonValue } from "../core/json.js";
 import type { ModelRegistry } from "../core/registry.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
@@ -387,34 +388,6 @@ function optionalDefaultValue(
     );
   }
   return { defaultValue: value };
-}
-
-function isJsonValue(value: unknown, seen = new Set<object>()): value is JsonValue {
-  if (value === null || typeof value === "string" || typeof value === "boolean") {
-    return true;
-  }
-  if (typeof value === "number") {
-    return Number.isFinite(value);
-  }
-  if (Array.isArray(value)) {
-    if (seen.has(value)) {
-      return false;
-    }
-    seen.add(value);
-    return value.every((item) => isJsonValue(item, seen));
-  }
-  if (typeof value !== "object") {
-    return false;
-  }
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) {
-    return false;
-  }
-  if (seen.has(value)) {
-    return false;
-  }
-  seen.add(value);
-  return Object.values(value).every((item) => item !== undefined && isJsonValue(item, seen));
 }
 
 function normalizeRequired(value: string, label: string): string {

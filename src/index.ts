@@ -78,6 +78,7 @@ export * from "./core/file-doctype.js";
 export * from "./core/field-property-overrides.js";
 export * from "./core/form-view.js";
 export * from "./core/jobs.js";
+export * from "./core/json.js";
 export * from "./core/kanban.js";
 export * from "./core/list-view.js";
 export * from "./core/notifications.js";

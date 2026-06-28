@@ -425,6 +425,16 @@ describe("CustomFieldService", () => {
       service.saveField({
         actor: admin,
         doctype: "Note",
+        field: { name: "json_payload", type: "json", defaultValue: Number.POSITIVE_INFINITY }
+      })
+    ).rejects.toMatchObject({
+      code: "CUSTOM_FIELD_INVALID",
+      message: "Custom field 'json_payload' defaultValue must be JSON-serializable"
+    });
+    await expect(
+      service.saveField({
+        actor: admin,
+        doctype: "Note",
         field: { name: "priority", type: "select", options: ["Low", "High"], defaultValue: "Medium" }
       })
     ).rejects.toMatchObject({
