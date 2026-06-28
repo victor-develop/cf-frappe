@@ -847,6 +847,28 @@ export function fileUploadScanFailedDocumentData(
   };
 }
 
+export interface FileBufferedUploadDocumentCreateCommand {
+  readonly data: DocumentData;
+  readonly eventType?: "FileScanFailed";
+}
+
+export function fileBufferedUploadDocumentCreateCommand(command: {
+  readonly data: DocumentData;
+  readonly object: FileObjectMetadata;
+  readonly scanPatch?: DocumentData;
+  readonly infected?: boolean;
+}): FileBufferedUploadDocumentCreateCommand {
+  if (command.infected === true) {
+    return {
+      data: fileUploadScanFailedDocumentData(command.data, command.object, command.scanPatch),
+      eventType: "FileScanFailed"
+    };
+  }
+  return {
+    data: fileUploadCompletedDocumentData(command.data, command.object, command.scanPatch)
+  };
+}
+
 export type FileUploadCompletionDocumentCommandName =
   | "completeDirectUpload"
   | "completeMultipartUpload"

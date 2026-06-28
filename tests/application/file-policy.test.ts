@@ -30,6 +30,7 @@ import {
   fileAttachedToCommandOption,
   fileBulkDeleteFailure,
   fileBulkFailure,
+  fileBufferedUploadDocumentCreateCommand,
   fileBufferedUploadDocumentData,
   fileBufferedUploadPutObjectCommand,
   fileCommandMetadata,
@@ -1459,6 +1460,52 @@ describe("file policy", () => {
       etag: "object-etag",
       scan_status: "clean",
       scan_checked_at: "2026-06-28T01:00:00.000Z"
+    });
+  });
+
+  it("builds buffered-upload document create intents", () => {
+    const data = {
+      filename: "invoice.pdf",
+      key: "acme/files/file_1-invoice.pdf",
+      content_type: "application/pdf",
+      size: 42,
+      is_private: true,
+      uploaded_by: "owner@example.com",
+      uploaded_at: "2026-06-28T00:00:00.000Z",
+      storage_state: "available"
+    };
+    const object = fileObject({ etag: "object-etag", httpEtag: '"http-etag"' });
+    const scanPatch = fileScanPatch({ status: "infected", message: "signature" }, "2026-06-28T01:00:00.000Z");
+
+    expect(fileBufferedUploadDocumentCreateCommand({
+      data,
+      object,
+      scanPatch
+    })).toEqual({
+      data: {
+        ...data,
+        storage_state: "available",
+        etag: '"http-etag"',
+        scan_status: "infected",
+        scan_message: "signature",
+        scan_checked_at: "2026-06-28T01:00:00.000Z"
+      }
+    });
+    expect(fileBufferedUploadDocumentCreateCommand({
+      data,
+      object,
+      scanPatch,
+      infected: true
+    })).toEqual({
+      data: {
+        ...data,
+        storage_state: "scan_failed",
+        etag: '"http-etag"',
+        scan_status: "infected",
+        scan_message: "signature",
+        scan_checked_at: "2026-06-28T01:00:00.000Z"
+      },
+      eventType: "FileScanFailed"
     });
   });
 

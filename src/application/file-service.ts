@@ -60,6 +60,7 @@ import {
   requireStoredFileObject,
   requireStoredFileRenditionObject,
   canUploadFile,
+  fileBufferedUploadDocumentCreateCommand,
   fileBulkDeleteFailure,
   fileBulkFailure,
   fileBufferedUploadPutObjectCommand,
@@ -93,14 +94,12 @@ import {
   fileExpectedVersionCommandOption,
   fileIsPrivateCommandOption,
   fileUploadCompletionDocumentCommand,
-  fileUploadCompletedDocumentData,
   fileUploadContentType,
   fileUploadExpiresAt,
   fileDirectUploadReservationCommand,
   filePendingUploadDocumentData,
   fileMultipartUploadAbortCommand,
   fileMultipartUploadReservationCommand,
-  fileUploadScanFailedDocumentData,
   fileTenantCommandOption,
   fileTransformOverlayCommandOption,
   fileTransformObjectCommand,
@@ -477,14 +476,20 @@ export class FileService {
 
     try {
       const scanPatch = optionalFileScanPatch(scan, this.clock.now());
+      const create = fileBufferedUploadDocumentCreateCommand({
+        data,
+        object,
+        scanPatch,
+        infected: isInfectedFileScanResult(scan)
+      });
       if (isInfectedFileScanResult(scan)) {
         const snapshot = await this.documents.create({
           actor: command.actor,
           doctype: this.fileDoctype,
           name: fileName,
           tenantId,
-          data: fileUploadScanFailedDocumentData(data, object, scanPatch),
-          eventType: "FileScanFailed",
+          data: create.data,
+          ...(create.eventType === undefined ? {} : { eventType: create.eventType }),
           metadata: fileCommandMetadata(command.metadata)
         });
         throw fileScanFailureError(scan, snapshot);
@@ -494,7 +499,8 @@ export class FileService {
         doctype: this.fileDoctype,
         name: fileName,
         tenantId,
-        data: fileUploadCompletedDocumentData(data, object, scanPatch),
+        data: create.data,
+        ...(create.eventType === undefined ? {} : { eventType: create.eventType }),
         metadata: fileCommandMetadata(command.metadata)
       });
       return { snapshot, object };
