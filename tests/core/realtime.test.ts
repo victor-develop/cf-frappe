@@ -190,6 +190,34 @@ describe("realtime topics", () => {
     ).toBeNull();
   });
 
+  it("snapshots transient field-edit values inside document realtime payloads", () => {
+    const value = { nested: { count: 1 } };
+    const event = realtimeEventFromDocumentFieldEdit({
+      id: "edit-snapshot",
+      topic: documentRealtimeTopic("acme", "Task", "TASK-1"),
+      connection: {
+        connectionId: "conn-1",
+        tenantId: "acme",
+        userId: "owner@example.com"
+      },
+      message: {
+        type: DOCUMENT_FIELD_EDIT_MESSAGE_TYPE,
+        field: "payload",
+        value
+      },
+      occurredAt: now
+    })!;
+
+    value.nested.count = 2;
+
+    expect(event.payload).toMatchObject({
+      value: { nested: { count: 1 } }
+    });
+
+    (((event.payload as DocumentData).value as DocumentData).nested as DocumentData).count = 3;
+    expect(value).toEqual({ nested: { count: 2 } });
+  });
+
   it("models transient shared draft patches as document-scoped collaboration events", () => {
     expect(
       realtimeEventFromDocumentSharedDraft({
@@ -255,6 +283,40 @@ describe("realtime topics", () => {
         occurredAt: now
       })
     ).toBeNull();
+  });
+
+  it("snapshots transient shared draft patches inside document realtime payloads", () => {
+    const patch = { " payload ": { nested: { count: 1 } } };
+    const unset = [" obsolete "];
+    const event = realtimeEventFromDocumentSharedDraft({
+      id: "draft-snapshot",
+      topic: documentRealtimeTopic("acme", "Task", "TASK-1"),
+      connection: {
+        connectionId: "conn-1",
+        tenantId: "acme",
+        userId: "owner@example.com"
+      },
+      message: {
+        type: DOCUMENT_SHARED_DRAFT_MESSAGE_TYPE,
+        patch,
+        unset
+      },
+      occurredAt: now
+    })!;
+
+    patch[" payload "].nested.count = 2;
+    unset.push("later");
+
+    expect(event.payload).toMatchObject({
+      patch: { payload: { nested: { count: 1 } } },
+      unset: ["obsolete"]
+    });
+
+    const payload = event.payload as DocumentData;
+    (((payload.patch as DocumentData).payload as DocumentData).nested as DocumentData).count = 3;
+    (payload.unset as JsonValue[]).push("returned");
+    expect(patch).toEqual({ " payload ": { nested: { count: 2 } } });
+    expect(unset).toEqual([" obsolete ", "later"]);
   });
 
   it("builds redacted user notifications only for user-recipient events", () => {

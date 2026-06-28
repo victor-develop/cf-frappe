@@ -285,7 +285,7 @@ function documentFieldEditMessage(value: unknown): DocumentFieldEditMessage | nu
     message.editing = value.editing;
   }
   if (Object.prototype.hasOwnProperty.call(value, "value")) {
-    message.value = value.value as JsonValue;
+    message.value = cloneJsonValue(value.value as JsonValue);
   }
   if (JSON.stringify(message).length > 16_384) {
     return null;
@@ -350,7 +350,7 @@ function documentSharedDraftPatch(value: unknown): Readonly<Record<string, JsonV
     if (!field || Object.prototype.hasOwnProperty.call(patch, field) || !isJsonValue(fieldValue, { maxDepth: 8 })) {
       return null;
     }
-    patch[field] = fieldValue;
+    patch[field] = cloneJsonValue(fieldValue);
   }
   return patch;
 }
