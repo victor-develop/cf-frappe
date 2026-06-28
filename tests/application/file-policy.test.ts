@@ -63,6 +63,7 @@ import {
   normalizeFileDashboardLimit,
   normalizeFileSize,
   objectKey,
+  optionalFileScanPatch,
   pendingFileRendition,
   requireFileSnapshotString,
   renditionObjectKey,
@@ -679,6 +680,14 @@ describe("file policy", () => {
       scan_checked_at: "2026-06-28T02:00:00.000Z",
       scan_engine: "unit-av",
       scan_message: "EICAR"
+    });
+  });
+
+  it("omits scan patches when no scanner result exists", () => {
+    expect(optionalFileScanPatch(undefined, "2026-06-28T01:00:00.000Z")).toEqual({});
+    expect(optionalFileScanPatch({ status: "clean" }, "2026-06-28T01:00:00.000Z")).toEqual({
+      scan_status: "clean",
+      scan_checked_at: "2026-06-28T01:00:00.000Z"
     });
   });
 

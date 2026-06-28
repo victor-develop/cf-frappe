@@ -75,7 +75,6 @@ import {
   fileRenditions,
   fileRenditionView,
   fileScanFailureError,
-  fileScanPatch,
   fileScanTarget,
   fileUploadCompletedPatch,
   fileUploadCompletedDocumentData,
@@ -93,6 +92,7 @@ import {
   normalizeFileDashboardLimit,
   normalizeFileSize,
   objectKey,
+  optionalFileScanPatch,
   pendingFileRendition,
   requireFileSnapshotString,
   sanitizeFilename,
@@ -454,7 +454,7 @@ export class FileService {
     }
 
     try {
-      const scanPatch = scan ? fileScanPatch(scan, this.clock.now()) : {};
+      const scanPatch = optionalFileScanPatch(scan, this.clock.now());
       if (scan?.status === "infected") {
         const snapshot = await this.documents.create({
           actor: command.actor,
@@ -546,7 +546,7 @@ export class FileService {
       source: "direct_upload",
       object
     });
-    const scanPatch = scan ? fileScanPatch(scan, this.clock.now()) : {};
+    const scanPatch = optionalFileScanPatch(scan, this.clock.now());
     if (scan?.status === "infected") {
       const snapshot = await this.documents.execute({
         actor: command.actor,
@@ -683,7 +683,7 @@ export class FileService {
       source: "multipart_upload",
       object
     });
-    const scanPatch = scan ? fileScanPatch(scan, this.clock.now()) : {};
+    const scanPatch = optionalFileScanPatch(scan, this.clock.now());
     if (scan?.status === "infected") {
       const snapshot = await this.documents.execute({
         actor: command.actor,

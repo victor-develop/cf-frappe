@@ -339,6 +339,10 @@ export function fileScanPatch(result: FileScanResult, checkedAt: string): Docume
   };
 }
 
+export function optionalFileScanPatch(result: FileScanResult | undefined, checkedAt: string): DocumentData {
+  return result === undefined ? {} : fileScanPatch(result, checkedAt);
+}
+
 export function fileScanTarget(command: {
   readonly actorId: string;
   readonly tenantId: string;
