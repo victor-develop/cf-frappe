@@ -55,6 +55,7 @@ import {
   ensureDirectUploadMatches,
   ensureMultipartCompletionMatchesManifest,
   ensureMultipartPartFitsReservation,
+  requireFileTransformer,
   canUploadFile,
   fileBulkDeleteFailure,
   fileBulkFailure,
@@ -825,9 +826,7 @@ export class FileService {
   }
 
   async generateRendition(command: GenerateFileRenditionCommand): Promise<GeneratedFileRendition> {
-    if (!this.transformer) {
-      throw badRequest("File transforms are not configured");
-    }
+    const transformer = requireFileTransformer(this.transformer);
     const downloaded = await this.download(command);
     const options = normalizeFileTransformOptions(command.options);
     ensureFileObjectTransformable(downloaded.snapshot, downloaded.object.metadata, `File '${downloaded.snapshot.name}'`);
@@ -882,6 +881,7 @@ export class FileService {
     let object: FileObjectMetadata | undefined;
     try {
       const transform = await this.transformDownloadedFile({
+        transformer,
         actor: command.actor,
         tenantId,
         downloaded,
@@ -945,9 +945,7 @@ export class FileService {
   }
 
   async transform(command: TransformFileCommand): Promise<TransformedFile> {
-    if (!this.transformer) {
-      throw badRequest("File transforms are not configured");
-    }
+    const transformer = requireFileTransformer(this.transformer);
     const downloaded = await this.download(command);
     const options = normalizeFileTransformOptions(command.options);
     ensureFileObjectTransformable(downloaded.snapshot, downloaded.object.metadata, `File '${downloaded.snapshot.name}'`);
@@ -959,6 +957,7 @@ export class FileService {
       options
     });
     const transform = await this.transformDownloadedFile({
+      transformer,
       actor: command.actor,
       tenantId,
       downloaded,
@@ -1072,16 +1071,14 @@ export class FileService {
   }
 
   private async transformDownloadedFile(command: {
+    readonly transformer: FileTransformer;
     readonly actor: Actor;
     readonly tenantId: string;
     readonly downloaded: DownloadedFile;
     readonly options: FileTransformOptions;
     readonly overlay?: FileTransformOverlaySource;
   }): Promise<TransformedFileObject> {
-    if (!this.transformer) {
-      throw badRequest("File transforms are not configured");
-    }
-    return this.transformer.transform({
+    return command.transformer.transform({
       actorId: command.actor.id,
       tenantId: command.tenantId,
       source: fileTransformSource(command.downloaded.snapshot, command.downloaded.object),

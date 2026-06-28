@@ -89,6 +89,7 @@ import {
   optionalFileScanPatch,
   pendingFileRendition,
   requireFileSnapshotString,
+  requireFileTransformer,
   renditionObjectKey,
   renditionSourcesMatch,
   reusableFileRenditionForGeneration,
@@ -104,6 +105,7 @@ import type {
   DocumentSnapshot,
   FileObjectMetadata,
   FileRenditionManifestEntry,
+  FileTransformer,
   FileTransformOverlaySource,
   StoredFileObject
 } from "../../src";
@@ -126,6 +128,20 @@ describe("file policy", () => {
     expect(() => ensureFileContentTypeTransformable("text/plain", "File 'file_text'")).toThrow(
       "File 'file_text' cannot be transformed"
     );
+  });
+
+  it("requires configured file transformers", () => {
+    const transformer: FileTransformer = {
+      async transform() {
+        return {
+          body: new ReadableStream<Uint8Array>(),
+          contentType: "image/webp"
+        };
+      }
+    };
+
+    expect(requireFileTransformer(transformer)).toBe(transformer);
+    expect(() => requireFileTransformer(undefined)).toThrow("File transforms are not configured");
   });
 
   it("reads file object content types from object metadata before snapshots", () => {

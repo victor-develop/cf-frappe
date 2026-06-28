@@ -14,6 +14,7 @@ import type {
   FileTransformSource,
   FileTransformOverlayPlacement,
   FileTransformOverlaySource,
+  FileTransformer,
   FileTransformOptions,
   TransformedFileObject,
   FileTransformWatermarkPlacement
@@ -57,6 +58,13 @@ export function ensureFileContentTypeTransformable(contentType: string, fileLabe
   if (!isTransformableFileContentType(contentType)) {
     throw badRequest(`${fileLabel} cannot be transformed`);
   }
+}
+
+export function requireFileTransformer(transformer: FileTransformer | undefined): FileTransformer {
+  if (!transformer) {
+    throw badRequest("File transforms are not configured");
+  }
+  return transformer;
 }
 
 export function fileObjectContentType(snapshot: DocumentSnapshot, object: FileObjectMetadata): string {
