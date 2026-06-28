@@ -99,7 +99,12 @@ import { documentStream, namingSeriesStream } from "../core/streams.js";
 import {
   type UserPermissionProvider
 } from "../core/user-permissions.js";
-import type { AfterCommitContext } from "../core/document-hooks.js";
+import {
+  documentHookContext,
+  documentValidationHookData,
+  mergeDocumentHookPatch,
+  type AfterCommitContext
+} from "../core/document-hooks.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
@@ -1522,13 +1527,9 @@ export class DocumentService implements DocumentCommandExecutor {
   ): Promise<DocumentData> {
     let current: MutableDocumentData = { ...data };
     for (const hook of this.registry.hooksFor(doctype.name)) {
-      const context = existing
-        ? { doctype, data: compactData(current), existing }
-        : { doctype, data: compactData(current) };
+      const context = documentHookContext({ doctype, data: current, existing });
       const patch = await hook.beforeValidate?.(context);
-      if (patch) {
-        current = { ...current, ...patch };
-      }
+      current = mergeDocumentHookPatch(current, patch);
     }
     return compactData(current);
   }
@@ -1546,11 +1547,9 @@ export class DocumentService implements DocumentCommandExecutor {
         relatedDocType
       })
     ];
-    const hookData = hookDataOverride ?? (existing ? { ...existing.data, ...compactData(data) } : compactData(data));
+    const hookData = documentValidationHookData({ data, existing, override: hookDataOverride });
     for (const hook of this.registry.hooksFor(doctype.name)) {
-      const context = existing
-        ? { doctype, data: hookData, existing }
-        : { doctype, data: hookData };
+      const context = documentHookContext({ doctype, data: hookData, existing });
       const hookIssues = await hook.validate?.(context);
       if (hookIssues) {
         issues.push(...hookIssues);

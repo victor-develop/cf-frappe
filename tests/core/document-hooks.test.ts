@@ -1,5 +1,28 @@
 import { readFileSync } from "node:fs";
-import { defineDocumentHooks } from "../../src";
+import {
+  defineDocType,
+  defineDocumentHooks,
+  documentHookContext,
+  documentValidationHookData,
+  mergeDocumentHookPatch,
+  type DocumentSnapshot
+} from "../../src";
+
+const Note = defineDocType({
+  name: "Note",
+  fields: [{ name: "title", type: "text" }]
+});
+
+const existing: DocumentSnapshot = {
+  tenantId: "acme",
+  doctype: "Note",
+  name: "NOTE-1",
+  version: 2,
+  docstatus: "draft",
+  data: { title: "Old", body: "Existing" },
+  createdAt: "2026-06-28T01:00:00.000Z",
+  updatedAt: "2026-06-28T01:30:00.000Z"
+};
 
 describe("document hooks", () => {
   it("snapshots hook entries by value", () => {
@@ -27,5 +50,43 @@ describe("document hooks", () => {
     expect(source).not.toMatch(/import type \{[^}]*AfterCommitContext[^}]*\} from "\.\.\/core\/registry\.js";/);
     expect(source).not.toMatch(/import type \{[^}]*DocumentHooks[^}]*\} from "\.\.\/core\/registry\.js";/);
     expect(source).toContain('from "../core/document-hooks.js"');
+  });
+
+  it("builds compact document hook contexts with optional existing snapshots", () => {
+    expect(documentHookContext({ doctype: Note, data: { title: "Draft", body: undefined } })).toEqual({
+      doctype: Note,
+      data: { title: "Draft" }
+    });
+
+    expect(documentHookContext({ doctype: Note, data: { title: "Draft" }, existing })).toEqual({
+      doctype: Note,
+      data: { title: "Draft" },
+      existing
+    });
+  });
+
+  it("merges beforeValidate patches without forcing service orchestration to know patch rules", () => {
+    expect(mergeDocumentHookPatch({ title: "Draft", body: "A" }, undefined)).toEqual({
+      title: "Draft",
+      body: "A"
+    });
+    expect(mergeDocumentHookPatch({ title: "Draft", body: "A" }, { body: undefined, status: "Open" })).toEqual({
+      title: "Draft",
+      body: undefined,
+      status: "Open"
+    });
+  });
+
+  it("plans validation hook data from override, create data, or existing document data", () => {
+    expect(documentValidationHookData({ data: { title: "New", body: undefined } })).toEqual({
+      title: "New"
+    });
+    expect(documentValidationHookData({ data: { title: "New" }, existing })).toEqual({
+      title: "New",
+      body: "Existing"
+    });
+    expect(documentValidationHookData({ data: { title: "New" }, existing, override: { title: "Override" } })).toEqual({
+      title: "Override"
+    });
   });
 });
