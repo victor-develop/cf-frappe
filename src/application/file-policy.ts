@@ -1723,6 +1723,23 @@ export function fileRenditionGenerationReservation(command: {
   };
 }
 
+export interface FileRenditionReservationDocumentCommand {
+  readonly command: "reserveRendition";
+  readonly input: DocumentData;
+  readonly expectedVersion: number;
+}
+
+export function fileRenditionReservationDocumentCommand(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly reservation: FileRenditionGenerationReservation;
+}): FileRenditionReservationDocumentCommand {
+  return {
+    command: "reserveRendition",
+    input: command.reservation.patch,
+    expectedVersion: command.snapshot.version
+  };
+}
+
 function ensureFileObjectKeyFits(key: string, message: string): void {
   if (new TextEncoder().encode(key).byteLength > 1024) {
     throw badRequest(message);

@@ -88,6 +88,7 @@ import {
   fileRenditionGenerationReservation,
   fileRenditionId,
   fileRenditionManifestDocumentCommand,
+  fileRenditionReservationDocumentCommand,
   fileRenditionSnapshotPutObjectCommand,
   fileRenditionView,
   fileScanFailureError,
@@ -907,14 +908,18 @@ export class FileService {
       requestedBy: command.actor.id
     });
     const { pending } = reservation;
+    const reservationCommand = fileRenditionReservationDocumentCommand({
+      snapshot: downloaded.snapshot,
+      reservation
+    });
     await this.documents.execute({
       actor: command.actor,
       doctype: this.fileDoctype,
       name: command.name,
-      command: "reserveRendition",
-      input: reservation.patch,
+      command: reservationCommand.command,
+      input: reservationCommand.input,
       ...fileTenantCommandOption(command.tenantId),
-      expectedVersion: downloaded.snapshot.version,
+      expectedVersion: reservationCommand.expectedVersion,
       metadata: fileCommandMetadata(command.metadata)
     });
 

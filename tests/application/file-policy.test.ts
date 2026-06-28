@@ -70,6 +70,7 @@ import {
   fileRenditionManifestPatch,
   fileRenditionManifestDocumentCommand,
   fileRenditionPutObjectCommand,
+  fileRenditionReservationDocumentCommand,
   fileRenditionSnapshotPutObjectCommand,
   fileRenditionSnapshotManifestPatch,
   fileRenditions,
@@ -947,6 +948,35 @@ describe("file policy", () => {
         renditionEntry("existing"),
         reservation.pending
       ]
+    });
+  });
+
+  it("builds rendition reservation document command intents", () => {
+    const snapshot = {
+      ...fileSnapshot({
+        content_type: "image/png",
+        renditions: [renditionEntry("existing")]
+      }),
+      version: 9
+    };
+    const reservation = fileRenditionGenerationReservation({
+      snapshot,
+      tenantId: "acme",
+      id: "w64-f-webp",
+      attemptId: "attempt-1",
+      sourceEtag: "source-1",
+      options: { width: 64, format: "webp" },
+      requestedAt: "2026-06-28T00:00:00.000Z",
+      requestedBy: "owner@example.com"
+    });
+
+    expect(fileRenditionReservationDocumentCommand({
+      snapshot,
+      reservation
+    })).toEqual({
+      command: "reserveRendition",
+      input: reservation.patch,
+      expectedVersion: 9
     });
   });
 
