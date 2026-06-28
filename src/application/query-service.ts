@@ -18,8 +18,8 @@ import {
 } from "../core/user-permissions.js";
 import {
   canReadLinkedDocumentTarget,
-  canUseDocumentAction,
-  canUseVisibleDocument
+  canUseVisibleDocument,
+  planDocumentSharedPermissionLookup
 } from "./document-access-policy.js";
 import {
   DEFAULT_TENANT_ID,
@@ -498,9 +498,7 @@ export class QueryService {
   }
 
   async canReadDocument(actor: Actor, doctype: DocTypeDefinition, document: DocumentSnapshot): Promise<boolean> {
-    const sharedPermissions = canUseDocumentAction({ actor, doctype, action: "read", document })
-      ? []
-      : await this.sharedPermissionsFor(actor, document);
+    const sharedPermissions = await this.sharedPermissionsForAction(actor, doctype, "read", document);
     const grants = await this.userPermissions?.permissionsFor(actor, document.tenantId);
     return canUseVisibleDocument({
       actor,
@@ -518,9 +516,7 @@ export class QueryService {
     action: PermissionAction,
     document: DocumentSnapshot
   ): Promise<boolean> {
-    const sharedPermissions = canUseDocumentAction({ actor, doctype, action, document })
-      ? []
-      : await this.sharedPermissionsFor(actor, document);
+    const sharedPermissions = await this.sharedPermissionsForAction(actor, doctype, action, document);
     const grants = await this.userPermissions?.permissionsFor(actor, document.tenantId);
     return canUseVisibleDocument({
       actor,
@@ -540,9 +536,7 @@ export class QueryService {
     document: DocumentSnapshot,
     grants: readonly UserPermissionGrant[]
   ): Promise<boolean> {
-    const sharedPermissions = canUseDocumentAction({ actor, doctype: target, action: "read", document })
-      ? []
-      : await this.sharedPermissionsFor(actor, document);
+    const sharedPermissions = await this.sharedPermissionsForAction(actor, target, "read", document);
     return canReadLinkedDocumentTarget({
       actor,
       sourceDoctype: source,
@@ -552,6 +546,18 @@ export class QueryService {
       sharedPermissions,
       userPermissionGrants: grants
     });
+  }
+
+  private async sharedPermissionsForAction(
+    actor: Actor,
+    doctype: DocTypeDefinition,
+    action: PermissionAction,
+    document: DocumentSnapshot
+  ): Promise<readonly DocumentSharePermission[]> {
+    const lookup = planDocumentSharedPermissionLookup({ actor, doctype, action, document });
+    return lookup.status === "read-shares"
+      ? await this.sharedPermissionsFor(actor, document)
+      : lookup.sharedPermissions;
   }
 
   private async sharedPermissionsFor(

@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the unique owner lookup decision slice:
+As of the shared-permission lookup decision slice:
 
 - Vitest files: `173`
-- Vitest cases: `2024`
-- Remaining gap to Frappe static markers: `760`
+- Vitest cases: `2027`
+- Remaining gap to Frappe static markers: `757`
 
 ## Implication
 

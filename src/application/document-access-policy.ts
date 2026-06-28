@@ -24,9 +24,22 @@ export interface DocumentActionAccessOptions {
   readonly sharedPermissions?: readonly DocumentSharePermission[];
 }
 
+export type DocumentSharedPermissionLookup =
+  | { readonly status: "skip"; readonly sharedPermissions: readonly [] }
+  | { readonly status: "read-shares" };
+
 export function canUseDocumentAction(options: DocumentActionAccessOptions): boolean {
   return can(options.actor, options.doctype, options.action, options.document) ||
     documentShareAllows(options.sharedPermissions ?? [], options.action);
+}
+
+export function planDocumentSharedPermissionLookup(
+  options: DocumentActionAccessOptions
+): DocumentSharedPermissionLookup {
+  if (canUseDocumentAction(options)) {
+    return { status: "skip", sharedPermissions: [] };
+  }
+  return { status: "read-shares" };
 }
 
 export interface DocumentVisibleAccessOptions extends DocumentActionAccessOptions {

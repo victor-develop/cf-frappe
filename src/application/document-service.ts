@@ -6,8 +6,8 @@ import {
   foldDocumentTags
 } from "../core/events.js";
 import {
-  documentShareAllows,
   foldDocumentShares,
+  type DocumentSharePermission,
   type DocumentShareProvider
 } from "../core/document-shares.js";
 import { can } from "../core/permissions.js";
@@ -35,7 +35,8 @@ import {
 import {
   canReadLinkedDocumentTarget,
   canUseDocumentAction,
-  documentSatisfiesUserPermissions
+  documentSatisfiesUserPermissions,
+  planDocumentSharedPermissionLookup
 } from "./document-access-policy.js";
 import {
   ensureDocumentStatus,
@@ -1128,11 +1129,22 @@ export class DocumentService implements DocumentCommandExecutor {
     const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, command.name);
-    const staticShareAllowed = can(command.actor, doctype, "share", existing);
-    const sharedPermissions = staticShareAllowed
-      ? []
-      : (await this.documentShares?.sharedPermissionsFor(command.actor, existing)) ?? [];
-    if (!staticShareAllowed && !documentShareAllows(sharedPermissions, "share")) {
+    const shareLookup = planDocumentSharedPermissionLookup({
+      actor: command.actor,
+      doctype,
+      action: "share",
+      document: existing
+    });
+    const sharedPermissions = shareLookup.status === "read-shares"
+      ? (await this.documentShares?.sharedPermissionsFor(command.actor, existing)) ?? []
+      : shareLookup.sharedPermissions;
+    if (!canUseDocumentAction({
+      actor: command.actor,
+      doctype,
+      action: "share",
+      document: existing,
+      sharedPermissions
+    })) {
       throw permissionDenied(`Actor '${command.actor.id}' cannot share ${doctype.name}/${command.name}`);
     }
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
@@ -1143,7 +1155,7 @@ export class DocumentService implements DocumentCommandExecutor {
       currentGrants: state.grants,
       command
     });
-    if (!staticShareAllowed) {
+    if (shareLookup.status === "read-shares") {
       ensureSharedGrantIsDelegable(command.actor, doctype, existing, sharedPermissions, plan.grant);
     }
     if (plan.noop) {
@@ -1617,7 +1629,7 @@ export class DocumentService implements DocumentCommandExecutor {
     targetDoctype: DocTypeDefinition,
     target: DocumentSnapshot
   ): Promise<boolean> {
-    const sharedPermissions = await this.documentShares?.sharedPermissionsFor(actor, target);
+    const sharedPermissions = await this.sharedPermissionsForAction(actor, targetDoctype, "read", target);
     const userPermissionGrants = await this.userPermissions?.permissionsFor(actor, target.tenantId);
     return canReadLinkedDocumentTarget({
       actor,
@@ -1636,17 +1648,26 @@ export class DocumentService implements DocumentCommandExecutor {
     action: Parameters<typeof can>[2],
     document: DocumentSnapshot
   ): Promise<boolean> {
-    if (canUseDocumentAction({ actor, doctype, action, document })) {
-      return true;
-    }
-    const permissions = await this.documentShares?.sharedPermissionsFor(actor, document);
+    const sharedPermissions = await this.sharedPermissionsForAction(actor, doctype, action, document);
     return canUseDocumentAction({
       actor,
       doctype,
       action,
       document,
-      sharedPermissions: permissions ?? []
+      sharedPermissions
     });
+  }
+
+  private async sharedPermissionsForAction(
+    actor: Actor,
+    doctype: DocTypeDefinition,
+    action: Parameters<typeof can>[2],
+    document: DocumentSnapshot
+  ): Promise<readonly DocumentSharePermission[]> {
+    const lookup = planDocumentSharedPermissionLookup({ actor, doctype, action, document });
+    return lookup.status === "read-shares"
+      ? (await this.documentShares?.sharedPermissionsFor(actor, document)) ?? []
+      : lookup.sharedPermissions;
   }
 
   private async doctypeContext(

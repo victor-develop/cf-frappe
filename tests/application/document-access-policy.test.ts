@@ -6,6 +6,7 @@ import {
   canUseVisibleDocument,
   defineDocType,
   documentSatisfiesUserPermissions,
+  planDocumentSharedPermissionLookup,
   type Actor,
   type DocumentSnapshot
 } from "../../src";
@@ -56,6 +57,34 @@ describe("document access policy", () => {
       document: task,
       sharedPermissions: ["read", "update"]
     })).toBe(false);
+  });
+
+  it("skips shared-permission lookup when static permissions already allow the action", () => {
+    expect(planDocumentSharedPermissionLookup({
+      actor: reader,
+      doctype: Task,
+      action: "update",
+      document: task
+    })).toEqual({ status: "skip", sharedPermissions: [] });
+  });
+
+  it("skips shared-permission lookup when supplied shares already allow the action", () => {
+    expect(planDocumentSharedPermissionLookup({
+      actor: collaborator,
+      doctype: Task,
+      action: "update",
+      document: task,
+      sharedPermissions: ["update"]
+    })).toEqual({ status: "skip", sharedPermissions: [] });
+  });
+
+  it("plans shared-permission lookup when static and supplied shares do not allow the action", () => {
+    expect(planDocumentSharedPermissionLookup({
+      actor: collaborator,
+      doctype: Task,
+      action: "update",
+      document: task
+    })).toEqual({ status: "read-shares" });
   });
 
   it("rejects deleted documents from visible access even when permissions match", () => {
