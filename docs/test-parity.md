@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document copy policy extraction slice:
+As of the document collaboration event planning slice:
 
 - Vitest files: `173`
-- Vitest cases: `1981`
-- Remaining gap to Frappe static markers: `803`
+- Vitest cases: `1985`
+- Remaining gap to Frappe static markers: `799`
 
 ## Implication
 

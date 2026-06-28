@@ -7,6 +7,14 @@ import {
 } from "../core/document-shares.js";
 import { badRequest, permissionDenied } from "../core/errors.js";
 import type { Actor, DocTypeDefinition, DocumentSnapshot } from "../core/types.js";
+import {
+  documentActivityRecordedPayload,
+  documentAssignmentPayload,
+  documentCommentAddedPayload,
+  documentFollowerPayload,
+  documentTagPayload,
+  type DocumentCollaborationEventPayload
+} from "./document-collaboration-events.js";
 
 const MAX_COMMENT_TEXT_LENGTH = 5000;
 const MAX_ACTIVITY_TYPE_LENGTH = 64;
@@ -38,6 +46,16 @@ export interface NormalizedActivity {
 export type CollaborationCollectionAction = "add" | "remove";
 
 export interface CollaborationCollectionChange {
+  readonly value: string;
+  readonly noop: boolean;
+}
+
+export interface DocumentCollaborationEventPlan {
+  readonly eventType: string;
+  readonly payload: DocumentCollaborationEventPayload;
+}
+
+export interface DocumentCollaborationCollectionPlan extends DocumentCollaborationEventPlan {
   readonly value: string;
   readonly noop: boolean;
 }
@@ -90,6 +108,89 @@ export function normalizeActivity(command: ActivityInput): NormalizedActivity {
     ...(detail !== undefined ? { detail } : {}),
     ...(channel !== undefined ? { channel } : {}),
     ...(externalId !== undefined ? { externalId } : {})
+  };
+}
+
+export function planDocumentCommentPolicy(
+  doctype: DocTypeDefinition,
+  text: string
+): DocumentCollaborationEventPlan {
+  return {
+    eventType: doctype.events?.comment ?? `${doctype.name}CommentAdded`,
+    payload: documentCommentAddedPayload(normalizeCommentText(text))
+  };
+}
+
+export function planDocumentActivityPolicy(
+  doctype: DocTypeDefinition,
+  command: ActivityInput
+): DocumentCollaborationEventPlan {
+  return {
+    eventType: doctype.events?.activity ?? `${doctype.name}ActivityRecorded`,
+    payload: documentActivityRecordedPayload(normalizeActivity(command))
+  };
+}
+
+export function planDocumentAssignmentChangePolicy(input: {
+  readonly doctype: DocTypeDefinition;
+  readonly currentAssignees: readonly string[];
+  readonly assignee: string;
+  readonly action: CollaborationCollectionAction;
+}): DocumentCollaborationCollectionPlan {
+  const change = collaborationCollectionChange(
+    input.currentAssignees,
+    normalizeAssigneeId(input.assignee),
+    input.action
+  );
+  const eventKind = input.action === "add" ? "DocumentAssigned" : "DocumentUnassigned";
+  return {
+    ...change,
+    eventType:
+      input.action === "add"
+        ? input.doctype.events?.assign ?? `${input.doctype.name}Assigned`
+        : input.doctype.events?.unassign ?? `${input.doctype.name}Unassigned`,
+    payload: documentAssignmentPayload(eventKind, change.value)
+  };
+}
+
+export function planDocumentTagChangePolicy(input: {
+  readonly doctype: DocTypeDefinition;
+  readonly currentTags: readonly string[];
+  readonly tag: string;
+  readonly action: CollaborationCollectionAction;
+}): DocumentCollaborationCollectionPlan {
+  const change = collaborationCollectionChange(input.currentTags, normalizeTag(input.tag), input.action);
+  const eventKind = input.action === "add" ? "DocumentTagged" : "DocumentUntagged";
+  return {
+    ...change,
+    eventType:
+      input.action === "add"
+        ? input.doctype.events?.tag ?? `${input.doctype.name}Tagged`
+        : input.doctype.events?.untag ?? `${input.doctype.name}Untagged`,
+    payload: documentTagPayload(eventKind, change.value)
+  };
+}
+
+export function planDocumentFollowerChangePolicy(input: {
+  readonly doctype: DocTypeDefinition;
+  readonly actor: Actor;
+  readonly currentFollowers: readonly string[];
+  readonly follower?: string | undefined;
+  readonly action: CollaborationCollectionAction;
+}): DocumentCollaborationCollectionPlan {
+  const change = collaborationCollectionChange(
+    input.currentFollowers,
+    normalizeFollowerId(input.follower ?? input.actor.id),
+    input.action
+  );
+  const eventKind = input.action === "add" ? "DocumentFollowed" : "DocumentUnfollowed";
+  return {
+    ...change,
+    eventType:
+      input.action === "add"
+        ? input.doctype.events?.follow ?? `${input.doctype.name}Followed`
+        : input.doctype.events?.unfollow ?? `${input.doctype.name}Unfollowed`,
+    payload: documentFollowerPayload(eventKind, change.value)
   };
 }
 

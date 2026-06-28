@@ -19,13 +19,12 @@ import {
 } from "../core/document-merge.js";
 import {
   ensureSharedGrantIsDelegable,
-  collaborationCollectionChange,
   type CollaborationCollectionAction,
-  normalizeActivity,
-  normalizeAssigneeId,
-  normalizeCommentText,
-  normalizeFollowerId,
-  normalizeTag,
+  planDocumentActivityPolicy,
+  planDocumentAssignmentChangePolicy,
+  planDocumentCommentPolicy,
+  planDocumentFollowerChangePolicy,
+  planDocumentTagChangePolicy,
   normalizeValidDocumentShareGrant,
   normalizeValidDocumentShareUserId
 } from "./document-collaboration-policy.js";
@@ -55,17 +54,6 @@ import {
   domainCommandAppliedPayload,
   workflowTransitionedPayload
 } from "./document-command-events.js";
-import {
-  documentActivityRecordedPayload,
-  documentAssignmentPayload,
-  documentCommentAddedPayload,
-  documentFollowerPayload,
-  documentTagPayload,
-  type DocumentAssignmentEventKind,
-  type DocumentCollaborationEventPayload,
-  type DocumentFollowerEventKind,
-  type DocumentTagEventKind
-} from "./document-collaboration-events.js";
 import {
   documentCreatedPayload,
   documentDeletedPayload,
@@ -1051,17 +1039,17 @@ export class DocumentService implements DocumentCommandExecutor {
     }
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
-    const payload = documentCommentAddedPayload(normalizeCommentText(command.text));
+    const plan = planDocumentCommentPolicy(doctype, command.text);
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,
       stream,
-      type: doctype.events?.comment ?? `${doctype.name}CommentAdded`,
+      type: plan.eventType,
       doctype: doctype.name,
       documentName: command.name,
       actorId: command.actor.id,
       occurredAt: now,
-      payload,
+      payload: plan.payload,
       metadata: command.metadata ?? {}
     });
     const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
@@ -1091,18 +1079,17 @@ export class DocumentService implements DocumentCommandExecutor {
     }
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
-    const activity = normalizeActivity(command);
-    const payload = documentActivityRecordedPayload(activity);
+    const plan = planDocumentActivityPolicy(doctype, command);
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,
       stream,
-      type: doctype.events?.activity ?? `${doctype.name}ActivityRecorded`,
+      type: plan.eventType,
       doctype: doctype.name,
       documentName: command.name,
       actorId: command.actor.id,
       occurredAt: now,
-      payload,
+      payload: plan.payload,
       metadata: command.metadata ?? {}
     });
     const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
@@ -1125,54 +1112,42 @@ export class DocumentService implements DocumentCommandExecutor {
   async assign(command: AssignDocumentCommand): Promise<DocumentSnapshot> {
     return this.changeAssignment({
       command,
-      action: "add",
-      eventKind: "DocumentAssigned",
-      eventType: (doctype) => doctype.events?.assign ?? `${doctype.name}Assigned`
+      action: "add"
     });
   }
 
   async unassign(command: UnassignDocumentCommand): Promise<DocumentSnapshot> {
     return this.changeAssignment({
       command,
-      action: "remove",
-      eventKind: "DocumentUnassigned",
-      eventType: (doctype) => doctype.events?.unassign ?? `${doctype.name}Unassigned`
+      action: "remove"
     });
   }
 
   async tag(command: TagDocumentCommand): Promise<DocumentSnapshot> {
     return this.changeTag({
       command,
-      action: "add",
-      eventKind: "DocumentTagged",
-      eventType: (doctype) => doctype.events?.tag ?? `${doctype.name}Tagged`
+      action: "add"
     });
   }
 
   async untag(command: UntagDocumentCommand): Promise<DocumentSnapshot> {
     return this.changeTag({
       command,
-      action: "remove",
-      eventKind: "DocumentUntagged",
-      eventType: (doctype) => doctype.events?.untag ?? `${doctype.name}Untagged`
+      action: "remove"
     });
   }
 
   async follow(command: FollowDocumentCommand): Promise<DocumentSnapshot> {
     return this.changeFollower({
       command,
-      action: "add",
-      eventKind: "DocumentFollowed",
-      eventType: (doctype) => doctype.events?.follow ?? `${doctype.name}Followed`
+      action: "add"
     });
   }
 
   async unfollow(command: UnfollowDocumentCommand): Promise<DocumentSnapshot> {
     return this.changeFollower({
       command,
-      action: "remove",
-      eventKind: "DocumentUnfollowed",
-      eventType: (doctype) => doctype.events?.unfollow ?? `${doctype.name}Unfollowed`
+      action: "remove"
     });
   }
 
@@ -1408,8 +1383,6 @@ export class DocumentService implements DocumentCommandExecutor {
   private async changeAssignment(options: {
     readonly command: AssignDocumentCommand | UnassignDocumentCommand;
     readonly action: CollaborationCollectionAction;
-    readonly eventKind: DocumentAssignmentEventKind;
-    readonly eventType: (doctype: DocTypeDefinition) => string;
   }): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(options.command.actor, options.command.tenantId);
     const doctype = await this.doctypeFor(options.command.actor, options.command.doctype, tenantId);
@@ -1420,25 +1393,25 @@ export class DocumentService implements DocumentCommandExecutor {
     }
     await this.ensureUserPermissionAccess(options.command.actor, doctype, existing);
     ensureExpectedVersion(existing, options.command.expectedVersion);
-    const change = collaborationCollectionChange(
-      foldDocumentAssignments(events),
-      normalizeAssigneeId(options.command.assignee),
-      options.action
-    );
-    if (change.noop) {
+    const plan = planDocumentAssignmentChangePolicy({
+      doctype,
+      currentAssignees: foldDocumentAssignments(events),
+      assignee: options.command.assignee,
+      action: options.action
+    });
+    if (plan.noop) {
       return existing;
     }
-    const payload = documentAssignmentPayload(options.eventKind, change.value);
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,
       stream,
-      type: options.eventType(doctype),
+      type: plan.eventType,
       doctype: doctype.name,
       documentName: options.command.name,
       actorId: options.command.actor.id,
       occurredAt: now,
-      payload,
+      payload: plan.payload,
       metadata: options.command.metadata ?? {}
     });
     const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
@@ -1461,8 +1434,6 @@ export class DocumentService implements DocumentCommandExecutor {
   private async changeTag(options: {
     readonly command: TagDocumentCommand | UntagDocumentCommand;
     readonly action: CollaborationCollectionAction;
-    readonly eventKind: DocumentTagEventKind;
-    readonly eventType: (doctype: DocTypeDefinition) => string;
   }): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(options.command.actor, options.command.tenantId);
     const doctype = await this.doctypeFor(options.command.actor, options.command.doctype, tenantId);
@@ -1473,25 +1444,25 @@ export class DocumentService implements DocumentCommandExecutor {
     }
     await this.ensureUserPermissionAccess(options.command.actor, doctype, existing);
     ensureExpectedVersion(existing, options.command.expectedVersion);
-    const change = collaborationCollectionChange(
-      foldDocumentTags(events),
-      normalizeTag(options.command.tag),
-      options.action
-    );
-    if (change.noop) {
+    const plan = planDocumentTagChangePolicy({
+      doctype,
+      currentTags: foldDocumentTags(events),
+      tag: options.command.tag,
+      action: options.action
+    });
+    if (plan.noop) {
       return existing;
     }
-    const payload = documentTagPayload(options.eventKind, change.value);
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,
       stream,
-      type: options.eventType(doctype),
+      type: plan.eventType,
       doctype: doctype.name,
       documentName: options.command.name,
       actorId: options.command.actor.id,
       occurredAt: now,
-      payload,
+      payload: plan.payload,
       metadata: options.command.metadata ?? {}
     });
     const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
@@ -1514,8 +1485,6 @@ export class DocumentService implements DocumentCommandExecutor {
   private async changeFollower(options: {
     readonly command: FollowDocumentCommand | UnfollowDocumentCommand;
     readonly action: CollaborationCollectionAction;
-    readonly eventKind: DocumentFollowerEventKind;
-    readonly eventType: (doctype: DocTypeDefinition) => string;
   }): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(options.command.actor, options.command.tenantId);
     const doctype = await this.doctypeFor(options.command.actor, options.command.doctype, tenantId);
@@ -1526,25 +1495,26 @@ export class DocumentService implements DocumentCommandExecutor {
     }
     await this.ensureUserPermissionAccess(options.command.actor, doctype, existing);
     ensureExpectedVersion(existing, options.command.expectedVersion);
-    const change = collaborationCollectionChange(
-      foldDocumentFollowers(events),
-      normalizeFollowerId(options.command.follower ?? options.command.actor.id),
-      options.action
-    );
-    if (change.noop) {
+    const plan = planDocumentFollowerChangePolicy({
+      doctype,
+      actor: options.command.actor,
+      currentFollowers: foldDocumentFollowers(events),
+      follower: options.command.follower,
+      action: options.action
+    });
+    if (plan.noop) {
       return existing;
     }
-    const payload = documentFollowerPayload(options.eventKind, change.value);
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,
       stream,
-      type: options.eventType(doctype),
+      type: plan.eventType,
       doctype: doctype.name,
       documentName: options.command.name,
       actorId: options.command.actor.id,
       occurredAt: now,
-      payload,
+      payload: plan.payload,
       metadata: options.command.metadata ?? {}
     });
     const commit = await this.store.commit(stream, existing.version, [event], ([saved]) => {
