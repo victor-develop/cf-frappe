@@ -239,6 +239,15 @@ export function upsertMultipartPartManifest(
   ].sort((left, right) => left.partNumber - right.partNumber);
 }
 
+export function multipartPartManifestPatch(
+  manifest: readonly MultipartPartManifestEntry[],
+  part: MultipartPartManifestEntry
+): DocumentData {
+  return {
+    multipart_parts: upsertMultipartPartManifest(manifest, part)
+  };
+}
+
 export function ensureMultipartPartFitsReservation(
   snapshot: DocumentSnapshot,
   partNumber: number,

@@ -52,6 +52,7 @@ import {
   isPreviewableFileContentType,
   MIN_MULTIPART_FILE_PART_BYTES,
   multipartPartManifest,
+  multipartPartManifestPatch,
   multipartPartSize,
   normalizeBulkFileSelections,
   normalizeContentType,
@@ -206,6 +207,22 @@ describe("file policy", () => {
       { partNumber: 1, etag: "one", size: 1 },
       { partNumber: 2, etag: "two-new", size: 4 }
     ]);
+  });
+
+  it("builds multipart part manifest document patches", () => {
+    expect(multipartPartManifestPatch([
+      { partNumber: 2, etag: "two", size: 2 }
+    ], { partNumber: 1, etag: "one", size: 1 })).toEqual({
+      multipart_parts: [
+        { partNumber: 1, etag: "one", size: 1 },
+        { partNumber: 2, etag: "two", size: 2 }
+      ]
+    });
+    expect(multipartPartManifestPatch([
+      { partNumber: 1, etag: "one", size: 1 }
+    ], { partNumber: 1, etag: "one-new", size: 3 })).toEqual({
+      multipart_parts: [{ partNumber: 1, etag: "one-new", size: 3 }]
+    });
   });
 
   it("rejects multipart parts that exceed the reserved file size", () => {

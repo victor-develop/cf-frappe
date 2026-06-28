@@ -89,6 +89,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Extracted file downloadability, direct-upload and multipart-upload state guards, multipart upload id reads, and delete expected-version rules from `FileService` into the file policy with focused state-machine coverage.
 - Extracted file document payload construction, upload completion/failure patch shaping, and multipart-completion state patches from `FileService` into the file policy with focused event-input coverage.
 - Extracted rendition manifest patch shaping from `FileService` into the file policy so rendition reservation/completion/failure commands reuse one pure document patch boundary.
+- Extracted multipart part manifest patch shaping from `FileService` into the file policy so part-upload commands reuse the same pure manifest write boundary as manifest parsing/upserts.
 - Extracted file metadata patch construction from `FileService` into the file policy with focused rename, privacy, attach, detach, and empty-patch coverage.
 - Extracted file dashboard query normalization and list-filter mapping from `FileService` into the file policy with focused trimming, boolean, equality, and contains-filter coverage.
 - Extracted file scanner target construction and scanner result-status validation from `FileService` into the file policy with focused default content-type and invalid-status coverage.

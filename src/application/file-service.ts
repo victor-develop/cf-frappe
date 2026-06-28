@@ -84,6 +84,7 @@ import {
   fileTransformOverlaySource,
   fileTransformSource,
   multipartPartManifest,
+  multipartPartManifestPatch,
   multipartPartSize,
   normalizeBulkFileSelections,
   normalizeFileDashboardFilters,
@@ -94,7 +95,6 @@ import {
   requireFileSnapshotString,
   sanitizeFilename,
   type FileRenditionManifestEntry,
-  upsertMultipartPartManifest
 } from "./file-policy.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 import { cryptoIdGenerator } from "../ports/id-generator.js";
@@ -645,13 +645,11 @@ export class FileService {
       doctype: this.fileDoctype,
       name: command.name,
       command: "recordMultipartPart",
-      input: {
-        multipart_parts: upsertMultipartPartManifest(multipartPartManifest(current), {
-          partNumber: part.partNumber,
-          etag: part.etag,
-          size
-        })
-      },
+      input: multipartPartManifestPatch(multipartPartManifest(current), {
+        partNumber: part.partNumber,
+        etag: part.etag,
+        size
+      }),
       ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
       expectedVersion: current.version,
       metadata: command.metadata ?? {}
