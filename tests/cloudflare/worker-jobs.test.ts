@@ -439,6 +439,112 @@ describe("CloudFrappe Worker jobs", () => {
     ]);
   });
 
+  it("retries failed durable outbox records through later Worker queue drains", async () => {
+    let currentTime = now;
+    let failDelivery = true;
+    const retryAt = "2026-01-01T00:01:00.000Z";
+    const clock = { now: () => currentTime };
+    const env = { DB: fakeD1(), AGGREGATES: fakeNamespace() };
+    const events = new D1EventStore(env.DB);
+    const outbox = new DocumentDeliveryOutboxService({
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["enqueue-email"])
+    });
+    await outbox.enqueueFromDomainEvent({
+      event: assignmentEvent(),
+      snapshot: taskSnapshot(),
+      targets: ["email"]
+    });
+    const worker = createCloudFrappeWorker<typeof env>({
+      registry: createTestRegistry(),
+      actor: () => owner,
+      documentDeliveryOutbox: {
+        clock,
+        retry: { baseDelaySeconds: 60, maxDelaySeconds: 60 },
+        ids: deterministicIds(["claim-1", "fail-1", "claim-2", "deliver-2"]),
+        emailNotifications: () => ({
+          async sendFromDomainEvent() {
+            if (failDelivery) {
+              throw new Error("email provider unavailable");
+            }
+          }
+        }) as unknown as EmailNotificationService
+      },
+      jobs: {
+        registry: createJobRegistry<CloudFrappeRuntimeServices>({
+          jobs: [createDocumentDeliveryOutboxDrainJob<CloudFrappeRuntimeServices>()]
+        }),
+        queue: () => new InMemoryJobQueue()
+      }
+    });
+    const firstDrain = queueMessageForOutboxDrain("msg_outbox_retry_1", "claim-email-1");
+
+    await worker.queue?.(
+      {
+        queue: "jobs",
+        metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
+        messages: [firstDrain],
+        retryAll: vi.fn(),
+        ackAll: vi.fn()
+      },
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(firstDrain.ack).toHaveBeenCalledOnce();
+    expect(firstDrain.retry).not.toHaveBeenCalled();
+    await expect(outbox.list("acme")).resolves.toMatchObject([
+      {
+        id: "evt_assign:email",
+        status: "failed",
+        claimId: "claim-email-1",
+        retryAt,
+        attempts: 1,
+        error: "email provider unavailable"
+      }
+    ]);
+
+    failDelivery = false;
+    currentTime = "2026-01-01T00:00:30.000Z";
+    const earlyDrain = queueMessageForOutboxDrain("msg_outbox_retry_early", "claim-email-early");
+    await worker.queue?.(
+      {
+        queue: "jobs",
+        metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
+        messages: [earlyDrain],
+        retryAll: vi.fn(),
+        ackAll: vi.fn()
+      },
+      env,
+      fakeExecutionContext()
+    );
+    expect(earlyDrain.ack).toHaveBeenCalledOnce();
+    await expect(outbox.list("acme")).resolves.toMatchObject([
+      { id: "evt_assign:email", status: "failed", retryAt, attempts: 1 }
+    ]);
+
+    currentTime = retryAt;
+    const retryDrain = queueMessageForOutboxDrain("msg_outbox_retry_2", "claim-email-2");
+    await worker.queue?.(
+      {
+        queue: "jobs",
+        metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
+        messages: [retryDrain],
+        retryAll: vi.fn(),
+        ackAll: vi.fn()
+      },
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(retryDrain.ack).toHaveBeenCalledOnce();
+    expect(retryDrain.retry).not.toHaveBeenCalled();
+    await expect(outbox.list("acme")).resolves.toMatchObject([
+      { id: "evt_assign:email", status: "delivered", claimId: "claim-email-2", attempts: 2 }
+    ]);
+  });
+
   it("allows transient scheduled dispatch failures to retry", async () => {
     const noRetry = vi.fn();
     const worker = createCloudFrappeWorker({
@@ -749,6 +855,25 @@ function taskSnapshot() {
     createdAt: now,
     updatedAt: now
   } as const;
+}
+
+function queueMessageForOutboxDrain(messageId: string, claimId: string): Message<JobMessage> {
+  return {
+    id: messageId,
+    timestamp: new Date(now),
+    body: {
+      tenantId: "acme",
+      jobName: DOCUMENT_DELIVERY_OUTBOX_DRAIN_JOB_NAME,
+      payload: { limit: 5, claimId },
+      runId: `job_${messageId}`,
+      idempotencyKey: `document-delivery-outbox:${messageId}`,
+      enqueuedAt: now,
+      metadata: {}
+    },
+    attempts: 1,
+    ack: vi.fn(),
+    retry: vi.fn()
+  } as unknown as Message<JobMessage>;
 }
 
 function fakeNamespace(): RpcDurableObjectNamespace<AggregateCoordinatorRpc> {
