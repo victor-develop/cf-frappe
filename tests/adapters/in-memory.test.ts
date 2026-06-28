@@ -1,4 +1,11 @@
-import { conflict, documentStream, InMemoryEventStore, InMemoryJobExecutionLog, InMemoryProjectionStore } from "../../src";
+import {
+  conflict,
+  documentStream,
+  InMemoryDataPatchLog,
+  InMemoryEventStore,
+  InMemoryJobExecutionLog,
+  InMemoryProjectionStore
+} from "../../src";
 import type { DocumentData, DocumentSnapshot, JobMessage, NewDomainEvent } from "../../src";
 
 describe("in-memory adapters", () => {
@@ -331,6 +338,97 @@ describe("in-memory adapters", () => {
       data: [],
       total: 0
     });
+  });
+
+  it("snapshots in-memory data-patch apply results by value", async () => {
+    const log = new InMemoryDataPatchLog();
+    const result = { nested: { count: 1 } };
+
+    await log.claimDataPatch({
+      id: "patch.apply",
+      checksum: "v1",
+      claimId: "claim-1",
+      claimedAt: "2026-01-01T00:00:00.000Z"
+    });
+    await log.completeDataPatch({
+      id: "patch.apply",
+      checksum: "v1",
+      claimId: "claim-1",
+      appliedAt: "2026-01-01T00:01:00.000Z",
+      result
+    });
+    result.nested.count = 2;
+
+    const [firstRead] = await log.appliedDataPatches();
+    expect(firstRead).toMatchObject({ result: { nested: { count: 1 } } });
+
+    (firstRead!.result as DocumentData).nested = { count: 3 };
+    await expect(log.appliedDataPatches()).resolves.toMatchObject([
+      { result: { nested: { count: 1 } } }
+    ]);
+  });
+
+  it("snapshots in-memory data-patch rollback results by value", async () => {
+    const log = new InMemoryDataPatchLog();
+    const rollbackResult = { nested: { undone: 1 } };
+
+    await log.claimDataPatch({
+      id: "patch.rollback",
+      checksum: "v1",
+      claimId: "claim-apply",
+      claimedAt: "2026-01-01T00:00:00.000Z"
+    });
+    await log.completeDataPatch({
+      id: "patch.rollback",
+      checksum: "v1",
+      claimId: "claim-apply",
+      appliedAt: "2026-01-01T00:01:00.000Z",
+      result: { touched: 1 }
+    });
+    await log.claimDataPatchRollback({
+      id: "patch.rollback",
+      checksum: "v1",
+      claimId: "claim-rollback",
+      claimedAt: "2026-01-01T00:02:00.000Z"
+    });
+    await log.completeDataPatchRollback({
+      id: "patch.rollback",
+      checksum: "v1",
+      claimId: "claim-rollback",
+      rolledBackAt: "2026-01-01T00:03:00.000Z",
+      result: rollbackResult
+    });
+    rollbackResult.nested.undone = 2;
+
+    const [firstRead] = await log.recordedDataPatches();
+    expect(firstRead).toMatchObject({ rollbackResult: { nested: { undone: 1 } } });
+
+    (firstRead as { rollbackResult: DocumentData }).rollbackResult.nested = { undone: 3 };
+    await expect(log.recordedDataPatches()).resolves.toMatchObject([
+      { rollbackResult: { nested: { undone: 1 } } }
+    ]);
+  });
+
+  it("rejects non-JSON in-memory data-patch results before recording journals", async () => {
+    const log = new InMemoryDataPatchLog();
+    await log.claimDataPatch({
+      id: "patch.bad",
+      checksum: "v1",
+      claimId: "claim-1",
+      claimedAt: "2026-01-01T00:00:00.000Z"
+    });
+
+    await expect(log.completeDataPatch({
+      id: "patch.bad",
+      checksum: "v1",
+      claimId: "claim-1",
+      appliedAt: "2026-01-01T00:01:00.000Z",
+      result: Number.POSITIVE_INFINITY as never
+    })).rejects.toMatchObject({
+      code: "DATA_PATCH_INVALID",
+      status: 409
+    });
+    await expect(log.recordedDataPatches()).resolves.toMatchObject([{ status: "pending" }]);
   });
 
   it("snapshots job execution message data by value", async () => {

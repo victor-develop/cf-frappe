@@ -1,4 +1,6 @@
 import { FrameworkError } from "../../core/errors.js";
+import { cloneJsonValue, isJsonValue } from "../../core/json.js";
+import type { JsonValue } from "../../core/types.js";
 import type {
   AppliedDataPatch,
   ClaimDataPatch,
@@ -65,7 +67,7 @@ export class InMemoryDataPatchLog implements DataPatchLog {
       id: patch.id,
       checksum: patch.checksum,
       appliedAt: patch.appliedAt,
-      ...(patch.result === undefined ? {} : { result: patch.result }),
+      ...(patch.result === undefined ? {} : { result: clonePatchResult(patch.id, "result", patch.result) }),
       status: "applied" as const
     }));
   }
@@ -96,7 +98,7 @@ export class InMemoryDataPatchLog implements DataPatchLog {
       id: patch.id,
       checksum: patch.checksum,
       appliedAt: existing.appliedAt,
-      ...(existing.result === undefined ? {} : { result: existing.result }),
+      ...(existing.result === undefined ? {} : { result: clonePatchResult(patch.id, "result", existing.result) }),
       claimId: patch.claimId,
       rollbackClaimedAt: patch.claimedAt,
       status: "rollback_pending" as const
@@ -131,9 +133,11 @@ export class InMemoryDataPatchLog implements DataPatchLog {
       id: patch.id,
       checksum: patch.checksum,
       appliedAt: existing.appliedAt,
-      ...(existing.result === undefined ? {} : { result: existing.result }),
+      ...(existing.result === undefined ? {} : { result: clonePatchResult(patch.id, "result", existing.result) }),
       rolledBackAt: patch.rolledBackAt,
-      ...(patch.result === undefined ? {} : { rollbackResult: patch.result }),
+      ...(patch.result === undefined
+        ? {}
+        : { rollbackResult: clonePatchResult(patch.id, "rollbackResult", patch.result) }),
       status: "rolled_back" as const
     }));
   }
@@ -145,7 +149,7 @@ export class InMemoryDataPatchLog implements DataPatchLog {
       id: patch.id,
       checksum: patch.checksum,
       appliedAt: existing.appliedAt,
-      ...(existing.result === undefined ? {} : { result: existing.result }),
+      ...(existing.result === undefined ? {} : { result: clonePatchResult(patch.id, "result", existing.result) }),
       claimId: patch.claimId,
       rollbackFailedAt: patch.failedAt,
       rollbackError: patch.error,
@@ -160,14 +164,14 @@ function recordFromEntry(entry: InMemoryDataPatchEntry): RecordedDataPatch {
   }
   if (entry.status === "rollback_pending") {
     const { claimId: _claimId, ...patch } = entry;
-    return patch;
+    return cloneRecordedPatch(patch);
   }
   if (entry.status === "rollback_failed") {
     const { claimId: _claimId, ...patch } = entry;
-    return patch;
+    return cloneRecordedPatch(patch);
   }
   if (entry.status === "rolled_back") {
-    return entry;
+    return cloneRecordedPatch(entry);
   }
   if (entry.status === "failed") {
     const { claimId: _claimId, ...patch } = entry;
@@ -180,7 +184,7 @@ function recordFromEntry(entry: InMemoryDataPatchEntry): RecordedDataPatch {
 function claimResult(entry: InMemoryDataPatchEntry): DataPatchClaimResult {
   if (entry.status === "applied") {
     const { status: _status, ...patch } = entry;
-    return { kind: "applied", patch };
+    return { kind: "applied", patch: cloneAppliedPatch(patch) };
   }
   if (entry.status === "failed") {
     const { status: _status, claimId: _claimId, ...patch } = entry;
@@ -204,22 +208,79 @@ function rollbackClaimResult(entry: InMemoryDataPatchEntry): DataPatchRollbackCl
   }
   if (entry.status === "rollback_pending") {
     const { status: _status, claimId: _claimId, ...patch } = entry;
-    return { kind: "rollback_pending", patch };
+    return { kind: "rollback_pending", patch: cloneRollbackPendingPatch(patch) };
   }
   if (entry.status === "rollback_failed") {
     const { status: _status, claimId: _claimId, ...patch } = entry;
-    return { kind: "rollback_failed", patch };
+    return { kind: "rollback_failed", patch: cloneRollbackFailedPatch(patch) };
   }
   if (entry.status === "rolled_back") {
     const { status: _status, ...patch } = entry;
-    return { kind: "rolled_back", patch };
+    return { kind: "rolled_back", patch: cloneRolledBackPatch(patch) };
   }
   throw dataPatchRollbackUnavailable(entry.id, `journal status is '${entry.status}'`);
 }
 
 function appliedPatchFromRecord(record: RecordedDataPatch & { readonly status: "applied" }): AppliedDataPatch {
   const { status: _status, ...patch } = record;
-  return patch;
+  return cloneAppliedPatch(patch);
+}
+
+function cloneRecordedPatch(record: RecordedDataPatch): RecordedDataPatch {
+  if (record.status === "applied") {
+    return { ...cloneAppliedPatch(record), status: "applied" };
+  }
+  if (record.status === "rollback_pending") {
+    return { ...cloneRollbackPendingPatch(record), status: "rollback_pending" };
+  }
+  if (record.status === "rolled_back") {
+    return { ...cloneRolledBackPatch(record), status: "rolled_back" };
+  }
+  if (record.status === "rollback_failed") {
+    return { ...cloneRollbackFailedPatch(record), status: "rollback_failed" };
+  }
+  return record;
+}
+
+function cloneAppliedPatch(patch: AppliedDataPatch): AppliedDataPatch {
+  return {
+    id: patch.id,
+    checksum: patch.checksum,
+    appliedAt: patch.appliedAt,
+    ...(patch.result === undefined ? {} : { result: clonePatchResult(patch.id, "result", patch.result) })
+  };
+}
+
+function cloneRollbackPendingPatch(patch: RollbackPendingDataPatch): RollbackPendingDataPatch {
+  return {
+    ...cloneAppliedPatch(patch),
+    rollbackClaimedAt: patch.rollbackClaimedAt
+  };
+}
+
+function cloneRolledBackPatch(patch: RolledBackDataPatch): RolledBackDataPatch {
+  return {
+    ...cloneAppliedPatch(patch),
+    rolledBackAt: patch.rolledBackAt,
+    ...(patch.rollbackResult === undefined
+      ? {}
+      : { rollbackResult: clonePatchResult(patch.id, "rollbackResult", patch.rollbackResult) })
+  };
+}
+
+function cloneRollbackFailedPatch(patch: RollbackFailedDataPatch): RollbackFailedDataPatch {
+  return {
+    ...cloneAppliedPatch(patch),
+    rollbackFailedAt: patch.rollbackFailedAt,
+    rollbackError: patch.rollbackError
+  };
+}
+
+function clonePatchResult(id: string, field: "result" | "rollbackResult", value: JsonValue): JsonValue {
+  if (!isJsonValue(value)) {
+    throw new FrameworkError("DATA_PATCH_INVALID", `Data patch '${id}' has invalid ${field}`, { status: 409 });
+  }
+  return cloneJsonValue(value);
 }
 
 function assertChecksumValueMatches(id: string, plannedChecksum: string, recordedChecksum: string): void {
