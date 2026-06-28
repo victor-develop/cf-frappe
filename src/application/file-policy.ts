@@ -1290,6 +1290,37 @@ export function fileDeleteRequestedDocumentCommand(
   };
 }
 
+export interface FileDeleteRequestedExecuteCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly command: "requestDelete";
+  readonly input: DocumentData;
+  readonly tenantId?: string;
+  readonly expectedVersion: number;
+  readonly metadata: DocumentData;
+}
+
+export function fileDeleteRequestedExecuteCommand(command: {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly tenantId?: string | undefined;
+  readonly metadata?: DocumentData | undefined;
+  readonly deleteRequest: FileDeleteRequestedDocumentCommand;
+}): FileDeleteRequestedExecuteCommand {
+  return {
+    actor: command.actor,
+    doctype: command.doctype,
+    name: command.name,
+    command: command.deleteRequest.command,
+    input: command.deleteRequest.input,
+    ...fileTenantCommandOption(command.tenantId),
+    expectedVersion: command.deleteRequest.expectedVersion,
+    metadata: fileCommandMetadata(command.metadata)
+  };
+}
+
 export interface FileDeletedDocumentCommand {
   readonly expectedVersion: number;
 }

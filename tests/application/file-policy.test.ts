@@ -41,6 +41,7 @@ import {
   fileDashboardEntry,
   fileDashboardEntryWithPermissions,
   fileDashboardListFilters,
+  fileDeleteRequestedExecuteCommand,
   fileDeleteRequestedDocumentCommand,
   fileDeletedDocumentCommand,
   fileDirectUploadDocumentCreateCommand,
@@ -2107,6 +2108,31 @@ describe("file policy", () => {
       expectedVersion: 1
     });
     expect(fileDeleteRequestedDocumentCommand(fileSnapshot({ storage_state: "delete_requested" }))).toBeUndefined();
+  });
+
+  it("builds delete-request execute command inputs", () => {
+    const actor = { id: "manager@example.com", roles: ["File Manager"], tenantId: "actor-tenant" };
+    const metadata = { source: "file-delete" };
+    const deleteRequest = fileDeleteRequestedDocumentCommand(fileSnapshot({ storage_state: "available" }));
+
+    expect(deleteRequest).toBeDefined();
+    expect(fileDeleteRequestedExecuteCommand({
+      actor,
+      doctype: "File",
+      name: "FILE-1",
+      tenantId: "tenant-a",
+      metadata,
+      deleteRequest: deleteRequest!
+    })).toEqual({
+      actor,
+      doctype: "File",
+      name: "FILE-1",
+      command: "requestDelete",
+      input: {},
+      tenantId: "tenant-a",
+      expectedVersion: 1,
+      metadata
+    });
   });
 
   it("builds delete document command intents", () => {

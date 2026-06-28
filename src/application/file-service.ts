@@ -72,6 +72,7 @@ import {
   fileDashboardEntryWithPermissions,
   fileDashboardListFilters,
   fileBufferedUploadDocumentData,
+  fileDeleteRequestedExecuteCommand,
   fileDeleteRequestedDocumentCommand,
   fileDeletedDocumentCommand,
   fileDirectUploadDocumentCreateCommand,
@@ -1025,16 +1026,14 @@ export class FileService {
     const deleteRequest = fileDeleteRequestedDocumentCommand(current);
     const deleteRequested =
       deleteRequest
-        ? await this.documents.execute({
+        ? await this.documents.execute(fileDeleteRequestedExecuteCommand({
             actor: command.actor,
             doctype: this.fileDoctype,
             name: command.name,
-            command: deleteRequest.command,
-            input: deleteRequest.input,
-            ...fileTenantCommandOption(command.tenantId),
-            expectedVersion: deleteRequest.expectedVersion,
-            metadata: fileCommandMetadata(command.metadata)
-          })
+            tenantId: command.tenantId,
+            metadata: command.metadata,
+            deleteRequest
+          }))
         : current;
     await this.deleteFileObjects(deleteRequested);
     const deleted = fileDeletedDocumentCommand(deleteRequested);

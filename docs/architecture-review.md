@@ -141,4 +141,5 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized multipart part record execute-command shaping in file policy so part upload orchestration no longer composes actor, tenant, metadata, expected-version, or manifest input inline.
 - Centralized multipart completion-start execute-command shaping in file policy so multipart finalization no longer composes begin-completion actor, tenant, metadata, expected-version, or state patch input inline.
 - Centralized metadata update execute-command shaping in file policy so metadata saves no longer compose actor, tenant, metadata, expected-version, or patch input inline.
+- Centralized delete-request execute-command shaping in file policy so delete orchestration no longer composes requestDelete actor, tenant, metadata, expected-version, or empty command input inline.
 - Centralized delete document-command intent shaping in file policy so abort and final delete orchestration no longer derive current snapshot version guards inline.
