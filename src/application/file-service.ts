@@ -120,6 +120,7 @@ import {
   fileTransformOverlayCommandOption,
   fileTransformObjectCommand,
   fileTransformOverlaySource,
+  fileTransformedFileResult,
   fileSnapshotFilename,
   failedFileRenditionForError,
   isInfectedFileScanResult,
@@ -1005,11 +1006,11 @@ export class FileService {
       options,
       ...fileTransformOverlayCommandOption(overlay)
     });
-    return {
+    return fileTransformedFileResult({
       snapshot: downloaded.snapshot,
-      object: downloaded.object.metadata,
+      object: downloaded.object,
       transform
-    };
+    });
   }
 
   async delete(command: DeleteFileCommand): Promise<DocumentSnapshot> {

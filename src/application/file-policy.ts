@@ -815,6 +815,22 @@ export function fileTransformObjectCommand(command: {
   };
 }
 
+export function fileTransformedFileResult(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly object: StoredFileObject;
+  readonly transform: TransformedFileObject;
+}): {
+  readonly snapshot: DocumentSnapshot;
+  readonly object: FileObjectMetadata;
+  readonly transform: TransformedFileObject;
+} {
+  return {
+    snapshot: command.snapshot,
+    object: command.object.metadata,
+    transform: command.transform
+  };
+}
+
 export function ensureValidFileScanResult(result: FileScanResult): void {
   if (result.status !== "clean" && result.status !== "infected") {
     throw badRequest("File scanner returned an invalid status");

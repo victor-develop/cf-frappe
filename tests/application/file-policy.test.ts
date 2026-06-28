@@ -116,6 +116,7 @@ import {
   fileTransformOverlayCommandOption,
   fileTransformObjectCommand,
   fileTransformOverlaySource,
+  fileTransformedFileResult,
   fileTransformOptionsData,
   fileTransformOptionsFromData,
   fileTransformSource,
@@ -623,6 +624,29 @@ describe("file policy", () => {
       },
       options,
       overlay
+    });
+  });
+
+  it("builds transformed file results", () => {
+    const snapshot = fileSnapshot({
+      filename: "photo.png",
+      content_type: "image/png"
+    });
+    const object = storedFileObject(fileObject({ contentType: "image/png" }));
+    const transform = {
+      body: new ReadableStream<Uint8Array>(),
+      contentType: "image/webp",
+      contentLength: 9
+    };
+
+    expect(fileTransformedFileResult({
+      snapshot,
+      object,
+      transform
+    })).toEqual({
+      snapshot,
+      object: object.metadata,
+      transform
     });
   });
 
