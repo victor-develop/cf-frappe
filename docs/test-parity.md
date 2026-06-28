@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the multipart completion-start event policy module slice:
+As of the delete-request event policy module slice:
 
 - Vitest files: `169`
-- Vitest cases: `1657`
+- Vitest cases: `1658`
 
 ## Implication
 

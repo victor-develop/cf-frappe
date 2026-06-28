@@ -613,6 +613,10 @@ export function isFileDeleteRequested(snapshot: DocumentSnapshot): boolean {
   return snapshot.data.storage_state === "delete_requested";
 }
 
+export function shouldRequestFileDelete(snapshot: DocumentSnapshot): boolean {
+  return !isFileDeleteRequested(snapshot);
+}
+
 export function isFileMultipartCompletionStarted(snapshot: DocumentSnapshot): boolean {
   return snapshot.data.storage_state === "upload_completing";
 }

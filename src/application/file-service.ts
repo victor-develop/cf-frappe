@@ -85,7 +85,6 @@ import {
   fileUploadScanFailedPatch,
   fileTransformOverlaySource,
   fileTransformSource,
-  isFileDeleteRequested,
   isInfectedFileScanResult,
   multipartPartManifest,
   multipartPartManifestPatch,
@@ -99,6 +98,7 @@ import {
   pendingFileRendition,
   requireFileSnapshotString,
   sanitizeFilename,
+  shouldRequestFileDelete,
   shouldStartFileMultipartCompletion,
   type FileRenditionManifestEntry,
 } from "./file-policy.js";
@@ -989,9 +989,8 @@ export class FileService {
     );
     this.preflightDelete(command.actor, current, command.expectedVersion);
     const deleteRequested =
-      isFileDeleteRequested(current)
-        ? current
-        : await this.documents.execute({
+      shouldRequestFileDelete(current)
+        ? await this.documents.execute({
             actor: command.actor,
             doctype: this.fileDoctype,
             name: command.name,
@@ -1000,7 +999,8 @@ export class FileService {
             ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
             expectedVersion: current.version,
             metadata: command.metadata ?? {}
-          });
+          })
+        : current;
     await this.deleteFileObjects(deleteRequested);
     const snapshot = await this.documents.delete({
       actor: command.actor,

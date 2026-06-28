@@ -76,6 +76,7 @@ import {
   renditionObjectKey,
   renditionSourcesMatch,
   sanitizeFilename,
+  shouldRequestFileDelete,
   shouldStartFileMultipartCompletion,
   upsertFileRenditionManifest,
   upsertMultipartPartManifest
@@ -1025,6 +1026,11 @@ describe("file policy", () => {
   it("identifies files with delete already requested", () => {
     expect(isFileDeleteRequested(fileSnapshot({ storage_state: "available" }))).toBe(false);
     expect(isFileDeleteRequested(fileSnapshot({ storage_state: "delete_requested" }))).toBe(true);
+  });
+
+  it("plans delete-request events only before delete has been requested", () => {
+    expect(shouldRequestFileDelete(fileSnapshot({ storage_state: "available" }))).toBe(true);
+    expect(shouldRequestFileDelete(fileSnapshot({ storage_state: "delete_requested" }))).toBe(false);
   });
 
   it("identifies multipart files already completing", () => {
