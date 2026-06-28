@@ -14,7 +14,86 @@ import {
 } from "../../src";
 import { UserNotificationService, deterministicIds, fixedClock, JobDispatcher } from "../../src";
 import { createServices, data, now, owner } from "../helpers";
-import type { AfterCommitContext, RealtimePublishResult } from "../../src";
+import type { AfterCommitContext, JsonValue, RealtimeEvent, RealtimePublishResult } from "../../src";
+
+describe("in-memory realtime publisher", () => {
+  it("clones published events before storing them", async () => {
+    const publisher = new InMemoryRealtimePublisher();
+    const topics = ["tenant:acme"];
+    const payload = { nested: { count: 1 } };
+    const event = {
+      id: "realtime-1",
+      type: "NoteChanged",
+      topics,
+      tenantId: "acme",
+      occurredAt: now,
+      payload
+    } satisfies RealtimeEvent;
+
+    await publisher.publish(event);
+
+    topics.push("tenant:other");
+    payload.nested.count = 2;
+
+    expect(publisher.events()).toEqual([
+      {
+        id: "realtime-1",
+        type: "NoteChanged",
+        topics: ["tenant:acme"],
+        tenantId: "acme",
+        occurredAt: now,
+        payload: { nested: { count: 1 } }
+      }
+    ]);
+  });
+
+  it("clones recorded events before exposing them", async () => {
+    const publisher = new InMemoryRealtimePublisher();
+    await publisher.publish({
+      id: "realtime-1",
+      type: "NoteChanged",
+      topics: ["tenant:acme"],
+      tenantId: "acme",
+      occurredAt: now,
+      payload: { nested: { count: 1 } }
+    });
+
+    const exposed = publisher.events();
+    const exposedEvent = exposed[0] as unknown as { topics: string[]; payload: Record<string, JsonValue> };
+    exposedEvent.topics.push("tenant:other");
+    (exposedEvent.payload.nested as Record<string, JsonValue>).count = 2;
+
+    expect(publisher.events()).toEqual([
+      {
+        id: "realtime-1",
+        type: "NoteChanged",
+        topics: ["tenant:acme"],
+        tenantId: "acme",
+        occurredAt: now,
+        payload: { nested: { count: 1 } }
+      }
+    ]);
+  });
+
+  it("rejects realtime payloads that cannot cross a JSON boundary", async () => {
+    const publisher = new InMemoryRealtimePublisher();
+
+    await expect(
+      publisher.publish({
+        id: "realtime-1",
+        type: "NoteChanged",
+        topics: ["tenant:acme"],
+        tenantId: "acme",
+        occurredAt: now,
+        payload: { count: Number.POSITIVE_INFINITY } as never
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Realtime event payload must be JSON-serializable"
+    });
+    expect(publisher.events()).toEqual([]);
+  });
+});
 
 describe("document realtime hooks", () => {
   it("publishes committed domain events to realtime topics", async () => {

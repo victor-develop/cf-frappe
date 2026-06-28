@@ -152,6 +152,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Guarded D1 data-patch journal writes with JSON cloning, rejecting non-JSON apply and rollback results before migration history can silently coerce values.
 - Guarded in-memory data-patch journal result handling with JSON cloning, preserving adapter parity by rejecting non-JSON results and returning cloned journal reads.
 - Guarded in-memory job queue messages with JSON cloning, preserving Cloudflare Queue boundary semantics by rejecting non-JSON payloads/metadata and returning cloned queued messages.
+- Guarded in-memory realtime events with JSON cloning, preserving Durable Object/WebSocket boundary semantics by rejecting non-JSON payloads and returning cloned published events.
 - Extracted selected-file bulk operation normalization from `FileService` into the file policy, covering trimming, duplicates, expected-version validation, empty selections, and the bounded 100-file limit.
 - Extracted direct-upload object metadata matching and scanner result patch shaping from `FileService` into the file policy with focused size/content-type and optional scan-field coverage.
 - Extracted file dashboard row projection and limit normalization from `FileService` into the file policy with focused preview, attachment, scan, rendition, and limit coverage.
