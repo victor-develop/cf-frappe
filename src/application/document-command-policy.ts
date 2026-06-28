@@ -1,6 +1,7 @@
 import type { DocumentMergeSnapshot } from "../core/document-merge.js";
 import { badRequest, conflict, FrameworkError } from "../core/errors.js";
 import { compactData } from "../core/schema.js";
+import { allowedWorkflowTransitions, currentWorkflowState } from "../core/workflow.js";
 import type {
   Actor,
   DomainCommandDefinition,
@@ -8,7 +9,8 @@ import type {
   DocumentData,
   DocumentSnapshot,
   MutableDocumentData,
-  PermissionAction
+  PermissionAction,
+  WorkflowDefinition
 } from "../core/types.js";
 
 export function ensureExpectedVersion(existing: DocumentSnapshot, expectedVersion?: number): void {
@@ -95,5 +97,42 @@ export function planDomainCommandPolicy(input: {
     patch: compactData(patch),
     permissionAction: input.definition.permissionAction ?? "update",
     allowReadOnlyFields: input.definition.allowReadOnlyFields ?? false
+  };
+}
+
+export interface WorkflowTransitionPolicyPlan {
+  readonly from: string;
+  readonly to: string;
+  readonly patch: DocumentData;
+  readonly eventType: string;
+}
+
+export function planWorkflowTransitionPolicy(input: {
+  readonly actor: Actor;
+  readonly action: string;
+  readonly doctypeName: string;
+  readonly document: DocumentSnapshot;
+  readonly workflow: WorkflowDefinition;
+}): WorkflowTransitionPolicyPlan {
+  const from = currentWorkflowState(input.workflow, input.document);
+  const transition = allowedWorkflowTransitions({
+    actor: input.actor,
+    workflow: input.workflow,
+    document: input.document
+  }).find((item) => item.action === input.action);
+  if (!transition) {
+    throw new FrameworkError(
+      "WORKFLOW_TRANSITION_DENIED",
+      `Transition '${input.action}' is not allowed from '${from}'`,
+      { status: 409 }
+    );
+  }
+  return {
+    from,
+    to: transition.to,
+    patch: { [input.workflow.stateField ?? "workflow_state"]: transition.to },
+    eventType:
+      transition.eventType ??
+      `${input.doctypeName}${input.action[0]?.toUpperCase() ?? ""}${input.action.slice(1)}`
   };
 }

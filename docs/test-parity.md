@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the domain command policy extraction slice:
+As of the workflow transition policy extraction slice:
 
 - Vitest files: `173`
-- Vitest cases: `1974`
-- Remaining gap to Frappe static markers: `810`
+- Vitest cases: `1977`
+- Remaining gap to Frappe static markers: `807`
 
 ## Implication
 

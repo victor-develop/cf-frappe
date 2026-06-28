@@ -8,6 +8,7 @@ import {
   mergeSnapshotFromDocument,
   normalizeUnsetFields,
   planDomainCommandPolicy,
+  planWorkflowTransitionPolicy,
   pickCommandFields,
   type Actor,
   type DocumentSnapshot
@@ -120,5 +121,67 @@ describe("document command policy", () => {
     expect(canExecuteDomainCommandForRoles(actor, {})).toBe(true);
     expect(canExecuteDomainCommandForRoles(actor, { roles: ["System Manager", "User"] })).toBe(true);
     expect(canExecuteDomainCommandForRoles(actor, { roles: ["System Manager"] })).toBe(false);
+  });
+
+  it("plans workflow transition patches and default event types", () => {
+    expect(
+      planWorkflowTransitionPolicy({
+        actor,
+        action: "close",
+        doctypeName: "Note",
+        document: { ...snapshot, data: { ...snapshot.data, workflow_state: "Open" } },
+        workflow: {
+          initialState: "Open",
+          states: ["Open", "Closed"],
+          transitions: [{ action: "close", from: "Open", to: "Closed" }]
+        }
+      })
+    ).toEqual({
+      from: "Open",
+      to: "Closed",
+      patch: { workflow_state: "Closed" },
+      eventType: "NoteClose"
+    });
+  });
+
+  it("plans workflow transitions with custom state fields and custom events", () => {
+    expect(
+      planWorkflowTransitionPolicy({
+        actor,
+        action: "approve",
+        doctypeName: "Expense Claim",
+        document: { ...snapshot, data: { ...snapshot.data, status: "Review" } },
+        workflow: {
+          stateField: "status",
+          initialState: "Draft",
+          states: ["Draft", "Review", "Approved"],
+          transitions: [
+            { action: "approve", from: "Review", to: "Approved", roles: ["User"], eventType: "ExpenseApproved" }
+          ]
+        }
+      })
+    ).toEqual({
+      from: "Review",
+      to: "Approved",
+      patch: { status: "Approved" },
+      eventType: "ExpenseApproved"
+    });
+  });
+
+  it("rejects workflow transitions that are not allowed from the current state", () => {
+    expect(() =>
+      planWorkflowTransitionPolicy({
+        actor,
+        action: "approve",
+        doctypeName: "Expense Claim",
+        document: { ...snapshot, data: { ...snapshot.data, status: "Review" } },
+        workflow: {
+          stateField: "status",
+          initialState: "Draft",
+          states: ["Draft", "Review", "Approved"],
+          transitions: [{ action: "approve", from: "Review", to: "Approved", roles: ["System Manager"] }]
+        }
+      })
+    ).toThrow("Transition 'approve' is not allowed from 'Review'");
   });
 });

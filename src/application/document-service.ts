@@ -46,7 +46,8 @@ import {
   mergeSnapshotFromDocument,
   normalizeUnsetFields,
   canExecuteDomainCommandForRoles,
-  planDomainCommandPolicy
+  planDomainCommandPolicy,
+  planWorkflowTransitionPolicy
 } from "./document-command-policy.js";
 import {
   domainCommandAppliedPayload,
@@ -109,7 +110,6 @@ import { documentStream, namingSeriesStream } from "../core/streams.js";
 import {
   type UserPermissionProvider
 } from "../core/user-permissions.js";
-import { allowedWorkflowTransitions, currentWorkflowState } from "../core/workflow.js";
 import type { AfterCommitContext } from "../core/document-hooks.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { Clock } from "../ports/clock.js";
@@ -913,34 +913,24 @@ export class DocumentService implements DocumentCommandExecutor {
     ensureExpectedVersion(existing, command.expectedVersion);
     ensureDocumentStatus(existing, ["draft"], "transition");
 
-    const currentState = currentWorkflowState(workflow, existing);
-    const transition = allowedWorkflowTransitions({
+    const plan = planWorkflowTransitionPolicy({
       actor: command.actor,
-      workflow,
-      document: existing
-    }).find((item) => item.action === command.action);
-    if (!transition) {
-      throw new FrameworkError(
-        "WORKFLOW_TRANSITION_DENIED",
-        `Transition '${command.action}' is not allowed from '${currentState}'`,
-        { status: 409 }
-      );
-    }
-
-    const patch: DocumentData = { [workflow.stateField ?? "workflow_state"]: transition.to };
+      action: command.action,
+      doctypeName: doctype.name,
+      document: existing,
+      workflow
+    });
     const payload = workflowTransitionedPayload({
       action: command.action,
-      from: currentState,
-      to: transition.to,
-      patch
+      from: plan.from,
+      to: plan.to,
+      patch: plan.patch
     });
     const now = this.clock.now();
     const event = this.newEvent({
       tenantId,
       stream,
-      type:
-        transition.eventType ??
-        `${doctype.name}${command.action[0]?.toUpperCase() ?? ""}${command.action.slice(1)}`,
+      type: plan.eventType,
       doctype: doctype.name,
       documentName: command.name,
       actorId: command.actor.id,
@@ -955,7 +945,7 @@ export class DocumentService implements DocumentCommandExecutor {
       return {
         ...existing,
         version: saved.sequence,
-        data: { ...existing.data, ...patch },
+        data: { ...existing.data, ...plan.patch },
         updatedAt: saved.occurredAt
       };
     });
