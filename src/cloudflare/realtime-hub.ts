@@ -403,10 +403,37 @@ function replayEvents(
 
 function replayEntryFromRow(row: RealtimeEventRow): readonly RealtimeReplayEntry[] {
   try {
-    return [{ cursor: row.sequence, event: JSON.parse(row.event_json) as RealtimeEvent }];
+    const event: unknown = JSON.parse(row.event_json);
+    return isRealtimeEvent(event) ? [{ cursor: row.sequence, event }] : [];
   } catch {
     return [];
   }
+}
+
+function isRealtimeEvent(value: unknown): value is RealtimeEvent {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return typeof value.id === "string" &&
+    typeof value.type === "string" &&
+    Array.isArray(value.topics) &&
+    value.topics.every((topic) => typeof topic === "string") &&
+    typeof value.tenantId === "string" &&
+    typeof value.occurredAt === "string" &&
+    isJsonValue(value.payload);
+}
+
+function isJsonValue(value: unknown): boolean {
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.every(isJsonValue);
+  }
+  if (isRecord(value)) {
+    return Object.values(value).every(isJsonValue);
+  }
+  return false;
 }
 
 function pruneReplayEvents(sql: SqlStorage, retentionLimit: number): void {

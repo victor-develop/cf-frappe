@@ -386,6 +386,34 @@ describe("RealtimeHub Durable Object", () => {
     });
   });
 
+  it("skips replay rows that are valid JSON but not realtime events", async () => {
+    const sql = fakeRealtimeSqlStorage();
+    const Hub = createRealtimeHubClass();
+    const hub = new Hub(fakeState([], sql), {});
+    const topic = "document:acme:Note:NOTE-1";
+    const event = realtimeEvent([topic], "evt1");
+
+    await hub.publish(topic, event);
+    sql.exec(
+      `
+        INSERT INTO realtime_events (topic, event_id, event_type, occurred_at, event_json)
+        VALUES (?, ?, ?, ?, ?)
+        RETURNING sequence
+      `,
+      topic,
+      "bad-event",
+      "BadEvent",
+      now,
+      JSON.stringify({ id: "bad-event", type: "BadEvent", topics: [topic] })
+    );
+
+    await expect(hub.replay()).resolves.toEqual({
+      topic,
+      events: [{ cursor: 1, event }],
+      nextCursor: 1
+    });
+  });
+
   it("does not replay rows before a hub topic is remembered", async () => {
     const sql = fakeRealtimeSqlStorage();
     const Hub = createRealtimeHubClass();

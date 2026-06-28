@@ -238,3 +238,4 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Hardened D1 data-patch journal result JSON parsing so corrupt apply and rollback results are reported as framework journal-invalid errors instead of leaking raw parser failures or relying on unchecked casts.
 - Hardened D1 job execution payload, metadata, and result JSON decoding so corrupted queue execution history rows are rejected through a typed framework error instead of unchecked serde casts.
 - Hardened D1 event-stream and projection JSON decoding so corrupt event payload/metadata rows and corrupt document projection rows fail through typed framework errors before entering event-sourced folds.
+- Hardened Durable Object realtime replay decoding so stored replay rows must prove the persisted JSON is a complete realtime event before fan-out replay exposes it.
