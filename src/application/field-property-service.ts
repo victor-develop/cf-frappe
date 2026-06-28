@@ -18,7 +18,7 @@ import {
   type TenantId
 } from "../core/types.js";
 import type { FieldPropertyEventPayload } from "./field-property-events.js";
-import { isJsonValue } from "../core/json.js";
+import { cloneJsonValue, isJsonValue } from "../core/json.js";
 import type { ModelRegistry } from "../core/registry.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
@@ -387,7 +387,7 @@ function optionalDefaultValue(
       { status: 400 }
     );
   }
-  return { defaultValue: value };
+  return { defaultValue: cloneJsonValue(value) };
 }
 
 function normalizeRequired(value: string, label: string): string {

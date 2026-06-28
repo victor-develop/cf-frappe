@@ -10,6 +10,7 @@ import {
   InMemoryDocumentStore,
   QueryService,
   SYSTEM_MANAGER_ROLE,
+  type DocumentData,
   type DocumentEventPayload,
   type DocTypeDefinition
 } from "../../src";
@@ -209,6 +210,41 @@ describe("FieldPropertyService", () => {
       code: "FIELD_PROPERTY_INVALID",
       message: "Field 'title' defaultValue must be JSON-serializable"
     });
+  });
+
+  it("snapshots field-property default values by value", async () => {
+    const events = new InMemoryDocumentStore();
+    const jsonDocType: DocTypeDefinition = {
+      ...noteDocType,
+      fields: [...noteDocType.fields, { name: "settings", type: "json" }]
+    };
+    const service = new FieldPropertyService({
+      registry: createRegistry({ doctypes: [jsonDocType] }),
+      events,
+      ids: deterministicIds(["property-1"]),
+      clock: fixedClock(now)
+    });
+    const defaultValue = { nested: { priority: "High" } };
+
+    const saved = await service.save({
+      actor: admin,
+      doctype: "Note",
+      fieldName: "settings",
+      overrides: { defaultValue }
+    });
+
+    defaultValue.nested.priority = "Low";
+    expect(saved.fields[0]?.overrides.defaultValue).toEqual({ nested: { priority: "High" } });
+
+    ((saved.fields[0]!.overrides.defaultValue as DocumentData).nested as DocumentData).priority = "Urgent";
+    await expect(events.readStream(fieldPropertyOverridesStream("acme"))).resolves.toMatchObject([
+      {
+        payload: {
+          kind: "FieldPropertyOverrideSaved",
+          overrides: { defaultValue: { nested: { priority: "High" } } }
+        }
+      }
+    ]);
   });
 
   it("can clear dangling overrides after an upstream custom field is disabled", async () => {
