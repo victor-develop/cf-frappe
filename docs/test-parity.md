@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the infected scan-failure selection policy slice:
+As of the generated rendition failure-recovery suppression policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1774`
-- Remaining gap to Frappe static markers: `1010`
+- Vitest cases: `1775`
+- Remaining gap to Frappe static markers: `1009`
 
 ## Implication
 

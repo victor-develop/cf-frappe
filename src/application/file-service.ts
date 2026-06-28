@@ -69,6 +69,7 @@ import {
   fileBulkMetadataOutcomeResult,
   fileBulkMetadataUpdatedOutcome,
   fileBulkMetadataUpdateEntryCommand,
+  ignoreFileRenditionFailureRecoveryFailure,
   fileBufferedUploadCreatePlan,
   fileBufferedUploadStoragePlan,
   fileCommandTenantId,
@@ -959,7 +960,7 @@ export class FileService {
         source: command,
         command: failure.failed.command,
         rendition: failure.failed.rendition
-      }).catch(() => undefined);
+      }).catch(ignoreFileRenditionFailureRecoveryFailure);
       throw error;
     }
   }

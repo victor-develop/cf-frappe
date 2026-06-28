@@ -186,6 +186,7 @@ import {
   fileTransformOptionsFromData,
   fileTransformSource,
   ignoreFileCleanupFailure,
+  ignoreFileRenditionFailureRecoveryFailure,
   isFileDeleteRequested,
   isFileMultipartCompletionStarted,
   isFileScanFailed,
@@ -2140,6 +2141,11 @@ describe("file policy", () => {
   it("ignores file cleanup failures without replacing the original failure", () => {
     expect(ignoreFileCleanupFailure(new Error("delete failed"))).toBeUndefined();
     expect(ignoreFileCleanupFailure("delete failed")).toBeUndefined();
+  });
+
+  it("ignores file rendition failure-recovery failures without replacing the original failure", () => {
+    expect(ignoreFileRenditionFailureRecoveryFailure(new Error("manifest write failed"))).toBeUndefined();
+    expect(ignoreFileRenditionFailureRecoveryFailure("manifest write failed")).toBeUndefined();
   });
 
   it("selects infected scan failures from upload outcomes", () => {

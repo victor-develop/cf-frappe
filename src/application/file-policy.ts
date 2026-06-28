@@ -767,6 +767,10 @@ export function ignoreFileCleanupFailure(_error: unknown): undefined {
   return undefined;
 }
 
+export function ignoreFileRenditionFailureRecoveryFailure(_error: unknown): undefined {
+  return undefined;
+}
+
 export function ensureDirectUploadMatches(
   snapshot: DocumentSnapshot,
   object: FileObjectMetadata,
