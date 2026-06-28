@@ -1926,6 +1926,19 @@ export function fileDashboardEntryWithPermissions(command: {
   };
 }
 
+export function fileReadableDashboardCandidate(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly readable: boolean;
+}): {
+  readonly snapshot: DocumentSnapshot;
+  readonly readable: boolean;
+} {
+  return {
+    snapshot: command.snapshot,
+    readable: command.readable
+  };
+}
+
 export function fileReadableDashboardEntries(command: {
   readonly actor: Actor;
   readonly doctype: DocTypeDefinition;

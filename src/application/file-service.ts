@@ -75,6 +75,7 @@ import {
   fileDashboardListFilters,
   fileDashboardResult,
   fileDownloadedResult,
+  fileReadableDashboardCandidate,
   fileReadableDashboardEntries,
   fileDashboardSystemActor,
   fileBufferedUploadDocumentData,
@@ -811,7 +812,7 @@ export class FileService {
       }));
       total = result.total;
       const readable = await Promise.all(
-        result.data.map(async (snapshot) => ({
+        result.data.map(async (snapshot) => fileReadableDashboardCandidate({
           snapshot,
           readable: await this.queries.canReadDocument(actor, doctype, snapshot)
         }))

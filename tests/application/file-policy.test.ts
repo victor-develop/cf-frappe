@@ -102,6 +102,7 @@ import {
   fileRenditionSnapshotManifestPatch,
   fileRenditions,
   fileRenditionView,
+  fileReadableDashboardCandidate,
   fileReadableDashboardEntries,
   fileScanFailureError,
   fileScanPatch,
@@ -2771,6 +2772,15 @@ describe("file policy", () => {
     });
     expect(canUploadFile({ id: "manager@example.com", roles: ["File Manager"] }, doctype)).toBe(true);
     expect(canUploadFile({ id: "viewer@example.com", roles: ["File Viewer"] }, doctype)).toBe(false);
+  });
+
+  it("builds readable file dashboard candidates", () => {
+    const snapshot = fileSnapshot({ filename: "visible.pdf", content_type: "application/pdf" });
+
+    expect(fileReadableDashboardCandidate({ snapshot, readable: true })).toEqual({
+      snapshot,
+      readable: true
+    });
   });
 
   it("filters readable file dashboard entries before permission projection", () => {
