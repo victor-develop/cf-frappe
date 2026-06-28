@@ -103,7 +103,6 @@ import {
   fileMultipartUploadId,
   fileMultipartUploadReservationCleanupPlan,
   fileObjectKeysForDelete,
-  fileObjectKeysForScanFailureCleanup,
   filePrimaryObjectKey,
   fileObjectSourceEtag,
   filePreparedDirectUploadResult,
@@ -118,6 +117,7 @@ import {
   fileGeneratedRenditionStoragePutCommand,
   fileObjectScanTarget,
   fileScanFailureError,
+  fileUploadScanFailureCleanupPlan,
   fileExpectedVersionCommandOption,
   fileUploadCompletionExecuteCommand,
   fileUploadCompletionPlan,
@@ -486,10 +486,7 @@ export class FileService {
         object
       });
     } catch (error) {
-      const cleanup = fileBufferedUploadFailureCleanupPlan({ key });
-      for (const cleanupKey of cleanup.deleteKeys) {
-        await this.storage.delete(cleanupKey).catch(ignoreFileCleanupFailure);
-      }
+      await this.deleteFileObjectsIgnoringFailures(fileBufferedUploadFailureCleanupPlan({ key }));
       throw error;
     }
 
@@ -521,10 +518,7 @@ export class FileService {
       }));
       return fileUploadedResult({ snapshot, object });
     } catch (error) {
-      const cleanup = fileBufferedUploadFailureCleanupPlan({ key });
-      for (const cleanupKey of cleanup.deleteKeys) {
-        await this.storage.delete(cleanupKey).catch(ignoreFileCleanupFailure);
-      }
+      await this.deleteFileObjectsIgnoringFailures(fileBufferedUploadFailureCleanupPlan({ key }));
       throw error;
     }
   }
@@ -600,7 +594,7 @@ export class FileService {
         metadata: command.metadata,
         completion: plan.completion
       }));
-      await this.deleteFileObjectsForScanFailure(current);
+      await this.deleteFileObjectsIgnoringFailures(fileUploadScanFailureCleanupPlan(current));
       throw fileScanFailureError(scan, snapshot);
     }
     return this.documents.execute(fileUploadCompletionExecuteCommand({
@@ -737,7 +731,7 @@ export class FileService {
         metadata: command.metadata,
         completion: plan.completion
       }));
-      await this.deleteFileObjectsForScanFailure(completing);
+      await this.deleteFileObjectsIgnoringFailures(fileUploadScanFailureCleanupPlan(completing));
       throw fileScanFailureError(scan, snapshot);
     }
     return this.documents.execute(fileUploadCompletionExecuteCommand({
@@ -1174,8 +1168,8 @@ export class FileService {
     }
   }
 
-  private async deleteFileObjectsForScanFailure(snapshot: DocumentSnapshot): Promise<void> {
-    for (const key of fileObjectKeysForScanFailureCleanup(snapshot)) {
+  private async deleteFileObjectsIgnoringFailures(plan: { readonly deleteKeys: readonly string[] }): Promise<void> {
+    for (const key of plan.deleteKeys) {
       await this.storage.delete(key).catch(ignoreFileCleanupFailure);
     }
   }

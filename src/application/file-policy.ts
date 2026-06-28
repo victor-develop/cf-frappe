@@ -2438,6 +2438,14 @@ export function fileObjectKeysForScanFailureCleanup(snapshot: DocumentSnapshot):
   return [filePrimaryObjectKey(snapshot)];
 }
 
+export function fileUploadScanFailureCleanupPlan(snapshot: DocumentSnapshot): {
+  readonly deleteKeys: readonly string[];
+} {
+  return {
+    deleteKeys: fileObjectKeysForScanFailureCleanup(snapshot)
+  };
+}
+
 export function fileTransformOptionsFromData(data: DocumentData): FileTransformOptions {
   const fit = typeof data.fit === "string" ? data.fit as NonNullable<FileTransformOptions["fit"]> : undefined;
   const format = typeof data.format === "string" ? data.format as NonNullable<FileTransformOptions["format"]> : undefined;

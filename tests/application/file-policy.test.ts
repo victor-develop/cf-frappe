@@ -97,6 +97,7 @@ import {
   filePrimaryObjectKey,
   filePreparedDirectUploadResult,
   filePreparedMultipartUploadResult,
+  fileUploadScanFailureCleanupPlan,
   fileDirectUploadReservationCommand,
   fileSnapshotFilename,
   fileGeneratedRenditionStoragePutCommand,
@@ -1032,6 +1033,17 @@ describe("file policy", () => {
     expect(fileObjectKeysForScanFailureCleanup(snapshot)).toEqual([
       "acme/files/file_multipart-original.png"
     ]);
+  });
+
+  it("plans upload scan-failure cleanup keys", () => {
+    expect(fileUploadScanFailureCleanupPlan(fileSnapshot({
+      key: "acme/files/file_multipart-original.png",
+      renditions: [
+        renditionEntry("thumb", { key: "acme/file-renditions/file/thumb.webp" })
+      ]
+    }))).toEqual({
+      deleteKeys: ["acme/files/file_multipart-original.png"]
+    });
   });
 
   it("reads primary file object keys", () => {
