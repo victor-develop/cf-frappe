@@ -184,8 +184,12 @@ async function importRsaVerifyKey(jwk: JsonWebKey, signingKeyLabel: string): Pro
 }
 
 function isAudience(value: unknown): value is string | readonly string[] {
-  return typeof value === "string" ||
-    (Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "string"));
+  return isNonBlankString(value) ||
+    (Array.isArray(value) && value.length > 0 && value.every(isNonBlankString));
+}
+
+function isNonBlankString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function base64UrlDecode(value: string, tokenLabel: string): Uint8Array {
