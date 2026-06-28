@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the field-property dependency-expression normalization slice:
+As of the field-property default-value serialization slice:
 
 - Vitest files: `170`
-- Vitest cases: `1827`
-- Remaining gap to Frappe static markers: `957`
+- Vitest cases: `1828`
+- Remaining gap to Frappe static markers: `956`
 
 ## Implication
 

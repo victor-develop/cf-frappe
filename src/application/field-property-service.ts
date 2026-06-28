@@ -241,7 +241,7 @@ function normalizeOverrides(field: FieldDefinition, overrides: FieldPropertyOver
     ...optionalNumber(overrides.min, "min", "min"),
     ...optionalNumber(overrides.max, "max", "max"),
     ...optionalOptions(field, overrides.options),
-    ...(overrides.defaultValue === undefined ? {} : { defaultValue: overrides.defaultValue })
+    ...optionalDefaultValue(field, overrides.defaultValue)
   };
   if (Object.keys(normalized).length === 0) {
     throw new FrameworkError("FIELD_PROPERTY_INVALID", "At least one field property override is required", {
@@ -370,6 +370,51 @@ function optionalOptions(
     normalized.push(item);
   }
   return { options: Object.freeze(normalized) };
+}
+
+function optionalDefaultValue(
+  field: FieldDefinition,
+  value: FieldPropertyOverrides["defaultValue"] | undefined
+): { readonly defaultValue?: JsonValue } {
+  if (value === undefined) {
+    return {};
+  }
+  if (!isJsonValue(value)) {
+    throw new FrameworkError(
+      "FIELD_PROPERTY_INVALID",
+      `Field '${field.name}' defaultValue must be JSON-serializable`,
+      { status: 400 }
+    );
+  }
+  return { defaultValue: value };
+}
+
+function isJsonValue(value: unknown, seen = new Set<object>()): value is JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return true;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value);
+  }
+  if (Array.isArray(value)) {
+    if (seen.has(value)) {
+      return false;
+    }
+    seen.add(value);
+    return value.every((item) => isJsonValue(item, seen));
+  }
+  if (typeof value !== "object") {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    return false;
+  }
+  if (seen.has(value)) {
+    return false;
+  }
+  seen.add(value);
+  return Object.values(value).every((item) => item !== undefined && isJsonValue(item, seen));
 }
 
 function normalizeRequired(value: string, label: string): string {

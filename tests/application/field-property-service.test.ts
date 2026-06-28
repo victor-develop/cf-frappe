@@ -190,6 +190,27 @@ describe("FieldPropertyService", () => {
     expect(saved.fields[0]?.overrides.hiddenDependsOn).toEqual({ field: "title", value: "Hidden" });
   });
 
+  it("rejects non-serializable field-property default values before persisting metadata events", async () => {
+    const service = new FieldPropertyService({
+      registry: createRegistry({ doctypes: [noteDocType] }),
+      events: new InMemoryDocumentStore(),
+      ids: deterministicIds(["property-1"]),
+      clock: fixedClock(now)
+    });
+
+    await expect(
+      service.save({
+        actor: admin,
+        doctype: "Note",
+        fieldName: "title",
+        overrides: { defaultValue: (() => "generated") as never }
+      })
+    ).rejects.toMatchObject({
+      code: "FIELD_PROPERTY_INVALID",
+      message: "Field 'title' defaultValue must be JSON-serializable"
+    });
+  });
+
   it("can clear dangling overrides after an upstream custom field is disabled", async () => {
     const events = new InMemoryDocumentStore();
     const registry = createRegistry({ doctypes: [noteDocType] });

@@ -135,6 +135,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Normalized custom field link and table target names before metadata events are persisted, so runtime link/table fields resolve registered DocTypes consistently after JSON/API whitespace.
 - Normalized custom field mandatory, read-only, and hidden dependency expressions before metadata events are persisted, so runtime conditional metadata stores the same canonical filter shapes as static DocTypes.
 - Normalized field-property mandatory, read-only, and hidden dependency expressions before metadata events are persisted, so runtime override metadata stores canonical filter shapes.
+- Rejected non-JSON field-property default values before metadata events are persisted, keeping runtime property setters inside the append-only event serialization contract.
 - Extracted selected-file bulk operation normalization from `FileService` into the file policy, covering trimming, duplicates, expected-version validation, empty selections, and the bounded 100-file limit.
 - Extracted direct-upload object metadata matching and scanner result patch shaping from `FileService` into the file policy with focused size/content-type and optional scan-field coverage.
 - Extracted file dashboard row projection and limit normalization from `FileService` into the file policy with focused preview, attachment, scan, rendition, and limit coverage.
