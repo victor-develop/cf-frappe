@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the link-option candidate decision slice:
+As of the global-search candidate decision slice:
 
 - Vitest files: `173`
-- Vitest cases: `2036`
-- Remaining gap to Frappe static markers: `748`
+- Vitest cases: `2038`
+- Remaining gap to Frappe static markers: `746`
 
 ## Implication
 

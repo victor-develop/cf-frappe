@@ -50,14 +50,13 @@ import {
   compareSearchResults,
   documentCsvColumns,
   getLinkField,
-  globalSearchMatch,
   mergeDefaultFilters,
   normalizeRequiredSearch,
   normalizeSearch,
   planDocumentReadProjection,
+  planGlobalSearchCandidate,
   planLinkOptionCandidate,
   planProjectionPageScan,
-  toGlobalSearchResult,
   toLinkOption
 } from "./document-query-policy.js";
 
@@ -476,9 +475,9 @@ export class QueryService {
       });
       const readable = await this.filterReadableDocuments(actor, doctype, result.data);
       for (const document of readable) {
-        const match = globalSearchMatch(doctype, document, query);
-        if (match) {
-          results.push(toGlobalSearchResult(doctype, document, match));
+        const candidate = planGlobalSearchCandidate({ doctype, document, query });
+        if (candidate.status === "add") {
+          results.push(candidate.result);
         }
       }
       const scan = planProjectionPageScan({ offset, pageSize, total: result.total });

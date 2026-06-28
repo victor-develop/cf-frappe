@@ -17,6 +17,7 @@ import {
   normalizeRequiredSearch,
   normalizeSearch,
   planDocumentReadProjection,
+  planGlobalSearchCandidate,
   planLinkOptionCandidate,
   planProjectionPageScan,
   primitiveCsvValue,
@@ -163,6 +164,19 @@ describe("document query policy", () => {
     expect(globalSearchMatch(Article, article, "saturn")).toEqual({ field: "summary", text: "Saturn readiness" });
     expect(searchableText("  ")).toBeUndefined();
     expect(searchableText(true)).toBe("true");
+  });
+
+  it("plans global-search candidates without matches as skipped", () => {
+    expect(planGlobalSearchCandidate({ doctype: Article, document: article, query: "missing" })).toEqual({
+      status: "skip"
+    });
+  });
+
+  it("plans matching global-search candidates as result additions", () => {
+    expect(planGlobalSearchCandidate({ doctype: Article, document: article, query: "saturn" })).toEqual({
+      status: "add",
+      result: toGlobalSearchResult(Article, article, { field: "summary", text: "Saturn readiness" })
+    });
   });
 
   it("builds and sorts global search results deterministically", () => {

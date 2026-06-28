@@ -36,6 +36,10 @@ export type LinkOptionCandidateDecision =
   | { readonly status: "add" }
   | { readonly status: "add-and-complete" };
 
+export type GlobalSearchCandidateDecision =
+  | { readonly status: "skip" }
+  | { readonly status: "add"; readonly result: GlobalSearchResultItem };
+
 export type LinkFieldDefinition = FieldDefinition & {
   readonly type: "link";
   readonly linkTo: string;
@@ -130,6 +134,21 @@ export function toGlobalSearchResult(
     matchedText: match.text,
     route: `/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(document.name)}`,
     updatedAt: document.updatedAt
+  };
+}
+
+export function planGlobalSearchCandidate(input: {
+  readonly doctype: DocTypeDefinition;
+  readonly document: DocumentSnapshot;
+  readonly query: string;
+}): GlobalSearchCandidateDecision {
+  const match = globalSearchMatch(input.doctype, input.document, input.query);
+  if (!match) {
+    return { status: "skip" };
+  }
+  return {
+    status: "add",
+    result: toGlobalSearchResult(input.doctype, input.document, match)
   };
 }
 
