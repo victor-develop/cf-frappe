@@ -7,7 +7,8 @@ import type {
   JsonValue,
   MutableDocumentData,
   PermissionRule,
-  ValidationIssue
+  ValidationIssue,
+  WorkflowDefinition
 } from "./types.js";
 import { normalizeAssignmentRules } from "./assignment-rules.js";
 import { FrameworkError } from "./errors.js";
@@ -54,6 +55,7 @@ export function defineDocType<TData extends DocumentData>(
   const listView = definition.listView ? freezeListView(definition, definition.listView) : undefined;
   const assignmentRules = normalizeAssignmentRules(definition, definition.assignmentRules);
   const permissions = definition.permissions ? freezePermissionRules(definition.permissions) : undefined;
+  const workflow = definition.workflow ? freezeWorkflowDefinition(definition.workflow) : undefined;
   const fields = Object.freeze(definition.fields.map((field) => freezeFieldDefinition(definition, field)));
   return Object.freeze({
     ...definition,
@@ -61,6 +63,7 @@ export function defineDocType<TData extends DocumentData>(
     ...(formView ? { formView } : {}),
     ...(listView ? { listView } : {}),
     ...(permissions ? { permissions } : {}),
+    ...(workflow ? { workflow } : {}),
     ...(assignmentRules ? { assignmentRules } : {})
   });
 }
@@ -494,4 +497,19 @@ function freezePermissionRules(permissions: readonly PermissionRule[]): readonly
       })
     )
   );
+}
+
+function freezeWorkflowDefinition(workflow: WorkflowDefinition): WorkflowDefinition {
+  return Object.freeze({
+    ...workflow,
+    states: Object.freeze([...workflow.states]),
+    transitions: Object.freeze(
+      workflow.transitions.map((transition) =>
+        Object.freeze({
+          ...transition,
+          ...(transition.roles === undefined ? {} : { roles: Object.freeze([...transition.roles]) })
+        })
+      )
+    )
+  });
 }

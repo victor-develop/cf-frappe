@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the permission metadata clone slice:
+As of the workflow metadata clone slice:
 
 - Vitest files: `171`
-- Vitest cases: `1889`
-- Remaining gap to Frappe static markers: `895`
+- Vitest cases: `1890`
+- Remaining gap to Frappe static markers: `894`
 
 ## Implication
 

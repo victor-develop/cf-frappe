@@ -1,5 +1,12 @@
-import { applyDefaults, can, defineDocType, FrameworkError, validateDocumentData } from "../../src";
-import type { DocumentData, PermissionAction } from "../../src";
+import {
+  allowedWorkflowTransitions,
+  applyDefaults,
+  can,
+  defineDocType,
+  FrameworkError,
+  validateDocumentData
+} from "../../src";
+import type { DocumentData, DocumentSnapshot, PermissionAction } from "../../src";
 import { owner } from "../helpers";
 
 describe("schema", () => {
@@ -102,6 +109,57 @@ describe("schema", () => {
     expect(Object.isFrozen(note.permissions?.[0]?.actions)).toBe(true);
     expect(can({ id: "reader@example.com", roles: ["Reader"] }, note, "read")).toBe(true);
     expect(can({ id: "reader@example.com", roles: ["Reader"] }, note, "delete")).toBe(false);
+  });
+
+  it("snapshots workflow states and transition roles by value", () => {
+    const states = ["Open", "Closed"];
+    const transitionRoles = ["User"];
+    const task = defineDocType({
+      name: "Workflow Task",
+      fields: [{ name: "workflow_state", type: "select", options: ["Open", "Closed"] }],
+      workflow: {
+        initialState: "Open",
+        states,
+        transitions: [{ action: "close", from: "Open", to: "Closed", roles: transitionRoles }]
+      }
+    });
+
+    states[0] = "Draft";
+    transitionRoles[0] = "Admin";
+
+    const document: DocumentSnapshot = {
+      tenantId: "acme",
+      doctype: "Workflow Task",
+      name: "TASK-1",
+      version: 1,
+      docstatus: "draft",
+      data: { workflow_state: "Open" },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    };
+
+    expect(task.workflow).toEqual({
+      initialState: "Open",
+      states: ["Open", "Closed"],
+      transitions: [{ action: "close", from: "Open", to: "Closed", roles: ["User"] }]
+    });
+    expect(Object.isFrozen(task.workflow?.states)).toBe(true);
+    expect(Object.isFrozen(task.workflow?.transitions)).toBe(true);
+    expect(Object.isFrozen(task.workflow?.transitions[0]?.roles)).toBe(true);
+    expect(
+      allowedWorkflowTransitions({
+        actor: { id: "user@example.com", roles: ["User"], tenantId: "acme" },
+        document,
+        workflow: task.workflow!
+      }).map((transition) => transition.action)
+    ).toEqual(["close"]);
+    expect(
+      allowedWorkflowTransitions({
+        actor: { id: "admin@example.com", roles: ["Admin"], tenantId: "acme" },
+        document,
+        workflow: task.workflow!
+      })
+    ).toEqual([]);
   });
 
   it("reports missing required fields", () => {
