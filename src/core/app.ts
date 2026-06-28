@@ -128,7 +128,7 @@ export function registryOptionsFromApps<TDataPatchResources = unknown>(
 export function resolveAppInstallOrder<TDataPatchResources = unknown>(
   apps: readonly FrameworkAppDefinition<TDataPatchResources>[]
 ): readonly FrameworkAppDefinition<TDataPatchResources>[] {
-  return resolveAppDependencyOrder(apps);
+  return resolveAppDependencyOrder(apps.map((app) => defineApp<TDataPatchResources>(app)));
 }
 
 function installedAppFromDefinition<TDataPatchResources>(

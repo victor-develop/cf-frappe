@@ -179,6 +179,45 @@ describe("app manifests", () => {
     expect(options.hooks?.Note).toEqual([hook]);
   });
 
+  it("snapshots raw app manifests while normalizing registry options", () => {
+    const modules = ["Notes"];
+    const statusOptions = ["Open", "Closed"];
+    const beforeValidate = vi.fn();
+    const replacementBeforeValidate = vi.fn();
+    const hook = { beforeValidate };
+    const app = {
+      name: "notes",
+      modules,
+      doctypes: [
+        {
+          name: "Note",
+          fields: [
+            { name: "title", type: "text" as const },
+            { name: "status", type: "select" as const, options: statusOptions }
+          ]
+        }
+      ],
+      hooks: { Note: [hook] }
+    };
+
+    const options = registryOptionsFromApps([app]);
+
+    modules[0] = "Mutated";
+    statusOptions[0] = "Mutated";
+    app.doctypes[0]!.fields[0]!.name = "mutated";
+    hook.beforeValidate = replacementBeforeValidate;
+
+    expect(options.apps).toEqual([{ name: "notes", modules: ["Notes"], dependencies: [] }]);
+    expect(options.doctypes?.[0]?.fields).toEqual([
+      { name: "title", type: "text" },
+      { name: "status", type: "select", options: ["Open", "Closed"] }
+    ]);
+    expect(options.hooks?.Note?.[0]?.beforeValidate).toBe(beforeValidate);
+    expect(options.hooks?.Note?.[0]?.beforeValidate).not.toBe(replacementBeforeValidate);
+    expect(Object.isFrozen(options.doctypes?.[0])).toBe(true);
+    expect(Object.isFrozen(options.hooks?.Note?.[0])).toBe(true);
+  });
+
   it("snapshots app manifest arrays, hooks, and website settings by value", () => {
     const modules = ["Notes"];
     const dependencies = ["core"];
