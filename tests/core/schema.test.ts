@@ -1,4 +1,5 @@
 import { applyDefaults, defineDocType, FrameworkError, validateDocumentData } from "../../src";
+import type { DocumentData } from "../../src";
 import { owner } from "../helpers";
 
 describe("schema", () => {
@@ -18,6 +19,27 @@ describe("schema", () => {
 
     expect(result).toEqual({ customer: "Ada", paid: false, status: "Draft" });
     expect(input).toEqual({ customer: "Ada" });
+  });
+
+  it("snapshots JSON defaults by value", () => {
+    const staticDefault = { nested: { enabled: true } };
+    const dynamicDefault = { nested: { actor: "template" } };
+    const settings = defineDocType({
+      name: "Settings",
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "static_json", type: "json", defaultValue: staticDefault },
+        { name: "dynamic_json", type: "json", defaultValue: () => dynamicDefault }
+      ]
+    });
+
+    const result = applyDefaults(settings, { title: "Site" }, { actor: owner, now: "2026-01-01T00:00:00.000Z" });
+
+    ((result.static_json as DocumentData).nested as DocumentData).enabled = false;
+    ((result.dynamic_json as DocumentData).nested as DocumentData).actor = "mutated";
+
+    expect(staticDefault).toEqual({ nested: { enabled: true } });
+    expect(dynamicDefault).toEqual({ nested: { actor: "template" } });
   });
 
   it("reports missing required fields", () => {

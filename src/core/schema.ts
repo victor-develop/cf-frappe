@@ -11,6 +11,7 @@ import type {
 import { normalizeAssignmentRules } from "./assignment-rules.js";
 import { FrameworkError } from "./errors.js";
 import { assertFormViewDefinition } from "./form-view.js";
+import { cloneJsonValue } from "./json.js";
 import {
   assertListViewDefinition,
   freezeListFilterExpression,
@@ -69,10 +70,8 @@ export function applyDefaults(
     if (data[field.name] !== undefined || field.defaultValue === undefined) {
       continue;
     }
-    data[field.name] =
-      typeof field.defaultValue === "function"
-        ? field.defaultValue(context)
-        : field.defaultValue;
+    const defaultValue = typeof field.defaultValue === "function" ? field.defaultValue(context) : field.defaultValue;
+    data[field.name] = cloneJsonValue(defaultValue);
   }
   if (definition.workflow) {
     const stateField = definition.workflow.stateField ?? "workflow_state";

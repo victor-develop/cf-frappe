@@ -161,6 +161,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Guarded data-patch apply and rollback results with JSON cloning, preserving runner return values and journal boundary semantics after patch hooks return migration results.
 - Guarded field-property JSON default values with cloning, preserving runtime metadata event boundaries before effective DocType overlays can reuse caller-owned defaults.
 - Guarded custom-field JSON default values with cloning, preserving tenant metadata event boundaries before custom DocType overlays can reuse caller-owned defaults.
+- Guarded schema-applied JSON defaults with cloning, preserving document data boundaries before static or function-provided DocType defaults are inserted into new documents.
 - Extracted selected-file bulk operation normalization from `FileService` into the file policy, covering trimming, duplicates, expected-version validation, empty selections, and the bounded 100-file limit.
 - Extracted direct-upload object metadata matching and scanner result patch shaping from `FileService` into the file policy with focused size/content-type and optional scan-field coverage.
 - Extracted file dashboard row projection and limit normalization from `FileService` into the file policy with focused preview, attachment, scan, rendition, and limit coverage.
