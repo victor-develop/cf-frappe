@@ -138,6 +138,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Extracted file scanner target construction and scanner result-status validation from `FileService` into the file policy with focused default content-type and invalid-status coverage.
 - Hardened CSV parser row access so header and trailing-empty-row handling no longer rely on array non-null assertions.
 - Centralized CSV importable field resolution so header validation and row mapping reject read-only or hidden fields through one metadata boundary.
+- Centralized single data-patch selection so retry flows no longer rely on a selected-array non-null assertion after patch-id validation.
 - Extracted available-rendition reuse selection and duplicate pending-rendition rejection from `FileService` into the file policy with focused source and overlay identity coverage.
 - Centralized file transformability rejection in the file policy so direct transforms, persisted renditions, and overlay-source transforms share one tested content-type guard.
 - Moved upload byte-limit checks and reservation-expiry timestamp planning into file policy so buffered, direct, and multipart upload flows share the same tested boundary rules.

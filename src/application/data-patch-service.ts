@@ -130,7 +130,7 @@ export class DataPatchService<TResources = unknown> {
 
   async retryFailed(actor: Actor, patchId: string): Promise<DataPatchRunResult> {
     this.authorize(actor);
-    const patch = selectPatches(this.patches, [patchId])[0]!;
+    const patch = selectPatch(this.patches, patchId);
     await this.assertPredecessorsApplied([patch]);
     await this.log.retryFailedDataPatch({ id: patch.id, checksum: patch.checksum });
     return this.runner().apply([patch]);
@@ -249,7 +249,7 @@ export class DataPatchService<TResources = unknown> {
   }
 
   private async patchForRollbackRetry(patchId: string): Promise<DataPatchDefinition<TResources>> {
-    const patch = selectPatches(this.patches, [patchId])[0]!;
+    const patch = selectPatch(this.patches, patchId);
     const recordedById = new Map((await this.log.recordedDataPatches()).map((recorded) => [recorded.id, recorded]));
     this.assertSelectedPatchRollbackRetryable(patch, recordedById);
     this.assertNoUnsafeSuccessorsOutsideSelection([patch], new Set([patch.id]), recordedById);
@@ -484,6 +484,17 @@ function selectPatches<TResources>(
     throw notFound(`Data patch '${missing[0]}' is not registered`, "DATA_PATCH_NOT_FOUND");
   }
   return selected;
+}
+
+function selectPatch<TResources>(
+  patches: readonly DataPatchDefinition<TResources>[],
+  patchId: string
+): DataPatchDefinition<TResources> {
+  const patch = selectPatches(patches, [patchId])[0];
+  if (patch === undefined) {
+    throw notFound(`Data patch '${patchId}' is not registered`, "DATA_PATCH_NOT_FOUND");
+  }
+  return patch;
 }
 
 function assertApplyLimit(limit: number | undefined): void {

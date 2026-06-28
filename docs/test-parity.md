@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the CSV importable field resolution slice:
+As of the data-patch single selection slice:
 
 - Vitest files: `170`
-- Vitest cases: `1781`
-- Remaining gap to Frappe static markers: `1003`
+- Vitest cases: `1782`
+- Remaining gap to Frappe static markers: `1002`
 
 ## Implication
 

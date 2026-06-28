@@ -644,6 +644,20 @@ describe("DataPatchService", () => {
     });
   });
 
+  it("rejects invalid data patch ids before retry selection", async () => {
+    const service = new DataPatchService({
+      log: new InMemoryDataPatchLog(),
+      resources: {},
+      patches: [defineDataPatch({ id: "core.retry", checksum: "v1", run: () => undefined })]
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+
+    await expect(service.retryFailed(admin, "")).rejects.toMatchObject({
+      code: "DATA_PATCH_INVALID",
+      status: 400
+    });
+  });
+
   it("retries failed data patch rollbacks by restoring applied state and re-entering the runner", async () => {
     const resources = { applied: [] as string[], rollbackAttempts: 0, rolledBack: [] as string[] };
     const service = new DataPatchService({
