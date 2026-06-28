@@ -110,6 +110,34 @@ describe("JobDispatcher", () => {
     });
     expect(queue.queued()).toHaveLength(1);
   });
+
+  it("rejects non-JSON queue payloads and metadata before enqueueing", async () => {
+    const queue = new InMemoryJobQueue();
+    const dispatcher = new JobDispatcher({
+      registry: createJobRegistry({
+        jobs: [{ name: "email.digest", handler: () => undefined }]
+      }),
+      queue,
+      clock: fixedClock(now),
+      ids: deterministicIds(["001"])
+    });
+
+    await expect(
+      dispatcher.dispatch({
+        jobName: "email.digest",
+        payload: { account: Number.POSITIVE_INFINITY } as never
+      })
+    ).rejects.toThrow("Job payload must be a JSON object");
+    await expect(
+      dispatcher.dispatch({
+        jobName: "email.digest",
+        payload: {},
+        metadata: { source: undefined } as never
+      })
+    ).rejects.toThrow("Job metadata must be a JSON object");
+
+    expect(queue.queued()).toEqual([]);
+  });
 });
 
 describe("JobExecutor", () => {
@@ -978,6 +1006,35 @@ describe("JobScheduleService", () => {
         enabled: false
       }
     ]);
+  });
+
+  it("rejects non-JSON runtime schedule payloads and metadata before persisting events", async () => {
+    const service = new JobScheduleService({
+      registry: createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] }),
+      schedules: [],
+      events: new InMemoryEventStore(),
+      clock: fixedClock(now),
+      ids: deterministicIds(["save-runtime"])
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+
+    await expect(
+      service.save(admin, {
+        id: "runtime-daily",
+        cron: "15 4 * * *",
+        jobName: "reports.daily",
+        payload: { scope: () => "daily" } as never
+      })
+    ).rejects.toThrow("Job schedule payload must be a JSON object");
+    await expect(
+      service.save(admin, {
+        id: "runtime-daily",
+        cron: "15 4 * * *",
+        jobName: "reports.daily",
+        metadata: { source: Number.POSITIVE_INFINITY } as never
+      })
+    ).rejects.toThrow("Job schedule metadata must be a JSON object");
+    await expect(service.schedulesForCron("15 4 * * *")).resolves.toEqual([]);
   });
 
   it("keeps dynamic schedules immutable and validates configured schedule ids", async () => {

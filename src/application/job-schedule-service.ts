@@ -11,6 +11,7 @@ import {
   type TenantId
 } from "../core/types.js";
 import type { JobScheduleEventPayload } from "./job-schedule-events.js";
+import { normalizeJobDocumentData } from "./job-payload-policy.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
@@ -901,10 +902,7 @@ function pauseIsActive(pausedUntil: string, now: string): boolean {
 }
 
 function normalizeDocumentData(value: DocumentData, field: string): DocumentData {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw badRequest(`Job schedule ${field} must be an object`);
-  }
-  return value;
+  return normalizeJobDocumentData(value, `Job schedule ${field}`);
 }
 
 function foldJobScheduleOverrides(

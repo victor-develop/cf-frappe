@@ -38,6 +38,7 @@ export * from "./application/field-property-service.js";
 export * from "./application/job-dispatcher.js";
 export * from "./application/job-errors.js";
 export * from "./application/job-executor.js";
+export * from "./application/job-payload-policy.js";
 export * from "./application/job-history-service.js";
 export * from "./application/job-retry-service.js";
 export * from "./application/job-schedule-service.js";

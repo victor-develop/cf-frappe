@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the shared metadata JSON-boundary slice:
+As of the job queue JSON-boundary slice:
 
 - Vitest files: `171`
-- Vitest cases: `1832`
-- Remaining gap to Frappe static markers: `952`
+- Vitest cases: `1834`
+- Remaining gap to Frappe static markers: `950`
 
 ## Implication
 

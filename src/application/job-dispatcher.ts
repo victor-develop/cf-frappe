@@ -6,6 +6,7 @@ import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 import { cryptoIdGenerator } from "../ports/id-generator.js";
+import { normalizeJobDocumentData } from "./job-payload-policy.js";
 import {
   MAX_JOB_QUEUE_DELAY_SECONDS,
   MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH,
@@ -39,16 +40,20 @@ export class JobDispatcher<TResources = unknown> {
     this.registry.get(command.jobName);
     const options = sendOptions(command);
     validateIdempotencyKey(command.idempotencyKey);
+    const payload = normalizeJobDocumentData(command.payload, "Job payload") as TPayload;
+    const metadata = command.metadata === undefined
+      ? {}
+      : normalizeJobDocumentData(command.metadata, "Job metadata");
     const runId = this.ids.next("job_");
     const tenantId = command.tenantId ?? DEFAULT_TENANT_ID;
     const message: JobMessage<TPayload> = {
       tenantId,
       jobName: command.jobName,
-      payload: command.payload,
+      payload,
       runId,
       idempotencyKey: command.idempotencyKey ?? `${command.jobName}:${runId}`,
       enqueuedAt: this.clock.now(),
-      metadata: command.metadata ?? {}
+      metadata
     };
     await this.queue.send(message, options);
     return message;
