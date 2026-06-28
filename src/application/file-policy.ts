@@ -1487,6 +1487,14 @@ export function fileDownloadedRenditionResult(command: {
   };
 }
 
+export function fileDownloadedRenditionObjectReadPlan(rendition: FileRenditionManifestEntry): {
+  readonly key: string;
+} {
+  return {
+    key: rendition.key
+  };
+}
+
 export function ensureValidFileScanResult(result: FileScanResult): void {
   if (result.status !== "clean" && result.status !== "infected") {
     throw badRequest("File scanner returned an invalid status");

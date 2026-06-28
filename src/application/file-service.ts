@@ -86,6 +86,7 @@ import {
   fileDeletedExecuteCommand,
   fileDeleteFinalizationPlan,
   fileResolvedTransformOverlaySource,
+  fileDownloadedRenditionObjectReadPlan,
   fileDownloadedRenditionResult,
   fileDocumentCreateCommand,
   fileDirectUploadReservationPlan,
@@ -954,8 +955,9 @@ export class FileService {
   async downloadRendition(command: DownloadFileRenditionCommand): Promise<DownloadedFileRendition> {
     const snapshot = await this.availableFileSnapshot(command);
     const rendition = availableFileRenditionForDownload(snapshot, command.renditionId);
+    const read = fileDownloadedRenditionObjectReadPlan(rendition);
     const object = requireStoredFileRenditionObject(
-      await this.storage.get(rendition.key),
+      await this.storage.get(read.key),
       this.fileDoctype,
       command.name,
       command.renditionId

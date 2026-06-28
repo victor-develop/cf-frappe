@@ -70,6 +70,7 @@ import {
   fileDashboardSystemActor,
   fileDownloadedObjectReadPlan,
   fileDownloadedResult,
+  fileDownloadedRenditionObjectReadPlan,
   fileDownloadedRenditionResult,
   fileDeleteRequestedExecuteCommand,
   fileDeleteRequestedDocumentCommand,
@@ -937,6 +938,14 @@ describe("file policy", () => {
         contentType: "image/webp"
       },
       object
+    });
+  });
+
+  it("plans downloaded rendition object reads from manifest entries", () => {
+    expect(fileDownloadedRenditionObjectReadPlan(renditionEntry("thumb", {
+      key: "acme/file-renditions/file/thumb.webp"
+    }))).toEqual({
+      key: "acme/file-renditions/file/thumb.webp"
     });
   });
 
