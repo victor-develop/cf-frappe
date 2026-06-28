@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canExecuteDomainCommandForRoles,
   ensureDocumentStatus,
   ensureExpectedVersion,
   ensureMergeBaseVersion,
   mergeSnapshotFromDocument,
   normalizeUnsetFields,
+  planDomainCommandPolicy,
   pickCommandFields,
+  type Actor,
   type DocumentSnapshot
 } from "../../src";
+
+const actor: Actor = { id: "user@example.com", roles: ["User"], tenantId: "acme" };
 
 const snapshot: DocumentSnapshot = {
   tenantId: "acme",
@@ -63,5 +68,57 @@ describe("document command policy", () => {
     expect(pickCommandFields(["body", "missing"], { title: "Hello", body: "World" })).toEqual({
       body: "World"
     });
+  });
+
+  it("plans field-picked domain command patches with default execution policy", () => {
+    expect(
+      planDomainCommandPolicy({
+        actor,
+        definition: {
+          name: "close",
+          eventType: "NoteClosed",
+          fields: ["title", "missing", "body"]
+        },
+        document: snapshot,
+        input: { title: "Updated", body: undefined, ignored: "nope" },
+        now: "2026-06-28T02:00:00.000Z"
+      })
+    ).toEqual({
+      input: { title: "Updated", ignored: "nope" },
+      patch: { title: "Updated" },
+      permissionAction: "update",
+      allowReadOnlyFields: false
+    });
+  });
+
+  it("plans buildPatch domain command patches from compact input", () => {
+    expect(
+      planDomainCommandPolicy({
+        actor,
+        definition: {
+          name: "score",
+          eventType: "NoteScored",
+          permissionAction: "metadata",
+          allowReadOnlyFields: true,
+          buildPatch: ({ input, now }) => ({
+            title: `${String(input.title)} @ ${now}`
+          })
+        },
+        document: snapshot,
+        input: { title: "Reviewed", body: undefined },
+        now: "2026-06-28T02:00:00.000Z"
+      })
+    ).toEqual({
+      input: { title: "Reviewed" },
+      patch: { title: "Reviewed @ 2026-06-28T02:00:00.000Z" },
+      permissionAction: "metadata",
+      allowReadOnlyFields: true
+    });
+  });
+
+  it("checks domain command role eligibility as a pure policy", () => {
+    expect(canExecuteDomainCommandForRoles(actor, {})).toBe(true);
+    expect(canExecuteDomainCommandForRoles(actor, { roles: ["System Manager", "User"] })).toBe(true);
+    expect(canExecuteDomainCommandForRoles(actor, { roles: ["System Manager"] })).toBe(false);
   });
 });

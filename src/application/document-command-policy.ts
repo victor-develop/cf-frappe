@@ -1,9 +1,14 @@
 import type { DocumentMergeSnapshot } from "../core/document-merge.js";
 import { badRequest, conflict, FrameworkError } from "../core/errors.js";
+import { compactData } from "../core/schema.js";
 import type {
+  Actor,
+  DomainCommandDefinition,
   DocStatus,
   DocumentData,
-  DocumentSnapshot
+  DocumentSnapshot,
+  MutableDocumentData,
+  PermissionAction
 } from "../core/types.js";
 
 export function ensureExpectedVersion(existing: DocumentSnapshot, expectedVersion?: number): void {
@@ -53,4 +58,42 @@ export function pickCommandFields(fields: readonly string[] | undefined, input: 
     return input;
   }
   return Object.fromEntries(fields.map((field) => [field, input[field]]).filter(([, value]) => value !== undefined)) as DocumentData;
+}
+
+export interface DomainCommandPolicyPlan {
+  readonly input: DocumentData;
+  readonly patch: DocumentData;
+  readonly permissionAction: PermissionAction;
+  readonly allowReadOnlyFields: boolean;
+}
+
+export function canExecuteDomainCommandForRoles(
+  actor: Actor,
+  definition: Pick<DomainCommandDefinition, "roles">
+): boolean {
+  return definition.roles === undefined || definition.roles.some((role) => actor.roles.includes(role));
+}
+
+export function planDomainCommandPolicy(input: {
+  readonly actor: Actor;
+  readonly definition: DomainCommandDefinition;
+  readonly document: DocumentSnapshot;
+  readonly input: MutableDocumentData;
+  readonly now: string;
+}): DomainCommandPolicyPlan {
+  const commandInput = compactData(input.input);
+  const patch = input.definition.buildPatch
+    ? input.definition.buildPatch({
+        actor: input.actor,
+        document: input.document,
+        input: commandInput,
+        now: input.now
+      })
+    : pickCommandFields(input.definition.fields, commandInput);
+  return {
+    input: commandInput,
+    patch: compactData(patch),
+    permissionAction: input.definition.permissionAction ?? "update",
+    allowReadOnlyFields: input.definition.allowReadOnlyFields ?? false
+  };
 }

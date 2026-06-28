@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the starter outbox deployment binding coverage slice:
+As of the domain command policy extraction slice:
 
 - Vitest files: `173`
-- Vitest cases: `1971`
-- Remaining gap to Frappe static markers: `813`
+- Vitest cases: `1974`
+- Remaining gap to Frappe static markers: `810`
 
 ## Implication
 

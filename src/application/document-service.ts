@@ -45,7 +45,8 @@ import {
   ensureMergeBaseVersion,
   mergeSnapshotFromDocument,
   normalizeUnsetFields,
-  pickCommandFields
+  canExecuteDomainCommandForRoles,
+  planDomainCommandPolicy
 } from "./document-command-policy.js";
 import {
   domainCommandAppliedPayload,
@@ -976,27 +977,26 @@ export class DocumentService implements DocumentCommandExecutor {
     }
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
-    const permissionAction = commandDefinition.permissionAction ?? "update";
-    if (!(await this.canActOnDocument(command.actor, doctype, permissionAction, existing))) {
+    const now = this.clock.now();
+    const commandPlan = planDomainCommandPolicy({
+      actor: command.actor,
+      definition: commandDefinition,
+      document: existing,
+      input: command.input,
+      now
+    });
+    if (!(await this.canActOnDocument(command.actor, doctype, commandPlan.permissionAction, existing))) {
       throw permissionDenied(`Actor '${command.actor.id}' cannot execute ${command.command} on ${doctype.name}/${command.name}`);
     }
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
-    const roleAllowed =
-      commandDefinition.roles === undefined ||
-      commandDefinition.roles.some((role) => command.actor.roles.includes(role));
-    if (!roleAllowed) {
+    if (!canExecuteDomainCommandForRoles(command.actor, commandDefinition)) {
       throw permissionDenied(`Actor '${command.actor.id}' cannot execute ${command.command}`);
     }
     ensureExpectedVersion(existing, command.expectedVersion);
     ensureDocumentStatus(existing, ["draft"], `execute ${command.command}`);
 
-    const input = compactData(command.input);
-    const sanitizedInput = stripInternalTableFields(doctype, input, relatedDocType);
-    const now = this.clock.now();
-    const patch = commandDefinition.buildPatch
-      ? commandDefinition.buildPatch({ actor: command.actor, document: existing, input, now })
-      : pickCommandFields(commandDefinition.fields, input);
-    const normalizedPatch = await this.runBeforeValidate(doctype, compactData(patch), existing);
+    const sanitizedInput = stripInternalTableFields(doctype, commandPlan.input, relatedDocType);
+    const normalizedPatch = await this.runBeforeValidate(doctype, commandPlan.patch, existing);
     const patchWithoutInternalFields = stripInternalTableFields(doctype, normalizedPatch, relatedDocType);
     const patchWithFetchedFields = await this.applyFetchedFields(
       command.actor,
@@ -1014,7 +1014,7 @@ export class DocumentService implements DocumentCommandExecutor {
       relatedDocType
     );
     const data = applyDocumentDataChange(existing.data, patchWithReadOnlyValues, []);
-    const readOnlyIssues = commandDefinition.allowReadOnlyFields
+    const readOnlyIssues = commandPlan.allowReadOnlyFields
       ? []
       : readonlyIssues(doctype, patchWithoutInternalFields, relatedDocType, data);
     const validationIssues = await this.validate(doctype, patchWithReadOnlyValues, relatedDocType, existing);
