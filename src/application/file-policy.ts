@@ -87,6 +87,40 @@ export function requireMultipartFileUploads(
   return multipartUploads;
 }
 
+export function requireFileObjectMetadata(
+  object: FileObjectMetadata | null | undefined,
+  fileDoctype: string,
+  fileName: string
+): FileObjectMetadata {
+  if (!object) {
+    throw notFound(`${fileDoctype}/${fileName} content was not found`);
+  }
+  return object;
+}
+
+export function requireStoredFileObject(
+  object: StoredFileObject | null | undefined,
+  fileDoctype: string,
+  fileName: string
+): StoredFileObject {
+  if (!object) {
+    throw notFound(`${fileDoctype}/${fileName} content was not found`);
+  }
+  return object;
+}
+
+export function requireStoredFileRenditionObject(
+  object: StoredFileObject | null | undefined,
+  fileDoctype: string,
+  fileName: string,
+  renditionId: string
+): StoredFileObject {
+  if (!object) {
+    throw notFound(`${fileDoctype}/${fileName} rendition '${renditionId}' content was not found`);
+  }
+  return object;
+}
+
 export function fileObjectContentType(snapshot: DocumentSnapshot, object: FileObjectMetadata): string {
   return object.contentType ?? requireFileSnapshotString(snapshot, "content_type");
 }

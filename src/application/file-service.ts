@@ -2,7 +2,6 @@ import type { DocumentCommandExecutor } from "./document-service.js";
 import { QueryService } from "./query-service.js";
 import {
   badRequest,
-  notFound,
   type FrameworkErrorCode
 } from "../core/errors.js";
 import { FILE_DOCTYPE_NAME } from "../core/file-doctype.js";
@@ -56,8 +55,11 @@ import {
   ensureMultipartCompletionMatchesManifest,
   ensureMultipartPartFitsReservation,
   requireDirectFileUploadCreator,
+  requireFileObjectMetadata,
   requireFileTransformer,
   requireMultipartFileUploads,
+  requireStoredFileObject,
+  requireStoredFileRenditionObject,
   canUploadFile,
   fileBulkDeleteFailure,
   fileBulkFailure,
@@ -541,10 +543,11 @@ export class FileService {
     const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
     const current = await this.queries.getDocument(command.actor, this.fileDoctype, command.name, tenantId);
     ensureFilePendingDirectUpload(current);
-    const object = await this.storage.head(filePrimaryObjectKey(current));
-    if (!object) {
-      throw notFound(`${this.fileDoctype}/${command.name} content was not found`);
-    }
+    const object = requireFileObjectMetadata(
+      await this.storage.head(filePrimaryObjectKey(current)),
+      this.fileDoctype,
+      command.name
+    );
     ensureDirectUploadMatches(current, object);
     const scan = await this.scanObject({
       actor: command.actor,
@@ -816,10 +819,7 @@ export class FileService {
   async download(command: DownloadFileCommand): Promise<DownloadedFile> {
     const snapshot = await this.availableFileSnapshot(command);
     const key = filePrimaryObjectKey(snapshot);
-    const object = await this.storage.get(key);
-    if (!object) {
-      throw notFound(`${this.fileDoctype}/${command.name} content was not found`);
-    }
+    const object = requireStoredFileObject(await this.storage.get(key), this.fileDoctype, command.name);
     return { snapshot, object };
   }
 
@@ -931,10 +931,12 @@ export class FileService {
   async downloadRendition(command: DownloadFileRenditionCommand): Promise<DownloadedFileRendition> {
     const snapshot = await this.availableFileSnapshot(command);
     const rendition = availableFileRenditionForDownload(snapshot, command.renditionId);
-    const object = await this.storage.get(rendition.key);
-    if (!object) {
-      throw notFound(`${this.fileDoctype}/${command.name} rendition '${command.renditionId}' content was not found`);
-    }
+    const object = requireStoredFileRenditionObject(
+      await this.storage.get(rendition.key),
+      this.fileDoctype,
+      command.name,
+      command.renditionId
+    );
     return {
       snapshot,
       rendition: fileRenditionView(rendition),
@@ -1104,10 +1106,7 @@ export class FileService {
       tenantId: command.tenantId
     });
     const key = filePrimaryObjectKey(snapshot);
-    const object = await this.storage.get(key);
-    if (!object) {
-      throw notFound(`${this.fileDoctype}/${overlay.file} content was not found`);
-    }
+    const object = requireStoredFileObject(await this.storage.get(key), this.fileDoctype, overlay.file);
     return fileTransformOverlaySource(snapshot, object, overlay);
   }
 

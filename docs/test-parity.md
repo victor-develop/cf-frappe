@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file storage capability preflight policy slice:
+As of the file missing-object policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1675`
-- Remaining gap to Frappe static markers: `1109`
+- Vitest cases: `1676`
+- Remaining gap to Frappe static markers: `1108`
 
 ## Implication
 

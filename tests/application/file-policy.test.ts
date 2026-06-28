@@ -89,9 +89,12 @@ import {
   optionalFileScanPatch,
   pendingFileRendition,
   requireDirectFileUploadCreator,
+  requireFileObjectMetadata,
   requireFileSnapshotString,
   requireFileTransformer,
   requireMultipartFileUploads,
+  requireStoredFileObject,
+  requireStoredFileRenditionObject,
   renditionObjectKey,
   renditionSourcesMatch,
   reusableFileRenditionForGeneration,
@@ -181,6 +184,24 @@ describe("file policy", () => {
     );
     expect(() => requireMultipartFileUploads(undefined)).toThrow(
       "Multipart uploads are not supported by this file storage"
+    );
+  });
+
+  it("requires stored file objects with stable not-found messages", () => {
+    const metadata = fileObject({ key: "acme/files/file_invoice-invoice.pdf" });
+    const object = storedFileObject(metadata);
+
+    expect(requireFileObjectMetadata(metadata, "File", "file_invoice")).toBe(metadata);
+    expect(requireStoredFileObject(object, "File", "file_invoice")).toBe(object);
+    expect(requireStoredFileRenditionObject(object, "File", "file_invoice", "thumb")).toBe(object);
+    expect(() => requireFileObjectMetadata(null, "File", "file_invoice")).toThrow(
+      "File/file_invoice content was not found"
+    );
+    expect(() => requireStoredFileObject(undefined, "File", "file_invoice")).toThrow(
+      "File/file_invoice content was not found"
+    );
+    expect(() => requireStoredFileRenditionObject(null, "File", "file_invoice", "thumb")).toThrow(
+      "File/file_invoice rendition 'thumb' content was not found"
     );
   });
 
@@ -1620,6 +1641,13 @@ function fileObject(overrides: Partial<FileObjectMetadata> = {}): FileObjectMeta
   return {
     ...baseFileObject(),
     ...overrides
+  };
+}
+
+function storedFileObject(metadata: FileObjectMetadata = fileObject()): StoredFileObject {
+  return {
+    metadata,
+    body: new ReadableStream<Uint8Array>()
   };
 }
 
