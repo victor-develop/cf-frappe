@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the report min/max summary candidate slice:
+As of the configured job schedule lookup invariant slice:
 
 - Vitest files: `170`
-- Vitest cases: `1791`
-- Remaining gap to Frappe static markers: `993`
+- Vitest cases: `1792`
+- Remaining gap to Frappe static markers: `992`
 
 ## Implication
 

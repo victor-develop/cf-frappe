@@ -455,6 +455,29 @@ describe("JobScheduleService", () => {
     );
   });
 
+  it("dispatches explicitly identified configured schedules through the configured runner", async () => {
+    const registry = createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] });
+    const runner = vi.fn(async () => jobMessage("reports.daily", "job_weekly", "acme"));
+    const service = new JobScheduleService({
+      registry,
+      schedules: [
+        { id: "daily-reports", cron: "0 2 * * *", jobName: "reports.daily", tenantId: "acme" },
+        { id: "weekly-reports", cron: "0 4 * * 1", jobName: "reports.daily", tenantId: "acme" }
+      ],
+      runner: { run: runner }
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+
+    await expect(service.dispatch(admin, "weekly-reports")).resolves.toMatchObject({
+      schedule: { id: "weekly-reports", cron: "0 4 * * 1", jobName: "reports.daily" },
+      message: { tenantId: "acme", idempotencyKey: "reports.daily:job_weekly" }
+    });
+    expect(runner).toHaveBeenCalledWith(
+      { id: "weekly-reports", cron: "0 4 * * 1", jobName: "reports.daily", tenantId: "acme" },
+      admin
+    );
+  });
+
   it("overrides static schedules through the event store for admin, manual, and cron dispatch", async () => {
     const registry = createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] });
     const events = new InMemoryEventStore();

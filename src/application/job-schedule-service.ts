@@ -589,7 +589,7 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
         summary: this.summaryFor(runtime, runtimeIndex, await this.overrideState(tenantId), "runtime")
       };
     }
-    const schedule = this.schedules[index]!;
+    const schedule = requireConfiguredSchedule(this.schedules, index, scheduleId);
     return { schedule, index, summary: this.summaryFor(schedule, index, await this.overrideState(tenantId)) };
   }
 
@@ -732,6 +732,18 @@ function canInspectSchedule(schedule: JobScheduleSummary, tenantId: TenantId): b
 
 function scheduleIdentity(schedule: JobScheduleDefinitionForAdmin, index: number): string {
   return schedule.id ?? String(index + 1);
+}
+
+function requireConfiguredSchedule<TSchedule extends JobScheduleDefinitionForAdmin>(
+  schedules: readonly TSchedule[],
+  index: number,
+  scheduleId: string
+): TSchedule {
+  const schedule = schedules[index];
+  if (schedule === undefined) {
+    throw new Error(`Configured job schedule '${scheduleId}' was not found at resolved index ${index}`);
+  }
+  return schedule;
 }
 
 function ensureUniqueScheduleIds(schedules: readonly JobScheduleDefinitionForAdmin[]): void {
