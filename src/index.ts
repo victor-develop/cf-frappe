@@ -74,6 +74,7 @@ export * from "./core/custom-fields.js";
 export * from "./core/dashboard.js";
 export * from "./core/data-patch.js";
 export * from "./core/document-merge.js";
+export * from "./core/document-snapshots.js";
 export * from "./core/document-shares.js";
 export * from "./core/domain-events.js";
 export * from "./core/file-doctype.js";

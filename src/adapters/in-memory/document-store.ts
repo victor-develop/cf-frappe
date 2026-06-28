@@ -20,6 +20,7 @@ import type { ReadStreamOptions } from "../../ports/document-store.js";
 import type { AuditDocumentEventQuery, AuditEventQuery, AuditEventStore } from "../../ports/audit-event-store.js";
 import type { EventStore } from "../../ports/event-store.js";
 import type { ProjectionStore } from "../../ports/projection-store.js";
+import { cloneDocumentSnapshot } from "../../core/document-snapshots.js";
 import { cloneDomainEvent, sequenceEvents } from "../../core/domain-events.js";
 import { readInMemoryAuditDocumentEvents, searchInMemoryAuditEvents } from "./audit-events.js";
 import { compareListDocuments, matchesListFilterExpression, matchesListFilters } from "./list-filters.js";
@@ -101,11 +102,12 @@ export class InMemoryDocumentStore implements DocumentStore, EventStore, Project
     doctype: DocTypeName,
     name: DocumentName
   ): Promise<DocumentSnapshot | null> {
-    return this.documents.get(key(tenantId, doctype, name)) ?? null;
+    const snapshot = this.documents.get(key(tenantId, doctype, name));
+    return snapshot ? cloneDocumentSnapshot(snapshot) : null;
   }
 
   async save(snapshot: DocumentSnapshot): Promise<void> {
-    this.documents.set(key(snapshot.tenantId, snapshot.doctype, snapshot.name), snapshot);
+    this.documents.set(key(snapshot.tenantId, snapshot.doctype, snapshot.name), cloneDocumentSnapshot(snapshot));
   }
 
   async list(query: ListDocumentsQuery): Promise<ListDocumentsResult> {
@@ -119,7 +121,7 @@ export class InMemoryDocumentStore implements DocumentStore, EventStore, Project
       )
       .sort((left, right) => compareListDocuments(left, right, query.orderBy ?? "updatedAt", query.order ?? "desc"));
     return {
-      data: all.slice(offset, offset + limit),
+      data: all.slice(offset, offset + limit).map(cloneDocumentSnapshot),
       limit,
       offset,
       total: all.length

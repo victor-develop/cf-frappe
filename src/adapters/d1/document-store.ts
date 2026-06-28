@@ -14,6 +14,7 @@ import type {
   ReadStreamOptions
 } from "../../ports/document-store.js";
 import { auditDocumentEventQuery, auditEventQuery } from "./audit-event-query.js";
+import { cloneDocumentSnapshot } from "../../core/document-snapshots.js";
 import { isD1ConstraintError } from "./constraint-error.js";
 import { insertEventStatements, sequenceEvents } from "./event-writer.js";
 import { eventStreamQuery } from "./read-stream-query.js";
@@ -98,6 +99,7 @@ export class D1DocumentStore implements DocumentStore, AuditEventStore {
 }
 
 function documentUpsertStatement(db: D1Database, snapshot: DocumentSnapshot): D1PreparedStatement {
+  const normalized = cloneDocumentSnapshot(snapshot);
   return db
     .prepare(
       `INSERT INTO cf_frappe_documents
@@ -111,13 +113,13 @@ function documentUpsertStatement(db: D1Database, snapshot: DocumentSnapshot): D1
          updated_at = excluded.updated_at`
     )
     .bind(
-      snapshot.tenantId,
-      snapshot.doctype,
-      snapshot.name,
-      snapshot.version,
-      snapshot.docstatus,
-      JSON.stringify(snapshot.data),
-      snapshot.createdAt,
-      snapshot.updatedAt
+      normalized.tenantId,
+      normalized.doctype,
+      normalized.name,
+      normalized.version,
+      normalized.docstatus,
+      JSON.stringify(normalized.data),
+      normalized.createdAt,
+      normalized.updatedAt
     );
 }

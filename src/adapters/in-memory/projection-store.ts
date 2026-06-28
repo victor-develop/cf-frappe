@@ -6,6 +6,7 @@ import type {
   ListDocumentsResult,
   TenantId
 } from "../../core/types.js";
+import { cloneDocumentSnapshot } from "../../core/document-snapshots.js";
 import type { ProjectionStore } from "../../ports/projection-store.js";
 import { compareListDocuments, matchesListFilterExpression, matchesListFilters } from "./list-filters.js";
 
@@ -17,11 +18,12 @@ export class InMemoryProjectionStore implements ProjectionStore {
     doctype: DocTypeName,
     name: DocumentName
   ): Promise<DocumentSnapshot | null> {
-    return this.documents.get(key(tenantId, doctype, name)) ?? null;
+    const snapshot = this.documents.get(key(tenantId, doctype, name));
+    return snapshot ? cloneDocumentSnapshot(snapshot) : null;
   }
 
   async save(snapshot: DocumentSnapshot): Promise<void> {
-    this.documents.set(key(snapshot.tenantId, snapshot.doctype, snapshot.name), snapshot);
+    this.documents.set(key(snapshot.tenantId, snapshot.doctype, snapshot.name), cloneDocumentSnapshot(snapshot));
   }
 
   async list(query: ListDocumentsQuery): Promise<ListDocumentsResult> {
@@ -35,7 +37,7 @@ export class InMemoryProjectionStore implements ProjectionStore {
       )
       .sort((left, right) => compareListDocuments(left, right, query.orderBy ?? "updatedAt", query.order ?? "desc"));
     return {
-      data: all.slice(offset, offset + limit),
+      data: all.slice(offset, offset + limit).map(cloneDocumentSnapshot),
       limit,
       offset,
       total: all.length

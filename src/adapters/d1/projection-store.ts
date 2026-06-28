@@ -11,6 +11,7 @@ import type {
   ListDocumentsResult,
   TenantId
 } from "../../core/types.js";
+import { cloneDocumentSnapshot } from "../../core/document-snapshots.js";
 import { andListFilterExpressions, isListFilterGroup, listFilterExpressionFromFilters } from "../../core/list-view.js";
 import type { ProjectionStore } from "../../ports/projection-store.js";
 import { documentFromRow, type DocumentRow } from "./serde.js";
@@ -35,6 +36,7 @@ export class D1ProjectionStore implements ProjectionStore {
   }
 
   async save(snapshot: DocumentSnapshot): Promise<void> {
+    const normalized = cloneDocumentSnapshot(snapshot);
     await this.db
       .prepare(
         `INSERT INTO cf_frappe_documents
@@ -48,14 +50,14 @@ export class D1ProjectionStore implements ProjectionStore {
            updated_at = excluded.updated_at`
       )
       .bind(
-        snapshot.tenantId,
-        snapshot.doctype,
-        snapshot.name,
-        snapshot.version,
-        snapshot.docstatus,
-        JSON.stringify(snapshot.data),
-        snapshot.createdAt,
-        snapshot.updatedAt
+        normalized.tenantId,
+        normalized.doctype,
+        normalized.name,
+        normalized.version,
+        normalized.docstatus,
+        JSON.stringify(normalized.data),
+        normalized.createdAt,
+        normalized.updatedAt
       )
       .run();
   }

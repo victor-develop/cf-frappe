@@ -1,5 +1,5 @@
 import { conflict, documentStream, InMemoryEventStore, InMemoryJobExecutionLog, InMemoryProjectionStore } from "../../src";
-import type { DocumentData, JobMessage, NewDomainEvent } from "../../src";
+import type { DocumentData, DocumentSnapshot, JobMessage, NewDomainEvent } from "../../src";
 
 describe("in-memory adapters", () => {
   const stream = documentStream("acme", "Note", "One");
@@ -121,6 +121,58 @@ describe("in-memory adapters", () => {
     await expect(projections.list({ tenantId: "acme", doctype: "Note" })).resolves.toMatchObject({
       data: [{ name: "New" }, { name: "Old" }]
     });
+  });
+
+  it("snapshots in-memory projections by value on save, get, and list", async () => {
+    const projections = new InMemoryProjectionStore();
+    const snapshot: DocumentSnapshot = {
+      tenantId: "acme",
+      doctype: "Note",
+      name: "One",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "One", nested: { count: 1 } },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    };
+
+    await projections.save(snapshot);
+    (snapshot.data.nested as DocumentData).count = 2;
+
+    const saved = await projections.get("acme", "Note", "One");
+    expect(saved).toMatchObject({ data: { title: "One", nested: { count: 1 } } });
+
+    (saved!.data.nested as DocumentData).count = 3;
+    await expect(projections.get("acme", "Note", "One")).resolves.toMatchObject({
+      data: { title: "One", nested: { count: 1 } }
+    });
+
+    const listed = await projections.list({ tenantId: "acme", doctype: "Note" });
+    (listed.data[0]!.data.nested as DocumentData).count = 4;
+    await expect(projections.get("acme", "Note", "One")).resolves.toMatchObject({
+      data: { title: "One", nested: { count: 1 } }
+    });
+  });
+
+  it("rejects non-JSON in-memory projection data before saving", async () => {
+    const projections = new InMemoryProjectionStore();
+
+    await expect(
+      projections.save({
+        tenantId: "acme",
+        doctype: "Note",
+        name: "Bad",
+        version: 1,
+        docstatus: "draft",
+        data: { count: Number.POSITIVE_INFINITY } as never,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z"
+      })
+    ).rejects.toMatchObject({
+      code: "DOCUMENT_INVALID",
+      status: 409
+    });
+    await expect(projections.get("acme", "Note", "Bad")).resolves.toBeNull();
   });
 
   it("orders projections by metadata fields with stable fallbacks", async () => {

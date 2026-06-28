@@ -49,6 +49,28 @@ describe("D1ProjectionStore", () => {
     });
   });
 
+  it("rejects non-JSON D1 projection data before writing rows", async () => {
+    const db = new FakeD1Database([]);
+    const store = new D1ProjectionStore(db as unknown as D1Database);
+
+    await expect(
+      store.save({
+        tenantId: "acme",
+        doctype: "Note",
+        name: "D1 Bad",
+        version: 1,
+        docstatus: "draft",
+        data: { count: Number.POSITIVE_INFINITY } as never,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z"
+      })
+    ).rejects.toMatchObject({
+      code: "DOCUMENT_INVALID",
+      status: 409
+    });
+    expect(db.rows).toEqual([]);
+  });
+
   it("escapes contains filter values before binding LIKE parameters", async () => {
     const db = new FakeD1Database([
       documentRow({ name: "D1 Sale", data: { title: "50%_Off", priority: "High" } })
@@ -485,8 +507,11 @@ function documentRow(input: {
 
 class FakeD1Database {
   readonly statements: FakeD1PreparedStatement[] = [];
+  readonly rows: FakeDocumentRow[];
 
-  constructor(readonly rows: readonly FakeDocumentRow[]) {}
+  constructor(rows: readonly FakeDocumentRow[]) {
+    this.rows = [...rows];
+  }
 
   prepare(sql: string): FakeD1PreparedStatement {
     const statement = new FakeD1PreparedStatement(this, sql);
@@ -527,6 +552,29 @@ class FakeD1PreparedStatement {
       return { results: [{ total: filtered.length }] };
     }
     return { results: this.applyOrdering(filtered) };
+  }
+
+  async run(): Promise<{ readonly success: boolean }> {
+    const [tenant_id, doctype, name, version, docstatus, data_json, created_at, updated_at] = this.params;
+    const row: FakeDocumentRow = {
+      tenant_id: String(tenant_id),
+      doctype: String(doctype),
+      name: String(name),
+      version: Number(version),
+      docstatus: docstatus as FakeDocumentRow["docstatus"],
+      data_json: String(data_json),
+      created_at: String(created_at),
+      updated_at: String(updated_at)
+    };
+    const index = this.db.rows.findIndex(
+      (item) => item.tenant_id === row.tenant_id && item.doctype === row.doctype && item.name === row.name
+    );
+    if (index >= 0) {
+      this.db.rows[index] = row;
+    } else {
+      this.db.rows.push(row);
+    }
+    return { success: true };
   }
 
   private applyFilters(rows: readonly FakeDocumentRow[]): readonly FakeDocumentRow[] {
