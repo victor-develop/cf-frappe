@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the object scan planning policy slice:
+As of the transform overlay document-read planning policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1763`
-- Remaining gap to Frappe static markers: `1021`
+- Vitest cases: `1764`
+- Remaining gap to Frappe static markers: `1020`
 
 ## Implication
 

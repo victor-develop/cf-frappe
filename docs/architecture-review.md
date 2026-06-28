@@ -188,6 +188,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized ignored cleanup failure policy so storage and multipart compensation failures do not replace the original file workflow failure inline.
 - Centralized object scan planning in file policy so scan orchestration no longer branches on scanner configuration before constructing scanner targets inline.
 - Centralized transformed file result shaping in file policy so temporary transform orchestration no longer composes source snapshot, object metadata, and transform output inline.
+- Centralized transform overlay document-read planning in file policy so overlay resolution no longer derives overlay document reads from transform options inline.
 - Centralized generated rendition reuse decisions in file policy so rendition orchestration now passes storage-existence facts into a pure generate-versus-reuse decision instead of composing reuse results inline.
 - Centralized generated rendition failure cleanup planning in file policy so rendition failure orchestration now reuses the shared delete-key cleanup executor instead of branching on a single cleanup key inline.
 - Centralized generated and downloaded rendition result shaping in file policy so rendition orchestration no longer composes manifest views and storage objects inline.

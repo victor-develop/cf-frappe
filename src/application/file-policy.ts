@@ -2703,6 +2703,36 @@ export function fileTransformOverlayResolutionPlan(options: FileTransformOptions
   };
 }
 
+export type FileTransformOverlayDocumentReadPlan =
+  | {
+      readonly kind: "none";
+    }
+  | {
+      readonly kind: "read";
+      readonly actor: Actor;
+      readonly name: string;
+      readonly tenantId: string;
+      readonly overlay: NonNullable<FileTransformOptions["overlay"]>;
+    };
+
+export function fileTransformOverlayDocumentReadPlan(command: {
+  readonly actor: Actor;
+  readonly tenantId: string;
+  readonly options: FileTransformOptions;
+}): FileTransformOverlayDocumentReadPlan {
+  const plan = fileTransformOverlayResolutionPlan(command.options);
+  if (plan.kind === "none") {
+    return { kind: "none" };
+  }
+  return {
+    kind: "read",
+    actor: command.actor,
+    name: plan.overlay.file,
+    tenantId: command.tenantId,
+    overlay: plan.overlay
+  };
+}
+
 export function pendingFileRendition(command: {
   readonly snapshot: DocumentSnapshot;
   readonly tenantId: string;

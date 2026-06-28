@@ -165,6 +165,7 @@ import {
   fileTenantCommandOption,
   fileDownloadedTransformObjectCommand,
   fileTransformOverlayCommandOption,
+  fileTransformOverlayDocumentReadPlan,
   fileTransformOverlayObjectReadPlan,
   fileTransformOverlayResolutionPlan,
   fileTransformObjectCommand,
@@ -283,6 +284,30 @@ describe("file policy", () => {
       overlay: { file: "file_overlay", placement: "top-left", opacity: 50 }
     })).toEqual({
       kind: "resolve",
+      overlay: { file: "file_overlay", placement: "top-left", opacity: 50 }
+    });
+  });
+
+  it("plans transform overlay document reads from transform options", () => {
+    const actor = { id: "owner@example.com", roles: ["File Manager"], tenantId: "actor-tenant" };
+
+    expect(fileTransformOverlayDocumentReadPlan({
+      actor,
+      tenantId: "acme",
+      options: { width: 64 }
+    })).toEqual({ kind: "none" });
+    expect(fileTransformOverlayDocumentReadPlan({
+      actor,
+      tenantId: "acme",
+      options: {
+        width: 64,
+        overlay: { file: "file_overlay", placement: "top-left", opacity: 50 }
+      }
+    })).toEqual({
+      kind: "read",
+      actor,
+      name: "file_overlay",
+      tenantId: "acme",
       overlay: { file: "file_overlay", placement: "top-left", opacity: 50 }
     });
   });

@@ -121,8 +121,8 @@ import {
   fileUploadContentType,
   fileUploadExpiresAt,
   fileTransformOverlayCommandOption,
+  fileTransformOverlayDocumentReadPlan,
   fileTransformOverlayObjectReadPlan,
-  fileTransformOverlayResolutionPlan,
   fileTransformedFileResult,
   fileUploadedMultipartPartResult,
   fileUploadedResult,
@@ -1112,18 +1112,18 @@ export class FileService {
     readonly tenantId: string;
     readonly options: FileTransformOptions;
   }): Promise<FileTransformOverlaySource | undefined> {
-    const plan = fileTransformOverlayResolutionPlan(command.options);
-    if (plan.kind === "none") {
+    const documentRead = fileTransformOverlayDocumentReadPlan(command);
+    if (documentRead.kind === "none") {
       return undefined;
     }
     const snapshot = await this.availableFileSnapshot({
-      actor: command.actor,
-      name: plan.overlay.file,
-      tenantId: command.tenantId
+      actor: documentRead.actor,
+      name: documentRead.name,
+      tenantId: documentRead.tenantId
     });
     const read = fileTransformOverlayObjectReadPlan({
       snapshot,
-      overlay: plan.overlay
+      overlay: documentRead.overlay
     });
     const object = requireStoredFileObject(await this.storage.get(read.key), this.fileDoctype, read.file);
     return fileResolvedTransformOverlaySource({ snapshot, object, plan: read });
