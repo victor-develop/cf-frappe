@@ -84,6 +84,7 @@ import {
   fileDeleteRequestedDocumentCommand,
   fileDeletedExecuteCommand,
   fileDeletedDocumentCommand,
+  fileDeleteStorageCleanupPlan,
   fileResolvedTransformOverlaySource,
   fileDownloadedRenditionResult,
   fileDocumentCreateCommand,
@@ -102,7 +103,6 @@ import {
   fileMultipartUploadReservationPlan,
   fileMultipartUploadId,
   fileMultipartUploadReservationCleanupPlan,
-  fileObjectKeysForDelete,
   filePrimaryObjectKey,
   fileObjectSourceEtag,
   filePreparedDirectUploadResult,
@@ -1020,7 +1020,7 @@ export class FileService {
             deleteRequest
           }))
         : current;
-    await this.deleteFileObjects(deleteRequested);
+    await this.deleteFileObjects(fileDeleteStorageCleanupPlan(deleteRequested));
     const deleted = fileDeletedDocumentCommand(deleteRequested);
     const snapshot = await this.documents.delete(fileDeletedExecuteCommand({
       actor: command.actor,
@@ -1162,8 +1162,8 @@ export class FileService {
     }));
   }
 
-  private async deleteFileObjects(snapshot: DocumentSnapshot): Promise<void> {
-    for (const key of fileObjectKeysForDelete(snapshot)) {
+  private async deleteFileObjects(plan: { readonly deleteKeys: readonly string[] }): Promise<void> {
+    for (const key of plan.deleteKeys) {
       await this.storage.delete(key);
     }
   }

@@ -50,6 +50,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized multipart abort planning in file policy so multipart orchestration no longer composes expected-version guards, storage abort commands, and delete document intents inline.
 - Centralized upload scan-failure cleanup planning in file policy so direct and multipart completion orchestration no longer select cleanup keys inline after infected scan results.
 - Centralized upload completion planning in file policy so direct and multipart completion orchestration no longer duplicate scan-patch, infected-state, and completion-command selection inline.
+- Centralized delete storage cleanup planning in file policy so delete orchestration no longer selects original and rendition object keys inline before deleting metadata.
 - Centralized buffered upload create planning in file policy so buffered upload orchestration no longer duplicates scan-patch, infected-state, and document-create intent selection inline.
 - Centralized buffered upload storage planning in file policy so buffered upload orchestration no longer composes document data and storage put commands from the same upload fields inline.
 - Centralized buffered upload failure cleanup planning in file policy so buffered upload scan and metadata failures no longer compose storage cleanup keys inline.

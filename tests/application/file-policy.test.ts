@@ -65,6 +65,7 @@ import {
   fileDeleteRequestedDocumentCommand,
   fileDeletedExecuteCommand,
   fileDeletedDocumentCommand,
+  fileDeleteStorageCleanupPlan,
   fileDirectUploadDocumentCreateCommand,
   fileDirectUploadReservationPlan,
   fileDocumentCreateCommand,
@@ -1020,6 +1021,20 @@ describe("file policy", () => {
       "acme/files/file_multipart-original.png",
       "acme/file-renditions/file/thumb.webp"
     ]);
+  });
+
+  it("plans delete storage cleanup across originals and renditions", () => {
+    expect(fileDeleteStorageCleanupPlan(fileSnapshot({
+      key: "acme/files/file_multipart-original.png",
+      renditions: [
+        renditionEntry("thumb", { key: "acme/file-renditions/file/thumb.webp" })
+      ]
+    }))).toEqual({
+      deleteKeys: [
+        "acme/files/file_multipart-original.png",
+        "acme/file-renditions/file/thumb.webp"
+      ]
+    });
   });
 
   it("plans primary file object cleanup after scan failures", () => {

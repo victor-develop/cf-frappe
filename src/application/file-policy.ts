@@ -2434,6 +2434,14 @@ export function fileObjectKeysForDelete(snapshot: DocumentSnapshot): readonly st
   ];
 }
 
+export function fileDeleteStorageCleanupPlan(snapshot: DocumentSnapshot): {
+  readonly deleteKeys: readonly string[];
+} {
+  return {
+    deleteKeys: fileObjectKeysForDelete(snapshot)
+  };
+}
+
 export function fileObjectKeysForScanFailureCleanup(snapshot: DocumentSnapshot): readonly string[] {
   return [filePrimaryObjectKey(snapshot)];
 }
