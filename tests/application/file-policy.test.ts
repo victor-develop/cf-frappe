@@ -69,6 +69,7 @@ import {
   fileMetadataUpdateExecuteCommand,
   fileMetadataUpdateDocumentCommand,
   fileMultipartAbortCommand,
+  fileMultipartAbortPlan,
   fileMultipartCompletionStartedExecuteCommand,
   fileMultipartCompletionStartedDocumentCommand,
   fileMultipartCompletionStartedPatch,
@@ -2157,6 +2158,33 @@ describe("file policy", () => {
     expect(() => fileCompletedMultipartObjectReadPlan(fileSnapshot({ key: "acme/files/file_1-invoice.pdf" }))).toThrow(
       "File/file_multipart has no multipart upload"
     );
+  });
+
+  it("plans multipart upload abort storage and delete document commands", () => {
+    const snapshot = {
+      ...fileSnapshot({
+        key: "acme/files/file_1-invoice.pdf",
+        multipart_upload_id: "upload-1"
+      }),
+      version: 4
+    };
+
+    expect(fileMultipartAbortPlan({
+      snapshot,
+      expectedVersion: 4
+    })).toEqual({
+      abort: {
+        key: "acme/files/file_1-invoice.pdf",
+        uploadId: "upload-1"
+      },
+      deleted: {
+        expectedVersion: 4
+      }
+    });
+    expect(() => fileMultipartAbortPlan({
+      snapshot,
+      expectedVersion: 5
+    })).toThrow("Expected version 5, found 4");
   });
 
   it("builds rendition object storage custom metadata", () => {

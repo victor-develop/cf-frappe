@@ -888,6 +888,23 @@ export function fileMultipartUploadAbortCommand(command: {
   };
 }
 
+export function fileMultipartAbortPlan(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly expectedVersion?: number | undefined;
+}): {
+  readonly abort: AbortMultipartFileUploadCommand;
+  readonly deleted: FileDeletedDocumentCommand;
+} {
+  ensureFileExpectedVersion(command.snapshot, command.expectedVersion);
+  return {
+    abort: fileMultipartAbortCommand({
+      snapshot: command.snapshot,
+      uploadId: fileMultipartUploadId(command.snapshot)
+    }),
+    deleted: fileDeletedDocumentCommand(command.snapshot)
+  };
+}
+
 export function fileRenditionObjectCustomMetadata(command: {
   readonly tenantId: string;
   readonly sourceFile: string;

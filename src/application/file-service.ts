@@ -38,7 +38,6 @@ import {
   ensureFileAvailableForDownload,
   ensureFileCreateAllowed,
   ensureFileDeleteAllowed,
-  ensureFileExpectedVersion,
   ensureFileMetadataUpdateAllowed,
   ensureFileMultipartUploadAllowed,
   ensureFilePendingDirectUpload,
@@ -92,7 +91,7 @@ import {
   fileGeneratedRenditionCompletionResult,
   fileMetadataUpdateExecuteCommand,
   fileMetadataUpdateDocumentCommand,
-  fileMultipartAbortCommand,
+  fileMultipartAbortPlan,
   fileMultipartCompletionStartedExecuteCommand,
   fileMultipartCompletionStartedDocumentCommand,
   fileMultipartCompletionCommand,
@@ -775,19 +774,18 @@ export class FileService {
   async abortMultipartUpload(command: AbortMultipartUploadCommand): Promise<DocumentSnapshot> {
     const multipartUploads = this.requireMultipartUploads();
     const current = await this.multipartUploadSnapshot(command, ensureFilePendingMultipartPartUpload);
-    ensureFileExpectedVersion(current, command.expectedVersion);
-    await multipartUploads.abortMultipartUpload(fileMultipartAbortCommand({
+    const plan = fileMultipartAbortPlan({
       snapshot: current,
-      uploadId: this.multipartUploadId(current)
-    }));
-    const deleted = fileDeletedDocumentCommand(current);
+      expectedVersion: command.expectedVersion
+    });
+    await multipartUploads.abortMultipartUpload(plan.abort);
     return this.documents.delete(fileDeletedExecuteCommand({
       actor: command.actor,
       doctype: this.fileDoctype,
       name: command.name,
       tenantId: command.tenantId,
       metadata: command.metadata,
-      deleted
+      deleted: plan.deleted
     }));
   }
 
