@@ -53,6 +53,7 @@ import {
   fileTransformSource,
   isFileDeleteRequested,
   isFileMultipartCompletionStarted,
+  isFileUploadPending,
   isInfectedFileScanResult,
   isPreviewableFileContentType,
   MIN_MULTIPART_FILE_PART_BYTES,
@@ -1002,6 +1003,12 @@ describe("file policy", () => {
   it("identifies multipart files already completing", () => {
     expect(isFileMultipartCompletionStarted(fileSnapshot({ storage_state: "upload_pending" }))).toBe(false);
     expect(isFileMultipartCompletionStarted(fileSnapshot({ storage_state: "upload_completing" }))).toBe(true);
+  });
+
+  it("identifies files still pending upload finalization", () => {
+    expect(isFileUploadPending(fileSnapshot({ storage_state: "upload_pending" }))).toBe(true);
+    expect(isFileUploadPending(fileSnapshot({ storage_state: "upload_completing" }))).toBe(false);
+    expect(isFileUploadPending(fileSnapshot({ storage_state: "available" }))).toBe(false);
   });
 
   it("normalizes file dashboard limits", () => {
