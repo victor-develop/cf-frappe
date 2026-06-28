@@ -593,6 +593,25 @@ export interface FileDocumentDataCommand {
   readonly scannerConfigured?: boolean;
 }
 
+export interface FileUploadDocumentDataCommand {
+  readonly filename: string;
+  readonly key: string;
+  readonly contentType: string;
+  readonly size: number;
+  readonly isPrivate?: boolean;
+  readonly uploadedBy: string;
+  readonly uploadedAt: string;
+  readonly attachedTo?: {
+    readonly doctype: string;
+    readonly name: string;
+  };
+}
+
+export interface FilePendingUploadDocumentDataCommand extends FileUploadDocumentDataCommand {
+  readonly directUploadExpiresAt: string;
+  readonly scannerConfigured?: boolean;
+}
+
 export function fileDocumentData(command: FileDocumentDataCommand): DocumentData {
   return {
     filename: command.filename,
@@ -612,6 +631,22 @@ export function fileDocumentData(command: FileDocumentDataCommand): DocumentData
           attached_to_name: command.attachedTo.name
         })
   };
+}
+
+export function fileBufferedUploadDocumentData(command: FileUploadDocumentDataCommand): DocumentData {
+  return fileDocumentData({
+    ...command,
+    isPrivate: fileUploadIsPrivate(command.isPrivate),
+    storageState: "available"
+  });
+}
+
+export function filePendingUploadDocumentData(command: FilePendingUploadDocumentDataCommand): DocumentData {
+  return fileDocumentData({
+    ...command,
+    isPrivate: fileUploadIsPrivate(command.isPrivate),
+    storageState: "upload_pending"
+  });
 }
 
 export function fileMultipartUploadDocumentData(data: DocumentData, uploadId: string): DocumentData {

@@ -30,6 +30,7 @@ import {
   fileAttachedToCommandOption,
   fileBulkDeleteFailure,
   fileBulkFailure,
+  fileBufferedUploadDocumentData,
   fileCommandMetadata,
   fileCommandTenantId,
   fileContentLength,
@@ -46,6 +47,7 @@ import {
   fileObjectKeysForScanFailureCleanup,
   fileObjectContentType,
   fileObjectSourceEtag,
+  filePendingUploadDocumentData,
   filePrimaryObjectKey,
   fileSnapshotFilename,
   fileRenditionGenerationReservation,
@@ -1114,6 +1116,38 @@ describe("file policy", () => {
       is_private: true,
       uploaded_by: "owner@example.com",
       uploaded_at: "2026-06-28T00:00:00.000Z",
+      storage_state: "upload_pending",
+      direct_upload_expires_at: "2026-06-28T00:15:00.000Z",
+      scan_status: "pending"
+    });
+  });
+
+  it("builds semantic upload document data for buffered and pending uploads", () => {
+    const base = {
+      filename: "invoice.pdf",
+      key: "acme/files/file_1-invoice.pdf",
+      contentType: "application/pdf",
+      size: 42,
+      uploadedBy: "owner@example.com",
+      uploadedAt: "2026-06-28T00:00:00.000Z"
+    };
+
+    expect(fileBufferedUploadDocumentData({
+      ...base,
+      attachedTo: { doctype: "Invoice", name: "INV-1" }
+    })).toMatchObject({
+      is_private: true,
+      storage_state: "available",
+      attached_to_doctype: "Invoice",
+      attached_to_name: "INV-1"
+    });
+    expect(filePendingUploadDocumentData({
+      ...base,
+      isPrivate: false,
+      directUploadExpiresAt: "2026-06-28T00:15:00.000Z",
+      scannerConfigured: true
+    })).toMatchObject({
+      is_private: false,
       storage_state: "upload_pending",
       direct_upload_expires_at: "2026-06-28T00:15:00.000Z",
       scan_status: "pending"
