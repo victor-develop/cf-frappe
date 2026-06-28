@@ -27,6 +27,7 @@ import {
   expectedRenditionContentType,
   failedFileRendition,
   failedFileRenditionForError,
+  fileAttachedToCommandOption,
   fileBulkDeleteFailure,
   fileBulkFailure,
   fileCommandMetadata,
@@ -147,6 +148,14 @@ describe("file policy", () => {
     expect(fileExpectedVersionCommandOption(undefined)).toEqual({});
     expect(fileCommandMetadata(metadata)).toBe(metadata);
     expect(fileCommandMetadata(undefined)).toEqual({});
+  });
+
+  it("shapes optional file attachment command options", () => {
+    const attachedTo = { doctype: "Invoice", name: "INV-1" };
+
+    expect(fileAttachedToCommandOption(attachedTo)).toEqual({ attachedTo });
+    expect(fileAttachedToCommandOption(null)).toEqual({ attachedTo: null });
+    expect(fileAttachedToCommandOption(undefined)).toEqual({});
   });
 
   it("marks only browser-safe content types as previewable", () => {

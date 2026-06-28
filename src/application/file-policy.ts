@@ -65,6 +65,12 @@ export function fileExpectedVersionCommandOption(
   return expectedVersion === undefined ? {} : { expectedVersion };
 }
 
+export function fileAttachedToCommandOption<TAttachedTo>(
+  attachedTo: TAttachedTo | undefined
+): { readonly attachedTo?: TAttachedTo } {
+  return attachedTo === undefined ? {} : { attachedTo };
+}
+
 export function fileCommandMetadata(metadata: DocumentData | undefined): DocumentData {
   return metadata ?? {};
 }

@@ -62,6 +62,7 @@ import {
   canUploadFile,
   fileBulkDeleteFailure,
   fileBulkFailure,
+  fileAttachedToCommandOption,
   fileCommandMetadata,
   fileCommandTenantId,
   fileContentLength,
@@ -444,7 +445,7 @@ export class FileService {
       uploadedBy: command.actor.id,
       uploadedAt: this.clock.now(),
       storageState: "available",
-      ...(command.attachedTo === undefined ? {} : { attachedTo: command.attachedTo })
+      ...fileAttachedToCommandOption(command.attachedTo)
     });
     this.preflightCreate(command.actor, data);
     const object = await this.storage.put({
@@ -521,7 +522,7 @@ export class FileService {
       storageState: "upload_pending",
       directUploadExpiresAt: expiresAt,
       scannerConfigured: this.scanner !== undefined,
-      ...(command.attachedTo === undefined ? {} : { attachedTo: command.attachedTo })
+      ...fileAttachedToCommandOption(command.attachedTo)
     });
     this.preflightCreate(command.actor, data);
     const upload = await createDirectUpload({
@@ -611,7 +612,7 @@ export class FileService {
       storageState: "upload_pending",
       directUploadExpiresAt: expiresAt,
       scannerConfigured: this.scanner !== undefined,
-      ...(command.attachedTo === undefined ? {} : { attachedTo: command.attachedTo })
+      ...fileAttachedToCommandOption(command.attachedTo)
     });
     this.preflightCreate(command.actor, baseData);
     const upload = await multipartUploads.createMultipartUpload({
@@ -1041,7 +1042,7 @@ export class FileService {
           actor: command.actor,
           name: selection.name,
           ...(command.isPrivate === undefined ? {} : { isPrivate: command.isPrivate }),
-          ...(command.attachedTo === undefined ? {} : { attachedTo: command.attachedTo }),
+          ...fileAttachedToCommandOption(command.attachedTo),
           ...fileExpectedVersionCommandOption(selection.expectedVersion),
           ...fileTenantCommandOption(command.tenantId),
           metadata: fileCommandMetadata(command.metadata)
