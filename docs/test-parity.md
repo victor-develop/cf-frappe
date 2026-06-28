@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the domain command metadata clone slice:
+As of the projection index metadata clone slice:
 
 - Vitest files: `171`
-- Vitest cases: `1891`
-- Remaining gap to Frappe static markers: `893`
+- Vitest cases: `1892`
+- Remaining gap to Frappe static markers: `892`
 
 ## Implication
 

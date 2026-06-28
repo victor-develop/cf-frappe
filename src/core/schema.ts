@@ -8,6 +8,7 @@ import type {
   JsonValue,
   MutableDocumentData,
   PermissionRule,
+  RetiredIndexDefinition,
   ValidationIssue,
   WorkflowDefinition
 } from "./types.js";
@@ -58,6 +59,8 @@ export function defineDocType<TData extends DocumentData>(
   const permissions = definition.permissions ? freezePermissionRules(definition.permissions) : undefined;
   const workflow = definition.workflow ? freezeWorkflowDefinition(definition.workflow) : undefined;
   const commands = definition.commands ? freezeCommandDefinitions(definition.commands) : undefined;
+  const indexes = definition.indexes ? freezeProjectionIndexes(definition.indexes) : undefined;
+  const retiredIndexes = definition.retiredIndexes ? freezeRetiredIndexes(definition.retiredIndexes) : undefined;
   const fields = Object.freeze(definition.fields.map((field) => freezeFieldDefinition(definition, field)));
   return Object.freeze({
     ...definition,
@@ -67,6 +70,8 @@ export function defineDocType<TData extends DocumentData>(
     ...(permissions ? { permissions } : {}),
     ...(workflow ? { workflow } : {}),
     ...(commands ? { commands } : {}),
+    ...(indexes ? { indexes } : {}),
+    ...(retiredIndexes ? { retiredIndexes } : {}),
     ...(assignmentRules ? { assignmentRules } : {})
   });
 }
@@ -527,4 +532,25 @@ function freezeCommandDefinitions(commands: readonly DomainCommandDefinition[]):
       })
     )
   );
+}
+
+function freezeProjectionIndexes(indexes: readonly (readonly string[])[]): readonly (readonly string[])[] {
+  return Object.freeze(indexes.map((fields) => Object.freeze([...fields])));
+}
+
+function freezeRetiredIndexes(retiredIndexes: readonly RetiredIndexDefinition[]): readonly RetiredIndexDefinition[] {
+  return Object.freeze(
+    retiredIndexes.map((retired) =>
+      isRetiredIndexFieldList(retired)
+        ? Object.freeze([...retired])
+        : Object.freeze({
+            ...retired,
+            fields: Object.freeze([...retired.fields])
+          })
+    )
+  );
+}
+
+function isRetiredIndexFieldList(retired: RetiredIndexDefinition): retired is readonly string[] {
+  return Array.isArray(retired);
 }

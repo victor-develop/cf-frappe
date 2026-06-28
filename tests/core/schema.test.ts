@@ -5,6 +5,8 @@ import {
   defineDocType,
   FrameworkError,
   pickCommandFields,
+  planD1ProjectionIndexes,
+  planD1RetiredProjectionIndexes,
   validateDocumentData
 } from "../../src";
 import type { DocumentData, DocumentSnapshot, PermissionAction } from "../../src";
@@ -205,6 +207,48 @@ describe("schema", () => {
     expect(pickCommandFields(command?.fields, { resolution: "Done", internal_note: "secret" })).toEqual({
       resolution: "Done"
     });
+  });
+
+  it("snapshots active and retired projection index metadata by value", () => {
+    const activeIndex = ["status"];
+    const retiredLocalIndex = ["legacy_status"];
+    const retiredLegacyFields = ["legacy_owner"];
+    const ticket = defineDocType({
+      name: "Indexed Ticket",
+      fields: [
+        { name: "status", type: "select", options: ["Open", "Closed"] },
+        { name: "owner", type: "text" },
+        { name: "legacy_status", type: "text" },
+        { name: "legacy_owner", type: "text" }
+      ],
+      indexes: [activeIndex],
+      retiredIndexes: [
+        retiredLocalIndex,
+        { doctype: "Legacy Ticket", fields: retiredLegacyFields }
+      ]
+    });
+
+    activeIndex.push("owner");
+    retiredLocalIndex.push("owner");
+    retiredLegacyFields[0] = "owner";
+
+    expect(ticket.indexes).toEqual([["status"]]);
+    expect(ticket.retiredIndexes).toEqual([
+      ["legacy_status"],
+      { doctype: "Legacy Ticket", fields: ["legacy_owner"] }
+    ]);
+    expect(Object.isFrozen(ticket.indexes)).toBe(true);
+    expect(Object.isFrozen(ticket.indexes?.[0])).toBe(true);
+    expect(Object.isFrozen(ticket.retiredIndexes)).toBe(true);
+    expect(Object.isFrozen(ticket.retiredIndexes?.[0])).toBe(true);
+    expect(Object.isFrozen((ticket.retiredIndexes?.[1] as { readonly fields: readonly string[] }).fields)).toBe(true);
+    expect(planD1ProjectionIndexes([ticket]).map((statement) => statement.sql).join("\n")).toContain(
+      "json_extract(data_json, '$.status')"
+    );
+    expect(planD1ProjectionIndexes([ticket]).map((statement) => statement.sql).join("\n")).not.toContain(
+      "json_extract(data_json, '$.owner')"
+    );
+    expect(planD1RetiredProjectionIndexes([ticket]).map((statement) => statement.sql)).toHaveLength(2);
   });
 
   it("reports missing required fields", () => {
