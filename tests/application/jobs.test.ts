@@ -63,6 +63,65 @@ describe("JobDispatcher", () => {
     expect(queue.queued()).toEqual([{ message, delaySeconds: 90 }]);
   });
 
+  it("snapshots in-memory queue messages by value", async () => {
+    const queue = new InMemoryJobQueue();
+    const message: JobMessage = {
+      tenantId: "acme",
+      jobName: "email.digest",
+      payload: { account: "acme", nested: { count: 1 } },
+      runId: "job_001",
+      idempotencyKey: "email.digest:job_001",
+      enqueuedAt: now,
+      metadata: { source: "test" }
+    };
+
+    await queue.send(message, { delaySeconds: 30 });
+    (message.payload.nested as DocumentData).count = 2;
+    message.metadata.source = "mutated";
+
+    const [firstRead] = queue.queued();
+    expect(firstRead).toMatchObject({
+      delaySeconds: 30,
+      message: {
+        payload: { account: "acme", nested: { count: 1 } },
+        metadata: { source: "test" }
+      }
+    });
+
+    (firstRead!.message.payload.nested as DocumentData).count = 3;
+    firstRead!.message.metadata.source = "read mutation";
+
+    expect(queue.queued()).toMatchObject([
+      {
+        message: {
+          payload: { account: "acme", nested: { count: 1 } },
+          metadata: { source: "test" }
+        }
+      }
+    ]);
+  });
+
+  it("rejects non-JSON in-memory queue payloads and metadata before enqueueing", async () => {
+    const queue = new InMemoryJobQueue();
+    const message: JobMessage = {
+      tenantId: "acme",
+      jobName: "email.digest",
+      payload: {},
+      runId: "job_001",
+      idempotencyKey: "email.digest:job_001",
+      enqueuedAt: now,
+      metadata: {}
+    };
+
+    await expect(
+      queue.send({ ...message, payload: { account: Number.POSITIVE_INFINITY } as never })
+    ).rejects.toThrow("Job payload must be a JSON object");
+    await expect(
+      queue.send({ ...message, metadata: { source: undefined } as never })
+    ).rejects.toThrow("Job metadata must be a JSON object");
+    expect(queue.queued()).toEqual([]);
+  });
+
   it("rejects queue delays outside the Cloudflare delivery window", async () => {
     const queue = new InMemoryJobQueue();
     const dispatcher = new JobDispatcher({
