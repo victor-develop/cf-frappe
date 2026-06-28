@@ -819,6 +819,37 @@ export function fileInfectedScanFailure(command: {
   return command.infected && isInfectedFileScanResult(command.scan) ? command.scan : undefined;
 }
 
+export type FileUploadScanFailureDecision =
+  | {
+      readonly kind: "continue";
+    }
+  | {
+      readonly kind: "fail";
+      readonly failure: FileScanResult;
+      readonly cleanup: {
+        readonly deleteKeys: readonly string[];
+      };
+    };
+
+export function fileUploadScanFailureDecision(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly infected: boolean;
+  readonly scan?: FileScanResult | undefined;
+}): FileUploadScanFailureDecision {
+  const failure = fileInfectedScanFailure({
+    infected: command.infected,
+    scan: command.scan
+  });
+  if (failure === undefined) {
+    return { kind: "continue" };
+  }
+  return {
+    kind: "fail",
+    failure,
+    cleanup: fileUploadScanFailureCleanupPlan(command.snapshot)
+  };
+}
+
 export function fileScanTarget(command: {
   readonly actorId: string;
   readonly tenantId: string;

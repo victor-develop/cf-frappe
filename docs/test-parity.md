@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the generated rendition failure-recovery suppression policy slice:
+As of the upload scan-failure decision policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1775`
-- Remaining gap to Frappe static markers: `1009`
+- Vitest cases: `1776`
+- Remaining gap to Frappe static markers: `1008`
 
 ## Implication
 

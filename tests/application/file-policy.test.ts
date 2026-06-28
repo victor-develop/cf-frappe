@@ -164,6 +164,7 @@ import {
   fileUploadCompletedDocumentData,
   fileUploadContentType,
   fileUploadExpiresAt,
+  fileUploadScanFailureDecision,
   fileUploadIsPrivate,
   fileVisibleDashboardEntries,
   fileUploadObjectCustomMetadata,
@@ -2156,6 +2157,30 @@ describe("file policy", () => {
     expect(fileInfectedScanFailure({ infected: true, scan: undefined })).toBeUndefined();
     expect(fileInfectedScanFailure({ infected: true, scan: clean })).toBeUndefined();
     expect(fileInfectedScanFailure({ infected: true, scan: infected })).toBe(infected);
+  });
+
+  it("decides upload scan-failure cleanup from persisted file snapshots", () => {
+    const snapshot = fileSnapshot({
+      key: "acme/files/file_multipart-original.png",
+      renditions: [
+        renditionEntry("thumb", { key: "acme/file-renditions/file/thumb.webp" })
+      ]
+    });
+    const infected = { status: "infected" as const, message: "signature" };
+
+    expect(fileUploadScanFailureDecision({ snapshot, infected: false, scan: infected })).toEqual({
+      kind: "continue"
+    });
+    expect(fileUploadScanFailureDecision({ snapshot, infected: true, scan: { status: "clean" } })).toEqual({
+      kind: "continue"
+    });
+    expect(fileUploadScanFailureDecision({ snapshot, infected: true, scan: infected })).toEqual({
+      kind: "fail",
+      failure: infected,
+      cleanup: {
+        deleteKeys: ["acme/files/file_multipart-original.png"]
+      }
+    });
   });
 
   it("validates direct upload object metadata against its reservation", () => {

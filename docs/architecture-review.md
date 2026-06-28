@@ -203,6 +203,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized generated rendition reuse object-existence facts in file policy so rendition orchestration no longer interprets optional storage head results inline.
 - Centralized infected scan-failure selection in file policy so buffered, direct, and multipart upload orchestration no longer duplicate final scan-failure branching inline.
 - Centralized generated rendition failure-recovery suppression in file policy so recovery manifest write failures no longer replace the original rendition failure inline.
+- Centralized upload scan-failure decisions in file policy so direct and multipart upload completion share infected-result and storage-cleanup planning.
 - Centralized upload, download, prepared-upload, and multipart-part result shaping in file policy so ordinary file orchestration no longer composes success DTOs inline.
 - Centralized bulk success entry and final result shaping in file policy so bulk delete and metadata orchestration no longer compose outcome DTOs inline.
 - Centralized bulk delete outcome aggregation in file policy so bulk delete orchestration no longer splits per-file success and failure outcomes into result arrays inline.
