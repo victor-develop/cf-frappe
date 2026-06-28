@@ -268,6 +268,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized downloaded object read planning in file policy so file download orchestration no longer derives primary object keys inline.
 - Centralized downloaded rendition object read planning in file policy so rendition download orchestration no longer derives storage keys from manifest entries inline.
 - Centralized multipart completion snapshot selection in file policy so multipart completion orchestration no longer chooses between current and begin-completion snapshots inline.
+- Added realtime event clone-boundary coverage so adapter fan-out copies topics and nested payloads by value and rejects non-JSON payloads before delivery.
 - Added realtime collaboration payload snapshot coverage so transient field-edit values and shared-draft patches are cloned before fan-out and cannot leak caller or returned-event mutation.
 - Added Durable Object realtime replay snapshot coverage so replay logs preserve events independently from caller mutation after publish and returned replay mutation after read.
 - Added realtime domain payload snapshot coverage so domain events and document snapshots are captured by value before entering Cloudflare/Durable Object realtime delivery.

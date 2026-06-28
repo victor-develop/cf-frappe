@@ -1,5 +1,6 @@
 import {
   canSubscribeToRealtimeTopic,
+  cloneRealtimeEvent,
   DOCUMENT_FIELD_EDIT_EVENT_TYPE,
   DOCUMENT_FIELD_EDIT_MESSAGE_TYPE,
   DOCUMENT_SHARED_DRAFT_EVENT_TYPE,
@@ -15,7 +16,7 @@ import {
   userRealtimeTopic
 } from "../../src";
 import { manager, now, owner } from "../helpers";
-import type { DocumentData, DocumentSnapshot, DomainEvent, JsonValue } from "../../src";
+import type { DocumentData, DocumentSnapshot, DomainEvent, JsonValue, RealtimeEvent } from "../../src";
 
 describe("realtime topics", () => {
   it("encodes and parses tenant, doctype, and document topics", () => {
@@ -131,6 +132,54 @@ describe("realtime topics", () => {
     expect(snapshot).toMatchObject({
       data: { title: "One", nested: { count: 2 } }
     });
+  });
+
+  it("clones realtime topics and payloads across adapter boundaries", () => {
+    const event: RealtimeEvent = {
+      id: "rt-snapshot",
+      type: "NoteUpdated",
+      topics: ["tenant:acme"],
+      tenantId: "acme",
+      occurredAt: now,
+      payload: { nested: { count: 1 }, list: ["first"] }
+    };
+
+    const cloned = cloneRealtimeEvent(event);
+
+    (event.topics as string[]).push("document:acme:Note:One");
+    ((event.payload as DocumentData).nested as DocumentData).count = 2;
+    ((event.payload as DocumentData).list as JsonValue[]).push("caller");
+
+    expect(cloned).toEqual({
+      id: "rt-snapshot",
+      type: "NoteUpdated",
+      topics: ["tenant:acme"],
+      tenantId: "acme",
+      occurredAt: now,
+      payload: { nested: { count: 1 }, list: ["first"] }
+    });
+
+    (cloned.topics as string[]).push("user:acme:owner%40example.com");
+    (((cloned.payload as DocumentData).nested as DocumentData)).count = 3;
+    ((cloned.payload as DocumentData).list as JsonValue[]).push("returned");
+
+    expect(event).toMatchObject({
+      topics: ["tenant:acme", "document:acme:Note:One"],
+      payload: { nested: { count: 2 }, list: ["first", "caller"] }
+    });
+  });
+
+  it("rejects non-JSON realtime payloads before adapter fan-out", () => {
+    const event = {
+      id: "rt-invalid",
+      type: "Invalid",
+      topics: ["tenant:acme"],
+      tenantId: "acme",
+      occurredAt: now,
+      payload: { deadline: new Date(now) }
+    } as unknown as RealtimeEvent;
+
+    expect(() => cloneRealtimeEvent(event)).toThrow("Realtime event payload must be JSON-serializable");
   });
 
   it("models transient document field edit intent as a document-scoped realtime event", () => {
