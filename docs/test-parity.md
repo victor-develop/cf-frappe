@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the delete-requested snapshot selection policy slice:
+As of the generated rendition reuse object-existence policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1772`
-- Remaining gap to Frappe static markers: `1012`
+- Vitest cases: `1773`
+- Remaining gap to Frappe static markers: `1011`
 
 ## Implication
 

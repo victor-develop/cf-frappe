@@ -3017,6 +3017,13 @@ export function fileGeneratedRenditionReuseHeadReadPlan(
   };
 }
 
+export function fileGeneratedRenditionReuseObjectExists(command: {
+  readonly head: FileGeneratedRenditionReuseHeadReadPlan;
+  readonly object?: FileObjectMetadata | null | undefined;
+}): boolean {
+  return command.head.kind === "head" && command.object !== null && command.object !== undefined;
+}
+
 export type FileGeneratedRenditionReuseDecision =
   | {
       readonly kind: "generate";

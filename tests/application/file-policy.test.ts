@@ -129,6 +129,7 @@ import {
   fileGeneratedRenditionFailurePlan,
   fileGeneratedRenditionReuseDecision,
   fileGeneratedRenditionReuseHeadReadPlan,
+  fileGeneratedRenditionReuseObjectExists,
   fileGeneratedRenditionReuseResult,
   fileGeneratedRenditionReuseStoragePlan,
   fileRenditionManifestPatch,
@@ -1490,6 +1491,25 @@ describe("file policy", () => {
       kind: "head",
       key: "acme/file-renditions/file/thumb.webp"
     });
+  });
+
+  it("maps generated rendition reuse head results to object-existence facts", () => {
+    const head = {
+      kind: "head" as const,
+      key: "acme/file-renditions/file/thumb.webp"
+    };
+
+    expect(fileGeneratedRenditionReuseObjectExists({
+      head: { kind: "skip" }
+    })).toBe(false);
+    expect(fileGeneratedRenditionReuseObjectExists({
+      head,
+      object: null
+    })).toBe(false);
+    expect(fileGeneratedRenditionReuseObjectExists({
+      head,
+      object: fileObject({ key: head.key })
+    })).toBe(true);
   });
 
   it("builds generated rendition reuse results", () => {
