@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the R2 custom-metadata boundary slice:
+As of the job dispatch JSON-clone slice:
 
 - Vitest files: `171`
-- Vitest cases: `1879`
-- Remaining gap to Frappe static markers: `905`
+- Vitest cases: `1880`
+- Remaining gap to Frappe static markers: `904`
 
 ## Implication
 

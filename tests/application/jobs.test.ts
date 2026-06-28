@@ -101,6 +101,48 @@ describe("JobDispatcher", () => {
     ]);
   });
 
+  it("snapshots dispatched payloads and metadata by value", async () => {
+    const queue = new InMemoryJobQueue();
+    const dispatcher = new JobDispatcher({
+      registry: createJobRegistry({
+        jobs: [{ name: "email.digest", handler: () => undefined }]
+      }),
+      queue,
+      clock: fixedClock(now),
+      ids: deterministicIds(["001"])
+    });
+    const payload = { account: "acme", nested: { count: 1 } };
+    const metadata = { source: "test", nested: { attempt: 1 } };
+
+    const message = await dispatcher.dispatch({
+      jobName: "email.digest",
+      payload,
+      metadata
+    });
+
+    payload.nested.count = 2;
+    metadata.source = "mutated";
+    metadata.nested.attempt = 2;
+
+    expect(message).toMatchObject({
+      payload: { account: "acme", nested: { count: 1 } },
+      metadata: { source: "test", nested: { attempt: 1 } }
+    });
+
+    (message.payload.nested as DocumentData).count = 3;
+    message.metadata.source = "returned";
+    (message.metadata.nested as DocumentData).attempt = 3;
+
+    expect(queue.queued()).toMatchObject([
+      {
+        message: {
+          payload: { account: "acme", nested: { count: 1 } },
+          metadata: { source: "test", nested: { attempt: 1 } }
+        }
+      }
+    ]);
+  });
+
   it("rejects non-JSON in-memory queue payloads and metadata before enqueueing", async () => {
     const queue = new InMemoryJobQueue();
     const message: JobMessage = {
