@@ -94,6 +94,7 @@ import {
   fileRenditionId,
   fileRenditionFilename,
   fileGeneratedRenditionResult,
+  fileGeneratedRenditionReuseStoragePlan,
   fileRenditionManifestPatch,
   fileRenditionManifestDocumentCommand,
   fileRenditionManifestExecuteCommand,
@@ -1136,6 +1137,32 @@ describe("file policy", () => {
 
     expect(reusableFileRenditionForGeneration(snapshot, "thumb", "source-1", overlay)).toBe(available);
     expect(reusableFileRenditionForGeneration(snapshot, "thumb", "source-2", overlay)).toBeUndefined();
+  });
+
+  it("plans generated rendition storage reuse checks for matching renditions", () => {
+    const available = renditionEntry("thumb", {
+      key: "acme/file-renditions/file/thumb.webp",
+      status: "available",
+      source_etag: "source-1"
+    });
+    const snapshot = fileSnapshot({
+      renditions: [available]
+    });
+
+    expect(fileGeneratedRenditionReuseStoragePlan({
+      snapshot,
+      renditionId: "thumb",
+      sourceEtag: "source-1"
+    })).toEqual({
+      kind: "check",
+      key: "acme/file-renditions/file/thumb.webp",
+      rendition: available
+    });
+    expect(fileGeneratedRenditionReuseStoragePlan({
+      snapshot,
+      renditionId: "thumb",
+      sourceEtag: "source-2"
+    })).toEqual({ kind: "skip" });
   });
 
   it("rejects duplicate pending file rendition generation", () => {

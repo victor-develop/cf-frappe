@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the transform overlay resolution policy slice:
+As of the generated rendition reuse storage policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1732`
-- Remaining gap to Frappe static markers: `1052`
+- Vitest cases: `1733`
+- Remaining gap to Frappe static markers: `1051`
 
 ## Implication
 

@@ -107,6 +107,7 @@ import {
   filePreparedDirectUploadResult,
   filePreparedMultipartUploadResult,
   fileRenditionGenerationReservation,
+  fileGeneratedRenditionReuseStoragePlan,
   fileRenditionId,
   fileRenditionManifestExecuteCommand,
   fileRenditionReservationExecuteCommand,
@@ -145,7 +146,6 @@ import {
   nextFileDashboardOffset,
   objectKey,
   optionalFileScanPatch,
-  reusableFileRenditionForGeneration,
   sanitizeFilename,
   shouldContinueFileDashboardScan,
   type FileRenditionManifestEntry,
@@ -903,11 +903,16 @@ export class FileService {
     });
     const sourceEtag = fileObjectSourceEtag(downloaded.object.metadata);
     const renditionId = await fileRenditionId(options);
-    const existing = reusableFileRenditionForGeneration(downloaded.snapshot, renditionId, sourceEtag, overlay);
-    if (existing && await this.storage.head(existing.key)) {
+    const reuse = fileGeneratedRenditionReuseStoragePlan({
+      snapshot: downloaded.snapshot,
+      renditionId,
+      sourceEtag,
+      ...fileTransformOverlayCommandOption(overlay)
+    });
+    if (reuse.kind === "check" && await this.storage.head(reuse.key)) {
       return fileGeneratedRenditionResult({
         snapshot: downloaded.snapshot,
-        rendition: existing,
+        rendition: reuse.rendition,
         created: false
       });
     }

@@ -2295,6 +2295,38 @@ export function reusableFileRenditionForGeneration(
   return availableFileRenditionForSource(fileRenditions(snapshot), renditionId, sourceEtag, overlay);
 }
 
+export type FileGeneratedRenditionReuseStoragePlan =
+  | {
+      readonly kind: "skip";
+    }
+  | {
+      readonly kind: "check";
+      readonly key: string;
+      readonly rendition: FileRenditionManifestEntry;
+    };
+
+export function fileGeneratedRenditionReuseStoragePlan(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly renditionId: string;
+  readonly sourceEtag: string;
+  readonly overlay?: FileTransformOverlaySource;
+}): FileGeneratedRenditionReuseStoragePlan {
+  const rendition = reusableFileRenditionForGeneration(
+    command.snapshot,
+    command.renditionId,
+    command.sourceEtag,
+    command.overlay
+  );
+  if (rendition === undefined) {
+    return { kind: "skip" };
+  }
+  return {
+    kind: "check",
+    key: rendition.key,
+    rendition
+  };
+}
+
 export function ensureNoPendingFileRenditionForSource(
   renditions: readonly FileRenditionManifestEntry[],
   renditionId: string,
