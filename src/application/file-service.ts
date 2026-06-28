@@ -78,8 +78,10 @@ import {
   fileScanPatch,
   fileScanTarget,
   fileUploadCompletedPatch,
+  fileUploadCompletedDocumentData,
   fileUploadExpiresAt,
   fileUploadObjectCustomMetadata,
+  fileUploadScanFailedDocumentData,
   fileUploadScanFailedPatch,
   fileTransformOverlaySource,
   fileTransformSource,
@@ -459,10 +461,7 @@ export class FileService {
           doctype: this.fileDoctype,
           name: fileName,
           tenantId,
-          data: {
-            ...data,
-            ...fileUploadScanFailedPatch(object, scanPatch)
-          },
+          data: fileUploadScanFailedDocumentData(data, object, scanPatch),
           eventType: "FileScanFailed",
           metadata: command.metadata ?? {}
         });
@@ -473,10 +472,7 @@ export class FileService {
         doctype: this.fileDoctype,
         name: fileName,
         tenantId,
-        data: {
-          ...data,
-          ...fileUploadCompletedPatch(object, scanPatch)
-        },
+        data: fileUploadCompletedDocumentData(data, object, scanPatch),
         metadata: command.metadata ?? {}
       });
       return { snapshot, object };

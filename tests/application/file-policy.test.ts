@@ -42,8 +42,10 @@ import {
   fileScanTarget,
   fileSnapshotStringData,
   fileUploadCompletedPatch,
+  fileUploadCompletedDocumentData,
   fileUploadExpiresAt,
   fileUploadObjectCustomMetadata,
+  fileUploadScanFailedDocumentData,
   fileUploadScanFailedPatch,
   fileTransformOverlaySource,
   fileTransformOptionsData,
@@ -821,6 +823,36 @@ describe("file policy", () => {
       scan_checked_at: "2026-06-28T01:00:00.000Z"
     });
     expect(fileMultipartCompletionStartedPatch()).toEqual({ storage_state: "upload_completing" });
+  });
+
+  it("builds final buffered-upload document data", () => {
+    const data = {
+      filename: "invoice.pdf",
+      key: "acme/files/file_1-invoice.pdf",
+      content_type: "application/pdf",
+      size: 42,
+      is_private: true,
+      uploaded_by: "owner@example.com",
+      uploaded_at: "2026-06-28T00:00:00.000Z",
+      storage_state: "upload_pending"
+    };
+    const object = fileObject({ etag: "object-etag", httpEtag: '"http-etag"' });
+    const scan = fileScanPatch({ status: "clean" }, "2026-06-28T01:00:00.000Z");
+
+    expect(fileUploadCompletedDocumentData(data, object, scan)).toEqual({
+      ...data,
+      storage_state: "available",
+      etag: '"http-etag"',
+      scan_status: "clean",
+      scan_checked_at: "2026-06-28T01:00:00.000Z"
+    });
+    expect(fileUploadScanFailedDocumentData(data, fileObject({ etag: "object-etag" }), scan)).toEqual({
+      ...data,
+      storage_state: "scan_failed",
+      etag: "object-etag",
+      scan_status: "clean",
+      scan_checked_at: "2026-06-28T01:00:00.000Z"
+    });
   });
 
   it("builds file metadata patches", () => {

@@ -466,11 +466,33 @@ export function fileUploadCompletedPatch(object: FileObjectMetadata, scanPatch: 
   };
 }
 
+export function fileUploadCompletedDocumentData(
+  data: DocumentData,
+  object: FileObjectMetadata,
+  scanPatch: DocumentData = {}
+): DocumentData {
+  return {
+    ...data,
+    ...fileUploadCompletedPatch(object, scanPatch)
+  };
+}
+
 export function fileUploadScanFailedPatch(object: FileObjectMetadata, scanPatch: DocumentData = {}): DocumentData {
   return {
     storage_state: "scan_failed",
     etag: object.httpEtag ?? object.etag,
     ...scanPatch
+  };
+}
+
+export function fileUploadScanFailedDocumentData(
+  data: DocumentData,
+  object: FileObjectMetadata,
+  scanPatch: DocumentData = {}
+): DocumentData {
+  return {
+    ...data,
+    ...fileUploadScanFailedPatch(object, scanPatch)
   };
 }
 

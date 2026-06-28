@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the multipart part manifest patch policy module slice:
+As of the buffered upload document data policy module slice:
 
 - Vitest files: `169`
-- Vitest cases: `1647`
+- Vitest cases: `1648`
 
 ## Implication
 
