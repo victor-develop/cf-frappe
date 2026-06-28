@@ -143,6 +143,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Shared the core JSON value guard across D1 row hydration for events, projections, and job execution history, rejecting parsed non-finite numbers before corrupted stored JSON can re-enter the event-sourced model.
 - Shared the core JSON value guard across D1 data-patch journal hydration, rejecting parsed non-finite apply and rollback results before corrupted patch history can be treated as valid.
 - Shared the core JSON value guard across Cloudflare Queue consumer message parsing, acknowledging malformed job payload and metadata objects with non-finite numbers before handlers execute.
+- Shared the core JSON value guard across Durable Object realtime replay hydration, skipping corrupted replay rows with non-finite payload numbers before they are sent to reconnecting clients.
 - Extracted selected-file bulk operation normalization from `FileService` into the file policy, covering trimming, duplicates, expected-version validation, empty selections, and the bounded 100-file limit.
 - Extracted direct-upload object metadata matching and scanner result patch shaping from `FileService` into the file policy with focused size/content-type and optional scan-field coverage.
 - Extracted file dashboard row projection and limit normalization from `FileService` into the file policy with focused preview, attachment, scan, rendition, and limit coverage.

@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Cloudflare Queue consumer JSON-boundary slice:
+As of the Durable Object realtime replay JSON-boundary slice:
 
 - Vitest files: `171`
-- Vitest cases: `1844`
-- Remaining gap to Frappe static markers: `940`
+- Vitest cases: `1845`
+- Remaining gap to Frappe static markers: `939`
 
 ## Implication
 

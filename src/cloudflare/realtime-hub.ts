@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { isJsonValue } from "../core/json.js";
 import {
   DOCUMENT_FIELD_EDIT_MESSAGE_TYPE,
   DOCUMENT_SHARED_DRAFT_MESSAGE_TYPE,
@@ -429,19 +430,6 @@ function isRealtimeEvent(value: unknown): value is RealtimeEvent {
     typeof value.tenantId === "string" &&
     typeof value.occurredAt === "string" &&
     isJsonValue(value.payload);
-}
-
-function isJsonValue(value: unknown): boolean {
-  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return true;
-  }
-  if (Array.isArray(value)) {
-    return value.every(isJsonValue);
-  }
-  if (isRecord(value)) {
-    return Object.values(value).every(isJsonValue);
-  }
-  return false;
 }
 
 function pruneReplayEvents(sql: SqlStorage, retentionLimit: number): void {
