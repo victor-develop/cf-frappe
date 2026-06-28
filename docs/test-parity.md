@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the generated rendition reuse object-existence policy slice:
+As of the infected scan-failure selection policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1773`
-- Remaining gap to Frappe static markers: `1011`
+- Vitest cases: `1774`
+- Remaining gap to Frappe static markers: `1010`
 
 ## Implication
 

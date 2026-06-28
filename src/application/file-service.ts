@@ -59,6 +59,7 @@ import {
   fileCompletedMultipartObjectHeadReadPlan,
   fileCompletedMultipartObjectPlan,
   fileCompletedMultipartObjectReadPlan,
+  fileInfectedScanFailure,
   fileDirectUploadObjectHeadReadPlan,
   fileBulkDeleteDeletedOutcome,
   fileBulkDeleteEntryCommand,
@@ -501,7 +502,8 @@ export class FileService {
         scan,
         checkedAt: this.clock.now()
       });
-      if (plan.infected && scan !== undefined) {
+      const failureScan = fileInfectedScanFailure({ infected: plan.infected, scan });
+      if (failureScan !== undefined) {
         const snapshot = await this.documents.create(fileDocumentCreateCommand({
           actor: command.actor,
           doctype: this.fileDoctype,
@@ -510,7 +512,7 @@ export class FileService {
           metadata: command.metadata,
           create: plan.create
         }));
-        throw fileScanFailureError(scan, snapshot);
+        throw fileScanFailureError(failureScan, snapshot);
       }
       const snapshot = await this.documents.create(fileDocumentCreateCommand({
         actor: command.actor,
@@ -590,7 +592,8 @@ export class FileService {
       checkedAt: this.clock.now(),
       ...fileExpectedVersionCommandOption(command.expectedVersion)
     });
-    if (plan.infected && scan !== undefined) {
+    const failureScan = fileInfectedScanFailure({ infected: plan.infected, scan });
+    if (failureScan !== undefined) {
       const snapshot = await this.documents.execute(fileUploadCompletionExecuteCommand({
         actor: command.actor,
         doctype: this.fileDoctype,
@@ -600,7 +603,7 @@ export class FileService {
         completion: plan.completion
       }));
       await this.deleteFileObjectsIgnoringFailures(fileUploadScanFailureCleanupPlan(current));
-      throw fileScanFailureError(scan, snapshot);
+      throw fileScanFailureError(failureScan, snapshot);
     }
     return this.documents.execute(fileUploadCompletionExecuteCommand({
       actor: command.actor,
@@ -728,7 +731,8 @@ export class FileService {
       checkedAt: this.clock.now(),
       expectedVersion: completing.version
     });
-    if (plan.infected && scan !== undefined) {
+    const failureScan = fileInfectedScanFailure({ infected: plan.infected, scan });
+    if (failureScan !== undefined) {
       const snapshot = await this.documents.execute(fileUploadCompletionExecuteCommand({
         actor: command.actor,
         doctype: this.fileDoctype,
@@ -738,7 +742,7 @@ export class FileService {
         completion: plan.completion
       }));
       await this.deleteFileObjectsIgnoringFailures(fileUploadScanFailureCleanupPlan(completing));
-      throw fileScanFailureError(scan, snapshot);
+      throw fileScanFailureError(failureScan, snapshot);
     }
     return this.documents.execute(fileUploadCompletionExecuteCommand({
       actor: command.actor,

@@ -144,6 +144,7 @@ import {
   fileRenditionView,
   fileReadableDashboardCandidate,
   fileReadableDashboardEntries,
+  fileInfectedScanFailure,
   fileObjectScanPlan,
   fileObjectScanTarget,
   fileScanFailureError,
@@ -2139,6 +2140,16 @@ describe("file policy", () => {
   it("ignores file cleanup failures without replacing the original failure", () => {
     expect(ignoreFileCleanupFailure(new Error("delete failed"))).toBeUndefined();
     expect(ignoreFileCleanupFailure("delete failed")).toBeUndefined();
+  });
+
+  it("selects infected scan failures from upload outcomes", () => {
+    const infected = { status: "infected" as const, message: "signature" };
+    const clean = { status: "clean" as const };
+
+    expect(fileInfectedScanFailure({ infected: false, scan: infected })).toBeUndefined();
+    expect(fileInfectedScanFailure({ infected: true, scan: undefined })).toBeUndefined();
+    expect(fileInfectedScanFailure({ infected: true, scan: clean })).toBeUndefined();
+    expect(fileInfectedScanFailure({ infected: true, scan: infected })).toBe(infected);
   });
 
   it("validates direct upload object metadata against its reservation", () => {

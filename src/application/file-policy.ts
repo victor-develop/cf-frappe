@@ -808,6 +808,13 @@ export function isInfectedFileScanResult(
   return result?.status === "infected";
 }
 
+export function fileInfectedScanFailure(command: {
+  readonly infected: boolean;
+  readonly scan?: FileScanResult | undefined;
+}): FileScanResult | undefined {
+  return command.infected && isInfectedFileScanResult(command.scan) ? command.scan : undefined;
+}
+
 export function fileScanTarget(command: {
   readonly actorId: string;
   readonly tenantId: string;
