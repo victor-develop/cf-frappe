@@ -4,6 +4,7 @@ import {
   DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
   type Actor,
+  type DocTypeDefinition,
   type DocumentData,
   type DomainEvent,
   type FieldDefinition,
@@ -19,6 +20,7 @@ import {
   type CustomFieldState
 } from "../core/custom-fields.js";
 import type { ModelRegistry } from "../core/registry.js";
+import { validateDocumentData } from "../core/schema.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
@@ -111,6 +113,7 @@ export class CustomFieldService {
     const state = this.stateFromEvents(tenantId, doctype.name, events);
     this.assertCustomFieldRuntimeSupported(field);
     assertCustomFieldCanExtend(doctype, field);
+    assertCustomFieldDefaultValueValid(doctype, field);
     this.assertReferencesResolve(field);
     this.assertTableFieldDoesNotSelfTarget(doctype, field);
     this.assertTableGraphAcyclicFrom(
@@ -399,6 +402,23 @@ function normalizeRequired(value: string, label: string): string {
     throw badRequest(`${label} is required`);
   }
   return normalized;
+}
+
+function assertCustomFieldDefaultValueValid(base: DocTypeDefinition, field: PersistedFieldDefinition): void {
+  if (field.defaultValue === undefined) {
+    return;
+  }
+  const issues = validateDocumentData(
+    { ...base, fields: Object.freeze([...base.fields, field]) },
+    { [field.name]: field.defaultValue },
+    { partial: true }
+  );
+  if (issues.length > 0) {
+    throw new FrameworkError("CUSTOM_FIELD_INVALID", issues[0]?.message ?? "Custom field default value is invalid", {
+      status: 400,
+      issues
+    });
+  }
 }
 
 function customFieldOptions(field: FieldDefinition): { readonly options?: readonly string[] } {

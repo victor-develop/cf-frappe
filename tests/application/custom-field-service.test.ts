@@ -135,7 +135,7 @@ describe("CustomFieldService", () => {
     const service = new CustomFieldService({
       registry: createRegistry({ doctypes: [Note] }),
       events,
-      ids: deterministicIds(["field-1"]),
+      ids: deterministicIds(["field-1", "field-2", "field-3"]),
       clock: fixedClock(now)
     });
 
@@ -333,6 +333,45 @@ describe("CustomFieldService", () => {
       code: "CUSTOM_FIELD_INVALID",
       message: "Only select custom fields can define options"
     });
+  });
+
+  it("validates custom field default values before persisting metadata events", async () => {
+    const events = new InMemoryEventStore();
+    const service = new CustomFieldService({
+      registry: createRegistry({ doctypes: [Note] }),
+      events,
+      ids: deterministicIds(["field-1", "field-2", "field-3"]),
+      clock: fixedClock(now)
+    });
+
+    await expect(
+      service.saveField({
+        actor: admin,
+        doctype: "Note",
+        field: { name: "reviewed", type: "boolean", defaultValue: false }
+      })
+    ).resolves.toMatchObject({ fields: [{ field: { name: "reviewed", defaultValue: false } }] });
+    await expect(
+      service.saveField({
+        actor: admin,
+        doctype: "Note",
+        field: { name: "bad_reviewed", type: "boolean", defaultValue: "yes" }
+      })
+    ).rejects.toMatchObject({
+      code: "CUSTOM_FIELD_INVALID",
+      message: "Field 'bad_reviewed' must be a boolean"
+    });
+    await expect(
+      service.saveField({
+        actor: admin,
+        doctype: "Note",
+        field: { name: "priority", type: "select", options: ["Low", "High"], defaultValue: "Medium" }
+      })
+    ).rejects.toMatchObject({
+      code: "CUSTOM_FIELD_INVALID",
+      message: "Field 'priority' must be one of Low, High"
+    });
+    await expect(events.readStream(customFieldsCatalogStream("acme"))).resolves.toHaveLength(1);
   });
 
   it("supports custom fields on static child table DocTypes", async () => {
