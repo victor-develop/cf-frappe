@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the first saved event lookup slice:
+As of the after-commit completion slice:
 
 - Vitest files: `173`
-- Vitest cases: `2011`
-- Remaining gap to Frappe static markers: `773`
+- Vitest cases: `2012`
+- Remaining gap to Frappe static markers: `772`
 
 ## Implication
 

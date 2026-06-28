@@ -112,7 +112,7 @@ import {
 import type { ModelRegistry } from "../core/registry.js";
 import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
-import type { DocumentStore } from "../ports/document-store.js";
+import type { DocumentCommit, DocumentStore } from "../ports/document-store.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 import { cryptoIdGenerator } from "../ports/id-generator.js";
 import {
@@ -602,11 +602,7 @@ export class DocumentService implements DocumentCommandExecutor {
         };
       }
     );
-    const saved = commit.events.find((item) => item.id === event.id);
-    if (saved) {
-      return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
-    }
-    return commit.snapshot;
+    return this.finishAfterCommit(doctype, commit, requireSavedEvent(commit.events, event.id));
   }
 
   async update(command: UpdateDocumentCommand): Promise<DocumentSnapshot> {
@@ -822,14 +818,11 @@ export class DocumentService implements DocumentCommandExecutor {
         };
       }
     );
-    const saved = commit.events.find((item) => item.id === event.id);
-    if (saved) {
-      await this.releaseUniqueValues(options.command.actor, releasedReservations, saved.occurredAt, {
-        suppressErrors: true
-      });
-      return await this.runAfterCommit(options.doctype, saved, commit.snapshot) ?? commit.snapshot;
-    }
-    return commit.snapshot;
+    const saved = requireSavedEvent(commit.events, event.id);
+    await this.releaseUniqueValues(options.command.actor, releasedReservations, saved.occurredAt, {
+      suppressErrors: true
+    });
+    return this.finishAfterCommit(options.doctype, commit, saved);
   }
 
   async duplicate(command: DuplicateDocumentCommand): Promise<DocumentSnapshot> {
@@ -938,11 +931,7 @@ export class DocumentService implements DocumentCommandExecutor {
         data: { ...existing.data, ...plan.patch }
       });
     });
-    const [saved] = commit.events;
-    if (saved) {
-      return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
-    }
-    return commit.snapshot;
+    return this.finishAfterCommit(doctype, commit, requireFirstSavedEvent(commit.events));
   }
 
   async execute(command: ExecuteDomainCommand): Promise<DocumentSnapshot> {
@@ -1025,11 +1014,7 @@ export class DocumentService implements DocumentCommandExecutor {
         data: { ...existing.data, ...patchWithReadOnlyValues }
       });
     });
-    const [saved] = commit.events;
-    if (saved) {
-      return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
-    }
-    return commit.snapshot;
+    return this.finishAfterCommit(doctype, commit, requireFirstSavedEvent(commit.events));
   }
 
   async comment(command: AddDocumentCommentCommand): Promise<DocumentSnapshot> {
@@ -1231,12 +1216,9 @@ export class DocumentService implements DocumentCommandExecutor {
       const saved = requireFirstSavedEvent(savedEvents);
       return snapshotFromCommittedDocumentEvent(existing, saved, { docstatus: plan.nextStatus });
     });
-    const [saved] = commit.events;
-    if (saved) {
-      await this.releaseUniqueValues(command.actor, uniqueReservations, saved.occurredAt, { suppressErrors: true });
-      return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
-    }
-    return commit.snapshot;
+    const saved = requireFirstSavedEvent(commit.events);
+    await this.releaseUniqueValues(command.actor, uniqueReservations, saved.occurredAt, { suppressErrors: true });
+    return this.finishAfterCommit(doctype, commit, saved);
   }
 
   async bulkDelete(command: BulkDeleteDocumentsCommand): Promise<BulkDeleteDocumentsResult> {
@@ -1473,11 +1455,7 @@ export class DocumentService implements DocumentCommandExecutor {
       const saved = requireFirstSavedEvent(savedEvents);
       return snapshotFromCommittedDocumentEvent(existing, saved);
     });
-    const [saved] = commit.events;
-    if (saved) {
-      return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
-    }
-    return commit.snapshot;
+    return this.finishAfterCommit(doctype, commit, requireFirstSavedEvent(commit.events));
   }
 
   private async changeDocStatus(options: {
@@ -1506,11 +1484,15 @@ export class DocumentService implements DocumentCommandExecutor {
       const saved = requireFirstSavedEvent(savedEvents);
       return snapshotFromCommittedDocumentEvent(options.existing, saved, { docstatus: options.nextStatus });
     });
-    const [saved] = commit.events;
-    if (saved) {
-      return await this.runAfterCommit(options.doctype, saved, commit.snapshot) ?? commit.snapshot;
-    }
-    return commit.snapshot;
+    return this.finishAfterCommit(options.doctype, commit, requireFirstSavedEvent(commit.events));
+  }
+
+  private async finishAfterCommit(
+    doctype: DocTypeDefinition,
+    commit: DocumentCommit,
+    saved: DomainEvent
+  ): Promise<DocumentSnapshot> {
+    return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
   }
 
   private async runBeforeValidate(

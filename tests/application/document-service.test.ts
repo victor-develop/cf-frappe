@@ -69,6 +69,54 @@ describe("DocumentService", () => {
     await expect(events.currentVersion("acme:Note:My%20Note")).resolves.toBe(1);
   });
 
+  it("runs afterCommit with the document event after create commit batches", async () => {
+    const uniqueNote = defineDocType({
+      name: "Unique Note",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "serial", type: "text", unique: true }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read", "create"] }]
+    });
+    const contexts: Array<{
+      readonly doctype: string;
+      readonly documentName: string;
+      readonly payloadKind: string;
+      readonly snapshotName: string | undefined;
+    }> = [];
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry: createRegistry({ doctypes: [uniqueNote] }),
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["reserve-1", "document-1"]),
+      afterCommit: (context) => {
+        contexts.push({
+          doctype: context.event.doctype,
+          documentName: context.event.documentName,
+          payloadKind: context.event.payload.kind,
+          snapshotName: context.snapshot?.name
+        });
+      }
+    });
+
+    await documents.create({
+      actor: owner,
+      doctype: "Unique Note",
+      data: { title: "Unique One", serial: "S-1" }
+    });
+
+    expect(contexts).toEqual([
+      {
+        doctype: "Unique Note",
+        documentName: "Unique One",
+        payloadKind: "DocumentCreated",
+        snapshotName: "Unique One"
+      }
+    ]);
+  });
+
   it("can resolve tenant-extended DocTypes for document command validation", async () => {
     const { registry, store } = createServices(["base"]);
     const documents = new DocumentService({
