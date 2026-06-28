@@ -192,7 +192,7 @@ export function createRealtimeHubClass(options: RealtimeHubOptions = {}): Realti
         return;
       }
       try {
-        const parsed = JSON.parse(message) as { readonly type?: unknown };
+        const parsed = parseRealtimeClientMessage(message);
         if (parsed.type === "ping") {
           ws.send(JSON.stringify({ type: "pong" }));
           return;
@@ -408,6 +408,14 @@ function replayEntryFromRow(row: RealtimeEventRow): readonly RealtimeReplayEntry
   } catch {
     return [];
   }
+}
+
+function parseRealtimeClientMessage(message: string): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(message);
+  if (isRecord(parsed)) {
+    return parsed;
+  }
+  throw new Error("Malformed realtime message");
 }
 
 function isRealtimeEvent(value: unknown): value is RealtimeEvent {

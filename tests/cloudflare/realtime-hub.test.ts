@@ -228,6 +228,34 @@ describe("RealtimeHub Durable Object", () => {
     ]);
   });
 
+  it("rejects non-object websocket JSON messages without broadcasting", async () => {
+    const originSent: string[] = [];
+    const peerSent: string[] = [];
+    const origin = fakeSocket(originSent, {
+      topic: "document:acme:Task:TASK-1",
+      connectionId: "conn-origin",
+      connectedAt: "2026-06-23T00:00:01.000Z",
+      tenantId: "acme",
+      userId: "owner@example.com"
+    });
+    const peer = fakeSocket(peerSent, {
+      topic: "document:acme:Task:TASK-1",
+      connectionId: "conn-peer",
+      connectedAt: "2026-06-23T00:00:02.000Z",
+      tenantId: "acme",
+      userId: "support@example.com"
+    });
+    const Hub = createRealtimeHubClass();
+    const hub = new Hub(fakeState([origin, peer]), {});
+
+    await hub.webSocketMessage(origin, JSON.stringify(["ping"]));
+
+    expect(peerSent).toEqual([]);
+    expect(originSent).toEqual([
+      JSON.stringify({ type: "error", message: "Malformed realtime message" })
+    ]);
+  });
+
   it("accepts websocket connections with server-owned presence identity", async () => {
     const accepted: WebSocket[] = [];
     const sent: string[] = [];
