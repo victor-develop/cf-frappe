@@ -44,6 +44,7 @@ import {
   fileCommandMetadata,
   fileCommandTenantId,
   fileCompletedMultipartObjectPlan,
+  fileCompletedRenditionManifestRecord,
   fileCompletedRenditionManifestCommandName,
   fileContentLength,
   fileContentTypeExtension,
@@ -995,6 +996,43 @@ describe("file policy", () => {
       http_etag: '"object-http"',
       generated_at: "2026-06-28T01:00:00.000Z",
       generated_by: "owner@example.com"
+    });
+  });
+
+  it("builds completed rendition manifest records from stored object metadata", () => {
+    const pending = pendingFileRendition({
+      snapshot: fileSnapshot({ content_type: "image/png" }),
+      tenantId: "acme",
+      id: "w64-f-webp",
+      attemptId: "attempt/1",
+      sourceEtag: "source-1",
+      options: { width: 64, format: "webp" },
+      requestedAt: "2026-06-28T00:00:00.000Z",
+      requestedBy: "owner@example.com"
+    });
+
+    expect(fileCompletedRenditionManifestRecord({
+      pending,
+      object: {
+        key: pending.key,
+        size: 99,
+        etag: "object-1",
+        uploadedAt: "2026-06-28T01:00:00.000Z",
+        contentType: "image/webp",
+        customMetadata: {}
+      },
+      generatedAt: "2026-06-28T01:00:00.000Z",
+      generatedBy: "owner@example.com"
+    })).toMatchObject({
+      command: "completeRendition",
+      rendition: {
+        status: "available",
+        content_type: "image/webp",
+        size: 99,
+        etag: "object-1",
+        generated_at: "2026-06-28T01:00:00.000Z",
+        generated_by: "owner@example.com"
+      }
     });
   });
 

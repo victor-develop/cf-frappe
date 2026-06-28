@@ -2250,6 +2250,21 @@ export function completeFileRendition(command: {
   };
 }
 
+export function fileCompletedRenditionManifestRecord(command: {
+  readonly pending: FileRenditionManifestEntry;
+  readonly object: FileObjectMetadata;
+  readonly generatedAt: string;
+  readonly generatedBy: string;
+}): {
+  readonly command: "completeRendition";
+  readonly rendition: FileRenditionManifestEntry;
+} {
+  return {
+    command: "completeRendition",
+    rendition: completeFileRendition(command)
+  };
+}
+
 export function fileTransformOptionsData(options: FileTransformOptions): DocumentData {
   return {
     ...(options.width === undefined ? {} : { width: options.width }),

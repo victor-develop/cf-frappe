@@ -32,7 +32,6 @@ import type {
 } from "../ports/file-storage.js";
 import {
   availableFileRenditionForDownload,
-  completeFileRendition,
   ensureFileSizeWithinLimit,
   ensureFileObjectTransformable,
   ensureValidFileScanResult,
@@ -58,7 +57,7 @@ import {
   requireStoredFileObject,
   requireStoredFileRenditionObject,
   fileBulkDeletedEntry,
-  fileCompletedRenditionManifestCommandName,
+  fileCompletedRenditionManifestRecord,
   fileCompletedMultipartObjectPlan,
   fileBufferedUploadDocumentCreateCommand,
   fileBulkDeleteEntryCommand,
@@ -962,7 +961,7 @@ export class FileService {
           renditionId
         })
       );
-      const completed = completeFileRendition({
+      const completed = fileCompletedRenditionManifestRecord({
         pending,
         object,
         generatedAt: this.clock.now(),
@@ -970,12 +969,12 @@ export class FileService {
       });
       const snapshot = await this.recordRenditionManifest({
         source: command,
-        command: fileCompletedRenditionManifestCommandName(),
-        rendition: completed
+        command: completed.command,
+        rendition: completed.rendition
       });
       return fileGeneratedRenditionResult({
         snapshot,
-        rendition: completed,
+        rendition: completed.rendition,
         created: true
       });
     } catch (error) {
