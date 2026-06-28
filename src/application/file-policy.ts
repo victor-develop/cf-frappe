@@ -25,6 +25,8 @@ import {
   sortedUploadedMultipartParts
 } from "../ports/multipart-file-storage.js";
 import type {
+  AbortMultipartFileUploadCommand,
+  CompleteMultipartFileUploadCommand,
   CreateDirectFileUploadCommand,
   CreateMultipartFileUploadCommand,
   FileContent,
@@ -34,6 +36,7 @@ import type {
   MultipartFilePartContent,
   PutFileObjectCommand,
   StoredFileObject,
+  UploadMultipartFilePartCommand,
   UploadedMultipartFilePart
 } from "../ports/file-storage.js";
 import type { FileScanResult, FileScanSource, FileScanTarget } from "../ports/file-scanner.js";
@@ -574,6 +577,52 @@ export function fileMultipartUploadReservationCommand(command: {
       tenantId: command.tenantId,
       uploadedBy: command.uploadedBy
     })
+  };
+}
+
+export function fileMultipartPartUploadCommand(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly uploadId: string;
+  readonly partNumber: number;
+  readonly body: MultipartFilePartContent;
+}): UploadMultipartFilePartCommand {
+  return {
+    key: filePrimaryObjectKey(command.snapshot),
+    uploadId: command.uploadId,
+    partNumber: command.partNumber,
+    body: command.body
+  };
+}
+
+export function fileMultipartCompletionCommand(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly uploadId: string;
+  readonly parts: readonly UploadedMultipartFilePart[];
+}): CompleteMultipartFileUploadCommand {
+  return {
+    key: filePrimaryObjectKey(command.snapshot),
+    uploadId: command.uploadId,
+    parts: command.parts
+  };
+}
+
+export function fileMultipartAbortCommand(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly uploadId: string;
+}): AbortMultipartFileUploadCommand {
+  return fileMultipartUploadAbortCommand({
+    key: filePrimaryObjectKey(command.snapshot),
+    uploadId: command.uploadId
+  });
+}
+
+export function fileMultipartUploadAbortCommand(command: {
+  readonly key: string;
+  readonly uploadId: string;
+}): AbortMultipartFileUploadCommand {
+  return {
+    key: command.key,
+    uploadId: command.uploadId
   };
 }
 

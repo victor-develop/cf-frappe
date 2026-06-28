@@ -41,8 +41,12 @@ import {
   fileDashboardListFilters,
   fileDocumentData,
   fileMetadataPatch,
+  fileMultipartAbortCommand,
   fileMultipartCompletionStartedPatch,
+  fileMultipartCompletionCommand,
+  fileMultipartPartUploadCommand,
   fileMultipartUploadDocumentData,
+  fileMultipartUploadAbortCommand,
   fileMultipartUploadId,
   fileObjectKeysForDelete,
   fileObjectKeysForScanFailureCleanup,
@@ -1096,6 +1100,46 @@ describe("file policy", () => {
       contentType: "application/pdf",
       filename: "invoice.pdf",
       customMetadata: { tenantId: "acme", uploadedBy: "owner@example.com" }
+    });
+  });
+
+  it("builds multipart storage operation commands", () => {
+    const snapshot = fileSnapshot({ key: "acme/files/file_1-invoice.pdf" });
+    const parts = [{ partNumber: 1, etag: "part-1" }];
+
+    expect(fileMultipartPartUploadCommand({
+      snapshot,
+      uploadId: "upload-1",
+      partNumber: 1,
+      body: "chunk"
+    })).toEqual({
+      key: "acme/files/file_1-invoice.pdf",
+      uploadId: "upload-1",
+      partNumber: 1,
+      body: "chunk"
+    });
+    expect(fileMultipartCompletionCommand({
+      snapshot,
+      uploadId: "upload-1",
+      parts
+    })).toEqual({
+      key: "acme/files/file_1-invoice.pdf",
+      uploadId: "upload-1",
+      parts
+    });
+    expect(fileMultipartAbortCommand({
+      snapshot,
+      uploadId: "upload-1"
+    })).toEqual({
+      key: "acme/files/file_1-invoice.pdf",
+      uploadId: "upload-1"
+    });
+    expect(fileMultipartUploadAbortCommand({
+      key: "acme/files/file_2-failed.pdf",
+      uploadId: "upload-2"
+    })).toEqual({
+      key: "acme/files/file_2-failed.pdf",
+      uploadId: "upload-2"
     });
   });
 

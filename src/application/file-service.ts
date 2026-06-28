@@ -71,7 +71,10 @@ import {
   fileDashboardListFilters,
   fileBufferedUploadDocumentData,
   fileMetadataPatch,
+  fileMultipartAbortCommand,
   fileMultipartCompletionStartedPatch,
+  fileMultipartCompletionCommand,
+  fileMultipartPartUploadCommand,
   fileMultipartUploadDocumentData,
   fileMultipartUploadId,
   fileObjectKeysForDelete,
@@ -93,6 +96,7 @@ import {
   fileUploadExpiresAt,
   fileDirectUploadReservationCommand,
   filePendingUploadDocumentData,
+  fileMultipartUploadAbortCommand,
   fileMultipartUploadReservationCommand,
   fileUploadScanFailedDocumentData,
   fileUploadScanFailedPatch,
@@ -637,7 +641,10 @@ export class FileService {
       });
       return { snapshot, upload };
     } catch (error) {
-      await multipartUploads.abortMultipartUpload({ key, uploadId: upload.uploadId }).catch(() => undefined);
+      await multipartUploads.abortMultipartUpload(fileMultipartUploadAbortCommand({
+        key,
+        uploadId: upload.uploadId
+      })).catch(() => undefined);
       throw error;
     }
   }
@@ -648,12 +655,12 @@ export class FileService {
     const uploadId = this.multipartUploadId(current);
     const size = multipartPartSize(command.body, command.size);
     ensureMultipartPartFitsReservation(current, command.partNumber, size);
-    const part = await multipartUploads.uploadMultipartPart({
-      key: filePrimaryObjectKey(current),
+    const part = await multipartUploads.uploadMultipartPart(fileMultipartPartUploadCommand({
+      snapshot: current,
       uploadId,
       partNumber: command.partNumber,
       body: command.body
-    });
+    }));
     const snapshot = await this.documents.execute({
       actor: command.actor,
       doctype: this.fileDoctype,
@@ -731,10 +738,10 @@ export class FileService {
     const multipartUploads = this.requireMultipartUploads();
     const current = await this.multipartUploadSnapshot(command, ensureFilePendingMultipartPartUpload);
     ensureFileExpectedVersion(current, command.expectedVersion);
-    await multipartUploads.abortMultipartUpload({
-      key: filePrimaryObjectKey(current),
+    await multipartUploads.abortMultipartUpload(fileMultipartAbortCommand({
+      snapshot: current,
       uploadId: this.multipartUploadId(current)
-    });
+    }));
     return this.documents.delete({
       actor: command.actor,
       doctype: this.fileDoctype,
@@ -1212,11 +1219,11 @@ export class FileService {
     if (existing) {
       return existing;
     }
-    return command.multipartUploads.completeMultipartUpload({
-      key,
+    return command.multipartUploads.completeMultipartUpload(fileMultipartCompletionCommand({
+      snapshot: command.snapshot,
       uploadId: this.multipartUploadId(command.snapshot),
       parts: command.parts
-    });
+    }));
   }
 
   private async scanObject(command: {
