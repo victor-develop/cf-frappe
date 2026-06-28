@@ -1,6 +1,7 @@
 import {
   availableFileRenditionForSource,
   completeFileRendition,
+  ensureFileContentTypeTransformable,
   ensureNoPendingFileRenditionForSource,
   ensureValidFileScanResult,
   ensureFileAvailableForDownload,
@@ -66,6 +67,13 @@ describe("file policy", () => {
     expect(isPreviewableFileContentType("IMAGE/PNG")).toBe(true);
     expect(isPreviewableFileContentType("image/svg+xml")).toBe(false);
     expect(isPreviewableFileContentType("text/html")).toBe(false);
+  });
+
+  it("rejects non-transformable file content types", () => {
+    expect(() => ensureFileContentTypeTransformable("image/png", "File 'file_image'")).not.toThrow();
+    expect(() => ensureFileContentTypeTransformable("text/plain", "File 'file_text'")).toThrow(
+      "File 'file_text' cannot be transformed"
+    );
   });
 
   it("normalizes declared file sizes", () => {

@@ -12,6 +12,7 @@ import type {
   FileTransformOptions,
   FileTransformWatermarkPlacement
 } from "../ports/file-transformer.js";
+import { isTransformableFileContentType } from "../ports/file-transformer.js";
 import {
   ensureR2CompatibleMultipartPartSizes,
   sortedUploadedMultipartParts
@@ -42,6 +43,12 @@ export function normalizeContentType(value: string | undefined): string {
 export function isPreviewableFileContentType(contentType: string): boolean {
   const normalized = normalizeContentType(contentType.split(";")[0]);
   return PREVIEWABLE_FILE_CONTENT_TYPES.has(normalized) || (normalized.startsWith("image/") && normalized !== "image/svg+xml");
+}
+
+export function ensureFileContentTypeTransformable(contentType: string, fileLabel: string): void {
+  if (!isTransformableFileContentType(contentType)) {
+    throw badRequest(`${fileLabel} cannot be transformed`);
+  }
 }
 
 export function normalizeFileSize(size: number): number {

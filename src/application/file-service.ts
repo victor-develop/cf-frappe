@@ -24,7 +24,6 @@ import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
 import type { FileScanner, FileScanResult, FileScanSource } from "../ports/file-scanner.js";
 import {
-  isTransformableFileContentType,
   normalizeFileTransformOptions,
   type FileTransformOverlaySource,
   type FileTransformer,
@@ -44,6 +43,7 @@ import type {
 import {
   availableFileRenditionForSource,
   completeFileRendition,
+  ensureFileContentTypeTransformable,
   ensureNoPendingFileRenditionForSource,
   ensureValidFileScanResult,
   ensureFileAvailableForDownload,
@@ -848,9 +848,7 @@ export class FileService {
     const options = normalizeFileTransformOptions(command.options);
     const sourceContentType = downloaded.object.metadata.contentType ??
       requireFileSnapshotString(downloaded.snapshot, "content_type");
-    if (!isTransformableFileContentType(sourceContentType)) {
-      throw badRequest(`File '${downloaded.snapshot.name}' cannot be transformed`);
-    }
+    ensureFileContentTypeTransformable(sourceContentType, `File '${downloaded.snapshot.name}'`);
     const doctype = this.registry.get(this.fileDoctype);
     if (!can(command.actor, doctype, "rendition", downloaded.snapshot)) {
       throw permissionDenied(
@@ -985,9 +983,7 @@ export class FileService {
     const options = normalizeFileTransformOptions(command.options);
     const contentType = downloaded.object.metadata.contentType ??
       requireFileSnapshotString(downloaded.snapshot, "content_type");
-    if (!isTransformableFileContentType(contentType)) {
-      throw badRequest(`File '${downloaded.snapshot.name}' cannot be transformed`);
-    }
+    ensureFileContentTypeTransformable(contentType, `File '${downloaded.snapshot.name}'`);
     const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
     this.validateTransformOptions(options);
     const overlay = await this.resolveTransformOverlay({
@@ -1167,9 +1163,7 @@ export class FileService {
       throw notFound(`${this.fileDoctype}/${overlay.file} content was not found`);
     }
     const contentType = object.metadata.contentType ?? requireFileSnapshotString(snapshot, "content_type");
-    if (!isTransformableFileContentType(contentType)) {
-      throw badRequest(`File overlay '${overlay.file}' cannot be transformed`);
-    }
+    ensureFileContentTypeTransformable(contentType, `File overlay '${overlay.file}'`);
     const filename = requireFileSnapshotString(snapshot, "filename");
     return {
       file: overlay.file,
