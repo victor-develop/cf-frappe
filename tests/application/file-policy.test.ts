@@ -107,6 +107,7 @@ import {
   fileUploadContentType,
   fileUploadExpiresAt,
   fileUploadIsPrivate,
+  fileVisibleDashboardEntries,
   fileUploadObjectCustomMetadata,
   fileMultipartUploadReservationCommand,
   fileUploadScanFailedDocumentData,
@@ -2546,6 +2547,17 @@ describe("file policy", () => {
         editable: true,
         deletable: true
       })
+    ]);
+  });
+
+  it("limits visible file dashboard entries after readable projection", () => {
+    expect(fileVisibleDashboardEntries([
+      { name: "FILE-1" },
+      { name: "FILE-2" },
+      { name: "FILE-3" }
+    ], 2)).toEqual([
+      { name: "FILE-1" },
+      { name: "FILE-2" }
     ]);
   });
 });

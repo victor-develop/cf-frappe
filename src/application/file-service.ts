@@ -72,6 +72,7 @@ import {
   fileDashboardEntryWithPermissions,
   fileDashboardListFilters,
   fileReadableDashboardEntries,
+  fileVisibleDashboardEntries,
   fileDashboardSystemActor,
   fileBufferedUploadDocumentData,
   fileDeleteRequestedExecuteCommand,
@@ -811,7 +812,7 @@ export class FileService {
       canUpload: canUploadFile(actor, doctype),
       directUpload: typeof this.storage.createDirectUpload === "function",
       maxUploadBytes: this.maxFileBytes,
-      files: files.slice(0, limit),
+      files: fileVisibleDashboardEntries(files, limit),
       limit,
       filters
     };

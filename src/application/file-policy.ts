@@ -1740,6 +1740,10 @@ export function fileReadableDashboardEntries(command: {
     }));
 }
 
+export function fileVisibleDashboardEntries<TEntry>(entries: readonly TEntry[], limit: number): readonly TEntry[] {
+  return entries.slice(0, limit);
+}
+
 export function canUploadFile(actor: Actor, doctype: DocTypeDefinition): boolean {
   return can(actor, doctype, "create");
 }

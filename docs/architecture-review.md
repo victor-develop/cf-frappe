@@ -152,4 +152,5 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized file dashboard system actor shaping in file policy so dashboard orchestration no longer imports or composes privileged catalog roles inline.
 - Centralized file dashboard batch-limit planning in file policy so dashboard orchestration no longer carries the scan-ahead floor inline.
 - Centralized readable file dashboard entry projection in file policy so dashboard orchestration no longer filters readable rows and applies permission flags inline.
+- Centralized visible file dashboard entry limiting in file policy so dashboard orchestration no longer slices projected rows inline.
 - Centralized delete document-command intent shaping in file policy so abort and final delete orchestration no longer derive current snapshot version guards inline.
