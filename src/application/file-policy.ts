@@ -7,6 +7,7 @@ import {
   type ListDocumentsFilter
 } from "../core/types.js";
 import type {
+  FileTransformSource,
   FileTransformOverlayPlacement,
   FileTransformOverlaySource,
   FileTransformOptions,
@@ -21,6 +22,7 @@ import type {
   FileContent,
   FileObjectMetadata,
   MultipartFilePartContent,
+  StoredFileObject,
   UploadedMultipartFilePart
 } from "../ports/file-storage.js";
 import type { FileScanResult, FileScanSource, FileScanTarget } from "../ports/file-scanner.js";
@@ -749,6 +751,35 @@ export function fileTransformOptionsFromData(data: DocumentData): FileTransformO
     ...(typeof data.quality === "number" ? { quality: data.quality } : {}),
     ...(watermark === undefined ? {} : { watermark }),
     ...(overlay === undefined ? {} : { overlay })
+  };
+}
+
+export function fileTransformSource(snapshot: DocumentSnapshot, object: StoredFileObject): FileTransformSource {
+  return {
+    key: object.metadata.key,
+    filename: requireFileSnapshotString(snapshot, "filename"),
+    contentType: object.metadata.contentType ?? requireFileSnapshotString(snapshot, "content_type"),
+    size: object.metadata.size,
+    body: object.body,
+    etag: object.metadata.etag,
+    ...(object.metadata.httpEtag === undefined ? {} : { httpEtag: object.metadata.httpEtag })
+  };
+}
+
+export function fileTransformOverlaySource(
+  snapshot: DocumentSnapshot,
+  object: StoredFileObject,
+  overlay: NonNullable<FileTransformOptions["overlay"]>
+): FileTransformOverlaySource {
+  const source = fileTransformSource(snapshot, object);
+  ensureFileContentTypeTransformable(source.contentType, `File overlay '${overlay.file}'`);
+  return {
+    file: overlay.file,
+    ...source,
+    ...(overlay.placement === undefined ? {} : { placement: overlay.placement }),
+    ...(overlay.opacity === undefined ? {} : { opacity: overlay.opacity }),
+    ...(overlay.width === undefined ? {} : { width: overlay.width }),
+    ...(overlay.height === undefined ? {} : { height: overlay.height })
   };
 }
 

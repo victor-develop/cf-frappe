@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file rendition download and delete policy module slice:
+As of the file transform source policy module slice:
 
 - Vitest files: `169`
-- Vitest cases: `1637`
+- Vitest cases: `1639`
 
 ## Implication
 

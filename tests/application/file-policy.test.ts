@@ -37,8 +37,10 @@ import {
   fileUploadCompletedPatch,
   fileUploadExpiresAt,
   fileUploadScanFailedPatch,
+  fileTransformOverlaySource,
   fileTransformOptionsData,
   fileTransformOptionsFromData,
+  fileTransformSource,
   isPreviewableFileContentType,
   MIN_MULTIPART_FILE_PART_BYTES,
   multipartPartManifest,
@@ -58,7 +60,13 @@ import {
   upsertFileRenditionManifest,
   upsertMultipartPartManifest
 } from "../../src";
-import type { DocumentSnapshot, FileObjectMetadata, FileRenditionManifestEntry, FileTransformOverlaySource } from "../../src";
+import type {
+  DocumentSnapshot,
+  FileObjectMetadata,
+  FileRenditionManifestEntry,
+  FileTransformOverlaySource,
+  StoredFileObject
+} from "../../src";
 
 describe("file policy", () => {
   it("normalizes content types for comparison", () => {
@@ -258,6 +266,70 @@ describe("file policy", () => {
     };
 
     expect(fileTransformOptionsFromData(fileTransformOptionsData(options))).toEqual(options);
+  });
+
+  it("builds file transform sources from stored objects", () => {
+    const body = new ReadableStream<Uint8Array>();
+    const { contentType: _contentType, ...metadataWithoutContentType } = fileObject({
+      key: "acme/files/file_photo-photo.png",
+      httpEtag: '"object-http"'
+    });
+    const source = fileTransformSource(fileSnapshot({
+      filename: "photo.png",
+      content_type: "image/png"
+    }), {
+      body,
+      metadata: metadataWithoutContentType
+    });
+
+    expect(source).toEqual({
+      key: "acme/files/file_photo-photo.png",
+      filename: "photo.png",
+      contentType: "image/png",
+      size: 12,
+      body,
+      etag: "object-1",
+      httpEtag: '"object-http"'
+    });
+  });
+
+  it("builds transform overlay sources with transformability guards", () => {
+    const body = new ReadableStream<Uint8Array>();
+    const snapshot = fileSnapshot({
+      filename: "badge.png",
+      content_type: "image/png"
+    });
+    const object: StoredFileObject = {
+      body,
+      metadata: fileObject({
+        key: "acme/files/file_badge-badge.png",
+        contentType: "image/webp"
+      })
+    };
+
+    expect(fileTransformOverlaySource(snapshot, object, {
+      file: "file_badge",
+      placement: "bottom-right",
+      opacity: 0.5,
+      width: 32
+    })).toEqual({
+      file: "file_badge",
+      key: "acme/files/file_badge-badge.png",
+      filename: "badge.png",
+      contentType: "image/webp",
+      size: 12,
+      body,
+      etag: "object-1",
+      placement: "bottom-right",
+      opacity: 0.5,
+      width: 32
+    });
+    expect(() =>
+      fileTransformOverlaySource(snapshot, {
+        body,
+        metadata: fileObject({ contentType: "text/plain" })
+      }, { file: "file_badge" })
+    ).toThrow("File overlay 'file_badge' cannot be transformed");
   });
 
   it("reads rendition manifests and projects browser-safe views", () => {

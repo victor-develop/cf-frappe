@@ -77,6 +77,8 @@ import {
   fileUploadCompletedPatch,
   fileUploadExpiresAt,
   fileUploadScanFailedPatch,
+  fileTransformOverlaySource,
+  fileTransformSource,
   multipartPartManifest,
   multipartPartSize,
   normalizeBulkFileSelections,
@@ -1111,23 +1113,10 @@ export class FileService {
     if (!this.transformer) {
       throw badRequest("File transforms are not configured");
     }
-    const contentType = command.downloaded.object.metadata.contentType ??
-      requireFileSnapshotString(command.downloaded.snapshot, "content_type");
-    const filename = requireFileSnapshotString(command.downloaded.snapshot, "filename");
     return this.transformer.transform({
       actorId: command.actor.id,
       tenantId: command.tenantId,
-      source: {
-        key: command.downloaded.object.metadata.key,
-        filename,
-        contentType,
-        size: command.downloaded.object.metadata.size,
-        body: command.downloaded.object.body,
-        etag: command.downloaded.object.metadata.etag,
-        ...(command.downloaded.object.metadata.httpEtag === undefined
-          ? {}
-          : { httpEtag: command.downloaded.object.metadata.httpEtag })
-      },
+      source: fileTransformSource(command.downloaded.snapshot, command.downloaded.object),
       options: command.options,
       ...(command.overlay === undefined ? {} : { overlay: command.overlay })
     });
@@ -1156,23 +1145,7 @@ export class FileService {
     if (!object) {
       throw notFound(`${this.fileDoctype}/${overlay.file} content was not found`);
     }
-    const contentType = object.metadata.contentType ?? requireFileSnapshotString(snapshot, "content_type");
-    ensureFileContentTypeTransformable(contentType, `File overlay '${overlay.file}'`);
-    const filename = requireFileSnapshotString(snapshot, "filename");
-    return {
-      file: overlay.file,
-      key: object.metadata.key,
-      filename,
-      contentType,
-      size: object.metadata.size,
-      body: object.body,
-      etag: object.metadata.etag,
-      ...(object.metadata.httpEtag === undefined ? {} : { httpEtag: object.metadata.httpEtag }),
-      ...(overlay.placement === undefined ? {} : { placement: overlay.placement }),
-      ...(overlay.opacity === undefined ? {} : { opacity: overlay.opacity }),
-      ...(overlay.width === undefined ? {} : { width: overlay.width }),
-      ...(overlay.height === undefined ? {} : { height: overlay.height })
-    };
+    return fileTransformOverlaySource(snapshot, object, overlay);
   }
 
   private async recordRenditionManifest(command: {

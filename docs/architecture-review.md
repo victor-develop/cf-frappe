@@ -95,3 +95,4 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized file transformability rejection in the file policy so direct transforms, persisted renditions, and overlay-source transforms share one tested content-type guard.
 - Moved upload byte-limit checks and reservation-expiry timestamp planning into file policy so buffered, direct, and multipart upload flows share the same tested boundary rules.
 - Extracted rendition download selection and file object deletion key planning from `FileService` into file policy so content serving and cleanup share tested manifest semantics.
+- Moved transform source and overlay-source shaping into file policy so transformer ports receive a single tested projection from stored file snapshots and objects.
