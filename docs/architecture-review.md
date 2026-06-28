@@ -268,6 +268,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized downloaded object read planning in file policy so file download orchestration no longer derives primary object keys inline.
 - Centralized downloaded rendition object read planning in file policy so rendition download orchestration no longer derives storage keys from manifest entries inline.
 - Centralized multipart completion snapshot selection in file policy so multipart completion orchestration no longer chooses between current and begin-completion snapshots inline.
+- Locked workspace and Website Settings role metadata snapshot coverage, preserving Desk and website navigation authorization after metadata definition.
 - Guarded data patch rollback metadata with cloned rollback definitions, preserving migration rollback execution after patch definition.
 - Guarded report roles and summary metadata with cloned definitions, preserving report authorization and aggregation behavior after metadata definition.
 - Guarded active and retired projection index metadata with cloned field arrays, preserving D1 migration planning after DocType definition.

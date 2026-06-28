@@ -14,12 +14,14 @@ const actor = { id: "user@example.com", roles: ["User"], tenantId: "acme" };
 const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
 
 describe("workspaces", () => {
-  it("freezes metadata-defined workspace sections and shortcuts", () => {
+  it("snapshots metadata-defined workspace roles and shortcut roles by value", () => {
+    const workspaceRoles = ["User"];
+    const shortcutRoles = ["User"];
     const workspace = defineWorkspace({
       name: "Operations",
       label: "Operations",
       description: "Daily workbench",
-      roles: ["User"],
+      roles: workspaceRoles,
       sections: [
         {
           name: "records",
@@ -30,19 +32,33 @@ describe("workspaces", () => {
               label: "Notes",
               kind: "doctype",
               target: "Note",
-              roles: ["User"]
+              roles: shortcutRoles
             }
           ]
         }
       ]
     });
 
+    workspaceRoles[0] = "Guest";
+    shortcutRoles[0] = "Guest";
+
+    expect(workspace.roles).toEqual(["User"]);
+    expect(workspace.sections[0]?.shortcuts[0]?.roles).toEqual(["User"]);
     expect(Object.isFrozen(workspace)).toBe(true);
+    expect(Object.isFrozen(workspace.roles)).toBe(true);
     expect(Object.isFrozen(workspace.sections)).toBe(true);
     expect(Object.isFrozen(workspace.sections[0]?.shortcuts)).toBe(true);
+    expect(Object.isFrozen(workspace.sections[0]?.shortcuts[0]?.roles)).toBe(true);
     expect(canReadWorkspace(actor, workspace)).toBe(true);
     expect(canReadWorkspace(admin, workspace)).toBe(true);
     expect(canReadWorkspaceShortcut(actor, workspace.sections[0]!.shortcuts[0]!)).toBe(true);
+    expect(canReadWorkspace({ id: "guest@example.com", roles: ["Guest"], tenantId: "acme" }, workspace)).toBe(false);
+    expect(
+      canReadWorkspaceShortcut(
+        { id: "guest@example.com", roles: ["Guest"], tenantId: "acme" },
+        workspace.sections[0]!.shortcuts[0]!
+      )
+    ).toBe(false);
   });
 
   it("rejects invalid workspace shortcut declarations", () => {

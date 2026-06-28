@@ -1,6 +1,8 @@
 import {
   createRegistry,
   createRegistryFromApps,
+  canReadWebsiteNavigationItem,
+  canReadWebsiteSettings,
   defineApp,
   defineDocType,
   defineWebForm,
@@ -30,6 +32,27 @@ describe("metadata Website Settings", () => {
     expect(Object.isFrozen(settings.navItems)).toBe(true);
     expect(Object.isFrozen(settings.navItems?.[0])).toBe(true);
     expect(Object.isFrozen(settings.navItems?.[0]?.roles)).toBe(true);
+  });
+
+  it("snapshots website settings and navigation roles by value", () => {
+    const siteRoles = ["Guest"];
+    const navRoles = ["Guest"];
+    const settings = defineWebsiteSettings({
+      title: "Starter Site",
+      homePageRoute: "about",
+      roles: siteRoles,
+      navItems: [{ name: "about", label: "About", pageRoute: "about", roles: navRoles }]
+    });
+
+    siteRoles[0] = "User";
+    navRoles[0] = "User";
+
+    expect(settings.roles).toEqual(["Guest"]);
+    expect(settings.navItems?.[0]?.roles).toEqual(["Guest"]);
+    expect(canReadWebsiteSettings({ id: "guest@example.com", roles: ["Guest"] }, settings)).toBe(true);
+    expect(canReadWebsiteSettings({ id: "user@example.com", roles: ["User"] }, settings)).toBe(false);
+    expect(canReadWebsiteNavigationItem({ id: "guest@example.com", roles: ["Guest"] }, settings.navItems![0]!)).toBe(true);
+    expect(canReadWebsiteNavigationItem({ id: "user@example.com", roles: ["User"] }, settings.navItems![0]!)).toBe(false);
   });
 
   it("validates singleton settings and referenced web page routes", () => {
