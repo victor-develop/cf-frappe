@@ -642,6 +642,14 @@ export function ensureFilePendingMultipartUpload(
   }
 }
 
+export function ensureFilePendingMultipartPartUpload(snapshot: DocumentSnapshot): void {
+  ensureFilePendingMultipartUpload(snapshot, ["upload_pending"]);
+}
+
+export function ensureFilePendingMultipartCompletion(snapshot: DocumentSnapshot): void {
+  ensureFilePendingMultipartUpload(snapshot, ["upload_pending", "upload_completing"]);
+}
+
 export function fileMultipartUploadId(snapshot: DocumentSnapshot): string {
   const uploadId = fileSnapshotStringData(snapshot, "multipart_upload_id");
   if (!uploadId) {

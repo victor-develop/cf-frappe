@@ -53,7 +53,8 @@ import {
   ensureFileExpectedVersion,
   ensureFileNotDeleteRequested,
   ensureFilePendingDirectUpload,
-  ensureFilePendingMultipartUpload,
+  ensureFilePendingMultipartCompletion,
+  ensureFilePendingMultipartPartUpload,
   ensureFileMetadataPatchProvided,
   ensureDirectUploadMatches,
   ensureMultipartCompletionMatchesManifest,
@@ -629,7 +630,7 @@ export class FileService {
 
   async uploadMultipartPart(command: UploadMultipartPartCommand): Promise<UploadedMultipartPartResult> {
     const multipartUploads = this.requireMultipartUploads();
-    const current = await this.multipartUploadSnapshot(command, ["upload_pending"]);
+    const current = await this.multipartUploadSnapshot(command, ensureFilePendingMultipartPartUpload);
     const uploadId = this.multipartUploadId(current);
     const size = multipartPartSize(command.body, command.size);
     ensureMultipartPartFitsReservation(current, command.partNumber, size);
@@ -658,7 +659,7 @@ export class FileService {
 
   async completeMultipartUpload(command: CompleteMultipartUploadCommand): Promise<DocumentSnapshot> {
     const multipartUploads = this.requireMultipartUploads();
-    const current = await this.multipartUploadSnapshot(command, ["upload_pending", "upload_completing"]);
+    const current = await this.multipartUploadSnapshot(command, ensureFilePendingMultipartCompletion);
     const key = requireFileSnapshotString(current, "key");
     ensureMultipartCompletionMatchesManifest(current, command.parts);
     const completing = isFileMultipartCompletionStarted(current)
@@ -715,7 +716,7 @@ export class FileService {
 
   async abortMultipartUpload(command: AbortMultipartUploadCommand): Promise<DocumentSnapshot> {
     const multipartUploads = this.requireMultipartUploads();
-    const current = await this.multipartUploadSnapshot(command, ["upload_pending"]);
+    const current = await this.multipartUploadSnapshot(command, ensureFilePendingMultipartPartUpload);
     ensureFileExpectedVersion(current, command.expectedVersion);
     await multipartUploads.abortMultipartUpload({
       key: requireFileSnapshotString(current, "key"),
@@ -1181,11 +1182,11 @@ export class FileService {
 
   private async multipartUploadSnapshot(
     command: DownloadFileCommand,
-    allowedStates: readonly string[]
+    ensurePendingMultipartUpload: (snapshot: DocumentSnapshot) => void
   ): Promise<DocumentSnapshot> {
     const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
     const current = await this.queries.getDocument(command.actor, this.fileDoctype, command.name, tenantId);
-    ensureFilePendingMultipartUpload(current, allowedStates);
+    ensurePendingMultipartUpload(current);
     const doctype = this.registry.get(this.fileDoctype);
     if (!can(command.actor, doctype, "metadata", current)) {
       throw permissionDenied(

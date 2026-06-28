@@ -11,6 +11,8 @@ import {
   ensureFileDeleteExpectedVersion,
   ensureFileExpectedVersion,
   ensureFilePendingDirectUpload,
+  ensureFilePendingMultipartCompletion,
+  ensureFilePendingMultipartPartUpload,
   ensureFilePendingMultipartUpload,
   ensureFileMetadataPatchProvided,
   ensureDirectUploadMatches,
@@ -980,6 +982,29 @@ describe("file policy", () => {
         ["upload_pending"]
       )
     ).toThrow("File/file_multipart is pending deletion");
+  });
+
+  it("validates multipart part upload state", () => {
+    expect(() =>
+      ensureFilePendingMultipartPartUpload(fileSnapshot({ storage_state: "upload_pending", multipart_upload_id: "upload-1" }))
+    ).not.toThrow();
+    expect(() =>
+      ensureFilePendingMultipartPartUpload(fileSnapshot({ storage_state: "upload_completing", multipart_upload_id: "upload-1" }))
+    ).toThrow("File/file_multipart is not pending multipart upload");
+  });
+
+  it("validates resumable multipart completion state", () => {
+    expect(() =>
+      ensureFilePendingMultipartCompletion(fileSnapshot({ storage_state: "upload_pending", multipart_upload_id: "upload-1" }))
+    ).not.toThrow();
+    expect(() =>
+      ensureFilePendingMultipartCompletion(
+        fileSnapshot({ storage_state: "upload_completing", multipart_upload_id: "upload-1" })
+      )
+    ).not.toThrow();
+    expect(() =>
+      ensureFilePendingMultipartCompletion(fileSnapshot({ storage_state: "available", multipart_upload_id: "upload-1" }))
+    ).toThrow("File/file_multipart is not pending multipart upload");
   });
 
   it("reads required multipart upload ids", () => {
