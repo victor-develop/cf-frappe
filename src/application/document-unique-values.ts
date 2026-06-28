@@ -41,6 +41,11 @@ export interface UniqueValueReservationWriteProjection {
   readonly saved: DomainEvent;
 }
 
+export interface UniqueValueReleaseWriteProjection {
+  readonly existing: DocumentSnapshot;
+  readonly saved: DomainEvent;
+}
+
 export function uniqueValueReservations(
   tenantId: string,
   doctype: DocTypeDefinition,
@@ -176,6 +181,14 @@ export function projectUniqueValueReservationWrite(
   }
   return snapshotFromCommittedDocumentEvent(input.existing, input.saved, {
     data: { ...input.existing.data, documentName: input.reservation.documentName, active: true }
+  });
+}
+
+export function projectUniqueValueReleaseWrite(
+  input: UniqueValueReleaseWriteProjection
+): DocumentSnapshot {
+  return snapshotFromCommittedDocumentEvent(input.existing, input.saved, {
+    data: { ...input.existing.data, active: false }
   });
 }
 

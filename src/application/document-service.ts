@@ -69,6 +69,7 @@ import {
   activeUniqueValueOwner,
   planUniqueValueReleaseEvent,
   planUniqueValueReservationEvent,
+  projectUniqueValueReleaseWrite,
   projectUniqueValueReservationWrite,
   releasedUniqueValueReservations,
   uniqueReservationOwnerStillOwnsValue,
@@ -1773,9 +1774,7 @@ export class DocumentService implements DocumentCommandExecutor {
         });
         await this.store.commit(reservation.stream, existing.version, [event], (savedEvents) => {
           const saved = requireFirstSavedEvent(savedEvents);
-          return snapshotFromCommittedDocumentEvent(existing, saved, {
-            data: { ...existing.data, active: false }
-          });
+          return projectUniqueValueReleaseWrite({ existing, saved });
         });
       } catch (error) {
         if (!options.suppressErrors) {

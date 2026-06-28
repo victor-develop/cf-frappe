@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the unique reservation projection slice:
+As of the unique release projection slice:
 
 - Vitest files: `173`
-- Vitest cases: `2014`
-- Remaining gap to Frappe static markers: `770`
+- Vitest cases: `2015`
+- Remaining gap to Frappe static markers: `769`
 
 ## Implication
 

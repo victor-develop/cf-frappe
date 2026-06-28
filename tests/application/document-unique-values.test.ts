@@ -6,6 +6,7 @@ import {
   defineDocType,
   planUniqueValueReleaseEvent,
   planUniqueValueReservationEvent,
+  projectUniqueValueReleaseWrite,
   projectUniqueValueReservationWrite,
   releasedUniqueValueReservations,
   uniqueReservationOwnerStillOwnsValue,
@@ -183,6 +184,25 @@ describe("document unique values", () => {
       ...uniqueValueSnapshot({ documentName: "ada", active: true }),
       version: 3,
       data: { documentName: "grace", active: true },
+      updatedAt: "2026-06-28T02:00:00.000Z"
+    });
+  });
+
+  it("projects unique-value release writes from saved update events", () => {
+    const existing = uniqueValueSnapshot({ documentName: "ada", valueKey: "s:ada@example.com", active: true });
+
+    expect(
+      projectUniqueValueReleaseWrite({
+        existing,
+        saved: uniqueValueEvent({
+          sequence: 4,
+          payload: planUniqueValueReleaseEvent(reservationFor("ada@example.com")).payload
+        })
+      })
+    ).toEqual({
+      ...existing,
+      version: 4,
+      data: { documentName: "ada", valueKey: "s:ada@example.com", active: false },
       updatedAt: "2026-06-28T02:00:00.000Z"
     });
   });
