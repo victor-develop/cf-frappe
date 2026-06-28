@@ -33,6 +33,7 @@ import {
 } from "./website-settings.js";
 import { assertWebsiteThemeDefinition, defineWebsiteTheme, type WebsiteThemeDefinition } from "./website-theme.js";
 import { assertWorkspaceDefinition, defineWorkspace, type WorkspaceDefinition } from "./workspace.js";
+import { defineDocType } from "./schema.js";
 import type {
   DocTypeDefinition,
   DocumentData,
@@ -204,12 +205,13 @@ export class ModelRegistry {
   }
 
   private putDocType(doctype: DocTypeDefinition): void {
-    if (this.doctypes.has(doctype.name)) {
-      throw new FrameworkError("DOCTYPE_DUPLICATE", `DocType '${doctype.name}' is already registered`, {
+    const definition = defineDocType(doctype);
+    if (this.doctypes.has(definition.name)) {
+      throw new FrameworkError("DOCTYPE_DUPLICATE", `DocType '${definition.name}' is already registered`, {
         status: 409
       });
     }
-    this.doctypes.set(doctype.name, doctype);
+    this.doctypes.set(definition.name, definition);
   }
 
   private assertDocTypeReferencesResolve(): void {

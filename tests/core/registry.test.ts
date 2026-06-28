@@ -18,6 +18,55 @@ describe("registry", () => {
     expect(() => registry.get("Missing")).toThrow(FrameworkError);
   });
 
+  it("snapshots registry option doctypes by value", () => {
+    const statusOptions = ["Open", "Closed"];
+    const doctype = {
+      name: "Task",
+      fields: [
+        { name: "title", type: "text" as const },
+        { name: "status", type: "select" as const, options: statusOptions }
+      ],
+      formView: { sections: [{ heading: "Main", fields: ["title", "status"] }] },
+      listView: {
+        columns: ["title"],
+        filters: [{ field: "status", operator: "eq" as const, value: "Open" }]
+      }
+    };
+    const registry = createRegistry({ doctypes: [doctype] });
+
+    statusOptions[0] = "Mutated";
+    doctype.fields[0]!.name = "mutated";
+    doctype.formView.sections[0]!.fields[0] = "mutated";
+    doctype.listView.columns[0] = "status";
+    doctype.listView.filters[0]!.value = "Closed";
+
+    expect(registry.get("Task").fields).toEqual([
+      { name: "title", type: "text" },
+      { name: "status", type: "select", options: ["Open", "Closed"] }
+    ]);
+    expect(registry.get("Task").formView?.sections).toEqual([{ heading: "Main", fields: ["title", "status"] }]);
+    expect(registry.get("Task").listView?.columns).toEqual(["title"]);
+    expect(registry.get("Task").listView?.filters).toEqual([{ field: "status", value: "Open" }]);
+    expect(Object.isFrozen(registry.get("Task"))).toBe(true);
+    expect(Object.isFrozen(registry.get("Task").fields)).toBe(true);
+    expect(Object.isFrozen(registry.get("Task").fields[1]?.options)).toBe(true);
+  });
+
+  it("snapshots registered doctypes by value", () => {
+    const doctype = {
+      name: "Note",
+      fields: [{ name: "title", type: "text" as const }]
+    };
+    const registry = createRegistry();
+
+    registry.registerDocType(doctype);
+    doctype.fields[0]!.name = "mutated";
+
+    expect(registry.get("Note").fields).toEqual([{ name: "title", type: "text" }]);
+    expect(Object.isFrozen(registry.get("Note"))).toBe(true);
+    expect(Object.isFrozen(registry.get("Note").fields[0])).toBe(true);
+  });
+
   it("keeps hooks grouped by doctype", () => {
     const registry = createRegistry({ doctypes: [defineDocType({ name: "Note", fields: [] })] });
     const hook = {};
