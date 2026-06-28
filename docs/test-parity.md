@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the upload data command policy slice:
+As of the file dashboard system actor policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1710`
-- Remaining gap to Frappe static markers: `1074`
+- Vitest cases: `1711`
+- Remaining gap to Frappe static markers: `1073`
 
 ## Implication
 

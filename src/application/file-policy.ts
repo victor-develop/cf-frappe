@@ -3,6 +3,7 @@ import { can } from "../core/permissions.js";
 import { validateDocumentData } from "../core/schema.js";
 import {
   DEFAULT_TENANT_ID,
+  SYSTEM_MANAGER_ROLE,
   type Actor,
   type DocTypeDefinition,
   type DocumentData,
@@ -1724,6 +1725,10 @@ export function fileDashboardEntryWithPermissions(command: {
 
 export function canUploadFile(actor: Actor, doctype: DocTypeDefinition): boolean {
   return can(actor, doctype, "create");
+}
+
+export function fileDashboardSystemActor(tenantId: string): Actor {
+  return { id: "__file_dashboard__", roles: [SYSTEM_MANAGER_ROLE], tenantId };
 }
 
 export function normalizeFileDashboardLimit(limit: number | undefined): number {

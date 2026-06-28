@@ -44,6 +44,7 @@ import {
   fileDashboardEntry,
   fileDashboardEntryWithPermissions,
   fileDashboardListFilters,
+  fileDashboardSystemActor,
   fileDeleteRequestedExecuteCommand,
   fileDeleteRequestedDocumentCommand,
   fileDeletedExecuteCommand,
@@ -2383,6 +2384,14 @@ describe("file policy", () => {
     expect(() => normalizeFileDashboardLimit(0)).toThrow("File dashboard limit must be between 1 and 200");
     expect(() => normalizeFileDashboardLimit(201)).toThrow("File dashboard limit must be between 1 and 200");
     expect(() => normalizeFileDashboardLimit(1.5)).toThrow("File dashboard limit must be between 1 and 200");
+  });
+
+  it("builds file dashboard system actors", () => {
+    expect(fileDashboardSystemActor("tenant-a")).toEqual({
+      id: "__file_dashboard__",
+      roles: ["System Manager"],
+      tenantId: "tenant-a"
+    });
   });
 
   it("normalizes file dashboard filters", () => {

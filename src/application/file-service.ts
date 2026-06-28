@@ -7,7 +7,6 @@ import {
 import { FILE_DOCTYPE_NAME } from "../core/file-doctype.js";
 import type { ModelRegistry } from "../core/registry.js";
 import {
-  SYSTEM_MANAGER_ROLE,
   type Actor,
   type DocumentData,
   type DocumentSnapshot,
@@ -71,6 +70,7 @@ import {
   fileContentLength,
   fileDashboardEntryWithPermissions,
   fileDashboardListFilters,
+  fileDashboardSystemActor,
   fileBufferedUploadDocumentData,
   fileDeleteRequestedExecuteCommand,
   fileDeleteRequestedDocumentCommand,
@@ -784,7 +784,7 @@ export class FileService {
     const doctype = this.registry.get(this.fileDoctype);
     const files: FileDashboardEntry[] = [];
     const tenantId = fileCommandTenantId(actor, undefined);
-    const systemActor: Actor = { id: "__file_dashboard__", roles: [SYSTEM_MANAGER_ROLE], tenantId };
+    const systemActor = fileDashboardSystemActor(tenantId);
     const batchLimit = Math.max(limit, 50);
     let offset = 0;
     let total = 0;
