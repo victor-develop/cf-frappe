@@ -1,5 +1,5 @@
-import { applyDefaults, defineDocType, FrameworkError, validateDocumentData } from "../../src";
-import type { DocumentData } from "../../src";
+import { applyDefaults, can, defineDocType, FrameworkError, validateDocumentData } from "../../src";
+import type { DocumentData, PermissionAction } from "../../src";
 import { owner } from "../helpers";
 
 describe("schema", () => {
@@ -82,6 +82,26 @@ describe("schema", () => {
       { field: "status", value: "Open" },
       { field: "rank", operator: "between", value: [1, 3] }
     ]);
+  });
+
+  it("snapshots permission rules by value", () => {
+    const roles = ["Reader"];
+    const actions: PermissionAction[] = ["read"];
+    const note = defineDocType({
+      name: "Permissioned Note",
+      fields: [{ name: "title", type: "text" }],
+      permissions: [{ roles, actions }]
+    });
+
+    roles[0] = "Admin";
+    actions.push("delete");
+
+    expect(note.permissions).toEqual([{ roles: ["Reader"], actions: ["read"] }]);
+    expect(Object.isFrozen(note.permissions)).toBe(true);
+    expect(Object.isFrozen(note.permissions?.[0]?.roles)).toBe(true);
+    expect(Object.isFrozen(note.permissions?.[0]?.actions)).toBe(true);
+    expect(can({ id: "reader@example.com", roles: ["Reader"] }, note, "read")).toBe(true);
+    expect(can({ id: "reader@example.com", roles: ["Reader"] }, note, "delete")).toBe(false);
   });
 
   it("reports missing required fields", () => {

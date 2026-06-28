@@ -6,6 +6,7 @@ import type {
   FieldDefinition,
   JsonValue,
   MutableDocumentData,
+  PermissionRule,
   ValidationIssue
 } from "./types.js";
 import { normalizeAssignmentRules } from "./assignment-rules.js";
@@ -52,12 +53,14 @@ export function defineDocType<TData extends DocumentData>(
   const formView = definition.formView ? freezeFormView(definition.formView) : undefined;
   const listView = definition.listView ? freezeListView(definition, definition.listView) : undefined;
   const assignmentRules = normalizeAssignmentRules(definition, definition.assignmentRules);
+  const permissions = definition.permissions ? freezePermissionRules(definition.permissions) : undefined;
   const fields = Object.freeze(definition.fields.map((field) => freezeFieldDefinition(definition, field)));
   return Object.freeze({
     ...definition,
     fields,
     ...(formView ? { formView } : {}),
     ...(listView ? { listView } : {}),
+    ...(permissions ? { permissions } : {}),
     ...(assignmentRules ? { assignmentRules } : {})
   });
 }
@@ -479,4 +482,16 @@ function freezeListView(
         }
       : {})
   });
+}
+
+function freezePermissionRules(permissions: readonly PermissionRule[]): readonly PermissionRule[] {
+  return Object.freeze(
+    permissions.map((rule) =>
+      Object.freeze({
+        ...rule,
+        roles: Object.freeze([...rule.roles]),
+        actions: Object.freeze([...rule.actions])
+      })
+    )
+  );
 }
