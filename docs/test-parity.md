@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the declared schema defaultValue JSON-clone slice:
+As of the list-view filter metadata JSON-clone slice:
 
 - Vitest files: `171`
-- Vitest cases: `1887`
-- Remaining gap to Frappe static markers: `897`
+- Vitest cases: `1888`
+- Remaining gap to Frappe static markers: `896`
 
 ## Implication
 

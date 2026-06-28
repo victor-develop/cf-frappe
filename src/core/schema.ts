@@ -14,8 +14,10 @@ import { assertFormViewDefinition } from "./form-view.js";
 import { cloneJsonValue } from "./json.js";
 import {
   assertListViewDefinition,
+  freezeListFilter,
   freezeListFilterExpression,
   matchesListFilterExpression,
+  normalizeListFilters,
   normalizeListFilterExpression
 } from "./list-view.js";
 
@@ -48,7 +50,7 @@ export function defineDocType<TData extends DocumentData>(
   assertFormViewDefinition(definition);
   assertListViewDefinition(definition);
   const formView = definition.formView ? freezeFormView(definition.formView) : undefined;
-  const listView = definition.listView ? freezeListView(definition.listView) : undefined;
+  const listView = definition.listView ? freezeListView(definition, definition.listView) : undefined;
   const assignmentRules = normalizeAssignmentRules(definition, definition.assignmentRules);
   const fields = Object.freeze(definition.fields.map((field) => freezeFieldDefinition(definition, field)));
   return Object.freeze({
@@ -461,11 +463,20 @@ function freezeFormView(formView: NonNullable<DocTypeDefinition["formView"]>): N
   });
 }
 
-function freezeListView(listView: NonNullable<DocTypeDefinition["listView"]>): NonNullable<DocTypeDefinition["listView"]> {
+function freezeListView(
+  doctype: DocTypeDefinition,
+  listView: NonNullable<DocTypeDefinition["listView"]>
+): NonNullable<DocTypeDefinition["listView"]> {
   return Object.freeze({
     ...listView,
     ...(listView.columns ? { columns: Object.freeze([...listView.columns]) } : {}),
     ...(listView.filterFields ? { filterFields: Object.freeze([...listView.filterFields]) } : {}),
-    ...(listView.filters ? { filters: Object.freeze([...listView.filters]) } : {})
+    ...(listView.filters
+      ? {
+          filters: Object.freeze(
+            normalizeListFilters(doctype, listView.filters, { errorCode: "LIST_VIEW_INVALID" }).map(freezeListFilter)
+          )
+        }
+      : {})
   });
 }

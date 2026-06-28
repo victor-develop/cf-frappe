@@ -58,6 +58,32 @@ describe("schema", () => {
     expect(result.settings).toEqual({ nested: { enabled: true } });
   });
 
+  it("snapshots list view filters by value", () => {
+    const statusFilter = { field: "status", value: "Open" };
+    const rangeValue = [1, 3];
+    const task = defineDocType({
+      name: "Filtered Task",
+      fields: [
+        { name: "status", type: "select", options: ["Open", "Closed"] },
+        { name: "rank", type: "integer" }
+      ],
+      listView: {
+        filters: [
+          statusFilter,
+          { field: "rank", operator: "between", value: rangeValue }
+        ]
+      }
+    });
+
+    statusFilter.field = "missing";
+    rangeValue[0] = 99;
+
+    expect(task.listView?.filters).toEqual([
+      { field: "status", value: "Open" },
+      { field: "rank", operator: "between", value: [1, 3] }
+    ]);
+  });
+
   it("reports missing required fields", () => {
     expect(validateDocumentData(doctype, {})).toMatchObject([
       { field: "customer", code: "required" }
