@@ -1143,6 +1143,16 @@ export function fileCompletedMultipartObjectReadPlan(snapshot: DocumentSnapshot)
   };
 }
 
+export function fileCompletedMultipartObjectHeadReadPlan(read: {
+  readonly key: string;
+}): {
+  readonly key: string;
+} {
+  return {
+    key: read.key
+  };
+}
+
 export function fileCompletedMultipartObjectPlan(command: {
   readonly snapshot: DocumentSnapshot;
   readonly uploadId: string;

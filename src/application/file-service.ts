@@ -56,6 +56,7 @@ import {
   requireStoredFileObject,
   requireStoredFileRenditionObject,
   fileCompletedRenditionManifestRecord,
+  fileCompletedMultipartObjectHeadReadPlan,
   fileCompletedMultipartObjectPlan,
   fileCompletedMultipartObjectReadPlan,
   fileBulkDeleteDeletedOutcome,
@@ -1217,11 +1218,12 @@ export class FileService {
     readonly parts: readonly UploadedMultipartFilePart[];
   }): Promise<FileObjectMetadata> {
     const read = fileCompletedMultipartObjectReadPlan(command.snapshot);
+    const head = fileCompletedMultipartObjectHeadReadPlan(read);
     const plan = fileCompletedMultipartObjectPlan({
       snapshot: command.snapshot,
       uploadId: read.uploadId,
       parts: command.parts,
-      existing: await this.storage.head(read.key)
+      existing: await this.storage.head(head.key)
     });
     if (plan.kind === "reuse") {
       return plan.object;

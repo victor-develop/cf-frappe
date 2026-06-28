@@ -51,6 +51,7 @@ import {
   fileBufferedUploadFailureCleanupPlan,
   fileBufferedUploadStoragePlan,
   fileBufferedUploadPutObjectCommand,
+  fileCompletedMultipartObjectHeadReadPlan,
   fileCompletedMultipartObjectReadPlan,
   fileCommandMetadata,
   fileCommandTenantId,
@@ -2462,6 +2463,14 @@ describe("file policy", () => {
     expect(() => fileCompletedMultipartObjectReadPlan(fileSnapshot({ key: "acme/files/file_1-invoice.pdf" }))).toThrow(
       "File/file_multipart has no multipart upload"
     );
+  });
+
+  it("plans completed multipart object head reads from object read plans", () => {
+    expect(fileCompletedMultipartObjectHeadReadPlan({
+      key: "acme/files/file_1-invoice.pdf"
+    })).toEqual({
+      key: "acme/files/file_1-invoice.pdf"
+    });
   });
 
   it("plans multipart upload abort storage and delete document commands", () => {
