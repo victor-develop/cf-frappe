@@ -802,6 +802,32 @@ export function fileObjectScanTarget(command: {
   });
 }
 
+export type FileObjectScanPlan =
+  | {
+      readonly kind: "skip";
+    }
+  | {
+      readonly kind: "scan";
+      readonly target: FileScanTarget;
+    };
+
+export function fileObjectScanPlan(command: {
+  readonly scannerConfigured: boolean;
+  readonly actor: Pick<Actor, "id">;
+  readonly tenantId: string;
+  readonly filename: string;
+  readonly source: FileScanSource;
+  readonly object: FileObjectMetadata;
+}): FileObjectScanPlan {
+  if (!command.scannerConfigured) {
+    return { kind: "skip" };
+  }
+  return {
+    kind: "scan",
+    target: fileObjectScanTarget(command)
+  };
+}
+
 export function fileUploadObjectCustomMetadata(command: {
   readonly tenantId: string;
   readonly uploadedBy: string;

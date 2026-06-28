@@ -112,7 +112,7 @@ import {
   fileRenditionManifestExecuteCommand,
   fileRenditionReservationExecuteCommand,
   fileGeneratedRenditionStoragePutCommand,
-  fileObjectScanTarget,
+  fileObjectScanPlan,
   fileScanFailureError,
   fileUploadScanFailureCleanupPlan,
   fileExpectedVersionCommandOption,
@@ -1237,16 +1237,18 @@ export class FileService {
     readonly source: FileScanSource;
     readonly object: FileObjectMetadata;
   }): Promise<FileScanResult | undefined> {
-    if (!this.scanner) {
-      return undefined;
-    }
-    const result = await this.scanner.scan(fileObjectScanTarget({
+    const plan = fileObjectScanPlan({
+      scannerConfigured: this.scanner !== undefined,
       actor: command.actor,
       tenantId: command.tenantId,
       filename: command.filename,
       source: command.source,
       object: command.object
-    }));
+    });
+    if (plan.kind === "skip") {
+      return undefined;
+    }
+    const result = await this.scanner!.scan(plan.target);
     ensureValidFileScanResult(result);
     return result;
   }

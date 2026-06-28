@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the generated rendition failure cleanup planning policy slice:
+As of the object scan planning policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1762`
-- Remaining gap to Frappe static markers: `1022`
+- Vitest cases: `1763`
+- Remaining gap to Frappe static markers: `1021`
 
 ## Implication
 

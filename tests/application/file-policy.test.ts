@@ -135,6 +135,7 @@ import {
   fileRenditionView,
   fileReadableDashboardCandidate,
   fileReadableDashboardEntries,
+  fileObjectScanPlan,
   fileObjectScanTarget,
   fileScanFailureError,
   fileScanPatch,
@@ -2126,6 +2127,42 @@ describe("file policy", () => {
       source: "direct_upload",
       etag: "object-1",
       httpEtag: '"http-etag"'
+    });
+  });
+
+  it("plans object scanning only when a scanner is configured", () => {
+    const { contentType: _contentType, ...objectWithoutContentType } = fileObject({
+      key: "acme/files/file_1-invoice.pdf",
+      httpEtag: '"http-etag"'
+    });
+    const command = {
+      actor: { id: "owner@example.com" },
+      tenantId: "acme",
+      filename: "invoice.pdf",
+      source: "direct_upload" as const,
+      object: objectWithoutContentType
+    };
+
+    expect(fileObjectScanPlan({
+      scannerConfigured: false,
+      ...command
+    })).toEqual({ kind: "skip" });
+    expect(fileObjectScanPlan({
+      scannerConfigured: true,
+      ...command
+    })).toEqual({
+      kind: "scan",
+      target: {
+        actorId: "owner@example.com",
+        tenantId: "acme",
+        key: "acme/files/file_1-invoice.pdf",
+        filename: "invoice.pdf",
+        contentType: "application/octet-stream",
+        size: 12,
+        source: "direct_upload",
+        etag: "object-1",
+        httpEtag: '"http-etag"'
+      }
     });
   });
 
