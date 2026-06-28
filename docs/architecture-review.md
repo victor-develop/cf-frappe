@@ -148,4 +148,5 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized rendition reservation execute-command shaping in file policy so rendition generation no longer composes reserveRendition actor, tenant, metadata, expected-version, or manifest input inline.
 - Centralized file document create command shaping in file policy so buffered, direct-upload, and multipart-upload creation no longer compose actor, tenant, metadata, data, or event-type payloads inline.
 - Reused centralized delete execute-command shaping for multipart upload aborts so abort orchestration no longer composes delete actor, tenant, metadata, or expected-version inline.
+- Centralized shared upload data command shaping in file policy so buffered, direct-upload, and multipart-upload reservation paths no longer compose privacy, attachment, uploader, expiry, or scanner flags inline.
 - Centralized delete document-command intent shaping in file policy so abort and final delete orchestration no longer derive current snapshot version guards inline.

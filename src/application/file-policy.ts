@@ -856,6 +856,53 @@ export interface FilePendingUploadDocumentDataCommand extends FileUploadDocument
   readonly scannerConfigured?: boolean;
 }
 
+export function fileUploadDocumentDataCommand(command: {
+  readonly filename: string;
+  readonly key: string;
+  readonly contentType: string;
+  readonly size: number;
+  readonly isPrivate?: boolean | undefined;
+  readonly uploadedBy: string;
+  readonly uploadedAt: string;
+  readonly attachedTo?: {
+    readonly doctype: string;
+    readonly name: string;
+  } | undefined;
+}): FileUploadDocumentDataCommand {
+  return {
+    filename: command.filename,
+    key: command.key,
+    contentType: command.contentType,
+    size: command.size,
+    ...fileIsPrivateCommandOption(command.isPrivate),
+    uploadedBy: command.uploadedBy,
+    uploadedAt: command.uploadedAt,
+    ...fileAttachedToCommandOption(command.attachedTo)
+  };
+}
+
+export function filePendingUploadDocumentDataCommand(command: {
+  readonly filename: string;
+  readonly key: string;
+  readonly contentType: string;
+  readonly size: number;
+  readonly isPrivate?: boolean | undefined;
+  readonly uploadedBy: string;
+  readonly uploadedAt: string;
+  readonly directUploadExpiresAt: string;
+  readonly scannerConfigured?: boolean | undefined;
+  readonly attachedTo?: {
+    readonly doctype: string;
+    readonly name: string;
+  } | undefined;
+}): FilePendingUploadDocumentDataCommand {
+  return {
+    ...fileUploadDocumentDataCommand(command),
+    directUploadExpiresAt: command.directUploadExpiresAt,
+    ...(command.scannerConfigured === undefined ? {} : { scannerConfigured: command.scannerConfigured })
+  };
+}
+
 export function fileDocumentData(command: FileDocumentDataCommand): DocumentData {
   return {
     filename: command.filename,

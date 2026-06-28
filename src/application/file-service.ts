@@ -67,7 +67,6 @@ import {
   fileBulkMetadataUpdateFailure,
   fileBulkMetadataUpdateEntryCommand,
   fileBufferedUploadPutObjectCommand,
-  fileAttachedToCommandOption,
   fileCommandTenantId,
   fileContentLength,
   fileDashboardEntryWithPermissions,
@@ -105,12 +104,13 @@ import {
   fileScanFailureError,
   fileScanTarget,
   fileExpectedVersionCommandOption,
-  fileIsPrivateCommandOption,
+  fileUploadDocumentDataCommand,
   fileUploadCompletionDocumentCommand,
   fileUploadCompletionExecuteCommand,
   fileUploadContentType,
   fileUploadExpiresAt,
   fileDirectUploadReservationCommand,
+  filePendingUploadDocumentDataCommand,
   filePendingUploadDocumentData,
   fileMultipartUploadAbortCommand,
   fileMultipartUploadReservationCommand,
@@ -453,16 +453,16 @@ export class FileService {
     await this.validateAttachmentTarget(command.actor, tenantId, command.attachedTo);
     const fileName = this.ids.next("file_");
     const key = objectKey(tenantId, fileName, filename);
-    const data = fileBufferedUploadDocumentData({
+    const data = fileBufferedUploadDocumentData(fileUploadDocumentDataCommand({
       filename,
       key,
       contentType,
       size,
-      ...fileIsPrivateCommandOption(command.isPrivate),
+      isPrivate: command.isPrivate,
       uploadedBy: command.actor.id,
       uploadedAt: this.clock.now(),
-      ...fileAttachedToCommandOption(command.attachedTo)
-    });
+      attachedTo: command.attachedTo
+    }));
     this.preflightCreate(command.actor, data);
     const object = await this.storage.put(fileBufferedUploadPutObjectCommand({
       key,
@@ -533,18 +533,19 @@ export class FileService {
     const fileName = this.ids.next("file_");
     const key = objectKey(tenantId, fileName, filename);
     const expiresAt = fileUploadExpiresAt(this.clock.now(), command.expiresInSeconds);
-    const create = fileDirectUploadDocumentCreateCommand({
+    const uploadData = filePendingUploadDocumentDataCommand({
       filename,
       key,
       contentType,
       size,
-      ...fileIsPrivateCommandOption(command.isPrivate),
+      isPrivate: command.isPrivate,
       uploadedBy: command.actor.id,
       uploadedAt: this.clock.now(),
       directUploadExpiresAt: expiresAt,
       scannerConfigured: this.scanner !== undefined,
-      ...fileAttachedToCommandOption(command.attachedTo)
+      attachedTo: command.attachedTo
     });
+    const create = fileDirectUploadDocumentCreateCommand(uploadData);
     this.preflightCreate(command.actor, create.data);
     const upload = await createDirectUpload(fileDirectUploadReservationCommand({
       key,
@@ -625,18 +626,18 @@ export class FileService {
     const fileName = this.ids.next("file_");
     const key = objectKey(tenantId, fileName, filename);
     const expiresAt = fileUploadExpiresAt(this.clock.now(), command.expiresInSeconds);
-    const uploadData = {
+    const uploadData = filePendingUploadDocumentDataCommand({
       filename,
       key,
       contentType,
       size,
-      ...fileIsPrivateCommandOption(command.isPrivate),
+      isPrivate: command.isPrivate,
       uploadedBy: command.actor.id,
       uploadedAt: this.clock.now(),
       directUploadExpiresAt: expiresAt,
       scannerConfigured: this.scanner !== undefined,
-      ...fileAttachedToCommandOption(command.attachedTo)
-    };
+      attachedTo: command.attachedTo
+    });
     this.preflightCreate(command.actor, filePendingUploadDocumentData(uploadData));
     const upload = await multipartUploads.createMultipartUpload(fileMultipartUploadReservationCommand({
       key,

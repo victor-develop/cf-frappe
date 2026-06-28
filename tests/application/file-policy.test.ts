@@ -70,6 +70,7 @@ import {
   fileObjectKeysForScanFailureCleanup,
   fileObjectContentType,
   fileObjectSourceEtag,
+  filePendingUploadDocumentDataCommand,
   filePendingUploadDocumentData,
   filePrimaryObjectKey,
   fileDirectUploadReservationCommand,
@@ -94,6 +95,7 @@ import {
   fileSnapshotStringData,
   fileExpectedVersionCommandOption,
   fileFailedRenditionManifestCommandName,
+  fileUploadDocumentDataCommand,
   fileIsPrivateCommandOption,
   fileUploadCompletionDocumentCommand,
   fileUploadCompletionExecuteCommand,
@@ -1557,6 +1559,36 @@ describe("file policy", () => {
       storage_state: "upload_pending",
       direct_upload_expires_at: "2026-06-28T00:15:00.000Z",
       scan_status: "pending"
+    });
+  });
+
+  it("builds semantic upload data commands before document data projection", () => {
+    const base = {
+      filename: "invoice.pdf",
+      key: "acme/files/file_1-invoice.pdf",
+      contentType: "application/pdf",
+      size: 42,
+      uploadedBy: "owner@example.com",
+      uploadedAt: "2026-06-28T00:00:00.000Z"
+    };
+
+    expect(fileUploadDocumentDataCommand({
+      ...base,
+      isPrivate: false,
+      attachedTo: { doctype: "Invoice", name: "INV-1" }
+    })).toEqual({
+      ...base,
+      isPrivate: false,
+      attachedTo: { doctype: "Invoice", name: "INV-1" }
+    });
+    expect(filePendingUploadDocumentDataCommand({
+      ...base,
+      directUploadExpiresAt: "2026-06-28T00:15:00.000Z",
+      scannerConfigured: false
+    })).toEqual({
+      ...base,
+      directUploadExpiresAt: "2026-06-28T00:15:00.000Z",
+      scannerConfigured: false
     });
   });
 
