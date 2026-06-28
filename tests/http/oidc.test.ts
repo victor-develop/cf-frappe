@@ -106,6 +106,34 @@ describe("OIDC actor resolver", () => {
     });
   });
 
+  it("rejects invalid configured OIDC token source names before request handling", () => {
+    const baseOptions = {
+      issuer: "https://login.example.com",
+      audience: "desk",
+      jwksUrl: "https://login.example.com/keys",
+      fetchJwks: async () => ({ keys: [] })
+    };
+
+    expect(() =>
+      oidcActorResolver({
+        ...baseOptions,
+        tokenSource: { header: "bad header" }
+      })
+    ).toThrow("OIDC token source header is invalid");
+    expect(() =>
+      oidcActorResolver({
+        ...baseOptions,
+        tokenSource: { cookie: "id;token" }
+      })
+    ).toThrow("OIDC token source cookie is invalid");
+    expect(() =>
+      oidcActorResolver({
+        ...baseOptions,
+        tokenSource: { header: "authorization", scheme: "bad scheme" }
+      })
+    ).toThrow("OIDC token source scheme is invalid");
+  });
+
   it("uses shared group-role mapping for generic OIDC claims", async () => {
     const signing = await createJwtSigner<OidcJwtClaims>();
     const token = await signing.sign(defaultClaims({

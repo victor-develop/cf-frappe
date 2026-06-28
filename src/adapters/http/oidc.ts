@@ -73,6 +73,7 @@ const DEFAULT_OIDC_TOKEN_SOURCE: NormalizedOidcTokenSource = {
   header: "authorization",
   scheme: "bearer"
 };
+const HTTP_TOKEN_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u;
 
 interface NormalizedOidcTokenSource {
   readonly header?: string;
@@ -360,6 +361,15 @@ function normalizeTokenSource(
   const header = firstNonBlank(tokenSource.header);
   const cookie = firstNonBlank(tokenSource.cookie);
   const scheme = firstNonBlank(tokenSource.scheme)?.toLowerCase();
+  if (header !== undefined && !isHttpTokenName(header)) {
+    throw badRequest("OIDC token source header is invalid");
+  }
+  if (cookie !== undefined && !isHttpTokenName(cookie)) {
+    throw badRequest("OIDC token source cookie is invalid");
+  }
+  if (scheme !== undefined && !isHttpTokenName(scheme)) {
+    throw badRequest("OIDC token source scheme is invalid");
+  }
   if (header === undefined && cookie === undefined) {
     throw badRequest("OIDC token source is required");
   }
@@ -371,6 +381,10 @@ function normalizeTokenSource(
     ...(scheme === undefined ? {} : { scheme }),
     ...(cookie === undefined ? {} : { cookie })
   };
+}
+
+function isHttpTokenName(value: string): boolean {
+  return HTTP_TOKEN_NAME.test(value);
 }
 
 function normalizeIssuer(issuer: string): string {

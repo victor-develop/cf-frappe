@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the shared JWT optional type header boundary slice:
+As of the OIDC token source name boundary slice:
 
 - Vitest files: `170`
-- Vitest cases: `1820`
-- Remaining gap to Frappe static markers: `964`
+- Vitest cases: `1821`
+- Remaining gap to Frappe static markers: `963`
 
 ## Implication
 
