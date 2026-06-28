@@ -6,6 +6,7 @@ import type {
   Actor,
   DomainCommandDefinition,
   DocStatus,
+  DocTypeDefinition,
   DocumentData,
   DocumentSnapshot,
   MutableDocumentData,
@@ -134,5 +135,34 @@ export function planWorkflowTransitionPolicy(input: {
     eventType:
       transition.eventType ??
       `${input.doctypeName}${input.action[0]?.toUpperCase() ?? ""}${input.action.slice(1)}`
+  };
+}
+
+export type DocumentStatusChangeAction = "submit" | "cancel";
+
+export interface DocumentStatusChangePolicyPlan {
+  readonly allowedStatus: readonly DocStatus[];
+  readonly nextStatus: DocStatus;
+  readonly eventType: string;
+  readonly payloadKind: "DocumentSubmitted" | "DocumentCancelled";
+}
+
+export function planDocumentStatusChangePolicy(
+  doctype: Pick<DocTypeDefinition, "name" | "events">,
+  action: DocumentStatusChangeAction
+): DocumentStatusChangePolicyPlan {
+  if (action === "submit") {
+    return {
+      allowedStatus: ["draft"],
+      nextStatus: "submitted",
+      eventType: doctype.events?.submit ?? `${doctype.name}Submitted`,
+      payloadKind: "DocumentSubmitted"
+    };
+  }
+  return {
+    allowedStatus: ["submitted"],
+    nextStatus: "cancelled",
+    eventType: doctype.events?.cancel ?? `${doctype.name}Cancelled`,
+    payloadKind: "DocumentCancelled"
   };
 }

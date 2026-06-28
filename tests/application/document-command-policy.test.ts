@@ -7,6 +7,7 @@ import {
   ensureMergeBaseVersion,
   mergeSnapshotFromDocument,
   normalizeUnsetFields,
+  planDocumentStatusChangePolicy,
   planDomainCommandPolicy,
   planWorkflowTransitionPolicy,
   pickCommandFields,
@@ -183,5 +184,28 @@ describe("document command policy", () => {
         }
       })
     ).toThrow("Transition 'approve' is not allowed from 'Review'");
+  });
+
+  it("plans submit status changes with default event names", () => {
+    expect(planDocumentStatusChangePolicy({ name: "Note" }, "submit")).toEqual({
+      allowedStatus: ["draft"],
+      nextStatus: "submitted",
+      eventType: "NoteSubmitted",
+      payloadKind: "DocumentSubmitted"
+    });
+  });
+
+  it("plans cancel status changes with custom event names", () => {
+    expect(
+      planDocumentStatusChangePolicy(
+        { name: "Note", events: { cancel: "NoteWasCancelled" } },
+        "cancel"
+      )
+    ).toEqual({
+      allowedStatus: ["submitted"],
+      nextStatus: "cancelled",
+      eventType: "NoteWasCancelled",
+      payloadKind: "DocumentCancelled"
+    });
   });
 });

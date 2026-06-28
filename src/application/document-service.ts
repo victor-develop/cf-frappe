@@ -46,6 +46,7 @@ import {
   mergeSnapshotFromDocument,
   normalizeUnsetFields,
   canExecuteDomainCommandForRoles,
+  planDocumentStatusChangePolicy,
   planDomainCommandPolicy,
   planWorkflowTransitionPolicy
 } from "./document-command-policy.js";
@@ -1332,16 +1333,17 @@ export class DocumentService implements DocumentCommandExecutor {
     }
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
-    ensureDocumentStatus(existing, ["draft"], "submit");
+    const plan = planDocumentStatusChangePolicy(doctype, "submit");
+    ensureDocumentStatus(existing, plan.allowedStatus, "submit");
     return this.changeDocStatus({
       command,
       doctype,
       tenantId,
       stream,
       existing,
-      nextStatus: "submitted",
-      eventType: doctype.events?.submit ?? `${doctype.name}Submitted`,
-      payloadKind: "DocumentSubmitted"
+      nextStatus: plan.nextStatus,
+      eventType: plan.eventType,
+      payloadKind: plan.payloadKind
     });
   }
 
@@ -1355,16 +1357,17 @@ export class DocumentService implements DocumentCommandExecutor {
     }
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
-    ensureDocumentStatus(existing, ["submitted"], "cancel");
+    const plan = planDocumentStatusChangePolicy(doctype, "cancel");
+    ensureDocumentStatus(existing, plan.allowedStatus, "cancel");
     return this.changeDocStatus({
       command,
       doctype,
       tenantId,
       stream,
       existing,
-      nextStatus: "cancelled",
-      eventType: doctype.events?.cancel ?? `${doctype.name}Cancelled`,
-      payloadKind: "DocumentCancelled"
+      nextStatus: plan.nextStatus,
+      eventType: plan.eventType,
+      payloadKind: plan.payloadKind
     });
   }
 
