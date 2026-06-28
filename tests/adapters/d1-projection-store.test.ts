@@ -37,6 +37,18 @@ describe("D1ProjectionStore", () => {
     });
   });
 
+  it("rejects stored D1 projection rows with non-finite JSON numbers", async () => {
+    const db = new FakeD1Database([
+      { ...documentRow({ name: "D1 Infinite", data: { title: "D1 Infinite" } }), data_json: '{"count":1e999}' }
+    ]);
+    const store = new D1ProjectionStore(db as unknown as D1Database);
+
+    await expect(store.get("acme", "Note", "D1 Infinite")).rejects.toMatchObject({
+      code: "D1_DOCUMENT_INVALID",
+      status: 409
+    });
+  });
+
   it("escapes contains filter values before binding LIKE parameters", async () => {
     const db = new FakeD1Database([
       documentRow({ name: "D1 Sale", data: { title: "50%_Off", priority: "High" } })

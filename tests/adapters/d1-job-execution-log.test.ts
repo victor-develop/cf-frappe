@@ -131,6 +131,18 @@ describe("D1JobExecutionLog", () => {
       status: 409
     });
   });
+
+  it("rejects stored D1 job execution results with non-finite JSON numbers", async () => {
+    const db = new FakeD1Database();
+    const log = new D1JobExecutionLog(db as unknown as D1Database);
+    const key = recordKey("default", "jobs.bad:run_001");
+    db.corruptRows.set(key, corruptRow({ result_json: "1e999" }));
+
+    await expect(log.get("jobs.bad:run_001", { tenantId: "default" })).rejects.toMatchObject({
+      code: "JOB_EXECUTION_INVALID",
+      status: 409
+    });
+  });
 });
 
 function jobMessage(

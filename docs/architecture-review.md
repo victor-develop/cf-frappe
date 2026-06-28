@@ -140,6 +140,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Shared a job document-data policy across Cloudflare Queue dispatch and runtime job-schedule definitions, rejecting non-JSON payloads and metadata before they enter queue messages or event-sourced schedule definitions.
 - Normalized job handler results through the same JSON guard before durable execution-history completion, recording non-JSON results as failed executions instead of succeeded history rows.
 - Normalized data-patch apply and rollback results through the shared JSON guard before patch journals complete, recording non-JSON outputs as failed or rollback-failed journals instead of applied history.
+- Shared the core JSON value guard across D1 row hydration for events, projections, and job execution history, rejecting parsed non-finite numbers before corrupted stored JSON can re-enter the event-sourced model.
 - Extracted selected-file bulk operation normalization from `FileService` into the file policy, covering trimming, duplicates, expected-version validation, empty selections, and the bounded 100-file limit.
 - Extracted direct-upload object metadata matching and scanner result patch shaping from `FileService` into the file policy with focused size/content-type and optional scan-field coverage.
 - Extracted file dashboard row projection and limit normalization from `FileService` into the file policy with focused preview, attachment, scan, rendition, and limit coverage.

@@ -1,4 +1,5 @@
 import { FrameworkError } from "../../core/errors.js";
+import { isJsonValue } from "../../core/json.js";
 import type { DocumentData, DocumentSnapshot, DomainEvent, JsonValue } from "../../core/types.js";
 import type { JobExecutionRecord } from "../../ports/job-execution-log.js";
 
@@ -131,21 +132,8 @@ function invalidJobExecutionJson(
   );
 }
 
-function isJsonValue(value: unknown): value is JsonValue {
-  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return true;
-  }
-  if (Array.isArray(value)) {
-    return value.every(isJsonValue);
-  }
-  if (isJsonRecord(value)) {
-    return Object.values(value).every(isJsonValue);
-  }
-  return false;
-}
-
 function isJsonRecord(value: unknown): value is DocumentData {
-  return typeof value === "object" && value !== null && !Array.isArray(value) && Object.values(value).every(isJsonValue);
+  return typeof value === "object" && value !== null && !Array.isArray(value) && isJsonValue(value);
 }
 
 function parseEventPayload(row: EventRow): DomainEvent["payload"] {
