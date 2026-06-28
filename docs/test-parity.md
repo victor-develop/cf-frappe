@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Worker realtime presence ingress coverage slice:
+As of the Worker realtime custom-route coverage slice:
 
 - Vitest files: `173`
-- Vitest cases: `1954`
-- Remaining gap to Frappe static markers: `830`
+- Vitest cases: `1956`
+- Remaining gap to Frappe static markers: `828`
 
 ## Implication
 
