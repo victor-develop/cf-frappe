@@ -16,6 +16,7 @@ import {
   createCloudFrappeWorker,
   type AggregateCoordinatorRpc,
   type CloudFrappeRuntimeServices,
+  type RealtimeHubNamespace,
   type RpcDurableObjectNamespace
 } from "../../src/cloudflare";
 import { createTestRegistry, now, owner } from "../helpers";
@@ -244,6 +245,91 @@ describe("CloudFrappe Worker jobs", () => {
         }
       ]
     });
+  });
+
+  it("drains durable realtime outbox records through the Worker queue path", async () => {
+    const env = { DB: fakeD1(), AGGREGATES: fakeNamespace(), REALTIME: fakeRealtimeNamespace() };
+    const events = new D1EventStore(env.DB);
+    const outbox = new DocumentDeliveryOutboxService({
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["enqueue-realtime"])
+    });
+    await outbox.enqueueFromDomainEvent({
+      event: assignmentEvent(),
+      snapshot: taskSnapshot(),
+      targets: ["realtime"]
+    });
+    const message = {
+      tenantId: "acme",
+      jobName: DOCUMENT_DELIVERY_OUTBOX_DRAIN_JOB_NAME,
+      payload: { limit: 5, claimId: "claim-realtime" },
+      runId: "job_outbox_realtime",
+      idempotencyKey: "document-delivery-outbox:job_outbox_realtime",
+      enqueuedAt: now,
+      metadata: {}
+    };
+    const queueMessage = {
+      id: "msg_outbox_realtime",
+      timestamp: new Date(now),
+      body: message,
+      attempts: 1,
+      ack: vi.fn(),
+      retry: vi.fn()
+    } as unknown as Message<JobMessage>;
+    const worker = createCloudFrappeWorker<typeof env>({
+      registry: createTestRegistry(),
+      actor: () => owner,
+      documentDeliveryOutbox: {
+        clock: fixedClock(now),
+        ids: deterministicIds(["claim-event", "delivered-realtime"])
+      },
+      realtime: {
+        namespace: (runtimeEnv) => runtimeEnv.REALTIME
+      },
+      jobs: {
+        registry: createJobRegistry<CloudFrappeRuntimeServices>({
+          jobs: [createDocumentDeliveryOutboxDrainJob<CloudFrappeRuntimeServices>()]
+        }),
+        queue: () => new InMemoryJobQueue()
+      }
+    });
+
+    await worker.queue?.(
+      {
+        queue: "jobs",
+        metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
+        messages: [queueMessage],
+        retryAll: vi.fn(),
+        ackAll: vi.fn()
+      },
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(queueMessage.ack).toHaveBeenCalledOnce();
+    expect(queueMessage.retry).not.toHaveBeenCalled();
+    await expect(outbox.list("acme")).resolves.toMatchObject([
+      { id: "evt_assign:realtime", status: "delivered", claimId: "claim-realtime" }
+    ]);
+    expect(env.REALTIME.published).toEqual([
+      expect.objectContaining({
+        topic: "tenant:acme",
+        event: expect.objectContaining({ id: "evt_assign", type: "NoteAssigned" })
+      }),
+      expect.objectContaining({
+        topic: "doctype:acme:Note",
+        event: expect.objectContaining({ id: "evt_assign", type: "NoteAssigned" })
+      }),
+      expect.objectContaining({
+        topic: "document:acme:Note:Review",
+        event: expect.objectContaining({ id: "evt_assign", type: "NoteAssigned" })
+      }),
+      expect.objectContaining({
+        topic: "user:acme:support%40example.com",
+        event: expect.objectContaining({ id: "evt_assign:user:support%40example.com", type: "NoteAssigned" })
+      })
+    ]);
   });
 
   it("allows transient scheduled dispatch failures to retry", async () => {
@@ -570,6 +656,35 @@ function fakeNamespace(): RpcDurableObjectNamespace<AggregateCoordinatorRpc> {
         },
         tryTransact() {
           throw new Error("Command path should not be used in this test");
+        }
+      };
+    }
+  };
+}
+
+function fakeRealtimeNamespace(): RealtimeHubNamespace & {
+  readonly published: Array<{ readonly topic: string; readonly event: { readonly id: string; readonly type: string } }>;
+} {
+  const published: Array<{ readonly topic: string; readonly event: { readonly id: string; readonly type: string } }> = [];
+  return {
+    published,
+    idFromName(name: string) {
+      return name as unknown as DurableObjectId;
+    },
+    get() {
+      return {
+        async publish(topic, event) {
+          published.push({ topic, event });
+          return 1;
+        },
+        async presence() {
+          return { topic: "", connections: [] };
+        },
+        async replay() {
+          return { topic: "", events: [], nextCursor: null };
+        },
+        async fetch() {
+          return new Response(null, { status: 101 });
         }
       };
     }
