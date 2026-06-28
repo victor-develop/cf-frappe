@@ -1,5 +1,5 @@
 import { D1ProjectionStore } from "../../src";
-import type { DocumentData } from "../../src";
+import type { DocumentData, DocumentSnapshot } from "../../src";
 
 describe("D1ProjectionStore", () => {
   it("lists projections with bound filter parameters for rows and counts", async () => {
@@ -69,6 +69,38 @@ describe("D1ProjectionStore", () => {
       status: 409
     });
     expect(db.rows).toEqual([]);
+  });
+
+  it("snapshots D1 projections by value on save, get, and list", async () => {
+    const db = new FakeD1Database([]);
+    const store = new D1ProjectionStore(db as unknown as D1Database);
+    const snapshot: DocumentSnapshot = {
+      tenantId: "acme",
+      doctype: "Note",
+      name: "D1 Snapshot",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "One", nested: { count: 1 } },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    };
+
+    await store.save(snapshot);
+    (snapshot.data.nested as DocumentData).count = 2;
+
+    const saved = await store.get("acme", "Note", "D1 Snapshot");
+    expect(saved).toMatchObject({ data: { title: "One", nested: { count: 1 } } });
+
+    (saved!.data.nested as DocumentData).count = 3;
+    await expect(store.get("acme", "Note", "D1 Snapshot")).resolves.toMatchObject({
+      data: { title: "One", nested: { count: 1 } }
+    });
+
+    const listed = await store.list({ tenantId: "acme", doctype: "Note" });
+    (listed.data[0]!.data.nested as DocumentData).count = 4;
+    await expect(store.get("acme", "Note", "D1 Snapshot")).resolves.toMatchObject({
+      data: { title: "One", nested: { count: 1 } }
+    });
   });
 
   it("escapes contains filter values before binding LIKE parameters", async () => {
