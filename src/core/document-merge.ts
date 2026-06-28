@@ -1,3 +1,4 @@
+import { cloneJsonValue } from "./json.js";
 import type { DocStatus, DocumentData, JsonValue, MutableDocumentData } from "./types.js";
 
 export interface DocumentMergeSnapshot {
@@ -186,16 +187,6 @@ function jsonEqual(left: JsonValue | undefined, right: JsonValue | undefined): b
   const leftObject = left as Record<string, JsonValue>;
   const rightObject = right as Record<string, JsonValue>;
   return leftKeys.every((key, index) => key === rightKeys[index] && jsonEqual(leftObject[key], rightObject[key]));
-}
-
-function cloneJsonValue(value: JsonValue): JsonValue {
-  if (value === null || typeof value !== "object") {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.map(cloneJsonValue);
-  }
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, cloneJsonValue(item)]));
 }
 
 function hasOwn(value: object, field: string): boolean {

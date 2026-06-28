@@ -8,6 +8,16 @@ export function isJsonValue(value: unknown, options: JsonValueGuardOptions = {})
   return isJsonValueAtDepth(value, options, 0, new Set<object>());
 }
 
+export function cloneJsonValue(value: JsonValue): JsonValue {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(cloneJsonValue);
+  }
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, cloneJsonValue(item)]));
+}
+
 function isJsonValueAtDepth(
   value: unknown,
   options: JsonValueGuardOptions,

@@ -268,4 +268,47 @@ describe("in-memory adapters", () => {
       metadata: { source: "test" }
     });
   });
+
+  it("rejects non-JSON in-memory job execution payloads before recording history", async () => {
+    const log = new InMemoryJobExecutionLog();
+    const message: JobMessage = {
+      tenantId: "acme",
+      jobName: "reports.daily",
+      payload: { count: Number.POSITIVE_INFINITY } as never,
+      runId: "job_001",
+      idempotencyKey: "reports.daily:job_001",
+      enqueuedAt: "2026-01-01T00:00:00.000Z",
+      metadata: {}
+    };
+
+    await expect(log.begin(message, "2026-01-01T00:01:00.000Z")).rejects.toMatchObject({
+      code: "JOB_EXECUTION_INVALID",
+      status: 409
+    });
+    await expect(log.get("reports.daily:job_001", { tenantId: "acme" })).resolves.toBeUndefined();
+  });
+
+  it("rejects non-JSON in-memory job execution results before recording success", async () => {
+    const log = new InMemoryJobExecutionLog();
+    const message: JobMessage = {
+      tenantId: "acme",
+      jobName: "reports.daily",
+      payload: {},
+      runId: "job_001",
+      idempotencyKey: "reports.daily:job_001",
+      enqueuedAt: "2026-01-01T00:00:00.000Z",
+      metadata: {}
+    };
+    await log.begin(message, "2026-01-01T00:01:00.000Z");
+
+    await expect(
+      log.complete(message, "2026-01-01T00:02:00.000Z", Number.POSITIVE_INFINITY as never)
+    ).rejects.toMatchObject({
+      code: "JOB_EXECUTION_INVALID",
+      status: 409
+    });
+    await expect(log.get("reports.daily:job_001", { tenantId: "acme" })).resolves.toMatchObject({
+      status: "running"
+    });
+  });
 });

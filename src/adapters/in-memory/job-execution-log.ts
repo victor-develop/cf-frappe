@@ -5,6 +5,8 @@ import type {
   ListJobExecutionsOptions
 } from "../../ports/job-execution-log.js";
 import type { JobMessage } from "../../ports/job-queue.js";
+import { FrameworkError } from "../../core/errors.js";
+import { cloneJsonValue, isJsonValue } from "../../core/json.js";
 import { DEFAULT_TENANT_ID, type JsonValue } from "../../core/types.js";
 import type { JobPayload } from "../../core/jobs.js";
 
@@ -124,5 +126,10 @@ function cloneRecord(record: JobExecutionRecord): JobExecutionRecord {
 }
 
 function cloneJson<TValue extends JobPayload | JsonValue>(value: TValue): TValue {
-  return JSON.parse(JSON.stringify(value)) as TValue;
+  if (!isJsonValue(value)) {
+    throw new FrameworkError("JOB_EXECUTION_INVALID", "Job execution history JSON value is invalid", {
+      status: 409
+    });
+  }
+  return cloneJsonValue(value) as TValue;
 }

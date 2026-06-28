@@ -1,4 +1,4 @@
-import { isJsonValue } from "../../src";
+import { cloneJsonValue, isJsonValue } from "../../src";
 
 describe("json value guard", () => {
   it("accepts JSON primitives, arrays, and plain objects", () => {
@@ -25,5 +25,14 @@ describe("json value guard", () => {
   it("supports bounded depth for realtime collaboration payloads", () => {
     expect(isJsonValue({ a: { b: { c: true } } }, { maxDepth: 2 })).toBe(true);
     expect(isJsonValue({ a: { b: { c: [] } } }, { maxDepth: 2 })).toBe(false);
+  });
+
+  it("clones JSON values by value without stringify coercion", () => {
+    const original = Object.assign(Object.create(null), { nested: [{ count: 1 }] });
+    const cloned = cloneJsonValue(original);
+
+    expect(cloned).toEqual({ nested: [{ count: 1 }] });
+    (cloned as { nested: Array<{ count: number }> }).nested[0]!.count = 2;
+    expect(original.nested[0].count).toBe(1);
   });
 });
