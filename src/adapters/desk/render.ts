@@ -3191,12 +3191,13 @@ export function renderFormView(
     readonly canAmend?: boolean;
   }
 ): string {
+  const updateDocument = options.mode === "update" ? options.document : undefined;
   const action =
     options.mode === "create"
       ? `/desk/${encodeURIComponent(doctype.name)}`
-      : `/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(options.document?.name ?? "")}`;
-  const title = options.mode === "create" ? `New ${labelFor(doctype)}` : options.document?.name ?? doctype.name;
-  const canSave = options.mode === "create" || (Boolean(options.canUpdate) && options.document?.docstatus === "draft");
+      : `/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(updateDocument?.name ?? "")}`;
+  const title = options.mode === "create" ? `New ${labelFor(doctype)}` : updateDocument?.name ?? doctype.name;
+  const canSave = options.mode === "create" || (Boolean(options.canUpdate) && updateDocument?.docstatus === "draft");
   const domainCommands = options.domainCommands ?? [];
   const sections = formView.sections
     .map((section) =>
@@ -3210,45 +3211,45 @@ export function renderFormView(
     )
     .join("");
   const commands =
-    options.mode === "update" && options.document?.docstatus === "draft" && domainCommands.length
+    updateDocument?.docstatus === "draft" && domainCommands.length
       ? `<section class="command-row" aria-label="Commands">${domainCommands
           .map(
             (command) =>
-              `<button class="button" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(options.document?.name ?? "")}/command/${encodeURIComponent(command.name)}">${escapeHtml(command.name)}</button>`
+              `<button class="button" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(updateDocument.name)}/command/${encodeURIComponent(command.name)}">${escapeHtml(command.name)}</button>`
           )
           .join("")}</section>`
       : "";
   const lifecycleActions =
-    options.mode === "update" && options.document && options.lifecycleActions?.length
+    updateDocument !== undefined && options.lifecycleActions?.length
       ? `<section class="command-row" aria-label="Lifecycle actions">${options.lifecycleActions
           .map((action) => {
             const label = action === "submit" ? "Submit" : "Cancel Document";
-            return `<button class="button" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(options.document!.name)}/${action}">${escapeHtml(label)}</button>`;
+            return `<button class="button" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(updateDocument.name)}/${action}">${escapeHtml(label)}</button>`;
           })
           .join("")}</section>`
       : "";
   const workflowActions =
-    options.mode === "update" && options.document && options.workflowActions?.length
+    updateDocument !== undefined && options.workflowActions?.length
       ? `<section class="command-row" aria-label="Workflow actions">${options.workflowActions
           .map(
             (workflow) =>
-              `<button class="button" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(options.document!.name)}/transition/${encodeURIComponent(workflow.action)}">${escapeHtml(workflow.label)}</button>`
+              `<button class="button" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(updateDocument.name)}/transition/${encodeURIComponent(workflow.action)}">${escapeHtml(workflow.label)}</button>`
           )
           .join("")}</section>`
       : "";
   const printLinks =
-    options.mode === "update" && options.document && options.printFormats?.length
+    updateDocument !== undefined && options.printFormats?.length
       ? `<section class="command-row" aria-label="Print formats">${options.printFormats
-          .map((format) => renderPrintFormatLinks(format, options.document!, Boolean(options.printPdfEnabled)))
+          .map((format) => renderPrintFormatLinks(format, updateDocument, Boolean(options.printPdfEnabled)))
           .join("")}</section>`
       : "";
   const duplicateAction =
-    options.mode === "update" && options.document && options.canDuplicate
-      ? `<button class="button" type="submit" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(options.document.name)}/duplicate">Duplicate</button>`
+    updateDocument !== undefined && options.canDuplicate
+      ? `<button class="button" type="submit" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(updateDocument.name)}/duplicate">Duplicate</button>`
       : "";
   const amendAction =
-    options.mode === "update" && options.document?.docstatus === "cancelled" && options.canAmend
-      ? `<button class="button" type="submit" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(options.document.name)}/amend">Amend</button>`
+    updateDocument?.docstatus === "cancelled" && options.canAmend
+      ? `<button class="button" type="submit" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(updateDocument.name)}/amend">Amend</button>`
       : "";
   const versionField = options.document
     ? `<input type="hidden" name="expectedVersion" value="${String(options.document.version)}">`

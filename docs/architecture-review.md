@@ -83,6 +83,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized single data-patch retry id resolution so remote retry routes use a validated and encoded patch id without relying on array non-null assertions.
 - Centralized D1 migration filename and metadata capture parsing so existing migration detection no longer relies on regex capture non-null assertions.
 - Centralized Desk chart palette fallback resolution so report chart rendering no longer relies on array non-null assertions for default colors.
+- Centralized Desk update-form document resolution so lifecycle, workflow, print, and duplicate actions share one guarded document snapshot.
 - Moved saved list filter event payloads into their own bounded application event module and narrowed the service event factory to that payload type, adding a fourth extension-map contract test.
 - Moved saved report event payloads into their own bounded application event module and narrowed the service event factory to that payload type, adding a fifth extension-map contract test.
 - Moved role catalog event payloads into their own bounded application event module and narrowed `RoleService` append/fold orchestration to that payload type, adding a sixth extension-map contract test.
