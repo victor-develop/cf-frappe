@@ -5,7 +5,13 @@ import { defineClientScript, type ClientScriptDefinition } from "./client-script
 import { defineDashboard, type DashboardDefinition } from "./dashboard.js";
 import { defineDataPatch, type DataPatchDefinition } from "./data-patch.js";
 import { defineKanban, type KanbanDefinition } from "./kanban.js";
-import { createRegistry, type DocumentHooks, type ModelRegistry, type RegistryOptions } from "./registry.js";
+import {
+  createRegistry,
+  defineDocumentHooks,
+  type DocumentHooks,
+  type ModelRegistry,
+  type RegistryOptions
+} from "./registry.js";
 import {
   definePrintFormat,
   definePrintLetterhead,
@@ -140,7 +146,7 @@ function installedAppFromDefinition<TDataPatchResources>(
 function freezeHooks(hooks: Readonly<Record<string, readonly DocumentHooks[]>>): Readonly<Record<string, readonly DocumentHooks[]>> {
   const frozen: Record<string, readonly DocumentHooks[]> = {};
   for (const [doctype, entries] of Object.entries(hooks)) {
-    frozen[doctype] = Object.freeze([...entries]);
+    frozen[doctype] = Object.freeze(entries.map(defineDocumentHooks));
   }
   return Object.freeze(frozen);
 }

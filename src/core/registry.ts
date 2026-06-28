@@ -62,6 +62,14 @@ export interface DocumentHooks {
   readonly afterCommit?: (context: AfterCommitContext) => MaybePromise<void>;
 }
 
+export function defineDocumentHooks(hooks: DocumentHooks): DocumentHooks {
+  return Object.freeze({
+    ...(hooks.beforeValidate === undefined ? {} : { beforeValidate: hooks.beforeValidate }),
+    ...(hooks.validate === undefined ? {} : { validate: hooks.validate }),
+    ...(hooks.afterCommit === undefined ? {} : { afterCommit: hooks.afterCommit })
+  });
+}
+
 export interface RegistryOptions {
   readonly apps?: readonly InstalledAppDefinition[];
   readonly doctypes?: readonly DocTypeDefinition[];
@@ -438,7 +446,7 @@ export class ModelRegistry {
         status: 404
       });
     }
-    this.hooks.set(doctype, Object.freeze([...(this.hooks.get(doctype) ?? []), hooks]));
+    this.hooks.set(doctype, Object.freeze([...(this.hooks.get(doctype) ?? []), defineDocumentHooks(hooks)]));
   }
 
   get(doctype: string): DocTypeDefinition {

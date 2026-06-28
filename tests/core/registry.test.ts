@@ -33,6 +33,20 @@ describe("registry", () => {
     expect(() => registry.registerHooks("Other", {})).toThrow(FrameworkError);
   });
 
+  it("snapshots registered hook entries by value", () => {
+    const registry = createRegistry({ doctypes: [defineDocType({ name: "Note", fields: [] })] });
+    const beforeValidate = vi.fn();
+    const replacementBeforeValidate = vi.fn();
+    const hook = { beforeValidate };
+
+    registry.registerHooks("Note", hook);
+    hook.beforeValidate = replacementBeforeValidate;
+
+    expect(registry.hooksFor("Note")[0]?.beforeValidate).toBe(beforeValidate);
+    expect(registry.hooksFor("Note")[0]?.beforeValidate).not.toBe(replacementBeforeValidate);
+    expect(Object.isFrozen(registry.hooksFor("Note")[0])).toBe(true);
+  });
+
   it("registers client scripts for known doctypes and filters them by scope", () => {
     const registry = createRegistry({ doctypes: [defineDocType({ name: "Note", fields: [] })] });
     const formScript = defineClientScript({ name: "note-form", doctype: "Note", src: "/assets/note-form.js" });

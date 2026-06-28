@@ -220,6 +220,23 @@ describe("app manifests", () => {
     expect(Object.isFrozen(app.hooks?.Note)).toBe(true);
   });
 
+  it("snapshots app manifest hook entries by value", () => {
+    const beforeValidate = vi.fn();
+    const replacementBeforeValidate = vi.fn();
+    const hook = { beforeValidate };
+    const app = defineApp({
+      name: "notes",
+      hooks: { Note: [hook] }
+    });
+
+    hook.beforeValidate = replacementBeforeValidate;
+
+    expect(app.hooks?.Note?.[0]?.beforeValidate).toBe(beforeValidate);
+    expect(app.hooks?.Note?.[0]?.beforeValidate).not.toBe(replacementBeforeValidate);
+    expect(registryOptionsFromApps([app]).hooks?.Note?.[0]?.beforeValidate).toBe(beforeValidate);
+    expect(Object.isFrozen(app.hooks?.Note?.[0])).toBe(true);
+  });
+
   it("snapshots app manifest website theme tokens by value", () => {
     const tokens = {
       primaryColor: "#2563eb",
