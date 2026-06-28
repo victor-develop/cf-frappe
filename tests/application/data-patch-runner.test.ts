@@ -1,4 +1,5 @@
 import { DataPatchRunner, defineDataPatch, deterministicIds, fixedClock, InMemoryDataPatchLog } from "../../src";
+import type { DocumentData, JsonValue } from "../../src";
 import { now } from "../helpers";
 
 describe("DataPatchRunner", () => {
@@ -96,6 +97,43 @@ describe("DataPatchRunner", () => {
     ]);
   });
 
+  it("snapshots patch apply results by value", async () => {
+    const patchResult = { nested: { touched: 1 }, tags: ["seed"] };
+    const log = new InMemoryDataPatchLog();
+    const runner = new DataPatchRunner({
+      log,
+      resources: {},
+      patches: [
+        defineDataPatch({
+          id: "core.snapshot",
+          checksum: "v1",
+          run: () => patchResult
+        })
+      ],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-snapshot"])
+    });
+
+    const result = await runner.apply();
+
+    patchResult.nested.touched = 2;
+    patchResult.tags.push("mutated");
+    expect(result.applied).toEqual([
+      { id: "core.snapshot", checksum: "v1", appliedAt: now, result: { nested: { touched: 1 }, tags: ["seed"] } }
+    ]);
+
+    ((result.applied[0]!.result as DocumentData).nested as DocumentData).touched = 3;
+    ((result.applied[0]!.result as DocumentData).tags as JsonValue[]).push("returned");
+
+    await expect(log.recordedDataPatches()).resolves.toMatchObject([
+      {
+        id: "core.snapshot",
+        status: "applied",
+        result: { nested: { touched: 1 }, tags: ["seed"] }
+      }
+    ]);
+  });
+
   it("rolls back applied patches once and records rollback results", async () => {
     const resources = { applied: [] as string[], rolledBack: [] as string[] };
     const log = new InMemoryDataPatchLog();
@@ -143,6 +181,52 @@ describe("DataPatchRunner", () => {
       skipped: [{ id: "core.seed", checksum: "v1", rolledBackAt: now }]
     });
     expect(resources).toEqual({ applied: ["core"], rolledBack: ["core"] });
+  });
+
+  it("snapshots patch rollback results by value", async () => {
+    const rollbackResult = { nested: { rolledBack: 1 }, tags: ["rollback"] };
+    const log = new InMemoryDataPatchLog();
+    const runner = new DataPatchRunner({
+      log,
+      resources: {},
+      patches: [
+        defineDataPatch({
+          id: "core.rollback.snapshot",
+          checksum: "v1",
+          run: () => ({ applied: true }),
+          rollback: {
+            run: () => rollbackResult
+          }
+        })
+      ],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-snapshot", "rollback-snapshot"])
+    });
+
+    await runner.apply();
+    const result = await runner.rollback();
+
+    rollbackResult.nested.rolledBack = 2;
+    rollbackResult.tags.push("mutated");
+    expect(result.rolledBack).toEqual([
+      {
+        id: "core.rollback.snapshot",
+        checksum: "v1",
+        rolledBackAt: now,
+        result: { nested: { rolledBack: 1 }, tags: ["rollback"] }
+      }
+    ]);
+
+    ((result.rolledBack[0]!.result as DocumentData).nested as DocumentData).rolledBack = 3;
+    ((result.rolledBack[0]!.result as DocumentData).tags as JsonValue[]).push("returned");
+
+    await expect(log.recordedDataPatches()).resolves.toMatchObject([
+      {
+        id: "core.rollback.snapshot",
+        status: "rolled_back",
+        rollbackResult: { nested: { rolledBack: 1 }, tags: ["rollback"] }
+      }
+    ]);
   });
 
   it("defaults direct rollback execution to reverse manifest order", async () => {

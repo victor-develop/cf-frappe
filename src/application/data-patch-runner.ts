@@ -1,6 +1,6 @@
 import { defineDataPatch, type DataPatchDefinition } from "../core/data-patch.js";
 import { badRequest, FrameworkError } from "../core/errors.js";
-import { isJsonValue } from "../core/json.js";
+import { cloneJsonValue, isJsonValue } from "../core/json.js";
 import type { JsonValue } from "../core/types.js";
 import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
@@ -373,7 +373,7 @@ function normalizeResult(result: JsonValue | void, label: string): JsonValue | u
   if (!isJsonValue(result)) {
     throw badRequest(`${label} must be JSON-serializable`);
   }
-  return result;
+  return cloneJsonValue(result);
 }
 
 function errorMessage(error: unknown): string {
