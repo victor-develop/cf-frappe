@@ -15,6 +15,7 @@ import {
   SYSTEM_MANAGER_ROLE,
   type DataPatchLog
 } from "../../src";
+import { DataPatchRunner } from "../../src/application/data-patch-runner.js";
 import { guest, now } from "../helpers";
 
 describe("DataPatchService", () => {
@@ -655,6 +656,20 @@ describe("DataPatchService", () => {
     await expect(service.retryFailed(admin, "")).rejects.toMatchObject({
       code: "DATA_PATCH_INVALID",
       status: 400
+    });
+  });
+
+  it("rejects rollback retries for patches without rollback declarations", async () => {
+    const runner = new DataPatchRunner({
+      log: new InMemoryDataPatchLog(),
+      resources: {}
+    });
+
+    await expect(runner.retryRollbackFailed(
+      defineDataPatch({ id: "core.no_rollback", checksum: "v1", run: () => undefined })
+    )).rejects.toMatchObject({
+      code: "DATA_PATCH_ROLLBACK_UNAVAILABLE",
+      status: 409
     });
   });
 

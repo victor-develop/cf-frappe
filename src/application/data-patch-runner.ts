@@ -211,7 +211,7 @@ export class DataPatchRunner<TResources = unknown> {
   }
 
   async retryRollbackFailed(patch: DataPatchDefinition<TResources>): Promise<DataPatchRollbackRunResult> {
-    const planned = normalizePatches([patch])[0]!;
+    const planned = normalizeSinglePatch(patch);
     if (planned.rollback === undefined) {
       throw new FrameworkError(
         "DATA_PATCH_ROLLBACK_UNAVAILABLE",
@@ -281,6 +281,12 @@ function normalizePatches<TResources>(
     seen.add(definition.id);
     return definition;
   });
+}
+
+function normalizeSinglePatch<TResources>(
+  patch: DataPatchDefinition<TResources>
+): DataPatchDefinition<TResources> {
+  return defineDataPatch(patch);
 }
 
 function patchChecksum<TResources>(patch: DataPatchDefinition<TResources>): string {
