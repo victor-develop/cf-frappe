@@ -51,7 +51,7 @@ export interface PrintLayoutDefinition {
 
 export function definePrintLayout(layout: PrintLayoutDefinition, ownerLabel = "Print layout"): PrintLayoutDefinition {
   assertPrintLayoutValid(ownerLabel, layout);
-  return freezePrintLayout(layout)!;
+  return requireFrozenPrintLayout(freezePrintLayout(layout), ownerLabel);
 }
 
 export function mergePrintLayouts(
@@ -300,6 +300,16 @@ function freezePrintLayout(layout: PrintLayoutDefinition | undefined): PrintLayo
     ...(layout.margins === undefined ? {} : { margins: Object.freeze({ ...layout.margins }) }),
     ...(layout.font === undefined ? {} : { font: Object.freeze({ ...layout.font }) })
   });
+}
+
+function requireFrozenPrintLayout(
+  layout: PrintLayoutDefinition | undefined,
+  ownerLabel: string
+): PrintLayoutDefinition {
+  if (layout === undefined) {
+    throw invalidPrintLayout(ownerLabel, "layout is required");
+  }
+  return layout;
 }
 
 function assertPrintLayoutValid(ownerLabel: string, layout: unknown): void {

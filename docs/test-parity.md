@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the user notification append-result consistency slice:
+As of the print layout invariant slice:
 
 - Vitest files: `170`
-- Vitest cases: `1788`
-- Remaining gap to Frappe static markers: `996`
+- Vitest cases: `1789`
+- Remaining gap to Frappe static markers: `995`
 
 ## Implication
 

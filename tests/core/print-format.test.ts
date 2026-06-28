@@ -1,4 +1,11 @@
-import { createRegistry, defineDocType, definePrintFormat, definePrintLetterhead, FrameworkError } from "../../src";
+import {
+  createRegistry,
+  defineDocType,
+  definePrintFormat,
+  definePrintLayout,
+  definePrintLetterhead,
+  FrameworkError
+} from "../../src";
 
 describe("print formats", () => {
   it("registers print formats after their DocType and lists them in stable order", () => {
@@ -106,6 +113,24 @@ describe("print formats", () => {
     expect(Object.isFrozen(format.layout)).toBe(true);
     expect(Object.isFrozen(format.layout?.margins)).toBe(true);
     expect(Object.isFrozen(format.layout?.font)).toBe(true);
+  });
+
+  it("defines standalone frozen print layouts", () => {
+    const layout = definePrintLayout({
+      pageSize: { widthMm: 148, heightMm: 210 },
+      margins: { topMm: 8, rightMm: 8 },
+      font: { family: "Inter", sizePt: 9 }
+    });
+
+    expect(layout).toEqual({
+      pageSize: { widthMm: 148, heightMm: 210 },
+      margins: { topMm: 8, rightMm: 8 },
+      font: { family: "Inter", sizePt: 9 }
+    });
+    expect(Object.isFrozen(layout)).toBe(true);
+    expect(Object.isFrozen(layout.pageSize)).toBe(true);
+    expect(Object.isFrozen(layout.margins)).toBe(true);
+    expect(Object.isFrozen(layout.font)).toBe(true);
   });
 
   it("rejects invalid print layout metadata", () => {

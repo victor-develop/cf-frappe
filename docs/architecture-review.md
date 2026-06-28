@@ -145,6 +145,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized user notification append-result consistency in a named resolver so record, read, and dismiss writes fail with an explicit inbox stream invariant when an event-store append returns no persisted event.
 - Centralized email outbox append-result consistency in a named resolver so queue and claim flows fail with an explicit outbox stream invariant when an event-store append returns no persisted event.
 - Captured document delivery outbox handler dependencies up front and centralized queued-email message-id eligibility in a named predicate so notification, realtime, and queued-email fan-out no longer relies on service and message-id non-null assertions inside async closures.
+- Centralized standalone print layout freeze invariants in a named resolver so `definePrintLayout` no longer relies on a non-null assertion after validating layout metadata.
 - Extracted available-rendition reuse selection and duplicate pending-rendition rejection from `FileService` into the file policy with focused source and overlay identity coverage.
 - Centralized file transformability rejection in the file policy so direct transforms, persisted renditions, and overlay-source transforms share one tested content-type guard.
 - Moved upload byte-limit checks and reservation-expiry timestamp planning into file policy so buffered, direct, and multipart upload flows share the same tested boundary rules.
