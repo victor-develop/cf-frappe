@@ -792,6 +792,28 @@ export function fileMultipartPartUploadCommand(command: {
   };
 }
 
+export function fileMultipartPartUploadPlan(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly partNumber: number;
+  readonly body: MultipartFilePartContent;
+  readonly size?: number | undefined;
+}): {
+  readonly size: number;
+  readonly command: UploadMultipartFilePartCommand;
+} {
+  const size = multipartPartSize(command.body, command.size);
+  ensureMultipartPartFitsReservation(command.snapshot, command.partNumber, size);
+  return {
+    size,
+    command: fileMultipartPartUploadCommand({
+      snapshot: command.snapshot,
+      uploadId: fileMultipartUploadId(command.snapshot),
+      partNumber: command.partNumber,
+      body: command.body
+    })
+  };
+}
+
 export function fileMultipartCompletionCommand(command: {
   readonly snapshot: DocumentSnapshot;
   readonly uploadId: string;

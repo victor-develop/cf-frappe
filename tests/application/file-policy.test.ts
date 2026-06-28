@@ -75,6 +75,7 @@ import {
   fileMultipartCompletionCommand,
   fileMultipartPartRecordedExecuteCommand,
   fileMultipartPartRecordedDocumentCommand,
+  fileMultipartPartUploadPlan,
   fileMultipartPartUploadCommand,
   fileMultipartUploadDocumentCreateCommand,
   fileMultipartUploadDocumentData,
@@ -2080,6 +2081,36 @@ describe("file policy", () => {
       key: "acme/files/file_2-failed.pdf",
       uploadId: "upload-2"
     });
+  });
+
+  it("plans multipart part storage upload commands with reservation guards", () => {
+    const body = new Uint8Array([1, 2, 3]);
+    const snapshot = fileSnapshot({
+      key: "acme/files/file_1-invoice.pdf",
+      multipart_upload_id: "upload-1",
+      size: 8,
+      multipart_parts: [{ partNumber: 1, etag: "one", size: 5 }]
+    });
+
+    expect(fileMultipartPartUploadPlan({
+      snapshot,
+      partNumber: 2,
+      body
+    })).toEqual({
+      size: 3,
+      command: {
+        key: "acme/files/file_1-invoice.pdf",
+        uploadId: "upload-1",
+        partNumber: 2,
+        body
+      }
+    });
+    expect(() => fileMultipartPartUploadPlan({
+      snapshot,
+      partNumber: 2,
+      body,
+      size: 4
+    })).toThrow("Multipart upload part exceeds reserved file size");
   });
 
   it("plans completed multipart object reuse before storage completion", () => {

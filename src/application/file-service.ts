@@ -48,7 +48,6 @@ import {
   ensureFileMetadataPatchProvided,
   ensureDirectUploadMatches,
   ensureMultipartCompletionMatchesManifest,
-  ensureMultipartPartFitsReservation,
   fileAttachmentTargetForValidation,
   requireDirectFileUploadCreator,
   requireFileObjectMetadata,
@@ -99,7 +98,7 @@ import {
   fileMultipartCompletionCommand,
   fileMultipartPartRecordedExecuteCommand,
   fileMultipartPartRecordedDocumentCommand,
-  fileMultipartPartUploadCommand,
+  fileMultipartPartUploadPlan,
   fileMultipartUploadDocumentCreateCommand,
   fileMultipartUploadId,
   fileObjectKeysForDelete,
@@ -138,7 +137,6 @@ import {
   fileSnapshotFilename,
   ignoreFileCleanupFailure,
   isInfectedFileScanResult,
-  multipartPartSize,
   normalizeBulkFileSelections,
   normalizeFileDashboardFilters,
   normalizeFileDashboardLimit,
@@ -690,19 +688,17 @@ export class FileService {
   async uploadMultipartPart(command: UploadMultipartPartCommand): Promise<UploadedMultipartPartResult> {
     const multipartUploads = this.requireMultipartUploads();
     const current = await this.multipartUploadSnapshot(command, ensureFilePendingMultipartPartUpload);
-    const uploadId = this.multipartUploadId(current);
-    const size = multipartPartSize(command.body, command.size);
-    ensureMultipartPartFitsReservation(current, command.partNumber, size);
-    const part = await multipartUploads.uploadMultipartPart(fileMultipartPartUploadCommand({
+    const upload = fileMultipartPartUploadPlan({
       snapshot: current,
-      uploadId,
       partNumber: command.partNumber,
-      body: command.body
-    }));
+      body: command.body,
+      size: command.size
+    });
+    const part = await multipartUploads.uploadMultipartPart(upload.command);
     const recorded = fileMultipartPartRecordedDocumentCommand({
       snapshot: current,
       part,
-      size
+      size: upload.size
     });
     const snapshot = await this.documents.execute(fileMultipartPartRecordedExecuteCommand({
       actor: command.actor,
