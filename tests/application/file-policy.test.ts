@@ -119,6 +119,7 @@ import {
   fileGeneratedRenditionResult,
   fileGeneratedRenditionFailureCleanupKey,
   fileGeneratedRenditionFailurePlan,
+  fileGeneratedRenditionReuseDecision,
   fileGeneratedRenditionReuseResult,
   fileGeneratedRenditionReuseStoragePlan,
   fileRenditionManifestPatch,
@@ -1435,6 +1436,49 @@ describe("file policy", () => {
       },
       created: false
     });
+  });
+
+  it("decides generated rendition reuse from storage existence", () => {
+    const available = renditionEntry("thumb", {
+      key: "acme/file-renditions/file/thumb.webp",
+      status: "available",
+      source_etag: "source-1",
+      content_type: "image/webp",
+      size: 42
+    });
+    const snapshot = fileSnapshot({
+      renditions: [available]
+    });
+    const reuse = fileGeneratedRenditionReuseStoragePlan({
+      snapshot,
+      renditionId: "thumb",
+      sourceEtag: "source-1"
+    });
+
+    expect(fileGeneratedRenditionReuseDecision({
+      snapshot,
+      reuse,
+      objectExists: true
+    })).toMatchObject({
+      kind: "reuse",
+      result: {
+        rendition: {
+          id: "thumb",
+          key: "acme/file-renditions/file/thumb.webp"
+        },
+        created: false
+      }
+    });
+    expect(fileGeneratedRenditionReuseDecision({
+      snapshot,
+      reuse,
+      objectExists: false
+    })).toEqual({ kind: "generate" });
+    expect(fileGeneratedRenditionReuseDecision({
+      snapshot,
+      reuse: { kind: "skip" },
+      objectExists: true
+    })).toEqual({ kind: "generate" });
   });
 
   it("builds generated rendition completion results", () => {

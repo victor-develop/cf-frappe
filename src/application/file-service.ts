@@ -106,7 +106,7 @@ import {
   filePreparedMultipartUploadResult,
   fileGeneratedRenditionReservationPlan,
   fileGeneratedRenditionFailurePlan,
-  fileGeneratedRenditionReuseResult,
+  fileGeneratedRenditionReuseDecision,
   fileGeneratedRenditionReuseStoragePlan,
   fileRenditionId,
   fileRenditionManifestExecuteCommand,
@@ -868,11 +868,13 @@ export class FileService {
       sourceEtag,
       ...fileTransformOverlayCommandOption(overlay)
     });
-    if (reuse.kind === "check" && await this.storage.head(reuse.key)) {
-      return fileGeneratedRenditionReuseResult({
-        snapshot: downloaded.snapshot,
-        reuse
-      });
+    const reuseDecision = fileGeneratedRenditionReuseDecision({
+      snapshot: downloaded.snapshot,
+      reuse,
+      objectExists: reuse.kind === "check" ? await this.storage.head(reuse.key) !== null : false
+    });
+    if (reuseDecision.kind === "reuse") {
+      return reuseDecision.result;
     }
 
     const reservation = fileGeneratedRenditionReservationPlan({

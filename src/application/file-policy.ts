@@ -2858,6 +2858,32 @@ export function fileGeneratedRenditionReuseStoragePlan(command: {
   };
 }
 
+export type FileGeneratedRenditionReuseDecision =
+  | {
+      readonly kind: "generate";
+    }
+  | {
+      readonly kind: "reuse";
+      readonly result: ReturnType<typeof fileGeneratedRenditionReuseResult>;
+    };
+
+export function fileGeneratedRenditionReuseDecision(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly reuse: FileGeneratedRenditionReuseStoragePlan;
+  readonly objectExists: boolean;
+}): FileGeneratedRenditionReuseDecision {
+  if (command.reuse.kind === "check" && command.objectExists) {
+    return {
+      kind: "reuse",
+      result: fileGeneratedRenditionReuseResult({
+        snapshot: command.snapshot,
+        reuse: command.reuse
+      })
+    };
+  }
+  return { kind: "generate" };
+}
+
 export function fileGeneratedRenditionFailureCleanupKey(
   object: FileObjectMetadata | undefined
 ): string | undefined {

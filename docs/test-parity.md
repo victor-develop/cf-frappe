@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file dashboard scan planning policy slice:
+As of the generated rendition reuse decision policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1760`
-- Remaining gap to Frappe static markers: `1024`
+- Vitest cases: `1761`
+- Remaining gap to Frappe static markers: `1023`
 
 ## Implication
 
