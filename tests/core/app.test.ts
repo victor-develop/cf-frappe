@@ -679,6 +679,54 @@ describe("app manifests", () => {
     expect(Object.isFrozen(app.printFormats?.[0]?.layout?.margins)).toBe(true);
   });
 
+  it("snapshots app manifest DocType schema metadata by value", () => {
+    const statusOptions = ["Open", "Closed"];
+    const doctype = {
+      name: "Task",
+      fields: [
+        { name: "title", type: "text" as const },
+        { name: "status", type: "select" as const, options: statusOptions }
+      ],
+      formView: { sections: [{ heading: "Main", fields: ["title", "status"] }] },
+      listView: {
+        columns: ["title"],
+        filters: [{ field: "status", operator: "eq" as const, value: "Open" }]
+      }
+    };
+    const app = defineApp({
+      name: "tasks",
+      doctypes: [doctype]
+    });
+
+    statusOptions[0] = "Mutated";
+    doctype.fields[0]!.name = "mutated";
+    doctype.formView.sections[0]!.fields[0] = "mutated";
+    doctype.listView.columns[0] = "status";
+    doctype.listView.filters[0]!.value = "Closed";
+
+    expect(app.doctypes?.[0]?.fields).toEqual([
+      { name: "title", type: "text" },
+      { name: "status", type: "select", options: ["Open", "Closed"] }
+    ]);
+    expect(app.doctypes?.[0]?.formView?.sections).toEqual([{ heading: "Main", fields: ["title", "status"] }]);
+    expect(app.doctypes?.[0]?.listView?.columns).toEqual(["title"]);
+    expect(app.doctypes?.[0]?.listView?.filters).toEqual([{ field: "status", value: "Open" }]);
+    expect(registryOptionsFromApps([app]).doctypes?.[0]?.fields).toEqual(app.doctypes?.[0]?.fields);
+    expect(Object.isFrozen(app.doctypes)).toBe(true);
+    expect(Object.isFrozen(app.doctypes?.[0])).toBe(true);
+    expect(Object.isFrozen(app.doctypes?.[0]?.fields)).toBe(true);
+    expect(Object.isFrozen(app.doctypes?.[0]?.fields[0])).toBe(true);
+    expect(Object.isFrozen(app.doctypes?.[0]?.fields[1]?.options)).toBe(true);
+    expect(Object.isFrozen(app.doctypes?.[0]?.formView)).toBe(true);
+    expect(Object.isFrozen(app.doctypes?.[0]?.formView?.sections)).toBe(true);
+    expect(Object.isFrozen(app.doctypes?.[0]?.formView?.sections?.[0])).toBe(true);
+    expect(Object.isFrozen(app.doctypes?.[0]?.formView?.sections?.[0]?.fields)).toBe(true);
+    expect(Object.isFrozen(app.doctypes?.[0]?.listView)).toBe(true);
+    expect(Object.isFrozen(app.doctypes?.[0]?.listView?.columns)).toBe(true);
+    expect(Object.isFrozen(app.doctypes?.[0]?.listView?.filters)).toBe(true);
+    expect(Object.isFrozen(app.doctypes?.[0]?.listView?.filters?.[0])).toBe(true);
+  });
+
   it("validates app names at the manifest boundary", () => {
     expect(() => defineApp({ name: "" })).toThrow(FrameworkError);
     expect(() => defineApp({ name: "Bad Name" })).toThrow("Invalid app name");

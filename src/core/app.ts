@@ -13,6 +13,7 @@ import {
   type PrintLetterheadDefinition
 } from "./print-format.js";
 import { defineReport, type ReportDefinition } from "./reports.js";
+import { defineDocType } from "./schema.js";
 import type { DocTypeDefinition } from "./types.js";
 import { defineWebForm, type WebFormDefinition } from "./web-form.js";
 import { defineWebPage, type WebPageDefinition } from "./web-page.js";
@@ -62,7 +63,7 @@ export function defineApp<TDataPatchResources = unknown>(
     ...input,
     modules: Object.freeze([...(input.modules ?? [])]),
     dependencies: Object.freeze([...(input.dependencies ?? [])]),
-    doctypes: Object.freeze([...(input.doctypes ?? [])]),
+    doctypes: Object.freeze((input.doctypes ?? []).map((doctype) => defineDocType(doctype))),
     letterheads: Object.freeze((input.letterheads ?? []).map(definePrintLetterhead)),
     printFormats: Object.freeze((input.printFormats ?? []).map(definePrintFormat)),
     reports: Object.freeze((input.reports ?? []).map(defineReport)),
