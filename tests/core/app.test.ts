@@ -179,6 +179,47 @@ describe("app manifests", () => {
     expect(options.hooks?.Note).toEqual([hook]);
   });
 
+  it("snapshots app manifest arrays, hooks, and website settings by value", () => {
+    const modules = ["Notes"];
+    const dependencies = ["core"];
+    const settingsRoles = ["Guest"];
+    const navRoles = ["Guest"];
+    const hook = {};
+    const hooks = { Note: [hook] };
+    const app = defineApp({
+      name: "notes",
+      modules,
+      dependencies,
+      websiteSettings: {
+        title: "Starter Site",
+        homePageRoute: "about",
+        roles: settingsRoles,
+        navItems: [{ name: "about", label: "About", pageRoute: "about", roles: navRoles }]
+      },
+      hooks
+    });
+
+    modules[0] = "Mutated";
+    dependencies[0] = "mutated";
+    settingsRoles[0] = "User";
+    navRoles[0] = "User";
+    hooks.Note.push({});
+
+    expect(app.modules).toEqual(["Notes"]);
+    expect(app.dependencies).toEqual(["core"]);
+    expect(app.websiteSettings?.roles).toEqual(["Guest"]);
+    expect(app.websiteSettings?.navItems?.[0]?.roles).toEqual(["Guest"]);
+    expect(app.hooks?.Note).toEqual([hook]);
+    expect(Object.isFrozen(app.modules)).toBe(true);
+    expect(Object.isFrozen(app.dependencies)).toBe(true);
+    expect(Object.isFrozen(app.websiteSettings)).toBe(true);
+    expect(Object.isFrozen(app.websiteSettings?.roles)).toBe(true);
+    expect(Object.isFrozen(app.websiteSettings?.navItems)).toBe(true);
+    expect(Object.isFrozen(app.websiteSettings?.navItems?.[0]?.roles)).toBe(true);
+    expect(Object.isFrozen(app.hooks)).toBe(true);
+    expect(Object.isFrozen(app.hooks?.Note)).toBe(true);
+  });
+
   it("validates app names at the manifest boundary", () => {
     expect(() => defineApp({ name: "" })).toThrow(FrameworkError);
     expect(() => defineApp({ name: "Bad Name" })).toThrow("Invalid app name");
