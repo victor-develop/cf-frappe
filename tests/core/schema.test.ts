@@ -4,6 +4,7 @@ import {
   can,
   defineDocType,
   FrameworkError,
+  pickCommandFields,
   validateDocumentData
 } from "../../src";
 import type { DocumentData, DocumentSnapshot, PermissionAction } from "../../src";
@@ -160,6 +161,50 @@ describe("schema", () => {
         workflow: task.workflow!
       })
     ).toEqual([]);
+  });
+
+  it("snapshots domain command field and role metadata by value", () => {
+    const commandFields = ["resolution"];
+    const commandRoles = ["Support"];
+    const buildPatch = () => ({ status: "Closed" });
+    const ticket = defineDocType({
+      name: "Command Ticket",
+      fields: [
+        { name: "status", type: "select", options: ["Open", "Closed"] },
+        { name: "resolution", type: "text" },
+        { name: "internal_note", type: "text" }
+      ],
+      commands: [
+        {
+          name: "resolve",
+          eventType: "TicketResolved",
+          fields: commandFields,
+          roles: commandRoles,
+          buildPatch
+        }
+      ]
+    });
+
+    commandFields.push("internal_note");
+    commandRoles[0] = "Admin";
+
+    const command = ticket.commands?.[0];
+
+    expect(ticket.commands).toEqual([
+      expect.objectContaining({
+        name: "resolve",
+        eventType: "TicketResolved",
+        fields: ["resolution"],
+        roles: ["Support"],
+        buildPatch
+      })
+    ]);
+    expect(Object.isFrozen(ticket.commands)).toBe(true);
+    expect(Object.isFrozen(command?.fields)).toBe(true);
+    expect(Object.isFrozen(command?.roles)).toBe(true);
+    expect(pickCommandFields(command?.fields, { resolution: "Done", internal_note: "secret" })).toEqual({
+      resolution: "Done"
+    });
   });
 
   it("reports missing required fields", () => {

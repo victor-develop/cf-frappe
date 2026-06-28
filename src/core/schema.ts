@@ -3,6 +3,7 @@ import type {
   DocTypeDefinition,
   DocumentData,
   DocStatus,
+  DomainCommandDefinition,
   FieldDefinition,
   JsonValue,
   MutableDocumentData,
@@ -56,6 +57,7 @@ export function defineDocType<TData extends DocumentData>(
   const assignmentRules = normalizeAssignmentRules(definition, definition.assignmentRules);
   const permissions = definition.permissions ? freezePermissionRules(definition.permissions) : undefined;
   const workflow = definition.workflow ? freezeWorkflowDefinition(definition.workflow) : undefined;
+  const commands = definition.commands ? freezeCommandDefinitions(definition.commands) : undefined;
   const fields = Object.freeze(definition.fields.map((field) => freezeFieldDefinition(definition, field)));
   return Object.freeze({
     ...definition,
@@ -64,6 +66,7 @@ export function defineDocType<TData extends DocumentData>(
     ...(listView ? { listView } : {}),
     ...(permissions ? { permissions } : {}),
     ...(workflow ? { workflow } : {}),
+    ...(commands ? { commands } : {}),
     ...(assignmentRules ? { assignmentRules } : {})
   });
 }
@@ -512,4 +515,16 @@ function freezeWorkflowDefinition(workflow: WorkflowDefinition): WorkflowDefinit
       )
     )
   });
+}
+
+function freezeCommandDefinitions(commands: readonly DomainCommandDefinition[]): readonly DomainCommandDefinition[] {
+  return Object.freeze(
+    commands.map((command) =>
+      Object.freeze({
+        ...command,
+        ...(command.fields === undefined ? {} : { fields: Object.freeze([...command.fields]) }),
+        ...(command.roles === undefined ? {} : { roles: Object.freeze([...command.roles]) })
+      })
+    )
+  );
 }
