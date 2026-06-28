@@ -15,7 +15,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - `DocumentService` is too broad. It owns command authorization, validation, link reads, naming, uniqueness, hooks, lifecycle, merge, comments, sharing, assignments, tags, followers, and event construction in one large service.
 - The central event payload union in `src/core/types.ts` is too large and makes every bounded feature edit the same core event type.
 - Uniqueness reservations and document writes are event-sourced, but they are not committed through one multi-stream atomic command boundary.
-- After-commit delivery intents can now be persisted to a durable document delivery outbox and drained through Worker/Queue composition in generated starters, but broader integration and operational coverage is still needed before this can be considered fully proven end to end.
+- After-commit delivery intents can now be persisted to a durable document delivery outbox and drained through Worker/Queue composition in generated starters, with generated Wrangler binding-type smoke coverage. Broader live deployment and operational coverage is still needed before this can be considered fully proven end to end.
 - D1 event insertion logic is duplicated between generic event-store and document-store adapters.
 - Test coverage is meaningful for the implemented kernel but remains below the stated Frappe parity target.
 
@@ -33,7 +33,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Replace the monolithic event payload union with bounded event modules or a registry/type-map pattern.
 - Introduce a multi-stream command commit and outbox abstraction for uniqueness reservations, assignment rules, notifications, and realtime delivery.
 - Deduplicate D1 event append serialization behind one shared event writer.
-- Broaden durable delivery outbox integration tests across starter deployment flows.
+- Broaden durable delivery outbox coverage across live deployment and operational flows.
 - Continue raising test parity through real adapter and cross-surface contract coverage.
 
 ## Post-Review Progress
@@ -42,6 +42,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Added Worker queue realtime outbox drain coverage so the durable document-delivery outbox is proven through the built-in drain job into the Durable Object realtime publisher path.
 - Added Worker queue email outbox drain coverage plus a Worker `documentDeliveryOutbox.emailNotificationDeliveryQueue` seam so durable email intents can enqueue delivery jobs instead of sending inline during drains.
 - Added Worker queue durable outbox retry coverage so failed email delivery records stay failed until `retryAt`, then drain successfully through a later Queue message with the retry attempt recorded.
+- Added starter outbox deployment binding coverage by running `wrangler types` against a generated starter and asserting D1, R2, Queue, Durable Object, and session-secret Env bindings are emitted for the outbox-capable Worker.
 - Added starter realtime wiring coverage so generated Cloudflare apps include a RealtimeHub Durable Object binding/class, aggregate realtime publisher, Worker websocket/presence route config, and README guidance for `/api/realtime`.
 - Added starter deployment-guidance coverage so generated app READMEs keep resource creation, D1 id replacement, session-secret setup, and first remote deploy in one ordered deployment section.
 - Added starter setup-script coverage so generated Cloudflare apps expose one-command local preparation, session-secret setup, and first remote deployment scripts instead of leaving the deployment sequence only in prose.

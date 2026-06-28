@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Worker queue durable outbox retry coverage slice:
+As of the starter outbox deployment binding coverage slice:
 
 - Vitest files: `173`
-- Vitest cases: `1970`
-- Remaining gap to Frappe static markers: `814`
+- Vitest cases: `1971`
+- Remaining gap to Frappe static markers: `813`
 
 ## Implication
 

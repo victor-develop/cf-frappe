@@ -542,6 +542,29 @@ describe("cf-frappe CLI scaffold", () => {
     expect(readmeText).toContain("document delivery outbox drain job");
   });
 
+  it("generates Wrangler binding types for starter outbox deployment resources", async () => {
+    const target = join(tempRoot, "Typed Outbox Starter App");
+
+    await scaffoldProject({
+      targetDirectory: target,
+      compatibilityDate: "2026-06-22",
+      cfFrappeVersion: "0.1.0",
+      nodeTypesVersion: "^26.0.0",
+      typescriptVersion: "^5.7.2",
+      wranglerVersion: "^4.103.0"
+    });
+
+    await runTool(binPath("wrangler"), ["types"], target);
+
+    const generatedTypes = await readFile(join(target, "worker-configuration.d.ts"), "utf8");
+    expect(generatedTypes).toContain("DB: D1Database;");
+    expect(generatedTypes).toContain("FILES: R2Bucket;");
+    expect(generatedTypes).toContain("JOBS: Queue;");
+    expect(generatedTypes).toContain("SESSION_SECRET: string;");
+    expect(generatedTypes).toContain('AGGREGATES: DurableObjectNamespace<import("./src/worker").AggregateCoordinator>;');
+    expect(generatedTypes).toContain('REALTIME: DurableObjectNamespace<import("./src/worker").RealtimeHub>;');
+  });
+
   it("creates a Cloudflare Access-backed starter app", async () => {
     const target = join(tempRoot, "Access App");
 
