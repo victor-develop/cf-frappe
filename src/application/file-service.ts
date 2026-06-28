@@ -72,7 +72,7 @@ import {
   fileBufferedUploadDocumentData,
   fileMetadataPatch,
   fileMultipartAbortCommand,
-  fileMultipartCompletionStartedPatch,
+  fileMultipartCompletionStartedDocumentCommand,
   fileMultipartCompletionCommand,
   fileMultipartPartRecordedDocumentCommand,
   fileMultipartPartUploadCommand,
@@ -118,7 +118,6 @@ import {
   reusableFileRenditionForGeneration,
   sanitizeFilename,
   shouldRequestFileDelete,
-  shouldStartFileMultipartCompletion,
   type FileRenditionManifestEntry,
 } from "./file-policy.js";
 import type { IdGenerator } from "../ports/id-generator.js";
@@ -687,15 +686,19 @@ export class FileService {
     const multipartUploads = this.requireMultipartUploads();
     const current = await this.multipartUploadSnapshot(command, ensureFilePendingMultipartCompletion);
     ensureMultipartCompletionMatchesManifest(current, command.parts);
-    const completing = shouldStartFileMultipartCompletion(current)
+    const completionStart = fileMultipartCompletionStartedDocumentCommand({
+      snapshot: current,
+      ...fileExpectedVersionCommandOption(command.expectedVersion)
+    });
+    const completing = completionStart
       ? await this.documents.execute({
           actor: command.actor,
           doctype: this.fileDoctype,
           name: command.name,
-          command: "beginMultipartUploadCompletion",
-          input: fileMultipartCompletionStartedPatch(),
+          command: completionStart.command,
+          input: completionStart.input,
           ...fileTenantCommandOption(command.tenantId),
-          ...fileExpectedVersionCommandOption(command.expectedVersion),
+          ...fileExpectedVersionCommandOption(completionStart.expectedVersion),
           metadata: fileCommandMetadata(command.metadata)
         })
       : current;

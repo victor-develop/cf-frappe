@@ -42,6 +42,7 @@ import {
   fileDocumentData,
   fileMetadataPatch,
   fileMultipartAbortCommand,
+  fileMultipartCompletionStartedDocumentCommand,
   fileMultipartCompletionStartedPatch,
   fileMultipartCompletionCommand,
   fileMultipartPartRecordedDocumentCommand,
@@ -1345,6 +1346,27 @@ describe("file policy", () => {
       scan_checked_at: "2026-06-28T01:00:00.000Z"
     });
     expect(fileMultipartCompletionStartedPatch()).toEqual({ storage_state: "upload_completing" });
+  });
+
+  it("builds multipart completion-start document command intents", () => {
+    expect(fileMultipartCompletionStartedDocumentCommand({
+      snapshot: fileSnapshot({ storage_state: "upload_pending" }),
+      expectedVersion: 3
+    })).toEqual({
+      command: "beginMultipartUploadCompletion",
+      input: { storage_state: "upload_completing" },
+      expectedVersion: 3
+    });
+    expect(fileMultipartCompletionStartedDocumentCommand({
+      snapshot: fileSnapshot({ storage_state: "upload_pending" })
+    })).toEqual({
+      command: "beginMultipartUploadCompletion",
+      input: { storage_state: "upload_completing" }
+    });
+    expect(fileMultipartCompletionStartedDocumentCommand({
+      snapshot: fileSnapshot({ storage_state: "upload_completing" }),
+      expectedVersion: 3
+    })).toBeUndefined();
   });
 
   it("selects upload completion document command intents", () => {

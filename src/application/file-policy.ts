@@ -883,6 +883,26 @@ export function shouldStartFileMultipartCompletion(snapshot: DocumentSnapshot): 
   return !isFileMultipartCompletionStarted(snapshot);
 }
 
+export interface FileMultipartCompletionStartedDocumentCommand {
+  readonly command: "beginMultipartUploadCompletion";
+  readonly input: DocumentData;
+  readonly expectedVersion?: number;
+}
+
+export function fileMultipartCompletionStartedDocumentCommand(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly expectedVersion?: number;
+}): FileMultipartCompletionStartedDocumentCommand | undefined {
+  if (!shouldStartFileMultipartCompletion(command.snapshot)) {
+    return undefined;
+  }
+  return {
+    command: "beginMultipartUploadCompletion",
+    input: fileMultipartCompletionStartedPatch(),
+    ...fileExpectedVersionCommandOption(command.expectedVersion)
+  };
+}
+
 export interface FileMetadataPatchCommand {
   readonly filename?: string;
   readonly isPrivate?: boolean;
