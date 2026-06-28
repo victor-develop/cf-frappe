@@ -55,6 +55,7 @@ import {
   mergeDefaultFilters,
   normalizeRequiredSearch,
   normalizeSearch,
+  planDocumentReadProjection,
   toGlobalSearchResult,
   toLinkOption
 } from "./document-query-policy.js";
@@ -133,13 +134,14 @@ export class QueryService {
   ): Promise<DocumentSnapshot> {
     const doctype = await this.doctypeFor(actor, doctypeName, tenantId);
     const document = await this.projections.get(tenantId, doctype.name, name);
-    if (!document || document.docstatus === "deleted") {
-      throw notFound(`${doctype.name}/${name} was not found`);
+    const projection = planDocumentReadProjection({ doctype, name, document });
+    if (projection.status === "not-found") {
+      throw notFound(projection.message);
     }
-    if (!(await this.canReadDocument(actor, doctype, document))) {
+    if (!(await this.canReadDocument(actor, doctype, projection.document))) {
       throw permissionDenied(`Actor '${actor.id}' cannot read ${doctype.name}/${name}`);
     }
-    return document;
+    return projection.document;
   }
 
   async listDocuments(
@@ -482,10 +484,14 @@ export class QueryService {
     documents: readonly DocumentSnapshot[]
   ): Promise<readonly DocumentSnapshot[]> {
     const readable = await Promise.all(
-      documents.map(async (document) => ({
-        document,
-        readable: document.docstatus !== "deleted" && (await this.canReadDocument(actor, doctype, document))
-      }))
+      documents.map(async (document) => {
+        const projection = planDocumentReadProjection({ doctype, name: document.name, document });
+        return {
+          document,
+          readable: projection.status === "check-access" &&
+            await this.canReadDocument(actor, doctype, projection.document)
+        };
+      })
     );
     return readable.filter((entry) => entry.readable).map((entry) => entry.document);
   }

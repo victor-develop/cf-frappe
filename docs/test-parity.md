@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the DocType action access decision slice:
+As of the projected-document read decision slice:
 
 - Vitest files: `173`
-- Vitest cases: `2029`
-- Remaining gap to Frappe static markers: `755`
+- Vitest cases: `2032`
+- Remaining gap to Frappe static markers: `752`
 
 ## Implication
 

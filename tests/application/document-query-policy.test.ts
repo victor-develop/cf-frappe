@@ -16,6 +16,7 @@ import {
   mergeDefaultFilters,
   normalizeRequiredSearch,
   normalizeSearch,
+  planDocumentReadProjection,
   primitiveCsvValue,
   searchableText,
   toGlobalSearchResult,
@@ -70,6 +71,33 @@ describe("document query policy", () => {
     expect(labelForLinkedDocument({ ...article, data: { slug: "launch-plan" } }, Article)).toBe("launch-plan");
     expect(labelForLinkedDocument({ ...article, data: {} }, Article)).toBe("ART-1");
     expect(toLinkOption(article, Article)).toEqual({ value: "ART-1", label: "Launch Plan" });
+  });
+
+  it("plans missing projected document reads as not found", () => {
+    expect(planDocumentReadProjection({ doctype: Article, name: "ART-404", document: null })).toEqual({
+      status: "not-found",
+      message: "Article/ART-404 was not found"
+    });
+  });
+
+  it("plans deleted projected document reads as not found", () => {
+    expect(
+      planDocumentReadProjection({
+        doctype: Article,
+        name: "ART-1",
+        document: { ...article, docstatus: "deleted" }
+      })
+    ).toEqual({
+      status: "not-found",
+      message: "Article/ART-1 was not found"
+    });
+  });
+
+  it("plans live projected document reads for access checks", () => {
+    expect(planDocumentReadProjection({ doctype: Article, name: "ART-1", document: article })).toEqual({
+      status: "check-access",
+      document: article
+    });
   });
 
   it("matches link searches against option values and labels", () => {

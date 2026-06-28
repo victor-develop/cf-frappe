@@ -23,6 +23,10 @@ export interface GlobalSearchMatch {
   readonly text: string;
 }
 
+export type DocumentReadProjectionDecision =
+  | { readonly status: "not-found"; readonly message: string }
+  | { readonly status: "check-access"; readonly document: DocumentSnapshot };
+
 export type LinkFieldDefinition = FieldDefinition & {
   readonly type: "link";
   readonly linkTo: string;
@@ -134,6 +138,20 @@ export function toLinkOption(document: DocumentSnapshot, doctype: DocTypeDefinit
     value: document.name,
     label: labelForLinkedDocument(document, doctype)
   };
+}
+
+export function planDocumentReadProjection(input: {
+  readonly doctype: DocTypeDefinition;
+  readonly name: string;
+  readonly document: DocumentSnapshot | null;
+}): DocumentReadProjectionDecision {
+  if (!input.document || input.document.docstatus === "deleted") {
+    return {
+      status: "not-found",
+      message: `${input.doctype.name}/${input.name} was not found`
+    };
+  }
+  return { status: "check-access", document: input.document };
 }
 
 export function labelForLinkedDocument(document: DocumentSnapshot, doctype: DocTypeDefinition): string {
