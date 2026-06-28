@@ -362,6 +362,36 @@ describe("app manifests", () => {
     expect(Object.isFrozen(app.webPages?.[0]?.sections[0])).toBe(true);
   });
 
+  it("snapshots app manifest Web Form metadata by value", () => {
+    const roles = ["Guest"];
+    const form = {
+      name: "Task Intake",
+      route: "task-intake",
+      roles,
+      doctype: "Task",
+      fields: [{ field: "title", label: "Title", required: true }]
+    };
+    const app = defineApp({
+      name: "tasks",
+      webForms: [form]
+    });
+
+    roles[0] = "User";
+    form.fields[0]!.label = "Mutated";
+    form.fields.push({ field: "status", label: "Status", required: false });
+
+    expect(app.webForms?.[0]?.roles).toEqual(["Guest"]);
+    expect(app.webForms?.[0]?.fields).toEqual([{ field: "title", label: "Title", required: true }]);
+    expect(registryOptionsFromApps([app]).webForms?.[0]?.fields).toEqual([
+      { field: "title", label: "Title", required: true }
+    ]);
+    expect(Object.isFrozen(app.webForms)).toBe(true);
+    expect(Object.isFrozen(app.webForms?.[0])).toBe(true);
+    expect(Object.isFrozen(app.webForms?.[0]?.roles)).toBe(true);
+    expect(Object.isFrozen(app.webForms?.[0]?.fields)).toBe(true);
+    expect(Object.isFrozen(app.webForms?.[0]?.fields[0])).toBe(true);
+  });
+
   it("validates app names at the manifest boundary", () => {
     expect(() => defineApp({ name: "" })).toThrow(FrameworkError);
     expect(() => defineApp({ name: "Bad Name" })).toThrow("Invalid app name");

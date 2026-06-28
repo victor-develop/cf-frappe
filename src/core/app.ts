@@ -9,7 +9,7 @@ import { createRegistry, type DocumentHooks, type ModelRegistry, type RegistryOp
 import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-format.js";
 import type { ReportDefinition } from "./reports.js";
 import type { DocTypeDefinition } from "./types.js";
-import type { WebFormDefinition } from "./web-form.js";
+import { defineWebForm, type WebFormDefinition } from "./web-form.js";
 import { defineWebPage, type WebPageDefinition } from "./web-page.js";
 import type { WebViewDefinition } from "./web-view.js";
 import { defineWebsiteSettings, type WebsiteSettingsDefinition } from "./website-settings.js";
@@ -64,7 +64,7 @@ export function defineApp<TDataPatchResources = unknown>(
     dashboards: Object.freeze([...(input.dashboards ?? [])]),
     kanbans: Object.freeze([...(input.kanbans ?? [])]),
     calendars: Object.freeze([...(input.calendars ?? [])]),
-    webForms: Object.freeze([...(input.webForms ?? [])]),
+    webForms: Object.freeze((input.webForms ?? []).map(defineWebForm)),
     webPages: Object.freeze((input.webPages ?? []).map(defineWebPage)),
     webViews: Object.freeze([...(input.webViews ?? [])]),
     ...(input.websiteSettings === undefined ? {} : { websiteSettings: defineWebsiteSettings(input.websiteSettings) }),
