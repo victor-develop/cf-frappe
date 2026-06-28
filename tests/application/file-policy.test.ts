@@ -131,6 +131,7 @@ import {
   fileUploadScanFailedPatch,
   fileTenantCommandOption,
   fileTransformOverlayCommandOption,
+  fileTransformOverlayResolutionPlan,
   fileTransformObjectCommand,
   fileTransformOverlaySource,
   fileTransformedFileResult,
@@ -237,6 +238,17 @@ describe("file policy", () => {
     expect(fileIsPrivateCommandOption(undefined)).toEqual({});
     expect(fileTransformOverlayCommandOption(overlay)).toEqual({ overlay });
     expect(fileTransformOverlayCommandOption(undefined)).toEqual({});
+  });
+
+  it("plans transform overlay resolution only when options include an overlay", () => {
+    expect(fileTransformOverlayResolutionPlan({ width: 64 })).toEqual({ kind: "none" });
+    expect(fileTransformOverlayResolutionPlan({
+      width: 64,
+      overlay: { file: "file_overlay", placement: "top-left", opacity: 50 }
+    })).toEqual({
+      kind: "resolve",
+      overlay: { file: "file_overlay", placement: "top-left", opacity: 50 }
+    });
   });
 
   it("marks only browser-safe content types as previewable", () => {

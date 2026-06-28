@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the attachment target validation policy slice:
+As of the transform overlay resolution policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1731`
-- Remaining gap to Frappe static markers: `1053`
+- Vitest cases: `1732`
+- Remaining gap to Frappe static markers: `1052`
 
 ## Implication
 

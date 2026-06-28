@@ -127,6 +127,7 @@ import {
   fileMultipartUploadAbortCommand,
   fileMultipartUploadReservationCommand,
   fileTransformOverlayCommandOption,
+  fileTransformOverlayResolutionPlan,
   fileTransformObjectCommand,
   fileTransformOverlaySource,
   fileTransformedFileResult,
@@ -1154,18 +1155,18 @@ export class FileService {
     readonly tenantId: string;
     readonly options: FileTransformOptions;
   }): Promise<FileTransformOverlaySource | undefined> {
-    const overlay = command.options.overlay;
-    if (overlay === undefined) {
+    const plan = fileTransformOverlayResolutionPlan(command.options);
+    if (plan.kind === "none") {
       return undefined;
     }
     const snapshot = await this.availableFileSnapshot({
       actor: command.actor,
-      name: overlay.file,
+      name: plan.overlay.file,
       tenantId: command.tenantId
     });
     const key = filePrimaryObjectKey(snapshot);
-    const object = requireStoredFileObject(await this.storage.get(key), this.fileDoctype, overlay.file);
-    return fileTransformOverlaySource(snapshot, object, overlay);
+    const object = requireStoredFileObject(await this.storage.get(key), this.fileDoctype, plan.overlay.file);
+    return fileTransformOverlaySource(snapshot, object, plan.overlay);
   }
 
   private async recordRenditionManifest(command: {

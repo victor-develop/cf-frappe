@@ -2155,6 +2155,25 @@ export function fileTransformOverlaySource(
   };
 }
 
+export type FileTransformOverlayResolutionPlan =
+  | {
+      readonly kind: "none";
+    }
+  | {
+      readonly kind: "resolve";
+      readonly overlay: NonNullable<FileTransformOptions["overlay"]>;
+    };
+
+export function fileTransformOverlayResolutionPlan(options: FileTransformOptions): FileTransformOverlayResolutionPlan {
+  if (options.overlay === undefined) {
+    return { kind: "none" };
+  }
+  return {
+    kind: "resolve",
+    overlay: options.overlay
+  };
+}
+
 export function pendingFileRendition(command: {
   readonly snapshot: DocumentSnapshot;
   readonly tenantId: string;
