@@ -589,7 +589,7 @@ export function ensureFileAvailableForDownload(snapshot: DocumentSnapshot): void
       status: 409
     });
   }
-  if (snapshot.data.storage_state === "scan_failed") {
+  if (isFileScanFailed(snapshot)) {
     throw new FrameworkError("FILE_SCAN_FAILED", `${snapshot.doctype}/${snapshot.name} did not pass file scanning`, {
       status: 409
     });
@@ -615,6 +615,10 @@ export function isFileMultipartCompletionStarted(snapshot: DocumentSnapshot): bo
 
 export function isFileUploadPending(snapshot: DocumentSnapshot): boolean {
   return snapshot.data.storage_state === "upload_pending";
+}
+
+export function isFileScanFailed(snapshot: DocumentSnapshot): boolean {
+  return snapshot.data.storage_state === "scan_failed";
 }
 
 export function ensureFilePendingDirectUpload(snapshot: DocumentSnapshot): void {

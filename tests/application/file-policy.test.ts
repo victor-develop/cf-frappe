@@ -53,6 +53,7 @@ import {
   fileTransformSource,
   isFileDeleteRequested,
   isFileMultipartCompletionStarted,
+  isFileScanFailed,
   isFileUploadPending,
   isInfectedFileScanResult,
   isPreviewableFileContentType,
@@ -1009,6 +1010,12 @@ describe("file policy", () => {
     expect(isFileUploadPending(fileSnapshot({ storage_state: "upload_pending" }))).toBe(true);
     expect(isFileUploadPending(fileSnapshot({ storage_state: "upload_completing" }))).toBe(false);
     expect(isFileUploadPending(fileSnapshot({ storage_state: "available" }))).toBe(false);
+  });
+
+  it("identifies files that failed scanning", () => {
+    expect(isFileScanFailed(fileSnapshot({ storage_state: "scan_failed" }))).toBe(true);
+    expect(isFileScanFailed(fileSnapshot({ storage_state: "available" }))).toBe(false);
+    expect(isFileScanFailed(fileSnapshot({ storage_state: "delete_requested" }))).toBe(false);
   });
 
   it("normalizes file dashboard limits", () => {
