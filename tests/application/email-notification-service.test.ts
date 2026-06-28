@@ -10,6 +10,7 @@ import {
   type EmailSender,
   type EmailNotificationEventPayload,
   type EventStore,
+  type DomainEvent,
   type DocumentEventPayload,
   type NewDomainEvent,
   type NotificationRuleDefinition,
@@ -151,6 +152,29 @@ describe("EmailNotificationService", () => {
           messageId: "evt_update:rule:Email%20owners:email:user_123",
           reason: "No deliverable email address for user 'user_123'"
         }
+      }
+    ]);
+  });
+
+  it("fails explicitly when an outbox append returns no persisted event", async () => {
+    const events = new EmptyAppendEmailOutboxEventStore();
+    const service = new EmailNotificationService({
+      events,
+      sender: recordingEmailSender(),
+      from: { email: "notifications@example.com" },
+      notificationRules: ruleProvider("reviewer@example.com"),
+      ids: deterministicIds(["queued-1"]),
+      clock: fixedClock(now)
+    });
+    const messageId = "evt_update:rule:Email%20owners:email:reviewer%40example.com";
+
+    await expect(service.queueFromDomainEvent(documentUpdatedEvent(), noteSnapshot())).rejects.toThrow(
+      "Email outbox append for 'evt_update:rule:Email%20owners:email:reviewer%40example.com' in tenant 'acme' did not return 'EmailNotificationQueued'"
+    );
+    expect(events.appended).toMatchObject([
+      {
+        stream: emailOutboxStream("acme", messageId),
+        payload: { kind: "EmailNotificationQueued", messageId }
       }
     ]);
   });
@@ -577,6 +601,27 @@ function recordingEmailSender(id?: string): EmailSender & { readonly messages: r
       return id === undefined ? {} : { id };
     }
   };
+}
+
+class EmptyAppendEmailOutboxEventStore implements EventStore {
+  readonly appended: NewDomainEvent[] = [];
+
+  async append(
+    _stream: StreamName,
+    _expectedVersion: number,
+    events: readonly NewDomainEvent[]
+  ): Promise<readonly DomainEvent[]> {
+    this.appended.push(...events);
+    return [];
+  }
+
+  async readStream(_stream: StreamName): Promise<readonly DomainEvent[]> {
+    return [];
+  }
+
+  async currentVersion(_stream: StreamName): Promise<number> {
+    return 0;
+  }
 }
 
 function failSentAppendEventStore(inner: InMemoryEventStore): EventStore {

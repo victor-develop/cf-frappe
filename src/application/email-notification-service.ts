@@ -409,7 +409,7 @@ export class EmailNotificationService {
         metadata: {}
       } satisfies NewDomainEvent
     ]);
-    return event!;
+    return requireAppendedEmailOutboxEvent(event, tenantId, messageId, payload.kind);
   }
 }
 
@@ -417,6 +417,20 @@ function isSkippedDelivery(
   delivery: DocumentEmailNotificationQueueResult
 ): delivery is Extract<DocumentEmailNotificationDelivery, { readonly status: "skipped" }> {
   return delivery.status === "skipped";
+}
+
+function requireAppendedEmailOutboxEvent(
+  event: DomainEvent | undefined,
+  tenantId: TenantId,
+  messageId: string,
+  payloadKind: EmailNotificationEventPayload["kind"]
+): DomainEvent {
+  if (event === undefined) {
+    throw new Error(
+      `Email outbox append for '${messageId}' in tenant '${tenantId}' did not return '${payloadKind}'`
+    );
+  }
+  return event;
 }
 
 function queueResultFromOutboxRecord(

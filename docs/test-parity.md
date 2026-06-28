@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the user notification replay consistency slice:
+As of the email outbox append consistency slice:
 
 - Vitest files: `170`
-- Vitest cases: `1785`
-- Remaining gap to Frappe static markers: `999`
+- Vitest cases: `1786`
+- Remaining gap to Frappe static markers: `998`
 
 ## Implication
 
