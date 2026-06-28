@@ -225,7 +225,15 @@ export class UserNotificationService {
             metadata: {}
           } satisfies NewDomainEvent
         ]);
-        return notificationFromRecordedEvent(saved!);
+        return notificationFromRecordedEvent(
+          requireAppendedUserNotificationEvent(
+            saved,
+            notification.tenantId,
+            notification.recipientId,
+            notificationId,
+            "UserNotificationRecorded"
+          )
+        );
       } catch (error) {
         if (isStreamConflict(error) && attempt < MAX_NOTIFICATION_APPEND_ATTEMPTS) {
           continue;
@@ -266,7 +274,13 @@ export class UserNotificationService {
         metadata: metadata ?? {}
       }
     ]);
-    return event!;
+    return requireAppendedUserNotificationEvent(
+      event,
+      state.tenantId,
+      state.userId,
+      payload.notificationId,
+      payload.kind
+    );
   }
 
   private authorizeUser(actor: Actor, explicitUserId?: string): { readonly tenantId: TenantId; readonly userId: string } {
@@ -398,6 +412,21 @@ function requireReplayedNotification(
     );
   }
   return notification;
+}
+
+function requireAppendedUserNotificationEvent(
+  event: DomainEvent | undefined,
+  tenantId: TenantId,
+  userId: string,
+  notificationId: string,
+  payloadKind: UserNotificationEventPayload["kind"]
+): DomainEvent {
+  if (event === undefined) {
+    throw new Error(
+      `User notification append for '${notificationId}' and user '${userId}' in tenant '${tenantId}' did not return '${payloadKind}'`
+    );
+  }
+  return event;
 }
 
 function notificationIdentity(notification: DocumentUserNotificationPayload): string {

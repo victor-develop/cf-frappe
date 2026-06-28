@@ -142,6 +142,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized single data-patch runner normalization so rollback retry no longer normalizes through a single-element array assertion.
 - Centralized runtime job schedule post-append replay consistency in a named resolver so `JobScheduleService` reports an explicit event-store/replay invariant failure instead of relying on a non-null assertion after save.
 - Centralized user notification post-append replay consistency in a named resolver so read and dismiss commands report an explicit inbox stream invariant failure instead of relying on map non-null assertions after replay.
+- Centralized user notification append-result consistency in a named resolver so record, read, and dismiss writes fail with an explicit inbox stream invariant when an event-store append returns no persisted event.
 - Centralized email outbox append-result consistency in a named resolver so queue and claim flows fail with an explicit outbox stream invariant when an event-store append returns no persisted event.
 - Captured document delivery outbox handler dependencies up front and centralized queued-email message-id eligibility in a named predicate so notification, realtime, and queued-email fan-out no longer relies on service and message-id non-null assertions inside async closures.
 - Extracted available-rendition reuse selection and duplicate pending-rendition rejection from `FileService` into the file policy with focused source and overlay identity coverage.

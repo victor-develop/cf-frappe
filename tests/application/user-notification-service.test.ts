@@ -55,6 +55,25 @@ describe("UserNotificationService", () => {
     await expect(events.readStream(userNotificationsStream("acme", "support@example.com"))).resolves.toHaveLength(1);
   });
 
+  it("fails explicitly when recording append returns no persisted event", async () => {
+    const events = new EmptyAppendNotificationEventStore();
+    const notifications = new UserNotificationService({
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["record-1"])
+    });
+
+    await expect(notifications.recordFromDomainEvent(assignmentEvent("evt_assign", "support@example.com"))).rejects.toThrow(
+      "User notification append for 'evt_assign:user:support%40example.com' and user 'support@example.com' in tenant 'acme' did not return 'UserNotificationRecorded'"
+    );
+    expect(events.appended).toMatchObject([
+      {
+        stream: userNotificationsStream("acme", "support@example.com"),
+        payload: { kind: "UserNotificationRecorded", notificationId: "evt_assign:user:support%40example.com" }
+      }
+    ]);
+  });
+
   it("retries user notification appends when another document commit wins the recipient stream", async () => {
     const events = new RacingNotificationEventStore();
     const notifications = new UserNotificationService({
@@ -229,6 +248,27 @@ class RacingNotificationEventStore implements EventStore {
 
   currentVersion(stream: StreamName): Promise<number> {
     return this.delegate.currentVersion(stream);
+  }
+}
+
+class EmptyAppendNotificationEventStore implements EventStore {
+  readonly appended: NewDomainEvent[] = [];
+
+  async append(
+    _stream: StreamName,
+    _expectedVersion: number,
+    events: readonly NewDomainEvent[]
+  ): Promise<readonly DomainEvent[]> {
+    this.appended.push(...events);
+    return [];
+  }
+
+  async readStream(_stream: StreamName): Promise<readonly DomainEvent[]> {
+    return [];
+  }
+
+  async currentVersion(_stream: StreamName): Promise<number> {
+    return 0;
   }
 }
 
