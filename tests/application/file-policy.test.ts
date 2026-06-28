@@ -72,6 +72,7 @@ import {
   fileSnapshotStringData,
   fileExpectedVersionCommandOption,
   fileIsPrivateCommandOption,
+  fileUploadCompletionDocumentCommand,
   fileUploadCompletedPatch,
   fileUploadCompletedDocumentData,
   fileUploadContentType,
@@ -1322,6 +1323,39 @@ describe("file policy", () => {
       scan_checked_at: "2026-06-28T01:00:00.000Z"
     });
     expect(fileMultipartCompletionStartedPatch()).toEqual({ storage_state: "upload_completing" });
+  });
+
+  it("selects upload completion document command intents", () => {
+    const object = fileObject({ etag: "object-etag", httpEtag: '"http-etag"' });
+    const scanPatch = fileScanPatch({ status: "clean" }, "2026-06-28T01:00:00.000Z");
+
+    expect(fileUploadCompletionDocumentCommand({
+      uploadCommand: "completeDirectUpload",
+      object,
+      scanPatch
+    })).toEqual({
+      command: "completeDirectUpload",
+      input: {
+        storage_state: "available",
+        etag: '"http-etag"',
+        scan_status: "clean",
+        scan_checked_at: "2026-06-28T01:00:00.000Z"
+      }
+    });
+    expect(fileUploadCompletionDocumentCommand({
+      uploadCommand: "completeMultipartUpload",
+      object,
+      scanPatch,
+      infected: true
+    })).toEqual({
+      command: "failScan",
+      input: {
+        storage_state: "scan_failed",
+        etag: '"http-etag"',
+        scan_status: "clean",
+        scan_checked_at: "2026-06-28T01:00:00.000Z"
+      }
+    });
   });
 
   it("builds final buffered-upload document data", () => {

@@ -825,6 +825,34 @@ export function fileUploadScanFailedDocumentData(
   };
 }
 
+export type FileUploadCompletionDocumentCommandName =
+  | "completeDirectUpload"
+  | "completeMultipartUpload"
+  | "failScan";
+
+export interface FileUploadCompletionDocumentCommand {
+  readonly command: FileUploadCompletionDocumentCommandName;
+  readonly input: DocumentData;
+}
+
+export function fileUploadCompletionDocumentCommand(command: {
+  readonly uploadCommand: Exclude<FileUploadCompletionDocumentCommandName, "failScan">;
+  readonly object: FileObjectMetadata;
+  readonly scanPatch?: DocumentData;
+  readonly infected?: boolean;
+}): FileUploadCompletionDocumentCommand {
+  if (command.infected === true) {
+    return {
+      command: "failScan",
+      input: fileUploadScanFailedPatch(command.object, command.scanPatch)
+    };
+  }
+  return {
+    command: command.uploadCommand,
+    input: fileUploadCompletedPatch(command.object, command.scanPatch)
+  };
+}
+
 export function fileMultipartCompletionStartedPatch(): DocumentData {
   return { storage_state: "upload_completing" };
 }

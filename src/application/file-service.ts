@@ -90,7 +90,7 @@ import {
   fileScanTarget,
   fileExpectedVersionCommandOption,
   fileIsPrivateCommandOption,
-  fileUploadCompletedPatch,
+  fileUploadCompletionDocumentCommand,
   fileUploadCompletedDocumentData,
   fileUploadContentType,
   fileUploadExpiresAt,
@@ -99,7 +99,6 @@ import {
   fileMultipartUploadAbortCommand,
   fileMultipartUploadReservationCommand,
   fileUploadScanFailedDocumentData,
-  fileUploadScanFailedPatch,
   fileTenantCommandOption,
   fileTransformOverlayCommandOption,
   fileTransformObjectCommand,
@@ -571,13 +570,19 @@ export class FileService {
       object
     });
     const scanPatch = optionalFileScanPatch(scan, this.clock.now());
+    const completion = fileUploadCompletionDocumentCommand({
+      uploadCommand: "completeDirectUpload",
+      object,
+      scanPatch,
+      infected: isInfectedFileScanResult(scan)
+    });
     if (isInfectedFileScanResult(scan)) {
       const snapshot = await this.documents.execute({
         actor: command.actor,
         doctype: this.fileDoctype,
         name: command.name,
-        command: "failScan",
-        input: fileUploadScanFailedPatch(object, scanPatch),
+        command: completion.command,
+        input: completion.input,
         ...fileTenantCommandOption(command.tenantId),
         ...fileExpectedVersionCommandOption(command.expectedVersion),
         metadata: fileCommandMetadata(command.metadata)
@@ -589,8 +594,8 @@ export class FileService {
       actor: command.actor,
       doctype: this.fileDoctype,
       name: command.name,
-      command: "completeDirectUpload",
-      input: fileUploadCompletedPatch(object, scanPatch),
+      command: completion.command,
+      input: completion.input,
       ...fileTenantCommandOption(command.tenantId),
       ...fileExpectedVersionCommandOption(command.expectedVersion),
       metadata: fileCommandMetadata(command.metadata)
@@ -708,13 +713,19 @@ export class FileService {
       object
     });
     const scanPatch = optionalFileScanPatch(scan, this.clock.now());
+    const completion = fileUploadCompletionDocumentCommand({
+      uploadCommand: "completeMultipartUpload",
+      object,
+      scanPatch,
+      infected: isInfectedFileScanResult(scan)
+    });
     if (isInfectedFileScanResult(scan)) {
       const snapshot = await this.documents.execute({
         actor: command.actor,
         doctype: this.fileDoctype,
         name: command.name,
-        command: "failScan",
-        input: fileUploadScanFailedPatch(object, scanPatch),
+        command: completion.command,
+        input: completion.input,
         ...fileTenantCommandOption(command.tenantId),
         expectedVersion: completing.version,
         metadata: fileCommandMetadata(command.metadata)
@@ -726,8 +737,8 @@ export class FileService {
       actor: command.actor,
       doctype: this.fileDoctype,
       name: command.name,
-      command: "completeMultipartUpload",
-      input: fileUploadCompletedPatch(object, scanPatch),
+      command: completion.command,
+      input: completion.input,
       ...fileTenantCommandOption(command.tenantId),
       expectedVersion: completing.version,
       metadata: fileCommandMetadata(command.metadata)
