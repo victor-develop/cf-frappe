@@ -97,6 +97,7 @@ import {
   fileRenditionGenerationReservation,
   fileRenditionId,
   fileRenditionManifestExecuteCommand,
+  fileRenditionReservationExecuteCommand,
   fileRenditionReservationDocumentCommand,
   fileFailedRenditionManifestCommandName,
   fileRenditionSnapshotPutObjectCommand,
@@ -912,16 +913,14 @@ export class FileService {
       snapshot: downloaded.snapshot,
       reservation
     });
-    await this.documents.execute({
+    await this.documents.execute(fileRenditionReservationExecuteCommand({
       actor: command.actor,
       doctype: this.fileDoctype,
       name: command.name,
-      command: reservationCommand.command,
-      input: reservationCommand.input,
-      ...fileTenantCommandOption(command.tenantId),
-      expectedVersion: reservationCommand.expectedVersion,
-      metadata: fileCommandMetadata(command.metadata)
-    });
+      tenantId: command.tenantId,
+      metadata: command.metadata,
+      reservation: reservationCommand
+    }));
 
     let object: FileObjectMetadata | undefined;
     try {

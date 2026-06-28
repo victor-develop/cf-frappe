@@ -81,6 +81,7 @@ import {
   fileRenditionManifestDocumentCommand,
   fileRenditionManifestExecuteCommand,
   fileRenditionPutObjectCommand,
+  fileRenditionReservationExecuteCommand,
   fileRenditionReservationDocumentCommand,
   fileRenditionSnapshotPutObjectCommand,
   fileRenditionSnapshotManifestPatch,
@@ -1025,6 +1026,50 @@ describe("file policy", () => {
       command: "reserveRendition",
       input: reservation.patch,
       expectedVersion: 9
+    });
+  });
+
+  it("builds rendition reservation execute command inputs", () => {
+    const actor = { id: "renderer@example.com", roles: ["File Manager"], tenantId: "actor-tenant" };
+    const metadata = { source: "rendition-worker" };
+    const snapshot = {
+      ...fileSnapshot({
+        content_type: "image/png",
+        renditions: [renditionEntry("existing")]
+      }),
+      version: 9
+    };
+    const generation = fileRenditionGenerationReservation({
+      snapshot,
+      tenantId: "acme",
+      id: "w64-f-webp",
+      attemptId: "attempt-1",
+      sourceEtag: "source-1",
+      options: { width: 64, format: "webp" },
+      requestedAt: "2026-06-28T00:00:00.000Z",
+      requestedBy: "owner@example.com"
+    });
+    const reservation = fileRenditionReservationDocumentCommand({
+      snapshot,
+      reservation: generation
+    });
+
+    expect(fileRenditionReservationExecuteCommand({
+      actor,
+      doctype: "File",
+      name: "FILE-1",
+      tenantId: "tenant-a",
+      metadata,
+      reservation
+    })).toEqual({
+      actor,
+      doctype: "File",
+      name: "FILE-1",
+      command: "reserveRendition",
+      input: generation.patch,
+      tenantId: "tenant-a",
+      expectedVersion: 9,
+      metadata
     });
   });
 

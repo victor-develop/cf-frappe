@@ -2042,6 +2042,37 @@ export function fileRenditionReservationDocumentCommand(command: {
   };
 }
 
+export interface FileRenditionReservationExecuteCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly command: "reserveRendition";
+  readonly input: DocumentData;
+  readonly tenantId?: string;
+  readonly expectedVersion: number;
+  readonly metadata: DocumentData;
+}
+
+export function fileRenditionReservationExecuteCommand(command: {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly tenantId?: string | undefined;
+  readonly metadata?: DocumentData | undefined;
+  readonly reservation: FileRenditionReservationDocumentCommand;
+}): FileRenditionReservationExecuteCommand {
+  return {
+    actor: command.actor,
+    doctype: command.doctype,
+    name: command.name,
+    command: command.reservation.command,
+    input: command.reservation.input,
+    ...fileTenantCommandOption(command.tenantId),
+    expectedVersion: command.reservation.expectedVersion,
+    metadata: fileCommandMetadata(command.metadata)
+  };
+}
+
 function ensureFileObjectKeyFits(key: string, message: string): void {
   if (new TextEncoder().encode(key).byteLength > 1024) {
     throw badRequest(message);

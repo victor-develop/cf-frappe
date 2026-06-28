@@ -145,4 +145,5 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized delete execute-command shaping in file policy so final file deletion no longer composes actor, tenant, metadata, or expected-version inline.
 - Centralized bulk delete and metadata update entry command shaping in file policy so bulk delete and metadata update no longer compose per-file actor, patch fields, tenant, metadata, or expected-version inline.
 - Centralized bulk metadata update failure mapping in file policy so bulk metadata saves no longer carry fallback failure strings in service orchestration.
+- Centralized rendition reservation execute-command shaping in file policy so rendition generation no longer composes reserveRendition actor, tenant, metadata, expected-version, or manifest input inline.
 - Centralized delete document-command intent shaping in file policy so abort and final delete orchestration no longer derive current snapshot version guards inline.
