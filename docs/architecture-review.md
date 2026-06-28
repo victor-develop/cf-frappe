@@ -91,6 +91,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Extracted buffered-upload final document data shaping from `FileService` into the file policy so scanner success/failure create events share one pure payload boundary.
 - Extracted optional scan-result patch planning from `FileService` into the file policy so buffered, direct, and multipart upload flows share the same no-scanner empty-patch semantics.
 - Extracted infected scan-result classification from `FileService` into the file policy so upload flows no longer compare scanner status strings inline.
+- Extracted delete-requested state classification from `FileService` into the file policy so delete commands and delete expected-version rules share one state predicate.
 - Extracted rendition manifest patch shaping from `FileService` into the file policy so rendition reservation/completion/failure commands reuse one pure document patch boundary.
 - Extracted multipart part manifest patch shaping from `FileService` into the file policy so part-upload commands reuse the same pure manifest write boundary as manifest parsing/upserts.
 - Extracted file metadata patch construction from `FileService` into the file policy with focused rename, privacy, attach, detach, and empty-patch coverage.

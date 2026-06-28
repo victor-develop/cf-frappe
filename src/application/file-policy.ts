@@ -577,7 +577,7 @@ export function ensureFileDeleteExpectedVersion(snapshot: DocumentSnapshot, expe
   if (
     expectedVersion !== undefined &&
     snapshot.version !== expectedVersion &&
-    snapshot.data.storage_state !== "delete_requested"
+    !isFileDeleteRequested(snapshot)
   ) {
     throw conflict(`Expected version ${expectedVersion}, found ${snapshot.version}`);
   }
@@ -598,11 +598,15 @@ export function ensureFileAvailableForDownload(snapshot: DocumentSnapshot): void
 }
 
 export function ensureFileNotDeleteRequested(snapshot: DocumentSnapshot): void {
-  if (snapshot.data.storage_state === "delete_requested") {
+  if (isFileDeleteRequested(snapshot)) {
     throw new FrameworkError("DOCUMENT_DELETED", `${snapshot.doctype}/${snapshot.name} is pending deletion`, {
       status: 410
     });
   }
+}
+
+export function isFileDeleteRequested(snapshot: DocumentSnapshot): boolean {
+  return snapshot.data.storage_state === "delete_requested";
 }
 
 export function ensureFilePendingDirectUpload(snapshot: DocumentSnapshot): void {

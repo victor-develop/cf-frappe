@@ -84,6 +84,7 @@ import {
   fileUploadScanFailedPatch,
   fileTransformOverlaySource,
   fileTransformSource,
+  isFileDeleteRequested,
   isInfectedFileScanResult,
   multipartPartManifest,
   multipartPartManifestPatch,
@@ -986,7 +987,7 @@ export class FileService {
     );
     this.preflightDelete(command.actor, current, command.expectedVersion);
     const deleteRequested =
-      current.data.storage_state === "delete_requested"
+      isFileDeleteRequested(current)
         ? current
         : await this.documents.execute({
             actor: command.actor,

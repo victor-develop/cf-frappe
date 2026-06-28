@@ -51,6 +51,7 @@ import {
   fileTransformOptionsData,
   fileTransformOptionsFromData,
   fileTransformSource,
+  isFileDeleteRequested,
   isInfectedFileScanResult,
   isPreviewableFileContentType,
   MIN_MULTIPART_FILE_PART_BYTES,
@@ -990,6 +991,11 @@ describe("file policy", () => {
       "Expected version 2, found 1"
     );
     expect(() => ensureFileDeleteExpectedVersion(fileSnapshot({ storage_state: "delete_requested" }), 2)).not.toThrow();
+  });
+
+  it("identifies files with delete already requested", () => {
+    expect(isFileDeleteRequested(fileSnapshot({ storage_state: "available" }))).toBe(false);
+    expect(isFileDeleteRequested(fileSnapshot({ storage_state: "delete_requested" }))).toBe(true);
   });
 
   it("normalizes file dashboard limits", () => {
