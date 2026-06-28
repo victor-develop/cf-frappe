@@ -4,13 +4,11 @@ import {
   badRequest,
   notFound,
   permissionDenied,
-  validationFailed,
   type FrameworkErrorCode
 } from "../core/errors.js";
 import { FILE_DOCTYPE_NAME } from "../core/file-doctype.js";
 import { can } from "../core/permissions.js";
 import type { ModelRegistry } from "../core/registry.js";
-import { validateDocumentData } from "../core/schema.js";
 import {
   DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
@@ -46,6 +44,7 @@ import {
   ensureFileObjectTransformable,
   ensureValidFileScanResult,
   ensureFileAvailableForDownload,
+  ensureFileCreateAllowed,
   ensureFileDeleteAllowed,
   ensureFileExpectedVersion,
   ensureFileNotDeleteRequested,
@@ -1059,13 +1058,12 @@ export class FileService {
 
   private preflightCreate(actor: Actor, data: DocumentData): void {
     const doctype = this.registry.get(this.fileDoctype);
-    if (!can(actor, doctype, "create")) {
-      throw permissionDenied(`Actor '${actor.id}' cannot create ${this.fileDoctype}`);
-    }
-    const issues = validateDocumentData(doctype, data);
-    if (issues.length > 0) {
-      throw validationFailed(issues);
-    }
+    ensureFileCreateAllowed({
+      actor,
+      doctype,
+      fileDoctype: this.fileDoctype,
+      data
+    });
   }
 
   private async availableFileSnapshot(command: DownloadFileCommand): Promise<DocumentSnapshot> {

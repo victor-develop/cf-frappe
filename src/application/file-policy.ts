@@ -1,5 +1,6 @@
-import { badRequest, conflict, FrameworkError, notFound, permissionDenied } from "../core/errors.js";
+import { badRequest, conflict, FrameworkError, notFound, permissionDenied, validationFailed } from "../core/errors.js";
 import { can } from "../core/permissions.js";
+import { validateDocumentData } from "../core/schema.js";
 import {
   DEFAULT_TENANT_ID,
   type Actor,
@@ -622,6 +623,21 @@ export function requireFileSnapshotString(snapshot: DocumentSnapshot, field: str
 export function ensureFileExpectedVersion(snapshot: DocumentSnapshot, expectedVersion: number | undefined): void {
   if (expectedVersion !== undefined && snapshot.version !== expectedVersion) {
     throw conflict(`Expected version ${expectedVersion}, found ${snapshot.version}`);
+  }
+}
+
+export function ensureFileCreateAllowed(command: {
+  readonly actor: Actor;
+  readonly doctype: DocTypeDefinition;
+  readonly fileDoctype: string;
+  readonly data: DocumentData;
+}): void {
+  if (!can(command.actor, command.doctype, "create")) {
+    throw permissionDenied(`Actor '${command.actor.id}' cannot create ${command.fileDoctype}`);
+  }
+  const issues = validateDocumentData(command.doctype, command.data);
+  if (issues.length > 0) {
+    throw validationFailed(issues);
   }
 }
 

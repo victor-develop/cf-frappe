@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file delete preflight policy slice:
+As of the file create preflight policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1668`
-- Remaining gap to Frappe static markers: `1116`
+- Vitest cases: `1669`
+- Remaining gap to Frappe static markers: `1115`
 
 ## Implication
 

@@ -8,6 +8,7 @@ import {
   ensureNoPendingFileRenditionForSource,
   ensureValidFileScanResult,
   ensureFileAvailableForDownload,
+  ensureFileCreateAllowed,
   ensureFileDeleteAllowed,
   ensureFileDeleteExpectedVersion,
   ensureFileExpectedVersion,
@@ -1198,6 +1199,45 @@ describe("file policy", () => {
       "Expected version 2, found 1"
     );
     expect(() => ensureFileDeleteExpectedVersion(fileSnapshot({ storage_state: "delete_requested" }), 2)).not.toThrow();
+  });
+
+  it("validates file create permissions and schema together", () => {
+    const doctype: DocTypeDefinition = {
+      name: "File",
+      fields: [
+        { name: "filename", type: "text", required: true },
+        { name: "size", type: "integer" }
+      ],
+      permissions: [{ roles: ["File Manager"], actions: ["create"] }]
+    };
+
+    expect(() => ensureFileCreateAllowed({
+      actor: { id: "manager@example.com", roles: ["File Manager"] },
+      doctype,
+      fileDoctype: "File",
+      data: { filename: "invoice.pdf", size: 42 }
+    })).not.toThrow();
+    expect(() => ensureFileCreateAllowed({
+      actor: { id: "reader@example.com", roles: ["Reader"] },
+      doctype,
+      fileDoctype: "File",
+      data: { filename: "invoice.pdf", size: 42 }
+    })).toThrow("Actor 'reader@example.com' cannot create File");
+    let error: unknown;
+    try {
+      ensureFileCreateAllowed({
+        actor: { id: "manager@example.com", roles: ["File Manager"] },
+        doctype,
+        fileDoctype: "File",
+        data: { size: 42 }
+      });
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "filename", code: "required" })]
+    });
   });
 
   it("validates file delete permissions and expected versions together", () => {
