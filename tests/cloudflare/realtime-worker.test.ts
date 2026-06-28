@@ -148,6 +148,93 @@ describe("CloudFrappe Worker realtime", () => {
     });
   });
 
+  it("rejects realtime presence requests without topics before authorization or hub access", async () => {
+    const topics: string[] = [];
+    const fetches: Request[] = [];
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => {
+        throw new Error("Actor should not be resolved for missing realtime presence topics");
+      },
+      realtime: { namespace: () => fakeRealtimeNamespace(topics, fetches) }
+    });
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/api/realtime/presence"),
+      { DB: fakeD1(), AGGREGATES: fakeAggregateNamespace() },
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "BAD_REQUEST", message: "topic is required" }
+    });
+    expect(topics).toEqual([]);
+    expect(fetches).toEqual([]);
+  });
+
+  it("rejects invalid realtime presence topics before authorization or hub access", async () => {
+    const topics: string[] = [];
+    const fetches: Request[] = [];
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => {
+        throw new Error("Actor should not be resolved for invalid realtime presence topics");
+      },
+      realtime: { namespace: () => fakeRealtimeNamespace(topics, fetches) }
+    });
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/api/realtime/presence?topic=user:acme"),
+      { DB: fakeD1(), AGGREGATES: fakeAggregateNamespace() },
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "BAD_REQUEST", message: "topic is invalid" }
+    });
+    expect(topics).toEqual([]);
+    expect(fetches).toEqual([]);
+  });
+
+  it("preserves canonical encoded topic delimiters for realtime presence snapshots", async () => {
+    const topics: string[] = [];
+    const fetches: Request[] = [];
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => owner,
+      realtime: {
+        namespace: () => fakeRealtimeNamespace(topics, fetches, {
+          connections: [
+            {
+              connectionId: "conn-1",
+              connectedAt: "2026-06-23T00:00:00.000Z",
+              tenantId: "acme",
+              userId: "owner@example.com"
+            }
+          ]
+        })
+      }
+    });
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/api/realtime/presence?topic=document:acme:Note:A%3AB"),
+      { DB: fakeD1("A:B"), AGGREGATES: fakeAggregateNamespace() },
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(200);
+    expect(topics).toEqual(["document:acme:Note:A%3AB"]);
+    expect(fetches).toEqual([]);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        topic: "document:acme:Note:A%3AB",
+        connections: [{ connectionId: "conn-1" }]
+      }
+    });
+  });
+
   it("rejects websocket subscriptions for another user's realtime room", async () => {
     const topics: string[] = [];
     const fetches: Request[] = [];
