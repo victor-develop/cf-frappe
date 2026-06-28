@@ -86,6 +86,7 @@ import {
   fileFailedRenditionManifestCommandName,
   fileIsPrivateCommandOption,
   fileUploadCompletionDocumentCommand,
+  fileUploadCompletionExecuteCommand,
   fileUploadCompletedPatch,
   fileUploadCompletedDocumentData,
   fileUploadContentType,
@@ -1570,6 +1571,38 @@ describe("file policy", () => {
         scan_checked_at: "2026-06-28T01:00:00.000Z"
       },
       expectedVersion: 4
+    });
+  });
+
+  it("builds upload completion execute command inputs", () => {
+    const actor = { id: "uploader@example.com", roles: ["File Manager"], tenantId: "actor-tenant" };
+    const metadata = { source: "direct-upload-callback" };
+    const object = fileObject({ etag: "object-etag", httpEtag: '"http-etag"' });
+    const completion = fileUploadCompletionDocumentCommand({
+      uploadCommand: "completeDirectUpload",
+      object,
+      expectedVersion: 5
+    });
+
+    expect(fileUploadCompletionExecuteCommand({
+      actor,
+      doctype: "File",
+      name: "FILE-1",
+      tenantId: "tenant-a",
+      metadata,
+      completion
+    })).toEqual({
+      actor,
+      doctype: "File",
+      name: "FILE-1",
+      command: "completeDirectUpload",
+      input: {
+        storage_state: "available",
+        etag: '"http-etag"'
+      },
+      tenantId: "tenant-a",
+      expectedVersion: 5,
+      metadata
     });
   });
 

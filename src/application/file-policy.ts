@@ -930,6 +930,37 @@ export function fileUploadCompletionDocumentCommand(command: {
   };
 }
 
+export interface FileUploadCompletionExecuteCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly command: FileUploadCompletionDocumentCommandName;
+  readonly input: DocumentData;
+  readonly tenantId?: string;
+  readonly expectedVersion?: number;
+  readonly metadata: DocumentData;
+}
+
+export function fileUploadCompletionExecuteCommand(command: {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly tenantId?: string | undefined;
+  readonly metadata?: DocumentData | undefined;
+  readonly completion: FileUploadCompletionDocumentCommand;
+}): FileUploadCompletionExecuteCommand {
+  return {
+    actor: command.actor,
+    doctype: command.doctype,
+    name: command.name,
+    command: command.completion.command,
+    input: command.completion.input,
+    ...fileTenantCommandOption(command.tenantId),
+    ...fileExpectedVersionCommandOption(command.completion.expectedVersion),
+    metadata: fileCommandMetadata(command.metadata)
+  };
+}
+
 export function fileMultipartCompletionStartedPatch(): DocumentData {
   return { storage_state: "upload_completing" };
 }

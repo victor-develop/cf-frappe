@@ -99,6 +99,7 @@ import {
   fileExpectedVersionCommandOption,
   fileIsPrivateCommandOption,
   fileUploadCompletionDocumentCommand,
+  fileUploadCompletionExecuteCommand,
   fileUploadContentType,
   fileUploadExpiresAt,
   fileDirectUploadReservationCommand,
@@ -587,29 +588,25 @@ export class FileService {
       ...fileExpectedVersionCommandOption(command.expectedVersion)
     });
     if (isInfectedFileScanResult(scan)) {
-      const snapshot = await this.documents.execute({
+      const snapshot = await this.documents.execute(fileUploadCompletionExecuteCommand({
         actor: command.actor,
         doctype: this.fileDoctype,
         name: command.name,
-        command: completion.command,
-        input: completion.input,
-        ...fileTenantCommandOption(command.tenantId),
-        ...fileExpectedVersionCommandOption(completion.expectedVersion),
-        metadata: fileCommandMetadata(command.metadata)
-      });
+        tenantId: command.tenantId,
+        metadata: command.metadata,
+        completion
+      }));
       await this.deleteFileObjectsForScanFailure(current);
       throw fileScanFailureError(scan, snapshot);
     }
-    return this.documents.execute({
+    return this.documents.execute(fileUploadCompletionExecuteCommand({
       actor: command.actor,
       doctype: this.fileDoctype,
       name: command.name,
-      command: completion.command,
-      input: completion.input,
-      ...fileTenantCommandOption(command.tenantId),
-      ...fileExpectedVersionCommandOption(completion.expectedVersion),
-      metadata: fileCommandMetadata(command.metadata)
-    });
+      tenantId: command.tenantId,
+      metadata: command.metadata,
+      completion
+    }));
   }
 
   async prepareMultipartUpload(command: PrepareMultipartUploadCommand): Promise<PreparedMultipartUpload> {
@@ -740,29 +737,25 @@ export class FileService {
       expectedVersion: completing.version
     });
     if (isInfectedFileScanResult(scan)) {
-      const snapshot = await this.documents.execute({
+      const snapshot = await this.documents.execute(fileUploadCompletionExecuteCommand({
         actor: command.actor,
         doctype: this.fileDoctype,
         name: command.name,
-        command: completion.command,
-        input: completion.input,
-        ...fileTenantCommandOption(command.tenantId),
-        ...fileExpectedVersionCommandOption(completion.expectedVersion),
-        metadata: fileCommandMetadata(command.metadata)
-      });
+        tenantId: command.tenantId,
+        metadata: command.metadata,
+        completion
+      }));
       await this.deleteFileObjectsForScanFailure(completing);
       throw fileScanFailureError(scan, snapshot);
     }
-    return this.documents.execute({
+    return this.documents.execute(fileUploadCompletionExecuteCommand({
       actor: command.actor,
       doctype: this.fileDoctype,
       name: command.name,
-      command: completion.command,
-      input: completion.input,
-      ...fileTenantCommandOption(command.tenantId),
-      ...fileExpectedVersionCommandOption(completion.expectedVersion),
-      metadata: fileCommandMetadata(command.metadata)
-    });
+      tenantId: command.tenantId,
+      metadata: command.metadata,
+      completion
+    }));
   }
 
   async abortMultipartUpload(command: AbortMultipartUploadCommand): Promise<DocumentSnapshot> {
