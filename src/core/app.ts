@@ -138,7 +138,7 @@ function freezeHooks(hooks: Readonly<Record<string, readonly DocumentHooks[]>>):
 function freezeHookOptions(hooks: Readonly<Record<string, readonly DocumentHooks[]>>): Readonly<Record<string, readonly DocumentHooks[]>> {
   const frozen: Record<string, readonly DocumentHooks[]> = {};
   for (const [doctype, entries] of Object.entries(hooks)) {
-    frozen[doctype] = Object.freeze([...entries]);
+    frozen[doctype] = Object.freeze(entries.map(defineDocumentHooks));
   }
   return Object.freeze(frozen);
 }

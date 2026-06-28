@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the frozen application hook factory slice:
+As of the registry hook option snapshot slice:
 
 - Vitest files: `173`
-- Vitest cases: `1927`
-- Remaining gap to Frappe static markers: `857`
+- Vitest cases: `1928`
+- Remaining gap to Frappe static markers: `856`
 
 ## Implication
 

@@ -205,11 +205,31 @@ describe("app manifests", () => {
     expect(Object.isFrozen(options.doctypes)).toBe(true);
     expect(Object.isFrozen(options.hooks)).toBe(true);
     expect(Object.isFrozen(options.hooks?.Note)).toBe(true);
+    expect(Object.isFrozen(options.hooks?.Note?.[0])).toBe(true);
     expect(() => (options.doctypes as unknown as unknown[]).push(defineDocType({ name: "Other", fields: [] }))).toThrow(
       TypeError
     );
     expect(() => (options.hooks?.Note as unknown as unknown[]).push({})).toThrow(TypeError);
+    expect(() => ((options.hooks?.Note?.[0] as { afterCommit?: unknown }).afterCommit = vi.fn())).toThrow(TypeError);
     expect(() => ((options.hooks as Record<string, unknown>).Other = [])).toThrow(TypeError);
+  });
+
+  it("snapshots registry option hook entries through the core hook helper", () => {
+    const beforeValidate = vi.fn();
+    const replacementBeforeValidate = vi.fn();
+    const hook = { beforeValidate };
+    const app = defineApp({
+      name: "notes",
+      hooks: { Note: [hook] }
+    });
+
+    const options = registryOptionsFromApps([app]);
+    hook.beforeValidate = replacementBeforeValidate;
+
+    expect(options.hooks?.Note?.[0]).toEqual({ beforeValidate });
+    expect(options.hooks?.Note?.[0]).not.toBe(app.hooks?.Note?.[0]);
+    expect(options.hooks?.Note?.[0]?.beforeValidate).not.toBe(replacementBeforeValidate);
+    expect(Object.isFrozen(options.hooks?.Note?.[0])).toBe(true);
   });
 
   it("returns a frozen registry option object from apps", () => {
