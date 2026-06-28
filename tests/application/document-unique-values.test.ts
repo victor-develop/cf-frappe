@@ -4,6 +4,7 @@ import {
   activeUniqueValueOwner,
   canonicalUniqueValue,
   defineDocType,
+  planUniqueValueReleaseWriteDecision,
   planUniqueValueReservationWriteDecision,
   planUniqueValueReleaseEvent,
   planUniqueValueReservationEvent,
@@ -177,6 +178,35 @@ describe("document unique values", () => {
         ownerStillOwnsValue: false
       })
     ).toEqual({ status: "reserve", reservation, existing });
+  });
+
+  it("skips release writes when the unique-value projection is missing", () => {
+    expect(
+      planUniqueValueReleaseWriteDecision({
+        reservation: reservationFor("ada@example.com"),
+        existing: null
+      })
+    ).toEqual({ status: "skip" });
+  });
+
+  it("skips release writes when another owner is active", () => {
+    expect(
+      planUniqueValueReleaseWriteDecision({
+        reservation: reservationFor("ada@example.com"),
+        existing: uniqueValueSnapshot({ documentName: "grace", active: true })
+      })
+    ).toEqual({ status: "skip" });
+  });
+
+  it("plans release writes when the active owner matches the reservation", () => {
+    const reservation = reservationFor("ada@example.com");
+    const existing = uniqueValueSnapshot({ documentName: "ada", active: true });
+
+    expect(planUniqueValueReleaseWriteDecision({ reservation, existing })).toEqual({
+      status: "release",
+      reservation,
+      existing
+    });
   });
 
   it("projects new unique-value reservation writes from saved create events", () => {

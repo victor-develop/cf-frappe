@@ -67,6 +67,7 @@ import {
 } from "./document-lifecycle-events.js";
 import {
   activeUniqueValueOwner,
+  planUniqueValueReleaseWriteDecision,
   planUniqueValueReservationWriteDecision,
   planUniqueValueReleaseEvent,
   planUniqueValueReservationEvent,
@@ -1764,13 +1765,14 @@ export class DocumentService implements DocumentCommandExecutor {
     for (const reservation of reservations) {
       try {
         const existing = foldDocument(await this.store.readStream(reservation.stream));
-        if (!existing || activeUniqueValueOwner(existing) !== reservation.documentName) {
+        const decision = planUniqueValueReleaseWriteDecision({ reservation, existing });
+        if (decision.status === "skip") {
           continue;
         }
-        const eventPlan = planUniqueValueReleaseEvent(reservation);
+        const eventPlan = planUniqueValueReleaseEvent(decision.reservation);
         const event = this.newEvent({
-          tenantId: existing.tenantId,
-          stream: reservation.stream,
+          tenantId: decision.existing.tenantId,
+          stream: decision.reservation.stream,
           type: eventPlan.eventType,
           doctype: UNIQUE_VALUE_DOCTYPE,
           documentName: eventPlan.documentName,
@@ -1779,9 +1781,9 @@ export class DocumentService implements DocumentCommandExecutor {
           payload: eventPlan.payload,
           metadata: eventPlan.metadata
         });
-        await this.store.commit(reservation.stream, existing.version, [event], (savedEvents) => {
+        await this.store.commit(decision.reservation.stream, decision.existing.version, [event], (savedEvents) => {
           const saved = requireFirstSavedEvent(savedEvents);
-          return projectUniqueValueReleaseWrite({ existing, saved });
+          return projectUniqueValueReleaseWrite({ existing: decision.existing, saved });
         });
       } catch (error) {
         if (!options.suppressErrors) {

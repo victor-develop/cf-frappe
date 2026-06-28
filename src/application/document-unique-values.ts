@@ -44,6 +44,14 @@ export type UniqueValueReservationWriteDecision =
       readonly existing: DocumentSnapshot | null;
     };
 
+export type UniqueValueReleaseWriteDecision =
+  | { readonly status: "skip" }
+  | {
+      readonly status: "release";
+      readonly reservation: UniqueValueReservation;
+      readonly existing: DocumentSnapshot;
+    };
+
 export interface UniqueValueReservationWriteProjection {
   readonly reservation: UniqueValueReservation;
   readonly existing: DocumentSnapshot | null;
@@ -201,6 +209,21 @@ export function planUniqueValueReservationWriteDecision(input: {
     status: "reserve",
     reservation: input.reservation,
     existing: input.existing
+  };
+}
+
+export function planUniqueValueReleaseWriteDecision(input: {
+  readonly reservation: UniqueValueReservation;
+  readonly existing: DocumentSnapshot | null;
+}): UniqueValueReleaseWriteDecision {
+  const existing = input.existing;
+  if (!existing || activeUniqueValueOwner(existing) !== input.reservation.documentName) {
+    return { status: "skip" };
+  }
+  return {
+    status: "release",
+    reservation: input.reservation,
+    existing
   };
 }
 
