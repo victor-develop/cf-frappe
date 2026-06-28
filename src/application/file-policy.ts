@@ -540,6 +540,32 @@ export function fileBulkMetadataUpdateEntryCommand(command: {
   };
 }
 
+export function fileBulkDeletedEntry(command: {
+  readonly name: string;
+  readonly snapshot: DocumentSnapshot;
+}): {
+  readonly name: string;
+  readonly snapshot: DocumentSnapshot;
+} {
+  return {
+    name: command.name,
+    snapshot: command.snapshot
+  };
+}
+
+export function fileBulkUpdatedEntry(command: {
+  readonly name: string;
+  readonly snapshot: DocumentSnapshot;
+}): {
+  readonly name: string;
+  readonly snapshot: DocumentSnapshot;
+} {
+  return {
+    name: command.name,
+    snapshot: command.snapshot
+  };
+}
+
 export function fileBulkFailure(name: string, error: unknown, fallback: string): {
   readonly name: string;
   readonly code: FrameworkError["code"] | "UNKNOWN";
@@ -568,6 +594,32 @@ export function fileBulkDeleteFailure(name: string, error: unknown): ReturnType<
 
 export function fileBulkMetadataUpdateFailure(name: string, error: unknown): ReturnType<typeof fileBulkFailure> {
   return fileBulkFailure(name, error, "Bulk metadata update failed");
+}
+
+export function fileBulkDeleteResult(command: {
+  readonly deleted: readonly ReturnType<typeof fileBulkDeletedEntry>[];
+  readonly failed: readonly ReturnType<typeof fileBulkDeleteFailure>[];
+}): {
+  readonly deleted: readonly ReturnType<typeof fileBulkDeletedEntry>[];
+  readonly failed: readonly ReturnType<typeof fileBulkDeleteFailure>[];
+} {
+  return {
+    deleted: command.deleted,
+    failed: command.failed
+  };
+}
+
+export function fileBulkMetadataUpdateResult(command: {
+  readonly updated: readonly ReturnType<typeof fileBulkUpdatedEntry>[];
+  readonly failed: readonly ReturnType<typeof fileBulkMetadataUpdateFailure>[];
+}): {
+  readonly updated: readonly ReturnType<typeof fileBulkUpdatedEntry>[];
+  readonly failed: readonly ReturnType<typeof fileBulkMetadataUpdateFailure>[];
+} {
+  return {
+    updated: command.updated,
+    failed: command.failed
+  };
 }
 
 export function ensureDirectUploadMatches(

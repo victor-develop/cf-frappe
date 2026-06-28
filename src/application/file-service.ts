@@ -59,12 +59,16 @@ import {
   requireStoredFileObject,
   requireStoredFileRenditionObject,
   canUploadFile,
+  fileBulkDeletedEntry,
   fileCompletedRenditionManifestCommandName,
   fileBufferedUploadDocumentCreateCommand,
   fileBulkDeleteEntryCommand,
   fileBulkDeleteFailure,
+  fileBulkDeleteResult,
   fileBulkMetadataUpdateFailure,
   fileBulkMetadataUpdateEntryCommand,
+  fileBulkMetadataUpdateResult,
+  fileBulkUpdatedEntry,
   fileBufferedUploadPutObjectCommand,
   fileCommandTenantId,
   fileContentLength,
@@ -1059,12 +1063,12 @@ export class FileService {
           metadata: command.metadata,
           selection
         }));
-        deleted.push({ name: selection.name, snapshot });
+        deleted.push(fileBulkDeletedEntry({ name: selection.name, snapshot }));
       } catch (error) {
         failed.push(fileBulkDeleteFailure(selection.name, error));
       }
     }
-    return { deleted, failed };
+    return fileBulkDeleteResult({ deleted, failed });
   }
 
   async bulkUpdateMetadata(command: BulkUpdateFileMetadataCommand): Promise<BulkUpdateFileMetadataResult> {
@@ -1081,12 +1085,12 @@ export class FileService {
           selection,
           patch: command
         }));
-        updated.push({ name: selection.name, snapshot });
+        updated.push(fileBulkUpdatedEntry({ name: selection.name, snapshot }));
       } catch (error) {
         failed.push(fileBulkMetadataUpdateFailure(selection.name, error));
       }
     }
-    return { updated, failed };
+    return fileBulkMetadataUpdateResult({ updated, failed });
   }
 
   private preflightCreate(actor: Actor, data: DocumentData): void {

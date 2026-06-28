@@ -27,12 +27,16 @@ import {
   expectedRenditionContentType,
   failedFileRendition,
   failedFileRenditionForError,
+  fileBulkDeletedEntry,
   fileAttachedToCommandOption,
   fileBulkDeleteEntryCommand,
   fileBulkDeleteFailure,
+  fileBulkDeleteResult,
   fileBulkFailure,
   fileBulkMetadataUpdateFailure,
   fileBulkMetadataUpdateEntryCommand,
+  fileBulkMetadataUpdateResult,
+  fileBulkUpdatedEntry,
   fileBufferedUploadDocumentCreateCommand,
   fileBufferedUploadDocumentData,
   fileBufferedUploadPutObjectCommand,
@@ -1369,6 +1373,39 @@ describe("file policy", () => {
       code: "UNKNOWN",
       message: "Bulk metadata update failed",
       status: 500
+    });
+  });
+
+  it("builds bulk delete success entries and results", () => {
+    const snapshot = fileSnapshot({ filename: "deleted.pdf" });
+    const deleted = fileBulkDeletedEntry({ name: "file_deleted", snapshot });
+    const failed = fileBulkDeleteFailure(
+      "file_missing",
+      new FrameworkError("DOCUMENT_NOT_FOUND", "missing", { status: 404 })
+    );
+
+    expect(deleted).toEqual({ name: "file_deleted", snapshot });
+    expect(fileBulkDeleteResult({
+      deleted: [deleted],
+      failed: [failed]
+    })).toEqual({
+      deleted: [deleted],
+      failed: [failed]
+    });
+  });
+
+  it("builds bulk metadata update success entries and results", () => {
+    const snapshot = fileSnapshot({ filename: "updated.pdf" });
+    const updated = fileBulkUpdatedEntry({ name: "file_updated", snapshot });
+    const failed = fileBulkMetadataUpdateFailure("file_locked", new Error("locked"));
+
+    expect(updated).toEqual({ name: "file_updated", snapshot });
+    expect(fileBulkMetadataUpdateResult({
+      updated: [updated],
+      failed: [failed]
+    })).toEqual({
+      updated: [updated],
+      failed: [failed]
     });
   });
 
