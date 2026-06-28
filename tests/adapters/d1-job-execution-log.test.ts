@@ -25,6 +25,45 @@ describe("D1JobExecutionLog", () => {
     });
   });
 
+  it("snapshots D1 job execution records across writes and reads", async () => {
+    const db = new FakeD1Database();
+    const log = new D1JobExecutionLog(db as unknown as D1Database);
+    const message = jobMessage("reports.daily", "job_001", "acme", {
+      payload: { report: "daily", nested: { count: 1 } },
+      metadata: { source: "queue", nested: { attempt: 1 } }
+    });
+    const result = { summary: { rows: 3 }, tags: ["daily"] };
+
+    const started = await log.begin(message, "2026-01-01T00:00:00.000Z");
+    (message.payload.nested as DocumentData).count = 2;
+    (message.metadata.nested as DocumentData).attempt = 2;
+    if (started.status === "started") {
+      (started.record.payload!.nested as DocumentData).count = 3;
+      (started.record.metadata!.nested as DocumentData).attempt = 3;
+    }
+    await log.complete(message, "2026-01-01T00:01:00.000Z", result);
+    result.summary.rows = 4;
+    result.tags.push("mutated");
+
+    const [listed] = await log.list({ tenantId: "acme" });
+    expect(listed).toMatchObject({
+      payload: { report: "daily", nested: { count: 1 } },
+      metadata: { source: "queue", nested: { attempt: 1 } },
+      result: { summary: { rows: 3 }, tags: ["daily"] }
+    });
+
+    (listed!.payload!.nested as DocumentData).count = 5;
+    (listed!.metadata!.nested as DocumentData).attempt = 5;
+    ((listed!.result as DocumentData).summary as DocumentData).rows = 5;
+    ((listed!.result as DocumentData).tags as JsonValue[]).push("listed");
+
+    await expect(log.get("reports.daily:job_001", { tenantId: "acme" })).resolves.toMatchObject({
+      payload: { report: "daily", nested: { count: 1 } },
+      metadata: { source: "queue", nested: { attempt: 1 } },
+      result: { summary: { rows: 3 }, tags: ["daily"] }
+    });
+  });
+
   it("claims duplicate deliveries atomically without overwriting running records", async () => {
     const db = new FakeD1Database();
     const log = new D1JobExecutionLog(db as unknown as D1Database);
