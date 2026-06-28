@@ -275,6 +275,84 @@ describe("RealtimeHub Durable Object", () => {
     ]);
   });
 
+  it("rejects collaboration messages from sockets without server-owned identity", async () => {
+    const originSent: string[] = [];
+    const peerSent: string[] = [];
+    const origin = fakeSocket(originSent);
+    const peer = fakeSocket(peerSent, {
+      topic: "document:acme:Task:TASK-1",
+      connectionId: "conn-peer",
+      connectedAt: "2026-06-23T00:00:02.000Z",
+      tenantId: "acme",
+      userId: "support@example.com"
+    });
+    const Hub = createRealtimeHubClass();
+    const hub = new Hub(fakeState([origin, peer]), {});
+
+    await hub.webSocketMessage(origin, JSON.stringify({
+      type: DOCUMENT_FIELD_EDIT_MESSAGE_TYPE,
+      field: "title"
+    }));
+
+    expect(peerSent).toEqual([]);
+    expect(originSent).toEqual([
+      JSON.stringify({ type: "error", message: "Missing realtime identity" })
+    ]);
+  });
+
+  it("broadcasts corrected presence when collaboration delivery closes a peer socket", async () => {
+    const originSent: string[] = [];
+    const healthySent: string[] = [];
+    const origin = fakeSocket(originSent, {
+      topic: "document:acme:Task:TASK-1",
+      connectionId: "conn-origin",
+      connectedAt: "2026-06-23T00:00:01.000Z",
+      tenantId: "acme",
+      userId: "owner@example.com"
+    });
+    const healthy = fakeSocket(healthySent, {
+      topic: "document:acme:Task:TASK-1",
+      connectionId: "conn-healthy",
+      connectedAt: "2026-06-23T00:00:02.000Z",
+      tenantId: "acme",
+      userId: "healthy@example.com"
+    });
+    const failing = fakeSocket([], {
+      topic: "document:acme:Task:TASK-1",
+      connectionId: "conn-failing",
+      connectedAt: "2026-06-23T00:00:03.000Z",
+      tenantId: "acme",
+      userId: "failing@example.com"
+    }, { throwOnSend: true });
+    vi.stubGlobal("crypto", { randomUUID: () => "edit-event" });
+    const Hub = createRealtimeHubClass();
+    const hub = new Hub(fakeState([origin, healthy, failing]), {});
+
+    await hub.webSocketMessage(origin, JSON.stringify({
+      type: DOCUMENT_FIELD_EDIT_MESSAGE_TYPE,
+      field: "title",
+      editing: true
+    }));
+
+    expect(healthySent.map((message) => (JSON.parse(message) as { readonly type?: string }).type)).toEqual([
+      REALTIME_COLLABORATION_MESSAGE_TYPE,
+      "cf-frappe.realtime.presence"
+    ]);
+    expect(JSON.parse(healthySent[1]!) as unknown).toMatchObject({
+      type: "cf-frappe.realtime.presence",
+      presence: {
+        action: "leave",
+        connections: [
+          { connectionId: "conn-origin" },
+          { connectionId: "conn-healthy" }
+        ]
+      }
+    });
+    expect(originSent.map((message) => (JSON.parse(message) as { readonly type?: string }).type)).toEqual([
+      "cf-frappe.realtime.presence"
+    ]);
+  });
+
   it("rejects non-object websocket JSON messages without broadcasting", async () => {
     const originSent: string[] = [];
     const peerSent: string[] = [];

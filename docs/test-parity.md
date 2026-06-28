@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the realtime event clone-boundary coverage slice:
+As of the Durable Object collaboration failure-boundary coverage slice:
 
 - Vitest files: `173`
-- Vitest cases: `1946`
-- Remaining gap to Frappe static markers: `838`
+- Vitest cases: `1948`
+- Remaining gap to Frappe static markers: `836`
 
 ## Implication
 
