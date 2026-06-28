@@ -25,6 +25,8 @@ import {
   sortedUploadedMultipartParts
 } from "../ports/multipart-file-storage.js";
 import type {
+  CreateDirectFileUploadCommand,
+  CreateMultipartFileUploadCommand,
   FileContent,
   FileObjectMetadata,
   FileStorage,
@@ -510,6 +512,68 @@ export function fileUploadObjectCustomMetadata(command: {
   return {
     tenantId: command.tenantId,
     uploadedBy: command.uploadedBy
+  };
+}
+
+export function fileBufferedUploadPutObjectCommand(command: {
+  readonly key: string;
+  readonly body: FileContent;
+  readonly contentType: string;
+  readonly filename: string;
+  readonly size: number;
+  readonly tenantId: string;
+  readonly uploadedBy: string;
+}): PutFileObjectCommand {
+  return {
+    key: command.key,
+    body: command.body,
+    contentType: command.contentType,
+    filename: command.filename,
+    size: command.size,
+    customMetadata: fileUploadObjectCustomMetadata({
+      tenantId: command.tenantId,
+      uploadedBy: command.uploadedBy
+    })
+  };
+}
+
+export function fileDirectUploadReservationCommand(command: {
+  readonly key: string;
+  readonly contentType: string;
+  readonly filename: string;
+  readonly size: number;
+  readonly expiresAt: string;
+  readonly tenantId: string;
+  readonly uploadedBy: string;
+}): CreateDirectFileUploadCommand {
+  return {
+    key: command.key,
+    contentType: command.contentType,
+    filename: command.filename,
+    size: command.size,
+    expiresAt: command.expiresAt,
+    customMetadata: fileUploadObjectCustomMetadata({
+      tenantId: command.tenantId,
+      uploadedBy: command.uploadedBy
+    })
+  };
+}
+
+export function fileMultipartUploadReservationCommand(command: {
+  readonly key: string;
+  readonly contentType: string;
+  readonly filename: string;
+  readonly tenantId: string;
+  readonly uploadedBy: string;
+}): CreateMultipartFileUploadCommand {
+  return {
+    key: command.key,
+    contentType: command.contentType,
+    filename: command.filename,
+    customMetadata: fileUploadObjectCustomMetadata({
+      tenantId: command.tenantId,
+      uploadedBy: command.uploadedBy
+    })
   };
 }
 

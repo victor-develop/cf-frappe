@@ -62,6 +62,7 @@ import {
   canUploadFile,
   fileBulkDeleteFailure,
   fileBulkFailure,
+  fileBufferedUploadPutObjectCommand,
   fileAttachedToCommandOption,
   fileCommandMetadata,
   fileCommandTenantId,
@@ -90,8 +91,9 @@ import {
   fileUploadCompletedDocumentData,
   fileUploadContentType,
   fileUploadExpiresAt,
-  fileUploadObjectCustomMetadata,
+  fileDirectUploadReservationCommand,
   filePendingUploadDocumentData,
+  fileMultipartUploadReservationCommand,
   fileUploadScanFailedDocumentData,
   fileUploadScanFailedPatch,
   fileTenantCommandOption,
@@ -449,14 +451,15 @@ export class FileService {
       ...fileAttachedToCommandOption(command.attachedTo)
     });
     this.preflightCreate(command.actor, data);
-    const object = await this.storage.put({
+    const object = await this.storage.put(fileBufferedUploadPutObjectCommand({
       key,
       body: command.body,
       contentType,
       filename,
       size,
-      customMetadata: fileUploadObjectCustomMetadata({ tenantId, uploadedBy: command.actor.id })
-    });
+      tenantId,
+      uploadedBy: command.actor.id
+    }));
     let scan: FileScanResult | undefined;
     try {
       scan = await this.scanObject({
@@ -525,14 +528,15 @@ export class FileService {
       ...fileAttachedToCommandOption(command.attachedTo)
     });
     this.preflightCreate(command.actor, data);
-    const upload = await createDirectUpload({
+    const upload = await createDirectUpload(fileDirectUploadReservationCommand({
       key,
       contentType,
       filename,
       size,
       expiresAt,
-      customMetadata: fileUploadObjectCustomMetadata({ tenantId, uploadedBy: command.actor.id })
-    });
+      tenantId,
+      uploadedBy: command.actor.id
+    }));
     const snapshot = await this.documents.create({
       actor: command.actor,
       doctype: this.fileDoctype,
@@ -614,12 +618,13 @@ export class FileService {
       ...fileAttachedToCommandOption(command.attachedTo)
     });
     this.preflightCreate(command.actor, baseData);
-    const upload = await multipartUploads.createMultipartUpload({
+    const upload = await multipartUploads.createMultipartUpload(fileMultipartUploadReservationCommand({
       key,
       contentType,
       filename,
-      customMetadata: fileUploadObjectCustomMetadata({ tenantId, uploadedBy: command.actor.id })
-    });
+      tenantId,
+      uploadedBy: command.actor.id
+    }));
     try {
       const snapshot = await this.documents.create({
         actor: command.actor,

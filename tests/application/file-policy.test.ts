@@ -31,6 +31,7 @@ import {
   fileBulkDeleteFailure,
   fileBulkFailure,
   fileBufferedUploadDocumentData,
+  fileBufferedUploadPutObjectCommand,
   fileCommandMetadata,
   fileCommandTenantId,
   fileContentLength,
@@ -49,6 +50,7 @@ import {
   fileObjectSourceEtag,
   filePendingUploadDocumentData,
   filePrimaryObjectKey,
+  fileDirectUploadReservationCommand,
   fileSnapshotFilename,
   fileRenditionGenerationReservation,
   fileRenditionObjectCustomMetadata,
@@ -72,6 +74,7 @@ import {
   fileUploadExpiresAt,
   fileUploadIsPrivate,
   fileUploadObjectCustomMetadata,
+  fileMultipartUploadReservationCommand,
   fileUploadScanFailedDocumentData,
   fileUploadScanFailedPatch,
   fileTenantCommandOption,
@@ -1046,6 +1049,53 @@ describe("file policy", () => {
     })).toEqual({
       tenantId: "acme",
       uploadedBy: "owner@example.com"
+    });
+  });
+
+  it("builds upload storage port commands", () => {
+    expect(fileBufferedUploadPutObjectCommand({
+      key: "acme/files/file_1-invoice.pdf",
+      body: "hello",
+      contentType: "application/pdf",
+      filename: "invoice.pdf",
+      size: 5,
+      tenantId: "acme",
+      uploadedBy: "owner@example.com"
+    })).toEqual({
+      key: "acme/files/file_1-invoice.pdf",
+      body: "hello",
+      contentType: "application/pdf",
+      filename: "invoice.pdf",
+      size: 5,
+      customMetadata: { tenantId: "acme", uploadedBy: "owner@example.com" }
+    });
+    expect(fileDirectUploadReservationCommand({
+      key: "acme/files/file_1-invoice.pdf",
+      contentType: "application/pdf",
+      filename: "invoice.pdf",
+      size: 42,
+      expiresAt: "2026-06-28T00:15:00.000Z",
+      tenantId: "acme",
+      uploadedBy: "owner@example.com"
+    })).toEqual({
+      key: "acme/files/file_1-invoice.pdf",
+      contentType: "application/pdf",
+      filename: "invoice.pdf",
+      size: 42,
+      expiresAt: "2026-06-28T00:15:00.000Z",
+      customMetadata: { tenantId: "acme", uploadedBy: "owner@example.com" }
+    });
+    expect(fileMultipartUploadReservationCommand({
+      key: "acme/files/file_1-invoice.pdf",
+      contentType: "application/pdf",
+      filename: "invoice.pdf",
+      tenantId: "acme",
+      uploadedBy: "owner@example.com"
+    })).toEqual({
+      key: "acme/files/file_1-invoice.pdf",
+      contentType: "application/pdf",
+      filename: "invoice.pdf",
+      customMetadata: { tenantId: "acme", uploadedBy: "owner@example.com" }
     });
   });
 
