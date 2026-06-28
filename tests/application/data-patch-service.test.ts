@@ -1303,6 +1303,98 @@ describe("DataPatchService", () => {
     expect(resources.rolledBack).toEqual(["second"]);
   });
 
+  it("snapshots data patch rollback enqueue actors, options, and metadata by value", async () => {
+    const resources = { applied: [] as string[] };
+    const service = new DataPatchService({
+      log: new InMemoryDataPatchLog(),
+      resources,
+      patches: [
+        defineDataPatch<typeof resources>({
+          id: "core.first",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.applied.push("first");
+          },
+          rollback: { run: () => undefined }
+        }),
+        defineDataPatch<typeof resources>({
+          id: "crm.second",
+          checksum: "v1",
+          run: ({ resources }) => {
+            resources.applied.push("second");
+          },
+          rollback: { run: () => undefined }
+        })
+      ],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-first", "claim-second"])
+    });
+    const queue = new InMemoryJobQueue();
+    const queueService = new DataPatchQueueService({
+      dataPatches: service,
+      dispatcher: new JobDispatcher({
+        registry: createJobRegistry({ jobs: [createDataPatchRollbackJob()] }),
+        queue,
+        clock: fixedClock(now),
+        ids: deterministicIds(["patch-rollback-snapshot"])
+      })
+    });
+    const roles = [SYSTEM_MANAGER_ROLE];
+    const actor = { id: "admin@example.com", roles, tenantId: "acme" };
+    await service.apply(actor);
+    const patchIds = ["crm.second"];
+    const metadata = { source: "test", nested: { attempt: 1 } };
+    const result = await queueService.enqueueRollback(actor, {
+      patchIds,
+      idempotencyKey: "patches:rollback-snapshot",
+      metadata
+    });
+
+    roles[0] = "Guest";
+    patchIds[0] = "core.mutated";
+    metadata.source = "mutated";
+    metadata.nested.attempt = 2;
+
+    expect(result.plan).toEqual({
+      patchIds: ["crm.second"],
+      requestedPatchIds: ["crm.second"]
+    });
+    expect(result.message).toMatchObject({
+      payload: {
+        actor: { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },
+        patchIds: ["crm.second"]
+      },
+      metadata: {
+        source: "test",
+        nested: { attempt: 1 },
+        dispatchSource: "data-patches",
+        requestedBy: "admin@example.com"
+      }
+    });
+
+    (result.message.payload.actor.roles as string[])[0] = "Mutated";
+    (result.message.payload.patchIds as string[])[0] = "crm.returned";
+    (result.message.metadata.nested as { attempt: number }).attempt = 3;
+    result.message.metadata.source = "returned";
+
+    expect(queue.queued()).toMatchObject([
+      {
+        message: {
+          payload: {
+            actor: { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },
+            patchIds: ["crm.second"]
+          },
+          metadata: {
+            source: "test",
+            nested: { attempt: 1 },
+            dispatchSource: "data-patches",
+            requestedBy: "admin@example.com"
+          }
+        }
+      }
+    ]);
+  });
+
   it("enqueues validated data patch rollback retry plans and executes them through the built-in job", async () => {
     const resources = { rollbackAttempts: 0, rolledBack: [] as string[] };
     const log = new InMemoryDataPatchLog();
@@ -1394,6 +1486,92 @@ describe("DataPatchService", () => {
       }
     });
     expect(resources).toEqual({ rollbackAttempts: 2, rolledBack: ["core"] });
+  });
+
+  it("snapshots data patch rollback retry enqueue actors and metadata by value", async () => {
+    const resources = { rollbackAttempts: 0 };
+    const service = new DataPatchService({
+      log: new InMemoryDataPatchLog(),
+      resources,
+      patches: [
+        defineDataPatch<typeof resources>({
+          id: "core.rollback_retry_snapshot",
+          checksum: "v1",
+          run: () => undefined,
+          rollback: {
+            run: ({ resources }) => {
+              resources.rollbackAttempts += 1;
+              if (resources.rollbackAttempts === 1) {
+                throw new Error("rollback boom");
+              }
+            }
+          }
+        })
+      ],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-apply", "rollback-failed"])
+    });
+    const queue = new InMemoryJobQueue();
+    const queueService = new DataPatchQueueService({
+      dataPatches: service,
+      dispatcher: new JobDispatcher({
+        registry: createJobRegistry({ jobs: [createDataPatchRollbackRetryJob()] }),
+        queue,
+        clock: fixedClock(now),
+        ids: deterministicIds(["patch-rollback-retry-snapshot"])
+      })
+    });
+    const roles = [SYSTEM_MANAGER_ROLE];
+    const actor = { id: "admin@example.com", roles, tenantId: "acme" };
+    await service.apply(actor);
+    await expect(service.rollback(actor, { patchIds: ["core.rollback_retry_snapshot"] })).rejects.toThrow(
+      "rollback boom"
+    );
+    const metadata = { source: "test", nested: { attempt: 1 } };
+    const result = await queueService.enqueueRollbackRetry(actor, "core.rollback_retry_snapshot", {
+      idempotencyKey: "patches:rollback-retry-snapshot",
+      metadata
+    });
+
+    roles[0] = "Guest";
+    metadata.source = "mutated";
+    metadata.nested.attempt = 2;
+
+    expect(result.plan).toEqual({ patchId: "core.rollback_retry_snapshot" });
+    expect(result.message).toMatchObject({
+      payload: {
+        actor: { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },
+        patchId: "core.rollback_retry_snapshot"
+      },
+      metadata: {
+        source: "test",
+        nested: { attempt: 1 },
+        dispatchSource: "data-patches",
+        requestedBy: "admin@example.com"
+      }
+    });
+
+    (result.message.payload.actor.roles as string[])[0] = "Mutated";
+    (result.message.payload as { patchId: string }).patchId = "core.returned";
+    (result.message.metadata.nested as { attempt: number }).attempt = 3;
+    result.message.metadata.source = "returned";
+
+    expect(queue.queued()).toMatchObject([
+      {
+        message: {
+          payload: {
+            actor: { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },
+            patchId: "core.rollback_retry_snapshot"
+          },
+          metadata: {
+            source: "test",
+            nested: { attempt: 1 },
+            dispatchSource: "data-patches",
+            requestedBy: "admin@example.com"
+          }
+        }
+      }
+    ]);
   });
 
   it("does not enqueue empty data patch plans", async () => {
