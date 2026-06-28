@@ -54,6 +54,7 @@ import {
   ensureFileNotDeleteRequested,
   ensureFilePendingDirectUpload,
   ensureFilePendingMultipartUpload,
+  ensureFileMetadataPatchProvided,
   ensureDirectUploadMatches,
   ensureMultipartCompletionMatchesManifest,
   ensureMultipartPartFitsReservation,
@@ -1050,9 +1051,7 @@ export class FileService {
 
   async bulkUpdateMetadata(command: BulkUpdateFileMetadataCommand): Promise<BulkUpdateFileMetadataResult> {
     const selections = normalizeBulkFileSelections(command.files);
-    if (command.isPrivate === undefined && command.attachedTo === undefined) {
-      throw badRequest("At least one file metadata field must be provided");
-    }
+    ensureFileMetadataPatchProvided(command);
     const updated: BulkUpdatedFile[] = [];
     const failed: BulkUpdateFileMetadataFailure[] = [];
     for (const selection of selections) {

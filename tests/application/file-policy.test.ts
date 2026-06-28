@@ -11,6 +11,7 @@ import {
   ensureFileExpectedVersion,
   ensureFilePendingDirectUpload,
   ensureFilePendingMultipartUpload,
+  ensureFileMetadataPatchProvided,
   ensureDirectUploadMatches,
   ensureMultipartCompletionMatchesManifest,
   ensureMultipartPartFitsReservation,
@@ -760,6 +761,12 @@ describe("file policy", () => {
 
   it("rejects empty file metadata patches", () => {
     expect(() => fileMetadataPatch({})).toThrow("At least one file metadata field must be provided");
+  });
+
+  it("rejects missing file metadata patch fields", () => {
+    expect(() => ensureFileMetadataPatchProvided({})).toThrow("At least one file metadata field must be provided");
+    expect(() => ensureFileMetadataPatchProvided({ isPrivate: true })).not.toThrow();
+    expect(() => ensureFileMetadataPatchProvided({ attachedTo: null })).not.toThrow();
   });
 
   it("builds file scan failure errors from persisted scan details first", () => {

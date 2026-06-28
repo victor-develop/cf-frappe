@@ -438,7 +438,14 @@ export interface FileMetadataPatchCommand {
     | null;
 }
 
+export function ensureFileMetadataPatchProvided(command: FileMetadataPatchCommand): void {
+  if (command.filename === undefined && command.isPrivate === undefined && command.attachedTo === undefined) {
+    throw badRequest("At least one file metadata field must be provided");
+  }
+}
+
 export function fileMetadataPatch(command: FileMetadataPatchCommand): DocumentData {
+  ensureFileMetadataPatchProvided(command);
   const patch: DocumentData = {
     ...(command.filename === undefined ? {} : { filename: sanitizeFilename(command.filename) }),
     ...(command.isPrivate === undefined ? {} : { is_private: command.isPrivate })
@@ -451,9 +458,6 @@ export function fileMetadataPatch(command: FileMetadataPatchCommand): DocumentDa
       patch.attached_to_doctype = command.attachedTo.doctype;
       patch.attached_to_name = command.attachedTo.name;
     }
-  }
-  if (Object.keys(patch).length === 0) {
-    throw badRequest("At least one file metadata field must be provided");
   }
   return patch;
 }
