@@ -10,7 +10,6 @@ import type {
   DocumentSharePermission,
   DocumentShareProvider
 } from "../core/document-shares.js";
-import { can } from "../core/permissions.js";
 import type { ModelRegistry } from "../core/registry.js";
 import {
   type UserPermissionGrant,
@@ -18,7 +17,9 @@ import {
 } from "../core/user-permissions.js";
 import {
   canReadLinkedDocumentTarget,
+  canUseDocTypeAction,
   canUseVisibleDocument,
+  planDocTypeActionAccess,
   planDocumentSharedPermissionLookup
 } from "./document-access-policy.js";
 import {
@@ -107,22 +108,20 @@ export class QueryService {
   }
 
   listDoctypes(actor: Actor): readonly DocTypeDefinition[] {
-    return this.registry.list().filter((doctype) => can(actor, doctype, "read"));
+    return this.registry.list().filter((doctype) =>
+      canUseDocTypeAction({ actor, doctype, action: "read" })
+    );
   }
 
   getMeta(actor: Actor, doctypeName: string): DocTypeDefinition {
     const doctype = this.registry.get(doctypeName);
-    if (!can(actor, doctype, "read")) {
-      throw permissionDenied(`Actor '${actor.id}' cannot read ${doctype.name}`);
-    }
+    this.requireDocTypeAction(actor, doctype, "read");
     return doctype;
   }
 
   getCreateMeta(actor: Actor, doctypeName: string): DocTypeDefinition {
     const doctype = this.registry.get(doctypeName);
-    if (!can(actor, doctype, "create")) {
-      throw permissionDenied(`Actor '${actor.id}' cannot create ${doctype.name}`);
-    }
+    this.requireDocTypeAction(actor, doctype, "create");
     return doctype;
   }
 
@@ -159,9 +158,7 @@ export class QueryService {
   ): Promise<ListDocumentsResult> {
     const tenantId = options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
     const doctype = await this.doctypeFor(actor, doctypeName, tenantId);
-    if (!can(actor, doctype, "read")) {
-      throw permissionDenied(`Actor '${actor.id}' cannot read ${doctype.name}`);
-    }
+    this.requireDocTypeAction(actor, doctype, "read");
     const limit = clampLimit(options.limit, options.maxLimit);
     const offset = Math.max(0, options.offset ?? 0);
     const order = normalizeListOrder(doctype, options.orderBy, options.order);
@@ -276,9 +273,7 @@ export class QueryService {
   ): Promise<LinkOptionsResult> {
     const field = getLinkField(doctype, fieldName);
     const target = this.registry.get(field.linkTo);
-    if (!can(actor, target, "read")) {
-      throw permissionDenied(`Actor '${actor.id}' cannot read ${target.name}`);
-    }
+    this.requireDocTypeAction(actor, target, "read");
     const limit = clampLimit(options.limit ?? 20);
     const search = normalizeSearch(options.q);
     const tenantId = options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
@@ -337,9 +332,7 @@ export class QueryService {
   }> {
     const tenantId = options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
     const doctype = await this.doctypeFor(actor, doctypeName, tenantId);
-    if (!can(actor, doctype, "read")) {
-      throw permissionDenied(`Actor '${actor.id}' cannot read ${doctype.name}`);
-    }
+    this.requireDocTypeAction(actor, doctype, "read");
     const listView = resolveListView(doctype);
     const filters = mergeDefaultFilters(
       options.useDefaultFilters === false ? [] : listView.filters,
@@ -495,6 +488,13 @@ export class QueryService {
       }))
     );
     return readable.filter((entry) => entry.readable).map((entry) => entry.document);
+  }
+
+  private requireDocTypeAction(actor: Actor, doctype: DocTypeDefinition, action: PermissionAction): void {
+    const decision = planDocTypeActionAccess({ actor, doctype, action });
+    if (decision.status === "deny") {
+      throw permissionDenied(decision.message);
+    }
   }
 
   async canReadDocument(actor: Actor, doctype: DocTypeDefinition, document: DocumentSnapshot): Promise<boolean> {

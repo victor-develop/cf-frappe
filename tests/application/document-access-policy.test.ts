@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   canReadLinkedDocumentTarget,
+  canUseDocTypeAction,
   canUseDocumentAction,
   canUseVisibleDocument,
   defineDocType,
   documentSatisfiesUserPermissions,
+  planDocTypeActionAccess,
   planDocumentSharedPermissionLookup,
   type Actor,
   type DocumentSnapshot
@@ -33,6 +35,21 @@ const project = snapshot("Project", "PROJ-1", { title: "Apollo" });
 const task = snapshot("Task", "TASK-1", { project: "PROJ-1", title: "Launch" });
 
 describe("document access policy", () => {
+  it("allows DocType actions through static DocType permissions", () => {
+    expect(canUseDocTypeAction({ actor: reader, doctype: Task, action: "read" })).toBe(true);
+    expect(planDocTypeActionAccess({ actor: reader, doctype: Task, action: "update" })).toEqual({
+      status: "allow"
+    });
+  });
+
+  it("denies DocType actions without requiring a document snapshot", () => {
+    expect(canUseDocTypeAction({ actor: collaborator, doctype: Task, action: "read" })).toBe(false);
+    expect(planDocTypeActionAccess({ actor: collaborator, doctype: Task, action: "create" })).toEqual({
+      status: "deny",
+      message: "Actor 'collab@example.com' cannot create Task"
+    });
+  });
+
   it("allows document actions through static DocType permissions", () => {
     expect(canUseDocumentAction({
       actor: reader,

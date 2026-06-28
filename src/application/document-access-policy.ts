@@ -24,9 +24,35 @@ export interface DocumentActionAccessOptions {
   readonly sharedPermissions?: readonly DocumentSharePermission[];
 }
 
+export interface DocTypeActionAccessOptions {
+  readonly actor: Actor;
+  readonly doctype: DocTypeDefinition;
+  readonly action: PermissionAction;
+}
+
+export type DocTypeActionAccessDecision =
+  | { readonly status: "allow" }
+  | { readonly status: "deny"; readonly message: string };
+
 export type DocumentSharedPermissionLookup =
   | { readonly status: "skip"; readonly sharedPermissions: readonly [] }
   | { readonly status: "read-shares" };
+
+export function canUseDocTypeAction(options: DocTypeActionAccessOptions): boolean {
+  return can(options.actor, options.doctype, options.action);
+}
+
+export function planDocTypeActionAccess(
+  options: DocTypeActionAccessOptions
+): DocTypeActionAccessDecision {
+  if (canUseDocTypeAction(options)) {
+    return { status: "allow" };
+  }
+  return {
+    status: "deny",
+    message: `Actor '${options.actor.id}' cannot ${options.action} ${options.doctype.name}`
+  };
+}
 
 export function canUseDocumentAction(options: DocumentActionAccessOptions): boolean {
   return can(options.actor, options.doctype, options.action, options.document) ||
