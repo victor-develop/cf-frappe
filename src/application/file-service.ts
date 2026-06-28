@@ -80,6 +80,7 @@ import {
   fileReadableDashboardEntries,
   fileDashboardSystemActor,
   fileBufferedUploadDocumentData,
+  fileDownloadedTransformObjectCommand,
   fileDeleteRequestedExecuteCommand,
   fileDeleteRequestedDocumentCommand,
   fileDeletedExecuteCommand,
@@ -128,7 +129,6 @@ import {
   fileMultipartUploadReservationCommand,
   fileTransformOverlayCommandOption,
   fileTransformOverlayResolutionPlan,
-  fileTransformObjectCommand,
   fileTransformOverlaySource,
   fileTransformedFileResult,
   fileUploadedMultipartPartResult,
@@ -1135,13 +1135,12 @@ export class FileService {
     readonly options: FileTransformOptions;
     readonly overlay?: FileTransformOverlaySource;
   }): Promise<TransformedFileObject> {
-    return command.transformer.transform(fileTransformObjectCommand({
-      actorId: command.actor.id,
+    return command.transformer.transform(fileDownloadedTransformObjectCommand({
+      actor: command.actor,
       tenantId: command.tenantId,
-      snapshot: command.downloaded.snapshot,
-      object: command.downloaded.object,
+      downloaded: command.downloaded,
       options: command.options,
-      ...fileTransformOverlayCommandOption(command.overlay)
+      overlay: command.overlay
     }));
   }
 

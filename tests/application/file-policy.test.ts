@@ -139,6 +139,7 @@ import {
   fileUploadScanFailedDocumentData,
   fileUploadScanFailedPatch,
   fileTenantCommandOption,
+  fileDownloadedTransformObjectCommand,
   fileTransformOverlayCommandOption,
   fileTransformOverlayResolutionPlan,
   fileTransformObjectCommand,
@@ -657,6 +658,47 @@ describe("file policy", () => {
         content_type: "image/png"
       }),
       object: { ...object, body },
+      options,
+      overlay
+    })).toEqual({
+      actorId: "owner@example.com",
+      tenantId: "acme",
+      source: {
+        key: "acme/files/file_photo-photo.png",
+        filename: "photo.png",
+        contentType: "image/png",
+        size: 42,
+        body,
+        etag: "object-1",
+        httpEtag: '"object-http"'
+      },
+      options,
+      overlay
+    });
+  });
+
+  it("builds downloaded file transformer port commands", () => {
+    const body = new ReadableStream<Uint8Array>();
+    const overlay = overlaySource({ placement: "top-left", opacity: 50 });
+    const object = storedFileObject(fileObject({
+      key: "acme/files/file_photo-photo.png",
+      contentType: "image/png",
+      filename: "photo.png",
+      size: 42,
+      httpEtag: '"object-http"'
+    }));
+    const options = { width: 128, format: "webp" as const };
+
+    expect(fileDownloadedTransformObjectCommand({
+      actor: { id: "owner@example.com" },
+      tenantId: "acme",
+      downloaded: {
+        snapshot: fileSnapshot({
+          filename: "photo.png",
+          content_type: "image/png"
+        }),
+        object: { ...object, body }
+      },
       options,
       overlay
     })).toEqual({

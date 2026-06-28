@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the generated rendition storage put-command policy slice:
+As of the downloaded transform command policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1741`
-- Remaining gap to Frappe static markers: `1043`
+- Vitest cases: `1742`
+- Remaining gap to Frappe static markers: `1042`
 
 ## Implication
 

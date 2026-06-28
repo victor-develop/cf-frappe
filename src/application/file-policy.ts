@@ -925,6 +925,26 @@ export function fileTransformObjectCommand(command: {
   };
 }
 
+export function fileDownloadedTransformObjectCommand(command: {
+  readonly actor: Pick<Actor, "id">;
+  readonly tenantId: string;
+  readonly downloaded: {
+    readonly snapshot: DocumentSnapshot;
+    readonly object: StoredFileObject;
+  };
+  readonly options: FileTransformOptions;
+  readonly overlay: FileTransformOverlaySource | undefined;
+}): TransformFileObjectCommand {
+  return fileTransformObjectCommand({
+    actorId: command.actor.id,
+    tenantId: command.tenantId,
+    snapshot: command.downloaded.snapshot,
+    object: command.downloaded.object,
+    options: command.options,
+    ...fileTransformOverlayCommandOption(command.overlay)
+  });
+}
+
 export function fileUploadedResult(command: {
   readonly snapshot: DocumentSnapshot;
   readonly object: FileObjectMetadata;
