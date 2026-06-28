@@ -33,6 +33,7 @@ import {
   fileRenditionObjectCustomMetadata,
   fileRenditionId,
   fileRenditionFilename,
+  fileRenditionPutObjectCommand,
   fileRenditions,
   fileRenditionView,
   fileScanFailureError,
@@ -485,6 +486,39 @@ describe("file policy", () => {
       http_etag: '"object-http"',
       generated_at: "2026-06-28T01:00:00.000Z",
       generated_by: "owner@example.com"
+    });
+  });
+
+  it("builds rendition storage put commands", () => {
+    const body = new ReadableStream<Uint8Array>();
+    const pending = renditionEntry("w64-f-webp", {
+      key: "acme/file-renditions/file/w64-f-webp-attempt.webp"
+    });
+
+    expect(fileRenditionPutObjectCommand({
+      pending,
+      transform: {
+        body,
+        contentType: "image/webp",
+        contentLength: 123
+      },
+      sourceFilename: "photo.png",
+      tenantId: "acme",
+      sourceFile: "file_photo",
+      sourceEtag: '"source-http"',
+      renditionId: "w64-f-webp"
+    })).toEqual({
+      key: "acme/file-renditions/file/w64-f-webp-attempt.webp",
+      body,
+      contentType: "image/webp",
+      filename: "photo.png.w64-f-webp.webp",
+      size: 123,
+      customMetadata: {
+        tenantId: "acme",
+        sourceFile: "file_photo",
+        sourceEtag: '"source-http"',
+        renditionId: "w64-f-webp"
+      }
     });
   });
 

@@ -99,3 +99,4 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized upload and rendition object storage custom-metadata construction in file policy so storage adapters receive one tested metadata contract.
 - Shared file metadata patch presence validation between single-file and bulk metadata updates through the file policy.
 - Centralized file object content-type fallback, transformability checks, and source-etag selection in file policy.
+- Moved persisted rendition storage put-command construction into file policy, including filename, optional size, and storage metadata.

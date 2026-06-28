@@ -69,9 +69,8 @@ import {
   fileMultipartUploadId,
   fileObjectKeysForDelete,
   fileObjectSourceEtag,
-  fileRenditionObjectCustomMetadata,
   fileRenditionId,
-  fileRenditionFilename,
+  fileRenditionPutObjectCommand,
   fileRenditions,
   fileRenditionView,
   fileScanFailureError,
@@ -900,24 +899,17 @@ export class FileService {
         options,
         ...(overlay === undefined ? {} : { overlay })
       });
-      const filename = fileRenditionFilename(
-        requireFileSnapshotString(downloaded.snapshot, "filename"),
-        renditionId,
-        transform.contentType
-      );
-      object = await this.storage.put({
-        key: pending.key,
-        body: transform.body,
-        contentType: transform.contentType,
-        filename,
-        ...(transform.contentLength === undefined ? {} : { size: transform.contentLength }),
-        customMetadata: fileRenditionObjectCustomMetadata({
+      object = await this.storage.put(
+        fileRenditionPutObjectCommand({
+          pending,
+          transform,
+          sourceFilename: requireFileSnapshotString(downloaded.snapshot, "filename"),
           tenantId,
           sourceFile: downloaded.snapshot.name,
           sourceEtag,
           renditionId
         })
-      });
+      );
       const completed = completeFileRendition({
         pending,
         object,

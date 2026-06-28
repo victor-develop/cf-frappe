@@ -11,6 +11,7 @@ import type {
   FileTransformOverlayPlacement,
   FileTransformOverlaySource,
   FileTransformOptions,
+  TransformedFileObject,
   FileTransformWatermarkPlacement
 } from "../ports/file-transformer.js";
 import { isTransformableFileContentType } from "../ports/file-transformer.js";
@@ -22,6 +23,7 @@ import type {
   FileContent,
   FileObjectMetadata,
   MultipartFilePartContent,
+  PutFileObjectCommand,
   StoredFileObject,
   UploadedMultipartFilePart
 } from "../ports/file-storage.js";
@@ -369,6 +371,30 @@ export function fileRenditionObjectCustomMetadata(command: {
     sourceFile: command.sourceFile,
     sourceEtag: command.sourceEtag,
     renditionId: command.renditionId
+  };
+}
+
+export function fileRenditionPutObjectCommand(command: {
+  readonly pending: FileRenditionManifestEntry;
+  readonly transform: TransformedFileObject;
+  readonly sourceFilename: string;
+  readonly tenantId: string;
+  readonly sourceFile: string;
+  readonly sourceEtag: string;
+  readonly renditionId: string;
+}): PutFileObjectCommand {
+  return {
+    key: command.pending.key,
+    body: command.transform.body,
+    contentType: command.transform.contentType,
+    filename: fileRenditionFilename(command.sourceFilename, command.renditionId, command.transform.contentType),
+    ...(command.transform.contentLength === undefined ? {} : { size: command.transform.contentLength }),
+    customMetadata: fileRenditionObjectCustomMetadata({
+      tenantId: command.tenantId,
+      sourceFile: command.sourceFile,
+      sourceEtag: command.sourceEtag,
+      renditionId: command.renditionId
+    })
   };
 }
 
