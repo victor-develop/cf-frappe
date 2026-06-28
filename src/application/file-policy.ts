@@ -55,6 +55,20 @@ export function fileCommandTenantId(actor: Pick<Actor, "tenantId">, tenantId: st
   return tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
 }
 
+export function fileTenantCommandOption(tenantId: string | undefined): { readonly tenantId?: string } {
+  return tenantId === undefined ? {} : { tenantId };
+}
+
+export function fileExpectedVersionCommandOption(
+  expectedVersion: number | undefined
+): { readonly expectedVersion?: number } {
+  return expectedVersion === undefined ? {} : { expectedVersion };
+}
+
+export function fileCommandMetadata(metadata: DocumentData | undefined): DocumentData {
+  return metadata ?? {};
+}
+
 export function fileUploadContentType(contentType: string | undefined): string {
   return contentType ?? "application/octet-stream";
 }

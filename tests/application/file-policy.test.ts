@@ -29,6 +29,7 @@ import {
   failedFileRenditionForError,
   fileBulkDeleteFailure,
   fileBulkFailure,
+  fileCommandMetadata,
   fileCommandTenantId,
   fileContentLength,
   fileContentTypeExtension,
@@ -60,6 +61,7 @@ import {
   fileScanPatch,
   fileScanTarget,
   fileSnapshotStringData,
+  fileExpectedVersionCommandOption,
   fileUploadCompletedPatch,
   fileUploadCompletedDocumentData,
   fileUploadContentType,
@@ -68,6 +70,7 @@ import {
   fileUploadObjectCustomMetadata,
   fileUploadScanFailedDocumentData,
   fileUploadScanFailedPatch,
+  fileTenantCommandOption,
   fileTransformOverlaySource,
   fileTransformOptionsData,
   fileTransformOptionsFromData,
@@ -133,6 +136,17 @@ describe("file policy", () => {
     expect(fileUploadContentType(undefined)).toBe("application/octet-stream");
     expect(fileUploadIsPrivate(false)).toBe(false);
     expect(fileUploadIsPrivate(undefined)).toBe(true);
+  });
+
+  it("shapes optional file document command options", () => {
+    const metadata = { source: "unit" };
+
+    expect(fileTenantCommandOption("explicit-tenant")).toEqual({ tenantId: "explicit-tenant" });
+    expect(fileTenantCommandOption(undefined)).toEqual({});
+    expect(fileExpectedVersionCommandOption(2)).toEqual({ expectedVersion: 2 });
+    expect(fileExpectedVersionCommandOption(undefined)).toEqual({});
+    expect(fileCommandMetadata(metadata)).toBe(metadata);
+    expect(fileCommandMetadata(undefined)).toEqual({});
   });
 
   it("marks only browser-safe content types as previewable", () => {

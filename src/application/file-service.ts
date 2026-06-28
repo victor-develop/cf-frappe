@@ -62,6 +62,7 @@ import {
   canUploadFile,
   fileBulkDeleteFailure,
   fileBulkFailure,
+  fileCommandMetadata,
   fileCommandTenantId,
   fileContentLength,
   fileDashboardEntryWithPermissions,
@@ -82,6 +83,7 @@ import {
   fileRenditionView,
   fileScanFailureError,
   fileScanTarget,
+  fileExpectedVersionCommandOption,
   fileUploadCompletedPatch,
   fileUploadCompletedDocumentData,
   fileUploadContentType,
@@ -90,6 +92,7 @@ import {
   fileUploadObjectCustomMetadata,
   fileUploadScanFailedDocumentData,
   fileUploadScanFailedPatch,
+  fileTenantCommandOption,
   fileTransformOverlaySource,
   fileTransformSource,
   fileSnapshotFilename,
@@ -476,7 +479,7 @@ export class FileService {
           tenantId,
           data: fileUploadScanFailedDocumentData(data, object, scanPatch),
           eventType: "FileScanFailed",
-          metadata: command.metadata ?? {}
+          metadata: fileCommandMetadata(command.metadata)
         });
         throw fileScanFailureError(scan, snapshot);
       }
@@ -486,7 +489,7 @@ export class FileService {
         name: fileName,
         tenantId,
         data: fileUploadCompletedDocumentData(data, object, scanPatch),
-        metadata: command.metadata ?? {}
+        metadata: fileCommandMetadata(command.metadata)
       });
       return { snapshot, object };
     } catch (error) {
@@ -536,7 +539,7 @@ export class FileService {
       tenantId,
       data,
       eventType: "FileDirectUploadReserved",
-      metadata: command.metadata ?? {}
+      metadata: fileCommandMetadata(command.metadata)
     });
     return { snapshot, upload };
   }
@@ -566,9 +569,9 @@ export class FileService {
         name: command.name,
         command: "failScan",
         input: fileUploadScanFailedPatch(object, scanPatch),
-        ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
-        ...(command.expectedVersion === undefined ? {} : { expectedVersion: command.expectedVersion }),
-        metadata: command.metadata ?? {}
+        ...fileTenantCommandOption(command.tenantId),
+        ...fileExpectedVersionCommandOption(command.expectedVersion),
+        metadata: fileCommandMetadata(command.metadata)
       });
       await this.deleteFileObjectsForScanFailure(current);
       throw fileScanFailureError(scan, snapshot);
@@ -579,9 +582,9 @@ export class FileService {
       name: command.name,
       command: "completeDirectUpload",
       input: fileUploadCompletedPatch(object, scanPatch),
-      ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
-      ...(command.expectedVersion === undefined ? {} : { expectedVersion: command.expectedVersion }),
-      metadata: command.metadata ?? {}
+      ...fileTenantCommandOption(command.tenantId),
+      ...fileExpectedVersionCommandOption(command.expectedVersion),
+      metadata: fileCommandMetadata(command.metadata)
     });
   }
 
@@ -625,7 +628,7 @@ export class FileService {
         tenantId,
         data: fileMultipartUploadDocumentData(baseData, upload.uploadId),
         eventType: "FileMultipartUploadReserved",
-        metadata: command.metadata ?? {}
+        metadata: fileCommandMetadata(command.metadata)
       });
       return { snapshot, upload };
     } catch (error) {
@@ -656,9 +659,9 @@ export class FileService {
         etag: part.etag,
         size
       }),
-      ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+      ...fileTenantCommandOption(command.tenantId),
       expectedVersion: current.version,
-      metadata: command.metadata ?? {}
+      metadata: fileCommandMetadata(command.metadata)
     });
     return { part, snapshot };
   }
@@ -674,9 +677,9 @@ export class FileService {
           name: command.name,
           command: "beginMultipartUploadCompletion",
           input: fileMultipartCompletionStartedPatch(),
-          ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
-          ...(command.expectedVersion === undefined ? {} : { expectedVersion: command.expectedVersion }),
-          metadata: command.metadata ?? {}
+          ...fileTenantCommandOption(command.tenantId),
+          ...fileExpectedVersionCommandOption(command.expectedVersion),
+          metadata: fileCommandMetadata(command.metadata)
         })
       : current;
     const object = await this.completedMultipartObject({
@@ -700,9 +703,9 @@ export class FileService {
         name: command.name,
         command: "failScan",
         input: fileUploadScanFailedPatch(object, scanPatch),
-        ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+        ...fileTenantCommandOption(command.tenantId),
         expectedVersion: completing.version,
-        metadata: command.metadata ?? {}
+        metadata: fileCommandMetadata(command.metadata)
       });
       await this.deleteFileObjectsForScanFailure(completing);
       throw fileScanFailureError(scan, snapshot);
@@ -713,9 +716,9 @@ export class FileService {
       name: command.name,
       command: "completeMultipartUpload",
       input: fileUploadCompletedPatch(object, scanPatch),
-      ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+      ...fileTenantCommandOption(command.tenantId),
       expectedVersion: completing.version,
-      metadata: command.metadata ?? {}
+      metadata: fileCommandMetadata(command.metadata)
     });
   }
 
@@ -731,9 +734,9 @@ export class FileService {
       actor: command.actor,
       doctype: this.fileDoctype,
       name: command.name,
-      ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+      ...fileTenantCommandOption(command.tenantId),
       expectedVersion: current.version,
-      metadata: command.metadata ?? {}
+      metadata: fileCommandMetadata(command.metadata)
     });
   }
 
@@ -812,9 +815,9 @@ export class FileService {
       name: command.name,
       command: "updateMetadata",
       input: patch,
-      ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
-      ...(command.expectedVersion === undefined ? {} : { expectedVersion: command.expectedVersion }),
-      metadata: command.metadata ?? {}
+      ...fileTenantCommandOption(command.tenantId),
+      ...fileExpectedVersionCommandOption(command.expectedVersion),
+      metadata: fileCommandMetadata(command.metadata)
     });
   }
 
@@ -873,9 +876,9 @@ export class FileService {
       name: command.name,
       command: "reserveRendition",
       input: reservation.patch,
-      ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+      ...fileTenantCommandOption(command.tenantId),
       expectedVersion: downloaded.snapshot.version,
-      metadata: command.metadata ?? {}
+      metadata: fileCommandMetadata(command.metadata)
     });
 
     let object: FileObjectMetadata | undefined;
@@ -989,9 +992,9 @@ export class FileService {
             name: command.name,
             command: "requestDelete",
             input: {},
-            ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+            ...fileTenantCommandOption(command.tenantId),
             expectedVersion: current.version,
-            metadata: command.metadata ?? {}
+            metadata: fileCommandMetadata(command.metadata)
           })
         : current;
     await this.deleteFileObjects(deleteRequested);
@@ -999,9 +1002,9 @@ export class FileService {
       actor: command.actor,
       doctype: this.fileDoctype,
       name: command.name,
-      ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
+      ...fileTenantCommandOption(command.tenantId),
       expectedVersion: deleteRequested.version,
-      metadata: command.metadata ?? {}
+      metadata: fileCommandMetadata(command.metadata)
     });
     return snapshot;
   }
@@ -1015,9 +1018,9 @@ export class FileService {
         const snapshot = await this.delete({
           actor: command.actor,
           name: selection.name,
-          ...(selection.expectedVersion === undefined ? {} : { expectedVersion: selection.expectedVersion }),
-          ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
-          metadata: command.metadata ?? {}
+          ...fileExpectedVersionCommandOption(selection.expectedVersion),
+          ...fileTenantCommandOption(command.tenantId),
+          metadata: fileCommandMetadata(command.metadata)
         });
         deleted.push({ name: selection.name, snapshot });
       } catch (error) {
@@ -1039,9 +1042,9 @@ export class FileService {
           name: selection.name,
           ...(command.isPrivate === undefined ? {} : { isPrivate: command.isPrivate }),
           ...(command.attachedTo === undefined ? {} : { attachedTo: command.attachedTo }),
-          ...(selection.expectedVersion === undefined ? {} : { expectedVersion: selection.expectedVersion }),
-          ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
-          metadata: command.metadata ?? {}
+          ...fileExpectedVersionCommandOption(selection.expectedVersion),
+          ...fileTenantCommandOption(command.tenantId),
+          metadata: fileCommandMetadata(command.metadata)
         });
         updated.push({ name: selection.name, snapshot });
       } catch (error) {
@@ -1129,9 +1132,9 @@ export class FileService {
       name: command.source.name,
       command: command.command,
       input: fileRenditionSnapshotManifestPatch(latest, command.rendition),
-      ...(command.source.tenantId === undefined ? {} : { tenantId: command.source.tenantId }),
+      ...fileTenantCommandOption(command.source.tenantId),
       expectedVersion: latest.version,
-      metadata: command.source.metadata ?? {}
+      metadata: fileCommandMetadata(command.source.metadata)
     });
   }
 
@@ -1154,7 +1157,7 @@ export class FileService {
       doctype,
       fileDoctype: this.fileDoctype,
       snapshot: document,
-      ...(expectedVersion === undefined ? {} : { expectedVersion })
+      ...fileExpectedVersionCommandOption(expectedVersion)
     });
   }
 
