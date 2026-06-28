@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the downloaded rendition object read planning policy slice:
+As of the multipart completion snapshot selection policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1770`
-- Remaining gap to Frappe static markers: `1014`
+- Vitest cases: `1771`
+- Remaining gap to Frappe static markers: `1013`
 
 ## Implication
 

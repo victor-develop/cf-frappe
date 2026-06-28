@@ -96,6 +96,7 @@ import {
   fileMultipartAbortPlan,
   fileMultipartCompletionStartedExecuteCommand,
   fileMultipartCompletionStartedDocumentCommand,
+  fileMultipartCompletionSnapshot,
   fileMultipartCompletionCommand,
   fileMultipartPartRecordedExecuteCommand,
   fileMultipartPartRecordedDocumentCommand,
@@ -694,7 +695,7 @@ export class FileService {
       snapshot: current,
       ...fileExpectedVersionCommandOption(command.expectedVersion)
     });
-    const completing = completionStart
+    const started = completionStart
       ? await this.documents.execute(fileMultipartCompletionStartedExecuteCommand({
           actor: command.actor,
           doctype: this.fileDoctype,
@@ -703,7 +704,8 @@ export class FileService {
           metadata: command.metadata,
           completionStart
         }))
-      : current;
+      : undefined;
+    const completing = fileMultipartCompletionSnapshot({ current, started });
     const object = await this.completedMultipartObject({
       multipartUploads,
       snapshot: completing,

@@ -1923,6 +1923,13 @@ export function fileMultipartCompletionStartedExecuteCommand(command: {
   };
 }
 
+export function fileMultipartCompletionSnapshot(command: {
+  readonly current: DocumentSnapshot;
+  readonly started?: DocumentSnapshot | undefined;
+}): DocumentSnapshot {
+  return command.started ?? command.current;
+}
+
 export interface FileMetadataPatchCommand {
   readonly filename?: string;
   readonly isPrivate?: boolean;

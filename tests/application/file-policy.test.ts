@@ -90,6 +90,7 @@ import {
   fileMultipartAbortPlan,
   fileMultipartCompletionStartedExecuteCommand,
   fileMultipartCompletionStartedDocumentCommand,
+  fileMultipartCompletionSnapshot,
   fileMultipartCompletionStartedPatch,
   fileMultipartCompletionCommand,
   fileMultipartPartRecordedExecuteCommand,
@@ -2950,6 +2951,17 @@ describe("file policy", () => {
       expectedVersion: 6,
       metadata
     });
+  });
+
+  it("selects multipart completion snapshots after optional start events", () => {
+    const current = fileSnapshot({ storage_state: "upload_completing" });
+    const started = {
+      ...fileSnapshot({ storage_state: "upload_completing" }),
+      version: 8
+    };
+
+    expect(fileMultipartCompletionSnapshot({ current })).toBe(current);
+    expect(fileMultipartCompletionSnapshot({ current, started })).toBe(started);
   });
 
   it("selects upload completion document command intents", () => {
