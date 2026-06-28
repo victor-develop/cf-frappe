@@ -1694,6 +1694,14 @@ export function fileRenditionSnapshotManifestPatch(
 
 export type FileRenditionManifestDocumentCommandName = "completeRendition" | "failRendition";
 
+export function fileCompletedRenditionManifestCommandName(): FileRenditionManifestDocumentCommandName {
+  return "completeRendition";
+}
+
+export function fileFailedRenditionManifestCommandName(): FileRenditionManifestDocumentCommandName {
+  return "failRendition";
+}
+
 export interface FileRenditionManifestDocumentCommand {
   readonly command: FileRenditionManifestDocumentCommandName;
   readonly input: DocumentData;

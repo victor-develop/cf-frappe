@@ -35,6 +35,7 @@ import {
   fileBufferedUploadPutObjectCommand,
   fileCommandMetadata,
   fileCommandTenantId,
+  fileCompletedRenditionManifestCommandName,
   fileContentLength,
   fileContentTypeExtension,
   fileDashboardEntry,
@@ -81,6 +82,7 @@ import {
   fileScanTarget,
   fileSnapshotStringData,
   fileExpectedVersionCommandOption,
+  fileFailedRenditionManifestCommandName,
   fileIsPrivateCommandOption,
   fileUploadCompletionDocumentCommand,
   fileUploadCompletedPatch,
@@ -1023,6 +1025,11 @@ describe("file policy", () => {
         replacement
       ]
     });
+  });
+
+  it("builds rendition manifest document command names", () => {
+    expect(fileCompletedRenditionManifestCommandName()).toBe("completeRendition");
+    expect(fileFailedRenditionManifestCommandName()).toBe("failRendition");
   });
 
   it("builds rendition manifest document command intents", () => {

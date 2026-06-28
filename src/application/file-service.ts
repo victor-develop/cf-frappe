@@ -60,6 +60,7 @@ import {
   requireStoredFileObject,
   requireStoredFileRenditionObject,
   canUploadFile,
+  fileCompletedRenditionManifestCommandName,
   fileBufferedUploadDocumentCreateCommand,
   fileBulkDeleteFailure,
   fileBulkFailure,
@@ -90,6 +91,7 @@ import {
   fileRenditionId,
   fileRenditionManifestDocumentCommand,
   fileRenditionReservationDocumentCommand,
+  fileFailedRenditionManifestCommandName,
   fileRenditionSnapshotPutObjectCommand,
   fileRenditionView,
   fileScanFailureError,
@@ -955,7 +957,7 @@ export class FileService {
       });
       const snapshot = await this.recordRenditionManifest({
         source: command,
-        command: "completeRendition",
+        command: fileCompletedRenditionManifestCommandName(),
         rendition: completed
       });
       return {
@@ -969,7 +971,7 @@ export class FileService {
       }
       await this.recordRenditionManifest({
         source: command,
-        command: "failRendition",
+        command: fileFailedRenditionManifestCommandName(),
         rendition: failedFileRenditionForError({
           pending,
           error
