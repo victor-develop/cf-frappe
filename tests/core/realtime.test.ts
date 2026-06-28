@@ -15,7 +15,7 @@ import {
   userRealtimeTopic
 } from "../../src";
 import { manager, now, owner } from "../helpers";
-import type { DomainEvent } from "../../src";
+import type { DocumentData, DocumentSnapshot, DomainEvent, JsonValue } from "../../src";
 
 describe("realtime topics", () => {
   it("encodes and parses tenant, doctype, and document topics", () => {
@@ -76,6 +76,60 @@ describe("realtime topics", () => {
       topics: ["tenant:acme", "doctype:acme:Note", "document:acme:Note:One"],
       tenantId: "acme",
       occurredAt: now
+    });
+  });
+
+  it("snapshots domain events and document snapshots inside document realtime payloads", () => {
+    const event: DomainEvent = {
+      id: "evt-snapshot",
+      tenantId: "acme",
+      stream: "acme:Note:One",
+      sequence: 1,
+      type: "NoteUpdated",
+      doctype: "Note",
+      documentName: "One",
+      actorId: "owner@example.com",
+      occurredAt: now,
+      payload: { kind: "DocumentUpdated", patch: { title: "One", tags: ["first"] } },
+      metadata: { source: "desk", nested: { attempt: 1 } }
+    };
+    const snapshot: DocumentSnapshot = {
+      tenantId: "acme",
+      doctype: "Note",
+      name: "One",
+      version: 2,
+      docstatus: "draft",
+      data: { title: "One", nested: { count: 1 } },
+      createdAt: now,
+      updatedAt: now
+    };
+
+    const realtime = realtimeEventFromDomainEvent(event, snapshot);
+
+    (((event.payload as DocumentData).patch as DocumentData).tags as JsonValue[]).push("caller");
+    ((event.metadata as DocumentData).nested as DocumentData).attempt = 2;
+    (snapshot.data.nested as DocumentData).count = 2;
+
+    expect(realtime.payload).toMatchObject({
+      event: {
+        payload: { kind: "DocumentUpdated", patch: { title: "One", tags: ["first"] } },
+        metadata: { source: "desk", nested: { attempt: 1 } }
+      },
+      snapshot: { data: { title: "One", nested: { count: 1 } } }
+    });
+
+    const payload = realtime.payload as DocumentData;
+    const payloadEvent = payload.event as DocumentData;
+    const payloadSnapshot = payload.snapshot as DocumentData;
+    ((((payloadEvent.payload as DocumentData).patch as DocumentData).tags as JsonValue[])).push("returned");
+    ((payloadSnapshot.data as DocumentData).nested as DocumentData).count = 3;
+
+    expect(event).toMatchObject({
+      payload: { kind: "DocumentUpdated", patch: { title: "One", tags: ["first", "caller"] } },
+      metadata: { source: "desk", nested: { attempt: 2 } }
+    });
+    expect(snapshot).toMatchObject({
+      data: { title: "One", nested: { count: 2 } }
     });
   });
 

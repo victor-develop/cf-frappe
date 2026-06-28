@@ -7,6 +7,8 @@ import {
   type JsonValue
 } from "./types.js";
 import { badRequest } from "./errors.js";
+import { cloneDocumentSnapshot } from "./document-snapshots.js";
+import { cloneDomainEvent } from "./domain-events.js";
 import { cloneJsonValue, isJsonValue } from "./json.js";
 import { documentUserNotificationsFromDomainEvent } from "./notifications.js";
 export { documentUserNotificationsFromDomainEvent } from "./notifications.js";
@@ -144,19 +146,21 @@ export function canSubscribeToRealtimeTopic(actor: Actor, topic: RealtimeTopic):
 }
 
 export function realtimeEventFromDomainEvent(event: DomainEvent, snapshot: DocumentSnapshot | null): RealtimeEvent {
+  const sourceEvent = cloneDomainEvent(event);
+  const sourceSnapshot = snapshot === null ? null : cloneDocumentSnapshot(snapshot);
   return {
-    id: event.id,
-    type: event.type,
+    id: sourceEvent.id,
+    type: sourceEvent.type,
     topics: [
-      tenantRealtimeTopic(event.tenantId),
-      doctypeRealtimeTopic(event.tenantId, event.doctype),
-      documentRealtimeTopic(event.tenantId, event.doctype, event.documentName)
+      tenantRealtimeTopic(sourceEvent.tenantId),
+      doctypeRealtimeTopic(sourceEvent.tenantId, sourceEvent.doctype),
+      documentRealtimeTopic(sourceEvent.tenantId, sourceEvent.doctype, sourceEvent.documentName)
     ],
-    tenantId: event.tenantId,
-    occurredAt: event.occurredAt,
+    tenantId: sourceEvent.tenantId,
+    occurredAt: sourceEvent.occurredAt,
     payload: {
-      event: event as unknown as JsonValue,
-      snapshot: snapshot as unknown as JsonValue
+      event: sourceEvent as unknown as JsonValue,
+      snapshot: sourceSnapshot as unknown as JsonValue
     }
   };
 }
