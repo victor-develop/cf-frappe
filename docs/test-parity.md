@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the in-memory account-recovery notifier snapshot slice:
+As of the R2 custom-metadata boundary slice:
 
 - Vitest files: `171`
-- Vitest cases: `1875`
-- Remaining gap to Frappe static markers: `909`
+- Vitest cases: `1879`
+- Remaining gap to Frappe static markers: `905`
 
 ## Implication
 

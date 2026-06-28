@@ -14,7 +14,7 @@ import {
   type UploadMultipartFilePartCommand
 } from "../ports/file-storage.js";
 import { ensureMultipartPartNumber, sortedUploadedMultipartParts } from "../ports/multipart-file-storage.js";
-import { FrameworkError, notFound } from "../core/errors.js";
+import { badRequest, FrameworkError, notFound } from "../core/errors.js";
 import type { DocumentData, JsonValue } from "../core/types.js";
 
 export interface R2DirectUploadSigner {
@@ -34,7 +34,11 @@ export class R2FileStorage implements FileStorage {
     this.bucket = bucket;
     const directUploads = options.directUploads;
     if (directUploads) {
-      this.createDirectUpload = (command) => directUploads.createUpload(command);
+      this.createDirectUpload = (command) =>
+        directUploads.createUpload({
+          ...command,
+          customMetadata: normalizeCustomMetadata(command.customMetadata ?? {})
+        });
     }
   }
 
@@ -44,7 +48,7 @@ export class R2FileStorage implements FileStorage {
         contentType: command.contentType,
         contentDisposition: contentDisposition(command.filename)
       },
-      customMetadata: command.customMetadata ?? {}
+      customMetadata: normalizeCustomMetadata(command.customMetadata ?? {})
     });
     return metadataFromR2Object(object);
   }
@@ -71,7 +75,7 @@ export class R2FileStorage implements FileStorage {
         contentType: command.contentType,
         contentDisposition: contentDisposition(command.filename)
       },
-      customMetadata: command.customMetadata ?? {}
+      customMetadata: normalizeCustomMetadata(command.customMetadata ?? {})
     });
     return { key: upload.key, uploadId: upload.uploadId };
   }
@@ -162,6 +166,17 @@ function metadataFromR2Object(object: R2Object): FileObjectMetadata {
 
 function documentDataFromMetadata(metadata: Readonly<Record<string, string>>): DocumentData {
   return Object.fromEntries(Object.entries(metadata).filter(([, value]) => isJsonValue(value))) as DocumentData;
+}
+
+function normalizeCustomMetadata(metadata: unknown): Record<string, string> {
+  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
+    throw badRequest("R2 object customMetadata must be a string record");
+  }
+  const entries = Object.entries(metadata);
+  if (entries.some(([, value]) => typeof value !== "string")) {
+    throw badRequest("R2 object customMetadata must be a string record");
+  }
+  return Object.fromEntries(entries) as Record<string, string>;
 }
 
 function isJsonValue(value: string): value is string & JsonValue {

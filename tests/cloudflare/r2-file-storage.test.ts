@@ -43,6 +43,58 @@ describe("R2FileStorage", () => {
     });
   });
 
+  it("clones custom metadata before putting objects to R2", async () => {
+    const calls: unknown[] = [];
+    const customMetadata = { tenantId: "acme", uploadedBy: "owner@example.com" };
+    const bucket = fakeBucket({
+      async put(key, value, options) {
+        calls.push({ key, value, options });
+        return fakeObject(key, 5, { contentType: "text/plain" });
+      }
+    });
+
+    await new R2FileStorage(bucket).put({
+      key: "acme/files/file_1-note.txt",
+      body: "hello",
+      contentType: "text/plain",
+      filename: "note.txt",
+      customMetadata
+    });
+    customMetadata.uploadedBy = "mutated@example.com";
+
+    expect(calls).toMatchObject([
+      {
+        options: {
+          customMetadata: { tenantId: "acme", uploadedBy: "owner@example.com" }
+        }
+      }
+    ]);
+  });
+
+  it("rejects custom metadata that cannot be stored as R2 strings", async () => {
+    const calls: unknown[] = [];
+    const bucket = fakeBucket({
+      async put(key, value, options) {
+        calls.push({ key, value, options });
+        return fakeObject(key, 5);
+      }
+    });
+
+    await expect(
+      new R2FileStorage(bucket).put({
+        key: "acme/files/file_1-bad.txt",
+        body: "bad",
+        contentType: "text/plain",
+        filename: "bad.txt",
+        customMetadata: { tenantId: "acme", bad: Number.POSITIVE_INFINITY } as never
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "R2 object customMetadata must be a string record"
+    });
+    expect(calls).toEqual([]);
+  });
+
   it("streams R2 object bodies on read", async () => {
     const bucket = fakeBucket({
       async get(key) {
@@ -123,6 +175,41 @@ describe("R2FileStorage", () => {
     });
   });
 
+  it("clones custom metadata before delegating direct upload signing", async () => {
+    const calls: unknown[] = [];
+    const customMetadata = { tenantId: "acme", uploadedBy: "owner@example.com" };
+    const storage = new R2FileStorage(fakeBucket({}), {
+      directUploads: {
+        async createUpload(command) {
+          calls.push(command);
+          return {
+            method: "PUT",
+            key: command.key,
+            url: `https://signed.example/${encodeURIComponent(command.key)}`,
+            headers: {},
+            expiresAt: command.expiresAt
+          };
+        }
+      }
+    });
+
+    await storage.createDirectUpload!({
+      key: "acme/files/file_1-browser.pdf",
+      contentType: "application/pdf",
+      filename: "browser.pdf",
+      size: 12,
+      expiresAt: "2026-01-01T00:15:00.000Z",
+      customMetadata
+    });
+    customMetadata.uploadedBy = "mutated@example.com";
+
+    expect(calls).toMatchObject([
+      {
+        customMetadata: { tenantId: "acme", uploadedBy: "owner@example.com" }
+      }
+    ]);
+  });
+
   it("omits direct upload capability until a signer is injected", () => {
     expect(new R2FileStorage(fakeBucket({})).createDirectUpload).toBeUndefined();
   });
@@ -159,6 +246,33 @@ describe("R2FileStorage", () => {
       key: "acme/files/file_1-video.mp4",
       uploadId: "upload-1"
     });
+  });
+
+  it("clones custom metadata before creating R2 multipart uploads", async () => {
+    const calls: unknown[] = [];
+    const customMetadata = { tenantId: "acme", uploadedBy: "owner@example.com" };
+    const bucket = fakeBucket({
+      async createMultipartUpload(key, options) {
+        calls.push({ key, options });
+        return fakeMultipartUpload(key, "upload-1");
+      }
+    });
+
+    await new R2FileStorage(bucket).multipartUploads.createMultipartUpload({
+      key: "acme/files/file_1-video.mp4",
+      contentType: "video/mp4",
+      filename: "video.mp4",
+      customMetadata
+    });
+    customMetadata.uploadedBy = "mutated@example.com";
+
+    expect(calls).toMatchObject([
+      {
+        options: {
+          customMetadata: { tenantId: "acme", uploadedBy: "owner@example.com" }
+        }
+      }
+    ]);
   });
 
   it("uploads R2 multipart parts through a resumed upload", async () => {
