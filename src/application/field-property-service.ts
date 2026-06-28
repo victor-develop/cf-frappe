@@ -100,11 +100,12 @@ export class FieldPropertyService {
     const tenantId = resolveActorTenant(command.actor, command.tenantId);
     const doctype = await this.prePropertyDocTypeFor(command.doctype, tenantId);
     const field = requireField(doctype, command.fieldName);
-    const overrides = normalizeOverrides(field, command.overrides);
+    let overrides = normalizeOverrides(field, command.overrides);
     const state = await this.stateFor(tenantId, doctype.name);
     ensureExpectedVersion(state, command.expectedVersion);
     const pending = replaceStateOverride(state, field.name, overrides, this.clock.now());
-    applyFieldPropertyOverridesToDocType(doctype, pending);
+    const effective = applyFieldPropertyOverridesToDocType(doctype, pending);
+    overrides = normalizeOverrideExpressions(effective, field.name, overrides);
     const existing = state.fields.find((entry) => entry.fieldName === field.name);
     if (existing && jsonEqual(existing.overrides, overrides)) {
       return state;
@@ -258,6 +259,25 @@ function normalizeOverrides(field: FieldDefinition, overrides: FieldPropertyOver
     throw new FrameworkError("FIELD_PROPERTY_INVALID", `Field '${field.name}' min cannot exceed max`, { status: 400 });
   }
   return Object.freeze(normalized);
+}
+
+function normalizeOverrideExpressions(
+  effective: DocTypeDefinition,
+  fieldName: string,
+  overrides: FieldPropertyOverrides
+): FieldPropertyOverrides {
+  const field = effective.fields.find((item) => item.name === fieldName);
+  if (field === undefined) {
+    throw new FrameworkError("FIELD_PROPERTY_INVALID", `Field '${fieldName}' was not normalized on ${effective.name}`, {
+      status: 400
+    });
+  }
+  return Object.freeze({
+    ...overrides,
+    ...(overrides.mandatoryDependsOn === undefined ? {} : { mandatoryDependsOn: field.mandatoryDependsOn }),
+    ...(overrides.readOnlyDependsOn === undefined ? {} : { readOnlyDependsOn: field.readOnlyDependsOn }),
+    ...(overrides.hiddenDependsOn === undefined ? {} : { hiddenDependsOn: field.hiddenDependsOn })
+  });
 }
 
 function replaceStateOverride(

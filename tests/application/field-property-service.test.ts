@@ -162,6 +162,34 @@ describe("FieldPropertyService", () => {
     expect(reviewed).not.toHaveProperty("defaultValue");
   });
 
+  it("normalizes field-property dependency expressions before persisting metadata events", async () => {
+    const service = new FieldPropertyService({
+      registry: createRegistry({ doctypes: [noteDocType] }),
+      events: new InMemoryDocumentStore(),
+      ids: deterministicIds(["property-1"]),
+      clock: fixedClock(now)
+    });
+
+    const saved = await service.save({
+      actor: admin,
+      doctype: "Note",
+      fieldName: "body",
+      overrides: {
+        mandatoryDependsOn: { field: "title", operator: "eq", value: "Required" },
+        readOnlyDependsOn: { field: "title", operator: "contains", value: "Closed" },
+        hiddenDependsOn: { field: "title", operator: "eq", value: "Hidden" }
+      }
+    });
+
+    expect(saved.fields[0]?.overrides.mandatoryDependsOn).toEqual({ field: "title", value: "Required" });
+    expect(saved.fields[0]?.overrides.readOnlyDependsOn).toEqual({
+      field: "title",
+      operator: "contains",
+      value: "Closed"
+    });
+    expect(saved.fields[0]?.overrides.hiddenDependsOn).toEqual({ field: "title", value: "Hidden" });
+  });
+
   it("can clear dangling overrides after an upstream custom field is disabled", async () => {
     const events = new InMemoryDocumentStore();
     const registry = createRegistry({ doctypes: [noteDocType] });
