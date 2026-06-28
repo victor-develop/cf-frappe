@@ -85,6 +85,7 @@ import {
   fileMultipartUploadDocumentData,
   fileMultipartUploadAbortCommand,
   fileMultipartUploadId,
+  fileMultipartUploadReservationCleanupPlan,
   fileMultipartUploadReservationPlan,
   fileObjectKeysForDelete,
   fileObjectKeysForScanFailureCleanup,
@@ -2122,6 +2123,18 @@ describe("file policy", () => {
     })).toEqual({
       key: "acme/files/file_2-failed.pdf",
       uploadId: "upload-2"
+    });
+  });
+
+  it("plans multipart-upload reservation cleanup commands", () => {
+    expect(fileMultipartUploadReservationCleanupPlan({
+      key: "acme/files/file_2-failed.pdf",
+      uploadId: "upload-2"
+    })).toEqual({
+      abort: {
+        key: "acme/files/file_2-failed.pdf",
+        uploadId: "upload-2"
+      }
     });
   });
 

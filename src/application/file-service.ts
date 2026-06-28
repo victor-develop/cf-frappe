@@ -100,6 +100,7 @@ import {
   fileMultipartUploadDocumentCreateCommand,
   fileMultipartUploadReservationPlan,
   fileMultipartUploadId,
+  fileMultipartUploadReservationCleanupPlan,
   fileObjectKeysForDelete,
   fileObjectKeysForScanFailureCleanup,
   filePrimaryObjectKey,
@@ -121,7 +122,6 @@ import {
   fileUploadCompletionPlan,
   fileUploadContentType,
   fileUploadExpiresAt,
-  fileMultipartUploadAbortCommand,
   fileTransformOverlayCommandOption,
   fileTransformOverlayObjectReadPlan,
   fileTransformOverlayResolutionPlan,
@@ -648,10 +648,11 @@ export class FileService {
       }));
       return filePreparedMultipartUploadResult({ snapshot, upload });
     } catch (error) {
-      await multipartUploads.abortMultipartUpload(fileMultipartUploadAbortCommand({
+      const cleanup = fileMultipartUploadReservationCleanupPlan({
         key,
         uploadId: upload.uploadId
-      })).catch(ignoreFileCleanupFailure);
+      });
+      await multipartUploads.abortMultipartUpload(cleanup.abort).catch(ignoreFileCleanupFailure);
       throw error;
     }
   }

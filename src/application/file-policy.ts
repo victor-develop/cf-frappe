@@ -1019,6 +1019,17 @@ export function fileMultipartUploadAbortCommand(command: {
   };
 }
 
+export function fileMultipartUploadReservationCleanupPlan(command: {
+  readonly key: string;
+  readonly uploadId: string;
+}): {
+  readonly abort: AbortMultipartFileUploadCommand;
+} {
+  return {
+    abort: fileMultipartUploadAbortCommand(command)
+  };
+}
+
 export function fileMultipartAbortPlan(command: {
   readonly snapshot: DocumentSnapshot;
   readonly expectedVersion?: number | undefined;
