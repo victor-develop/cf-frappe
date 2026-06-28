@@ -2,7 +2,7 @@ import { assertAppName, assertAppNames } from "./app-name.js";
 import { resolveAppDependencyOrder } from "./app-graph.js";
 import { defineCalendar, type CalendarDefinition } from "./calendar.js";
 import { defineClientScript, type ClientScriptDefinition } from "./client-script.js";
-import type { DashboardDefinition } from "./dashboard.js";
+import { defineDashboard, type DashboardDefinition } from "./dashboard.js";
 import { defineDataPatch, type DataPatchDefinition } from "./data-patch.js";
 import { defineKanban, type KanbanDefinition } from "./kanban.js";
 import { createRegistry, type DocumentHooks, type ModelRegistry, type RegistryOptions } from "./registry.js";
@@ -61,7 +61,7 @@ export function defineApp<TDataPatchResources = unknown>(
     letterheads: Object.freeze([...(input.letterheads ?? [])]),
     printFormats: Object.freeze([...(input.printFormats ?? [])]),
     reports: Object.freeze([...(input.reports ?? [])]),
-    dashboards: Object.freeze([...(input.dashboards ?? [])]),
+    dashboards: Object.freeze((input.dashboards ?? []).map(defineDashboard)),
     kanbans: Object.freeze((input.kanbans ?? []).map(defineKanban)),
     calendars: Object.freeze((input.calendars ?? []).map(defineCalendar)),
     webForms: Object.freeze((input.webForms ?? []).map(defineWebForm)),

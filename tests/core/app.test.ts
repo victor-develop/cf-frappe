@@ -494,6 +494,68 @@ describe("app manifests", () => {
     expect(Object.isFrozen(app.kanbans?.[0]?.columns?.[0])).toBe(true);
   });
 
+  it("snapshots app manifest dashboard metadata by value", () => {
+    const roles = ["User"];
+    const dashboard = {
+      name: "Task Dashboard",
+      roles,
+      cards: [
+        {
+          name: "open_tasks",
+          source: {
+            kind: "documentCount" as const,
+            doctype: "Task",
+            filters: [{ field: "status", operator: "eq" as const, value: "Open" }]
+          },
+          indicatorRules: [{ operator: "gt" as const, value: 10, indicator: "red" }]
+        }
+      ]
+    };
+    const app = defineApp({
+      name: "tasks",
+      dashboards: [dashboard]
+    });
+
+    roles[0] = "Guest";
+    dashboard.cards[0]!.source.filters![0]!.value = "Closed";
+    dashboard.cards[0]!.indicatorRules![0]!.indicator = "green";
+    dashboard.cards.push({
+      name: "injected",
+      source: { kind: "documentCount", doctype: "Task", filters: [] },
+      indicatorRules: []
+    });
+
+    expect(app.dashboards?.[0]?.roles).toEqual(["User"]);
+    expect(app.dashboards?.[0]?.cards).toEqual([
+      {
+        name: "open_tasks",
+        source: {
+          kind: "documentCount",
+          doctype: "Task",
+          filters: [{ field: "status", operator: "eq", value: "Open" }]
+        },
+        indicatorRules: [{ operator: "gt", value: 10, indicator: "red" }]
+      }
+    ]);
+    expect(registryOptionsFromApps([app]).dashboards?.[0]?.cards).toEqual(app.dashboards?.[0]?.cards);
+    expect(Object.isFrozen(app.dashboards)).toBe(true);
+    expect(Object.isFrozen(app.dashboards?.[0])).toBe(true);
+    expect(Object.isFrozen(app.dashboards?.[0]?.roles)).toBe(true);
+    expect(Object.isFrozen(app.dashboards?.[0]?.cards)).toBe(true);
+    expect(Object.isFrozen(app.dashboards?.[0]?.cards[0])).toBe(true);
+    const dashboardSource = app.dashboards?.[0]?.cards[0]?.source;
+    expect(dashboardSource?.kind).toBe("documentCount");
+    if (dashboardSource?.kind !== "documentCount") {
+      throw new Error("Expected a document-count dashboard source");
+    }
+    expect(Object.isFrozen(dashboardSource)).toBe(true);
+    expect(Object.isFrozen(dashboardSource.filters)).toBe(true);
+    expect(Object.isFrozen(dashboardSource.filters?.[0])).toBe(true);
+    const indicatorRules = app.dashboards?.[0]?.cards[0]?.indicatorRules;
+    expect(Object.isFrozen(indicatorRules)).toBe(true);
+    expect(Object.isFrozen(indicatorRules?.[0])).toBe(true);
+  });
+
   it("validates app names at the manifest boundary", () => {
     expect(() => defineApp({ name: "" })).toThrow(FrameworkError);
     expect(() => defineApp({ name: "Bad Name" })).toThrow("Invalid app name");
