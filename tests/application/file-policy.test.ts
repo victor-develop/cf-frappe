@@ -51,6 +51,7 @@ import {
   fileTransformOptionsData,
   fileTransformOptionsFromData,
   fileTransformSource,
+  isInfectedFileScanResult,
   isPreviewableFileContentType,
   MIN_MULTIPART_FILE_PART_BYTES,
   multipartPartManifest,
@@ -689,6 +690,12 @@ describe("file policy", () => {
       scan_status: "clean",
       scan_checked_at: "2026-06-28T01:00:00.000Z"
     });
+  });
+
+  it("identifies infected scanner results", () => {
+    expect(isInfectedFileScanResult(undefined)).toBe(false);
+    expect(isInfectedFileScanResult({ status: "clean" })).toBe(false);
+    expect(isInfectedFileScanResult({ status: "infected" })).toBe(true);
   });
 
   it("builds file scan targets from stored object metadata", () => {

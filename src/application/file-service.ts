@@ -84,6 +84,7 @@ import {
   fileUploadScanFailedPatch,
   fileTransformOverlaySource,
   fileTransformSource,
+  isInfectedFileScanResult,
   multipartPartManifest,
   multipartPartManifestPatch,
   multipartPartSize,
@@ -455,7 +456,7 @@ export class FileService {
 
     try {
       const scanPatch = optionalFileScanPatch(scan, this.clock.now());
-      if (scan?.status === "infected") {
+      if (isInfectedFileScanResult(scan)) {
         const snapshot = await this.documents.create({
           actor: command.actor,
           doctype: this.fileDoctype,
@@ -547,7 +548,7 @@ export class FileService {
       object
     });
     const scanPatch = optionalFileScanPatch(scan, this.clock.now());
-    if (scan?.status === "infected") {
+    if (isInfectedFileScanResult(scan)) {
       const snapshot = await this.documents.execute({
         actor: command.actor,
         doctype: this.fileDoctype,
@@ -684,7 +685,7 @@ export class FileService {
       object
     });
     const scanPatch = optionalFileScanPatch(scan, this.clock.now());
-    if (scan?.status === "infected") {
+    if (isInfectedFileScanResult(scan)) {
       const snapshot = await this.documents.execute({
         actor: command.actor,
         doctype: this.fileDoctype,

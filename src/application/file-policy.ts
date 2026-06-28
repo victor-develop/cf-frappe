@@ -343,6 +343,12 @@ export function optionalFileScanPatch(result: FileScanResult | undefined, checke
   return result === undefined ? {} : fileScanPatch(result, checkedAt);
 }
 
+export function isInfectedFileScanResult(
+  result: FileScanResult | undefined
+): result is FileScanResult & { readonly status: "infected" } {
+  return result?.status === "infected";
+}
+
 export function fileScanTarget(command: {
   readonly actorId: string;
   readonly tenantId: string;

@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the optional file scan patch policy module slice:
+As of the infected file scan predicate policy module slice:
 
 - Vitest files: `169`
-- Vitest cases: `1649`
+- Vitest cases: `1650`
 
 ## Implication
 
