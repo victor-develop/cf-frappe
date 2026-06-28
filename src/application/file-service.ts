@@ -79,7 +79,7 @@ import {
   fileMultipartCompletionCommand,
   fileMultipartPartRecordedDocumentCommand,
   fileMultipartPartUploadCommand,
-  fileMultipartUploadDocumentData,
+  fileMultipartUploadDocumentCreateCommand,
   fileMultipartUploadId,
   fileObjectKeysForDelete,
   fileObjectKeysForScanFailureCleanup,
@@ -619,7 +619,7 @@ export class FileService {
     const fileName = this.ids.next("file_");
     const key = objectKey(tenantId, fileName, filename);
     const expiresAt = fileUploadExpiresAt(this.clock.now(), command.expiresInSeconds);
-    const baseData = filePendingUploadDocumentData({
+    const uploadData = {
       filename,
       key,
       contentType,
@@ -630,8 +630,8 @@ export class FileService {
       directUploadExpiresAt: expiresAt,
       scannerConfigured: this.scanner !== undefined,
       ...fileAttachedToCommandOption(command.attachedTo)
-    });
-    this.preflightCreate(command.actor, baseData);
+    };
+    this.preflightCreate(command.actor, filePendingUploadDocumentData(uploadData));
     const upload = await multipartUploads.createMultipartUpload(fileMultipartUploadReservationCommand({
       key,
       contentType,
@@ -640,13 +640,17 @@ export class FileService {
       uploadedBy: command.actor.id
     }));
     try {
+      const create = fileMultipartUploadDocumentCreateCommand({
+        upload: uploadData,
+        uploadId: upload.uploadId
+      });
       const snapshot = await this.documents.create({
         actor: command.actor,
         doctype: this.fileDoctype,
         name: fileName,
         tenantId,
-        data: fileMultipartUploadDocumentData(baseData, upload.uploadId),
-        eventType: "FileMultipartUploadReserved",
+        data: create.data,
+        eventType: create.eventType,
         metadata: fileCommandMetadata(command.metadata)
       });
       return { snapshot, upload };

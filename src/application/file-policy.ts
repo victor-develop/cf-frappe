@@ -823,6 +823,21 @@ export function fileMultipartUploadDocumentData(data: DocumentData, uploadId: st
   };
 }
 
+export interface FileMultipartUploadDocumentCreateCommand {
+  readonly data: DocumentData;
+  readonly eventType: "FileMultipartUploadReserved";
+}
+
+export function fileMultipartUploadDocumentCreateCommand(command: {
+  readonly upload: FilePendingUploadDocumentDataCommand;
+  readonly uploadId: string;
+}): FileMultipartUploadDocumentCreateCommand {
+  return {
+    data: fileMultipartUploadDocumentData(filePendingUploadDocumentData(command.upload), command.uploadId),
+    eventType: "FileMultipartUploadReserved"
+  };
+}
+
 export function fileUploadCompletedPatch(object: FileObjectMetadata, scanPatch: DocumentData = {}): DocumentData {
   return {
     storage_state: "available",

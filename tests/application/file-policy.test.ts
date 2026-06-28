@@ -51,6 +51,7 @@ import {
   fileMultipartCompletionCommand,
   fileMultipartPartRecordedDocumentCommand,
   fileMultipartPartUploadCommand,
+  fileMultipartUploadDocumentCreateCommand,
   fileMultipartUploadDocumentData,
   fileMultipartUploadAbortCommand,
   fileMultipartUploadId,
@@ -1390,6 +1391,37 @@ describe("file policy", () => {
     expect(fileMultipartUploadDocumentData(data, "upload-1")).toEqual({
       ...data,
       multipart_upload_id: "upload-1"
+    });
+  });
+
+  it("builds multipart-upload document create intents", () => {
+    expect(fileMultipartUploadDocumentCreateCommand({
+      upload: {
+        filename: "invoice.pdf",
+        key: "acme/files/file_1-invoice.pdf",
+        contentType: "application/pdf",
+        size: 42,
+        uploadedBy: "owner@example.com",
+        uploadedAt: "2026-06-28T00:00:00.000Z",
+        directUploadExpiresAt: "2026-06-28T00:15:00.000Z",
+        scannerConfigured: true
+      },
+      uploadId: "upload-1"
+    })).toEqual({
+      data: {
+        filename: "invoice.pdf",
+        key: "acme/files/file_1-invoice.pdf",
+        content_type: "application/pdf",
+        size: 42,
+        is_private: true,
+        uploaded_by: "owner@example.com",
+        uploaded_at: "2026-06-28T00:00:00.000Z",
+        storage_state: "upload_pending",
+        direct_upload_expires_at: "2026-06-28T00:15:00.000Z",
+        scan_status: "pending",
+        multipart_upload_id: "upload-1"
+      },
+      eventType: "FileMultipartUploadReserved"
     });
   });
 
