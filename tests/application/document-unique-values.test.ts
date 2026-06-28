@@ -6,9 +6,11 @@ import {
   defineDocType,
   planUniqueValueReleaseEvent,
   planUniqueValueReservationEvent,
+  projectUniqueValueReservationWrite,
   releasedUniqueValueReservations,
   uniqueReservationOwnerStillOwnsValue,
   uniqueValueReservations,
+  type DomainEvent,
   type DocumentSnapshot,
   type UniqueValueReservation
 } from "../../src";
@@ -134,6 +136,56 @@ describe("document unique values", () => {
       metadata: { target_doctype: "Contact", target_field: "email" }
     });
   });
+
+  it("projects new unique-value reservation writes from saved create events", () => {
+    const reservation = reservationFor("ada@example.com");
+
+    expect(
+      projectUniqueValueReservationWrite({
+        reservation,
+        existing: null,
+        saved: uniqueValueEvent({
+          payload: planUniqueValueReservationEvent(reservation, null).payload
+        })
+      })
+    ).toEqual({
+      tenantId: "acme",
+      doctype: "__UniqueValues",
+      name: "Contact:email:s:ada@example.com",
+      version: 2,
+      docstatus: "draft",
+      data: {
+        doctype: "Contact",
+        field: "email",
+        value: "ada@example.com",
+        valueKey: "s:ada@example.com",
+        documentName: "ada",
+        active: true
+      },
+      createdAt: "2026-06-28T02:00:00.000Z",
+      updatedAt: "2026-06-28T02:00:00.000Z"
+    });
+  });
+
+  it("projects transferred unique-value reservation writes from saved update events", () => {
+    const reservation = { ...reservationFor("ada@example.com"), documentName: "grace" };
+
+    expect(
+      projectUniqueValueReservationWrite({
+        reservation,
+        existing: uniqueValueSnapshot({ documentName: "ada", active: true }),
+        saved: uniqueValueEvent({
+          sequence: 3,
+          payload: planUniqueValueReservationEvent(reservation, uniqueValueSnapshot({})).payload
+        })
+      })
+    ).toEqual({
+      ...uniqueValueSnapshot({ documentName: "ada", active: true }),
+      version: 3,
+      data: { documentName: "grace", active: true },
+      updatedAt: "2026-06-28T02:00:00.000Z"
+    });
+  });
 });
 
 function reservationFor(email: string): UniqueValueReservation {
@@ -163,5 +215,24 @@ function uniqueValueSnapshot(data: Record<string, string | boolean>): DocumentSn
     data,
     createdAt: "2026-06-28T01:00:00.000Z",
     updatedAt: "2026-06-28T01:00:00.000Z"
+  };
+}
+
+function uniqueValueEvent(options: {
+  readonly sequence?: number;
+  readonly payload: DomainEvent["payload"];
+}): DomainEvent {
+  return {
+    id: "event-1",
+    tenantId: "acme",
+    stream: "acme:__UniqueValues:Contact%3Aemail%3As%3Aada%40example%2Ecom",
+    sequence: options.sequence ?? 2,
+    type: options.payload.kind === "DocumentCreated" ? "UniqueValueStarted" : "UniqueValueReserved",
+    doctype: "__UniqueValues",
+    documentName: "Contact:email:s:ada@example.com",
+    actorId: "owner@example.com",
+    occurredAt: "2026-06-28T02:00:00.000Z",
+    payload: options.payload,
+    metadata: {}
   };
 }

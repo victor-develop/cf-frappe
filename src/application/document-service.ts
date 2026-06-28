@@ -69,6 +69,7 @@ import {
   activeUniqueValueOwner,
   planUniqueValueReleaseEvent,
   planUniqueValueReservationEvent,
+  projectUniqueValueReservationWrite,
   releasedUniqueValueReservations,
   uniqueReservationOwnerStillOwnsValue,
   uniqueValueReservations,
@@ -597,7 +598,11 @@ export class DocumentService implements DocumentCommandExecutor {
         return {
           snapshot: snapshotFromDocumentCreatedEvent(saved),
           auxiliarySnapshots: uniqueReservationWrites.map((write) =>
-            this.projectUniqueReservationWrite(write, requireSavedEvent(savedEvents, write.event.id))
+            projectUniqueValueReservationWrite({
+              reservation: write.reservation,
+              existing: write.existing,
+              saved: requireSavedEvent(savedEvents, write.event.id)
+            })
           )
         };
       }
@@ -813,7 +818,11 @@ export class DocumentService implements DocumentCommandExecutor {
         return {
           snapshot: snapshotFromCommittedDocumentEvent(options.existing, saved, { data }),
           auxiliarySnapshots: uniqueReservationWrites.map((write) =>
-            this.projectUniqueReservationWrite(write, requireSavedEvent(savedEvents, write.event.id))
+            projectUniqueValueReservationWrite({
+              reservation: write.reservation,
+              existing: write.existing,
+              saved: requireSavedEvent(savedEvents, write.event.id)
+            })
           )
         };
       }
@@ -1725,18 +1734,6 @@ export class DocumentService implements DocumentCommandExecutor {
           metadata: eventPlan.metadata
         })
       };
-    });
-  }
-
-  private projectUniqueReservationWrite(
-    write: UniqueValueReservationWrite,
-    saved: DomainEvent
-  ): DocumentSnapshot {
-    if (!write.existing) {
-      return snapshotFromDocumentCreatedEvent(saved);
-    }
-    return snapshotFromCommittedDocumentEvent(write.existing, saved, {
-      data: { ...write.existing.data, documentName: write.reservation.documentName, active: true }
     });
   }
 

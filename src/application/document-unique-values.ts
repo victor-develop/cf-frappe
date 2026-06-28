@@ -3,12 +3,15 @@ import type {
   DocTypeDefinition,
   DocumentData,
   DocumentSnapshot,
+  DomainEvent,
   JsonValue
 } from "../core/types.js";
 import { validationFailed } from "../core/errors.js";
 import {
   documentCreatedPayload,
   documentUpdatedPayload,
+  snapshotFromCommittedDocumentEvent,
+  snapshotFromDocumentCreatedEvent,
   type DocumentLifecycleEventPayload
 } from "./document-lifecycle-events.js";
 
@@ -30,6 +33,12 @@ export interface UniqueValueEventPlan {
   readonly documentName: string;
   readonly payload: Extract<DocumentLifecycleEventPayload, { readonly kind: "DocumentCreated" | "DocumentUpdated" }>;
   readonly metadata: DocumentData;
+}
+
+export interface UniqueValueReservationWriteProjection {
+  readonly reservation: UniqueValueReservation;
+  readonly existing: DocumentSnapshot | null;
+  readonly saved: DomainEvent;
 }
 
 export function uniqueValueReservations(
@@ -157,6 +166,17 @@ export function planUniqueValueReleaseEvent(reservation: UniqueValueReservation)
     payload: documentUpdatedPayload({ active: false }),
     metadata: uniqueValueEventMetadata(reservation)
   };
+}
+
+export function projectUniqueValueReservationWrite(
+  input: UniqueValueReservationWriteProjection
+): DocumentSnapshot {
+  if (!input.existing) {
+    return snapshotFromDocumentCreatedEvent(input.saved);
+  }
+  return snapshotFromCommittedDocumentEvent(input.existing, input.saved, {
+    data: { ...input.existing.data, documentName: input.reservation.documentName, active: true }
+  });
 }
 
 function boundedUniqueValue(
