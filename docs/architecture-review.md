@@ -268,6 +268,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized downloaded object read planning in file policy so file download orchestration no longer derives primary object keys inline.
 - Centralized downloaded rendition object read planning in file policy so rendition download orchestration no longer derives storage keys from manifest entries inline.
 - Centralized multipart completion snapshot selection in file policy so multipart completion orchestration no longer chooses between current and begin-completion snapshots inline.
+- Guarded app manifest report metadata with cloned report definitions, preserving report filters, summaries, groups, and charts after app definition.
 - Guarded app manifest dashboard metadata with cloned dashboard definitions, preserving Desk dashboard cards and indicator rules after app definition.
 - Guarded app manifest Kanban metadata with cloned board definitions, preserving Desk board columns and filters after app definition.
 - Guarded app manifest Calendar metadata with cloned calendar definitions, preserving Desk schedule filtering after app definition.

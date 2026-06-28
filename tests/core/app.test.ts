@@ -110,7 +110,7 @@ describe("app manifests", () => {
 
     expect(registry.getPrintLetterhead("Standard")).toBe(letterhead);
     expect(registry.getPrintFormat("Note Standard")).toBe(printFormat);
-    expect(registry.getReport("All Notes")).toBe(report);
+    expect(registry.getReport("All Notes")).toEqual(report);
     expect(registry.getDashboard("Operations Dashboard")).toEqual(dashboard);
     expect(registry.getWorkspace("Operations")).toEqual(workspace);
     expect(registry.listClientScripts("Note")).toEqual([clientScript]);
@@ -554,6 +554,85 @@ describe("app manifests", () => {
     const indicatorRules = app.dashboards?.[0]?.cards[0]?.indicatorRules;
     expect(Object.isFrozen(indicatorRules)).toBe(true);
     expect(Object.isFrozen(indicatorRules?.[0])).toBe(true);
+  });
+
+  it("snapshots app manifest report metadata by value", () => {
+    const roles = ["User"];
+    const filterDefault = ["Open", "In Progress"];
+    const filterOptions = ["Open", "In Progress", "Closed"];
+    const chartColors = ["#2563eb"];
+    const report = {
+      name: "Task Summary",
+      doctype: "Task",
+      roles,
+      columns: [{ name: "title", field: "title", type: "text" as const }],
+      filters: [
+        {
+          name: "status",
+          field: "status",
+          type: "select" as const,
+          operator: "eq" as const,
+          defaultValue: filterDefault,
+          options: filterOptions
+        }
+      ],
+      summaries: [{ name: "task_count", aggregate: "count" as const, indicator: "blue" }],
+      groups: [
+        {
+          name: "by_status",
+          field: "status",
+          summaries: [{ name: "group_count", aggregate: "count" as const, indicator: "gray" }]
+        }
+      ],
+      charts: [
+        {
+          name: "status_chart",
+          type: "bar" as const,
+          group: "by_status",
+          summary: "group_count",
+          colors: chartColors
+        }
+      ]
+    };
+    const app = defineApp({
+      name: "tasks",
+      reports: [report]
+    });
+
+    roles[0] = "Guest";
+    filterDefault[0] = "Closed";
+    filterOptions.push("Cancelled");
+    chartColors[0] = "#dc2626";
+    report.summaries[0]!.indicator = "red";
+    report.groups[0]!.summaries[0]!.indicator = "green";
+    report.columns.push({ name: "body", field: "body", type: "text" });
+
+    expect(app.reports?.[0]?.roles).toEqual(["User"]);
+    expect(app.reports?.[0]?.columns).toEqual([{ name: "title", field: "title", type: "text" }]);
+    expect(app.reports?.[0]?.filters?.[0]?.defaultValue).toEqual(["Open", "In Progress"]);
+    expect(app.reports?.[0]?.filters?.[0]?.options).toEqual(["Open", "In Progress", "Closed"]);
+    expect(app.reports?.[0]?.summaries).toEqual([{ name: "task_count", aggregate: "count", indicator: "blue" }]);
+    expect(app.reports?.[0]?.groups?.[0]?.summaries).toEqual([
+      { name: "group_count", aggregate: "count", indicator: "gray" }
+    ]);
+    expect(app.reports?.[0]?.charts?.[0]?.colors).toEqual(["#2563eb"]);
+    expect(registryOptionsFromApps([app]).reports?.[0]?.filters?.[0]?.defaultValue).toEqual([
+      "Open",
+      "In Progress"
+    ]);
+    expect(Object.isFrozen(app.reports)).toBe(true);
+    expect(Object.isFrozen(app.reports?.[0])).toBe(true);
+    expect(Object.isFrozen(app.reports?.[0]?.roles)).toBe(true);
+    expect(Object.isFrozen(app.reports?.[0]?.columns)).toBe(true);
+    expect(Object.isFrozen(app.reports?.[0]?.columns[0])).toBe(true);
+    expect(Object.isFrozen(app.reports?.[0]?.filters)).toBe(true);
+    expect(Object.isFrozen(app.reports?.[0]?.filters?.[0]?.defaultValue)).toBe(true);
+    expect(Object.isFrozen(app.reports?.[0]?.filters?.[0]?.options)).toBe(true);
+    expect(Object.isFrozen(app.reports?.[0]?.summaries)).toBe(true);
+    expect(Object.isFrozen(app.reports?.[0]?.groups)).toBe(true);
+    expect(Object.isFrozen(app.reports?.[0]?.groups?.[0]?.summaries)).toBe(true);
+    expect(Object.isFrozen(app.reports?.[0]?.charts)).toBe(true);
+    expect(Object.isFrozen(app.reports?.[0]?.charts?.[0]?.colors)).toBe(true);
   });
 
   it("validates app names at the manifest boundary", () => {
