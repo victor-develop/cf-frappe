@@ -235,3 +235,4 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized bulk metadata update outcome aggregation in file policy so bulk metadata orchestration no longer splits per-file success and failure outcomes into result arrays inline.
 - Centralized delete document-command intent shaping in file policy so abort and final delete orchestration no longer derive current snapshot version guards inline.
 - Hardened D1 data-patch journal changed-row evidence parsing so apply, fail, retry, rollback, and rollback-retry state transitions no longer treat malformed adapter results as successful updates.
+- Hardened D1 data-patch journal result JSON parsing so corrupt apply and rollback results are reported as framework journal-invalid errors instead of leaking raw parser failures or relying on unchecked casts.

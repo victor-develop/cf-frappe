@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the D1 data-patch changed-row evidence boundary slice:
+As of the D1 data-patch journal JSON evidence boundary slice:
 
 - Vitest files: `170`
-- Vitest cases: `1804`
-- Remaining gap to Frappe static markers: `980`
+- Vitest cases: `1805`
+- Remaining gap to Frappe static markers: `979`
 
 ## Implication
 

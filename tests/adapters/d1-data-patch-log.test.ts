@@ -493,6 +493,50 @@ describe("D1DataPatchLog", () => {
       log.claimDataPatch({ id: "bad.status", checksum: "v1", claimId: "claim-2", claimedAt: now })
     ).rejects.toMatchObject({ code: "DATA_PATCH_INVALID" });
   });
+
+  it("rejects invalid stored D1 journal JSON results", async () => {
+    const db = new FakeD1Database();
+    const log = new D1DataPatchLog(db as unknown as D1Database);
+    db.patches.set("bad.result", {
+      checksum: "v1",
+      status: "applied",
+      claim_id: "claim-1",
+      claimed_at: now,
+      applied_at: now,
+      failed_at: null,
+      error: null,
+      result_json: "{",
+      result_present: 1
+    });
+    db.patches.set("bad.rollback_result", {
+      checksum: "v1",
+      status: "rolled_back",
+      claim_id: "claim-1",
+      claimed_at: now,
+      applied_at: now,
+      failed_at: null,
+      error: null,
+      result_json: null,
+      result_present: 0,
+      rollback_claim_id: "claim-rollback",
+      rollback_claimed_at: now,
+      rolled_back_at: now,
+      rollback_failed_at: null,
+      rollback_error: null,
+      rollback_result_json: "{",
+      rollback_result_present: 1
+    });
+
+    await expect(log.appliedDataPatches()).rejects.toMatchObject({
+      code: "DATA_PATCH_INVALID",
+      status: 409
+    });
+    db.patches.delete("bad.result");
+    await expect(log.recordedDataPatches()).rejects.toMatchObject({
+      code: "DATA_PATCH_INVALID",
+      status: 409
+    });
+  });
 });
 
 class FakeD1Database {

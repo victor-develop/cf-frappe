@@ -450,14 +450,39 @@ function parseResult(row: DataPatchRow): JsonValue | undefined {
   if (Number(row.result_present) !== 1) {
     return undefined;
   }
-  return JSON.parse(row.result_json ?? "null") as JsonValue;
+  return parseJsonValue(row.id, "result_json", row.result_json ?? "null");
 }
 
 function parseRollbackResult(row: DataPatchRow): JsonValue | undefined {
   if (Number(row.rollback_result_present) !== 1) {
     return undefined;
   }
-  return JSON.parse(row.rollback_result_json ?? "null") as JsonValue;
+  return parseJsonValue(row.id, "rollback_result_json", row.rollback_result_json ?? "null");
+}
+
+function parseJsonValue(id: string, field: "result_json" | "rollback_result_json", value: string): JsonValue {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (isJsonValue(parsed)) {
+      return parsed;
+    }
+  } catch {
+    // Fall through to the journal corruption error below.
+  }
+  throw new FrameworkError("DATA_PATCH_INVALID", `Data patch '${id}' has invalid ${field}`, { status: 409 });
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.every(isJsonValue);
+  }
+  if (isRecord(value)) {
+    return Object.values(value).every(isJsonValue);
+  }
+  return false;
 }
 
 function rollbackPendingDataPatchFromRow(row: DataPatchRow): RollbackPendingDataPatch {
