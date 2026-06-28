@@ -384,6 +384,55 @@ describe("RealtimeHub Durable Object", () => {
     });
   });
 
+  it("snapshots replay events by value across publish and replay reads", async () => {
+    const Hub = createRealtimeHubClass();
+    const hub = new Hub(fakeState([]), {});
+    const topic = "document:acme:Note:NOTE-1";
+    const event: RealtimeEvent = {
+      ...realtimeEvent([topic], "evt-snapshot"),
+      payload: { nested: { count: 1 } }
+    };
+
+    await hub.publish(topic, event);
+    ((event.payload as DocumentData).nested as DocumentData).count = 2;
+    (event.topics as string[]).push("mutated");
+
+    const firstReplay = await hub.replay();
+    expect(firstReplay).toMatchObject({
+      topic,
+      events: [
+        {
+          cursor: 1,
+          event: {
+            id: "evt-snapshot",
+            topics: [topic],
+            payload: { nested: { count: 1 } }
+          }
+        }
+      ],
+      nextCursor: 1
+    });
+
+    const replayEvent = firstReplay.events[0]!.event;
+    ((replayEvent.payload as DocumentData).nested as DocumentData).count = 3;
+    (replayEvent.topics as string[]).push("returned");
+
+    await expect(hub.replay()).resolves.toMatchObject({
+      topic,
+      events: [
+        {
+          cursor: 1,
+          event: {
+            id: "evt-snapshot",
+            topics: [topic],
+            payload: { nested: { count: 1 } }
+          }
+        }
+      ],
+      nextCursor: 1
+    });
+  });
+
   it("caps requested replay batches at the hub limit", async () => {
     const Hub = createRealtimeHubClass({ replayBatchLimit: 1 });
     const hub = new Hub(fakeState([]), {});

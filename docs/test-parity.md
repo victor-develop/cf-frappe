@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the realtime domain payload snapshot slice:
+As of the Durable Object realtime replay snapshot slice:
 
 - Vitest files: `173`
-- Vitest cases: `1941`
-- Remaining gap to Frappe static markers: `843`
+- Vitest cases: `1942`
+- Remaining gap to Frappe static markers: `842`
 
 ## Implication
 

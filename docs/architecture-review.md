@@ -268,6 +268,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized downloaded object read planning in file policy so file download orchestration no longer derives primary object keys inline.
 - Centralized downloaded rendition object read planning in file policy so rendition download orchestration no longer derives storage keys from manifest entries inline.
 - Centralized multipart completion snapshot selection in file policy so multipart completion orchestration no longer chooses between current and begin-completion snapshots inline.
+- Added Durable Object realtime replay snapshot coverage so replay logs preserve events independently from caller mutation after publish and returned replay mutation after read.
 - Added realtime domain payload snapshot coverage so domain events and document snapshots are captured by value before entering Cloudflare/Durable Object realtime delivery.
 - Added Durable Object realtime publisher snapshot coverage and a shared realtime-event clone helper so per-topic Cloudflare RPC publishing cannot leak one receiver's mutation into another receiver or the caller's event.
 - Added D1 projection store snapshot coverage so Cloudflare D1-backed read models preserve projection data independently from caller, returned-get, and returned-list mutation.
