@@ -49,6 +49,7 @@ import {
   fileDashboardEntry,
   fileDashboardEntryWithPermissions,
   fileDashboardListFilters,
+  fileDashboardListQuery,
   fileDashboardResult,
   fileDashboardSystemActor,
   fileDownloadedResult,
@@ -150,6 +151,7 @@ import {
   normalizeFileDashboardFilters,
   normalizeFileDashboardLimit,
   normalizeFileSize,
+  nextFileDashboardOffset,
   objectKey,
   optionalFileScanPatch,
   pendingFileRendition,
@@ -164,6 +166,7 @@ import {
   renditionSourcesMatch,
   reusableFileRenditionForGeneration,
   sanitizeFilename,
+  shouldContinueFileDashboardScan,
   shouldRequestFileDelete,
   shouldStartFileMultipartCompletion,
   upsertFileRenditionManifest,
@@ -2644,6 +2647,51 @@ describe("file policy", () => {
       { field: "scan_status", operator: "eq", value: "clean" },
       { field: "is_private", operator: "eq", value: true }
     ]);
+  });
+
+  it("builds file dashboard list queries", () => {
+    const filters = fileDashboardListFilters({
+      filename: "invoice",
+      isPrivate: false
+    });
+
+    expect(fileDashboardListQuery({
+      tenantId: "tenant-a",
+      filters,
+      limit: 50,
+      offset: 100
+    })).toEqual({
+      tenantId: "tenant-a",
+      filters,
+      limit: 50,
+      offset: 100
+    });
+  });
+
+  it("advances file dashboard offsets by batch size", () => {
+    expect(nextFileDashboardOffset(0, 50)).toBe(50);
+    expect(nextFileDashboardOffset(100, 125)).toBe(225);
+  });
+
+  it("continues file dashboard scans only while more readable rows are needed", () => {
+    expect(shouldContinueFileDashboardScan({
+      visibleFiles: 2,
+      limit: 3,
+      offset: 50,
+      total: 100
+    })).toBe(true);
+    expect(shouldContinueFileDashboardScan({
+      visibleFiles: 3,
+      limit: 3,
+      offset: 50,
+      total: 100
+    })).toBe(false);
+    expect(shouldContinueFileDashboardScan({
+      visibleFiles: 2,
+      limit: 3,
+      offset: 100,
+      total: 100
+    })).toBe(false);
   });
 
   it("projects file dashboard entries from snapshots", () => {

@@ -71,6 +71,7 @@ import {
   fileContentLength,
   fileDashboardBatchLimit,
   fileDashboardEntryWithPermissions,
+  fileDashboardListQuery,
   fileDashboardListFilters,
   fileDashboardResult,
   fileDownloadedResult,
@@ -137,10 +138,12 @@ import {
   normalizeFileDashboardFilters,
   normalizeFileDashboardLimit,
   normalizeFileSize,
+  nextFileDashboardOffset,
   objectKey,
   optionalFileScanPatch,
   reusableFileRenditionForGeneration,
   sanitizeFilename,
+  shouldContinueFileDashboardScan,
   type FileRenditionManifestEntry,
 } from "./file-policy.js";
 import type { IdGenerator } from "../ports/id-generator.js";
@@ -800,12 +803,12 @@ export class FileService {
     let offset = 0;
     let total = 0;
     do {
-      const result = await this.queries.listDocuments(systemActor, this.fileDoctype, {
+      const result = await this.queries.listDocuments(systemActor, this.fileDoctype, fileDashboardListQuery({
         tenantId,
         filters: listFilters,
         limit: batchLimit,
         offset
-      });
+      }));
       total = result.total;
       const readable = await Promise.all(
         result.data.map(async (snapshot) => ({
@@ -814,8 +817,13 @@ export class FileService {
         }))
       );
       files.push(...fileReadableDashboardEntries({ actor, doctype, readable }));
-      offset += batchLimit;
-    } while (files.length < limit && offset < total);
+      offset = nextFileDashboardOffset(offset, batchLimit);
+    } while (shouldContinueFileDashboardScan({
+      visibleFiles: files.length,
+      limit,
+      offset,
+      total
+    }));
     return fileDashboardResult({
       actor,
       doctype,

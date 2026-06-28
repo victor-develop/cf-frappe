@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the cleanup failure policy slice:
+As of the dashboard pagination policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1725`
-- Remaining gap to Frappe static markers: `1059`
+- Vitest cases: `1728`
+- Remaining gap to Frappe static markers: `1056`
 
 ## Implication
 

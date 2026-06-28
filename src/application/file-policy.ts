@@ -1836,6 +1836,38 @@ export function fileDashboardListFilters(filters: FileDashboardFilters): readonl
   ];
 }
 
+export function fileDashboardListQuery(command: {
+  readonly tenantId: string;
+  readonly filters: readonly ListDocumentsFilter[];
+  readonly limit: number;
+  readonly offset: number;
+}): {
+  readonly tenantId: string;
+  readonly filters: readonly ListDocumentsFilter[];
+  readonly limit: number;
+  readonly offset: number;
+} {
+  return {
+    tenantId: command.tenantId,
+    filters: command.filters,
+    limit: command.limit,
+    offset: command.offset
+  };
+}
+
+export function nextFileDashboardOffset(offset: number, batchLimit: number): number {
+  return offset + batchLimit;
+}
+
+export function shouldContinueFileDashboardScan(command: {
+  readonly visibleFiles: number;
+  readonly limit: number;
+  readonly offset: number;
+  readonly total: number;
+}): boolean {
+  return command.visibleFiles < command.limit && command.offset < command.total;
+}
+
 export function fileRenditions(snapshot: DocumentSnapshot): readonly FileRenditionManifestEntry[] {
   const value = snapshot.data.renditions;
   if (!Array.isArray(value)) {
