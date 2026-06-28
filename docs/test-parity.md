@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the delete-request event policy module slice:
+As of the primary file object-key policy module slice:
 
 - Vitest files: `169`
-- Vitest cases: `1658`
+- Vitest cases: `1659`
 
 ## Implication
 

@@ -69,6 +69,7 @@ import {
   fileMultipartUploadDocumentData,
   fileMultipartUploadId,
   fileObjectKeysForDelete,
+  filePrimaryObjectKey,
   fileObjectSourceEtag,
   fileRenditionId,
   fileRenditionManifestPatch,
@@ -538,7 +539,7 @@ export class FileService {
     const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
     const current = await this.queries.getDocument(command.actor, this.fileDoctype, command.name, tenantId);
     ensureFilePendingDirectUpload(current);
-    const object = await this.storage.head(requireFileSnapshotString(current, "key"));
+    const object = await this.storage.head(filePrimaryObjectKey(current));
     if (!object) {
       throw notFound(`${this.fileDoctype}/${command.name} content was not found`);
     }
@@ -562,7 +563,7 @@ export class FileService {
         ...(command.expectedVersion === undefined ? {} : { expectedVersion: command.expectedVersion }),
         metadata: command.metadata ?? {}
       });
-      await this.storage.delete(requireFileSnapshotString(current, "key")).catch(() => undefined);
+      await this.storage.delete(filePrimaryObjectKey(current)).catch(() => undefined);
       throw fileScanFailureError(scan, snapshot);
     }
     return this.documents.execute({
@@ -635,7 +636,7 @@ export class FileService {
     const size = multipartPartSize(command.body, command.size);
     ensureMultipartPartFitsReservation(current, command.partNumber, size);
     const part = await multipartUploads.uploadMultipartPart({
-      key: requireFileSnapshotString(current, "key"),
+      key: filePrimaryObjectKey(current),
       uploadId,
       partNumber: command.partNumber,
       body: command.body
@@ -660,7 +661,7 @@ export class FileService {
   async completeMultipartUpload(command: CompleteMultipartUploadCommand): Promise<DocumentSnapshot> {
     const multipartUploads = this.requireMultipartUploads();
     const current = await this.multipartUploadSnapshot(command, ensureFilePendingMultipartCompletion);
-    const key = requireFileSnapshotString(current, "key");
+    const key = filePrimaryObjectKey(current);
     ensureMultipartCompletionMatchesManifest(current, command.parts);
     const completing = shouldStartFileMultipartCompletion(current)
       ? await this.documents.execute({
@@ -719,7 +720,7 @@ export class FileService {
     const current = await this.multipartUploadSnapshot(command, ensureFilePendingMultipartPartUpload);
     ensureFileExpectedVersion(current, command.expectedVersion);
     await multipartUploads.abortMultipartUpload({
-      key: requireFileSnapshotString(current, "key"),
+      key: filePrimaryObjectKey(current),
       uploadId: this.multipartUploadId(current)
     });
     return this.documents.delete({
@@ -823,7 +824,7 @@ export class FileService {
 
   async download(command: DownloadFileCommand): Promise<DownloadedFile> {
     const snapshot = await this.availableFileSnapshot(command);
-    const key = requireFileSnapshotString(snapshot, "key");
+    const key = filePrimaryObjectKey(snapshot);
     const object = await this.storage.get(key);
     if (!object) {
       throw notFound(`${this.fileDoctype}/${command.name} content was not found`);
@@ -1117,7 +1118,7 @@ export class FileService {
       name: overlay.file,
       tenantId: command.tenantId
     });
-    const key = requireFileSnapshotString(snapshot, "key");
+    const key = filePrimaryObjectKey(snapshot);
     const object = await this.storage.get(key);
     if (!object) {
       throw notFound(`${this.fileDoctype}/${overlay.file} content was not found`);
@@ -1205,7 +1206,7 @@ export class FileService {
     readonly snapshot: DocumentSnapshot;
     readonly parts: readonly UploadedMultipartFilePart[];
   }): Promise<FileObjectMetadata> {
-    const key = requireFileSnapshotString(command.snapshot, "key");
+    const key = filePrimaryObjectKey(command.snapshot);
     const existing = await this.storage.head(key);
     if (existing) {
       return existing;

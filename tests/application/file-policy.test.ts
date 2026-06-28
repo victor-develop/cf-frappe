@@ -32,6 +32,7 @@ import {
   fileObjectKeysForDelete,
   fileObjectContentType,
   fileObjectSourceEtag,
+  filePrimaryObjectKey,
   fileRenditionObjectCustomMetadata,
   fileRenditionId,
   fileRenditionFilename,
@@ -463,6 +464,13 @@ describe("file policy", () => {
       "acme/files/file_multipart-original.png",
       "acme/file-renditions/file/thumb.webp"
     ]);
+  });
+
+  it("reads primary file object keys", () => {
+    expect(filePrimaryObjectKey(fileSnapshot({ key: "acme/files/file_multipart-original.png" }))).toBe(
+      "acme/files/file_multipart-original.png"
+    );
+    expect(() => filePrimaryObjectKey(fileSnapshot({}))).toThrow("File/file_multipart has no key");
   });
 
   it("plans pending, failed, and completed file renditions", () => {

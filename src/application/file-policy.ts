@@ -872,10 +872,14 @@ export function availableFileRenditionForDownload(
   return rendition;
 }
 
+export function filePrimaryObjectKey(snapshot: DocumentSnapshot): string {
+  return requireFileSnapshotString(snapshot, "key");
+}
+
 export function fileObjectKeysForDelete(snapshot: DocumentSnapshot): readonly string[] {
   return [
     ...new Set([
-      requireFileSnapshotString(snapshot, "key"),
+      filePrimaryObjectKey(snapshot),
       ...fileRenditions(snapshot).map((rendition) => rendition.key)
     ])
   ];
