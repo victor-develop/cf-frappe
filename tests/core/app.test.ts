@@ -428,6 +428,36 @@ describe("app manifests", () => {
     expect(Object.isFrozen(app.webViews?.[0]?.filters?.[0])).toBe(true);
   });
 
+  it("snapshots app manifest Calendar metadata by value", () => {
+    const roles = ["User"];
+    const calendar = {
+      name: "Task Calendar",
+      roles,
+      doctype: "Task",
+      startField: "startsOn",
+      titleField: "title",
+      filters: [{ field: "published", operator: "eq" as const, value: true }]
+    };
+    const app = defineApp({
+      name: "tasks",
+      calendars: [calendar]
+    });
+
+    roles[0] = "Guest";
+    calendar.filters[0]!.value = false;
+
+    expect(app.calendars?.[0]?.roles).toEqual(["User"]);
+    expect(app.calendars?.[0]?.filters).toEqual([{ field: "published", operator: "eq", value: true }]);
+    expect(registryOptionsFromApps([app]).calendars?.[0]?.filters).toEqual([
+      { field: "published", operator: "eq", value: true }
+    ]);
+    expect(Object.isFrozen(app.calendars)).toBe(true);
+    expect(Object.isFrozen(app.calendars?.[0])).toBe(true);
+    expect(Object.isFrozen(app.calendars?.[0]?.roles)).toBe(true);
+    expect(Object.isFrozen(app.calendars?.[0]?.filters)).toBe(true);
+    expect(Object.isFrozen(app.calendars?.[0]?.filters?.[0])).toBe(true);
+  });
+
   it("validates app names at the manifest boundary", () => {
     expect(() => defineApp({ name: "" })).toThrow(FrameworkError);
     expect(() => defineApp({ name: "Bad Name" })).toThrow("Invalid app name");

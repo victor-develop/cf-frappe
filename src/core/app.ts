@@ -1,6 +1,6 @@
 import { assertAppName, assertAppNames } from "./app-name.js";
 import { resolveAppDependencyOrder } from "./app-graph.js";
-import type { CalendarDefinition } from "./calendar.js";
+import { defineCalendar, type CalendarDefinition } from "./calendar.js";
 import { defineClientScript, type ClientScriptDefinition } from "./client-script.js";
 import type { DashboardDefinition } from "./dashboard.js";
 import { defineDataPatch, type DataPatchDefinition } from "./data-patch.js";
@@ -63,7 +63,7 @@ export function defineApp<TDataPatchResources = unknown>(
     reports: Object.freeze([...(input.reports ?? [])]),
     dashboards: Object.freeze([...(input.dashboards ?? [])]),
     kanbans: Object.freeze([...(input.kanbans ?? [])]),
-    calendars: Object.freeze([...(input.calendars ?? [])]),
+    calendars: Object.freeze((input.calendars ?? []).map(defineCalendar)),
     webForms: Object.freeze((input.webForms ?? []).map(defineWebForm)),
     webPages: Object.freeze((input.webPages ?? []).map(defineWebPage)),
     webViews: Object.freeze((input.webViews ?? []).map(defineWebView)),
