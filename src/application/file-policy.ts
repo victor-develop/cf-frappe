@@ -831,6 +831,38 @@ export function fileTransformedFileResult(command: {
   };
 }
 
+export function fileGeneratedRenditionResult(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly rendition: FileRenditionManifestEntry;
+  readonly created: boolean;
+}): {
+  readonly snapshot: DocumentSnapshot;
+  readonly rendition: FileRenditionView;
+  readonly created: boolean;
+} {
+  return {
+    snapshot: command.snapshot,
+    rendition: fileRenditionView(command.rendition),
+    created: command.created
+  };
+}
+
+export function fileDownloadedRenditionResult(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly rendition: FileRenditionManifestEntry;
+  readonly object: StoredFileObject;
+}): {
+  readonly snapshot: DocumentSnapshot;
+  readonly rendition: FileRenditionView;
+  readonly object: StoredFileObject;
+} {
+  return {
+    snapshot: command.snapshot,
+    rendition: fileRenditionView(command.rendition),
+    object: command.object
+  };
+}
+
 export function ensureValidFileScanResult(result: FileScanResult): void {
   if (result.status !== "clean" && result.status !== "infected") {
     throw badRequest("File scanner returned an invalid status");

@@ -154,4 +154,5 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized readable file dashboard entry projection in file policy so dashboard orchestration no longer filters readable rows and applies permission flags inline.
 - Centralized visible file dashboard entry limiting in file policy so dashboard orchestration no longer slices projected rows inline.
 - Centralized transformed file result shaping in file policy so temporary transform orchestration no longer composes source snapshot, object metadata, and transform output inline.
+- Centralized generated and downloaded rendition result shaping in file policy so rendition orchestration no longer composes manifest views and storage objects inline.
 - Centralized delete document-command intent shaping in file policy so abort and final delete orchestration no longer derive current snapshot version guards inline.

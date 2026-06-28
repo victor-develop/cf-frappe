@@ -79,8 +79,10 @@ import {
   fileDeleteRequestedDocumentCommand,
   fileDeletedExecuteCommand,
   fileDeletedDocumentCommand,
+  fileDownloadedRenditionResult,
   fileDocumentCreateCommand,
   fileDirectUploadDocumentCreateCommand,
+  fileGeneratedRenditionResult,
   fileMetadataUpdateExecuteCommand,
   fileMetadataUpdateDocumentCommand,
   fileMultipartAbortCommand,
@@ -103,7 +105,6 @@ import {
   fileRenditionReservationDocumentCommand,
   fileFailedRenditionManifestCommandName,
   fileRenditionSnapshotPutObjectCommand,
-  fileRenditionView,
   fileScanFailureError,
   fileScanTarget,
   fileExpectedVersionCommandOption,
@@ -886,11 +887,11 @@ export class FileService {
     const renditionId = await fileRenditionId(options);
     const existing = reusableFileRenditionForGeneration(downloaded.snapshot, renditionId, sourceEtag, overlay);
     if (existing && await this.storage.head(existing.key)) {
-      return {
+      return fileGeneratedRenditionResult({
         snapshot: downloaded.snapshot,
-        rendition: fileRenditionView(existing),
+        rendition: existing,
         created: false
-      };
+      });
     }
 
     const reservation = fileRenditionGenerationReservation({
@@ -949,11 +950,11 @@ export class FileService {
         command: fileCompletedRenditionManifestCommandName(),
         rendition: completed
       });
-      return {
+      return fileGeneratedRenditionResult({
         snapshot,
-        rendition: fileRenditionView(completed),
+        rendition: completed,
         created: true
-      };
+      });
     } catch (error) {
       if (object) {
         await this.storage.delete(object.key).catch(() => undefined);
@@ -979,11 +980,11 @@ export class FileService {
       command.name,
       command.renditionId
     );
-    return {
+    return fileDownloadedRenditionResult({
       snapshot,
-      rendition: fileRenditionView(rendition),
+      rendition,
       object
-    };
+    });
   }
 
   async transform(command: TransformFileCommand): Promise<TransformedFile> {

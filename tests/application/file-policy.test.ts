@@ -46,6 +46,7 @@ import {
   fileDashboardEntryWithPermissions,
   fileDashboardListFilters,
   fileDashboardSystemActor,
+  fileDownloadedRenditionResult,
   fileDeleteRequestedExecuteCommand,
   fileDeleteRequestedDocumentCommand,
   fileDeletedExecuteCommand,
@@ -81,6 +82,7 @@ import {
   fileRenditionObjectCustomMetadata,
   fileRenditionId,
   fileRenditionFilename,
+  fileGeneratedRenditionResult,
   fileRenditionManifestPatch,
   fileRenditionManifestDocumentCommand,
   fileRenditionManifestExecuteCommand,
@@ -647,6 +649,65 @@ describe("file policy", () => {
       snapshot,
       object: object.metadata,
       transform
+    });
+  });
+
+  it("builds generated rendition results", () => {
+    const snapshot = fileSnapshot({});
+    const rendition = renditionEntry("thumb", {
+      status: "available",
+      content_type: "image/webp",
+      size: 42,
+      generated_at: "2026-06-28T01:00:00.000Z",
+      generated_by: "owner@example.com"
+    });
+
+    expect(fileGeneratedRenditionResult({
+      snapshot,
+      rendition,
+      created: true
+    })).toEqual({
+      snapshot,
+      rendition: {
+        id: "thumb",
+        key: "acme/file-renditions/file/thumb.webp",
+        status: "available",
+        options: {},
+        requestedAt: "2026-06-28T00:00:00.000Z",
+        requestedBy: "owner@example.com",
+        contentType: "image/webp",
+        size: 42,
+        generatedAt: "2026-06-28T01:00:00.000Z",
+        generatedBy: "owner@example.com"
+      },
+      created: true
+    });
+  });
+
+  it("builds downloaded rendition results", () => {
+    const snapshot = fileSnapshot({});
+    const rendition = renditionEntry("thumb", {
+      status: "available",
+      content_type: "image/webp"
+    });
+    const object = storedFileObject(fileObject({ contentType: "image/webp" }));
+
+    expect(fileDownloadedRenditionResult({
+      snapshot,
+      rendition,
+      object
+    })).toEqual({
+      snapshot,
+      rendition: {
+        id: "thumb",
+        key: "acme/file-renditions/file/thumb.webp",
+        status: "available",
+        options: {},
+        requestedAt: "2026-06-28T00:00:00.000Z",
+        requestedBy: "owner@example.com",
+        contentType: "image/webp"
+      },
+      object
     });
   });
 
