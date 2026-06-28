@@ -35,6 +35,27 @@ describe("signed session actor resolver", () => {
     await expect(resolver(new Request("http://localhost", { headers: { cookie } }))).resolves.toEqual(actor);
   });
 
+  it("round trips UTF-8 actor claims through the signed session cookie", async () => {
+    const unicodeActor: Actor = {
+      id: "renee@example.com",
+      roles: ["User", "Equipe"],
+      tenantId: "acme-paris",
+      email: "renee+équipe@example.com"
+    };
+    const cookie = await createSignedSessionCookie(unicodeActor, {
+      secret: "test-secret",
+      now: () => 1_000,
+      maxAgeSeconds: 3_600,
+      secure: false
+    });
+    const resolver = signedSessionActorResolver({
+      secret: "test-secret",
+      now: () => 1_001
+    });
+
+    await expect(resolver(new Request("http://localhost", { headers: { cookie } }))).resolves.toEqual(unicodeActor);
+  });
+
   it("rejects tampered and expired sessions", async () => {
     const cookie = await createSignedSessionCookie(actor, {
       secret: "test-secret",

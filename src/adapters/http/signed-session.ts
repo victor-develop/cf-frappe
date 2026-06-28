@@ -233,9 +233,17 @@ function normalizeAccountVersion(value: unknown): number {
 function base64UrlEncode(bytes: Uint8Array): string {
   let binary = "";
   for (let index = 0; index < bytes.byteLength; index += 1) {
-    binary += String.fromCharCode(bytes[index]!);
+    binary += String.fromCharCode(byteAt(bytes, index));
   }
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+}
+
+function byteAt(bytes: Uint8Array, index: number): number {
+  const byte = bytes[index];
+  if (byte === undefined) {
+    throw new Error(`Byte index ${index} is outside encoded byte length ${bytes.byteLength}`);
+  }
+  return byte;
 }
 
 function base64UrlDecode(value: string): Uint8Array {

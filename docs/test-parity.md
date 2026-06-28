@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the OIDC authorization header parsing slice:
+As of the base64url byte encoding boundary slice:
 
 - Vitest files: `170`
-- Vitest cases: `1796`
-- Remaining gap to Frappe static markers: `988`
+- Vitest cases: `1797`
+- Remaining gap to Frappe static markers: `987`
 
 ## Implication
 
