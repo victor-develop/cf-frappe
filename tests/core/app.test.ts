@@ -250,6 +250,51 @@ describe("app manifests", () => {
     });
   });
 
+  it("snapshots app manifest client script and data patch metadata by value", async () => {
+    const clientScript = {
+      name: " note-form ",
+      doctype: " Note ",
+      src: " /assets/note-form.js ",
+      scope: "form" as const
+    };
+    const rollback = { label: "Undo seed notes", run: () => "original rollback" };
+    const dataPatch = {
+      id: "notes.seed",
+      checksum: "v1",
+      run: () => "original apply",
+      rollback
+    };
+    const app = defineApp({
+      name: "notes",
+      clientScripts: [clientScript],
+      dataPatches: [dataPatch]
+    });
+
+    clientScript.name = "mutated-script";
+    clientScript.doctype = "Mutated";
+    clientScript.src = "/assets/mutated.js";
+    dataPatch.checksum = "v2";
+    dataPatch.run = () => "mutated apply";
+    rollback.run = () => "mutated rollback";
+
+    expect(app.clientScripts).toEqual([
+      {
+        name: "note-form",
+        doctype: "Note",
+        src: "/assets/note-form.js",
+        scope: "form"
+      }
+    ]);
+    expect(app.dataPatches?.[0]?.checksum).toBe("v1");
+    expect(await app.dataPatches?.[0]?.run({ resources: {} })).toBe("original apply");
+    expect(await app.dataPatches?.[0]?.rollback?.run({ resources: {} })).toBe("original rollback");
+    expect(Object.isFrozen(app.clientScripts)).toBe(true);
+    expect(Object.isFrozen(app.clientScripts?.[0])).toBe(true);
+    expect(Object.isFrozen(app.dataPatches)).toBe(true);
+    expect(Object.isFrozen(app.dataPatches?.[0])).toBe(true);
+    expect(Object.isFrozen(app.dataPatches?.[0]?.rollback)).toBe(true);
+  });
+
   it("validates app names at the manifest boundary", () => {
     expect(() => defineApp({ name: "" })).toThrow(FrameworkError);
     expect(() => defineApp({ name: "Bad Name" })).toThrow("Invalid app name");

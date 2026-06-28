@@ -1,9 +1,9 @@
 import { assertAppName, assertAppNames } from "./app-name.js";
 import { resolveAppDependencyOrder } from "./app-graph.js";
 import type { CalendarDefinition } from "./calendar.js";
-import type { ClientScriptDefinition } from "./client-script.js";
+import { defineClientScript, type ClientScriptDefinition } from "./client-script.js";
 import type { DashboardDefinition } from "./dashboard.js";
-import type { DataPatchDefinition } from "./data-patch.js";
+import { defineDataPatch, type DataPatchDefinition } from "./data-patch.js";
 import type { KanbanDefinition } from "./kanban.js";
 import { createRegistry, type DocumentHooks, type ModelRegistry, type RegistryOptions } from "./registry.js";
 import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-format.js";
@@ -70,8 +70,8 @@ export function defineApp<TDataPatchResources = unknown>(
     ...(input.websiteSettings === undefined ? {} : { websiteSettings: defineWebsiteSettings(input.websiteSettings) }),
     websiteThemes: Object.freeze((input.websiteThemes ?? []).map(defineWebsiteTheme)),
     workspaces: Object.freeze([...(input.workspaces ?? [])]),
-    clientScripts: Object.freeze([...(input.clientScripts ?? [])]),
-    dataPatches: Object.freeze([...(input.dataPatches ?? [])]),
+    clientScripts: Object.freeze((input.clientScripts ?? []).map(defineClientScript)),
+    dataPatches: Object.freeze((input.dataPatches ?? []).map((patch) => defineDataPatch<TDataPatchResources>(patch))),
     hooks: freezeHooks(input.hooks ?? {})
   });
 }
