@@ -678,6 +678,19 @@ export function ensureFileMetadataUpdateAllowed(command: {
   ensureFileNotDeleteRequested(command.snapshot);
 }
 
+export function ensureFileRenditionGenerationAllowed(command: {
+  readonly actor: Actor;
+  readonly doctype: DocTypeDefinition;
+  readonly fileDoctype: string;
+  readonly snapshot: DocumentSnapshot;
+}): void {
+  if (!can(command.actor, command.doctype, "rendition", command.snapshot)) {
+    throw permissionDenied(
+      `Actor '${command.actor.id}' cannot generate renditions for ${command.fileDoctype}/${command.snapshot.name}`
+    );
+  }
+}
+
 export function ensureFileAvailableForDownload(snapshot: DocumentSnapshot): void {
   if (isFileUploadPending(snapshot) || isFileMultipartCompletionStarted(snapshot)) {
     throw new FrameworkError("FILE_UPLOAD_PENDING", `${snapshot.doctype}/${snapshot.name} upload has not been finalized`, {

@@ -51,6 +51,7 @@ import {
   ensureFilePendingDirectUpload,
   ensureFilePendingMultipartCompletion,
   ensureFilePendingMultipartPartUpload,
+  ensureFileRenditionGenerationAllowed,
   ensureFileMetadataPatchProvided,
   ensureDirectUploadMatches,
   ensureMultipartCompletionMatchesManifest,
@@ -839,11 +840,12 @@ export class FileService {
     const options = normalizeFileTransformOptions(command.options);
     ensureFileObjectTransformable(downloaded.snapshot, downloaded.object.metadata, `File '${downloaded.snapshot.name}'`);
     const doctype = this.registry.get(this.fileDoctype);
-    if (!can(command.actor, doctype, "rendition", downloaded.snapshot)) {
-      throw permissionDenied(
-        `Actor '${command.actor.id}' cannot generate renditions for ${this.fileDoctype}/${command.name}`
-      );
-    }
+    ensureFileRenditionGenerationAllowed({
+      actor: command.actor,
+      doctype,
+      fileDoctype: this.fileDoctype,
+      snapshot: downloaded.snapshot
+    });
     this.validateTransformOptions(options);
     const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
     const overlay = await this.resolveTransformOverlay({

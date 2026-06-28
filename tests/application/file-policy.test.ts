@@ -18,6 +18,7 @@ import {
   ensureFilePendingMultipartPartUpload,
   ensureFilePendingMultipartUpload,
   ensureFileMetadataPatchProvided,
+  ensureFileRenditionGenerationAllowed,
   ensureDirectUploadMatches,
   ensureMultipartCompletionMatchesManifest,
   ensureMultipartPartFitsReservation,
@@ -1297,6 +1298,28 @@ describe("file policy", () => {
       fileDoctype: "File",
       snapshot: fileSnapshot({ storage_state: "delete_requested" })
     })).toThrow("File/file_multipart is pending deletion");
+  });
+
+  it("validates file rendition generation permissions", () => {
+    const doctype: DocTypeDefinition = {
+      name: "File",
+      fields: [],
+      permissions: [{ roles: ["File Manager"], actions: ["rendition"] }]
+    };
+    const snapshot = fileSnapshot({ storage_state: "available" });
+
+    expect(() => ensureFileRenditionGenerationAllowed({
+      actor: { id: "manager@example.com", roles: ["File Manager"] },
+      doctype,
+      fileDoctype: "File",
+      snapshot
+    })).not.toThrow();
+    expect(() => ensureFileRenditionGenerationAllowed({
+      actor: { id: "reader@example.com", roles: ["Reader"] },
+      doctype,
+      fileDoctype: "File",
+      snapshot
+    })).toThrow("Actor 'reader@example.com' cannot generate renditions for File/file_multipart");
   });
 
   it("identifies files with delete already requested", () => {
