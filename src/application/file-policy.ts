@@ -801,6 +801,51 @@ export function fileDirectUploadReservationCommand(command: {
   };
 }
 
+export function fileDirectUploadReservationPlan(command: {
+  readonly key: string;
+  readonly contentType: string;
+  readonly filename: string;
+  readonly size: number;
+  readonly expiresAt: string;
+  readonly tenantId: string;
+  readonly isPrivate?: boolean | undefined;
+  readonly uploadedBy: string;
+  readonly uploadedAt: string;
+  readonly scannerConfigured?: boolean | undefined;
+  readonly attachedTo?: {
+    readonly doctype: string;
+    readonly name: string;
+  } | undefined;
+}): {
+  readonly create: FileDirectUploadDocumentCreateCommand;
+  readonly reservation: CreateDirectFileUploadCommand;
+} {
+  const upload = filePendingUploadDocumentDataCommand({
+    filename: command.filename,
+    key: command.key,
+    contentType: command.contentType,
+    size: command.size,
+    isPrivate: command.isPrivate,
+    uploadedBy: command.uploadedBy,
+    uploadedAt: command.uploadedAt,
+    directUploadExpiresAt: command.expiresAt,
+    scannerConfigured: command.scannerConfigured,
+    attachedTo: command.attachedTo
+  });
+  return {
+    create: fileDirectUploadDocumentCreateCommand(upload),
+    reservation: fileDirectUploadReservationCommand({
+      key: command.key,
+      contentType: command.contentType,
+      filename: command.filename,
+      size: command.size,
+      expiresAt: command.expiresAt,
+      tenantId: command.tenantId,
+      uploadedBy: command.uploadedBy
+    })
+  };
+}
+
 export function fileMultipartUploadReservationCommand(command: {
   readonly key: string;
   readonly contentType: string;

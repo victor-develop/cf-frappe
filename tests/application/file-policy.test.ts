@@ -65,6 +65,7 @@ import {
   fileDeletedExecuteCommand,
   fileDeletedDocumentCommand,
   fileDirectUploadDocumentCreateCommand,
+  fileDirectUploadReservationPlan,
   fileDocumentCreateCommand,
   fileDocumentData,
   fileMetadataPatch,
@@ -2389,6 +2390,48 @@ describe("file policy", () => {
         attached_to_name: "INV-1"
       },
       eventType: "FileDirectUploadReserved"
+    });
+  });
+
+  it("plans direct-upload reservation document and storage commands together", () => {
+    expect(fileDirectUploadReservationPlan({
+      filename: "invoice.pdf",
+      key: "acme/files/file_1-invoice.pdf",
+      contentType: "application/pdf",
+      size: 42,
+      expiresAt: "2026-06-28T00:15:00.000Z",
+      tenantId: "acme",
+      isPrivate: false,
+      uploadedBy: "owner@example.com",
+      uploadedAt: "2026-06-28T00:00:00.000Z",
+      scannerConfigured: true,
+      attachedTo: { doctype: "Invoice", name: "INV-1" }
+    })).toEqual({
+      create: {
+        data: {
+          filename: "invoice.pdf",
+          key: "acme/files/file_1-invoice.pdf",
+          content_type: "application/pdf",
+          size: 42,
+          is_private: false,
+          uploaded_by: "owner@example.com",
+          uploaded_at: "2026-06-28T00:00:00.000Z",
+          storage_state: "upload_pending",
+          direct_upload_expires_at: "2026-06-28T00:15:00.000Z",
+          scan_status: "pending",
+          attached_to_doctype: "Invoice",
+          attached_to_name: "INV-1"
+        },
+        eventType: "FileDirectUploadReserved"
+      },
+      reservation: {
+        key: "acme/files/file_1-invoice.pdf",
+        contentType: "application/pdf",
+        filename: "invoice.pdf",
+        size: 42,
+        expiresAt: "2026-06-28T00:15:00.000Z",
+        customMetadata: { tenantId: "acme", uploadedBy: "owner@example.com" }
+      }
     });
   });
 

@@ -86,7 +86,7 @@ import {
   fileResolvedTransformOverlaySource,
   fileDownloadedRenditionResult,
   fileDocumentCreateCommand,
-  fileDirectUploadDocumentCreateCommand,
+  fileDirectUploadReservationPlan,
   fileGeneratedRenditionCompletionResult,
   fileMetadataUpdateExecuteCommand,
   fileMetadataUpdateDocumentCommand,
@@ -120,7 +120,6 @@ import {
   fileUploadCompletionPlan,
   fileUploadContentType,
   fileUploadExpiresAt,
-  fileDirectUploadReservationCommand,
   filePendingUploadDocumentDataCommand,
   filePendingUploadDocumentData,
   fileMultipartUploadAbortCommand,
@@ -537,36 +536,28 @@ export class FileService {
     const fileName = this.ids.next("file_");
     const key = objectKey(tenantId, fileName, filename);
     const expiresAt = fileUploadExpiresAt(this.clock.now(), command.expiresInSeconds);
-    const uploadData = filePendingUploadDocumentDataCommand({
+    const plan = fileDirectUploadReservationPlan({
       filename,
       key,
       contentType,
-      size,
-      isPrivate: command.isPrivate,
-      uploadedBy: command.actor.id,
-      uploadedAt: this.clock.now(),
-      directUploadExpiresAt: expiresAt,
-      scannerConfigured: this.scanner !== undefined,
-      attachedTo: command.attachedTo
-    });
-    const create = fileDirectUploadDocumentCreateCommand(uploadData);
-    this.preflightCreate(command.actor, create.data);
-    const upload = await createDirectUpload(fileDirectUploadReservationCommand({
-      key,
-      contentType,
-      filename,
       size,
       expiresAt,
       tenantId,
-      uploadedBy: command.actor.id
-    }));
+      isPrivate: command.isPrivate,
+      uploadedBy: command.actor.id,
+      uploadedAt: this.clock.now(),
+      scannerConfigured: this.scanner !== undefined,
+      attachedTo: command.attachedTo
+    });
+    this.preflightCreate(command.actor, plan.create.data);
+    const upload = await createDirectUpload(plan.reservation);
     const snapshot = await this.documents.create(fileDocumentCreateCommand({
       actor: command.actor,
       doctype: this.fileDoctype,
       name: fileName,
       tenantId,
       metadata: command.metadata,
-      create
+      create: plan.create
     }));
     return filePreparedDirectUploadResult({ snapshot, upload });
   }

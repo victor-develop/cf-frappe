@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the buffered upload storage planning policy slice:
+As of the direct upload reservation planning policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1750`
-- Remaining gap to Frappe static markers: `1034`
+- Vitest cases: `1751`
+- Remaining gap to Frappe static markers: `1033`
 
 ## Implication
 
