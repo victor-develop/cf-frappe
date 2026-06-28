@@ -50,6 +50,7 @@ import {
   ensureDirectUploadMatches,
   ensureMultipartCompletionMatchesManifest,
   ensureMultipartPartFitsReservation,
+  fileAttachmentTargetForValidation,
   requireDirectFileUploadCreator,
   requireFileObjectMetadata,
   requireFileTransformer,
@@ -859,10 +860,9 @@ export class FileService {
       snapshot: current
     });
     const update = fileMetadataUpdateDocumentCommand(command);
-    if (command.attachedTo !== undefined) {
-      if (command.attachedTo !== null) {
-        await this.validateAttachmentTarget(command.actor, tenantId, command.attachedTo);
-      }
+    const attachmentTarget = fileAttachmentTargetForValidation(command.attachedTo);
+    if (attachmentTarget) {
+      await this.validateAttachmentTarget(command.actor, tenantId, attachmentTarget);
     }
     return this.documents.execute(fileMetadataUpdateExecuteCommand({
       actor: command.actor,
@@ -1219,10 +1219,11 @@ export class FileService {
     tenantId: string,
     attachedTo: UploadFileCommand["attachedTo"] | undefined
   ): Promise<void> {
-    if (!attachedTo) {
+    const attachmentTarget = fileAttachmentTargetForValidation(attachedTo);
+    if (!attachmentTarget) {
       return;
     }
-    await this.queries.getDocument(actor, attachedTo.doctype, attachedTo.name, tenantId);
+    await this.queries.getDocument(actor, attachmentTarget.doctype, attachmentTarget.name, tenantId);
   }
 
   private requireMultipartUploads(): NonNullable<FileStorage["multipartUploads"]> {

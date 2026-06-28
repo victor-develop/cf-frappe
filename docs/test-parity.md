@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the multipart completion object policy slice:
+As of the attachment target validation policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1730`
-- Remaining gap to Frappe static markers: `1054`
+- Vitest cases: `1731`
+- Remaining gap to Frappe static markers: `1053`
 
 ## Implication
 

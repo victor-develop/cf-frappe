@@ -80,6 +80,15 @@ export function fileAttachedToCommandOption<TAttachedTo>(
   return attachedTo === undefined ? {} : { attachedTo };
 }
 
+export function fileAttachmentTargetForValidation<TAttachedTo extends {
+  readonly doctype: string;
+  readonly name: string;
+}>(
+  attachedTo: TAttachedTo | null | undefined
+): TAttachedTo | undefined {
+  return attachedTo === undefined || attachedTo === null ? undefined : attachedTo;
+}
+
 export function fileIsPrivateCommandOption(isPrivate: boolean | undefined): { readonly isPrivate?: boolean } {
   return isPrivate === undefined ? {} : { isPrivate };
 }

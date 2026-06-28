@@ -27,8 +27,9 @@ import {
   expectedRenditionContentType,
   failedFileRendition,
   failedFileRenditionForError,
-  fileBulkDeletedEntry,
   fileAttachedToCommandOption,
+  fileAttachmentTargetForValidation,
+  fileBulkDeletedEntry,
   fileBulkDeleteEntryCommand,
   fileBulkDeleteFailure,
   fileBulkDeleteResult,
@@ -219,6 +220,14 @@ describe("file policy", () => {
     expect(fileAttachedToCommandOption(attachedTo)).toEqual({ attachedTo });
     expect(fileAttachedToCommandOption(null)).toEqual({ attachedTo: null });
     expect(fileAttachedToCommandOption(undefined)).toEqual({});
+  });
+
+  it("plans attachment target validation only for present targets", () => {
+    const attachedTo = { doctype: "Invoice", name: "INV-1" };
+
+    expect(fileAttachmentTargetForValidation(undefined)).toBeUndefined();
+    expect(fileAttachmentTargetForValidation(null)).toBeUndefined();
+    expect(fileAttachmentTargetForValidation(attachedTo)).toBe(attachedTo);
   });
 
   it("shapes optional file privacy and transform overlay command options", () => {
