@@ -1,6 +1,85 @@
 import { InMemoryFileStorage, MIN_MULTIPART_FILE_PART_BYTES } from "../../src";
 
 describe("InMemoryFileStorage", () => {
+  it("clones object metadata on put, head, and get", async () => {
+    const storage = new InMemoryFileStorage();
+    const customMetadata = { tenantId: "acme", uploadedBy: "owner@example.com" };
+
+    const stored = await storage.put({
+      key: "acme/files/file_object-note.txt",
+      body: "hello",
+      contentType: "text/plain",
+      filename: "note.txt",
+      customMetadata
+    });
+
+    customMetadata.uploadedBy = "mutated@example.com";
+    stored.customMetadata.uploadedBy = "returned@example.com";
+
+    const headed = await storage.head("acme/files/file_object-note.txt");
+    expect(headed).toMatchObject({
+      customMetadata: { tenantId: "acme", uploadedBy: "owner@example.com" }
+    });
+
+    headed!.customMetadata.uploadedBy = "head@example.com";
+    const object = await storage.get("acme/files/file_object-note.txt");
+    expect(object?.metadata).toMatchObject({
+      customMetadata: { tenantId: "acme", uploadedBy: "owner@example.com" }
+    });
+
+    object!.metadata.customMetadata.uploadedBy = "get@example.com";
+    await expect(storage.head("acme/files/file_object-note.txt")).resolves.toMatchObject({
+      customMetadata: { tenantId: "acme", uploadedBy: "owner@example.com" }
+    });
+  });
+
+  it("clones multipart upload metadata before storing completed objects", async () => {
+    const storage = new InMemoryFileStorage();
+    const customMetadata = { tenantId: "acme", uploadedBy: "owner@example.com" };
+    const upload = await storage.multipartUploads.createMultipartUpload({
+      key: "acme/files/file_object-archive.bin",
+      contentType: "application/octet-stream",
+      filename: "archive.bin",
+      customMetadata
+    });
+
+    customMetadata.uploadedBy = "mutated@example.com";
+    const part = await storage.multipartUploads.uploadMultipartPart({
+      key: upload.key,
+      uploadId: upload.uploadId,
+      partNumber: 1,
+      body: "archive"
+    });
+    const metadata = await storage.multipartUploads.completeMultipartUpload({
+      key: upload.key,
+      uploadId: upload.uploadId,
+      parts: [part]
+    });
+
+    metadata.customMetadata.uploadedBy = "returned@example.com";
+    await expect(storage.head(upload.key)).resolves.toMatchObject({
+      customMetadata: { tenantId: "acme", uploadedBy: "owner@example.com" }
+    });
+  });
+
+  it("rejects custom metadata that cannot cross the JSON storage boundary", async () => {
+    const storage = new InMemoryFileStorage();
+
+    await expect(
+      storage.put({
+        key: "acme/files/file_object-bad.txt",
+        body: "hello",
+        contentType: "text/plain",
+        filename: "bad.txt",
+        customMetadata: { tenantId: "acme", bad: Number.POSITIVE_INFINITY } as never
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "File object customMetadata must be a JSON object"
+    });
+    await expect(storage.head("acme/files/file_object-bad.txt")).resolves.toBeNull();
+  });
+
   it("assembles uploaded multipart parts by part number", async () => {
     const storage = new InMemoryFileStorage();
     const firstBody = new Uint8Array(MIN_MULTIPART_FILE_PART_BYTES).fill(97);

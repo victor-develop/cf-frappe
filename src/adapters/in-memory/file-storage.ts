@@ -20,7 +20,9 @@ import {
   ensureR2CompatibleMultipartPartSizes,
   sortedUploadedMultipartParts
 } from "../../ports/multipart-file-storage.js";
-import { notFound } from "../../core/errors.js";
+import { badRequest, notFound } from "../../core/errors.js";
+import { cloneJsonValue, isJsonValue } from "../../core/json.js";
+import type { DocumentData } from "../../core/types.js";
 
 interface StoredEntry {
   readonly bytes: Uint8Array;
@@ -31,7 +33,7 @@ interface MultipartEntry {
   readonly key: string;
   readonly contentType: string;
   readonly filename: string;
-  readonly customMetadata: Readonly<Record<string, string>>;
+  readonly customMetadata: DocumentData;
   readonly parts: Map<number, { readonly bytes: Uint8Array; readonly etag: string }>;
 }
 
@@ -53,14 +55,15 @@ export class InMemoryFileStorage implements FileStorage {
       uploadedAt: new Date(0).toISOString(),
       contentType: command.contentType,
       filename: command.filename,
-      customMetadata: command.customMetadata ?? {}
+      customMetadata: cloneCustomMetadata(command.customMetadata ?? {})
     };
-    this.objects.set(command.key, { bytes, metadata });
-    return metadata;
+    this.objects.set(command.key, { bytes, metadata: cloneFileObjectMetadata(metadata) });
+    return cloneFileObjectMetadata(metadata);
   }
 
   async head(key: string): Promise<FileObjectMetadata | null> {
-    return this.objects.get(key)?.metadata ?? null;
+    const metadata = this.objects.get(key)?.metadata;
+    return metadata ? cloneFileObjectMetadata(metadata) : null;
   }
 
   async get(key: string): Promise<StoredFileObject | null> {
@@ -69,7 +72,7 @@ export class InMemoryFileStorage implements FileStorage {
       return null;
     }
     return {
-      metadata: entry.metadata,
+      metadata: cloneFileObjectMetadata(entry.metadata),
       body: new Response(entry.bytes.slice().buffer).body as ReadableStream<Uint8Array>
     };
   }
@@ -94,7 +97,7 @@ export class InMemoryFileStorage implements FileStorage {
       key: command.key,
       contentType: command.contentType,
       filename: command.filename,
-      customMetadata: command.customMetadata ?? {},
+      customMetadata: cloneCustomMetadata(command.customMetadata ?? {}),
       parts: new Map()
     });
     return { key: command.key, uploadId };
@@ -136,11 +139,11 @@ export class InMemoryFileStorage implements FileStorage {
       uploadedAt: new Date(0).toISOString(),
       contentType: upload.contentType,
       filename: upload.filename,
-      customMetadata: upload.customMetadata
+      customMetadata: cloneCustomMetadata(upload.customMetadata)
     };
-    this.objects.set(command.key, { bytes, metadata });
+    this.objects.set(command.key, { bytes, metadata: cloneFileObjectMetadata(metadata) });
     this.multipartUploadEntries.delete(command.uploadId);
-    return metadata;
+    return cloneFileObjectMetadata(metadata);
   }
 
   async abortMultipartUpload(command: AbortMultipartFileUploadCommand): Promise<void> {
@@ -163,6 +166,20 @@ export class InMemoryFileStorage implements FileStorage {
     }
     return upload;
   }
+}
+
+function cloneFileObjectMetadata(metadata: FileObjectMetadata): FileObjectMetadata {
+  return {
+    ...metadata,
+    customMetadata: cloneCustomMetadata(metadata.customMetadata)
+  };
+}
+
+function cloneCustomMetadata(metadata: DocumentData | Readonly<Record<string, string>>): DocumentData {
+  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata) || !isJsonValue(metadata)) {
+    throw badRequest("File object customMetadata must be a JSON object");
+  }
+  return cloneJsonValue(metadata) as DocumentData;
 }
 
 async function toArrayBuffer(body: FileContent | MultipartFilePartContent): Promise<ArrayBuffer> {

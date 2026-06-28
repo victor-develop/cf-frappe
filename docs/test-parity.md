@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the in-memory realtime JSON-clone slice:
+As of the in-memory file-storage metadata JSON-clone slice:
 
 - Vitest files: `171`
-- Vitest cases: `1870`
-- Remaining gap to Frappe static markers: `914`
+- Vitest cases: `1873`
+- Remaining gap to Frappe static markers: `911`
 
 ## Implication
 
