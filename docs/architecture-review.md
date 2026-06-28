@@ -81,6 +81,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized email outbox claim-id resolution so sent and failed completion events no longer rely on non-null assertions after delivery claim replay.
 - Centralized Cloudflare Access setup scope parsing so account/zone routing is represented as a typed boundary instead of a non-null assertion in the CLI parser.
 - Centralized single data-patch retry id resolution so remote retry routes use a validated and encoded patch id without relying on array non-null assertions.
+- Centralized D1 migration filename and metadata capture parsing so existing migration detection no longer relies on regex capture non-null assertions.
 - Moved saved list filter event payloads into their own bounded application event module and narrowed the service event factory to that payload type, adding a fourth extension-map contract test.
 - Moved saved report event payloads into their own bounded application event module and narrowed the service event factory to that payload type, adding a fifth extension-map contract test.
 - Moved role catalog event payloads into their own bounded application event module and narrowed `RoleService` append/fold orchestration to that payload type, adding a sixth extension-map contract test.

@@ -126,12 +126,11 @@ async function readExistingMigrationFiles(
     throw error;
   }
   const files = entries.flatMap((entry) => {
-    const match = /^(\d{4})_(.+)\.sql$/u.exec(entry);
-    if (match === null) {
+    const parsed = parseExistingMigrationFilename(entry);
+    if (parsed === undefined) {
       return [];
     }
-    const basename = entry.slice(0, -".sql".length);
-    return [{ filename: entry, sequence: Number(match[1]), migrationIds: [basename, match[2]!] }];
+    return [parsed];
   });
   return Promise.all(files.map(async (file) => {
     const metadata = metadataFromFile(await readFile(resolve(migrationsPath, file.filename), "utf8"));
@@ -143,15 +142,40 @@ async function readExistingMigrationFiles(
   }));
 }
 
+function parseExistingMigrationFilename(filename: string): ExistingMigrationFile | undefined {
+  const match = /^(\d{4})_(.+)\.sql$/u.exec(filename);
+  if (match === null) {
+    return undefined;
+  }
+  const [, sequence, migrationId] = match;
+  if (sequence === undefined || migrationId === undefined) {
+    return undefined;
+  }
+  return {
+    filename,
+    sequence: Number(sequence),
+    migrationIds: [filename.slice(0, -".sql".length), migrationId]
+  };
+}
+
 function metadataFromFile(
   contents: string
 ): { readonly checksum?: string; readonly migrationIds?: readonly string[] } {
-  const checksumMatch = /^-- checksum:\s*(\S+)\s*$/mu.exec(contents);
-  const migrationIdMatch = /^--\s+(?!checksum\b)([a-z0-9_.-]+):/mu.exec(contents);
+  const checksum = captureFirstGroup(/^-- checksum:\s*(\S+)\s*$/mu, contents);
+  const migrationId = captureFirstGroup(/^--\s+(?!checksum\b)([a-z0-9_.-]+):/mu, contents);
   return {
-    ...(checksumMatch === null ? {} : { checksum: checksumMatch[1]! }),
-    ...(migrationIdMatch === null ? {} : { migrationIds: [migrationIdMatch[1]!] })
+    ...(checksum === undefined ? {} : { checksum }),
+    ...(migrationId === undefined ? {} : { migrationIds: [migrationId] })
   };
+}
+
+function captureFirstGroup(pattern: RegExp, contents: string): string | undefined {
+  const match = pattern.exec(contents);
+  if (match === null) {
+    return undefined;
+  }
+  const [, captured] = match;
+  return captured;
 }
 
 function assertExistingMigrationChecksum(migration: D1Migration, file: ExistingMigrationFile): void {

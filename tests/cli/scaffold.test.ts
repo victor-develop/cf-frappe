@@ -1178,6 +1178,42 @@ if (seededAfterRollback.data.length !== 0) {
     expect(secondStdout.text()).toContain("No new migration files were needed.");
   });
 
+  it("uses migration metadata to avoid regenerating files after a filename changes", async () => {
+    const registry = createRegistry({
+      doctypes: [
+        defineDocType({
+          name: "Customer",
+          version: 2,
+          fields: [{ name: "email", type: "text" }],
+          indexes: [["email"]]
+        })
+      ]
+    });
+    const first = await runCli(["migrate", "generate", "--no-core"], {
+      cwd: () => tempRoot,
+      migrationRegistryLoader: registryLoader(registry),
+      stdout: textBuffer(),
+      stderr: textBuffer()
+    });
+    expect(first).toBe(0);
+    const originalPath = join(tempRoot, "migrations/0001_doctype_customer_v2_indexes.sql");
+    const generated = await readFile(originalPath, "utf8");
+    await rm(originalPath);
+    await writeFile(join(tempRoot, "migrations/0042_legacy_customer_indexes.sql"), generated, "utf8");
+
+    const secondStdout = textBuffer();
+    const second = await runCli(["migrate", "generate", "--no-core"], {
+      cwd: () => tempRoot,
+      migrationRegistryLoader: registryLoader(registry),
+      stdout: secondStdout,
+      stderr: textBuffer()
+    });
+
+    expect(second).toBe(0);
+    expect(secondStdout.text()).toContain("No new migration files were needed.");
+    await expect(readFile(originalPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("reports checksum drift for scaffolded starter migration files", async () => {
     const target = join(tempRoot, "starter-checksum-drift");
     await scaffoldProject({

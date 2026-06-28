@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the data patch retry route id boundary slice:
+As of the migration metadata parsing boundary slice:
 
 - Vitest files: `170`
-- Vitest cases: `1800`
-- Remaining gap to Frappe static markers: `984`
+- Vitest cases: `1801`
+- Remaining gap to Frappe static markers: `983`
 
 ## Implication
 
