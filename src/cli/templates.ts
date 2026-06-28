@@ -482,18 +482,6 @@ npx cf-frappe files transform-download --url https://your-worker.example --name 
 npx cf-frappe files delete --url https://your-worker.example --name file_invoice --expected-version 3 --header-env Authorization=CF_FRAPPE_AUTH
 \`\`\`
 
-## Deploy
-
-\`\`\`bash
-npm run resources:create
-\`\`\`
-
-Copy the returned D1 \`database_id\` into the \`replace-with-d1-database-id\` placeholder in \`wrangler.jsonc\`, then set the production session secret with Wrangler's interactive prompt:
-
-\`\`\`bash
-npm run secret:session
-npm run deploy:first
-\`\`\`
 ${authProviderDeployReadme(input.auth)}
 
 Run \`npm run cf:types\` after changing bindings so \`worker-configuration.d.ts\` stays aligned with \`wrangler.jsonc\`.

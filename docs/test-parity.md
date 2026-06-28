@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the starter setup-script coverage slice:
+As of the starter deployment-guidance coverage slice:
 
 - Vitest files: `173`
-- Vitest cases: `1964`
-- Remaining gap to Frappe static markers: `820`
+- Vitest cases: `1965`
+- Remaining gap to Frappe static markers: `819`
 
 ## Implication
 

@@ -451,6 +451,30 @@ describe("cf-frappe CLI scaffold", () => {
     expect(readmeText).toContain("npm run deploy:first");
   });
 
+  it("keeps starter deployment guidance in one ordered section", async () => {
+    const target = join(tempRoot, "Deployment Readme App");
+
+    await scaffoldProject({
+      targetDirectory: target,
+      compatibilityDate: "2026-06-22",
+      cfFrappeVersion: "0.1.0",
+      nodeTypesVersion: "^26.0.0",
+      typescriptVersion: "^5.7.2",
+      wranglerVersion: "^4.103.0"
+    });
+
+    const readmeText = await readFile(join(target, "README.md"), "utf8");
+    expect(readmeText.match(/^## Deployment$/gm)).toHaveLength(1);
+    expect(readmeText.match(/^## Deploy$/gm)).toBeNull();
+    expect(readmeText.indexOf("npm run resources:create")).toBeLessThan(
+      readmeText.indexOf("replace-with-d1-database-id")
+    );
+    expect(readmeText.indexOf("replace-with-d1-database-id")).toBeLessThan(
+      readmeText.indexOf("npm run secret:session")
+    );
+    expect(readmeText.indexOf("npm run secret:session")).toBeLessThan(readmeText.indexOf("npm run deploy:first"));
+  });
+
   it("creates a Cloudflare Access-backed starter app", async () => {
     const target = join(tempRoot, "Access App");
 
