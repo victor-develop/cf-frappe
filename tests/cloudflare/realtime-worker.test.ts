@@ -110,6 +110,29 @@ describe("CloudFrappe Worker realtime", () => {
     expect(new URL(fetches[0]!.url).pathname).toBe("/");
   });
 
+  it("normalizes relative configured realtime websocket routes", async () => {
+    const topics: string[] = [];
+    const fetches: Request[] = [];
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => ({ ...owner, roles: ["System Manager"] }),
+      realtime: { namespace: () => fakeRealtimeNamespace(topics, fetches), route: "rt/" }
+    });
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/rt?topic=document:acme:Note:My%20Note", {
+        headers: { upgrade: "websocket" }
+      }),
+      { DB: fakeD1(), AGGREGATES: fakeAggregateNamespace() },
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(101);
+    expect(topics).toEqual(["document:acme:Note:My%20Note"]);
+    expect(fetches).toHaveLength(1);
+    expect(new URL(fetches[0]!.url).pathname).toBe("/rt");
+  });
+
   it("routes authorized doctype websocket subscriptions to the topic hub", async () => {
     const topics: string[] = [];
     const fetches: Request[] = [];
@@ -319,6 +342,44 @@ describe("CloudFrappe Worker realtime", () => {
 
     const response = await worker.fetch!(
       cfRequest("http://localhost/presence?topic=document:acme:Note:My%20Note"),
+      { DB: fakeD1(), AGGREGATES: fakeAggregateNamespace() },
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(200);
+    expect(topics).toEqual(["document:acme:Note:My%20Note"]);
+    expect(fetches).toEqual([]);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        topic: "document:acme:Note:My%20Note",
+        connections: [{ connectionId: "conn-1" }]
+      }
+    });
+  });
+
+  it("normalizes relative configured realtime presence routes", async () => {
+    const topics: string[] = [];
+    const fetches: Request[] = [];
+    const worker = createCloudFrappeWorker({
+      registry: createTestRegistry(),
+      actor: () => owner,
+      realtime: {
+        route: "rt",
+        namespace: () => fakeRealtimeNamespace(topics, fetches, {
+          connections: [
+            {
+              connectionId: "conn-1",
+              connectedAt: "2026-06-23T00:00:00.000Z",
+              tenantId: "acme",
+              userId: "owner@example.com"
+            }
+          ]
+        })
+      }
+    });
+
+    const response = await worker.fetch!(
+      cfRequest("http://localhost/rt/presence?topic=document:acme:Note:My%20Note"),
       { DB: fakeD1(), AGGREGATES: fakeAggregateNamespace() },
       fakeExecutionContext()
     );

@@ -1005,7 +1005,10 @@ function isRealtimePresencePath(pathname: string, route = "/api/realtime"): bool
 
 function normalizedRealtimeRoute(route = "/api/realtime"): string {
   const normalized = route.replace(/\/$/, "");
-  return normalized === "" ? "/" : normalized;
+  if (normalized === "") {
+    return "/";
+  }
+  return normalized.startsWith("/") ? normalized : `/${normalized}`;
 }
 
 function realtimePresenceRoute(route = "/api/realtime"): string {
