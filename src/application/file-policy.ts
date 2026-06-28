@@ -664,6 +664,20 @@ export function ensureFileDeleteAllowed(command: {
   ensureFileDeleteExpectedVersion(command.snapshot, command.expectedVersion);
 }
 
+export function ensureFileMetadataUpdateAllowed(command: {
+  readonly actor: Actor;
+  readonly doctype: DocTypeDefinition;
+  readonly fileDoctype: string;
+  readonly snapshot: DocumentSnapshot;
+}): void {
+  if (!can(command.actor, command.doctype, "metadata", command.snapshot)) {
+    throw permissionDenied(
+      `Actor '${command.actor.id}' cannot execute updateMetadata on ${command.fileDoctype}/${command.snapshot.name}`
+    );
+  }
+  ensureFileNotDeleteRequested(command.snapshot);
+}
+
 export function ensureFileAvailableForDownload(snapshot: DocumentSnapshot): void {
   if (isFileUploadPending(snapshot) || isFileMultipartCompletionStarted(snapshot)) {
     throw new FrameworkError("FILE_UPLOAD_PENDING", `${snapshot.doctype}/${snapshot.name} upload has not been finalized`, {

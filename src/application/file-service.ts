@@ -47,7 +47,7 @@ import {
   ensureFileCreateAllowed,
   ensureFileDeleteAllowed,
   ensureFileExpectedVersion,
-  ensureFileNotDeleteRequested,
+  ensureFileMetadataUpdateAllowed,
   ensureFilePendingDirectUpload,
   ensureFilePendingMultipartCompletion,
   ensureFilePendingMultipartPartUpload,
@@ -797,12 +797,12 @@ export class FileService {
     const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
     const current = await this.queries.getDocument(command.actor, this.fileDoctype, command.name, tenantId);
     const doctype = this.registry.get(this.fileDoctype);
-    if (!can(command.actor, doctype, "metadata", current)) {
-      throw permissionDenied(
-        `Actor '${command.actor.id}' cannot execute updateMetadata on ${this.fileDoctype}/${command.name}`
-      );
-    }
-    ensureFileNotDeleteRequested(current);
+    ensureFileMetadataUpdateAllowed({
+      actor: command.actor,
+      doctype,
+      fileDoctype: this.fileDoctype,
+      snapshot: current
+    });
     const patch = fileMetadataPatch(command);
     if (command.attachedTo !== undefined) {
       if (command.attachedTo !== null) {

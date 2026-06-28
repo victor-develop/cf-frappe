@@ -12,6 +12,7 @@ import {
   ensureFileDeleteAllowed,
   ensureFileDeleteExpectedVersion,
   ensureFileExpectedVersion,
+  ensureFileMetadataUpdateAllowed,
   ensureFilePendingDirectUpload,
   ensureFilePendingMultipartCompletion,
   ensureFilePendingMultipartPartUpload,
@@ -1269,6 +1270,33 @@ describe("file policy", () => {
       snapshot,
       expectedVersion: 2
     })).toThrow("Expected version 2, found 1");
+  });
+
+  it("validates file metadata update permissions before deletion state", () => {
+    const doctype: DocTypeDefinition = {
+      name: "File",
+      fields: [],
+      permissions: [{ roles: ["File Manager"], actions: ["metadata"] }]
+    };
+
+    expect(() => ensureFileMetadataUpdateAllowed({
+      actor: { id: "manager@example.com", roles: ["File Manager"] },
+      doctype,
+      fileDoctype: "File",
+      snapshot: fileSnapshot({ storage_state: "available" })
+    })).not.toThrow();
+    expect(() => ensureFileMetadataUpdateAllowed({
+      actor: { id: "reader@example.com", roles: ["Reader"] },
+      doctype,
+      fileDoctype: "File",
+      snapshot: fileSnapshot({ storage_state: "delete_requested" })
+    })).toThrow("Actor 'reader@example.com' cannot execute updateMetadata on File/file_multipart");
+    expect(() => ensureFileMetadataUpdateAllowed({
+      actor: { id: "manager@example.com", roles: ["File Manager"] },
+      doctype,
+      fileDoctype: "File",
+      snapshot: fileSnapshot({ storage_state: "delete_requested" })
+    })).toThrow("File/file_multipart is pending deletion");
   });
 
   it("identifies files with delete already requested", () => {
