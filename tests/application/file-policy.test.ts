@@ -1,6 +1,7 @@
 import {
   availableFileRenditionForSource,
   availableFileRenditionForDownload,
+  canUploadFile,
   completeFileRendition,
   ensureFileContentTypeTransformable,
   ensureFileObjectTransformable,
@@ -31,6 +32,7 @@ import {
   fileContentLength,
   fileContentTypeExtension,
   fileDashboardEntry,
+  fileDashboardEntryWithPermissions,
   fileDashboardListFilters,
   fileDocumentData,
   fileMetadataPatch,
@@ -1482,6 +1484,39 @@ describe("file policy", () => {
       previewable: false,
       storageState: "available"
     });
+  });
+
+  it("projects file dashboard permission flags from doctype actions", () => {
+    const doctype: DocTypeDefinition = {
+      name: "File",
+      fields: [],
+      permissions: [
+        { roles: ["File Manager"], actions: ["create", "metadata", "delete"] },
+        { roles: ["File Viewer"], actions: ["read"] }
+      ]
+    };
+    const snapshot = fileSnapshot({ filename: "invoice.pdf", content_type: "application/pdf" });
+
+    expect(fileDashboardEntryWithPermissions({
+      actor: { id: "manager@example.com", roles: ["File Manager"] },
+      doctype,
+      snapshot
+    })).toMatchObject({
+      filename: "invoice.pdf",
+      editable: true,
+      deletable: true
+    });
+    expect(fileDashboardEntryWithPermissions({
+      actor: { id: "viewer@example.com", roles: ["File Viewer"] },
+      doctype,
+      snapshot
+    })).toMatchObject({
+      filename: "invoice.pdf",
+      editable: false,
+      deletable: false
+    });
+    expect(canUploadFile({ id: "manager@example.com", roles: ["File Manager"] }, doctype)).toBe(true);
+    expect(canUploadFile({ id: "viewer@example.com", roles: ["File Viewer"] }, doctype)).toBe(false);
   });
 });
 

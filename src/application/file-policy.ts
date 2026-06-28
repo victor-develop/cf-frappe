@@ -947,6 +947,22 @@ export function fileDashboardEntry(snapshot: DocumentSnapshot): FileDashboardEnt
   };
 }
 
+export function fileDashboardEntryWithPermissions(command: {
+  readonly actor: Actor;
+  readonly doctype: DocTypeDefinition;
+  readonly snapshot: DocumentSnapshot;
+}): FileDashboardEntryView & { readonly editable: boolean; readonly deletable: boolean } {
+  return {
+    ...fileDashboardEntry(command.snapshot),
+    editable: can(command.actor, command.doctype, "metadata", command.snapshot),
+    deletable: can(command.actor, command.doctype, "delete", command.snapshot)
+  };
+}
+
+export function canUploadFile(actor: Actor, doctype: DocTypeDefinition): boolean {
+  return can(actor, doctype, "create");
+}
+
 export function normalizeFileDashboardLimit(limit: number | undefined): number {
   if (limit === undefined) {
     return 50;

@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file multipart upload preflight policy slice:
+As of the file dashboard permission projection policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1672`
-- Remaining gap to Frappe static markers: `1112`
+- Vitest cases: `1673`
+- Remaining gap to Frappe static markers: `1111`
 
 ## Implication
 

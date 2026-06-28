@@ -3,11 +3,9 @@ import { QueryService } from "./query-service.js";
 import {
   badRequest,
   notFound,
-  permissionDenied,
   type FrameworkErrorCode
 } from "../core/errors.js";
 import { FILE_DOCTYPE_NAME } from "../core/file-doctype.js";
-import { can } from "../core/permissions.js";
 import type { ModelRegistry } from "../core/registry.js";
 import {
   DEFAULT_TENANT_ID,
@@ -57,10 +55,11 @@ import {
   ensureDirectUploadMatches,
   ensureMultipartCompletionMatchesManifest,
   ensureMultipartPartFitsReservation,
+  canUploadFile,
   fileBulkDeleteFailure,
   fileBulkFailure,
   fileContentLength,
-  fileDashboardEntry,
+  fileDashboardEntryWithPermissions,
   fileDashboardListFilters,
   fileDocumentData,
   fileMetadataPatch,
@@ -762,16 +761,12 @@ export class FileService {
       files.push(
         ...readable
           .filter((entry) => entry.readable)
-          .map(({ snapshot }) => ({
-            ...fileDashboardEntry(snapshot),
-            editable: can(actor, doctype, "metadata", snapshot),
-            deletable: can(actor, doctype, "delete", snapshot)
-          }))
+          .map(({ snapshot }) => fileDashboardEntryWithPermissions({ actor, doctype, snapshot }))
       );
       offset += batchLimit;
     } while (files.length < limit && offset < total);
     return {
-      canUpload: can(actor, doctype, "create"),
+      canUpload: canUploadFile(actor, doctype),
       directUpload: typeof this.storage.createDirectUpload === "function",
       maxUploadBytes: this.maxFileBytes,
       files: files.slice(0, limit),
@@ -788,11 +783,7 @@ export class FileService {
       tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID
     );
     const doctype = this.registry.get(this.fileDoctype);
-    return {
-      ...fileDashboardEntry(snapshot),
-      editable: can(actor, doctype, "metadata", snapshot),
-      deletable: can(actor, doctype, "delete", snapshot)
-    };
+    return fileDashboardEntryWithPermissions({ actor, doctype, snapshot });
   }
 
   async updateMetadata(command: UpdateFileMetadataCommand): Promise<DocumentSnapshot> {
