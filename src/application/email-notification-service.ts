@@ -261,6 +261,7 @@ export class EmailNotificationService {
     if (claim === undefined) {
       return undefined;
     }
+    const claimId = claimedDeliveryId(claim, messageId);
     let sent: Awaited<ReturnType<EmailSender["send"]>>;
     try {
       sent = await this.sender.send({
@@ -272,10 +273,10 @@ export class EmailNotificationService {
       });
     } catch (error) {
       const messageText = errorMessage(error);
-      const recorded = await this.appendClaimCompletion(tenantId, messageId, claim.claimId!, {
+      const recorded = await this.appendClaimCompletion(tenantId, messageId, claimId, {
         kind: "EmailNotificationFailed",
         messageId,
-        claimId: claim.claimId!,
+        claimId,
         error: messageText
       });
       if (!recorded) {
@@ -292,10 +293,10 @@ export class EmailNotificationService {
         error: messageText
       };
     }
-    const recorded = await this.appendClaimCompletion(tenantId, messageId, claim.claimId!, {
+    const recorded = await this.appendClaimCompletion(tenantId, messageId, claimId, {
       kind: "EmailNotificationSent",
       messageId,
-      claimId: claim.claimId!,
+      claimId,
       ...(sent.id === undefined ? {} : { providerMessageId: sent.id })
     });
     if (!recorded) {
@@ -431,6 +432,13 @@ function requireAppendedEmailOutboxEvent(
     );
   }
   return event;
+}
+
+function claimedDeliveryId(record: EmailOutboxRecord, messageId: string): string {
+  if (record.claimId === undefined) {
+    throw new Error(`Claimed email outbox message '${messageId}' has no claim id`);
+  }
+  return record.claimId;
 }
 
 function queueResultFromOutboxRecord(

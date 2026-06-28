@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the base64url byte encoding boundary slice:
+As of the email outbox claim id boundary slice:
 
 - Vitest files: `170`
-- Vitest cases: `1797`
-- Remaining gap to Frappe static markers: `987`
+- Vitest cases: `1798`
+- Remaining gap to Frappe static markers: `986`
 
 ## Implication
 

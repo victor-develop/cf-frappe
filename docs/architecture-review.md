@@ -78,6 +78,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Introduced a `DomainEventPayloadMap` extension point and moved document delivery outbox event payloads into their own bounded application event module, proving the path away from one central `DocumentEventPayload` union with a focused contract test.
 - Moved email notification outbox event payloads into their own bounded application event module and narrowed `EmailNotificationService` internals to that payload type, adding a second extension-map contract test.
 - Moved user notification inbox event payloads into their own bounded application event module and narrowed read/dismiss helpers to that payload type, adding a third extension-map contract test.
+- Centralized email outbox claim-id resolution so sent and failed completion events no longer rely on non-null assertions after delivery claim replay.
 - Moved saved list filter event payloads into their own bounded application event module and narrowed the service event factory to that payload type, adding a fourth extension-map contract test.
 - Moved saved report event payloads into their own bounded application event module and narrowed the service event factory to that payload type, adding a fifth extension-map contract test.
 - Moved role catalog event payloads into their own bounded application event module and narrowed `RoleService` append/fold orchestration to that payload type, adding a sixth extension-map contract test.

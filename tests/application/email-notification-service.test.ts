@@ -115,9 +115,32 @@ describe("EmailNotificationService", () => {
         payload: {
           kind: "EmailNotificationSent",
           messageId,
+          claimId: "claim_claim-1",
           providerMessageId: "cf-msg-1"
         }
       }
+    ]);
+  });
+
+  it("records the active delivery claim id on sent completion events", async () => {
+    const events = new InMemoryEventStore();
+    const service = new EmailNotificationService({
+      events,
+      sender: recordingEmailSender("cf-msg-1"),
+      from: { email: "notifications@example.com" },
+      notificationRules: ruleProvider("reviewer@example.com"),
+      ids: deterministicIds(["queued-1", "claim-1", "claimed-1", "sent-1"]),
+      clock: fixedClock(now)
+    });
+    const messageId = "evt_update:rule:Email%20owners:email:reviewer%40example.com";
+
+    await expect(service.sendFromDomainEvent(documentUpdatedEvent(), noteSnapshot())).resolves.toEqual([
+      expect.objectContaining({ status: "sent", messageId, providerMessageId: "cf-msg-1" })
+    ]);
+    await expect(events.readStream(emailOutboxStream("acme", messageId))).resolves.toMatchObject([
+      { payload: { kind: "EmailNotificationQueued", messageId } },
+      { payload: { kind: "EmailNotificationDeliveryClaimed", messageId, claimId: "claim_claim-1" } },
+      { payload: { kind: "EmailNotificationSent", messageId, claimId: "claim_claim-1" } }
     ]);
   });
 
@@ -208,6 +231,7 @@ describe("EmailNotificationService", () => {
         payload: {
           kind: "EmailNotificationFailed",
           messageId: "evt_update:rule:Email%20owners:email:reviewer%40example.com",
+          claimId: "claim_claim-1",
           error: "Cloudflare Email rejected recipient"
         }
       }
