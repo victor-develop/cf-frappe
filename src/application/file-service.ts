@@ -58,7 +58,6 @@ import {
   fileCompletedRenditionManifestRecord,
   fileCompletedMultipartObjectPlan,
   fileCompletedMultipartObjectReadPlan,
-  fileBufferedUploadDocumentCreateCommand,
   fileBulkDeleteEntryCommand,
   fileBulkDeleteFailure,
   fileBulkDeleteResult,
@@ -66,6 +65,7 @@ import {
   fileBulkMetadataUpdateEntryCommand,
   fileBulkMetadataUpdateResult,
   fileBulkUpdatedEntry,
+  fileBufferedUploadCreatePlan,
   fileBufferedUploadPutObjectCommand,
   fileCommandTenantId,
   fileContentLength,
@@ -135,14 +135,12 @@ import {
   fileUploadedResult,
   fileSnapshotFilename,
   ignoreFileCleanupFailure,
-  isInfectedFileScanResult,
   normalizeBulkFileSelections,
   normalizeFileDashboardFilters,
   normalizeFileDashboardLimit,
   normalizeFileSize,
   nextFileDashboardOffset,
   objectKey,
-  optionalFileScanPatch,
   sanitizeFilename,
   shouldContinueFileDashboardScan,
   type FileRenditionManifestEntry,
@@ -503,21 +501,20 @@ export class FileService {
     }
 
     try {
-      const scanPatch = optionalFileScanPatch(scan, this.clock.now());
-      const create = fileBufferedUploadDocumentCreateCommand({
+      const plan = fileBufferedUploadCreatePlan({
         data,
         object,
-        scanPatch,
-        infected: isInfectedFileScanResult(scan)
+        scan,
+        checkedAt: this.clock.now()
       });
-      if (isInfectedFileScanResult(scan)) {
+      if (plan.infected && scan !== undefined) {
         const snapshot = await this.documents.create(fileDocumentCreateCommand({
           actor: command.actor,
           doctype: this.fileDoctype,
           name: fileName,
           tenantId,
           metadata: command.metadata,
-          create
+          create: plan.create
         }));
         throw fileScanFailureError(scan, snapshot);
       }
@@ -527,7 +524,7 @@ export class FileService {
         name: fileName,
         tenantId,
         metadata: command.metadata,
-        create
+        create: plan.create
       }));
       return fileUploadedResult({ snapshot, object });
     } catch (error) {

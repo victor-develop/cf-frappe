@@ -38,6 +38,7 @@ import {
   fileBulkMetadataUpdateEntryCommand,
   fileBulkMetadataUpdateResult,
   fileBulkUpdatedEntry,
+  fileBufferedUploadCreatePlan,
   fileBufferedUploadDocumentCreateCommand,
   fileBufferedUploadDocumentData,
   fileBufferedUploadPutObjectCommand,
@@ -2715,6 +2716,65 @@ describe("file policy", () => {
         scan_checked_at: "2026-06-28T01:00:00.000Z"
       },
       eventType: "FileScanFailed"
+    });
+  });
+
+  it("plans buffered-upload document creation from scan outcomes", () => {
+    const data = {
+      filename: "invoice.pdf",
+      key: "acme/files/file_1-invoice.pdf",
+      content_type: "application/pdf",
+      size: 42,
+      storage_state: "available"
+    };
+    const object = fileObject({ etag: "object-etag", httpEtag: '"http-etag"' });
+
+    expect(fileBufferedUploadCreatePlan({
+      data,
+      object,
+      scan: { status: "clean", engine: "clam" },
+      checkedAt: "2026-06-28T01:00:00.000Z"
+    })).toEqual({
+      scanPatch: {
+        scan_status: "clean",
+        scan_checked_at: "2026-06-28T01:00:00.000Z",
+        scan_engine: "clam"
+      },
+      infected: false,
+      create: {
+        data: {
+          ...data,
+          storage_state: "available",
+          etag: '"http-etag"',
+          scan_status: "clean",
+          scan_checked_at: "2026-06-28T01:00:00.000Z",
+          scan_engine: "clam"
+        }
+      }
+    });
+    expect(fileBufferedUploadCreatePlan({
+      data,
+      object,
+      scan: { status: "infected", checkedAt: "2026-06-28T01:02:00.000Z", message: "signature" },
+      checkedAt: "2026-06-28T01:00:00.000Z"
+    })).toEqual({
+      scanPatch: {
+        scan_status: "infected",
+        scan_checked_at: "2026-06-28T01:02:00.000Z",
+        scan_message: "signature"
+      },
+      infected: true,
+      create: {
+        data: {
+          ...data,
+          storage_state: "scan_failed",
+          etag: '"http-etag"',
+          scan_status: "infected",
+          scan_checked_at: "2026-06-28T01:02:00.000Z",
+          scan_message: "signature"
+        },
+        eventType: "FileScanFailed"
+      }
     });
   });
 

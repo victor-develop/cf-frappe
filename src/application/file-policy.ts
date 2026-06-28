@@ -1375,6 +1375,30 @@ export function fileBufferedUploadDocumentCreateCommand(command: {
   };
 }
 
+export function fileBufferedUploadCreatePlan(command: {
+  readonly data: DocumentData;
+  readonly object: FileObjectMetadata;
+  readonly scan?: FileScanResult | undefined;
+  readonly checkedAt: string;
+}): {
+  readonly scanPatch: DocumentData;
+  readonly infected: boolean;
+  readonly create: FileBufferedUploadDocumentCreateCommand;
+} {
+  const scanPatch = optionalFileScanPatch(command.scan, command.checkedAt);
+  const infected = isInfectedFileScanResult(command.scan);
+  return {
+    scanPatch,
+    infected,
+    create: fileBufferedUploadDocumentCreateCommand({
+      data: command.data,
+      object: command.object,
+      scanPatch,
+      infected
+    })
+  };
+}
+
 export type FileDocumentCreateIntent =
   | FileBufferedUploadDocumentCreateCommand
   | FileDirectUploadDocumentCreateCommand
