@@ -97,6 +97,7 @@ import {
   fileGeneratedRenditionCompletionResult,
   fileGeneratedRenditionResult,
   fileGeneratedRenditionFailureCleanupKey,
+  fileGeneratedRenditionFailurePlan,
   fileGeneratedRenditionReuseResult,
   fileGeneratedRenditionReuseStoragePlan,
   fileRenditionManifestPatch,
@@ -1314,6 +1315,51 @@ describe("file policy", () => {
     expect(fileGeneratedRenditionFailureCleanupKey(fileObject({
       key: "acme/file-renditions/file/thumb.webp"
     }))).toBe("acme/file-renditions/file/thumb.webp");
+  });
+
+  it("plans generated rendition failure cleanup and manifest records", () => {
+    const pending = pendingFileRendition({
+      snapshot: fileSnapshot({ content_type: "image/png" }),
+      tenantId: "acme",
+      id: "w64-f-webp",
+      attemptId: "attempt/1",
+      sourceEtag: "source-1",
+      options: { width: 64, format: "webp" },
+      requestedAt: "2026-06-28T00:00:00.000Z",
+      requestedBy: "owner@example.com"
+    });
+
+    expect(fileGeneratedRenditionFailurePlan({
+      pending,
+      object: fileObject({
+        key: pending.key
+      }),
+      error: new Error("transform exploded")
+    })).toMatchObject({
+      cleanupKey: pending.key,
+      failed: {
+        command: "failRendition",
+        rendition: {
+          status: "failed",
+          failure_message: "transform exploded"
+        }
+      }
+    });
+    const beforeWrite = fileGeneratedRenditionFailurePlan({
+      pending,
+      object: undefined,
+      error: "transform failed before write"
+    });
+    expect(beforeWrite).toMatchObject({
+      failed: {
+        command: "failRendition",
+        rendition: {
+          status: "failed",
+          failure_message: "transform failed before write"
+        }
+      }
+    });
+    expect(beforeWrite.cleanupKey).toBeUndefined();
   });
 
   it("rejects duplicate pending file rendition generation", () => {

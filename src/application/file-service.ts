@@ -106,14 +106,13 @@ import {
   filePreparedDirectUploadResult,
   filePreparedMultipartUploadResult,
   fileRenditionGenerationReservation,
-  fileGeneratedRenditionFailureCleanupKey,
+  fileGeneratedRenditionFailurePlan,
   fileGeneratedRenditionReuseResult,
   fileGeneratedRenditionReuseStoragePlan,
   fileRenditionId,
   fileRenditionManifestExecuteCommand,
   fileRenditionReservationExecuteCommand,
   fileRenditionReservationDocumentCommand,
-  fileFailedRenditionManifestRecord,
   fileRenditionSnapshotPutObjectCommand,
   fileScanFailureError,
   fileScanTarget,
@@ -977,18 +976,18 @@ export class FileService {
         completed
       });
     } catch (error) {
-      const cleanupKey = fileGeneratedRenditionFailureCleanupKey(object);
-      if (cleanupKey) {
-        await this.storage.delete(cleanupKey).catch(ignoreFileCleanupFailure);
-      }
-      const failed = fileFailedRenditionManifestRecord({
+      const failure = fileGeneratedRenditionFailurePlan({
         pending,
+        object,
         error
       });
+      if (failure.cleanupKey) {
+        await this.storage.delete(failure.cleanupKey).catch(ignoreFileCleanupFailure);
+      }
       await this.recordRenditionManifest({
         source: command,
-        command: failed.command,
-        rendition: failed.rendition
+        command: failure.failed.command,
+        rendition: failure.failed.rendition
       }).catch(() => undefined);
       throw error;
     }

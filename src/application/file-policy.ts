@@ -2391,6 +2391,27 @@ export function fileGeneratedRenditionFailureCleanupKey(
   return object?.key;
 }
 
+export function fileGeneratedRenditionFailurePlan(command: {
+  readonly pending: FileRenditionManifestEntry;
+  readonly object: FileObjectMetadata | undefined;
+  readonly error: unknown;
+}): {
+  readonly cleanupKey?: string;
+  readonly failed: {
+    readonly command: "failRendition";
+    readonly rendition: FileRenditionManifestEntry;
+  };
+} {
+  const cleanupKey = fileGeneratedRenditionFailureCleanupKey(command.object);
+  return {
+    ...(cleanupKey === undefined ? {} : { cleanupKey }),
+    failed: fileFailedRenditionManifestRecord({
+      pending: command.pending,
+      error: command.error
+    })
+  };
+}
+
 export function ensureNoPendingFileRenditionForSource(
   renditions: readonly FileRenditionManifestEntry[],
   renditionId: string,
