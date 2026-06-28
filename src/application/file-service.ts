@@ -87,7 +87,7 @@ import {
   fileDownloadedRenditionResult,
   fileDocumentCreateCommand,
   fileDirectUploadDocumentCreateCommand,
-  fileGeneratedRenditionResult,
+  fileGeneratedRenditionCompletionResult,
   fileMetadataUpdateExecuteCommand,
   fileMetadataUpdateDocumentCommand,
   fileMultipartAbortCommand,
@@ -972,10 +972,9 @@ export class FileService {
         command: completed.command,
         rendition: completed.rendition
       });
-      return fileGeneratedRenditionResult({
+      return fileGeneratedRenditionCompletionResult({
         snapshot,
-        rendition: completed.rendition,
-        created: true
+        completed
       });
     } catch (error) {
       const cleanupKey = fileGeneratedRenditionFailureCleanupKey(object);

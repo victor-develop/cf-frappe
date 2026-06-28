@@ -94,6 +94,7 @@ import {
   fileRenditionObjectCustomMetadata,
   fileRenditionId,
   fileRenditionFilename,
+  fileGeneratedRenditionCompletionResult,
   fileGeneratedRenditionResult,
   fileGeneratedRenditionFailureCleanupKey,
   fileGeneratedRenditionReuseResult,
@@ -1267,6 +1268,44 @@ describe("file policy", () => {
         generatedBy: "owner@example.com"
       },
       created: false
+    });
+  });
+
+  it("builds generated rendition completion results", () => {
+    const completed = renditionEntry("thumb", {
+      key: "acme/file-renditions/file/thumb.webp",
+      status: "available",
+      source_etag: "source-1",
+      content_type: "image/webp",
+      size: 42,
+      generated_at: "2026-06-28T01:00:00.000Z",
+      generated_by: "owner@example.com"
+    });
+    const snapshot = fileSnapshot({
+      renditions: [completed]
+    });
+
+    expect(fileGeneratedRenditionCompletionResult({
+      snapshot,
+      completed: {
+        rendition: completed
+      }
+    })).toEqual({
+      snapshot,
+      rendition: {
+        id: "thumb",
+        key: "acme/file-renditions/file/thumb.webp",
+        status: "available",
+        options: {},
+        requestedAt: "2026-06-28T00:00:00.000Z",
+        requestedBy: "owner@example.com",
+        sourceEtag: "source-1",
+        contentType: "image/webp",
+        size: 42,
+        generatedAt: "2026-06-28T01:00:00.000Z",
+        generatedBy: "owner@example.com"
+      },
+      created: true
     });
   });
 

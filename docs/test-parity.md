@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the generated rendition reuse result policy slice:
+As of the generated rendition completion result policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1737`
-- Remaining gap to Frappe static markers: `1047`
+- Vitest cases: `1738`
+- Remaining gap to Frappe static markers: `1046`
 
 ## Implication
 
