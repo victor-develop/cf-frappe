@@ -41,6 +41,7 @@ import {
   fileCompletedRenditionManifestCommandName,
   fileContentLength,
   fileContentTypeExtension,
+  fileDashboardBatchLimit,
   fileDashboardEntry,
   fileDashboardEntryWithPermissions,
   fileDashboardListFilters,
@@ -2392,6 +2393,12 @@ describe("file policy", () => {
       roles: ["System Manager"],
       tenantId: "tenant-a"
     });
+  });
+
+  it("normalizes file dashboard batch limits", () => {
+    expect(fileDashboardBatchLimit(1)).toBe(50);
+    expect(fileDashboardBatchLimit(50)).toBe(50);
+    expect(fileDashboardBatchLimit(125)).toBe(125);
   });
 
   it("normalizes file dashboard filters", () => {

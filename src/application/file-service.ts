@@ -68,6 +68,7 @@ import {
   fileBufferedUploadPutObjectCommand,
   fileCommandTenantId,
   fileContentLength,
+  fileDashboardBatchLimit,
   fileDashboardEntryWithPermissions,
   fileDashboardListFilters,
   fileDashboardSystemActor,
@@ -785,7 +786,7 @@ export class FileService {
     const files: FileDashboardEntry[] = [];
     const tenantId = fileCommandTenantId(actor, undefined);
     const systemActor = fileDashboardSystemActor(tenantId);
-    const batchLimit = Math.max(limit, 50);
+    const batchLimit = fileDashboardBatchLimit(limit);
     let offset = 0;
     let total = 0;
     do {

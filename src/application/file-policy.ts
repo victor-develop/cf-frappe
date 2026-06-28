@@ -1731,6 +1731,10 @@ export function fileDashboardSystemActor(tenantId: string): Actor {
   return { id: "__file_dashboard__", roles: [SYSTEM_MANAGER_ROLE], tenantId };
 }
 
+export function fileDashboardBatchLimit(limit: number): number {
+  return Math.max(limit, 50);
+}
+
 export function normalizeFileDashboardLimit(limit: number | undefined): number {
   if (limit === undefined) {
     return 50;

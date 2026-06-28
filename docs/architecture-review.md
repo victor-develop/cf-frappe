@@ -150,4 +150,5 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Reused centralized delete execute-command shaping for multipart upload aborts so abort orchestration no longer composes delete actor, tenant, metadata, or expected-version inline.
 - Centralized shared upload data command shaping in file policy so buffered, direct-upload, and multipart-upload reservation paths no longer compose privacy, attachment, uploader, expiry, or scanner flags inline.
 - Centralized file dashboard system actor shaping in file policy so dashboard orchestration no longer imports or composes privileged catalog roles inline.
+- Centralized file dashboard batch-limit planning in file policy so dashboard orchestration no longer carries the scan-ahead floor inline.
 - Centralized delete document-command intent shaping in file policy so abort and final delete orchestration no longer derive current snapshot version guards inline.
