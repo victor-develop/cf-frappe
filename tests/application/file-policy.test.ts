@@ -1502,7 +1502,8 @@ describe("file policy", () => {
     expect(fileUploadCompletionDocumentCommand({
       uploadCommand: "completeDirectUpload",
       object,
-      scanPatch
+      scanPatch,
+      expectedVersion: 3
     })).toEqual({
       command: "completeDirectUpload",
       input: {
@@ -1510,13 +1511,15 @@ describe("file policy", () => {
         etag: '"http-etag"',
         scan_status: "clean",
         scan_checked_at: "2026-06-28T01:00:00.000Z"
-      }
+      },
+      expectedVersion: 3
     });
     expect(fileUploadCompletionDocumentCommand({
       uploadCommand: "completeMultipartUpload",
       object,
       scanPatch,
-      infected: true
+      infected: true,
+      expectedVersion: 4
     })).toEqual({
       command: "failScan",
       input: {
@@ -1524,7 +1527,8 @@ describe("file policy", () => {
         etag: '"http-etag"',
         scan_status: "clean",
         scan_checked_at: "2026-06-28T01:00:00.000Z"
-      }
+      },
+      expectedVersion: 4
     });
   });
 

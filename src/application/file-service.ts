@@ -581,7 +581,8 @@ export class FileService {
       uploadCommand: "completeDirectUpload",
       object,
       scanPatch,
-      infected: isInfectedFileScanResult(scan)
+      infected: isInfectedFileScanResult(scan),
+      ...fileExpectedVersionCommandOption(command.expectedVersion)
     });
     if (isInfectedFileScanResult(scan)) {
       const snapshot = await this.documents.execute({
@@ -591,7 +592,7 @@ export class FileService {
         command: completion.command,
         input: completion.input,
         ...fileTenantCommandOption(command.tenantId),
-        ...fileExpectedVersionCommandOption(command.expectedVersion),
+        ...fileExpectedVersionCommandOption(completion.expectedVersion),
         metadata: fileCommandMetadata(command.metadata)
       });
       await this.deleteFileObjectsForScanFailure(current);
@@ -604,7 +605,7 @@ export class FileService {
       command: completion.command,
       input: completion.input,
       ...fileTenantCommandOption(command.tenantId),
-      ...fileExpectedVersionCommandOption(command.expectedVersion),
+      ...fileExpectedVersionCommandOption(completion.expectedVersion),
       metadata: fileCommandMetadata(command.metadata)
     });
   }
@@ -733,7 +734,8 @@ export class FileService {
       uploadCommand: "completeMultipartUpload",
       object,
       scanPatch,
-      infected: isInfectedFileScanResult(scan)
+      infected: isInfectedFileScanResult(scan),
+      expectedVersion: completing.version
     });
     if (isInfectedFileScanResult(scan)) {
       const snapshot = await this.documents.execute({
@@ -743,7 +745,7 @@ export class FileService {
         command: completion.command,
         input: completion.input,
         ...fileTenantCommandOption(command.tenantId),
-        expectedVersion: completing.version,
+        ...fileExpectedVersionCommandOption(completion.expectedVersion),
         metadata: fileCommandMetadata(command.metadata)
       });
       await this.deleteFileObjectsForScanFailure(completing);
@@ -756,7 +758,7 @@ export class FileService {
       command: completion.command,
       input: completion.input,
       ...fileTenantCommandOption(command.tenantId),
-      expectedVersion: completing.version,
+      ...fileExpectedVersionCommandOption(completion.expectedVersion),
       metadata: fileCommandMetadata(command.metadata)
     });
   }

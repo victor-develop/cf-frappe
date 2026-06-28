@@ -906,6 +906,7 @@ export type FileUploadCompletionDocumentCommandName =
 export interface FileUploadCompletionDocumentCommand {
   readonly command: FileUploadCompletionDocumentCommandName;
   readonly input: DocumentData;
+  readonly expectedVersion?: number;
 }
 
 export function fileUploadCompletionDocumentCommand(command: {
@@ -913,16 +914,19 @@ export function fileUploadCompletionDocumentCommand(command: {
   readonly object: FileObjectMetadata;
   readonly scanPatch?: DocumentData;
   readonly infected?: boolean;
+  readonly expectedVersion?: number;
 }): FileUploadCompletionDocumentCommand {
   if (command.infected === true) {
     return {
       command: "failScan",
-      input: fileUploadScanFailedPatch(command.object, command.scanPatch)
+      input: fileUploadScanFailedPatch(command.object, command.scanPatch),
+      ...fileExpectedVersionCommandOption(command.expectedVersion)
     };
   }
   return {
     command: command.uploadCommand,
-    input: fileUploadCompletedPatch(command.object, command.scanPatch)
+    input: fileUploadCompletedPatch(command.object, command.scanPatch),
+    ...fileExpectedVersionCommandOption(command.expectedVersion)
   };
 }
 

@@ -20,7 +20,7 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file delete command policy slice:
+As of the file upload completion command version policy slice:
 
 - Vitest files: `169`
 - Vitest cases: `1695`
