@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the report ordered-row heap invariant slice:
+As of the report min/max summary candidate slice:
 
 - Vitest files: `170`
-- Vitest cases: `1790`
-- Remaining gap to Frappe static markers: `994`
+- Vitest cases: `1791`
+- Remaining gap to Frappe static markers: `993`
 
 ## Implication
 

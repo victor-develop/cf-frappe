@@ -147,6 +147,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Captured document delivery outbox handler dependencies up front and centralized queued-email message-id eligibility in a named predicate so notification, realtime, and queued-email fan-out no longer relies on service and message-id non-null assertions inside async closures.
 - Centralized standalone print layout freeze invariants in a named resolver so `definePrintLayout` no longer relies on a non-null assertion after validating layout metadata.
 - Centralized bounded report ordered-row heap access in a named invariant so top-N CSV export no longer relies on array non-null assertions inside sift/swap operations.
+- Centralized report min/max summary candidate selection in a named invariant so summary reduction no longer relies on a non-null array seed after filtering null and missing values.
 - Extracted available-rendition reuse selection and duplicate pending-rendition rejection from `FileService` into the file policy with focused source and overlay identity coverage.
 - Centralized file transformability rejection in the file policy so direct transforms, persisted renditions, and overlay-source transforms share one tested content-type guard.
 - Moved upload byte-limit checks and reservation-expiry timestamp planning into file policy so buffered, direct, and multipart upload flows share the same tested boundary rules.

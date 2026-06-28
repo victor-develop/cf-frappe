@@ -407,6 +407,49 @@ describe("ReportService", () => {
     ]);
   });
 
+  it("computes min and max summaries from present primitive candidates", async () => {
+    const { queries, registry } = createServices();
+    registry.registerReport(
+      defineReport({
+        name: "Mixed Summary Values",
+        doctype: "Note",
+        source: { kind: "custom", provider: "mixed-summary-values" },
+        columns: [
+          { name: "title", label: "Title" },
+          { name: "score", label: "Score", type: "number" }
+        ],
+        summaries: [
+          { name: "minimum_score", aggregate: "min", field: "score", type: "number" },
+          { name: "maximum_score", aggregate: "max", field: "score", type: "number" }
+        ],
+        roles: ["User"]
+      })
+    );
+    const reports = new ReportService({
+      registry,
+      queries,
+      rowProviders: {
+        "mixed-summary-values": {
+          async rows() {
+            return [
+              { title: "Blank", score: null },
+              { title: "Low", score: 2 },
+              { title: "Missing" },
+              { title: "High", score: 9 }
+            ];
+          }
+        }
+      }
+    });
+
+    const result = await reports.runReport(owner, "Mixed Summary Values");
+
+    expect(result.summary).toEqual([
+      { name: "minimum_score", label: "minimum_score", aggregate: "min", field: "score", value: 2, type: "number" },
+      { name: "maximum_score", label: "maximum_score", aggregate: "max", field: "score", value: 9, type: "number" }
+    ]);
+  });
+
   it("computes formula columns before ordering and CSV export", async () => {
     const { documents, registry, reports } = createServices(["e1", "e2", "e3", "e4"]);
     registry.registerReport(

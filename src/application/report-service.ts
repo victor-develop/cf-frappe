@@ -1201,7 +1201,19 @@ function minMaxValue(
     return direction === "min"
       ? comparison < 0 ? value : selected
       : comparison > 0 ? value : selected;
-  }, values[0]!);
+  }, firstMinMaxCandidate(values, field, direction));
+}
+
+function firstMinMaxCandidate(
+  values: readonly Exclude<JsonPrimitive, null>[],
+  field: string,
+  direction: "min" | "max"
+): Exclude<JsonPrimitive, null> {
+  const value = values[0];
+  if (value === undefined) {
+    throw new Error(`Report ${direction} summary for field '${field}' has no candidate values`);
+  }
+  return value;
 }
 
 function primitiveRowValue(row: ReportRow, field: string): JsonPrimitive | undefined {
