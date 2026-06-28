@@ -1,5 +1,6 @@
 import {
   createDocumentDeliveryOutboxDrainJob,
+  type EmailNotificationService,
   createJobRegistry,
   deterministicIds,
   D1EventStore,
@@ -329,6 +330,112 @@ describe("CloudFrappe Worker jobs", () => {
         topic: "user:acme:support%40example.com",
         event: expect.objectContaining({ id: "evt_assign:user:support%40example.com", type: "NoteAssigned" })
       })
+    ]);
+  });
+
+  it("queues durable email outbox deliveries through the Worker queue path", async () => {
+    const env = { DB: fakeD1(), AGGREGATES: fakeNamespace() };
+    const events = new D1EventStore(env.DB);
+    const outbox = new DocumentDeliveryOutboxService({
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["enqueue-email"])
+    });
+    await outbox.enqueueFromDomainEvent({
+      event: assignmentEvent(),
+      snapshot: taskSnapshot(),
+      targets: ["email"]
+    });
+    const queuedEmailMessages: Array<{
+      readonly tenantId: string;
+      readonly messageId: string;
+      readonly metadata?: Record<string, unknown>;
+    }> = [];
+    const message = {
+      tenantId: "acme",
+      jobName: DOCUMENT_DELIVERY_OUTBOX_DRAIN_JOB_NAME,
+      payload: { limit: 5, claimId: "claim-email" },
+      runId: "job_outbox_email",
+      idempotencyKey: "document-delivery-outbox:job_outbox_email",
+      enqueuedAt: now,
+      metadata: {}
+    };
+    const queueMessage = {
+      id: "msg_outbox_email",
+      timestamp: new Date(now),
+      body: message,
+      attempts: 1,
+      ack: vi.fn(),
+      retry: vi.fn()
+    } as unknown as Message<JobMessage>;
+    const worker = createCloudFrappeWorker<typeof env>({
+      registry: createTestRegistry(),
+      actor: () => owner,
+      documentDeliveryOutbox: {
+        clock: fixedClock(now),
+        ids: deterministicIds(["claim-event", "delivered-email"]),
+        emailNotifications: () => ({
+          async sendFromDomainEvent() {
+            throw new Error("email should be queued by the Worker drain path");
+          },
+          async queueFromDomainEvent() {
+            return [
+              {
+                status: "queued",
+                messageId: "evt_assign:rule:Email%20assignees:email:support%40example.com",
+                ruleName: "Email assignees",
+                recipientId: "support@example.com"
+              }
+            ];
+          }
+        }) as unknown as EmailNotificationService,
+        emailNotificationDeliveryQueue: () => ({
+          async enqueue(tenantId, messageId, options) {
+            queuedEmailMessages.push({
+              tenantId,
+              messageId,
+              ...(options?.metadata === undefined ? {} : { metadata: options.metadata })
+            });
+          }
+        })
+      },
+      jobs: {
+        registry: createJobRegistry<CloudFrappeRuntimeServices>({
+          jobs: [createDocumentDeliveryOutboxDrainJob<CloudFrappeRuntimeServices>()]
+        }),
+        queue: () => new InMemoryJobQueue()
+      }
+    });
+
+    await worker.queue?.(
+      {
+        queue: "jobs",
+        metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
+        messages: [queueMessage],
+        retryAll: vi.fn(),
+        ackAll: vi.fn()
+      },
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(queueMessage.ack).toHaveBeenCalledOnce();
+    expect(queueMessage.retry).not.toHaveBeenCalled();
+    await expect(outbox.list("acme")).resolves.toMatchObject([
+      { id: "evt_assign:email", status: "delivered", claimId: "claim-email" }
+    ]);
+    expect(queuedEmailMessages).toEqual([
+      {
+        tenantId: "acme",
+        messageId: "evt_assign:rule:Email%20assignees:email:support%40example.com",
+        metadata: {
+          sourceEventId: "evt_assign",
+          sourceEventType: "NoteAssigned",
+          sourcePayloadKind: "DocumentAssigned",
+          ruleName: "Email assignees",
+          recipientId: "support@example.com"
+        }
+      }
     ]);
   });
 

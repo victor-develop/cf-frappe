@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Worker queue realtime outbox drain coverage slice:
+As of the Worker queue email outbox drain coverage slice:
 
 - Vitest files: `173`
-- Vitest cases: `1968`
-- Remaining gap to Frappe static markers: `816`
+- Vitest cases: `1969`
+- Remaining gap to Frappe static markers: `815`
 
 ## Implication
 

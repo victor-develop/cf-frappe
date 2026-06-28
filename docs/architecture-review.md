@@ -33,13 +33,14 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Replace the monolithic event payload union with bounded event modules or a registry/type-map pattern.
 - Introduce a multi-stream command commit and outbox abstraction for uniqueness reservations, assignment rules, notifications, and realtime delivery.
 - Deduplicate D1 event append serialization behind one shared event writer.
-- Broaden durable delivery outbox integration tests across email, retry, and starter deployment flows.
+- Broaden durable delivery outbox integration tests across retry and starter deployment flows.
 - Continue raising test parity through real adapter and cross-surface contract coverage.
 
 ## Post-Review Progress
 
 - Added starter Cron outbox drain coverage so generated Cloudflare apps include a Wrangler Cron trigger, Worker schedule dispatch config, and README guidance for scheduled document-delivery outbox draining.
 - Added Worker queue realtime outbox drain coverage so the durable document-delivery outbox is proven through the built-in drain job into the Durable Object realtime publisher path.
+- Added Worker queue email outbox drain coverage plus a Worker `documentDeliveryOutbox.emailNotificationDeliveryQueue` seam so durable email intents can enqueue delivery jobs instead of sending inline during drains.
 - Added starter realtime wiring coverage so generated Cloudflare apps include a RealtimeHub Durable Object binding/class, aggregate realtime publisher, Worker websocket/presence route config, and README guidance for `/api/realtime`.
 - Added starter deployment-guidance coverage so generated app READMEs keep resource creation, D1 id replacement, session-secret setup, and first remote deploy in one ordered deployment section.
 - Added starter setup-script coverage so generated Cloudflare apps expose one-command local preparation, session-secret setup, and first remote deployment scripts instead of leaving the deployment sequence only in prose.

@@ -38,6 +38,7 @@ import { SavedListFilterService } from "../application/saved-list-filter-service
 import { SavedReportService } from "../application/saved-report-service.js";
 import { NotificationRuleService } from "../application/notification-rule-service.js";
 import type { EmailNotificationService } from "../application/email-notification-service.js";
+import type { EmailNotificationDeliveryQueue } from "../application/realtime.js";
 import { UserAccountService } from "../application/user-account-service.js";
 import { UserNotificationService } from "../application/user-notification-service.js";
 import { UserProfileService } from "../application/user-profile-service.js";
@@ -221,6 +222,10 @@ export interface CloudFrappeDocumentDeliveryOutboxOptions<TEnv extends CloudFrap
     env: TEnv,
     services: { readonly events: D1EventStore; readonly notificationRules: NotificationRuleService }
   ) => EmailNotificationService;
+  readonly emailNotificationDeliveryQueue?: (
+    env: TEnv,
+    services: { readonly events: D1EventStore; readonly notificationRules: NotificationRuleService }
+  ) => EmailNotificationDeliveryQueue;
   readonly clock?: Clock;
   readonly ids?: IdGenerator;
   readonly retry?: {
@@ -469,6 +474,9 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     events,
     notificationRules
   });
+  const documentDeliveryOutboxEmailNotificationDeliveryQueue = documentDeliveryOutboxEmailNotifications
+    ? deliveryOutboxOptions?.emailNotificationDeliveryQueue?.(env, { events, notificationRules })
+    : undefined;
   const documentDeliveryOutboxConsumer = documentDeliveryOutbox && deliveryOutboxOptions
     ? new DocumentDeliveryOutboxConsumer({
         outbox: documentDeliveryOutbox,
@@ -477,7 +485,10 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
           ...(realtime === undefined ? {} : { realtime }),
           ...(documentDeliveryOutboxEmailNotifications === undefined
             ? {}
-            : { emailNotifications: documentDeliveryOutboxEmailNotifications })
+            : { emailNotifications: documentDeliveryOutboxEmailNotifications }),
+          ...(documentDeliveryOutboxEmailNotificationDeliveryQueue === undefined
+            ? {}
+            : { emailNotificationDeliveryQueue: documentDeliveryOutboxEmailNotificationDeliveryQueue })
         }),
         ...(deliveryOutboxOptions.clock === undefined ? {} : { clock: deliveryOutboxOptions.clock }),
         ...(deliveryOutboxOptions.retry === undefined ? {} : { retry: deliveryOutboxOptions.retry })
