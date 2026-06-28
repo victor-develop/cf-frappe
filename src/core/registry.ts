@@ -471,7 +471,7 @@ export class ModelRegistry {
   }
 
   list(): readonly DocTypeDefinition[] {
-    return [...this.doctypes.values()].sort((left, right) => left.name.localeCompare(right.name));
+    return Object.freeze([...this.doctypes.values()].sort((left, right) => left.name.localeCompare(right.name)));
   }
 
   listApps(): readonly InstalledAppDefinition[] {
@@ -489,7 +489,7 @@ export class ModelRegistry {
   }
 
   listReports(): readonly ReportDefinition[] {
-    return [...this.reports.values()].sort((left, right) => left.name.localeCompare(right.name));
+    return Object.freeze([...this.reports.values()].sort((left, right) => left.name.localeCompare(right.name)));
   }
 
   getDashboard(dashboardName: string): DashboardDefinition {
@@ -503,7 +503,7 @@ export class ModelRegistry {
   }
 
   listDashboards(): readonly DashboardDefinition[] {
-    return [...this.dashboards.values()].sort((left, right) => left.name.localeCompare(right.name));
+    return Object.freeze([...this.dashboards.values()].sort((left, right) => left.name.localeCompare(right.name)));
   }
 
   getKanban(kanbanName: string): KanbanDefinition {
@@ -517,7 +517,7 @@ export class ModelRegistry {
   }
 
   listKanbans(): readonly KanbanDefinition[] {
-    return [...this.kanbans.values()].sort((left, right) => left.name.localeCompare(right.name));
+    return Object.freeze([...this.kanbans.values()].sort((left, right) => left.name.localeCompare(right.name)));
   }
 
   getCalendar(calendarName: string): CalendarDefinition {
@@ -531,7 +531,7 @@ export class ModelRegistry {
   }
 
   listCalendars(): readonly CalendarDefinition[] {
-    return [...this.calendars.values()].sort((left, right) => left.name.localeCompare(right.name));
+    return Object.freeze([...this.calendars.values()].sort((left, right) => left.name.localeCompare(right.name)));
   }
 
   getWebForm(webFormName: string): WebFormDefinition {
@@ -555,7 +555,7 @@ export class ModelRegistry {
   }
 
   listWebForms(): readonly WebFormDefinition[] {
-    return [...this.webForms.values()].sort((left, right) => left.name.localeCompare(right.name));
+    return Object.freeze([...this.webForms.values()].sort((left, right) => left.name.localeCompare(right.name)));
   }
 
   getWebView(webViewName: string): WebViewDefinition {
@@ -569,7 +569,7 @@ export class ModelRegistry {
   }
 
   listWebViews(): readonly WebViewDefinition[] {
-    return [...this.webViews.values()].sort((left, right) => left.name.localeCompare(right.name));
+    return Object.freeze([...this.webViews.values()].sort((left, right) => left.name.localeCompare(right.name)));
   }
 
   getWebPage(webPageName: string): WebPageDefinition {
@@ -583,7 +583,7 @@ export class ModelRegistry {
   }
 
   listWebPages(): readonly WebPageDefinition[] {
-    return [...this.webPages.values()].sort((left, right) => left.name.localeCompare(right.name));
+    return Object.freeze([...this.webPages.values()].sort((left, right) => left.name.localeCompare(right.name)));
   }
 
   getWebsiteSettings(): WebsiteSettingsDefinition {
@@ -606,7 +606,7 @@ export class ModelRegistry {
   }
 
   listWebsiteThemes(): readonly WebsiteThemeDefinition[] {
-    return [...this.websiteThemes.values()].sort((left, right) => left.name.localeCompare(right.name));
+    return Object.freeze([...this.websiteThemes.values()].sort((left, right) => left.name.localeCompare(right.name)));
   }
 
   getPrintFormat(formatName: string): PrintFormatDefinition {
@@ -620,7 +620,7 @@ export class ModelRegistry {
   }
 
   listPrintFormats(): readonly PrintFormatDefinition[] {
-    return [...this.printFormats.values()].sort((left, right) => left.name.localeCompare(right.name));
+    return Object.freeze([...this.printFormats.values()].sort((left, right) => left.name.localeCompare(right.name)));
   }
 
   getPrintLetterhead(letterheadName: string): PrintLetterheadDefinition {
@@ -634,21 +634,21 @@ export class ModelRegistry {
   }
 
   listPrintLetterheads(): readonly PrintLetterheadDefinition[] {
-    return [...this.letterheads.values()].sort((left, right) => left.name.localeCompare(right.name));
+    return Object.freeze([...this.letterheads.values()].sort((left, right) => left.name.localeCompare(right.name)));
   }
 
   listClientScripts(
     doctype?: string,
     scope?: Exclude<ClientScriptScope, "both">
   ): readonly ClientScriptDefinition[] {
-    return [...this.clientScripts.values()]
+    return Object.freeze([...this.clientScripts.values()]
       .filter((script) => doctype === undefined || script.doctype === doctype)
       .filter((script) => scope === undefined || clientScriptAppliesTo(script, scope))
-      .sort((left, right) => left.name.localeCompare(right.name));
+      .sort((left, right) => left.name.localeCompare(right.name)));
   }
 
   listDataPatches(): readonly DataPatchDefinition[] {
-    return [...this.dataPatches.values()];
+    return Object.freeze([...this.dataPatches.values()]);
   }
 
   getWorkspace(workspaceName: string): WorkspaceDefinition {
@@ -662,7 +662,7 @@ export class ModelRegistry {
   }
 
   listWorkspaces(): readonly WorkspaceDefinition[] {
-    return [...this.workspaces.values()].sort((left, right) => left.name.localeCompare(right.name));
+    return Object.freeze([...this.workspaces.values()].sort((left, right) => left.name.localeCompare(right.name)));
   }
 
   hooksFor(doctype: string): readonly DocumentHooks[] {

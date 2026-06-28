@@ -1,4 +1,4 @@
-import { createRegistry, defineClientScript, defineDocType, FrameworkError } from "../../src";
+import { createRegistry, defineClientScript, defineDataPatch, defineDocType, FrameworkError } from "../../src";
 
 describe("registry", () => {
   it("lists doctypes in stable name order", () => {
@@ -10,6 +10,21 @@ describe("registry", () => {
     });
 
     expect(registry.list().map((doctype) => doctype.name)).toEqual(["Alpha", "Zulu"]);
+  });
+
+  it("returns frozen registry list collections", () => {
+    const registry = createRegistry({
+      apps: [{ name: "notes", modules: ["Notes"], dependencies: [] }],
+      doctypes: [defineDocType({ name: "Note", fields: [] })],
+      dataPatches: [defineDataPatch({ id: "notes.seed", checksum: "v1", run: () => ({ seeded: true }) })]
+    });
+
+    expect(Object.isFrozen(registry.list())).toBe(true);
+    expect(Object.isFrozen(registry.listApps())).toBe(true);
+    expect(Object.isFrozen(registry.listDataPatches())).toBe(true);
+    expect(() => (registry.list() as unknown as unknown[]).push(defineDocType({ name: "Other", fields: [] }))).toThrow(
+      TypeError
+    );
   });
 
   it("throws a framework error for unknown doctypes", () => {
@@ -129,6 +144,7 @@ describe("registry", () => {
       "note-list",
       "note-shared"
     ]);
+    expect(Object.isFrozen(registry.listClientScripts("Note"))).toBe(true);
     expect(Object.isFrozen(registry.listClientScripts("Note")[0])).toBe(true);
     expect(() => registry.registerClientScript(formScript)).toThrow("already registered");
     expect(() =>
