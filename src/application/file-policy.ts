@@ -800,6 +800,35 @@ export function renditionSourcesMatch(
   );
 }
 
+export function availableFileRenditionForSource(
+  renditions: readonly FileRenditionManifestEntry[],
+  renditionId: string,
+  sourceEtag: string,
+  overlay: FileTransformOverlaySource | undefined
+): FileRenditionManifestEntry | undefined {
+  return renditions.find((rendition) =>
+    rendition.id === renditionId &&
+    rendition.status === "available" &&
+    renditionSourcesMatch(rendition, sourceEtag, overlay)
+  );
+}
+
+export function ensureNoPendingFileRenditionForSource(
+  renditions: readonly FileRenditionManifestEntry[],
+  renditionId: string,
+  sourceEtag: string,
+  overlay: FileTransformOverlaySource | undefined
+): void {
+  const pending = renditions.find((rendition) =>
+    rendition.id === renditionId &&
+    rendition.status === "pending" &&
+    renditionSourcesMatch(rendition, sourceEtag, overlay)
+  );
+  if (pending) {
+    throw conflict(`File rendition '${renditionId}' is already being generated`);
+  }
+}
+
 export async function fileRenditionId(options: FileTransformOptions): Promise<string> {
   return (await Promise.all([
     ...(options.width === undefined ? [] : [`w${String(options.width)}`]),

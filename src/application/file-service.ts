@@ -2,7 +2,6 @@ import type { DocumentCommandExecutor } from "./document-service.js";
 import { QueryService } from "./query-service.js";
 import {
   badRequest,
-  conflict,
   FrameworkError,
   notFound,
   permissionDenied,
@@ -43,7 +42,9 @@ import type {
   UploadedMultipartFilePart
 } from "../ports/file-storage.js";
 import {
+  availableFileRenditionForSource,
   completeFileRendition,
+  ensureNoPendingFileRenditionForSource,
   ensureValidFileScanResult,
   ensureFileAvailableForDownload,
   ensureFileDeleteExpectedVersion,
@@ -82,7 +83,6 @@ import {
   objectKey,
   pendingFileRendition,
   requireFileSnapshotString,
-  renditionSourcesMatch,
   sanitizeFilename,
   type FileRenditionManifestEntry,
   upsertFileRenditionManifest,
@@ -866,12 +866,8 @@ export class FileService {
     });
     const sourceEtag = downloaded.object.metadata.httpEtag ?? downloaded.object.metadata.etag;
     const renditionId = await fileRenditionId(options);
-    const existing = fileRenditions(downloaded.snapshot).find(
-      (rendition) =>
-        rendition.id === renditionId &&
-        rendition.status === "available" &&
-        renditionSourcesMatch(rendition, sourceEtag, overlay)
-    );
+    const currentRenditions = fileRenditions(downloaded.snapshot);
+    const existing = availableFileRenditionForSource(currentRenditions, renditionId, sourceEtag, overlay);
     if (existing && await this.storage.head(existing.key)) {
       return {
         snapshot: downloaded.snapshot,
@@ -880,16 +876,7 @@ export class FileService {
       };
     }
 
-    const currentRenditions = fileRenditions(downloaded.snapshot);
-    const pendingExisting = currentRenditions.find(
-      (rendition) =>
-        rendition.id === renditionId &&
-        rendition.status === "pending" &&
-        renditionSourcesMatch(rendition, sourceEtag, overlay)
-    );
-    if (pendingExisting) {
-      throw conflict(`File rendition '${renditionId}' is already being generated`);
-    }
+    ensureNoPendingFileRenditionForSource(currentRenditions, renditionId, sourceEtag, overlay);
     const pending = pendingFileRendition({
       snapshot: downloaded.snapshot,
       tenantId,

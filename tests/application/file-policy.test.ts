@@ -1,5 +1,7 @@
 import {
+  availableFileRenditionForSource,
   completeFileRendition,
+  ensureNoPendingFileRenditionForSource,
   ensureValidFileScanResult,
   ensureFileAvailableForDownload,
   ensureFileDeleteExpectedVersion,
@@ -355,6 +357,36 @@ describe("file policy", () => {
     expect(renditionSourcesMatch(pending, "source-2", overlaySource({ key: "overlay-key", etag: "overlay-1" }))).toBe(false);
     expect(renditionSourcesMatch(pending, "source-1", undefined)).toBe(false);
     expect(renditionSourcesMatch(renditionEntry("plain", { source_etag: "source-1" }), "source-1", undefined)).toBe(true);
+  });
+
+  it("selects reusable available file renditions for matching sources", () => {
+    const overlay = {
+      ...overlaySource({ key: "overlay-key" }),
+      etag: "overlay-1"
+    };
+    const available = renditionEntry("thumb", {
+      status: "available",
+      source_etag: "source-1",
+      overlay_file: overlay.file,
+      overlay_key: overlay.key,
+      overlay_etag: overlay.etag
+    });
+    expect(availableFileRenditionForSource([
+      renditionEntry("thumb", { status: "available", source_etag: "source-2" }),
+      available
+    ], "thumb", "source-1", overlay)).toBe(available);
+    expect(availableFileRenditionForSource([available], "thumb", "source-2", overlay)).toBeUndefined();
+  });
+
+  it("rejects duplicate pending file rendition generation", () => {
+    const pending = renditionEntry("thumb", {
+      status: "pending",
+      source_etag: "source-1"
+    });
+    expect(() => ensureNoPendingFileRenditionForSource([pending], "thumb", "source-1", undefined)).toThrow(
+      "File rendition 'thumb' is already being generated"
+    );
+    expect(() => ensureNoPendingFileRenditionForSource([pending], "thumb", "source-2", undefined)).not.toThrow();
   });
 
   it("builds deterministic rendition ids and caps unique rendition manifests", async () => {
