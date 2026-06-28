@@ -107,6 +107,7 @@ import {
   filePreparedDirectUploadResult,
   filePreparedMultipartUploadResult,
   fileRenditionGenerationReservation,
+  fileGeneratedRenditionFailureCleanupKey,
   fileGeneratedRenditionReuseStoragePlan,
   fileRenditionId,
   fileRenditionManifestExecuteCommand,
@@ -979,8 +980,9 @@ export class FileService {
         created: true
       });
     } catch (error) {
-      if (object) {
-        await this.storage.delete(object.key).catch(ignoreFileCleanupFailure);
+      const cleanupKey = fileGeneratedRenditionFailureCleanupKey(object);
+      if (cleanupKey) {
+        await this.storage.delete(cleanupKey).catch(ignoreFileCleanupFailure);
       }
       await this.recordRenditionManifest({
         source: command,

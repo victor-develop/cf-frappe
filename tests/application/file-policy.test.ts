@@ -94,6 +94,7 @@ import {
   fileRenditionId,
   fileRenditionFilename,
   fileGeneratedRenditionResult,
+  fileGeneratedRenditionFailureCleanupKey,
   fileGeneratedRenditionReuseStoragePlan,
   fileRenditionManifestPatch,
   fileRenditionManifestDocumentCommand,
@@ -1163,6 +1164,13 @@ describe("file policy", () => {
       renditionId: "thumb",
       sourceEtag: "source-2"
     })).toEqual({ kind: "skip" });
+  });
+
+  it("selects generated rendition failure cleanup keys only after object writes", () => {
+    expect(fileGeneratedRenditionFailureCleanupKey(undefined)).toBeUndefined();
+    expect(fileGeneratedRenditionFailureCleanupKey(fileObject({
+      key: "acme/file-renditions/file/thumb.webp"
+    }))).toBe("acme/file-renditions/file/thumb.webp");
   });
 
   it("rejects duplicate pending file rendition generation", () => {

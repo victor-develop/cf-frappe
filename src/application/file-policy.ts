@@ -2327,6 +2327,12 @@ export function fileGeneratedRenditionReuseStoragePlan(command: {
   };
 }
 
+export function fileGeneratedRenditionFailureCleanupKey(
+  object: FileObjectMetadata | undefined
+): string | undefined {
+  return object?.key;
+}
+
 export function ensureNoPendingFileRenditionForSource(
   renditions: readonly FileRenditionManifestEntry[],
   renditionId: string,
