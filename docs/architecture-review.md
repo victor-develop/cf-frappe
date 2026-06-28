@@ -96,3 +96,4 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Moved upload byte-limit checks and reservation-expiry timestamp planning into file policy so buffered, direct, and multipart upload flows share the same tested boundary rules.
 - Extracted rendition download selection and file object deletion key planning from `FileService` into file policy so content serving and cleanup share tested manifest semantics.
 - Moved transform source and overlay-source shaping into file policy so transformer ports receive a single tested projection from stored file snapshots and objects.
+- Centralized upload and rendition object storage custom-metadata construction in file policy so storage adapters receive one tested metadata contract.

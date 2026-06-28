@@ -67,6 +67,7 @@ import {
   fileMultipartUploadDocumentData,
   fileMultipartUploadId,
   fileObjectKeysForDelete,
+  fileRenditionObjectCustomMetadata,
   fileRenditionId,
   fileRenditionFilename,
   fileRenditions,
@@ -76,6 +77,7 @@ import {
   fileScanTarget,
   fileUploadCompletedPatch,
   fileUploadExpiresAt,
+  fileUploadObjectCustomMetadata,
   fileUploadScanFailedPatch,
   fileTransformOverlaySource,
   fileTransformSource,
@@ -432,10 +434,7 @@ export class FileService {
       contentType,
       filename,
       size,
-      customMetadata: {
-        tenantId,
-        uploadedBy: command.actor.id
-      }
+      customMetadata: fileUploadObjectCustomMetadata({ tenantId, uploadedBy: command.actor.id })
     });
     let scan: FileScanResult | undefined;
     try {
@@ -520,10 +519,7 @@ export class FileService {
       filename,
       size,
       expiresAt,
-      customMetadata: {
-        tenantId,
-        uploadedBy: command.actor.id
-      }
+      customMetadata: fileUploadObjectCustomMetadata({ tenantId, uploadedBy: command.actor.id })
     });
     const snapshot = await this.documents.create({
       actor: command.actor,
@@ -612,10 +608,7 @@ export class FileService {
       key,
       contentType,
       filename,
-      customMetadata: {
-        tenantId,
-        uploadedBy: command.actor.id
-      }
+      customMetadata: fileUploadObjectCustomMetadata({ tenantId, uploadedBy: command.actor.id })
     });
     try {
       const snapshot = await this.documents.create({
@@ -918,12 +911,12 @@ export class FileService {
         contentType: transform.contentType,
         filename,
         ...(transform.contentLength === undefined ? {} : { size: transform.contentLength }),
-        customMetadata: {
+        customMetadata: fileRenditionObjectCustomMetadata({
           tenantId,
           sourceFile: downloaded.snapshot.name,
           sourceEtag,
           renditionId
-        }
+        })
       });
       const completed = completeFileRendition({
         pending,

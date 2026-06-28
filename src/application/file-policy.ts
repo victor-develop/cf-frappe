@@ -332,6 +332,30 @@ export function fileScanTarget(command: {
   };
 }
 
+export function fileUploadObjectCustomMetadata(command: {
+  readonly tenantId: string;
+  readonly uploadedBy: string;
+}): Readonly<Record<string, string>> {
+  return {
+    tenantId: command.tenantId,
+    uploadedBy: command.uploadedBy
+  };
+}
+
+export function fileRenditionObjectCustomMetadata(command: {
+  readonly tenantId: string;
+  readonly sourceFile: string;
+  readonly sourceEtag: string;
+  readonly renditionId: string;
+}): Readonly<Record<string, string>> {
+  return {
+    tenantId: command.tenantId,
+    sourceFile: command.sourceFile,
+    sourceEtag: command.sourceEtag,
+    renditionId: command.renditionId
+  };
+}
+
 export function ensureValidFileScanResult(result: FileScanResult): void {
   if (result.status !== "clean" && result.status !== "infected") {
     throw badRequest("File scanner returned an invalid status");

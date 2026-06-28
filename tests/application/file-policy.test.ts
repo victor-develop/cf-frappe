@@ -26,6 +26,7 @@ import {
   fileMultipartUploadDocumentData,
   fileMultipartUploadId,
   fileObjectKeysForDelete,
+  fileRenditionObjectCustomMetadata,
   fileRenditionId,
   fileRenditionFilename,
   fileRenditions,
@@ -36,6 +37,7 @@ import {
   fileSnapshotStringData,
   fileUploadCompletedPatch,
   fileUploadExpiresAt,
+  fileUploadObjectCustomMetadata,
   fileUploadScanFailedPatch,
   fileTransformOverlaySource,
   fileTransformOptionsData,
@@ -617,6 +619,30 @@ describe("file policy", () => {
       source: "direct_upload",
       etag: "object-1",
       httpEtag: '"http-etag"'
+    });
+  });
+
+  it("builds upload object storage custom metadata", () => {
+    expect(fileUploadObjectCustomMetadata({
+      tenantId: "acme",
+      uploadedBy: "owner@example.com"
+    })).toEqual({
+      tenantId: "acme",
+      uploadedBy: "owner@example.com"
+    });
+  });
+
+  it("builds rendition object storage custom metadata", () => {
+    expect(fileRenditionObjectCustomMetadata({
+      tenantId: "acme",
+      sourceFile: "file_source",
+      sourceEtag: '"source-http"',
+      renditionId: "w64-f-webp"
+    })).toEqual({
+      tenantId: "acme",
+      sourceFile: "file_source",
+      sourceEtag: '"source-http"',
+      renditionId: "w64-f-webp"
     });
   });
 
