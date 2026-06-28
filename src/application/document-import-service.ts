@@ -156,7 +156,7 @@ function importableFields(doctype: DocTypeDefinition): readonly FieldDefinition[
 }
 
 function rowInput(headers: readonly string[], row: ParsedCsvRow, doctype: DocTypeDefinition): RowInput {
-  const fields = new Map(doctype.fields.map((field) => [field.name, field] as const));
+  const fields = importableFieldMap(doctype);
   const data: MutableDocumentData = {};
   let name: string | undefined;
   let expectedVersion: number | undefined;
@@ -170,7 +170,7 @@ function rowInput(headers: readonly string[], row: ParsedCsvRow, doctype: DocTyp
       expectedVersion = parseExpectedVersion(raw, row.line);
       return;
     }
-    const value = csvFieldValue(fields.get(header)!, raw, row.line);
+    const value = csvFieldValue(importFieldForHeader(doctype, fields, header), raw, row.line);
     if (value !== undefined) {
       data[header] = value;
     }
@@ -260,6 +260,7 @@ function blankToUndefined(value: string): string | undefined {
 
 function validateImportHeaders(doctype: DocTypeDefinition, headers: readonly string[]): void {
   const fields = new Set(doctype.fields.map((field) => field.name));
+  const importable = importableFieldMap(doctype);
   for (const header of headers) {
     if (RESERVED_HEADERS.has(header)) {
       continue;
@@ -267,7 +268,26 @@ function validateImportHeaders(doctype: DocTypeDefinition, headers: readonly str
     if (!fields.has(header)) {
       throw badRequest(`CSV import header '${header}' is not a field on ${doctype.name}`);
     }
+    if (!importable.has(header)) {
+      throw badRequest(`CSV import header '${header}' is not importable on ${doctype.name}`);
+    }
   }
+}
+
+function importableFieldMap(doctype: DocTypeDefinition): ReadonlyMap<string, FieldDefinition> {
+  return new Map(importableFields(doctype).map((field) => [field.name, field] as const));
+}
+
+function importFieldForHeader(
+  doctype: DocTypeDefinition,
+  fields: ReadonlyMap<string, FieldDefinition>,
+  header: string
+): FieldDefinition {
+  const field = fields.get(header);
+  if (field === undefined) {
+    throw badRequest(`CSV import header '${header}' is not importable on ${doctype.name}`);
+  }
+  return field;
 }
 
 function importFailure(

@@ -165,6 +165,24 @@ describe("DocumentImportService", () => {
     await expect(services.queries.listDocuments(owner, "Note")).resolves.toMatchObject({ total: 0 });
   });
 
+  it("rejects non-importable CSV headers before writing document events", async () => {
+    const services = createServices(["import-1"]);
+    const imports = new DocumentImportService({
+      documents: services.documents,
+      queries: services.queries
+    });
+
+    await expect(imports.importCsv({
+      actor: owner,
+      doctype: "Note",
+      csv: ["title,created_by", "Visible,system"].join("\n")
+    })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "CSV import header 'created_by' is not importable on Note"
+    });
+    await expect(services.queries.listDocuments(owner, "Note")).resolves.toMatchObject({ total: 0 });
+  });
+
   it("rejects mismatched row widths before dropping import cells", async () => {
     const services = createServices(["import-1"]);
     const imports = new DocumentImportService({
