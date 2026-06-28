@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the data patch queue route capability slice:
+As of the auth provider sync actor boundary slice:
 
 - Vitest files: `170`
-- Vitest cases: `1794`
-- Remaining gap to Frappe static markers: `990`
+- Vitest cases: `1795`
+- Remaining gap to Frappe static markers: `989`
 
 ## Implication
 

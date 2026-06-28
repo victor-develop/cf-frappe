@@ -287,13 +287,21 @@ function syncActorForClaims<TClaims extends OidcJwtClaims>(
   }
 ): Actor {
   return {
-    id: firstNonBlank(
-      typeof options.syncActorId === "function" ? options.syncActorId(claims) : options.syncActorId,
-      `${options.provider}:sync`
-    )!,
+    id: syncActorIdForClaims(claims, options.provider, options.syncActorId),
     roles: options.syncActorRoles ?? [SYSTEM_MANAGER_ROLE],
     tenantId: options.tenantId
   };
+}
+
+function syncActorIdForClaims<TClaims extends OidcJwtClaims>(
+  claims: TClaims,
+  provider: string,
+  syncActorId: string | ((claims: TClaims) => string | undefined) | undefined
+): string {
+  return firstNonBlank(
+    typeof syncActorId === "function" ? syncActorId(claims) : syncActorId,
+    `${provider}:sync`
+  ) ?? `${provider}:sync`;
 }
 
 function oidcTokenFromRequest(

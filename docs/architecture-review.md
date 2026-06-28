@@ -151,6 +151,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized configured job schedule lookup in a named invariant so dispatch and override flows no longer rely on array non-null assertions after schedule-id resolution.
 - Centralized Worker auth composition around explicit auth and Cloudflare Access options so Access/OIDC account-sync routing no longer relies on non-null assertions after provider checks.
 - Centralized data-patch queue route capabilities around captured queue ports so apply, rollback, and rollback-retry enqueue handlers no longer rely on optional dependency non-null assertions after route mounting.
+- Centralized Cloudflare Access and OIDC provider-sync actor id selection so blank sync actor overrides fall back to provider defaults without non-null assertions.
 - Extracted available-rendition reuse selection and duplicate pending-rendition rejection from `FileService` into the file policy with focused source and overlay identity coverage.
 - Centralized file transformability rejection in the file policy so direct transforms, persisted renditions, and overlay-source transforms share one tested content-type guard.
 - Moved upload byte-limit checks and reservation-expiry timestamp planning into file policy so buffered, direct, and multipart upload flows share the same tested boundary rules.

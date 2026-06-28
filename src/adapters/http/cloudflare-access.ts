@@ -263,13 +263,21 @@ function syncActorForClaims(
   }
 ): Actor {
   return {
-    id: firstNonBlank(
-      typeof options.syncActorId === "function" ? options.syncActorId(claims) : options.syncActorId,
-      `${options.provider}:sync`
-    )!,
+    id: syncActorIdForClaims(claims, options.provider, options.syncActorId),
     roles: options.syncActorRoles ?? [SYSTEM_MANAGER_ROLE],
     tenantId: options.tenantId
   };
+}
+
+function syncActorIdForClaims(
+  claims: CloudflareAccessJwtClaims,
+  provider: string,
+  syncActorId: string | ((claims: CloudflareAccessJwtClaims) => string | undefined) | undefined
+): string {
+  return firstNonBlank(
+    typeof syncActorId === "function" ? syncActorId(claims) : syncActorId,
+    `${provider}:sync`
+  ) ?? `${provider}:sync`;
 }
 
 function accessTokenFromRequest(request: Request): string | undefined {

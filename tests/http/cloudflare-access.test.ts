@@ -129,6 +129,38 @@ describe("Cloudflare Access actor resolver", () => {
     await expect(events.readStream(userAccountsStream("acme", "owner@example.com"))).resolves.toHaveLength(2);
   });
 
+  it("falls back to the provider sync actor when the Access sync actor override is blank", async () => {
+    const signing = await createJwtSigner<CloudflareAccessJwtClaims>();
+    const events = new InMemoryEventStore();
+    const userAccounts = new UserAccountService({
+      events,
+      passwords: deterministicPasswords(),
+      ids: deterministicIds(["account-created", "provider-linked"]),
+      clock: fixedClock(now)
+    });
+    const resolver = cloudflareAccessAccountSyncActorResolver({
+      teamDomain: "team.cloudflareaccess.com",
+      audience: "desk",
+      now: () => 1_000,
+      fetchJwks: async () => signing.jwks,
+      userAccounts,
+      provider: "access-idp",
+      tenantId: () => "acme",
+      syncActorId: () => " "
+    });
+    const token = await signing.sign(defaultClaims({
+      sub: "access-subject-1",
+      email: "OWNER@EXAMPLE.COM"
+    }));
+
+    await resolver(new Request("https://app.test", { headers: { "cf-access-jwt-assertion": token } }));
+
+    await expect(events.readStream(userAccountsStream("acme", "owner@example.com"))).resolves.toMatchObject([
+      { actorId: "access-idp:sync", payload: { kind: "UserAccountCreated" } },
+      { actorId: "access-idp:sync", payload: { kind: "UserAuthProviderLinked" } }
+    ]);
+  });
+
   it("uses normalized email as the provider subject fallback", async () => {
     const signing = await createJwtSigner<CloudflareAccessJwtClaims>();
     const events = new InMemoryEventStore();
