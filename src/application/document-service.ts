@@ -46,6 +46,7 @@ import {
   mergeSnapshotFromDocument,
   normalizeUnsetFields,
   canExecuteDomainCommandForRoles,
+  planDocumentCopyPolicy,
   planDocumentStatusChangePolicy,
   planDomainCommandPolicy,
   planWorkflowTransitionPolicy
@@ -101,7 +102,6 @@ import { resolveTenant } from "./document-tenant-policy.js";
 import {
   allowOnSubmitIssues,
   childTableOriginIssues,
-  copyDocumentData,
   documentUnsetIssues,
   preserveReadOnlyTableValues,
   readonlyIssues,
@@ -841,26 +841,22 @@ export class DocumentService implements DocumentCommandExecutor {
     }
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
-    const data = copyDocumentData(
+    const plan = planDocumentCopyPolicy({
+      action: "duplicate",
       doctype,
-      {
-        ...copyDocumentData(doctype, existing.data, relatedDocType, { skipNoCopy: true }),
-        ...compactData(command.data ?? {})
-      },
+      existing,
+      data: command.data,
+      metadata: command.metadata,
       relatedDocType
-    );
+    });
     return this.create({
       actor: command.actor,
       doctype: doctype.name,
-      data,
+      data: plan.data,
       ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
       ...(command.newName === undefined ? {} : { name: command.newName }),
       ...(command.eventType === undefined ? {} : { eventType: command.eventType }),
-      metadata: {
-        ...(command.metadata ?? {}),
-        duplicatedFrom: existing.name,
-        duplicatedFromVersion: existing.version
-      }
+      metadata: plan.metadata
     });
   }
 
@@ -875,26 +871,22 @@ export class DocumentService implements DocumentCommandExecutor {
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
     ensureDocumentStatus(existing, ["cancelled"], "amend");
-    const data = copyDocumentData(
+    const plan = planDocumentCopyPolicy({
+      action: "amend",
       doctype,
-      {
-        ...existing.data,
-        ...compactData(command.data ?? {})
-      },
+      existing,
+      data: command.data,
+      metadata: command.metadata,
       relatedDocType
-    );
+    });
     return this.create({
       actor: command.actor,
       doctype: doctype.name,
-      data,
+      data: plan.data,
       ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
       ...(command.newName === undefined ? {} : { name: command.newName }),
       ...(command.eventType === undefined ? {} : { eventType: command.eventType }),
-      metadata: {
-        ...(command.metadata ?? {}),
-        amendedFrom: existing.name,
-        amendedFromVersion: existing.version
-      }
+      metadata: plan.metadata
     });
   }
 

@@ -7,11 +7,13 @@ import {
   ensureMergeBaseVersion,
   mergeSnapshotFromDocument,
   normalizeUnsetFields,
+  planDocumentCopyPolicy,
   planDocumentStatusChangePolicy,
   planDomainCommandPolicy,
   planWorkflowTransitionPolicy,
   pickCommandFields,
   type Actor,
+  type DocTypeDefinition,
   type DocumentSnapshot
 } from "../../src";
 
@@ -26,6 +28,19 @@ const snapshot: DocumentSnapshot = {
   data: { title: "Hello", body: "World", count: 1 },
   createdAt: "2026-06-28T01:00:00.000Z",
   updatedAt: "2026-06-28T01:00:00.000Z"
+};
+
+const copyDoctype: DocTypeDefinition = {
+  name: "Note",
+  fields: [
+    { name: "title", type: "text" },
+    { name: "secret", type: "text", noCopy: true },
+    { name: "status", type: "text" }
+  ]
+};
+
+const relatedDocType = () => {
+  throw new Error("No related DocTypes in this test");
 };
 
 describe("document command policy", () => {
@@ -206,6 +221,45 @@ describe("document command policy", () => {
       nextStatus: "cancelled",
       eventType: "NoteWasCancelled",
       payloadKind: "DocumentCancelled"
+    });
+  });
+
+  it("plans duplicate data without copying no-copy fields", () => {
+    expect(
+      planDocumentCopyPolicy({
+        action: "duplicate",
+        doctype: copyDoctype,
+        existing: {
+          ...snapshot,
+          data: { title: "Original", secret: "keep-private", status: "Open" }
+        },
+        data: { title: "Copy", status: undefined },
+        metadata: { source: "copy-button" },
+        relatedDocType
+      })
+    ).toEqual({
+      data: { title: "Copy", status: "Open" },
+      metadata: { source: "copy-button", duplicatedFrom: "NOTE-1", duplicatedFromVersion: 3 }
+    });
+  });
+
+  it("plans amendment data with amendment provenance", () => {
+    expect(
+      planDocumentCopyPolicy({
+        action: "amend",
+        doctype: copyDoctype,
+        existing: {
+          ...snapshot,
+          version: 5,
+          data: { title: "Original", secret: "kept", status: "Cancelled" }
+        },
+        data: { title: "Amended" },
+        metadata: { source: "amend-button" },
+        relatedDocType
+      })
+    ).toEqual({
+      data: { title: "Amended", secret: "kept", status: "Cancelled" },
+      metadata: { source: "amend-button", amendedFrom: "NOTE-1", amendedFromVersion: 5 }
     });
   });
 });

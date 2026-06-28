@@ -2,6 +2,8 @@ import type { DocumentMergeSnapshot } from "../core/document-merge.js";
 import { badRequest, conflict, FrameworkError } from "../core/errors.js";
 import { compactData } from "../core/schema.js";
 import { allowedWorkflowTransitions, currentWorkflowState } from "../core/workflow.js";
+import { copyDocumentData } from "./document-field-policy.js";
+import type { RelatedDocTypeResolver } from "./document-reference-policy.js";
 import type {
   Actor,
   DomainCommandDefinition,
@@ -164,5 +166,55 @@ export function planDocumentStatusChangePolicy(
     nextStatus: "cancelled",
     eventType: doctype.events?.cancel ?? `${doctype.name}Cancelled`,
     payloadKind: "DocumentCancelled"
+  };
+}
+
+export type DocumentCopyAction = "duplicate" | "amend";
+
+export interface DocumentCopyPolicyPlan {
+  readonly data: DocumentData;
+  readonly metadata: DocumentData;
+}
+
+export function planDocumentCopyPolicy(input: {
+  readonly action: DocumentCopyAction;
+  readonly doctype: DocTypeDefinition;
+  readonly existing: DocumentSnapshot;
+  readonly data?: MutableDocumentData | undefined;
+  readonly metadata?: DocumentData | undefined;
+  readonly relatedDocType: RelatedDocTypeResolver;
+}): DocumentCopyPolicyPlan {
+  const overrides = compactData(input.data ?? {});
+  if (input.action === "duplicate") {
+    return {
+      data: copyDocumentData(
+        input.doctype,
+        {
+          ...copyDocumentData(input.doctype, input.existing.data, input.relatedDocType, { skipNoCopy: true }),
+          ...overrides
+        },
+        input.relatedDocType
+      ),
+      metadata: {
+        ...(input.metadata ?? {}),
+        duplicatedFrom: input.existing.name,
+        duplicatedFromVersion: input.existing.version
+      }
+    };
+  }
+  return {
+    data: copyDocumentData(
+      input.doctype,
+      {
+        ...input.existing.data,
+        ...overrides
+      },
+      input.relatedDocType
+    ),
+    metadata: {
+      ...(input.metadata ?? {}),
+      amendedFrom: input.existing.name,
+      amendedFromVersion: input.existing.version
+    }
   };
 }
