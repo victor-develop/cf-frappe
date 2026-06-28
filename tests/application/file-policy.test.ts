@@ -30,8 +30,11 @@ import {
   fileAttachedToCommandOption,
   fileAttachmentTargetForValidation,
   fileBulkDeletedEntry,
+  fileBulkDeleteDeletedOutcome,
   fileBulkDeleteEntryCommand,
+  fileBulkDeleteFailedOutcome,
   fileBulkDeleteFailure,
+  fileBulkDeleteOutcomeResult,
   fileBulkDeleteResult,
   fileBulkFailure,
   fileBulkMetadataUpdateFailure,
@@ -1898,6 +1901,28 @@ describe("file policy", () => {
     })).toEqual({
       deleted: [deleted],
       failed: [failed]
+    });
+  });
+
+  it("groups bulk delete outcomes into final results", () => {
+    const snapshot = fileSnapshot({ filename: "deleted.pdf" });
+    const deleted = fileBulkDeleteDeletedOutcome({
+      selection: { name: "file_deleted" },
+      snapshot
+    });
+    const failed = fileBulkDeleteFailedOutcome({
+      selection: { name: "file_missing" },
+      error: new FrameworkError("DOCUMENT_NOT_FOUND", "missing", { status: 404 })
+    });
+
+    expect(fileBulkDeleteOutcomeResult([deleted, failed])).toEqual({
+      deleted: [{ name: "file_deleted", snapshot }],
+      failed: [{
+        name: "file_missing",
+        code: "DOCUMENT_NOT_FOUND",
+        message: "missing",
+        status: 404
+      }]
     });
   });
 

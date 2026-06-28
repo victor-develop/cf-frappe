@@ -620,6 +620,54 @@ export function fileBulkDeleteResult(command: {
   };
 }
 
+export type FileBulkDeleteOutcome =
+  | {
+      readonly kind: "deleted";
+      readonly deleted: ReturnType<typeof fileBulkDeletedEntry>;
+    }
+  | {
+      readonly kind: "failed";
+      readonly failed: ReturnType<typeof fileBulkDeleteFailure>;
+    };
+
+export function fileBulkDeleteDeletedOutcome(command: {
+  readonly selection: BulkFileSelectionPolicyInput;
+  readonly snapshot: DocumentSnapshot;
+}): FileBulkDeleteOutcome {
+  return {
+    kind: "deleted",
+    deleted: fileBulkDeletedEntry({
+      name: command.selection.name,
+      snapshot: command.snapshot
+    })
+  };
+}
+
+export function fileBulkDeleteFailedOutcome(command: {
+  readonly selection: BulkFileSelectionPolicyInput;
+  readonly error: unknown;
+}): FileBulkDeleteOutcome {
+  return {
+    kind: "failed",
+    failed: fileBulkDeleteFailure(command.selection.name, command.error)
+  };
+}
+
+export function fileBulkDeleteOutcomeResult(
+  outcomes: readonly FileBulkDeleteOutcome[]
+): ReturnType<typeof fileBulkDeleteResult> {
+  const deleted: ReturnType<typeof fileBulkDeletedEntry>[] = [];
+  const failed: ReturnType<typeof fileBulkDeleteFailure>[] = [];
+  for (const outcome of outcomes) {
+    if (outcome.kind === "deleted") {
+      deleted.push(outcome.deleted);
+    } else {
+      failed.push(outcome.failed);
+    }
+  }
+  return fileBulkDeleteResult({ deleted, failed });
+}
+
 export function fileBulkMetadataUpdateResult(command: {
   readonly updated: readonly ReturnType<typeof fileBulkUpdatedEntry>[];
   readonly failed: readonly ReturnType<typeof fileBulkMetadataUpdateFailure>[];

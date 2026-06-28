@@ -55,13 +55,13 @@ import {
   requireMultipartFileUploads,
   requireStoredFileObject,
   requireStoredFileRenditionObject,
-  fileBulkDeletedEntry,
   fileCompletedRenditionManifestRecord,
   fileCompletedMultipartObjectPlan,
   fileCompletedMultipartObjectReadPlan,
+  fileBulkDeleteDeletedOutcome,
   fileBulkDeleteEntryCommand,
-  fileBulkDeleteFailure,
-  fileBulkDeleteResult,
+  fileBulkDeleteFailedOutcome,
+  fileBulkDeleteOutcomeResult,
   fileBulkMetadataUpdateFailure,
   fileBulkMetadataUpdateEntryCommand,
   fileBulkMetadataUpdateResult,
@@ -138,6 +138,7 @@ import {
   objectKey,
   sanitizeFilename,
   shouldContinueFileDashboardScan,
+  type FileBulkDeleteOutcome,
   type FileRenditionManifestEntry,
 } from "./file-policy.js";
 import type { IdGenerator } from "../ports/id-generator.js";
@@ -1034,8 +1035,7 @@ export class FileService {
 
   async bulkDelete(command: BulkDeleteFilesCommand): Promise<BulkDeleteFilesResult> {
     const selections = normalizeBulkFileSelections(command.files);
-    const deleted: BulkDeletedFile[] = [];
-    const failed: BulkDeleteFileFailure[] = [];
+    const outcomes: FileBulkDeleteOutcome[] = [];
     for (const selection of selections) {
       try {
         const snapshot = await this.delete(fileBulkDeleteEntryCommand({
@@ -1044,12 +1044,12 @@ export class FileService {
           metadata: command.metadata,
           selection
         }));
-        deleted.push(fileBulkDeletedEntry({ name: selection.name, snapshot }));
+        outcomes.push(fileBulkDeleteDeletedOutcome({ selection, snapshot }));
       } catch (error) {
-        failed.push(fileBulkDeleteFailure(selection.name, error));
+        outcomes.push(fileBulkDeleteFailedOutcome({ selection, error }));
       }
     }
-    return fileBulkDeleteResult({ deleted, failed });
+    return fileBulkDeleteOutcomeResult(outcomes);
   }
 
   async bulkUpdateMetadata(command: BulkUpdateFileMetadataCommand): Promise<BulkUpdateFileMetadataResult> {

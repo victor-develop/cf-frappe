@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the delete finalization planning policy slice:
+As of the bulk delete outcome aggregation policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1757`
-- Remaining gap to Frappe static markers: `1027`
+- Vitest cases: `1758`
+- Remaining gap to Frappe static markers: `1026`
 
 ## Implication
 
