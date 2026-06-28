@@ -77,6 +77,7 @@ import {
   fileDirectUploadDocumentCreateCommand,
   fileMetadataUpdateDocumentCommand,
   fileMultipartAbortCommand,
+  fileMultipartCompletionStartedExecuteCommand,
   fileMultipartCompletionStartedDocumentCommand,
   fileMultipartCompletionCommand,
   fileMultipartPartRecordedExecuteCommand,
@@ -703,16 +704,14 @@ export class FileService {
       ...fileExpectedVersionCommandOption(command.expectedVersion)
     });
     const completing = completionStart
-      ? await this.documents.execute({
+      ? await this.documents.execute(fileMultipartCompletionStartedExecuteCommand({
           actor: command.actor,
           doctype: this.fileDoctype,
           name: command.name,
-          command: completionStart.command,
-          input: completionStart.input,
-          ...fileTenantCommandOption(command.tenantId),
-          ...fileExpectedVersionCommandOption(completionStart.expectedVersion),
-          metadata: fileCommandMetadata(command.metadata)
-        })
+          tenantId: command.tenantId,
+          metadata: command.metadata,
+          completionStart
+        }))
       : current;
     const object = await this.completedMultipartObject({
       multipartUploads,

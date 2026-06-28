@@ -1020,6 +1020,37 @@ export function fileMultipartCompletionStartedDocumentCommand(command: {
   };
 }
 
+export interface FileMultipartCompletionStartedExecuteCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly command: "beginMultipartUploadCompletion";
+  readonly input: DocumentData;
+  readonly tenantId?: string;
+  readonly expectedVersion?: number;
+  readonly metadata: DocumentData;
+}
+
+export function fileMultipartCompletionStartedExecuteCommand(command: {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly tenantId?: string | undefined;
+  readonly metadata?: DocumentData | undefined;
+  readonly completionStart: FileMultipartCompletionStartedDocumentCommand;
+}): FileMultipartCompletionStartedExecuteCommand {
+  return {
+    actor: command.actor,
+    doctype: command.doctype,
+    name: command.name,
+    command: command.completionStart.command,
+    input: command.completionStart.input,
+    ...fileTenantCommandOption(command.tenantId),
+    ...fileExpectedVersionCommandOption(command.completionStart.expectedVersion),
+    metadata: fileCommandMetadata(command.metadata)
+  };
+}
+
 export interface FileMetadataPatchCommand {
   readonly filename?: string;
   readonly isPrivate?: boolean;

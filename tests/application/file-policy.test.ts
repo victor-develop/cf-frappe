@@ -48,6 +48,7 @@ import {
   fileMetadataPatch,
   fileMetadataUpdateDocumentCommand,
   fileMultipartAbortCommand,
+  fileMultipartCompletionStartedExecuteCommand,
   fileMultipartCompletionStartedDocumentCommand,
   fileMultipartCompletionStartedPatch,
   fileMultipartCompletionCommand,
@@ -1571,6 +1572,34 @@ describe("file policy", () => {
       snapshot: fileSnapshot({ storage_state: "upload_completing" }),
       expectedVersion: 3
     })).toBeUndefined();
+  });
+
+  it("builds multipart completion-start execute command inputs", () => {
+    const actor = { id: "uploader@example.com", roles: ["File Manager"], tenantId: "actor-tenant" };
+    const metadata = { source: "multipart-complete" };
+    const completionStart = fileMultipartCompletionStartedDocumentCommand({
+      snapshot: fileSnapshot({ storage_state: "upload_pending" }),
+      expectedVersion: 6
+    });
+
+    expect(completionStart).toBeDefined();
+    expect(fileMultipartCompletionStartedExecuteCommand({
+      actor,
+      doctype: "File",
+      name: "FILE-1",
+      tenantId: "tenant-a",
+      metadata,
+      completionStart: completionStart!
+    })).toEqual({
+      actor,
+      doctype: "File",
+      name: "FILE-1",
+      command: "beginMultipartUploadCompletion",
+      input: { storage_state: "upload_completing" },
+      tenantId: "tenant-a",
+      expectedVersion: 6,
+      metadata
+    });
   });
 
   it("selects upload completion document command intents", () => {
