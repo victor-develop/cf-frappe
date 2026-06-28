@@ -149,9 +149,9 @@ function parseJwtClaims(payloadPart: string, tokenLabel: string): JwtClaims {
     typeof value.iss !== "string" ||
     !isAudience(value.aud) ||
     typeof value.exp !== "number" ||
-    !Number.isInteger(value.exp) ||
-    (value.nbf !== undefined && (typeof value.nbf !== "number" || !Number.isInteger(value.nbf))) ||
-    (value.iat !== undefined && (typeof value.iat !== "number" || !Number.isInteger(value.iat))) ||
+    !Number.isSafeInteger(value.exp) ||
+    (value.nbf !== undefined && (typeof value.nbf !== "number" || !Number.isSafeInteger(value.nbf))) ||
+    (value.iat !== undefined && (typeof value.iat !== "number" || !Number.isSafeInteger(value.iat))) ||
     (value.email !== undefined && typeof value.email !== "string") ||
     (value.sub !== undefined && typeof value.sub !== "string") ||
     (value.name !== undefined && typeof value.name !== "string")
