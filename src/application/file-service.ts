@@ -70,15 +70,13 @@ import {
   fileBufferedUploadStoragePlan,
   fileCommandTenantId,
   fileContentLength,
-  fileDashboardBatchLimit,
   fileDashboardEntryWithPermissions,
   fileDashboardListQuery,
-  fileDashboardListFilters,
   fileDashboardResult,
+  fileDashboardScanPlan,
   fileDownloadedResult,
   fileReadableDashboardCandidate,
   fileReadableDashboardEntries,
-  fileDashboardSystemActor,
   fileDownloadedTransformObjectCommand,
   fileDeleteRequestedExecuteCommand,
   fileDeleteRequestedDocumentCommand,
@@ -131,8 +129,6 @@ import {
   fileSnapshotFilename,
   ignoreFileCleanupFailure,
   normalizeBulkFileSelections,
-  normalizeFileDashboardFilters,
-  normalizeFileDashboardLimit,
   normalizeFileSize,
   nextFileDashboardOffset,
   objectKey,
@@ -764,21 +760,16 @@ export class FileService {
   }
 
   async dashboard(actor: Actor, query: FileDashboardQuery = {}): Promise<FileDashboard> {
-    const limit = normalizeFileDashboardLimit(query.limit);
-    const filters = normalizeFileDashboardFilters(query);
-    const listFilters = fileDashboardListFilters(filters);
+    const scan = fileDashboardScanPlan({ actor, query });
     const doctype = this.registry.get(this.fileDoctype);
     const files: FileDashboardEntry[] = [];
-    const tenantId = fileCommandTenantId(actor, undefined);
-    const systemActor = fileDashboardSystemActor(tenantId);
-    const batchLimit = fileDashboardBatchLimit(limit);
-    let offset = 0;
+    let offset = scan.offset;
     let total = 0;
     do {
-      const result = await this.queries.listDocuments(systemActor, this.fileDoctype, fileDashboardListQuery({
-        tenantId,
-        filters: listFilters,
-        limit: batchLimit,
+      const result = await this.queries.listDocuments(scan.systemActor, this.fileDoctype, fileDashboardListQuery({
+        tenantId: scan.tenantId,
+        filters: scan.listFilters,
+        limit: scan.batchLimit,
         offset
       }));
       total = result.total;
@@ -789,10 +780,10 @@ export class FileService {
         }))
       );
       files.push(...fileReadableDashboardEntries({ actor, doctype, readable }));
-      offset = nextFileDashboardOffset(offset, batchLimit);
+      offset = nextFileDashboardOffset(offset, scan.batchLimit);
     } while (shouldContinueFileDashboardScan({
       visibleFiles: files.length,
-      limit,
+      limit: scan.limit,
       offset,
       total
     }));
@@ -802,8 +793,8 @@ export class FileService {
       storage: this.storage,
       maxUploadBytes: this.maxFileBytes,
       files,
-      limit,
-      filters
+      limit: scan.limit,
+      filters: scan.filters
     });
   }
 

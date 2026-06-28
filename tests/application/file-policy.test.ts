@@ -64,6 +64,7 @@ import {
   fileDashboardListFilters,
   fileDashboardListQuery,
   fileDashboardResult,
+  fileDashboardScanPlan,
   fileDashboardSystemActor,
   fileDownloadedResult,
   fileDownloadedRenditionResult,
@@ -3571,6 +3572,35 @@ describe("file policy", () => {
       filters,
       limit: 50,
       offset: 100
+    });
+  });
+
+  it("plans file dashboard scans from actor and query filters", () => {
+    expect(fileDashboardScanPlan({
+      actor: { tenantId: "tenant-a" },
+      query: {
+        limit: 25,
+        filename: " invoice ",
+        isPrivate: false
+      }
+    })).toEqual({
+      tenantId: "tenant-a",
+      systemActor: {
+        id: "__file_dashboard__",
+        roles: ["System Manager"],
+        tenantId: "tenant-a"
+      },
+      limit: 25,
+      filters: {
+        filename: "invoice",
+        isPrivate: false
+      },
+      listFilters: [
+        { field: "filename", operator: "contains", value: "invoice" },
+        { field: "is_private", operator: "eq", value: false }
+      ],
+      batchLimit: 50,
+      offset: 0
     });
   });
 

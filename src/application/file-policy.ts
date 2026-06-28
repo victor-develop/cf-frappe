@@ -2491,6 +2491,32 @@ export function normalizeFileDashboardLimit(limit: number | undefined): number {
   return limit;
 }
 
+export function fileDashboardScanPlan(command: {
+  readonly actor: Pick<Actor, "tenantId">;
+  readonly query?: (FileDashboardFilterQuery & { readonly limit?: number | undefined }) | undefined;
+}): {
+  readonly tenantId: string;
+  readonly systemActor: Actor;
+  readonly limit: number;
+  readonly filters: FileDashboardFilters;
+  readonly listFilters: readonly ListDocumentsFilter[];
+  readonly batchLimit: number;
+  readonly offset: number;
+} {
+  const limit = normalizeFileDashboardLimit(command.query?.limit);
+  const filters = normalizeFileDashboardFilters(command.query ?? {});
+  const tenantId = fileCommandTenantId(command.actor, undefined);
+  return {
+    tenantId,
+    systemActor: fileDashboardSystemActor(tenantId),
+    limit,
+    filters,
+    listFilters: fileDashboardListFilters(filters),
+    batchLimit: fileDashboardBatchLimit(limit),
+    offset: 0
+  };
+}
+
 export function fileRenditionView(entry: FileRenditionManifestEntry): FileRenditionView {
   return {
     id: entry.id,

@@ -180,6 +180,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized shared upload data command shaping in file policy so buffered, direct-upload, and multipart-upload reservation paths no longer compose privacy, attachment, uploader, expiry, or scanner flags inline.
 - Centralized file dashboard system actor shaping in file policy so dashboard orchestration no longer imports or composes privileged catalog roles inline.
 - Centralized file dashboard batch-limit planning in file policy so dashboard orchestration no longer carries the scan-ahead floor inline.
+- Centralized file dashboard scan planning in file policy so dashboard orchestration no longer composes limit, filters, system actor, batch limit, and initial offset inline.
 - Centralized readable file dashboard entry projection in file policy so dashboard orchestration no longer filters readable rows and applies permission flags inline.
 - Centralized visible file dashboard entry limiting in file policy so dashboard orchestration no longer slices projected rows inline.
 - Centralized final file dashboard result and direct-upload capability shaping in file policy so dashboard orchestration no longer composes capability and result DTOs inline.
