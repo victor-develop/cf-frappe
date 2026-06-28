@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file rendition manifest command policy slice:
+As of the file metadata update command policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1689`
-- Remaining gap to Frappe static markers: `1095`
+- Vitest cases: `1690`
+- Remaining gap to Frappe static markers: `1094`
 
 ## Implication
 

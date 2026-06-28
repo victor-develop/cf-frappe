@@ -938,6 +938,22 @@ export function fileMetadataPatch(command: FileMetadataPatchCommand): DocumentDa
   return patch;
 }
 
+export interface FileMetadataUpdateDocumentCommand {
+  readonly command: "updateMetadata";
+  readonly input: DocumentData;
+  readonly expectedVersion?: number;
+}
+
+export function fileMetadataUpdateDocumentCommand(
+  command: FileMetadataPatchCommand & { readonly expectedVersion?: number }
+): FileMetadataUpdateDocumentCommand {
+  return {
+    command: "updateMetadata",
+    input: fileMetadataPatch(command),
+    ...fileExpectedVersionCommandOption(command.expectedVersion)
+  };
+}
+
 export function fileScanFailureError(result: FileScanResult, snapshot: DocumentSnapshot): FrameworkError {
   const message = fileSnapshotStringData(snapshot, "scan_message") || result.message;
   return new FrameworkError(

@@ -71,7 +71,7 @@ import {
   fileDashboardListFilters,
   fileBufferedUploadDocumentData,
   fileDeleteRequestedDocumentCommand,
-  fileMetadataPatch,
+  fileMetadataUpdateDocumentCommand,
   fileMultipartAbortCommand,
   fileMultipartCompletionStartedDocumentCommand,
   fileMultipartCompletionCommand,
@@ -829,7 +829,7 @@ export class FileService {
       fileDoctype: this.fileDoctype,
       snapshot: current
     });
-    const patch = fileMetadataPatch(command);
+    const update = fileMetadataUpdateDocumentCommand(command);
     if (command.attachedTo !== undefined) {
       if (command.attachedTo !== null) {
         await this.validateAttachmentTarget(command.actor, tenantId, command.attachedTo);
@@ -839,10 +839,10 @@ export class FileService {
       actor: command.actor,
       doctype: this.fileDoctype,
       name: command.name,
-      command: "updateMetadata",
-      input: patch,
+      command: update.command,
+      input: update.input,
       ...fileTenantCommandOption(command.tenantId),
-      ...fileExpectedVersionCommandOption(command.expectedVersion),
+      ...fileExpectedVersionCommandOption(update.expectedVersion),
       metadata: fileCommandMetadata(command.metadata)
     });
   }

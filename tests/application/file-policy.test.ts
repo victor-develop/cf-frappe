@@ -42,6 +42,7 @@ import {
   fileDeleteRequestedDocumentCommand,
   fileDocumentData,
   fileMetadataPatch,
+  fileMetadataUpdateDocumentCommand,
   fileMultipartAbortCommand,
   fileMultipartCompletionStartedDocumentCommand,
   fileMultipartCompletionStartedPatch,
@@ -1475,6 +1476,24 @@ describe("file policy", () => {
     expect(fileMetadataPatch({ attachedTo: null })).toEqual({
       attached_to_doctype: "",
       attached_to_name: ""
+    });
+  });
+
+  it("builds file metadata update document command intents", () => {
+    expect(fileMetadataUpdateDocumentCommand({
+      filename: " folder/invoice.pdf ",
+      isPrivate: false,
+      attachedTo: null,
+      expectedVersion: 4
+    })).toEqual({
+      command: "updateMetadata",
+      input: {
+        filename: "folder-invoice.pdf",
+        is_private: false,
+        attached_to_doctype: "",
+        attached_to_name: ""
+      },
+      expectedVersion: 4
     });
   });
 
