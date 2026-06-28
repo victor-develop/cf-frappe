@@ -22,6 +22,36 @@ describe("processCloudflareJobBatch", () => {
     expect(message.actions).toEqual([{ kind: "ack" }]);
   });
 
+  it("acks queue messages with non-finite JSON payload numbers without executing handlers", async () => {
+    const message = queueMessage({ ...jobMessage("ok"), payload: { count: Number.POSITIVE_INFINITY } });
+    let called = false;
+
+    await processCloudflareJobBatch(batch([message]), {
+      executor: new JobExecutor({
+        registry: createJobRegistry({ jobs: [{ name: "ok", handler: () => { called = true; } }] }),
+        resources: {}
+      })
+    });
+
+    expect(called).toBe(false);
+    expect(message.actions).toEqual([{ kind: "ack" }]);
+  });
+
+  it("acks queue messages with non-finite JSON metadata numbers without executing handlers", async () => {
+    const message = queueMessage({ ...jobMessage("ok"), metadata: { attempt: Number.POSITIVE_INFINITY } });
+    let called = false;
+
+    await processCloudflareJobBatch(batch([message]), {
+      executor: new JobExecutor({
+        registry: createJobRegistry({ jobs: [{ name: "ok", handler: () => { called = true; } }] }),
+        resources: {}
+      })
+    });
+
+    expect(called).toBe(false);
+    expect(message.actions).toEqual([{ kind: "ack" }]);
+  });
+
   it("acks unknown jobs as permanent failures", async () => {
     const message = queueMessage(jobMessage("missing"));
 

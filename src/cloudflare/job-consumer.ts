@@ -6,7 +6,8 @@ import {
   type JobRetryPolicy,
   type ResolvedJobWorkerPool
 } from "../core/jobs.js";
-import type { DocumentData, JsonValue } from "../core/types.js";
+import { isJsonValue } from "../core/json.js";
+import type { DocumentData } from "../core/types.js";
 import type { JobMessage } from "../ports/job-queue.js";
 
 export interface CloudflareJobBatchOptions<TResources = unknown> {
@@ -126,23 +127,10 @@ function parseJobMessage(value: unknown): JobMessage | null {
 }
 
 function isDocumentData(value: unknown): value is DocumentData {
-  if (!isRecord(value) || Array.isArray(value)) {
+  if (!isRecord(value)) {
     return false;
   }
-  return Object.values(value).every(isJsonValue);
-}
-
-function isJsonValue(value: unknown): value is JsonValue {
-  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return true;
-  }
-  if (Array.isArray(value)) {
-    return value.every(isJsonValue);
-  }
-  if (isRecord(value)) {
-    return Object.values(value).every(isJsonValue);
-  }
-  return false;
+  return isJsonValue(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
