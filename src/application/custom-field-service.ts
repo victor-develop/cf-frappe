@@ -20,7 +20,7 @@ import {
   type CustomFieldState
 } from "../core/custom-fields.js";
 import type { ModelRegistry } from "../core/registry.js";
-import { validateDocumentData } from "../core/schema.js";
+import { defineDocType, validateDocumentData } from "../core/schema.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
@@ -107,12 +107,13 @@ export class CustomFieldService {
     this.authorizeAdministration(command.actor, command.tenantId);
     const doctype = this.registry.get(command.doctype);
     const tenantId = resolveActorTenant(command.actor, command.tenantId);
-    const field = normalizeField(command.field);
+    let field = normalizeField(command.field);
     const events = await this.tenantCustomFieldEvents(tenantId);
     const states = this.statesFromEvents(tenantId, events);
     const state = this.stateFromEvents(tenantId, doctype.name, events);
     this.assertCustomFieldRuntimeSupported(field);
     assertCustomFieldCanExtend(doctype, field);
+    field = normalizeCustomFieldExpressions(doctype, field);
     assertCustomFieldDefaultValueValid(doctype, field);
     this.assertReferencesResolve(field);
     this.assertTableFieldDoesNotSelfTarget(doctype, field);
@@ -394,6 +395,26 @@ function normalizeField(field: FieldDefinition): PersistedFieldDefinition {
     ...(tableOf === undefined ? {} : { tableOf }),
     ...customFieldBounds(name, field),
     ...(field.defaultValue === undefined ? {} : { defaultValue: field.defaultValue })
+  });
+}
+
+function normalizeCustomFieldExpressions(
+  base: DocTypeDefinition,
+  field: PersistedFieldDefinition
+): PersistedFieldDefinition {
+  const composed = defineDocType({
+    ...base,
+    fields: Object.freeze([...base.fields, field])
+  });
+  const normalized = composed.fields.find((item) => item.name === field.name);
+  if (normalized === undefined) {
+    throw new FrameworkError("CUSTOM_FIELD_INVALID", `Custom field '${field.name}' was not normalized`, { status: 400 });
+  }
+  return Object.freeze({
+    ...field,
+    ...(normalized.mandatoryDependsOn === undefined ? {} : { mandatoryDependsOn: normalized.mandatoryDependsOn }),
+    ...(normalized.readOnlyDependsOn === undefined ? {} : { readOnlyDependsOn: normalized.readOnlyDependsOn }),
+    ...(normalized.hiddenDependsOn === undefined ? {} : { hiddenDependsOn: normalized.hiddenDependsOn })
   });
 }
 

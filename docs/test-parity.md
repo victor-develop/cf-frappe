@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the custom field target-normalization slice:
+As of the custom field dependency-expression normalization slice:
 
 - Vitest files: `170`
-- Vitest cases: `1825`
-- Remaining gap to Frappe static markers: `959`
+- Vitest cases: `1826`
+- Remaining gap to Frappe static markers: `958`
 
 ## Implication
 

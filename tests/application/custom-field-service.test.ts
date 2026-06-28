@@ -366,6 +366,35 @@ describe("CustomFieldService", () => {
     ]);
   });
 
+  it("normalizes custom field dependency expressions before persisting metadata events", async () => {
+    const service = new CustomFieldService({
+      registry: createRegistry({ doctypes: [Note] }),
+      events: new InMemoryEventStore(),
+      ids: deterministicIds(["field-1"]),
+      clock: fixedClock(now)
+    });
+
+    const saved = await service.saveField({
+      actor: admin,
+      doctype: "Note",
+      field: {
+        name: "approval_note",
+        type: "text",
+        mandatoryDependsOn: { field: "title", operator: "eq", value: "Needs approval" },
+        readOnlyDependsOn: { field: "title", operator: "contains", value: "Closed" },
+        hiddenDependsOn: { field: "title", operator: "eq", value: "Hidden" }
+      }
+    });
+
+    expect(saved.fields[0]?.field.mandatoryDependsOn).toEqual({ field: "title", value: "Needs approval" });
+    expect(saved.fields[0]?.field.readOnlyDependsOn).toEqual({
+      field: "title",
+      operator: "contains",
+      value: "Closed"
+    });
+    expect(saved.fields[0]?.field.hiddenDependsOn).toEqual({ field: "title", value: "Hidden" });
+  });
+
   it("validates custom field default values before persisting metadata events", async () => {
     const events = new InMemoryEventStore();
     const service = new CustomFieldService({
