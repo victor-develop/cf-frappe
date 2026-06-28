@@ -25,7 +25,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - D1 document commits batch immutable event insertion with projection updates.
 - DocType metadata validation and registry reference checks are centralized.
 - Tests assert domain event names separately from reducer payload kinds.
-- File workflows now delegate reusable-rendition selection, pending reservation patch planning, latest-snapshot manifest update patch planning, snapshot-based rendition storage command planning, bulk failure result mapping, rendition failure result mapping, missing-object error shaping, create permission/schema preflight, metadata update permission/state preflight, rendition generation permission preflight, multipart upload permission/state preflight, dashboard permission projection, transform configuration preflight, storage capability preflight, and delete permission/version preflight to pure policy functions while `FileService` keeps I/O orchestration.
+- File workflows now delegate reusable-rendition selection, pending reservation patch planning, latest-snapshot manifest update patch planning, snapshot-based rendition storage command planning, bulk failure result mapping, rendition failure result mapping, command tenant/default upload normalization, missing-object error shaping, create permission/schema preflight, metadata update permission/state preflight, rendition generation permission preflight, multipart upload permission/state preflight, dashboard permission projection, transform configuration preflight, storage capability preflight, and delete permission/version preflight to pure policy functions while `FileService` keeps I/O orchestration.
 
 ## Next Fixes
 
@@ -117,3 +117,4 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized file object content-type fallback, transformability checks, and source-etag selection in file policy.
 - Moved persisted rendition storage put-command construction into file policy, including filename, optional size, and storage metadata.
 - Centralized missing stored-object and rendition-object errors in file policy so direct-upload completion, download, rendition download, and transform overlay resolution share one tested not-found contract.
+- Centralized file command tenant resolution plus upload content-type and privacy defaults in file policy so upload, direct-upload, multipart-upload, download, dashboard, rendition, and delete paths share one tested command boundary.

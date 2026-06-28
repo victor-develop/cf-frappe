@@ -7,7 +7,6 @@ import {
 import { FILE_DOCTYPE_NAME } from "../core/file-doctype.js";
 import type { ModelRegistry } from "../core/registry.js";
 import {
-  DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
   type Actor,
   type DocumentData,
@@ -63,6 +62,7 @@ import {
   canUploadFile,
   fileBulkDeleteFailure,
   fileBulkFailure,
+  fileCommandTenantId,
   fileContentLength,
   fileDashboardEntryWithPermissions,
   fileDashboardListFilters,
@@ -84,7 +84,9 @@ import {
   fileScanTarget,
   fileUploadCompletedPatch,
   fileUploadCompletedDocumentData,
+  fileUploadContentType,
   fileUploadExpiresAt,
+  fileUploadIsPrivate,
   fileUploadObjectCustomMetadata,
   fileUploadScanFailedDocumentData,
   fileUploadScanFailedPatch,
@@ -425,8 +427,8 @@ export class FileService {
     const size = fileContentLength(command.body);
     ensureFileSizeWithinLimit(size, this.maxFileBytes);
 
-    const contentType = command.contentType ?? "application/octet-stream";
-    const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
+    const contentType = fileUploadContentType(command.contentType);
+    const tenantId = fileCommandTenantId(command.actor, command.tenantId);
     await this.validateAttachmentTarget(command.actor, tenantId, command.attachedTo);
     const fileName = this.ids.next("file_");
     const key = objectKey(tenantId, fileName, filename);
@@ -435,7 +437,7 @@ export class FileService {
       key,
       contentType,
       size,
-      isPrivate: command.isPrivate ?? true,
+      isPrivate: fileUploadIsPrivate(command.isPrivate),
       uploadedBy: command.actor.id,
       uploadedAt: this.clock.now(),
       storageState: "available",
@@ -499,8 +501,8 @@ export class FileService {
     const size = normalizeFileSize(command.size);
     ensureFileSizeWithinLimit(size, this.maxFileBytes);
 
-    const contentType = command.contentType ?? "application/octet-stream";
-    const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
+    const contentType = fileUploadContentType(command.contentType);
+    const tenantId = fileCommandTenantId(command.actor, command.tenantId);
     await this.validateAttachmentTarget(command.actor, tenantId, command.attachedTo);
     const fileName = this.ids.next("file_");
     const key = objectKey(tenantId, fileName, filename);
@@ -510,7 +512,7 @@ export class FileService {
       key,
       contentType,
       size,
-      isPrivate: command.isPrivate ?? true,
+      isPrivate: fileUploadIsPrivate(command.isPrivate),
       uploadedBy: command.actor.id,
       uploadedAt: this.clock.now(),
       storageState: "upload_pending",
@@ -540,7 +542,7 @@ export class FileService {
   }
 
   async completeDirectUpload(command: CompleteDirectUploadCommand): Promise<DocumentSnapshot> {
-    const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
+    const tenantId = fileCommandTenantId(command.actor, command.tenantId);
     const current = await this.queries.getDocument(command.actor, this.fileDoctype, command.name, tenantId);
     ensureFilePendingDirectUpload(current);
     const object = requireFileObjectMetadata(
@@ -589,8 +591,8 @@ export class FileService {
     const size = normalizeFileSize(command.size);
     ensureFileSizeWithinLimit(size, this.maxFileBytes);
 
-    const contentType = command.contentType ?? "application/octet-stream";
-    const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
+    const contentType = fileUploadContentType(command.contentType);
+    const tenantId = fileCommandTenantId(command.actor, command.tenantId);
     await this.validateAttachmentTarget(command.actor, tenantId, command.attachedTo);
     const fileName = this.ids.next("file_");
     const key = objectKey(tenantId, fileName, filename);
@@ -600,7 +602,7 @@ export class FileService {
       key,
       contentType,
       size,
-      isPrivate: command.isPrivate ?? true,
+      isPrivate: fileUploadIsPrivate(command.isPrivate),
       uploadedBy: command.actor.id,
       uploadedAt: this.clock.now(),
       storageState: "upload_pending",
@@ -685,7 +687,7 @@ export class FileService {
     ensureDirectUploadMatches(completing, object, "Multipart upload");
     const scan = await this.scanObject({
       actor: command.actor,
-      tenantId: command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID,
+      tenantId: fileCommandTenantId(command.actor, command.tenantId),
       filename: fileSnapshotFilename(completing),
       source: "multipart_upload",
       object
@@ -741,7 +743,7 @@ export class FileService {
     const listFilters = fileDashboardListFilters(filters);
     const doctype = this.registry.get(this.fileDoctype);
     const files: FileDashboardEntry[] = [];
-    const tenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
+    const tenantId = fileCommandTenantId(actor, undefined);
     const systemActor: Actor = { id: "__file_dashboard__", roles: [SYSTEM_MANAGER_ROLE], tenantId };
     const batchLimit = Math.max(limit, 50);
     let offset = 0;
@@ -782,14 +784,14 @@ export class FileService {
       actor,
       this.fileDoctype,
       name,
-      tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID
+      fileCommandTenantId(actor, tenantId)
     );
     const doctype = this.registry.get(this.fileDoctype);
     return fileDashboardEntryWithPermissions({ actor, doctype, snapshot });
   }
 
   async updateMetadata(command: UpdateFileMetadataCommand): Promise<DocumentSnapshot> {
-    const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
+    const tenantId = fileCommandTenantId(command.actor, command.tenantId);
     const current = await this.queries.getDocument(command.actor, this.fileDoctype, command.name, tenantId);
     const doctype = this.registry.get(this.fileDoctype);
     ensureFileMetadataUpdateAllowed({
@@ -836,7 +838,7 @@ export class FileService {
       snapshot: downloaded.snapshot
     });
     this.validateTransformOptions(options);
-    const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
+    const tenantId = fileCommandTenantId(command.actor, command.tenantId);
     const overlay = await this.resolveTransformOverlay({
       actor: command.actor,
       tenantId,
@@ -949,7 +951,7 @@ export class FileService {
     const downloaded = await this.download(command);
     const options = normalizeFileTransformOptions(command.options);
     ensureFileObjectTransformable(downloaded.snapshot, downloaded.object.metadata, `File '${downloaded.snapshot.name}'`);
-    const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
+    const tenantId = fileCommandTenantId(command.actor, command.tenantId);
     this.validateTransformOptions(options);
     const overlay = await this.resolveTransformOverlay({
       actor: command.actor,
@@ -976,7 +978,7 @@ export class FileService {
       command.actor,
       this.fileDoctype,
       command.name,
-      command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID
+      fileCommandTenantId(command.actor, command.tenantId)
     );
     this.preflightDelete(command.actor, current, command.expectedVersion);
     const deleteRequested =
@@ -1064,7 +1066,7 @@ export class FileService {
       command.actor,
       this.fileDoctype,
       command.name,
-      command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID
+      fileCommandTenantId(command.actor, command.tenantId)
     );
     ensureFileAvailableForDownload(snapshot);
     return snapshot;
@@ -1119,7 +1121,7 @@ export class FileService {
       command.source.actor,
       this.fileDoctype,
       command.source.name,
-      command.source.tenantId ?? command.source.actor.tenantId ?? DEFAULT_TENANT_ID
+      fileCommandTenantId(command.source.actor, command.source.tenantId)
     );
     return this.documents.execute({
       actor: command.source.actor,
@@ -1175,7 +1177,7 @@ export class FileService {
     command: DownloadFileCommand,
     ensurePendingMultipartUpload: (snapshot: DocumentSnapshot) => void
   ): Promise<DocumentSnapshot> {
-    const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
+    const tenantId = fileCommandTenantId(command.actor, command.tenantId);
     const current = await this.queries.getDocument(command.actor, this.fileDoctype, command.name, tenantId);
     const doctype = this.registry.get(this.fileDoctype);
     ensureFileMultipartUploadAllowed({

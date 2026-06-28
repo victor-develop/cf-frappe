@@ -29,6 +29,7 @@ import {
   failedFileRenditionForError,
   fileBulkDeleteFailure,
   fileBulkFailure,
+  fileCommandTenantId,
   fileContentLength,
   fileContentTypeExtension,
   fileDashboardEntry,
@@ -61,7 +62,9 @@ import {
   fileSnapshotStringData,
   fileUploadCompletedPatch,
   fileUploadCompletedDocumentData,
+  fileUploadContentType,
   fileUploadExpiresAt,
+  fileUploadIsPrivate,
   fileUploadObjectCustomMetadata,
   fileUploadScanFailedDocumentData,
   fileUploadScanFailedPatch,
@@ -120,6 +123,16 @@ describe("file policy", () => {
   it("normalizes content types for comparison", () => {
     expect(normalizeContentType(" Application/PDF ; charset=utf-8 ")).toBe("application/pdf ; charset=utf-8");
     expect(normalizeContentType(undefined)).toBe("");
+  });
+
+  it("normalizes file command tenant and upload defaults", () => {
+    expect(fileCommandTenantId({ tenantId: "actor-tenant" }, "explicit-tenant")).toBe("explicit-tenant");
+    expect(fileCommandTenantId({ tenantId: "actor-tenant" }, undefined)).toBe("actor-tenant");
+    expect(fileCommandTenantId({}, undefined)).toBe("default");
+    expect(fileUploadContentType("image/png")).toBe("image/png");
+    expect(fileUploadContentType(undefined)).toBe("application/octet-stream");
+    expect(fileUploadIsPrivate(false)).toBe(false);
+    expect(fileUploadIsPrivate(undefined)).toBe(true);
   });
 
   it("marks only browser-safe content types as previewable", () => {

@@ -51,6 +51,18 @@ export function normalizeContentType(value: string | undefined): string {
   return value?.trim().toLowerCase() ?? "";
 }
 
+export function fileCommandTenantId(actor: Pick<Actor, "tenantId">, tenantId: string | undefined): string {
+  return tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
+}
+
+export function fileUploadContentType(contentType: string | undefined): string {
+  return contentType ?? "application/octet-stream";
+}
+
+export function fileUploadIsPrivate(isPrivate: boolean | undefined): boolean {
+  return isPrivate ?? true;
+}
+
 export function isPreviewableFileContentType(contentType: string): boolean {
   const normalized = normalizeContentType(contentType.split(";")[0]);
   return PREVIEWABLE_FILE_CONTENT_TYPES.has(normalized) || (normalized.startsWith("image/") && normalized !== "image/svg+xml");
