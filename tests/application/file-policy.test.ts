@@ -122,6 +122,7 @@ import {
   fileGeneratedRenditionFailureCleanupPlan,
   fileGeneratedRenditionFailurePlan,
   fileGeneratedRenditionReuseDecision,
+  fileGeneratedRenditionReuseHeadReadPlan,
   fileGeneratedRenditionReuseResult,
   fileGeneratedRenditionReuseStoragePlan,
   fileRenditionManifestPatch,
@@ -1450,6 +1451,22 @@ describe("file policy", () => {
       renditionId: "thumb",
       sourceEtag: "source-2"
     })).toEqual({ kind: "skip" });
+  });
+
+  it("plans generated rendition reuse head reads", () => {
+    expect(fileGeneratedRenditionReuseHeadReadPlan({ kind: "skip" })).toEqual({ kind: "skip" });
+    expect(fileGeneratedRenditionReuseHeadReadPlan({
+      kind: "check",
+      key: "acme/file-renditions/file/thumb.webp",
+      rendition: renditionEntry("thumb", {
+        key: "acme/file-renditions/file/thumb.webp",
+        status: "available",
+        source_etag: "source-1"
+      })
+    })).toEqual({
+      kind: "head",
+      key: "acme/file-renditions/file/thumb.webp"
+    });
   });
 
   it("builds generated rendition reuse results", () => {

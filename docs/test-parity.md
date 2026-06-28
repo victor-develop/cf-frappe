@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the attachment validation planning policy slice:
+As of the generated rendition reuse head-read planning policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1765`
-- Remaining gap to Frappe static markers: `1019`
+- Vitest cases: `1766`
+- Remaining gap to Frappe static markers: `1018`
 
 ## Implication
 

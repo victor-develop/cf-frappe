@@ -2948,6 +2948,27 @@ export function fileGeneratedRenditionReuseStoragePlan(command: {
   };
 }
 
+export type FileGeneratedRenditionReuseHeadReadPlan =
+  | {
+      readonly kind: "skip";
+    }
+  | {
+      readonly kind: "head";
+      readonly key: string;
+    };
+
+export function fileGeneratedRenditionReuseHeadReadPlan(
+  reuse: FileGeneratedRenditionReuseStoragePlan
+): FileGeneratedRenditionReuseHeadReadPlan {
+  if (reuse.kind === "skip") {
+    return { kind: "skip" };
+  }
+  return {
+    kind: "head",
+    key: reuse.key
+  };
+}
+
 export type FileGeneratedRenditionReuseDecision =
   | {
       readonly kind: "generate";

@@ -107,6 +107,7 @@ import {
   fileGeneratedRenditionReservationPlan,
   fileGeneratedRenditionFailurePlan,
   fileGeneratedRenditionReuseDecision,
+  fileGeneratedRenditionReuseHeadReadPlan,
   fileGeneratedRenditionReuseStoragePlan,
   fileRenditionId,
   fileRenditionManifestExecuteCommand,
@@ -865,10 +866,11 @@ export class FileService {
       sourceEtag,
       ...fileTransformOverlayCommandOption(overlay)
     });
+    const reuseHead = fileGeneratedRenditionReuseHeadReadPlan(reuse);
     const reuseDecision = fileGeneratedRenditionReuseDecision({
       snapshot: downloaded.snapshot,
       reuse,
-      objectExists: reuse.kind === "check" ? await this.storage.head(reuse.key) !== null : false
+      objectExists: reuseHead.kind === "head" ? await this.storage.head(reuseHead.key) !== null : false
     });
     if (reuseDecision.kind === "reuse") {
       return reuseDecision.result;

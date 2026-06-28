@@ -190,6 +190,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized attachment validation planning in file policy so upload and metadata orchestration now execute shared skip-or-validate document-read plans instead of branching on attachment targets inline.
 - Centralized transformed file result shaping in file policy so temporary transform orchestration no longer composes source snapshot, object metadata, and transform output inline.
 - Centralized transform overlay document-read planning in file policy so overlay resolution no longer derives overlay document reads from transform options inline.
+- Centralized generated rendition reuse head-read planning in file policy so rendition orchestration no longer knows which reuse candidates require storage existence checks inline.
 - Centralized generated rendition reuse decisions in file policy so rendition orchestration now passes storage-existence facts into a pure generate-versus-reuse decision instead of composing reuse results inline.
 - Centralized generated rendition failure cleanup planning in file policy so rendition failure orchestration now reuses the shared delete-key cleanup executor instead of branching on a single cleanup key inline.
 - Centralized generated and downloaded rendition result shaping in file policy so rendition orchestration no longer composes manifest views and storage objects inline.
