@@ -83,6 +83,7 @@ import {
   fileDownloadedTransformObjectCommand,
   fileDeleteRequestedExecuteCommand,
   fileDeleteRequestedDocumentCommand,
+  fileDeleteRequestedSnapshot,
   fileDeletedExecuteCommand,
   fileDeleteFinalizationPlan,
   fileResolvedTransformOverlaySource,
@@ -1007,7 +1008,7 @@ export class FileService {
     );
     this.preflightDelete(command.actor, current, command.expectedVersion);
     const deleteRequest = fileDeleteRequestedDocumentCommand(current);
-    const deleteRequested =
+    const requested =
       deleteRequest
         ? await this.documents.execute(fileDeleteRequestedExecuteCommand({
             actor: command.actor,
@@ -1017,7 +1018,8 @@ export class FileService {
             metadata: command.metadata,
             deleteRequest
           }))
-        : current;
+        : undefined;
+    const deleteRequested = fileDeleteRequestedSnapshot({ current, requested });
     const finalization = fileDeleteFinalizationPlan(deleteRequested);
     await this.deleteFileObjects(finalization.cleanup);
     const snapshot = await this.documents.delete(fileDeletedExecuteCommand({

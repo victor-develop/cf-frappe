@@ -74,6 +74,7 @@ import {
   fileDownloadedRenditionResult,
   fileDeleteRequestedExecuteCommand,
   fileDeleteRequestedDocumentCommand,
+  fileDeleteRequestedSnapshot,
   fileDeletedExecuteCommand,
   fileDeletedDocumentCommand,
   fileDeleteFinalizationPlan,
@@ -3605,6 +3606,17 @@ describe("file policy", () => {
       expectedVersion: 1,
       metadata
     });
+  });
+
+  it("selects delete-requested snapshots after optional request events", () => {
+    const current = fileSnapshot({ storage_state: "delete_requested" });
+    const requested = {
+      ...fileSnapshot({ storage_state: "delete_requested" }),
+      version: 8
+    };
+
+    expect(fileDeleteRequestedSnapshot({ current })).toBe(current);
+    expect(fileDeleteRequestedSnapshot({ current, requested })).toBe(requested);
   });
 
   it("builds delete document command intents", () => {

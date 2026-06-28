@@ -199,6 +199,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized downloaded object read planning in file policy so file download orchestration no longer derives primary object keys inline.
 - Centralized downloaded rendition object read planning in file policy so rendition download orchestration no longer derives storage keys from manifest entries inline.
 - Centralized multipart completion snapshot selection in file policy so multipart completion orchestration no longer chooses between current and begin-completion snapshots inline.
+- Centralized delete-requested snapshot selection in file policy so delete orchestration no longer chooses between current and request-delete snapshots inline.
 - Centralized upload, download, prepared-upload, and multipart-part result shaping in file policy so ordinary file orchestration no longer composes success DTOs inline.
 - Centralized bulk success entry and final result shaping in file policy so bulk delete and metadata orchestration no longer compose outcome DTOs inline.
 - Centralized bulk delete outcome aggregation in file policy so bulk delete orchestration no longer splits per-file success and failure outcomes into result arrays inline.

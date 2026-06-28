@@ -2200,6 +2200,13 @@ export function fileDeleteRequestedExecuteCommand(command: {
   };
 }
 
+export function fileDeleteRequestedSnapshot(command: {
+  readonly current: DocumentSnapshot;
+  readonly requested?: DocumentSnapshot | undefined;
+}): DocumentSnapshot {
+  return command.requested ?? command.current;
+}
+
 export interface FileDeletedDocumentCommand {
   readonly expectedVersion: number;
 }

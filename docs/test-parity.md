@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the multipart completion snapshot selection policy slice:
+As of the delete-requested snapshot selection policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1771`
-- Remaining gap to Frappe static markers: `1013`
+- Vitest cases: `1772`
+- Remaining gap to Frappe static markers: `1012`
 
 ## Implication
 
