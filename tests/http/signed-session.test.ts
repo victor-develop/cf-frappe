@@ -99,6 +99,19 @@ describe("signed session actor resolver", () => {
     });
   });
 
+  it("rejects unsafe clocks when issuing signed session cookies", async () => {
+    await expect(
+      createSignedSessionCookie(actor, {
+        secret: "test-secret",
+        now: () => Number.MAX_SAFE_INTEGER + 1,
+        maxAgeSeconds: 1
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Session clock must be a safe integer"
+    });
+  });
+
   it("rejects tampered and expired sessions", async () => {
     const cookie = await createSignedSessionCookie(actor, {
       secret: "test-secret",

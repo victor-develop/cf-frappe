@@ -217,7 +217,11 @@ function serializeCookie(
 }
 
 function currentSeconds(now: (() => number) | undefined): number {
-  return now ? now() : Math.floor(Date.now() / 1000);
+  const seconds = now ? now() : Math.floor(Date.now() / 1000);
+  if (!Number.isSafeInteger(seconds)) {
+    throw badRequest("Session clock must be a safe integer");
+  }
+  return seconds;
 }
 
 function ensureSecret(secret: string): void {
