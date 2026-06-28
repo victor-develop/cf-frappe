@@ -6,7 +6,12 @@ import { defineDashboard, type DashboardDefinition } from "./dashboard.js";
 import { defineDataPatch, type DataPatchDefinition } from "./data-patch.js";
 import { defineKanban, type KanbanDefinition } from "./kanban.js";
 import { createRegistry, type DocumentHooks, type ModelRegistry, type RegistryOptions } from "./registry.js";
-import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-format.js";
+import {
+  definePrintFormat,
+  definePrintLetterhead,
+  type PrintFormatDefinition,
+  type PrintLetterheadDefinition
+} from "./print-format.js";
 import { defineReport, type ReportDefinition } from "./reports.js";
 import type { DocTypeDefinition } from "./types.js";
 import { defineWebForm, type WebFormDefinition } from "./web-form.js";
@@ -58,8 +63,8 @@ export function defineApp<TDataPatchResources = unknown>(
     modules: Object.freeze([...(input.modules ?? [])]),
     dependencies: Object.freeze([...(input.dependencies ?? [])]),
     doctypes: Object.freeze([...(input.doctypes ?? [])]),
-    letterheads: Object.freeze([...(input.letterheads ?? [])]),
-    printFormats: Object.freeze([...(input.printFormats ?? [])]),
+    letterheads: Object.freeze((input.letterheads ?? []).map(definePrintLetterhead)),
+    printFormats: Object.freeze((input.printFormats ?? []).map(definePrintFormat)),
     reports: Object.freeze((input.reports ?? []).map(defineReport)),
     dashboards: Object.freeze((input.dashboards ?? []).map(defineDashboard)),
     kanbans: Object.freeze((input.kanbans ?? []).map(defineKanban)),

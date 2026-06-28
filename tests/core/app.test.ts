@@ -108,8 +108,8 @@ describe("app manifests", () => {
       })
     ]);
 
-    expect(registry.getPrintLetterhead("Standard")).toBe(letterhead);
-    expect(registry.getPrintFormat("Note Standard")).toBe(printFormat);
+    expect(registry.getPrintLetterhead("Standard")).toEqual(letterhead);
+    expect(registry.getPrintFormat("Note Standard")).toEqual(printFormat);
     expect(registry.getReport("All Notes")).toEqual(report);
     expect(registry.getDashboard("Operations Dashboard")).toEqual(dashboard);
     expect(registry.getWorkspace("Operations")).toEqual(workspace);
@@ -633,6 +633,50 @@ describe("app manifests", () => {
     expect(Object.isFrozen(app.reports?.[0]?.groups?.[0]?.summaries)).toBe(true);
     expect(Object.isFrozen(app.reports?.[0]?.charts)).toBe(true);
     expect(Object.isFrozen(app.reports?.[0]?.charts?.[0]?.colors)).toBe(true);
+  });
+
+  it("snapshots app manifest print metadata by value", () => {
+    const letterheadRoles = ["User"];
+    const formatRoles = ["User"];
+    const margins = { topMm: 10 };
+    const field = { field: "title", label: "Title" };
+    const format = {
+      name: "Task Standard",
+      doctype: "Task",
+      roles: formatRoles,
+      sections: [{ heading: "Main", fields: [field] }],
+      layout: { margins }
+    };
+    const app = defineApp({
+      name: "tasks",
+      letterheads: [{ name: "Standard", headerHtml: "<strong>Acme</strong>", roles: letterheadRoles }],
+      printFormats: [format]
+    });
+
+    letterheadRoles[0] = "Guest";
+    formatRoles[0] = "Guest";
+    margins.topMm = 20;
+    field.label = "Mutated";
+    format.sections[0]!.fields.push({ field: "status", label: "Status" });
+
+    expect(app.letterheads?.[0]?.roles).toEqual(["User"]);
+    expect(app.printFormats?.[0]?.roles).toEqual(["User"]);
+    expect(app.printFormats?.[0]?.sections).toEqual([{ heading: "Main", fields: [{ field: "title", label: "Title" }] }]);
+    expect(app.printFormats?.[0]?.layout?.margins).toEqual({ topMm: 10 });
+    expect(registryOptionsFromApps([app]).printFormats?.[0]?.sections).toEqual([
+      { heading: "Main", fields: [{ field: "title", label: "Title" }] }
+    ]);
+    expect(Object.isFrozen(app.letterheads)).toBe(true);
+    expect(Object.isFrozen(app.letterheads?.[0])).toBe(true);
+    expect(Object.isFrozen(app.letterheads?.[0]?.roles)).toBe(true);
+    expect(Object.isFrozen(app.printFormats)).toBe(true);
+    expect(Object.isFrozen(app.printFormats?.[0])).toBe(true);
+    expect(Object.isFrozen(app.printFormats?.[0]?.roles)).toBe(true);
+    expect(Object.isFrozen(app.printFormats?.[0]?.sections)).toBe(true);
+    expect(Object.isFrozen(app.printFormats?.[0]?.sections?.[0])).toBe(true);
+    expect(Object.isFrozen(app.printFormats?.[0]?.sections?.[0]?.fields)).toBe(true);
+    expect(Object.isFrozen(app.printFormats?.[0]?.sections?.[0]?.fields[0])).toBe(true);
+    expect(Object.isFrozen(app.printFormats?.[0]?.layout?.margins)).toBe(true);
   });
 
   it("validates app names at the manifest boundary", () => {

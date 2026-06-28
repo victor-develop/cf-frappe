@@ -120,7 +120,10 @@ interface PrintTemplateToken {
 export function definePrintLetterhead(definition: PrintLetterheadDefinition): PrintLetterheadDefinition {
   assertIdentifier(definition.name, "print letterhead name");
   assertHasLetterheadBody(definition);
-  return Object.freeze({ ...definition });
+  return Object.freeze({
+    ...definition,
+    ...(definition.roles === undefined ? {} : { roles: Object.freeze([...definition.roles]) })
+  });
 }
 
 export function definePrintFormat(definition: PrintFormatDefinition): PrintFormatDefinition {
@@ -142,11 +145,12 @@ export function definePrintFormat(definition: PrintFormatDefinition): PrintForma
   return Object.freeze({
     ...definition,
     ...(layout === undefined ? {} : { layout }),
+    ...(definition.roles === undefined ? {} : { roles: Object.freeze([...definition.roles]) }),
     sections: Object.freeze(
       sections.map((section) =>
         Object.freeze({
           ...section,
-          fields: Object.freeze([...section.fields])
+          fields: Object.freeze(section.fields.map((field) => Object.freeze({ ...field })))
         })
       )
     )
