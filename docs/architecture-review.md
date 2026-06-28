@@ -268,6 +268,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized downloaded object read planning in file policy so file download orchestration no longer derives primary object keys inline.
 - Centralized downloaded rendition object read planning in file policy so rendition download orchestration no longer derives storage keys from manifest entries inline.
 - Centralized multipart completion snapshot selection in file policy so multipart completion orchestration no longer chooses between current and begin-completion snapshots inline.
+- Guarded registry-options composition boundaries with frozen app, metadata, and hook collections before registry construction.
 - Guarded registry list collection boundaries with frozen arrays so metadata listings cannot be mutated and mistaken for registry state.
 - Guarded direct registry report and print metadata with cloned report, print format, and letterhead definitions after registry construction and registration.
 - Guarded raw app registry-options composition with normalized app definitions, preserving app, DocType, and hook metadata even when callers skip `defineApp`.

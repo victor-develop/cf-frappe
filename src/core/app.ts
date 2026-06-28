@@ -105,23 +105,25 @@ export function registryOptionsFromApps<TDataPatchResources = unknown>(
     }
   }
   return {
-    apps: orderedApps.map(installedAppFromDefinition),
-    doctypes: orderedApps.flatMap((app) => app.doctypes ?? []),
-    letterheads: orderedApps.flatMap((app) => app.letterheads ?? []),
-    printFormats: orderedApps.flatMap((app) => app.printFormats ?? []),
-    reports: orderedApps.flatMap((app) => app.reports ?? []),
-    dashboards: orderedApps.flatMap((app) => app.dashboards ?? []),
-    kanbans: orderedApps.flatMap((app) => app.kanbans ?? []),
-    calendars: orderedApps.flatMap((app) => app.calendars ?? []),
-    webForms: orderedApps.flatMap((app) => app.webForms ?? []),
-    webPages: orderedApps.flatMap((app) => app.webPages ?? []),
-    webViews: orderedApps.flatMap((app) => app.webViews ?? []),
-    websiteSettings: orderedApps.flatMap((app) => (app.websiteSettings === undefined ? [] : [app.websiteSettings])),
-    websiteThemes: orderedApps.flatMap((app) => app.websiteThemes ?? []),
-    workspaces: orderedApps.flatMap((app) => app.workspaces ?? []),
-    clientScripts: orderedApps.flatMap((app) => app.clientScripts ?? []),
-    dataPatches: orderedApps.flatMap((app) => app.dataPatches ?? []) as readonly DataPatchDefinition[],
-    hooks
+    apps: Object.freeze(orderedApps.map(installedAppFromDefinition)),
+    doctypes: Object.freeze(orderedApps.flatMap((app) => app.doctypes ?? [])),
+    letterheads: Object.freeze(orderedApps.flatMap((app) => app.letterheads ?? [])),
+    printFormats: Object.freeze(orderedApps.flatMap((app) => app.printFormats ?? [])),
+    reports: Object.freeze(orderedApps.flatMap((app) => app.reports ?? [])),
+    dashboards: Object.freeze(orderedApps.flatMap((app) => app.dashboards ?? [])),
+    kanbans: Object.freeze(orderedApps.flatMap((app) => app.kanbans ?? [])),
+    calendars: Object.freeze(orderedApps.flatMap((app) => app.calendars ?? [])),
+    webForms: Object.freeze(orderedApps.flatMap((app) => app.webForms ?? [])),
+    webPages: Object.freeze(orderedApps.flatMap((app) => app.webPages ?? [])),
+    webViews: Object.freeze(orderedApps.flatMap((app) => app.webViews ?? [])),
+    websiteSettings: Object.freeze(
+      orderedApps.flatMap((app) => (app.websiteSettings === undefined ? [] : [app.websiteSettings]))
+    ),
+    websiteThemes: Object.freeze(orderedApps.flatMap((app) => app.websiteThemes ?? [])),
+    workspaces: Object.freeze(orderedApps.flatMap((app) => app.workspaces ?? [])),
+    clientScripts: Object.freeze(orderedApps.flatMap((app) => app.clientScripts ?? [])),
+    dataPatches: Object.freeze(orderedApps.flatMap((app) => app.dataPatches ?? [])) as readonly DataPatchDefinition[],
+    hooks: freezeHookOptions(hooks)
   };
 }
 
@@ -147,6 +149,14 @@ function freezeHooks(hooks: Readonly<Record<string, readonly DocumentHooks[]>>):
   const frozen: Record<string, readonly DocumentHooks[]> = {};
   for (const [doctype, entries] of Object.entries(hooks)) {
     frozen[doctype] = Object.freeze(entries.map(defineDocumentHooks));
+  }
+  return Object.freeze(frozen);
+}
+
+function freezeHookOptions(hooks: Readonly<Record<string, readonly DocumentHooks[]>>): Readonly<Record<string, readonly DocumentHooks[]>> {
+  const frozen: Record<string, readonly DocumentHooks[]> = {};
+  for (const [doctype, entries] of Object.entries(hooks)) {
+    frozen[doctype] = Object.freeze([...entries]);
   }
   return Object.freeze(frozen);
 }
