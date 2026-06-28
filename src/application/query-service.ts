@@ -56,6 +56,7 @@ import {
   normalizeRequiredSearch,
   normalizeSearch,
   planDocumentReadProjection,
+  planProjectionPageScan,
   toGlobalSearchResult,
   toLinkOption
 } from "./document-query-policy.js";
@@ -423,7 +424,7 @@ export class QueryService {
     const matches: LinkOption[] = [];
     const pageSize = 200;
     const grants = (await this.userPermissions?.permissionsFor(actor, tenantId)) ?? [];
-    for (let offset = 0; ; offset += pageSize) {
+    for (let offset = 0; ;) {
       const result = await this.projections.list({
         tenantId,
         doctype: target.name,
@@ -443,9 +444,11 @@ export class QueryService {
           }
         }
       }
-      if (offset + pageSize >= result.total) {
+      const scan = planProjectionPageScan({ offset, pageSize, total: result.total });
+      if (scan.status === "complete") {
         return matches;
       }
+      offset = scan.nextOffset;
     }
   }
 
@@ -457,7 +460,7 @@ export class QueryService {
     results: GlobalSearchResultItem[]
   ): Promise<void> {
     const pageSize = 200;
-    for (let offset = 0; ; offset += pageSize) {
+    for (let offset = 0; ;) {
       const result = await this.projections.list({
         tenantId,
         doctype: doctype.name,
@@ -472,9 +475,11 @@ export class QueryService {
           results.push(toGlobalSearchResult(doctype, document, match));
         }
       }
-      if (offset + pageSize >= result.total) {
+      const scan = planProjectionPageScan({ offset, pageSize, total: result.total });
+      if (scan.status === "complete") {
         return;
       }
+      offset = scan.nextOffset;
     }
   }
 

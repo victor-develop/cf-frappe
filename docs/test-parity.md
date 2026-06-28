@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the projected-document read decision slice:
+As of the projection page scan decision slice:
 
 - Vitest files: `173`
-- Vitest cases: `2032`
-- Remaining gap to Frappe static markers: `752`
+- Vitest cases: `2033`
+- Remaining gap to Frappe static markers: `751`
 
 ## Implication
 

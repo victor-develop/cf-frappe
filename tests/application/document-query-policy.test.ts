@@ -17,6 +17,7 @@ import {
   normalizeRequiredSearch,
   normalizeSearch,
   planDocumentReadProjection,
+  planProjectionPageScan,
   primitiveCsvValue,
   searchableText,
   toGlobalSearchResult,
@@ -97,6 +98,16 @@ describe("document query policy", () => {
     expect(planDocumentReadProjection({ doctype: Article, name: "ART-1", document: article })).toEqual({
       status: "check-access",
       document: article
+    });
+  });
+
+  it("plans projection page scans until the current page reaches the total", () => {
+    expect(planProjectionPageScan({ offset: 0, pageSize: 200, total: 450 })).toEqual({
+      status: "continue",
+      nextOffset: 200
+    });
+    expect(planProjectionPageScan({ offset: 400, pageSize: 200, total: 450 })).toEqual({
+      status: "complete"
     });
   });
 

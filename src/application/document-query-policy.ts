@@ -27,6 +27,10 @@ export type DocumentReadProjectionDecision =
   | { readonly status: "not-found"; readonly message: string }
   | { readonly status: "check-access"; readonly document: DocumentSnapshot };
 
+export type ProjectionPageScanDecision =
+  | { readonly status: "complete" }
+  | { readonly status: "continue"; readonly nextOffset: number };
+
 export type LinkFieldDefinition = FieldDefinition & {
   readonly type: "link";
   readonly linkTo: string;
@@ -152,6 +156,16 @@ export function planDocumentReadProjection(input: {
     };
   }
   return { status: "check-access", document: input.document };
+}
+
+export function planProjectionPageScan(input: {
+  readonly offset: number;
+  readonly pageSize: number;
+  readonly total: number;
+}): ProjectionPageScanDecision {
+  return input.offset + input.pageSize >= input.total
+    ? { status: "complete" }
+    : { status: "continue", nextOffset: input.offset + input.pageSize };
 }
 
 export function labelForLinkedDocument(document: DocumentSnapshot, doctype: DocTypeDefinition): string {
