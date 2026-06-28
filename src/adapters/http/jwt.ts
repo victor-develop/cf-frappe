@@ -99,7 +99,11 @@ export function assertJwks<TJwks extends JsonWebKeySet = JsonWebKeySet>(
 }
 
 export function currentSeconds(now: (() => number) | undefined): number {
-  return now ? now() : Math.floor(Date.now() / 1000);
+  const seconds = now ? now() : Math.floor(Date.now() / 1000);
+  if (!Number.isSafeInteger(seconds)) {
+    throw permissionDenied("JWT clock must be a safe integer");
+  }
+  return seconds;
 }
 
 function validateRegisteredClaims(

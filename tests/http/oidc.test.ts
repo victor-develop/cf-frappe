@@ -201,6 +201,22 @@ describe("OIDC actor resolver", () => {
     });
   });
 
+  it("rejects unsafe verifier clocks before evaluating OIDC validity windows", async () => {
+    const signing = await createJwtSigner<OidcJwtClaims>();
+    const resolver = oidcActorResolver({
+      issuer: "https://login.example.com",
+      audience: "desk",
+      jwksUrl: "https://login.example.com/keys",
+      now: () => Number.MAX_SAFE_INTEGER + 1,
+      fetchJwks: async () => signing.jwks
+    });
+
+    await expect(jwtRequest(resolver, signing, {})).rejects.toMatchObject({
+      code: "PERMISSION_DENIED",
+      message: "JWT clock must be a safe integer"
+    });
+  });
+
   it("rejects bad issuer, audience, validity windows, signatures, and claim shapes", async () => {
     const signing = await createJwtSigner<OidcJwtClaims>();
     expect(() =>

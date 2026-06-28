@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the signed-session payload expiresAt safe-integer boundary slice:
+As of the shared JWT clock safe-integer boundary slice:
 
 - Vitest files: `170`
-- Vitest cases: `1815`
-- Remaining gap to Frappe static markers: `969`
+- Vitest cases: `1816`
+- Remaining gap to Frappe static markers: `968`
 
 ## Implication
 
