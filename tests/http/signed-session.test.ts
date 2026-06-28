@@ -112,6 +112,26 @@ describe("signed session actor resolver", () => {
     });
   });
 
+  it("rejects unsafe expiresAt values in signed session payloads", async () => {
+    const cookie = await signedCookieForPayload(
+      {
+        version: 1,
+        actor,
+        expiresAt: Number.MAX_SAFE_INTEGER + 1
+      },
+      "test-secret"
+    );
+    const resolver = signedSessionActorResolver({
+      secret: "test-secret",
+      now: () => 1
+    });
+
+    await expect(resolver(new Request("https://app.test", { headers: { cookie } }))).rejects.toMatchObject({
+      code: "PERMISSION_DENIED",
+      message: "Session payload is invalid"
+    });
+  });
+
   it("rejects tampered and expired sessions", async () => {
     const cookie = await createSignedSessionCookie(actor, {
       secret: "test-secret",
@@ -156,3 +176,28 @@ describe("signed session actor resolver", () => {
     );
   });
 });
+
+async function signedCookieForPayload(payload: unknown, secret: string): Promise<string> {
+  const payloadPart = base64UrlEncode(new TextEncoder().encode(JSON.stringify(payload)));
+  const signature = await hmacSha256(payloadPart, secret);
+  return `cf_frappe_session=${payloadPart}.${base64UrlEncode(signature)}`;
+}
+
+async function hmacSha256(value: string, secret: string): Promise<Uint8Array> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  return new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value)));
+}
+
+function base64UrlEncode(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+}

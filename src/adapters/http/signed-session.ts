@@ -157,7 +157,7 @@ function parseSessionPayload(payloadPart: string): SignedSessionPayload {
     throw permissionDenied("Session payload is malformed");
   }
   const expiresAt = isRecord(value) ? value.expiresAt : undefined;
-  if (!isRecord(value) || value.version !== 1 || typeof expiresAt !== "number" || !Number.isInteger(expiresAt)) {
+  if (!isRecord(value) || value.version !== 1 || typeof expiresAt !== "number" || !Number.isSafeInteger(expiresAt)) {
     throw permissionDenied("Session payload is invalid");
   }
   return {
