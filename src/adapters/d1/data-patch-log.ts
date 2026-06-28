@@ -616,12 +616,14 @@ function assertRollbackChanged(result: unknown, id: string): void {
 }
 
 function changedRows(result: unknown): number {
-  return typeof result === "object" &&
-    result !== null &&
-    "meta" in result &&
-    typeof (result as { readonly meta?: { readonly changes?: unknown } }).meta?.changes === "number"
-    ? (result as { readonly meta: { readonly changes: number } }).meta.changes
-    : 1;
+  if (!isRecord(result) || !isRecord(result.meta)) {
+    return 0;
+  }
+  return typeof result.meta.changes === "number" ? result.meta.changes : 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function dataPatchRetryUnavailable(id: string, reason: string): FrameworkError {

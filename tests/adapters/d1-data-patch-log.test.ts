@@ -353,6 +353,24 @@ describe("D1DataPatchLog", () => {
     });
   });
 
+  it("rejects D1 update results that do not prove changed rows", async () => {
+    const db = new FakeD1Database();
+    const log = new D1DataPatchLog(db as unknown as D1Database);
+
+    await log.claimDataPatch({ id: "accounts.unproven", checksum: "v1", claimId: "claim-1", claimedAt: now });
+    db.runResultOverride = (sql) => sql.includes("SET status = 'applied'") ? { success: true, meta: {} } : undefined;
+
+    await expect(log.completeDataPatch({
+      id: "accounts.unproven",
+      checksum: "v1",
+      claimId: "claim-1",
+      appliedAt: now
+    })).rejects.toMatchObject({
+      code: "DATA_PATCH_PENDING",
+      status: 409
+    });
+  });
+
   it("does not claim a newer failed D1 rollback attempt after reading an older one", async () => {
     const db = new FakeD1Database();
     const log = new D1DataPatchLog(db as unknown as D1Database);
@@ -499,6 +517,7 @@ class FakeD1Database {
   readonly executedSql: string[] = [];
   beforeDelete: (() => void) | undefined;
   beforeRollbackRetry: (() => void) | undefined;
+  runResultOverride: ((sql: string) => unknown | undefined) | undefined;
 
   prepare(sql: string) {
     this.executedSql.push(sql);
@@ -579,6 +598,10 @@ class FakeD1PreparedStatement {
   }
 
   async run() {
+    const overriddenResult = this.db.runResultOverride?.(this.sql);
+    if (overriddenResult !== undefined) {
+      return overriddenResult;
+    }
     if (this.sql.includes("INSERT OR IGNORE INTO cf_frappe_data_patches")) {
       const [id, checksum, claim_id, claimed_at] = this.params;
       if (!this.db.patches.has(String(id))) {
