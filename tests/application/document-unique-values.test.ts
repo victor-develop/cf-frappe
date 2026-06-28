@@ -4,6 +4,7 @@ import {
   activeUniqueValueOwner,
   canonicalUniqueValue,
   defineDocType,
+  planUniqueValueReservationOwnerLookup,
   planUniqueValueReleaseWriteDecision,
   planUniqueValueReservationWriteDecision,
   planUniqueValueReleaseEvent,
@@ -138,6 +139,41 @@ describe("document unique values", () => {
       payload: { kind: "DocumentUpdated", patch: { active: false } },
       metadata: { target_doctype: "Contact", target_field: "email" }
     });
+  });
+
+  it("skips owner lookup when no active unique-value owner exists", () => {
+    const reservation = reservationFor("ada@example.com");
+
+    expect(planUniqueValueReservationOwnerLookup({ reservation, existing: null })).toEqual({
+      status: "skip",
+      ownerStillOwnsValue: false
+    });
+    expect(
+      planUniqueValueReservationOwnerLookup({
+        reservation,
+        existing: uniqueValueSnapshot({ documentName: "grace", active: false })
+      })
+    ).toEqual({ status: "skip", ownerStillOwnsValue: false });
+  });
+
+  it("skips owner lookup when the active owner already matches the reservation", () => {
+    const reservation = reservationFor("ada@example.com");
+
+    expect(
+      planUniqueValueReservationOwnerLookup({
+        reservation,
+        existing: uniqueValueSnapshot({ documentName: "ada", active: true })
+      })
+    ).toEqual({ status: "skip", ownerStillOwnsValue: false });
+  });
+
+  it("plans owner lookup when another document owns the unique-value projection", () => {
+    expect(
+      planUniqueValueReservationOwnerLookup({
+        reservation: reservationFor("ada@example.com"),
+        existing: uniqueValueSnapshot({ documentName: "grace", active: true })
+      })
+    ).toEqual({ status: "read-owner", documentName: "grace" });
   });
 
   it("skips reservation writes when the active owner already matches the document", () => {

@@ -52,6 +52,10 @@ export type UniqueValueReleaseWriteDecision =
       readonly existing: DocumentSnapshot;
     };
 
+export type UniqueValueReservationOwnerLookup =
+  | { readonly status: "skip"; readonly ownerStillOwnsValue: false }
+  | { readonly status: "read-owner"; readonly documentName: string };
+
 export interface UniqueValueReservationWriteProjection {
   readonly reservation: UniqueValueReservation;
   readonly existing: DocumentSnapshot | null;
@@ -188,6 +192,17 @@ export function planUniqueValueReleaseEvent(reservation: UniqueValueReservation)
     payload: documentUpdatedPayload({ active: false }),
     metadata: uniqueValueEventMetadata(reservation)
   };
+}
+
+export function planUniqueValueReservationOwnerLookup(input: {
+  readonly reservation: UniqueValueReservation;
+  readonly existing: DocumentSnapshot | null;
+}): UniqueValueReservationOwnerLookup {
+  const owner = activeUniqueValueOwner(input.existing);
+  if (owner === undefined || owner === input.reservation.documentName) {
+    return { status: "skip", ownerStillOwnsValue: false };
+  }
+  return { status: "read-owner", documentName: owner };
 }
 
 export function planUniqueValueReservationWriteDecision(input: {

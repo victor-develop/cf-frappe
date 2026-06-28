@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the unique release decision slice:
+As of the unique owner lookup decision slice:
 
 - Vitest files: `173`
-- Vitest cases: `2021`
-- Remaining gap to Frappe static markers: `763`
+- Vitest cases: `2024`
+- Remaining gap to Frappe static markers: `760`
 
 ## Implication
 

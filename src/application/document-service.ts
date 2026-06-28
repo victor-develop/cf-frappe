@@ -66,7 +66,7 @@ import {
   snapshotFromDocumentCreatedEvent
 } from "./document-lifecycle-events.js";
 import {
-  activeUniqueValueOwner,
+  planUniqueValueReservationOwnerLookup,
   planUniqueValueReleaseWriteDecision,
   planUniqueValueReservationWriteDecision,
   planUniqueValueReleaseEvent,
@@ -1709,10 +1709,10 @@ export class DocumentService implements DocumentCommandExecutor {
     const planned: Array<{ readonly reservation: UniqueValueReservation; readonly existing: DocumentSnapshot | null }> = [];
     for (const reservation of reservations) {
       const existing = foldDocument(await this.store.readStream(reservation.stream));
-      const owner = activeUniqueValueOwner(existing);
-      const ownerStillOwnsValue = owner !== undefined && owner !== reservation.documentName
-        ? await this.uniqueReservationOwnerStillOwnsValue(reservation, owner)
-        : false;
+      const ownerLookup = planUniqueValueReservationOwnerLookup({ reservation, existing });
+      const ownerStillOwnsValue = ownerLookup.status === "read-owner"
+        ? await this.uniqueReservationOwnerStillOwnsValue(reservation, ownerLookup.documentName)
+        : ownerLookup.ownerStillOwnsValue;
       const decision = planUniqueValueReservationWriteDecision({
         reservation,
         existing,
