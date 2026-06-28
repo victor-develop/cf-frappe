@@ -101,6 +101,7 @@ import {
   type UserPermissionProvider
 } from "../core/user-permissions.js";
 import {
+  documentAfterCommitContext,
   documentHookContext,
   documentValidationHookData,
   mergeDocumentHookPatch,
@@ -1820,7 +1821,7 @@ export class DocumentService implements DocumentCommandExecutor {
     event: DomainEvent,
     snapshot: DocumentSnapshot | null
   ): Promise<DocumentSnapshot | null> {
-    const context = { doctype, data: snapshot?.data ?? {}, event, snapshot };
+    const context = documentAfterCommitContext({ doctype, event, snapshot });
     for (const hook of this.registry.hooksFor(doctype.name)) {
       try {
         await hook.afterCommit?.(context);

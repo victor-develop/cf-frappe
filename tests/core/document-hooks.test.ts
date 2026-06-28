@@ -2,9 +2,11 @@ import { readFileSync } from "node:fs";
 import {
   defineDocType,
   defineDocumentHooks,
+  documentAfterCommitContext,
   documentHookContext,
   documentValidationHookData,
   mergeDocumentHookPatch,
+  type DomainEvent,
   type DocumentSnapshot
 } from "../../src";
 
@@ -89,4 +91,36 @@ describe("document hooks", () => {
       title: "Override"
     });
   });
+
+  it("builds afterCommit contexts from committed snapshots", () => {
+    expect(documentAfterCommitContext({ doctype: Note, event, snapshot: existing })).toEqual({
+      doctype: Note,
+      data: existing.data,
+      event,
+      snapshot: existing
+    });
+  });
+
+  it("builds afterCommit contexts for events without a current snapshot", () => {
+    expect(documentAfterCommitContext({ doctype: Note, event, snapshot: null })).toEqual({
+      doctype: Note,
+      data: {},
+      event,
+      snapshot: null
+    });
+  });
 });
+
+const event: DomainEvent = {
+  id: "evt_1",
+  tenantId: "acme",
+  stream: "acme:Note:NOTE-1",
+  sequence: 3,
+  type: "NoteUpdated",
+  doctype: "Note",
+  documentName: "NOTE-1",
+  actorId: "user@example.com",
+  occurredAt: "2026-06-28T02:00:00.000Z",
+  payload: { kind: "DocumentUpdated", patch: { title: "New" } },
+  metadata: {}
+};

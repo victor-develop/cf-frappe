@@ -64,3 +64,16 @@ export function documentValidationHookData(input: {
   const data = compactData(input.data);
   return input.existing === undefined ? data : { ...input.existing.data, ...data };
 }
+
+export function documentAfterCommitContext(input: {
+  readonly doctype: DocTypeDefinition;
+  readonly event: DomainEvent;
+  readonly snapshot: DocumentSnapshot | null;
+}): AfterCommitContext {
+  return {
+    doctype: input.doctype,
+    data: input.snapshot?.data ?? {},
+    event: input.event,
+    snapshot: input.snapshot
+  };
+}
