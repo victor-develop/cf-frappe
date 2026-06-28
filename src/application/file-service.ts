@@ -75,6 +75,7 @@ import {
   fileDeleteRequestedDocumentCommand,
   fileDeletedDocumentCommand,
   fileDirectUploadDocumentCreateCommand,
+  fileMetadataUpdateExecuteCommand,
   fileMetadataUpdateDocumentCommand,
   fileMultipartAbortCommand,
   fileMultipartCompletionStartedExecuteCommand,
@@ -844,16 +845,14 @@ export class FileService {
         await this.validateAttachmentTarget(command.actor, tenantId, command.attachedTo);
       }
     }
-    return this.documents.execute({
+    return this.documents.execute(fileMetadataUpdateExecuteCommand({
       actor: command.actor,
       doctype: this.fileDoctype,
       name: command.name,
-      command: update.command,
-      input: update.input,
-      ...fileTenantCommandOption(command.tenantId),
-      ...fileExpectedVersionCommandOption(update.expectedVersion),
-      metadata: fileCommandMetadata(command.metadata)
-    });
+      tenantId: command.tenantId,
+      metadata: command.metadata,
+      update
+    }));
   }
 
   async download(command: DownloadFileCommand): Promise<DownloadedFile> {

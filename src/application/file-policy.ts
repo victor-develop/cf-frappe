@@ -1102,6 +1102,37 @@ export function fileMetadataUpdateDocumentCommand(
   };
 }
 
+export interface FileMetadataUpdateExecuteCommand {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly command: "updateMetadata";
+  readonly input: DocumentData;
+  readonly tenantId?: string;
+  readonly expectedVersion?: number;
+  readonly metadata: DocumentData;
+}
+
+export function fileMetadataUpdateExecuteCommand(command: {
+  readonly actor: Actor;
+  readonly doctype: string;
+  readonly name: string;
+  readonly tenantId?: string | undefined;
+  readonly metadata?: DocumentData | undefined;
+  readonly update: FileMetadataUpdateDocumentCommand;
+}): FileMetadataUpdateExecuteCommand {
+  return {
+    actor: command.actor,
+    doctype: command.doctype,
+    name: command.name,
+    command: command.update.command,
+    input: command.update.input,
+    ...fileTenantCommandOption(command.tenantId),
+    ...fileExpectedVersionCommandOption(command.update.expectedVersion),
+    metadata: fileCommandMetadata(command.metadata)
+  };
+}
+
 export function fileScanFailureError(result: FileScanResult, snapshot: DocumentSnapshot): FrameworkError {
   const message = fileSnapshotStringData(snapshot, "scan_message") || result.message;
   return new FrameworkError(

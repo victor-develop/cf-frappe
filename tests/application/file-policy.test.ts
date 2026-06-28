@@ -46,6 +46,7 @@ import {
   fileDirectUploadDocumentCreateCommand,
   fileDocumentData,
   fileMetadataPatch,
+  fileMetadataUpdateExecuteCommand,
   fileMetadataUpdateDocumentCommand,
   fileMultipartAbortCommand,
   fileMultipartCompletionStartedExecuteCommand,
@@ -1779,6 +1780,37 @@ describe("file policy", () => {
         attached_to_name: ""
       },
       expectedVersion: 4
+    });
+  });
+
+  it("builds file metadata update execute command inputs", () => {
+    const actor = { id: "manager@example.com", roles: ["File Manager"], tenantId: "actor-tenant" };
+    const metadata = { source: "file-manager" };
+    const update = fileMetadataUpdateDocumentCommand({
+      filename: " folder/invoice.pdf ",
+      isPrivate: false,
+      expectedVersion: 4
+    });
+
+    expect(fileMetadataUpdateExecuteCommand({
+      actor,
+      doctype: "File",
+      name: "FILE-1",
+      tenantId: "tenant-a",
+      metadata,
+      update
+    })).toEqual({
+      actor,
+      doctype: "File",
+      name: "FILE-1",
+      command: "updateMetadata",
+      input: {
+        filename: "folder-invoice.pdf",
+        is_private: false
+      },
+      tenantId: "tenant-a",
+      expectedVersion: 4,
+      metadata
     });
   });
 
