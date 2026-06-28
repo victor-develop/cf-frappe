@@ -268,6 +268,25 @@ describe("OIDC actor resolver", () => {
     });
   });
 
+  it("rejects blank JWT type headers before verifying OIDC tokens", async () => {
+    const signing = await createJwtSigner<OidcJwtClaims>();
+    const resolver = oidcActorResolver({
+      issuer: "https://login.example.com",
+      audience: "desk",
+      jwksUrl: "https://login.example.com/keys",
+      now: () => 1_000,
+      fetchJwks: async () => signing.jwks
+    });
+    const token = await signing.sign(defaultClaims(), { typ: " " });
+
+    await expect(
+      resolver(new Request("https://app.test", { headers: { authorization: `Bearer ${token}` } }))
+    ).rejects.toMatchObject({
+      code: "PERMISSION_DENIED",
+      message: "OIDC token header is invalid"
+    });
+  });
+
   it("rejects bad issuer, audience, validity windows, signatures, and claim shapes", async () => {
     const signing = await createJwtSigner<OidcJwtClaims>();
     expect(() =>
