@@ -1,5 +1,6 @@
 import {
   availableFileRenditionForSource,
+  availableFileRenditionForDownload,
   completeFileRendition,
   ensureFileContentTypeTransformable,
   ensureFileSizeWithinLimit,
@@ -24,6 +25,7 @@ import {
   fileMultipartCompletionStartedPatch,
   fileMultipartUploadDocumentData,
   fileMultipartUploadId,
+  fileObjectKeysForDelete,
   fileRenditionId,
   fileRenditionFilename,
   fileRenditions,
@@ -302,6 +304,39 @@ describe("file policy", () => {
       generatedAt: "2026-06-28T01:00:00.000Z",
       generatedBy: "owner@example.com"
     });
+  });
+
+  it("selects available file renditions for downloads", () => {
+    const available = renditionEntry("thumb", { status: "available" });
+    const snapshot = fileSnapshot({
+      renditions: [
+        renditionEntry("thumb-pending", { status: "pending" }),
+        available
+      ]
+    });
+
+    expect(availableFileRenditionForDownload(snapshot, "thumb")).toBe(available);
+    expect(() => availableFileRenditionForDownload(snapshot, "thumb-pending")).toThrow(
+      "File/file_multipart rendition 'thumb-pending' was not found"
+    );
+    expect(() => availableFileRenditionForDownload(snapshot, "missing")).toThrow(
+      "File/file_multipart rendition 'missing' was not found"
+    );
+  });
+
+  it("plans unique file object keys for delete", () => {
+    const snapshot = fileSnapshot({
+      key: "acme/files/file_multipart-original.png",
+      renditions: [
+        renditionEntry("thumb", { key: "acme/file-renditions/file/thumb.webp" }),
+        renditionEntry("duplicate", { key: "acme/file-renditions/file/thumb.webp" })
+      ]
+    });
+
+    expect(fileObjectKeysForDelete(snapshot)).toEqual([
+      "acme/files/file_multipart-original.png",
+      "acme/file-renditions/file/thumb.webp"
+    ]);
   });
 
   it("plans pending, failed, and completed file renditions", () => {

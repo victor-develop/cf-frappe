@@ -42,6 +42,7 @@ import type {
 } from "../ports/file-storage.js";
 import {
   availableFileRenditionForSource,
+  availableFileRenditionForDownload,
   completeFileRendition,
   ensureFileContentTypeTransformable,
   ensureFileSizeWithinLimit,
@@ -65,6 +66,7 @@ import {
   fileMultipartCompletionStartedPatch,
   fileMultipartUploadDocumentData,
   fileMultipartUploadId,
+  fileObjectKeysForDelete,
   fileRenditionId,
   fileRenditionFilename,
   fileRenditions,
@@ -955,10 +957,7 @@ export class FileService {
 
   async downloadRendition(command: DownloadFileRenditionCommand): Promise<DownloadedFileRendition> {
     const snapshot = await this.availableFileSnapshot(command);
-    const rendition = fileRenditions(snapshot).find((item) => item.id === command.renditionId);
-    if (!rendition || rendition.status !== "available") {
-      throw notFound(`${this.fileDoctype}/${command.name} rendition '${command.renditionId}' was not found`);
-    }
+    const rendition = availableFileRenditionForDownload(snapshot, command.renditionId);
     const object = await this.storage.get(rendition.key);
     if (!object) {
       throw notFound(`${this.fileDoctype}/${command.name} rendition '${command.renditionId}' content was not found`);
@@ -1202,11 +1201,7 @@ export class FileService {
   }
 
   private async deleteFileObjects(snapshot: DocumentSnapshot): Promise<void> {
-    const keys = [
-      requireFileSnapshotString(snapshot, "key"),
-      ...fileRenditions(snapshot).map((rendition) => rendition.key)
-    ];
-    for (const key of [...new Set(keys)]) {
+    for (const key of fileObjectKeysForDelete(snapshot)) {
       await this.storage.delete(key);
     }
   }

@@ -20,10 +20,10 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file upload bound and expiry policy module slice:
+As of the file rendition download and delete policy module slice:
 
 - Vitest files: `169`
-- Vitest cases: `1635`
+- Vitest cases: `1637`
 
 ## Implication
 

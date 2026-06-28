@@ -1,4 +1,4 @@
-import { badRequest, conflict, FrameworkError } from "../core/errors.js";
+import { badRequest, conflict, FrameworkError, notFound } from "../core/errors.js";
 import {
   DEFAULT_TENANT_ID,
   type DocumentData,
@@ -714,6 +714,26 @@ export function fileRenditionView(entry: FileRenditionManifestEntry): FileRendit
     ...(entry.generated_by === undefined ? {} : { generatedBy: entry.generated_by }),
     ...(entry.failure_message === undefined ? {} : { failureMessage: entry.failure_message })
   };
+}
+
+export function availableFileRenditionForDownload(
+  snapshot: DocumentSnapshot,
+  renditionId: string
+): FileRenditionManifestEntry {
+  const rendition = fileRenditions(snapshot).find((entry) => entry.id === renditionId);
+  if (!rendition || rendition.status !== "available") {
+    throw notFound(`${snapshot.doctype}/${snapshot.name} rendition '${renditionId}' was not found`);
+  }
+  return rendition;
+}
+
+export function fileObjectKeysForDelete(snapshot: DocumentSnapshot): readonly string[] {
+  return [
+    ...new Set([
+      requireFileSnapshotString(snapshot, "key"),
+      ...fileRenditions(snapshot).map((rendition) => rendition.key)
+    ])
+  ];
 }
 
 export function fileTransformOptionsFromData(data: DocumentData): FileTransformOptions {

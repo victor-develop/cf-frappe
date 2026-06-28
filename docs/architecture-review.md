@@ -94,3 +94,4 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Extracted available-rendition reuse selection and duplicate pending-rendition rejection from `FileService` into the file policy with focused source and overlay identity coverage.
 - Centralized file transformability rejection in the file policy so direct transforms, persisted renditions, and overlay-source transforms share one tested content-type guard.
 - Moved upload byte-limit checks and reservation-expiry timestamp planning into file policy so buffered, direct, and multipart upload flows share the same tested boundary rules.
+- Extracted rendition download selection and file object deletion key planning from `FileService` into file policy so content serving and cleanup share tested manifest semantics.
