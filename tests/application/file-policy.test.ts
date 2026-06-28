@@ -20,6 +20,8 @@ import {
   ensureMultipartPartFitsReservation,
   expectedRenditionContentType,
   failedFileRendition,
+  fileBulkDeleteFailure,
+  fileBulkFailure,
   fileContentLength,
   fileContentTypeExtension,
   fileDashboardEntry,
@@ -86,7 +88,8 @@ import {
   shouldRequestFileDelete,
   shouldStartFileMultipartCompletion,
   upsertFileRenditionManifest,
-  upsertMultipartPartManifest
+  upsertMultipartPartManifest,
+  FrameworkError
 } from "../../src";
 import type {
   DocumentSnapshot,
@@ -779,6 +782,27 @@ describe("file policy", () => {
     expect(() =>
       normalizeBulkFileSelections(Array.from({ length: 101 }, (_, index) => ({ name: `file_${String(index)}` })))
     ).toThrow("At most 100 files can be selected");
+  });
+
+  it("maps bulk file failures without service state", () => {
+    expect(fileBulkDeleteFailure("file_a", new FrameworkError("DOCUMENT_NOT_FOUND", "missing", { status: 404 }))).toEqual({
+      name: "file_a",
+      code: "DOCUMENT_NOT_FOUND",
+      message: "missing",
+      status: 404
+    });
+    expect(fileBulkFailure("file_b", new Error("storage unavailable"), "fallback")).toEqual({
+      name: "file_b",
+      code: "UNKNOWN",
+      message: "storage unavailable",
+      status: 500
+    });
+    expect(fileBulkFailure("file_c", "bad", "Bulk metadata update failed")).toEqual({
+      name: "file_c",
+      code: "UNKNOWN",
+      message: "Bulk metadata update failed",
+      status: 500
+    });
   });
 
   it("validates direct upload object metadata against its reservation", () => {

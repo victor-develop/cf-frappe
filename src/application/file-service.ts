@@ -2,7 +2,6 @@ import type { DocumentCommandExecutor } from "./document-service.js";
 import { QueryService } from "./query-service.js";
 import {
   badRequest,
-  FrameworkError,
   notFound,
   permissionDenied,
   validationFailed,
@@ -58,6 +57,8 @@ import {
   ensureMultipartCompletionMatchesManifest,
   ensureMultipartPartFitsReservation,
   failedFileRendition,
+  fileBulkDeleteFailure,
+  fileBulkFailure,
   fileContentLength,
   fileDashboardEntry,
   fileDashboardListFilters,
@@ -1026,7 +1027,7 @@ export class FileService {
         });
         deleted.push({ name: selection.name, snapshot });
       } catch (error) {
-        failed.push(bulkDeleteFailure(selection.name, error));
+        failed.push(fileBulkDeleteFailure(selection.name, error));
       }
     }
     return { deleted, failed };
@@ -1050,7 +1051,7 @@ export class FileService {
         });
         updated.push({ name: selection.name, snapshot });
       } catch (error) {
-        failed.push(bulkFileFailure(selection.name, error, "Bulk metadata update failed"));
+        failed.push(fileBulkFailure(selection.name, error, "Bulk metadata update failed"));
       }
     }
     return { updated, failed };
@@ -1241,27 +1242,6 @@ export class FileService {
     ensureValidFileScanResult(result);
     return result;
   }
-}
-
-function bulkDeleteFailure(name: string, error: unknown): BulkDeleteFileFailure {
-  return bulkFileFailure(name, error, "Bulk delete failed");
-}
-
-function bulkFileFailure(name: string, error: unknown, fallback: string): BulkDeleteFileFailure {
-  if (error instanceof FrameworkError) {
-    return {
-      name,
-      code: error.code,
-      message: error.message,
-      status: error.status
-    };
-  }
-  return {
-    name,
-    code: "UNKNOWN",
-    message: error instanceof Error ? error.message : fallback,
-    status: 500
-  };
 }
 
 function errorMessage(error: unknown): string {

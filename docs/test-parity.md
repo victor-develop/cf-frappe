@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file rendition snapshot storage command policy slice:
+As of the file bulk failure mapping policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1665`
-- Remaining gap to Frappe static markers: `1119`
+- Vitest cases: `1666`
+- Remaining gap to Frappe static markers: `1118`
 
 ## Implication
 

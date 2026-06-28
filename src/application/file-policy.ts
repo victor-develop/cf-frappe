@@ -316,6 +316,32 @@ export function normalizeBulkFileSelections<TSelection extends BulkFileSelection
   });
 }
 
+export function fileBulkFailure(name: string, error: unknown, fallback: string): {
+  readonly name: string;
+  readonly code: FrameworkError["code"] | "UNKNOWN";
+  readonly message: string;
+  readonly status: number;
+} {
+  if (error instanceof FrameworkError) {
+    return {
+      name,
+      code: error.code,
+      message: error.message,
+      status: error.status
+    };
+  }
+  return {
+    name,
+    code: "UNKNOWN",
+    message: error instanceof Error ? error.message : fallback,
+    status: 500
+  };
+}
+
+export function fileBulkDeleteFailure(name: string, error: unknown): ReturnType<typeof fileBulkFailure> {
+  return fileBulkFailure(name, error, "Bulk delete failed");
+}
+
 export function ensureDirectUploadMatches(
   snapshot: DocumentSnapshot,
   object: FileObjectMetadata,
