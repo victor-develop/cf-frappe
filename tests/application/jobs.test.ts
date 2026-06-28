@@ -19,7 +19,17 @@ import {
   retryableJobError,
   SYSTEM_MANAGER_ROLE
 } from "../../src";
-import type { DocumentData, DocumentEventPayload, JobMessage, JobScheduleEventPayload } from "../../src";
+import type {
+  DocumentData,
+  DocumentEventPayload,
+  DomainEvent,
+  EventStore,
+  JobMessage,
+  JobScheduleEventPayload,
+  NewDomainEvent,
+  ReadStreamOptions,
+  StreamName
+} from "../../src";
 import { now } from "../helpers";
 
 describe("JobDispatcher", () => {
@@ -762,6 +772,33 @@ describe("JobScheduleService", () => {
     ]);
   });
 
+  it("fails explicitly when a saved runtime schedule cannot be replayed", async () => {
+    const registry = createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] });
+    const events = new ReplayMissingDefinitionEventStore();
+    const service = new JobScheduleService({
+      registry,
+      schedules: [],
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["save-runtime"])
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+
+    await expect(
+      service.save(admin, {
+        id: "runtime-daily",
+        cron: "15 4 * * *",
+        jobName: "reports.daily"
+      })
+    ).rejects.toThrow("Saved job schedule 'runtime-daily' for tenant 'acme' was not found after replay");
+    expect(events.appended).toMatchObject([
+      {
+        stream: jobScheduleDefinitionsStream(),
+        payload: { kind: "JobScheduleSaved", scheduleId: "runtime-daily" }
+      }
+    ]);
+  });
+
   it("rejects runtime schedules with queue delays outside the delivery window before appending events", async () => {
     const registry = createJobRegistry({ jobs: [{ name: "reports.daily", handler: () => undefined }] });
     const events = new InMemoryEventStore();
@@ -1066,6 +1103,27 @@ function jobSchedulePayload(
   payload: Extract<DocumentEventPayload, { readonly kind: "JobScheduleSaved" }>
 ): Extract<JobScheduleEventPayload, { readonly kind: "JobScheduleSaved" }> {
   return payload;
+}
+
+class ReplayMissingDefinitionEventStore implements EventStore {
+  readonly appended: NewDomainEvent[] = [];
+
+  async append(
+    _stream: StreamName,
+    _expectedVersion: number,
+    events: readonly NewDomainEvent[]
+  ): Promise<readonly DomainEvent[]> {
+    this.appended.push(...events);
+    return [];
+  }
+
+  async readStream(_stream: StreamName, _options?: ReadStreamOptions): Promise<readonly DomainEvent[]> {
+    return [];
+  }
+
+  async currentVersion(_stream: StreamName): Promise<number> {
+    return 0;
+  }
 }
 
 describe("job retry classification", () => {

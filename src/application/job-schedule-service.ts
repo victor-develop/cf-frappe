@@ -311,7 +311,7 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
     };
     await events.append(stream, state.version, [event]);
     const updated = await this.definitionState();
-    const saved = runtimeScheduleForTenant(updated, tenantId, schedule.id)!;
+    const saved = requireSavedRuntimeSchedule(updated, tenantId, schedule.id);
     return {
       schedule: this.summaryFor(saved, runtimeScheduleIndex(updated, tenantId, saved.id), await this.overrideState(tenantId), "runtime")
     };
@@ -764,6 +764,18 @@ function runtimeScheduleForTenant(
   scheduleId: string
 ): RuntimeJobScheduleRecord | undefined {
   return state.schedules.get(runtimeScheduleKey(tenantId, scheduleId));
+}
+
+function requireSavedRuntimeSchedule(
+  state: JobScheduleDefinitionState,
+  tenantId: TenantId,
+  scheduleId: string
+): RuntimeJobScheduleRecord {
+  const schedule = runtimeScheduleForTenant(state, tenantId, scheduleId);
+  if (schedule === undefined) {
+    throw new Error(`Saved job schedule '${scheduleId}' for tenant '${tenantId}' was not found after replay`);
+  }
+  return schedule;
 }
 
 function runtimeScheduleIndex(state: JobScheduleDefinitionState, tenantId: TenantId, scheduleId: string): number {
