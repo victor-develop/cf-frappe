@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the file multipart completion-start command policy slice:
+As of the file delete-request command policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1687`
-- Remaining gap to Frappe static markers: `1097`
+- Vitest cases: `1688`
+- Remaining gap to Frappe static markers: `1096`
 
 ## Implication
 

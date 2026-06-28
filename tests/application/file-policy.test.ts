@@ -39,6 +39,7 @@ import {
   fileDashboardEntry,
   fileDashboardEntryWithPermissions,
   fileDashboardListFilters,
+  fileDeleteRequestedDocumentCommand,
   fileDocumentData,
   fileMetadataPatch,
   fileMultipartAbortCommand,
@@ -1733,6 +1734,15 @@ describe("file policy", () => {
   it("plans delete-request events only before delete has been requested", () => {
     expect(shouldRequestFileDelete(fileSnapshot({ storage_state: "available" }))).toBe(true);
     expect(shouldRequestFileDelete(fileSnapshot({ storage_state: "delete_requested" }))).toBe(false);
+  });
+
+  it("builds delete-request document command intents", () => {
+    expect(fileDeleteRequestedDocumentCommand(fileSnapshot({ storage_state: "available" }))).toEqual({
+      command: "requestDelete",
+      input: {},
+      expectedVersion: 1
+    });
+    expect(fileDeleteRequestedDocumentCommand(fileSnapshot({ storage_state: "delete_requested" }))).toBeUndefined();
   });
 
   it("identifies multipart files already completing", () => {

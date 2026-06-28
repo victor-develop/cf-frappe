@@ -70,6 +70,7 @@ import {
   fileDashboardEntryWithPermissions,
   fileDashboardListFilters,
   fileBufferedUploadDocumentData,
+  fileDeleteRequestedDocumentCommand,
   fileMetadataPatch,
   fileMultipartAbortCommand,
   fileMultipartCompletionStartedDocumentCommand,
@@ -117,7 +118,6 @@ import {
   requireFileSnapshotString,
   reusableFileRenditionForGeneration,
   sanitizeFilename,
-  shouldRequestFileDelete,
   type FileRenditionManifestEntry,
 } from "./file-policy.js";
 import type { IdGenerator } from "../ports/id-generator.js";
@@ -1010,16 +1010,17 @@ export class FileService {
       fileCommandTenantId(command.actor, command.tenantId)
     );
     this.preflightDelete(command.actor, current, command.expectedVersion);
+    const deleteRequest = fileDeleteRequestedDocumentCommand(current);
     const deleteRequested =
-      shouldRequestFileDelete(current)
+      deleteRequest
         ? await this.documents.execute({
             actor: command.actor,
             doctype: this.fileDoctype,
             name: command.name,
-            command: "requestDelete",
-            input: {},
+            command: deleteRequest.command,
+            input: deleteRequest.input,
             ...fileTenantCommandOption(command.tenantId),
-            expectedVersion: current.version,
+            expectedVersion: deleteRequest.expectedVersion,
             metadata: fileCommandMetadata(command.metadata)
           })
         : current;

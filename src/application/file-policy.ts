@@ -1076,6 +1076,25 @@ export function shouldRequestFileDelete(snapshot: DocumentSnapshot): boolean {
   return !isFileDeleteRequested(snapshot);
 }
 
+export interface FileDeleteRequestedDocumentCommand {
+  readonly command: "requestDelete";
+  readonly input: DocumentData;
+  readonly expectedVersion: number;
+}
+
+export function fileDeleteRequestedDocumentCommand(
+  snapshot: DocumentSnapshot
+): FileDeleteRequestedDocumentCommand | undefined {
+  if (!shouldRequestFileDelete(snapshot)) {
+    return undefined;
+  }
+  return {
+    command: "requestDelete",
+    input: {},
+    expectedVersion: snapshot.version
+  };
+}
+
 export function isFileMultipartCompletionStarted(snapshot: DocumentSnapshot): boolean {
   return snapshot.data.storage_state === "upload_completing";
 }
