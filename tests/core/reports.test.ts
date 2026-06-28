@@ -22,6 +22,41 @@ describe("reports", () => {
     expect(registry.listReports().map((report) => report.name)).toEqual(["Alpha Notes", "Zulu Notes"]);
   });
 
+  it("snapshots direct registry report metadata by value", () => {
+    const filterDefault = ["Open", "Closed"];
+    const filterOptions = ["Open", "Closed", "Done"];
+    const chartColors = ["#2563eb", "#16a34a"];
+    const report = {
+      name: "Status Report",
+      doctype: "Note",
+      columns: [{ name: "status", field: "status" }],
+      filters: [
+        { name: "status_filter", field: "status", type: "select" as const, defaultValue: filterDefault, options: filterOptions }
+      ],
+      groups: [{ name: "by_status", field: "status", summaries: [{ name: "rows", aggregate: "count" as const }] }],
+      charts: [{ name: "status_chart", type: "bar" as const, group: "by_status", summary: "rows", colors: chartColors }]
+    };
+    const registry = createRegistry({
+      doctypes: [defineDocType({ name: "Note", fields: [{ name: "status", type: "select", options: filterOptions }] })],
+      reports: [report]
+    });
+
+    filterDefault[0] = "Mutated";
+    filterOptions[0] = "Mutated";
+    chartColors[0] = "#000000";
+    report.columns[0]!.name = "mutated";
+    report.groups[0]!.summaries[0]!.name = "mutated_rows";
+
+    expect(registry.getReport("Status Report").columns).toEqual([{ name: "status", field: "status" }]);
+    expect(registry.getReport("Status Report").filters?.[0]?.defaultValue).toEqual(["Open", "Closed"]);
+    expect(registry.getReport("Status Report").filters?.[0]?.options).toEqual(["Open", "Closed", "Done"]);
+    expect(registry.getReport("Status Report").groups?.[0]?.summaries).toEqual([{ name: "rows", aggregate: "count" }]);
+    expect(registry.getReport("Status Report").charts?.[0]?.colors).toEqual(["#2563eb", "#16a34a"]);
+    expect(Object.isFrozen(registry.getReport("Status Report"))).toBe(true);
+    expect(Object.isFrozen(registry.getReport("Status Report").filters?.[0]?.defaultValue)).toBe(true);
+    expect(Object.isFrozen(registry.getReport("Status Report").charts?.[0]?.colors)).toBe(true);
+  });
+
   it("rejects reports with duplicate columns", () => {
     expect(() =>
       defineReport({

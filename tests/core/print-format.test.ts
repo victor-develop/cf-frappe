@@ -43,6 +43,43 @@ describe("print formats", () => {
     ]);
   });
 
+  it("snapshots direct registry print metadata by value", () => {
+    const letterheadRoles = ["System Manager"];
+    const printRoles = ["System Manager"];
+    const sectionFields = [{ field: "title", label: "Title" }];
+    const margins = { topMm: 12, rightMm: 10 };
+    const letterhead = { name: "Standard", headerHtml: "<strong>Acme</strong>", roles: letterheadRoles };
+    const format = {
+      name: "Note Print",
+      doctype: "Note",
+      letterhead: "Standard",
+      roles: printRoles,
+      sections: [{ heading: "Main", fields: sectionFields }],
+      layout: { margins }
+    };
+    const registry = createRegistry({
+      doctypes: [defineDocType({ name: "Note", fields: [{ name: "title", type: "text" }] })],
+      letterheads: [letterhead],
+      printFormats: [format]
+    });
+
+    letterheadRoles[0] = "Guest";
+    printRoles[0] = "Guest";
+    sectionFields[0]!.field = "mutated";
+    margins.topMm = 1;
+
+    expect(registry.getPrintLetterhead("Standard").roles).toEqual(["System Manager"]);
+    expect(registry.getPrintFormat("Note Print").roles).toEqual(["System Manager"]);
+    expect(registry.getPrintFormat("Note Print").sections).toEqual([
+      { heading: "Main", fields: [{ field: "title", label: "Title" }] }
+    ]);
+    expect(registry.getPrintFormat("Note Print").layout?.margins).toEqual({ topMm: 12, rightMm: 10 });
+    expect(Object.isFrozen(registry.getPrintLetterhead("Standard"))).toBe(true);
+    expect(Object.isFrozen(registry.getPrintLetterhead("Standard").roles)).toBe(true);
+    expect(Object.isFrozen(registry.getPrintFormat("Note Print").sections?.[0]?.fields)).toBe(true);
+    expect(Object.isFrozen(registry.getPrintFormat("Note Print").layout?.margins)).toBe(true);
+  });
+
   it("rejects empty print formats", () => {
     expect(() =>
       definePrintFormat({

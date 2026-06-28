@@ -19,9 +19,13 @@ import { FrameworkError } from "./errors.js";
 import { normalizeListFilterExpression, normalizeListFilters } from "./list-view.js";
 import { assertKanbanDefinition, assertKanbanMatchesDocType, defineKanban, type KanbanDefinition } from "./kanban.js";
 import type { PrintFormatDefinition, PrintLetterheadDefinition } from "./print-format.js";
-import { assertPrintFormatMatchesDocType, assertPrintLetterheadValid } from "./print-format.js";
+import {
+  assertPrintFormatMatchesDocType,
+  definePrintFormat,
+  definePrintLetterhead
+} from "./print-format.js";
 import type { ReportDefinition, ReportSummaryDefinition } from "./reports.js";
-import { assertReportDefinition, assertReportFilterValues, assertReportMatchesDocType } from "./reports.js";
+import { assertReportFilterValues, assertReportMatchesDocType, defineReport } from "./reports.js";
 import type { InstalledAppDefinition } from "./app.js";
 import { assertWebFormDefinition, assertWebFormMatchesDocType, defineWebForm, type WebFormDefinition } from "./web-form.js";
 import { assertWebPageDefinition, defineWebPage, type WebPageDefinition } from "./web-page.js";
@@ -236,55 +240,56 @@ export class ModelRegistry {
   }
 
   registerReport(report: ReportDefinition): void {
-    const doctype = this.doctypes.get(report.doctype);
+    const definition = defineReport(report);
+    const doctype = this.doctypes.get(definition.doctype);
     if (!doctype) {
-      throw new FrameworkError("DOCTYPE_NOT_FOUND", `DocType '${report.doctype}' is not registered`, {
+      throw new FrameworkError("DOCTYPE_NOT_FOUND", `DocType '${definition.doctype}' is not registered`, {
         status: 404
       });
     }
-    if (this.reports.has(report.name)) {
-      throw new FrameworkError("REPORT_DUPLICATE", `Report '${report.name}' is already registered`, {
+    if (this.reports.has(definition.name)) {
+      throw new FrameworkError("REPORT_DUPLICATE", `Report '${definition.name}' is already registered`, {
         status: 409
       });
     }
-    assertReportDefinition(report);
-    assertReportMatchesDocType(report, doctype);
-    this.reports.set(report.name, report);
+    assertReportMatchesDocType(definition, doctype);
+    this.reports.set(definition.name, definition);
   }
 
   registerPrintLetterhead(letterhead: PrintLetterheadDefinition): void {
-    if (this.letterheads.has(letterhead.name)) {
+    const definition = definePrintLetterhead(letterhead);
+    if (this.letterheads.has(definition.name)) {
       throw new FrameworkError(
         "PRINT_FORMAT_DUPLICATE",
-        `Print letterhead '${letterhead.name}' is already registered`,
+        `Print letterhead '${definition.name}' is already registered`,
         { status: 409 }
       );
     }
-    assertPrintLetterheadValid(letterhead);
-    this.letterheads.set(letterhead.name, letterhead);
+    this.letterheads.set(definition.name, definition);
   }
 
   registerPrintFormat(format: PrintFormatDefinition): void {
-    const doctype = this.doctypes.get(format.doctype);
+    const definition = definePrintFormat(format);
+    const doctype = this.doctypes.get(definition.doctype);
     if (!doctype) {
-      throw new FrameworkError("DOCTYPE_NOT_FOUND", `DocType '${format.doctype}' is not registered`, {
+      throw new FrameworkError("DOCTYPE_NOT_FOUND", `DocType '${definition.doctype}' is not registered`, {
         status: 404
       });
     }
-    if (this.printFormats.has(format.name)) {
-      throw new FrameworkError("PRINT_FORMAT_DUPLICATE", `Print format '${format.name}' is already registered`, {
+    if (this.printFormats.has(definition.name)) {
+      throw new FrameworkError("PRINT_FORMAT_DUPLICATE", `Print format '${definition.name}' is already registered`, {
         status: 409
       });
     }
-    if (format.letterhead !== undefined && !this.letterheads.has(format.letterhead)) {
+    if (definition.letterhead !== undefined && !this.letterheads.has(definition.letterhead)) {
       throw new FrameworkError(
         "PRINT_FORMAT_INVALID",
-        `Print format '${format.name}' references unknown letterhead '${format.letterhead}'`,
+        `Print format '${definition.name}' references unknown letterhead '${definition.letterhead}'`,
         { status: 400 }
       );
     }
-    assertPrintFormatMatchesDocType(format, doctype);
-    this.printFormats.set(format.name, format);
+    assertPrintFormatMatchesDocType(definition, doctype);
+    this.printFormats.set(definition.name, definition);
   }
 
   registerClientScript(script: ClientScriptDefinition): void {
