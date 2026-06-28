@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the buffered upload scan-failure decision reuse slice:
+As of the scanner port guard policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1777`
-- Remaining gap to Frappe static markers: `1007`
+- Vitest cases: `1778`
+- Remaining gap to Frappe static markers: `1006`
 
 ## Implication
 

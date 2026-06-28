@@ -210,6 +210,7 @@ import {
   pendingFileRendition,
   requireDirectFileUploadCreator,
   requireFileObjectMetadata,
+  requireFileScanner,
   requireFileSnapshotString,
   requireFileTransformer,
   requireMultipartFileUploads,
@@ -376,6 +377,15 @@ describe("file policy", () => {
 
     expect(requireFileTransformer(transformer)).toBe(transformer);
     expect(() => requireFileTransformer(undefined)).toThrow("File transforms are not configured");
+  });
+
+  it("requires configured file scanners", () => {
+    const scanner = {
+      scan: async () => ({ status: "clean" as const })
+    };
+
+    expect(requireFileScanner(scanner)).toBe(scanner);
+    expect(() => requireFileScanner(undefined)).toThrow("File scanning is not configured");
   });
 
   it("requires configured direct and multipart upload storage capabilities", () => {

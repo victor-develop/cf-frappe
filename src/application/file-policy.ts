@@ -43,7 +43,7 @@ import type {
   UploadMultipartFilePartCommand,
   UploadedMultipartFilePart
 } from "../ports/file-storage.js";
-import type { FileScanResult, FileScanSource, FileScanTarget } from "../ports/file-scanner.js";
+import type { FileScanner, FileScanResult, FileScanSource, FileScanTarget } from "../ports/file-scanner.js";
 
 const PREVIEWABLE_FILE_CONTENT_TYPES = new Set([
   "application/json",
@@ -161,6 +161,13 @@ export function requireFileTransformer(transformer: FileTransformer | undefined)
     throw badRequest("File transforms are not configured");
   }
   return transformer;
+}
+
+export function requireFileScanner(scanner: FileScanner | undefined): FileScanner {
+  if (!scanner) {
+    throw badRequest("File scanning is not configured");
+  }
+  return scanner;
 }
 
 export function requireDirectFileUploadCreator(

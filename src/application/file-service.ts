@@ -121,6 +121,7 @@ import {
   fileRenditionReservationExecuteCommand,
   fileGeneratedRenditionStoragePutCommand,
   fileObjectScanPlan,
+  requireFileScanner,
   fileScanFailureError,
   fileUploadScanFailureDecision,
   fileExpectedVersionCommandOption,
@@ -1260,7 +1261,7 @@ export class FileService {
     if (plan.kind === "skip") {
       return undefined;
     }
-    const result = await this.scanner!.scan(plan.target);
+    const result = await requireFileScanner(this.scanner).scan(plan.target);
     ensureValidFileScanResult(result);
     return result;
   }
