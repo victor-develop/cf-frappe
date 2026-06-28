@@ -83,8 +83,7 @@ import {
   fileDeleteRequestedExecuteCommand,
   fileDeleteRequestedDocumentCommand,
   fileDeletedExecuteCommand,
-  fileDeletedDocumentCommand,
-  fileDeleteStorageCleanupPlan,
+  fileDeleteFinalizationPlan,
   fileResolvedTransformOverlaySource,
   fileDownloadedRenditionResult,
   fileDocumentCreateCommand,
@@ -1020,15 +1019,15 @@ export class FileService {
             deleteRequest
           }))
         : current;
-    await this.deleteFileObjects(fileDeleteStorageCleanupPlan(deleteRequested));
-    const deleted = fileDeletedDocumentCommand(deleteRequested);
+    const finalization = fileDeleteFinalizationPlan(deleteRequested);
+    await this.deleteFileObjects(finalization.cleanup);
     const snapshot = await this.documents.delete(fileDeletedExecuteCommand({
       actor: command.actor,
       doctype: this.fileDoctype,
       name: command.name,
       tenantId: command.tenantId,
       metadata: command.metadata,
-      deleted
+      deleted: finalization.deleted
     }));
     return snapshot;
   }

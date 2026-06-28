@@ -2013,6 +2013,18 @@ export function fileDeletedDocumentCommand(snapshot: DocumentSnapshot): FileDele
   };
 }
 
+export function fileDeleteFinalizationPlan(snapshot: DocumentSnapshot): {
+  readonly cleanup: {
+    readonly deleteKeys: readonly string[];
+  };
+  readonly deleted: FileDeletedDocumentCommand;
+} {
+  return {
+    cleanup: fileDeleteStorageCleanupPlan(snapshot),
+    deleted: fileDeletedDocumentCommand(snapshot)
+  };
+}
+
 export interface FileDeletedExecuteCommand {
   readonly actor: Actor;
   readonly doctype: string;

@@ -65,6 +65,7 @@ import {
   fileDeleteRequestedDocumentCommand,
   fileDeletedExecuteCommand,
   fileDeletedDocumentCommand,
+  fileDeleteFinalizationPlan,
   fileDeleteStorageCleanupPlan,
   fileDirectUploadDocumentCreateCommand,
   fileDirectUploadReservationPlan,
@@ -3349,6 +3350,29 @@ describe("file policy", () => {
       version: 5
     })).toEqual({
       expectedVersion: 5
+    });
+  });
+
+  it("plans delete finalization cleanup and document delete intent together", () => {
+    expect(fileDeleteFinalizationPlan({
+      ...fileSnapshot({
+        storage_state: "delete_requested",
+        key: "acme/files/file_multipart-original.png",
+        renditions: [
+          renditionEntry("thumb", { key: "acme/file-renditions/file/thumb.webp" })
+        ]
+      }),
+      version: 5
+    })).toEqual({
+      cleanup: {
+        deleteKeys: [
+          "acme/files/file_multipart-original.png",
+          "acme/file-renditions/file/thumb.webp"
+        ]
+      },
+      deleted: {
+        expectedVersion: 5
+      }
     });
   });
 

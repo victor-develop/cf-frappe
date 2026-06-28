@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the delete storage cleanup planning policy slice:
+As of the delete finalization planning policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1756`
-- Remaining gap to Frappe static markers: `1028`
+- Vitest cases: `1757`
+- Remaining gap to Frappe static markers: `1027`
 
 ## Implication
 
