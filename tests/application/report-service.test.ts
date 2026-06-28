@@ -1128,6 +1128,54 @@ describe("ReportService", () => {
     ].join("\n"));
   });
 
+  it("keeps tied ordered CSV rows stable across projection pages", async () => {
+    const { registry, reports, store } = createServices();
+    registry.registerReport(
+      defineReport({
+        name: "Stable Ordered Count Export",
+        doctype: "Note",
+        columns: [
+          { name: "title", label: "Title" },
+          { name: "count", label: "Count" }
+        ],
+        orderBy: "count",
+        order: "desc",
+        roles: ["User"]
+      })
+    );
+    for (let index = 0; index < 205; index += 1) {
+      await store.save({
+        tenantId: "acme",
+        doctype: "Note",
+        name: `Stable ${index}`,
+        version: 1,
+        docstatus: "draft",
+        data: {
+          title: `Stable ${index}`,
+          count: 10,
+          created_by: owner.id
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString()
+      });
+    }
+
+    const csv = await reports.exportReportCsv(owner, "Stable Ordered Count Export", { limit: 3 });
+
+    expect(csv).toMatchObject({
+      exported: 3,
+      total: 205,
+      truncated: true,
+      limit: 3
+    });
+    expect(csv.body).toBe([
+      "Title,Count",
+      "Stable 204,10",
+      "Stable 203,10",
+      "Stable 202,10"
+    ].join("\n"));
+  });
+
   it("finds matching rows beyond the first projection page", async () => {
     const { store, reports } = createServices();
     for (let index = 0; index < 204; index += 1) {

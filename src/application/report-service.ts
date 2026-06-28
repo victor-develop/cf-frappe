@@ -607,7 +607,11 @@ class BoundedOrderedReportRows {
     let child = index;
     while (child > 0) {
       const parent = Math.floor((child - 1) / 2);
-      if (!isWorseOrderedRow(this.heap[child]!, this.heap[parent]!, this.direction)) {
+      if (!isWorseOrderedRow(
+        requireHeapEntry(this.heap, child, "child"),
+        requireHeapEntry(this.heap, parent, "parent"),
+        this.direction
+      )) {
         return;
       }
       this.swap(child, parent);
@@ -621,10 +625,16 @@ class BoundedOrderedReportRows {
       const left = parent * 2 + 1;
       const right = left + 1;
       let worst = parent;
-      if (left < this.heap.length && isWorseOrderedRow(this.heap[left]!, this.heap[worst]!, this.direction)) {
+      if (
+        left < this.heap.length &&
+        isWorseOrderedRow(requireHeapEntry(this.heap, left, "left"), requireHeapEntry(this.heap, worst, "worst"), this.direction)
+      ) {
         worst = left;
       }
-      if (right < this.heap.length && isWorseOrderedRow(this.heap[right]!, this.heap[worst]!, this.direction)) {
+      if (
+        right < this.heap.length &&
+        isWorseOrderedRow(requireHeapEntry(this.heap, right, "right"), requireHeapEntry(this.heap, worst, "worst"), this.direction)
+      ) {
         worst = right;
       }
       if (worst === parent) {
@@ -636,10 +646,22 @@ class BoundedOrderedReportRows {
   }
 
   private swap(left: number, right: number): void {
-    const value = this.heap[left]!;
-    this.heap[left] = this.heap[right]!;
+    const value = requireHeapEntry(this.heap, left, "left");
+    this.heap[left] = requireHeapEntry(this.heap, right, "right");
     this.heap[right] = value;
   }
+}
+
+function requireHeapEntry(
+  heap: readonly OrderedReportRow[],
+  index: number,
+  label: string
+): OrderedReportRow {
+  const entry = heap[index];
+  if (entry === undefined) {
+    throw new Error(`Report ordered-row heap is missing ${label} entry at index ${index}`);
+  }
+  return entry;
 }
 
 function sortReportDocuments(
