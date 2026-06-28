@@ -45,8 +45,10 @@ import {
   normalizeUnsetFields,
   canExecuteDomainCommandForRoles,
   planDocumentCopyPolicy,
+  planDocumentCreatePolicy,
   planDocumentDeletePolicy,
   planDocumentStatusChangePolicy,
+  planDocumentUpdatePolicy,
   planDomainCommandPolicy,
   planWorkflowTransitionPolicy
 } from "./document-command-policy.js";
@@ -555,15 +557,20 @@ export class DocumentService implements DocumentCommandExecutor {
       uniqueReservations,
       now
     );
+    const plan = planDocumentCreatePolicy({
+      doctype,
+      data,
+      eventType: command.eventType
+    });
     const event = this.newEvent({
       tenantId,
       stream,
-      type: command.eventType ?? doctype.events?.create ?? `${doctype.name}Created`,
+      type: plan.eventType,
       doctype: doctype.name,
       documentName: name,
       actorId: command.actor.id,
       occurredAt: now,
-      payload: documentCreatedPayload(data, "draft"),
+      payload: plan.payload,
       metadata: command.metadata ?? {}
     });
     const commit = await this.store.commitBatch(
@@ -769,16 +776,21 @@ export class DocumentService implements DocumentCommandExecutor {
       nextReservations,
       now
     );
-    const payload = documentUpdatedPayload(normalizedPatch, unset);
+    const plan = planDocumentUpdatePolicy({
+      doctype: options.doctype,
+      patch: normalizedPatch,
+      unset,
+      eventType: options.command.eventType
+    });
     const event = this.newEvent({
       tenantId: options.tenantId,
       stream: options.stream,
-      type: options.command.eventType ?? options.doctype.events?.update ?? `${options.doctype.name}Updated`,
+      type: plan.eventType,
       doctype: options.doctype.name,
       documentName: options.command.name,
       actorId: options.command.actor.id,
       occurredAt: now,
-      payload,
+      payload: plan.payload,
       metadata: options.command.metadata ?? {}
     });
     const commit = await this.store.commitBatch(

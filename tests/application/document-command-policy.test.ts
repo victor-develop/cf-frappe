@@ -8,8 +8,10 @@ import {
   mergeSnapshotFromDocument,
   normalizeUnsetFields,
   planDocumentCopyPolicy,
+  planDocumentCreatePolicy,
   planDocumentDeletePolicy,
   planDocumentStatusChangePolicy,
+  planDocumentUpdatePolicy,
   planDomainCommandPolicy,
   planWorkflowTransitionPolicy,
   pickCommandFields,
@@ -85,6 +87,54 @@ describe("document command policy", () => {
     });
     expect(pickCommandFields(["body", "missing"], { title: "Hello", body: "World" })).toEqual({
       body: "World"
+    });
+  });
+
+  it("plans document create lifecycle events with draft payloads", () => {
+    expect(planDocumentCreatePolicy({ doctype: { name: "Note" }, data: { title: "Hello" } })).toEqual({
+      eventType: "NoteCreated",
+      docstatus: "draft",
+      payload: { kind: "DocumentCreated", data: { title: "Hello" }, docstatus: "draft" }
+    });
+  });
+
+  it("plans document create lifecycle events with explicit command event names", () => {
+    expect(
+      planDocumentCreatePolicy({
+        doctype: { name: "Note", events: { create: "NoteWasCreated" } },
+        data: { title: "Hello" },
+        eventType: "NoteImported"
+      })
+    ).toEqual({
+      eventType: "NoteImported",
+      docstatus: "draft",
+      payload: { kind: "DocumentCreated", data: { title: "Hello" }, docstatus: "draft" }
+    });
+  });
+
+  it("plans document update lifecycle events with explicit unset payloads", () => {
+    expect(
+      planDocumentUpdatePolicy({
+        doctype: { name: "Note" },
+        patch: { title: "Updated" },
+        unset: ["body"]
+      })
+    ).toEqual({
+      eventType: "NoteUpdated",
+      payload: { kind: "DocumentUpdated", patch: { title: "Updated" }, unset: ["body"] }
+    });
+  });
+
+  it("plans document update lifecycle events with explicit command event names", () => {
+    expect(
+      planDocumentUpdatePolicy({
+        doctype: { name: "Note", events: { update: "NoteWasUpdated" } },
+        patch: { title: "Updated" },
+        eventType: "NoteTitleEdited"
+      })
+    ).toEqual({
+      eventType: "NoteTitleEdited",
+      payload: { kind: "DocumentUpdated", patch: { title: "Updated" } }
     });
   });
 

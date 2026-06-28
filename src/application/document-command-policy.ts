@@ -3,6 +3,11 @@ import { badRequest, conflict, FrameworkError } from "../core/errors.js";
 import { compactData } from "../core/schema.js";
 import { allowedWorkflowTransitions, currentWorkflowState } from "../core/workflow.js";
 import { copyDocumentData } from "./document-field-policy.js";
+import {
+  documentCreatedPayload,
+  documentUpdatedPayload,
+  type DocumentLifecycleEventPayload
+} from "./document-lifecycle-events.js";
 import type { RelatedDocTypeResolver } from "./document-reference-policy.js";
 import type {
   Actor,
@@ -63,6 +68,41 @@ export function pickCommandFields(fields: readonly string[] | undefined, input: 
     return input;
   }
   return Object.fromEntries(fields.map((field) => [field, input[field]]).filter(([, value]) => value !== undefined)) as DocumentData;
+}
+
+export interface DocumentCreatePolicyPlan {
+  readonly eventType: string;
+  readonly docstatus: "draft";
+  readonly payload: Extract<DocumentLifecycleEventPayload, { readonly kind: "DocumentCreated" }>;
+}
+
+export function planDocumentCreatePolicy(input: {
+  readonly doctype: Pick<DocTypeDefinition, "name" | "events">;
+  readonly data: DocumentData;
+  readonly eventType?: string | undefined;
+}): DocumentCreatePolicyPlan {
+  return {
+    eventType: input.eventType ?? input.doctype.events?.create ?? `${input.doctype.name}Created`,
+    docstatus: "draft",
+    payload: documentCreatedPayload(input.data, "draft")
+  };
+}
+
+export interface DocumentUpdatePolicyPlan {
+  readonly eventType: string;
+  readonly payload: Extract<DocumentLifecycleEventPayload, { readonly kind: "DocumentUpdated" }>;
+}
+
+export function planDocumentUpdatePolicy(input: {
+  readonly doctype: Pick<DocTypeDefinition, "name" | "events">;
+  readonly patch: DocumentData;
+  readonly unset?: readonly string[] | undefined;
+  readonly eventType?: string | undefined;
+}): DocumentUpdatePolicyPlan {
+  return {
+    eventType: input.eventType ?? input.doctype.events?.update ?? `${input.doctype.name}Updated`,
+    payload: documentUpdatedPayload(input.patch, input.unset ?? [])
+  };
 }
 
 export interface DomainCommandPolicyPlan {
