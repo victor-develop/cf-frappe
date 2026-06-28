@@ -458,6 +458,42 @@ describe("app manifests", () => {
     expect(Object.isFrozen(app.calendars?.[0]?.filters?.[0])).toBe(true);
   });
 
+  it("snapshots app manifest Kanban metadata by value", () => {
+    const roles = ["User"];
+    const kanban = {
+      name: "Task Board",
+      roles,
+      doctype: "Task",
+      columnField: "status",
+      titleField: "title",
+      filters: [{ field: "published", operator: "eq" as const, value: true }],
+      columns: [{ value: "Open", label: "Open", indicator: "blue" }]
+    };
+    const app = defineApp({
+      name: "tasks",
+      kanbans: [kanban]
+    });
+
+    roles[0] = "Guest";
+    kanban.filters[0]!.value = false;
+    kanban.columns[0]!.label = "Mutated";
+    kanban.columns.push({ value: "Closed", label: "Closed", indicator: "green" });
+
+    expect(app.kanbans?.[0]?.roles).toEqual(["User"]);
+    expect(app.kanbans?.[0]?.filters).toEqual([{ field: "published", operator: "eq", value: true }]);
+    expect(app.kanbans?.[0]?.columns).toEqual([{ value: "Open", label: "Open", indicator: "blue" }]);
+    expect(registryOptionsFromApps([app]).kanbans?.[0]?.columns).toEqual([
+      { value: "Open", label: "Open", indicator: "blue" }
+    ]);
+    expect(Object.isFrozen(app.kanbans)).toBe(true);
+    expect(Object.isFrozen(app.kanbans?.[0])).toBe(true);
+    expect(Object.isFrozen(app.kanbans?.[0]?.roles)).toBe(true);
+    expect(Object.isFrozen(app.kanbans?.[0]?.filters)).toBe(true);
+    expect(Object.isFrozen(app.kanbans?.[0]?.filters?.[0])).toBe(true);
+    expect(Object.isFrozen(app.kanbans?.[0]?.columns)).toBe(true);
+    expect(Object.isFrozen(app.kanbans?.[0]?.columns?.[0])).toBe(true);
+  });
+
   it("validates app names at the manifest boundary", () => {
     expect(() => defineApp({ name: "" })).toThrow(FrameworkError);
     expect(() => defineApp({ name: "Bad Name" })).toThrow("Invalid app name");
