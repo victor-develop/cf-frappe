@@ -48,6 +48,7 @@ import {
   ensureDirectUploadMatches,
   ensureMultipartCompletionMatchesManifest,
   fileAttachmentTargetForValidation,
+  fileBufferedUploadFailureCleanupPlan,
   requireDirectFileUploadCreator,
   requireFileObjectMetadata,
   requireFileTransformer,
@@ -485,7 +486,10 @@ export class FileService {
         object
       });
     } catch (error) {
-      await this.storage.delete(key).catch(ignoreFileCleanupFailure);
+      const cleanup = fileBufferedUploadFailureCleanupPlan({ key });
+      for (const cleanupKey of cleanup.deleteKeys) {
+        await this.storage.delete(cleanupKey).catch(ignoreFileCleanupFailure);
+      }
       throw error;
     }
 
@@ -517,7 +521,10 @@ export class FileService {
       }));
       return fileUploadedResult({ snapshot, object });
     } catch (error) {
-      await this.storage.delete(key).catch(ignoreFileCleanupFailure);
+      const cleanup = fileBufferedUploadFailureCleanupPlan({ key });
+      for (const cleanupKey of cleanup.deleteKeys) {
+        await this.storage.delete(cleanupKey).catch(ignoreFileCleanupFailure);
+      }
       throw error;
     }
   }

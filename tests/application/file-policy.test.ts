@@ -41,6 +41,7 @@ import {
   fileBufferedUploadCreatePlan,
   fileBufferedUploadDocumentCreateCommand,
   fileBufferedUploadDocumentData,
+  fileBufferedUploadFailureCleanupPlan,
   fileBufferedUploadStoragePlan,
   fileBufferedUploadPutObjectCommand,
   fileCompletedMultipartObjectReadPlan,
@@ -2083,6 +2084,14 @@ describe("file policy", () => {
         size: 5,
         customMetadata: { tenantId: "acme", uploadedBy: "owner@example.com" }
       }
+    });
+  });
+
+  it("plans buffered-upload failure cleanup keys", () => {
+    expect(fileBufferedUploadFailureCleanupPlan({
+      key: "acme/files/file_1-invoice.pdf"
+    })).toEqual({
+      deleteKeys: ["acme/files/file_1-invoice.pdf"]
     });
   });
 

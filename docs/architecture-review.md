@@ -51,6 +51,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized upload completion planning in file policy so direct and multipart completion orchestration no longer duplicate scan-patch, infected-state, and completion-command selection inline.
 - Centralized buffered upload create planning in file policy so buffered upload orchestration no longer duplicates scan-patch, infected-state, and document-create intent selection inline.
 - Centralized buffered upload storage planning in file policy so buffered upload orchestration no longer composes document data and storage put commands from the same upload fields inline.
+- Centralized buffered upload failure cleanup planning in file policy so buffered upload scan and metadata failures no longer compose storage cleanup keys inline.
 - Centralized direct upload reservation planning in file policy so direct-upload orchestration no longer composes pending document create intents and storage reservation commands from the same upload fields inline.
 - Centralized multipart upload reservation planning in file policy so multipart-upload orchestration no longer composes pending document data and storage reservation commands from the same upload fields inline.
 - Centralized multipart upload reservation cleanup planning in file policy so failed multipart metadata creation no longer composes storage abort cleanup commands inline.

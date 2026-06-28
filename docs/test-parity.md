@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the multipart upload reservation cleanup planning policy slice:
+As of the buffered upload failure cleanup planning policy slice:
 
 - Vitest files: `169`
-- Vitest cases: `1753`
-- Remaining gap to Frappe static markers: `1031`
+- Vitest cases: `1754`
+- Remaining gap to Frappe static markers: `1030`
 
 ## Implication
 

@@ -779,6 +779,16 @@ export function fileBufferedUploadStoragePlan(command: {
   };
 }
 
+export function fileBufferedUploadFailureCleanupPlan(command: {
+  readonly key: string;
+}): {
+  readonly deleteKeys: readonly string[];
+} {
+  return {
+    deleteKeys: [command.key]
+  };
+}
+
 export function fileDirectUploadReservationCommand(command: {
   readonly key: string;
   readonly contentType: string;
