@@ -68,6 +68,7 @@ import {
   fileDashboardResult,
   fileDashboardScanPlan,
   fileDashboardSystemActor,
+  fileDownloadedObjectReadPlan,
   fileDownloadedResult,
   fileDownloadedRenditionResult,
   fileDeleteRequestedExecuteCommand,
@@ -835,6 +836,15 @@ describe("file policy", () => {
       snapshot,
       object
     });
+  });
+
+  it("plans downloaded object reads from the file snapshot", () => {
+    expect(fileDownloadedObjectReadPlan(fileSnapshot({
+      key: "acme/files/file_invoice-invoice.pdf"
+    }))).toEqual({
+      key: "acme/files/file_invoice-invoice.pdf"
+    });
+    expect(() => fileDownloadedObjectReadPlan(fileSnapshot({}))).toThrow("File/file_multipart has no key");
   });
 
   it("builds prepared direct and multipart upload results", () => {

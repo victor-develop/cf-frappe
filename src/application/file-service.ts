@@ -79,6 +79,7 @@ import {
   fileDownloadedResult,
   fileReadableDashboardCandidate,
   fileReadableDashboardEntries,
+  fileDownloadedObjectReadPlan,
   fileDownloadedTransformObjectCommand,
   fileDeleteRequestedExecuteCommand,
   fileDeleteRequestedDocumentCommand,
@@ -102,7 +103,6 @@ import {
   fileMultipartUploadReservationPlan,
   fileMultipartUploadId,
   fileMultipartUploadReservationCleanupPlan,
-  filePrimaryObjectKey,
   fileObjectSourceEtag,
   filePreparedDirectUploadResult,
   filePreparedMultipartUploadResult,
@@ -837,8 +837,8 @@ export class FileService {
 
   async download(command: DownloadFileCommand): Promise<DownloadedFile> {
     const snapshot = await this.availableFileSnapshot(command);
-    const key = filePrimaryObjectKey(snapshot);
-    const object = requireStoredFileObject(await this.storage.get(key), this.fileDoctype, command.name);
+    const read = fileDownloadedObjectReadPlan(snapshot);
+    const object = requireStoredFileObject(await this.storage.get(read.key), this.fileDoctype, command.name);
     return fileDownloadedResult({ snapshot, object });
   }
 

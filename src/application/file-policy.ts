@@ -1401,6 +1401,14 @@ export function fileDownloadedResult(command: {
   };
 }
 
+export function fileDownloadedObjectReadPlan(snapshot: DocumentSnapshot): {
+  readonly key: string;
+} {
+  return {
+    key: filePrimaryObjectKey(snapshot)
+  };
+}
+
 export function fileTransformedFileResult(command: {
   readonly snapshot: DocumentSnapshot;
   readonly object: StoredFileObject;
