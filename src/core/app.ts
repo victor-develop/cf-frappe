@@ -14,7 +14,7 @@ import type { WebPageDefinition } from "./web-page.js";
 import type { WebViewDefinition } from "./web-view.js";
 import { defineWebsiteSettings, type WebsiteSettingsDefinition } from "./website-settings.js";
 import { defineWebsiteTheme, type WebsiteThemeDefinition } from "./website-theme.js";
-import type { WorkspaceDefinition } from "./workspace.js";
+import { defineWorkspace, type WorkspaceDefinition } from "./workspace.js";
 
 export interface FrameworkAppDefinition<TDataPatchResources = unknown> {
   readonly name: string;
@@ -69,7 +69,7 @@ export function defineApp<TDataPatchResources = unknown>(
     webViews: Object.freeze([...(input.webViews ?? [])]),
     ...(input.websiteSettings === undefined ? {} : { websiteSettings: defineWebsiteSettings(input.websiteSettings) }),
     websiteThemes: Object.freeze((input.websiteThemes ?? []).map(defineWebsiteTheme)),
-    workspaces: Object.freeze([...(input.workspaces ?? [])]),
+    workspaces: Object.freeze((input.workspaces ?? []).map(defineWorkspace)),
     clientScripts: Object.freeze((input.clientScripts ?? []).map(defineClientScript)),
     dataPatches: Object.freeze((input.dataPatches ?? []).map((patch) => defineDataPatch<TDataPatchResources>(patch))),
     hooks: freezeHooks(input.hooks ?? {})

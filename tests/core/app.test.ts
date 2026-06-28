@@ -295,6 +295,43 @@ describe("app manifests", () => {
     expect(Object.isFrozen(app.dataPatches?.[0]?.rollback)).toBe(true);
   });
 
+  it("snapshots app manifest workspace metadata by value", () => {
+    const workspaceRoles = ["User"];
+    const shortcutRoles = ["User"];
+    const workspace = {
+      name: "Operations",
+      roles: workspaceRoles,
+      sections: [
+        {
+          name: "main",
+          shortcuts: [{ name: "notes", kind: "doctype" as const, target: "Note", roles: shortcutRoles }]
+        }
+      ]
+    };
+    const app = defineApp({
+      name: "notes",
+      workspaces: [workspace]
+    });
+
+    workspaceRoles[0] = "Guest";
+    shortcutRoles[0] = "Guest";
+    workspace.sections[0]!.shortcuts.push({ name: "mutated", kind: "doctype", target: "Mutated", roles: ["Guest"] });
+
+    expect(app.workspaces?.[0]?.roles).toEqual(["User"]);
+    expect(app.workspaces?.[0]?.sections[0]?.shortcuts).toEqual([
+      { name: "notes", kind: "doctype", target: "Note", roles: ["User"] }
+    ]);
+    expect(registryOptionsFromApps([app]).workspaces?.[0]?.sections[0]?.shortcuts).toEqual([
+      { name: "notes", kind: "doctype", target: "Note", roles: ["User"] }
+    ]);
+    expect(Object.isFrozen(app.workspaces)).toBe(true);
+    expect(Object.isFrozen(app.workspaces?.[0])).toBe(true);
+    expect(Object.isFrozen(app.workspaces?.[0]?.roles)).toBe(true);
+    expect(Object.isFrozen(app.workspaces?.[0]?.sections)).toBe(true);
+    expect(Object.isFrozen(app.workspaces?.[0]?.sections[0]?.shortcuts)).toBe(true);
+    expect(Object.isFrozen(app.workspaces?.[0]?.sections[0]?.shortcuts[0]?.roles)).toBe(true);
+  });
+
   it("validates app names at the manifest boundary", () => {
     expect(() => defineApp({ name: "" })).toThrow(FrameworkError);
     expect(() => defineApp({ name: "Bad Name" })).toThrow("Invalid app name");

@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the app manifest executable metadata clone slice:
+As of the app manifest workspace metadata clone slice:
 
 - Vitest files: `172`
-- Vitest cases: `1899`
-- Remaining gap to Frappe static markers: `885`
+- Vitest cases: `1900`
+- Remaining gap to Frappe static markers: `884`
 
 ## Implication
 
