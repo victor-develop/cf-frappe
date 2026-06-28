@@ -102,6 +102,13 @@ export interface DocumentDeliveryOutboxDeliveryServices {
   readonly realtime?: RealtimePublisher;
 }
 
+interface EmailNotificationQueueResult {
+  readonly status: string;
+  readonly messageId?: string;
+  readonly ruleName?: string;
+  readonly recipientId?: string;
+}
+
 export interface DocumentDeliveryOutboxDrainJobResources {
   readonly documentDeliveryOutboxConsumer?: {
     drain(command: DrainDocumentDeliveryOutboxCommand): Promise<DocumentDeliveryOutboxDrainResult>;
@@ -226,27 +233,31 @@ export class DocumentDeliveryOutboxConsumer {
 export function createDocumentDeliveryOutboxDeliveryHandlers(
   services: DocumentDeliveryOutboxDeliveryServices
 ): DocumentDeliveryOutboxDeliveryHandlers {
+  const notifications = services.notifications;
+  const realtime = services.realtime;
+  const emailNotifications = services.emailNotifications;
+  const emailNotificationDeliveryQueue = services.emailNotificationDeliveryQueue;
   return {
-    ...(services.notifications === undefined
+    ...(notifications === undefined
       ? {}
       : {
           notification: {
             async deliver(record: DocumentDeliveryOutboxRecord): Promise<DocumentData> {
               const source = sourceFromOutboxRecord(record);
-              await services.notifications!.recordFromDomainEvent(source.event, source.snapshot);
+              await notifications.recordFromDomainEvent(source.event, source.snapshot);
               return { deliveredBy: "notifications" };
             }
           }
         }),
-    ...(services.realtime === undefined
+    ...(realtime === undefined
       ? {}
       : {
           realtime: {
             async deliver(record: DocumentDeliveryOutboxRecord): Promise<DocumentData> {
               const source = sourceFromOutboxRecord(record);
               const published = await Promise.all([
-                services.realtime!.publish(realtimeEventFromDomainEvent(source.event, source.snapshot)),
-                ...realtimeUserNotificationsFromDomainEvent(source.event).map((event) => services.realtime!.publish(event))
+                realtime.publish(realtimeEventFromDomainEvent(source.event, source.snapshot)),
+                ...realtimeUserNotificationsFromDomainEvent(source.event).map((event) => realtime.publish(event))
               ]);
               return {
                 deliveredBy: "realtime",
@@ -255,22 +266,22 @@ export function createDocumentDeliveryOutboxDeliveryHandlers(
             }
           }
         }),
-    ...(services.emailNotifications === undefined
+    ...(emailNotifications === undefined
       ? {}
       : {
           email: {
             async deliver(record: DocumentDeliveryOutboxRecord): Promise<DocumentData> {
               const source = sourceFromOutboxRecord(record);
               if (
-                services.emailNotificationDeliveryQueue !== undefined &&
-                services.emailNotifications!.queueFromDomainEvent !== undefined
+                emailNotificationDeliveryQueue !== undefined &&
+                emailNotifications.queueFromDomainEvent !== undefined
               ) {
-                const deliveries = await services.emailNotifications!.queueFromDomainEvent(source.event, source.snapshot);
+                const deliveries = await emailNotifications.queueFromDomainEvent(source.event, source.snapshot);
                 await Promise.all(
                   deliveries
-                    .filter((delivery) => delivery.status === "queued" && delivery.messageId !== undefined)
+                    .filter(hasQueuedEmailMessageId)
                     .map((delivery) =>
-                      services.emailNotificationDeliveryQueue!.enqueue(source.event.tenantId, delivery.messageId!, {
+                      emailNotificationDeliveryQueue.enqueue(source.event.tenantId, delivery.messageId, {
                         metadata: {
                           sourceEventId: source.event.id,
                           sourceEventType: source.event.type,
@@ -283,12 +294,18 @@ export function createDocumentDeliveryOutboxDeliveryHandlers(
                 );
                 return { deliveredBy: "email-queue", queued: deliveries.length };
               }
-              await services.emailNotifications!.sendFromDomainEvent(source.event, source.snapshot);
+              await emailNotifications.sendFromDomainEvent(source.event, source.snapshot);
               return { deliveredBy: "email" };
             }
           }
         })
   };
+}
+
+function hasQueuedEmailMessageId<TDelivery extends EmailNotificationQueueResult>(
+  delivery: TDelivery
+): delivery is TDelivery & { readonly messageId: string } {
+  return delivery.status === "queued" && delivery.messageId !== undefined;
 }
 
 export function createDocumentDeliveryOutboxDrainJob<

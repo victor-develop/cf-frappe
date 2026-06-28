@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the email outbox append consistency slice:
+As of the document delivery outbox dependency boundary slice:
 
 - Vitest files: `170`
-- Vitest cases: `1786`
-- Remaining gap to Frappe static markers: `998`
+- Vitest cases: `1787`
+- Remaining gap to Frappe static markers: `997`
 
 ## Implication
 

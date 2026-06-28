@@ -193,6 +193,51 @@ describe("DocumentDeliveryOutboxConsumer", () => {
     ]);
   });
 
+  it("only enqueues queued email deliveries with message ids", async () => {
+    const outbox = new DocumentDeliveryOutboxService({
+      events: new InMemoryDocumentStore(),
+      ids: deterministicIds(["enqueue-email", "claim-email", "deliver-email"]),
+      clock: fixedClock(now)
+    });
+    await outbox.enqueueFromDomainEvent({
+      event: domainEvent(),
+      snapshot: snapshot(),
+      targets: ["email"]
+    });
+    const queuedEmailMessages: Array<{ readonly tenantId: string; readonly messageId: string }> = [];
+    const consumer = new DocumentDeliveryOutboxConsumer({
+      outbox,
+      clock: fixedClock(now),
+      deliveries: createDocumentDeliveryOutboxDeliveryHandlers({
+        emailNotifications: {
+          async sendFromDomainEvent() {
+            throw new Error("should queue email instead of sending directly");
+          },
+          async queueFromDomainEvent() {
+            return [
+              { status: "queued" },
+              { status: "queued", messageId: "msg_ready" },
+              { status: "skipped", messageId: "msg_skipped" }
+            ];
+          }
+        },
+        emailNotificationDeliveryQueue: {
+          async enqueue(tenantId, messageId) {
+            queuedEmailMessages.push({ tenantId, messageId });
+          }
+        }
+      })
+    });
+
+    await expect(consumer.drain({ tenantId: "acme", claimId: "claim-1", now })).resolves.toMatchObject({
+      claimed: 1,
+      delivered: 1,
+      failed: 0,
+      outcomes: [{ outboxId: "evt_source:email", status: "delivered", attempts: 1 }]
+    });
+    expect(queuedEmailMessages).toEqual([{ tenantId: "acme", messageId: "msg_ready" }]);
+  });
+
   it("runs through the built-in drain job", async () => {
     const registry = createJobRegistry({
       jobs: [createDocumentDeliveryOutboxDrainJob()]
