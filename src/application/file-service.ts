@@ -48,6 +48,7 @@ import {
   ensureFileDeleteAllowed,
   ensureFileExpectedVersion,
   ensureFileMetadataUpdateAllowed,
+  ensureFileMultipartUploadAllowed,
   ensureFilePendingDirectUpload,
   ensureFilePendingMultipartCompletion,
   ensureFilePendingMultipartPartUpload,
@@ -1194,13 +1195,14 @@ export class FileService {
   ): Promise<DocumentSnapshot> {
     const tenantId = command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
     const current = await this.queries.getDocument(command.actor, this.fileDoctype, command.name, tenantId);
-    ensurePendingMultipartUpload(current);
     const doctype = this.registry.get(this.fileDoctype);
-    if (!can(command.actor, doctype, "metadata", current)) {
-      throw permissionDenied(
-        `Actor '${command.actor.id}' cannot execute multipart upload on ${this.fileDoctype}/${command.name}`
-      );
-    }
+    ensureFileMultipartUploadAllowed({
+      actor: command.actor,
+      doctype,
+      fileDoctype: this.fileDoctype,
+      snapshot: current,
+      ensurePendingMultipartUpload
+    });
     return current;
   }
 

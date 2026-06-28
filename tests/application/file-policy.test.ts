@@ -13,6 +13,7 @@ import {
   ensureFileDeleteExpectedVersion,
   ensureFileExpectedVersion,
   ensureFileMetadataUpdateAllowed,
+  ensureFileMultipartUploadAllowed,
   ensureFilePendingDirectUpload,
   ensureFilePendingMultipartCompletion,
   ensureFilePendingMultipartPartUpload,
@@ -1320,6 +1321,36 @@ describe("file policy", () => {
       fileDoctype: "File",
       snapshot
     })).toThrow("Actor 'reader@example.com' cannot generate renditions for File/file_multipart");
+  });
+
+  it("validates multipart upload state before permissions", () => {
+    const doctype: DocTypeDefinition = {
+      name: "File",
+      fields: [],
+      permissions: [{ roles: ["File Manager"], actions: ["metadata"] }]
+    };
+
+    expect(() => ensureFileMultipartUploadAllowed({
+      actor: { id: "manager@example.com", roles: ["File Manager"] },
+      doctype,
+      fileDoctype: "File",
+      snapshot: fileSnapshot({ storage_state: "upload_pending", multipart_upload_id: "upload-1" }),
+      ensurePendingMultipartUpload: ensureFilePendingMultipartPartUpload
+    })).not.toThrow();
+    expect(() => ensureFileMultipartUploadAllowed({
+      actor: { id: "reader@example.com", roles: ["Reader"] },
+      doctype,
+      fileDoctype: "File",
+      snapshot: fileSnapshot({ storage_state: "available", multipart_upload_id: "upload-1" }),
+      ensurePendingMultipartUpload: ensureFilePendingMultipartPartUpload
+    })).toThrow("File/file_multipart is not pending multipart upload");
+    expect(() => ensureFileMultipartUploadAllowed({
+      actor: { id: "reader@example.com", roles: ["Reader"] },
+      doctype,
+      fileDoctype: "File",
+      snapshot: fileSnapshot({ storage_state: "upload_pending", multipart_upload_id: "upload-1" }),
+      ensurePendingMultipartUpload: ensureFilePendingMultipartPartUpload
+    })).toThrow("Actor 'reader@example.com' cannot execute multipart upload on File/file_multipart");
   });
 
   it("identifies files with delete already requested", () => {
