@@ -133,6 +133,7 @@ import {
   fileTransformOptionsData,
   fileTransformOptionsFromData,
   fileTransformSource,
+  ignoreFileCleanupFailure,
   isFileDeleteRequested,
   isFileMultipartCompletionStarted,
   isFileScanFailed,
@@ -1463,6 +1464,11 @@ describe("file policy", () => {
       updated: [updated],
       failed: [failed]
     });
+  });
+
+  it("ignores file cleanup failures without replacing the original failure", () => {
+    expect(ignoreFileCleanupFailure(new Error("delete failed"))).toBeUndefined();
+    expect(ignoreFileCleanupFailure("delete failed")).toBeUndefined();
   });
 
   it("validates direct upload object metadata against its reservation", () => {

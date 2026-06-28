@@ -1,7 +1,6 @@
 import type { DocumentCommandExecutor } from "./document-service.js";
 import { QueryService } from "./query-service.js";
 import {
-  badRequest,
   type FrameworkErrorCode
 } from "../core/errors.js";
 import { FILE_DOCTYPE_NAME } from "../core/file-doctype.js";
@@ -9,8 +8,7 @@ import type { ModelRegistry } from "../core/registry.js";
 import {
   type Actor,
   type DocumentData,
-  type DocumentSnapshot,
-  type JsonValue
+  type DocumentSnapshot
 } from "../core/types.js";
 import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
@@ -132,6 +130,7 @@ import {
   fileUploadedResult,
   fileSnapshotFilename,
   failedFileRenditionForError,
+  ignoreFileCleanupFailure,
   isInfectedFileScanResult,
   multipartPartSize,
   normalizeBulkFileSelections,
@@ -140,7 +139,6 @@ import {
   normalizeFileSize,
   objectKey,
   optionalFileScanPatch,
-  requireFileSnapshotString,
   reusableFileRenditionForGeneration,
   sanitizeFilename,
   type FileRenditionManifestEntry,
@@ -496,7 +494,7 @@ export class FileService {
         object
       });
     } catch (error) {
-      await this.storage.delete(key).catch(() => undefined);
+      await this.storage.delete(key).catch(ignoreFileCleanupFailure);
       throw error;
     }
 
@@ -529,7 +527,7 @@ export class FileService {
       }));
       return fileUploadedResult({ snapshot, object });
     } catch (error) {
-      await this.storage.delete(key).catch(() => undefined);
+      await this.storage.delete(key).catch(ignoreFileCleanupFailure);
       throw error;
     }
   }
@@ -677,7 +675,7 @@ export class FileService {
       await multipartUploads.abortMultipartUpload(fileMultipartUploadAbortCommand({
         key,
         uploadId: upload.uploadId
-      })).catch(() => undefined);
+      })).catch(ignoreFileCleanupFailure);
       throw error;
     }
   }
@@ -966,7 +964,7 @@ export class FileService {
       });
     } catch (error) {
       if (object) {
-        await this.storage.delete(object.key).catch(() => undefined);
+        await this.storage.delete(object.key).catch(ignoreFileCleanupFailure);
       }
       await this.recordRenditionManifest({
         source: command,
@@ -1191,7 +1189,7 @@ export class FileService {
 
   private async deleteFileObjectsForScanFailure(snapshot: DocumentSnapshot): Promise<void> {
     for (const key of fileObjectKeysForScanFailureCleanup(snapshot)) {
-      await this.storage.delete(key).catch(() => undefined);
+      await this.storage.delete(key).catch(ignoreFileCleanupFailure);
     }
   }
 
