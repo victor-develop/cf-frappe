@@ -131,6 +131,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Guarded configured OIDC token source header, cookie, and scheme names so invalid Fetch header names or cookie tokens are rejected during resolver setup instead of request handling.
 - Normalized custom select field options before metadata events are persisted, rejecting blank, duplicate, and non-select option declarations so runtime custom fields match field-property override semantics.
 - Validated custom field default values against the composed DocType before metadata events are persisted, rejecting type and select-option mismatches before they enter the event stream.
+- Validated custom field numeric bounds before metadata events are persisted, rejecting non-finite min/max values and inverted ranges before they enter the event stream.
 - Extracted selected-file bulk operation normalization from `FileService` into the file policy, covering trimming, duplicates, expected-version validation, empty selections, and the bounded 100-file limit.
 - Extracted direct-upload object metadata matching and scanner result patch shaping from `FileService` into the file policy with focused size/content-type and optional scan-field coverage.
 - Extracted file dashboard row projection and limit normalization from `FileService` into the file policy with focused preview, attachment, scan, rendition, and limit coverage.

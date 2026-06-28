@@ -374,6 +374,45 @@ describe("CustomFieldService", () => {
     await expect(events.readStream(customFieldsCatalogStream("acme"))).resolves.toHaveLength(1);
   });
 
+  it("validates custom field numeric bounds before persisting metadata events", async () => {
+    const events = new InMemoryEventStore();
+    const service = new CustomFieldService({
+      registry: createRegistry({ doctypes: [Note] }),
+      events,
+      ids: deterministicIds(["field-1", "field-2", "field-3"]),
+      clock: fixedClock(now)
+    });
+
+    await expect(
+      service.saveField({
+        actor: admin,
+        doctype: "Note",
+        field: { name: "score", type: "number", min: 0, max: 100 }
+      })
+    ).resolves.toMatchObject({ fields: [{ field: { name: "score", min: 0, max: 100 } }] });
+    await expect(
+      service.saveField({
+        actor: admin,
+        doctype: "Note",
+        field: { name: "bad_range", type: "number", min: 10, max: 1 }
+      })
+    ).rejects.toMatchObject({
+      code: "CUSTOM_FIELD_INVALID",
+      message: "Custom field 'bad_range' min cannot exceed max"
+    });
+    await expect(
+      service.saveField({
+        actor: admin,
+        doctype: "Note",
+        field: { name: "unsafe_min", type: "number", min: Number.POSITIVE_INFINITY }
+      })
+    ).rejects.toMatchObject({
+      code: "CUSTOM_FIELD_INVALID",
+      message: "min must be a finite number"
+    });
+    await expect(events.readStream(customFieldsCatalogStream("acme"))).resolves.toHaveLength(1);
+  });
+
   it("supports custom fields on static child table DocTypes", async () => {
     const InvoiceItem = defineDocType({
       name: "Invoice Item",

@@ -390,8 +390,7 @@ function normalizeField(field: FieldDefinition): PersistedFieldDefinition {
     ...customFieldOptions(field),
     ...(field.linkTo === undefined ? {} : { linkTo: field.linkTo }),
     ...(field.tableOf === undefined ? {} : { tableOf: field.tableOf }),
-    ...(field.min === undefined ? {} : { min: field.min }),
-    ...(field.max === undefined ? {} : { max: field.max }),
+    ...customFieldBounds(name, field),
     ...(field.defaultValue === undefined ? {} : { defaultValue: field.defaultValue })
   });
 }
@@ -419,6 +418,31 @@ function assertCustomFieldDefaultValueValid(base: DocTypeDefinition, field: Pers
       issues
     });
   }
+}
+
+function customFieldBounds(
+  name: string,
+  field: FieldDefinition
+): { readonly min?: number; readonly max?: number } {
+  const min = customFieldBound(field.min, "min");
+  const max = customFieldBound(field.max, "max");
+  if (min !== undefined && max !== undefined && min > max) {
+    throw new FrameworkError("CUSTOM_FIELD_INVALID", `Custom field '${name}' min cannot exceed max`, { status: 400 });
+  }
+  return {
+    ...(min === undefined ? {} : { min }),
+    ...(max === undefined ? {} : { max })
+  };
+}
+
+function customFieldBound(value: number | undefined, field: "min" | "max"): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new FrameworkError("CUSTOM_FIELD_INVALID", `${field} must be a finite number`, { status: 400 });
+  }
+  return value;
 }
 
 function customFieldOptions(field: FieldDefinition): { readonly options?: readonly string[] } {
