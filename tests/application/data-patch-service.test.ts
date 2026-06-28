@@ -96,6 +96,96 @@ describe("DataPatchService", () => {
     });
   });
 
+  it("snapshots configured patch definitions for dashboard, apply, and rollback", async () => {
+    interface PatchResources {
+      readonly events: string[];
+    }
+    const resources: PatchResources = { events: [] };
+    const patch = {
+      id: "core.service_snapshot",
+      label: "Original Patch",
+      checksum: "v1",
+      run: ({ resources }: { resources: PatchResources }) => {
+        resources.events.push("original-run");
+        return { run: "original" };
+      },
+      rollback: {
+        label: "Original Rollback",
+        run: ({ resources }: { resources: PatchResources }) => {
+          resources.events.push("original-rollback");
+          return { rollback: "original" };
+        }
+      }
+    };
+    const service = new DataPatchService({
+      log: new InMemoryDataPatchLog(),
+      resources,
+      patches: [patch],
+      clock: fixedClock(now),
+      ids: deterministicIds(["claim-service-snapshot", "rollback-service-snapshot"])
+    });
+    const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+
+    patch.id = "core.mutated";
+    patch.label = "Mutated Patch";
+    patch.checksum = "v2";
+    patch.run = () => {
+      resources.events.push("mutated-run");
+      return { run: "mutated" };
+    };
+    patch.rollback.label = "Mutated Rollback";
+    patch.rollback.run = () => {
+      resources.events.push("mutated-rollback");
+      return { rollback: "mutated" };
+    };
+
+    await expect(service.dashboard(admin)).resolves.toMatchObject({
+      patches: [
+        {
+          id: "core.service_snapshot",
+          label: "Original Patch",
+          checksum: "v1",
+          status: "not_applied"
+        }
+      ]
+    });
+    await expect(service.apply(admin)).resolves.toEqual({
+      applied: [
+        {
+          id: "core.service_snapshot",
+          checksum: "v1",
+          appliedAt: now,
+          result: { run: "original" }
+        }
+      ],
+      skipped: []
+    });
+    await expect(service.dashboard(admin)).resolves.toMatchObject({
+      patches: [
+        {
+          id: "core.service_snapshot",
+          label: "Original Patch",
+          checksum: "v1",
+          status: "applied",
+          rollbackable: true,
+          rollbackLabel: "Original Rollback"
+        }
+      ]
+    });
+    await expect(service.rollback(admin)).resolves.toEqual({
+      rolledBack: [
+        {
+          id: "core.service_snapshot",
+          checksum: "v1",
+          rolledBackAt: now,
+          result: { rollback: "original" }
+        }
+      ],
+      skipped: []
+    });
+    expect(resources.events).toEqual(["original-run", "original-rollback"]);
+  });
+
   it("blocks non-admins and surfaces pending or failed journal state", async () => {
     const log = new InMemoryDataPatchLog();
     const pending = defineDataPatch({ id: "core.pending", checksum: "v1", run: () => undefined });

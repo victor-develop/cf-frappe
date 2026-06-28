@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the data-patch runner definition snapshot slice:
+As of the data-patch service catalog snapshot slice:
 
 - Vitest files: `173`
-- Vitest cases: `1929`
-- Remaining gap to Frappe static markers: `855`
+- Vitest cases: `1930`
+- Remaining gap to Frappe static markers: `854`
 
 ## Implication
 
