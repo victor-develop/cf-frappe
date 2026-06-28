@@ -72,6 +72,7 @@ import {
   fileDashboardListFilters,
   fileBufferedUploadDocumentData,
   fileDeleteRequestedDocumentCommand,
+  fileDeletedDocumentCommand,
   fileDirectUploadDocumentCreateCommand,
   fileMetadataUpdateDocumentCommand,
   fileMultipartAbortCommand,
@@ -768,12 +769,13 @@ export class FileService {
       snapshot: current,
       uploadId: this.multipartUploadId(current)
     }));
+    const deleted = fileDeletedDocumentCommand(current);
     return this.documents.delete({
       actor: command.actor,
       doctype: this.fileDoctype,
       name: command.name,
       ...fileTenantCommandOption(command.tenantId),
-      expectedVersion: current.version,
+      expectedVersion: deleted.expectedVersion,
       metadata: fileCommandMetadata(command.metadata)
     });
   }
@@ -1041,12 +1043,13 @@ export class FileService {
           })
         : current;
     await this.deleteFileObjects(deleteRequested);
+    const deleted = fileDeletedDocumentCommand(deleteRequested);
     const snapshot = await this.documents.delete({
       actor: command.actor,
       doctype: this.fileDoctype,
       name: command.name,
       ...fileTenantCommandOption(command.tenantId),
-      expectedVersion: deleteRequested.version,
+      expectedVersion: deleted.expectedVersion,
       metadata: fileCommandMetadata(command.metadata)
     });
     return snapshot;

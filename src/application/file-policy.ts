@@ -1162,6 +1162,16 @@ export function fileDeleteRequestedDocumentCommand(
   };
 }
 
+export interface FileDeletedDocumentCommand {
+  readonly expectedVersion: number;
+}
+
+export function fileDeletedDocumentCommand(snapshot: DocumentSnapshot): FileDeletedDocumentCommand {
+  return {
+    expectedVersion: snapshot.version
+  };
+}
+
 export function isFileMultipartCompletionStarted(snapshot: DocumentSnapshot): boolean {
   return snapshot.data.storage_state === "upload_completing";
 }

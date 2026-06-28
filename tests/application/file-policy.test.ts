@@ -41,6 +41,7 @@ import {
   fileDashboardEntryWithPermissions,
   fileDashboardListFilters,
   fileDeleteRequestedDocumentCommand,
+  fileDeletedDocumentCommand,
   fileDirectUploadDocumentCreateCommand,
   fileDocumentData,
   fileMetadataPatch,
@@ -1931,6 +1932,15 @@ describe("file policy", () => {
       expectedVersion: 1
     });
     expect(fileDeleteRequestedDocumentCommand(fileSnapshot({ storage_state: "delete_requested" }))).toBeUndefined();
+  });
+
+  it("builds delete document command intents", () => {
+    expect(fileDeletedDocumentCommand({
+      ...fileSnapshot({ storage_state: "delete_requested" }),
+      version: 5
+    })).toEqual({
+      expectedVersion: 5
+    });
   });
 
   it("identifies multipart files already completing", () => {
