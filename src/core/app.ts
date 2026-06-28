@@ -13,7 +13,7 @@ import type { WebFormDefinition } from "./web-form.js";
 import type { WebPageDefinition } from "./web-page.js";
 import type { WebViewDefinition } from "./web-view.js";
 import { defineWebsiteSettings, type WebsiteSettingsDefinition } from "./website-settings.js";
-import type { WebsiteThemeDefinition } from "./website-theme.js";
+import { defineWebsiteTheme, type WebsiteThemeDefinition } from "./website-theme.js";
 import type { WorkspaceDefinition } from "./workspace.js";
 
 export interface FrameworkAppDefinition<TDataPatchResources = unknown> {
@@ -68,7 +68,7 @@ export function defineApp<TDataPatchResources = unknown>(
     webPages: Object.freeze([...(input.webPages ?? [])]),
     webViews: Object.freeze([...(input.webViews ?? [])]),
     ...(input.websiteSettings === undefined ? {} : { websiteSettings: defineWebsiteSettings(input.websiteSettings) }),
-    websiteThemes: Object.freeze([...(input.websiteThemes ?? [])]),
+    websiteThemes: Object.freeze((input.websiteThemes ?? []).map(defineWebsiteTheme)),
     workspaces: Object.freeze([...(input.workspaces ?? [])]),
     clientScripts: Object.freeze([...(input.clientScripts ?? [])]),
     dataPatches: Object.freeze([...(input.dataPatches ?? [])]),

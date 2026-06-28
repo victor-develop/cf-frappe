@@ -220,6 +220,36 @@ describe("app manifests", () => {
     expect(Object.isFrozen(app.hooks?.Note)).toBe(true);
   });
 
+  it("snapshots app manifest website theme tokens by value", () => {
+    const tokens = {
+      primaryColor: "#2563eb",
+      backgroundColor: "#ffffff"
+    };
+    const app = defineApp({
+      name: "website",
+      websiteThemes: [
+        {
+          name: "Starter",
+          tokens
+        }
+      ]
+    });
+
+    tokens.primaryColor = "#111827";
+
+    expect(app.websiteThemes?.[0]?.tokens).toEqual({
+      primaryColor: "#2563eb",
+      backgroundColor: "#ffffff"
+    });
+    expect(Object.isFrozen(app.websiteThemes)).toBe(true);
+    expect(Object.isFrozen(app.websiteThemes?.[0])).toBe(true);
+    expect(Object.isFrozen(app.websiteThemes?.[0]?.tokens)).toBe(true);
+    expect(createRegistryFromApps([app]).getWebsiteTheme("Starter").tokens).toEqual({
+      primaryColor: "#2563eb",
+      backgroundColor: "#ffffff"
+    });
+  });
+
   it("validates app names at the manifest boundary", () => {
     expect(() => defineApp({ name: "" })).toThrow(FrameworkError);
     expect(() => defineApp({ name: "Bad Name" })).toThrow("Invalid app name");
