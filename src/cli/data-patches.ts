@@ -353,8 +353,9 @@ function recordLines(records: readonly DataPatchRecordResponse[]): readonly stri
 
 function singlePatchId(command: DataPatchRemoteCommand, label = "retry"): string {
   const patchIds = command.patchIds ?? [];
-  if (patchIds.length !== 1) {
+  const [patchId] = patchIds;
+  if (patchId === undefined || patchIds.length !== 1) {
     throw new DataPatchRemoteError(`Data patch ${label} requires exactly one --id`);
   }
-  return patchIds[0]!;
+  return patchId;
 }

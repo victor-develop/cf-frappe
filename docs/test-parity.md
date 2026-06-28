@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Cloudflare Access setup scope boundary slice:
+As of the data patch retry route id boundary slice:
 
 - Vitest files: `170`
-- Vitest cases: `1799`
-- Remaining gap to Frappe static markers: `985`
+- Vitest cases: `1800`
+- Remaining gap to Frappe static markers: `984`
 
 ## Implication
 

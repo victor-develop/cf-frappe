@@ -404,6 +404,32 @@ describe("cf-frappe CLI remote data patches", () => {
     expect(stdout.text()).toContain("- core.seed (v1)");
   });
 
+  it("encodes the single data patch retry id before placing it in the route", async () => {
+    const calls: RemoteCall[] = [];
+    const stdout = textBuffer();
+    const exitCode = await runCli(
+      ["data-patches", "retry", "--url", "https://app.example/cf", "--id", "app/seed:one"],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(calls, {
+          data: {
+            applied: [{ id: "app/seed:one", checksum: "v1", appliedAt: "2026-01-01T00:00:00Z" }],
+            skipped: []
+          }
+        }, 201),
+        stdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("https://app.example/cf/api/data-patches/app%2Fseed%3Aone/retry");
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.body).toBeUndefined();
+    expect(stdout.text()).toContain("- app/seed:one (v1)");
+  });
+
   it("retries one failed remote data patch rollback through the admin API", async () => {
     const calls: RemoteCall[] = [];
     const stdout = textBuffer();
