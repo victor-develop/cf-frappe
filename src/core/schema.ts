@@ -390,8 +390,13 @@ function assertHiddenDependsOnDefinition(doctype: DocTypeDefinition, field: Fiel
 }
 
 function freezeFieldDefinition(doctype: DocTypeDefinition, field: FieldDefinition): FieldDefinition {
+  const defaultValue =
+    field.defaultValue === undefined || typeof field.defaultValue === "function"
+      ? field.defaultValue
+      : cloneJsonValue(field.defaultValue);
   return Object.freeze({
     ...field,
+    ...(defaultValue === undefined ? {} : { defaultValue }),
     ...(field.options === undefined ? {} : { options: Object.freeze([...field.options]) }),
     ...(field.mandatoryDependsOn === undefined
       ? {}

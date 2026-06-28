@@ -268,6 +268,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized downloaded object read planning in file policy so file download orchestration no longer derives primary object keys inline.
 - Centralized downloaded rendition object read planning in file policy so rendition download orchestration no longer derives storage keys from manifest entries inline.
 - Centralized multipart completion snapshot selection in file policy so multipart completion orchestration no longer chooses between current and begin-completion snapshots inline.
+- Guarded declared schema JSON defaults with cloning, preserving DocType metadata boundaries before caller-owned default objects can mutate frozen model definitions.
 - Centralized delete-requested snapshot selection in file policy so delete orchestration no longer chooses between current and request-delete snapshots inline.
 - Centralized generated rendition reuse object-existence facts in file policy so rendition orchestration no longer interprets optional storage head results inline.
 - Centralized infected scan-failure selection in file policy so buffered, direct, and multipart upload orchestration no longer duplicate final scan-failure branching inline.

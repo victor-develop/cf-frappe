@@ -42,6 +42,22 @@ describe("schema", () => {
     expect(dynamicDefault).toEqual({ nested: { actor: "template" } });
   });
 
+  it("snapshots declared JSON defaults by value", () => {
+    const declaredDefault = { nested: { enabled: true } };
+    const settings = defineDocType({
+      name: "Declared Settings",
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "settings", type: "json", defaultValue: declaredDefault }
+      ]
+    });
+
+    declaredDefault.nested.enabled = false;
+    const result = applyDefaults(settings, { title: "Site" }, { actor: owner, now: "2026-01-01T00:00:00.000Z" });
+
+    expect(result.settings).toEqual({ nested: { enabled: true } });
+  });
+
   it("reports missing required fields", () => {
     expect(validateDocumentData(doctype, {})).toMatchObject([
       { field: "customer", code: "required" }
