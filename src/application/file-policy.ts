@@ -71,6 +71,16 @@ export function fileAttachedToCommandOption<TAttachedTo>(
   return attachedTo === undefined ? {} : { attachedTo };
 }
 
+export function fileIsPrivateCommandOption(isPrivate: boolean | undefined): { readonly isPrivate?: boolean } {
+  return isPrivate === undefined ? {} : { isPrivate };
+}
+
+export function fileTransformOverlayCommandOption(
+  overlay: FileTransformOverlaySource | undefined
+): { readonly overlay?: FileTransformOverlaySource } {
+  return overlay === undefined ? {} : { overlay };
+}
+
 export function fileCommandMetadata(metadata: DocumentData | undefined): DocumentData {
   return metadata ?? {};
 }

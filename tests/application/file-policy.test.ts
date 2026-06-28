@@ -63,6 +63,7 @@ import {
   fileScanTarget,
   fileSnapshotStringData,
   fileExpectedVersionCommandOption,
+  fileIsPrivateCommandOption,
   fileUploadCompletedPatch,
   fileUploadCompletedDocumentData,
   fileUploadContentType,
@@ -72,6 +73,7 @@ import {
   fileUploadScanFailedDocumentData,
   fileUploadScanFailedPatch,
   fileTenantCommandOption,
+  fileTransformOverlayCommandOption,
   fileTransformOverlaySource,
   fileTransformOptionsData,
   fileTransformOptionsFromData,
@@ -156,6 +158,15 @@ describe("file policy", () => {
     expect(fileAttachedToCommandOption(attachedTo)).toEqual({ attachedTo });
     expect(fileAttachedToCommandOption(null)).toEqual({ attachedTo: null });
     expect(fileAttachedToCommandOption(undefined)).toEqual({});
+  });
+
+  it("shapes optional file privacy and transform overlay command options", () => {
+    const overlay = overlaySource();
+
+    expect(fileIsPrivateCommandOption(false)).toEqual({ isPrivate: false });
+    expect(fileIsPrivateCommandOption(undefined)).toEqual({});
+    expect(fileTransformOverlayCommandOption(overlay)).toEqual({ overlay });
+    expect(fileTransformOverlayCommandOption(undefined)).toEqual({});
   });
 
   it("marks only browser-safe content types as previewable", () => {

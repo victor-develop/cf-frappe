@@ -85,6 +85,7 @@ import {
   fileScanFailureError,
   fileScanTarget,
   fileExpectedVersionCommandOption,
+  fileIsPrivateCommandOption,
   fileUploadCompletedPatch,
   fileUploadCompletedDocumentData,
   fileUploadContentType,
@@ -94,6 +95,7 @@ import {
   fileUploadScanFailedDocumentData,
   fileUploadScanFailedPatch,
   fileTenantCommandOption,
+  fileTransformOverlayCommandOption,
   fileTransformOverlaySource,
   fileTransformSource,
   fileSnapshotFilename,
@@ -865,7 +867,7 @@ export class FileService {
       id: renditionId,
       attemptId: this.ids.next("rendition_"),
       sourceEtag,
-      ...(overlay === undefined ? {} : { overlay }),
+      ...fileTransformOverlayCommandOption(overlay),
       options,
       requestedAt: this.clock.now(),
       requestedBy: command.actor.id
@@ -890,7 +892,7 @@ export class FileService {
         tenantId,
         downloaded,
         options,
-        ...(overlay === undefined ? {} : { overlay })
+        ...fileTransformOverlayCommandOption(overlay)
       });
       object = await this.storage.put(
         fileRenditionSnapshotPutObjectCommand({
@@ -968,7 +970,7 @@ export class FileService {
       tenantId,
       downloaded,
       options,
-      ...(overlay === undefined ? {} : { overlay })
+      ...fileTransformOverlayCommandOption(overlay)
     });
     return {
       snapshot: downloaded.snapshot,
@@ -1041,7 +1043,7 @@ export class FileService {
         const snapshot = await this.updateMetadata({
           actor: command.actor,
           name: selection.name,
-          ...(command.isPrivate === undefined ? {} : { isPrivate: command.isPrivate }),
+          ...fileIsPrivateCommandOption(command.isPrivate),
           ...fileAttachedToCommandOption(command.attachedTo),
           ...fileExpectedVersionCommandOption(selection.expectedVersion),
           ...fileTenantCommandOption(command.tenantId),
@@ -1089,7 +1091,7 @@ export class FileService {
       tenantId: command.tenantId,
       source: fileTransformSource(command.downloaded.snapshot, command.downloaded.object),
       options: command.options,
-      ...(command.overlay === undefined ? {} : { overlay: command.overlay })
+      ...fileTransformOverlayCommandOption(command.overlay)
     });
   }
 
