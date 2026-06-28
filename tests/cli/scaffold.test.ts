@@ -94,6 +94,7 @@ describe("cf-frappe CLI scaffold", () => {
         readonly producers?: readonly { readonly binding: string; readonly queue: string }[];
         readonly consumers?: readonly { readonly queue: string; readonly max_batch_size?: number }[];
       };
+      readonly triggers?: { readonly crons?: readonly string[] };
       readonly durable_objects?: {
         readonly bindings?: readonly { readonly name: string; readonly class_name: string }[];
       };
@@ -113,6 +114,7 @@ describe("cf-frappe CLI scaffold", () => {
     expect(wranglerConfig.queues?.consumers).toEqual([
       { queue: "demo-app-jobs", max_batch_size: 10, max_batch_timeout: 5, max_retries: 3 }
     ]);
+    expect(wranglerConfig.triggers?.crons).toEqual(["*/5 * * * *"]);
     expect(wranglerConfig.durable_objects?.bindings).toEqual([
       { name: "AGGREGATES", class_name: "AggregateCoordinator" },
       { name: "REALTIME", class_name: "RealtimeHub" }
@@ -126,6 +128,7 @@ describe("cf-frappe CLI scaffold", () => {
     expect(worker).toContain('import { registry } from "./apps"');
     expect(worker).toContain("createRealtimeHubClass");
     expect(worker).toContain("DurableObjectRealtimePublisher");
+    expect(worker).toContain("DOCUMENT_DELIVERY_OUTBOX_DRAIN_JOB_NAME");
     expect(worker).toContain("createDataPatchApplyJob");
     expect(worker).toContain("createDataPatchRollbackJob");
     expect(worker).toContain("createDataPatchRollbackRetryJob");
@@ -142,6 +145,9 @@ describe("cf-frappe CLI scaffold", () => {
     expect(worker).toContain("realtime: {");
     expect(worker).toContain("namespace: (env) => env.REALTIME");
     expect(worker).toContain("jobs: {");
+    expect(worker).toContain('cron: "*/5 * * * *"');
+    expect(worker).toContain("jobName: DOCUMENT_DELIVERY_OUTBOX_DRAIN_JOB_NAME");
+    expect(worker).toContain("payload: { limit: 50 }");
     expect(worker).toContain("documentDeliveryOutbox: true");
     const taskApp = await readFile(join(target, "src/apps/tasks.ts"), "utf8");
     expect(taskApp).toContain("defineClientScript");
@@ -266,6 +272,8 @@ describe("cf-frappe CLI scaffold", () => {
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "buffered Desk uploads immediately"
     );
+    expect(readmeText).toContain("Cloudflare Cron trigger (`*/5 * * * *`)");
+    expect(readmeText).toContain("document delivery outbox drain job");
     await expect(readFile(join(target, "README.md"), "utf8")).resolves.toContain(
       "replace-with-d1-database-id"
     );
@@ -503,6 +511,35 @@ describe("cf-frappe CLI scaffold", () => {
     const readmeText = await readFile(join(target, "README.md"), "utf8");
     expect(readmeText).toContain("Realtime document updates and presence are enabled at `/api/realtime`");
     expect(readmeText).toContain("the generated `REALTIME` Durable Object binding");
+  });
+
+  it("wires starter Cron triggers to durable document delivery outbox drains", async () => {
+    const target = join(tempRoot, "Cron Starter App");
+
+    await scaffoldProject({
+      targetDirectory: target,
+      compatibilityDate: "2026-06-22",
+      cfFrappeVersion: "0.1.0",
+      nodeTypesVersion: "^26.0.0",
+      typescriptVersion: "^5.7.2",
+      wranglerVersion: "^4.103.0"
+    });
+
+    const wrangler = JSON.parse(await readFile(join(target, "wrangler.jsonc"), "utf8")) as {
+      readonly triggers?: { readonly crons?: readonly string[] };
+    };
+    expect(wrangler.triggers?.crons).toEqual(["*/5 * * * *"]);
+
+    const worker = await readFile(join(target, "src/worker.ts"), "utf8");
+    expect(worker).toContain("DOCUMENT_DELIVERY_OUTBOX_DRAIN_JOB_NAME");
+    expect(worker).toContain("schedules: [");
+    expect(worker).toContain('cron: "*/5 * * * *"');
+    expect(worker).toContain("jobName: DOCUMENT_DELIVERY_OUTBOX_DRAIN_JOB_NAME");
+    expect(worker).toContain("payload: { limit: 50 }");
+
+    const readmeText = await readFile(join(target, "README.md"), "utf8");
+    expect(readmeText).toContain("Cloudflare Cron trigger (`*/5 * * * *`)");
+    expect(readmeText).toContain("document delivery outbox drain job");
   });
 
   it("creates a Cloudflare Access-backed starter app", async () => {

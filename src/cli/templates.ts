@@ -161,6 +161,9 @@ function wranglerJsonc(input: StarterProjectTemplateInput): string {
       }
     ]
   },
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
   "migrations": [
     {
       "tag": "v1",
@@ -263,6 +266,7 @@ npm run dev
 
 Open \`/\` for the generated website homepage, \`/desk\` for the generated Desk UI, the \`Tasks\` workspace, the \`Task Calendar\`, the \`Task Board\`, the \`Task Dashboard\`, the \`Task Intake\` Web Form at \`/web-forms/task-intake\`, the \`Task Updates\` Web View, the \`About\` Web Page, and the file manager at \`/desk/files\`; run the \`tasks.seed_starter_tasks\` data patch when you want sample Task records and the starter Task owner notification rule in a fresh environment. Use \`/api/meta/doctypes/Task\`, \`/api/meta/web-forms/Task%20Intake\`, \`/api/meta/web-views/Task%20Updates\`, \`/api/meta/web-pages/About\`, \`/api/meta/website-settings\`, and \`/api/meta/website-themes/Starter Theme\` for metadata APIs. ${authLocalReadme(input.auth)}
 Realtime document updates and presence are enabled at \`/api/realtime\` through the generated \`REALTIME\` Durable Object binding.
+A generated Cloudflare Cron trigger (\`*/5 * * * *\`) dispatches the document delivery outbox drain job, so post-commit notification, realtime, and email delivery intents keep moving without a separate scheduler service.
 The generated R2 binding supports buffered Desk uploads immediately. Add a \`directUploads\` signer to \`R2FileStorage\` before enabling signed browser direct-upload targets.
 Client scripts live under \`public/assets\`; add them with \`defineClientScript(...)\` in files under \`src/apps\`.
 ${authProviderReadme(input.auth)}
@@ -1117,6 +1121,7 @@ function signedSessionWorkerTs(): string {
   createDocumentDeliveryOutboxDrainJob,
   createJobRegistry,
   D1JobExecutionLog,
+  DOCUMENT_DELIVERY_OUTBOX_DRAIN_JOB_NAME,
   signedSessionActorResolver,
   type Actor
 } from "cf-frappe";
@@ -1172,7 +1177,14 @@ export default createCloudFrappeWorker<Env>({
   jobs: {
     registry: starterJobs,
     queue: (env) => new CloudflareJobQueue(env.JOBS),
-    executionLog: (env) => new D1JobExecutionLog(env.DB)
+    executionLog: (env) => new D1JobExecutionLog(env.DB),
+    schedules: [
+      {
+        cron: "*/5 * * * *",
+        jobName: DOCUMENT_DELIVERY_OUTBOX_DRAIN_JOB_NAME,
+        payload: { limit: 50 }
+      }
+    ]
   },
   documentDeliveryOutbox: true,
   realtime: {
@@ -1193,6 +1205,7 @@ function cloudflareAccessWorkerTs(): string {
   createDocumentDeliveryOutboxDrainJob,
   createJobRegistry,
   D1JobExecutionLog,
+  DOCUMENT_DELIVERY_OUTBOX_DRAIN_JOB_NAME,
   permissionDenied
 } from "cf-frappe";
 import {
@@ -1239,7 +1252,14 @@ export default createCloudFrappeWorker<Env>({
   jobs: {
     registry: starterJobs,
     queue: (env) => new CloudflareJobQueue(env.JOBS),
-    executionLog: (env) => new D1JobExecutionLog(env.DB)
+    executionLog: (env) => new D1JobExecutionLog(env.DB),
+    schedules: [
+      {
+        cron: "*/5 * * * *",
+        jobName: DOCUMENT_DELIVERY_OUTBOX_DRAIN_JOB_NAME,
+        payload: { limit: 50 }
+      }
+    ]
   },
   documentDeliveryOutbox: true,
   realtime: {
@@ -1271,6 +1291,7 @@ function oidcWorkerTs(): string {
   createDocumentDeliveryOutboxDrainJob,
   createJobRegistry,
   D1JobExecutionLog,
+  DOCUMENT_DELIVERY_OUTBOX_DRAIN_JOB_NAME,
   oidcGroupsRoleMapper,
   permissionDenied
 } from "cf-frappe";
@@ -1318,7 +1339,14 @@ export default createCloudFrappeWorker<Env>({
   jobs: {
     registry: starterJobs,
     queue: (env) => new CloudflareJobQueue(env.JOBS),
-    executionLog: (env) => new D1JobExecutionLog(env.DB)
+    executionLog: (env) => new D1JobExecutionLog(env.DB),
+    schedules: [
+      {
+        cron: "*/5 * * * *",
+        jobName: DOCUMENT_DELIVERY_OUTBOX_DRAIN_JOB_NAME,
+        payload: { limit: 50 }
+      }
+    ]
   },
   documentDeliveryOutbox: true,
   realtime: {
