@@ -864,6 +864,51 @@ export function fileMultipartUploadReservationCommand(command: {
   };
 }
 
+export function fileMultipartUploadReservationPlan(command: {
+  readonly key: string;
+  readonly contentType: string;
+  readonly filename: string;
+  readonly size: number;
+  readonly expiresAt: string;
+  readonly tenantId: string;
+  readonly isPrivate?: boolean | undefined;
+  readonly uploadedBy: string;
+  readonly uploadedAt: string;
+  readonly scannerConfigured?: boolean | undefined;
+  readonly attachedTo?: {
+    readonly doctype: string;
+    readonly name: string;
+  } | undefined;
+}): {
+  readonly upload: FilePendingUploadDocumentDataCommand;
+  readonly data: DocumentData;
+  readonly reservation: CreateMultipartFileUploadCommand;
+} {
+  const upload = filePendingUploadDocumentDataCommand({
+    filename: command.filename,
+    key: command.key,
+    contentType: command.contentType,
+    size: command.size,
+    isPrivate: command.isPrivate,
+    uploadedBy: command.uploadedBy,
+    uploadedAt: command.uploadedAt,
+    directUploadExpiresAt: command.expiresAt,
+    scannerConfigured: command.scannerConfigured,
+    attachedTo: command.attachedTo
+  });
+  return {
+    upload,
+    data: filePendingUploadDocumentData(upload),
+    reservation: fileMultipartUploadReservationCommand({
+      key: command.key,
+      contentType: command.contentType,
+      filename: command.filename,
+      tenantId: command.tenantId,
+      uploadedBy: command.uploadedBy
+    })
+  };
+}
+
 export function fileMultipartPartUploadCommand(command: {
   readonly snapshot: DocumentSnapshot;
   readonly uploadId: string;

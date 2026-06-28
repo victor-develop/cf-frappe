@@ -98,6 +98,7 @@ import {
   fileMultipartPartRecordedDocumentCommand,
   fileMultipartPartUploadPlan,
   fileMultipartUploadDocumentCreateCommand,
+  fileMultipartUploadReservationPlan,
   fileMultipartUploadId,
   fileObjectKeysForDelete,
   fileObjectKeysForScanFailureCleanup,
@@ -120,10 +121,7 @@ import {
   fileUploadCompletionPlan,
   fileUploadContentType,
   fileUploadExpiresAt,
-  filePendingUploadDocumentDataCommand,
-  filePendingUploadDocumentData,
   fileMultipartUploadAbortCommand,
-  fileMultipartUploadReservationCommand,
   fileTransformOverlayCommandOption,
   fileTransformOverlayObjectReadPlan,
   fileTransformOverlayResolutionPlan,
@@ -620,29 +618,24 @@ export class FileService {
     const fileName = this.ids.next("file_");
     const key = objectKey(tenantId, fileName, filename);
     const expiresAt = fileUploadExpiresAt(this.clock.now(), command.expiresInSeconds);
-    const uploadData = filePendingUploadDocumentDataCommand({
+    const reservation = fileMultipartUploadReservationPlan({
       filename,
       key,
       contentType,
       size,
+      expiresAt,
+      tenantId,
       isPrivate: command.isPrivate,
       uploadedBy: command.actor.id,
       uploadedAt: this.clock.now(),
-      directUploadExpiresAt: expiresAt,
       scannerConfigured: this.scanner !== undefined,
       attachedTo: command.attachedTo
     });
-    this.preflightCreate(command.actor, filePendingUploadDocumentData(uploadData));
-    const upload = await multipartUploads.createMultipartUpload(fileMultipartUploadReservationCommand({
-      key,
-      contentType,
-      filename,
-      tenantId,
-      uploadedBy: command.actor.id
-    }));
+    this.preflightCreate(command.actor, reservation.data);
+    const upload = await multipartUploads.createMultipartUpload(reservation.reservation);
     try {
       const create = fileMultipartUploadDocumentCreateCommand({
-        upload: uploadData,
+        upload: reservation.upload,
         uploadId: upload.uploadId
       });
       const snapshot = await this.documents.create(fileDocumentCreateCommand({

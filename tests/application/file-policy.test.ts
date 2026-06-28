@@ -85,6 +85,7 @@ import {
   fileMultipartUploadDocumentData,
   fileMultipartUploadAbortCommand,
   fileMultipartUploadId,
+  fileMultipartUploadReservationPlan,
   fileObjectKeysForDelete,
   fileObjectKeysForScanFailureCleanup,
   fileObjectContentType,
@@ -2481,6 +2482,55 @@ describe("file policy", () => {
         multipart_upload_id: "upload-1"
       },
       eventType: "FileMultipartUploadReserved"
+    });
+  });
+
+  it("plans multipart-upload reservation data and storage commands together", () => {
+    expect(fileMultipartUploadReservationPlan({
+      filename: "invoice.pdf",
+      key: "acme/files/file_1-invoice.pdf",
+      contentType: "application/pdf",
+      size: 42,
+      expiresAt: "2026-06-28T00:15:00.000Z",
+      tenantId: "acme",
+      isPrivate: false,
+      uploadedBy: "owner@example.com",
+      uploadedAt: "2026-06-28T00:00:00.000Z",
+      scannerConfigured: true,
+      attachedTo: { doctype: "Invoice", name: "INV-1" }
+    })).toEqual({
+      upload: {
+        filename: "invoice.pdf",
+        key: "acme/files/file_1-invoice.pdf",
+        contentType: "application/pdf",
+        size: 42,
+        isPrivate: false,
+        uploadedBy: "owner@example.com",
+        uploadedAt: "2026-06-28T00:00:00.000Z",
+        directUploadExpiresAt: "2026-06-28T00:15:00.000Z",
+        scannerConfigured: true,
+        attachedTo: { doctype: "Invoice", name: "INV-1" }
+      },
+      data: {
+        filename: "invoice.pdf",
+        key: "acme/files/file_1-invoice.pdf",
+        content_type: "application/pdf",
+        size: 42,
+        is_private: false,
+        uploaded_by: "owner@example.com",
+        uploaded_at: "2026-06-28T00:00:00.000Z",
+        storage_state: "upload_pending",
+        direct_upload_expires_at: "2026-06-28T00:15:00.000Z",
+        scan_status: "pending",
+        attached_to_doctype: "Invoice",
+        attached_to_name: "INV-1"
+      },
+      reservation: {
+        key: "acme/files/file_1-invoice.pdf",
+        contentType: "application/pdf",
+        filename: "invoice.pdf",
+        customMetadata: { tenantId: "acme", uploadedBy: "owner@example.com" }
+      }
     });
   });
 
