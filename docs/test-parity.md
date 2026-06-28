@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the OIDC token source name boundary slice:
+As of the custom select field options boundary slice:
 
 - Vitest files: `170`
-- Vitest cases: `1821`
-- Remaining gap to Frappe static markers: `963`
+- Vitest cases: `1822`
+- Remaining gap to Frappe static markers: `962`
 
 ## Implication
 

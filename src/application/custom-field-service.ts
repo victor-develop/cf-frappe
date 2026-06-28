@@ -384,7 +384,7 @@ function normalizeField(field: FieldDefinition): PersistedFieldDefinition {
     ...(field.inFormView === undefined ? {} : { inFormView: field.inFormView }),
     ...(field.inListView === undefined ? {} : { inListView: field.inListView }),
     ...(field.inListFilter === undefined ? {} : { inListFilter: field.inListFilter }),
-    ...(field.options === undefined ? {} : { options: Object.freeze([...field.options]) }),
+    ...customFieldOptions(field),
     ...(field.linkTo === undefined ? {} : { linkTo: field.linkTo }),
     ...(field.tableOf === undefined ? {} : { tableOf: field.tableOf }),
     ...(field.min === undefined ? {} : { min: field.min }),
@@ -397,6 +397,40 @@ function normalizeRequired(value: string, label: string): string {
   const normalized = value.trim();
   if (normalized.length === 0) {
     throw badRequest(`${label} is required`);
+  }
+  return normalized;
+}
+
+function customFieldOptions(field: FieldDefinition): { readonly options?: readonly string[] } {
+  if (field.options === undefined) {
+    return {};
+  }
+  if (field.type !== "select") {
+    throw new FrameworkError("CUSTOM_FIELD_INVALID", "Only select custom fields can define options", { status: 400 });
+  }
+  if (!Array.isArray(field.options) || field.options.length === 0) {
+    throw new FrameworkError("CUSTOM_FIELD_INVALID", "options must contain at least one item", { status: 400 });
+  }
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+  for (const option of field.options) {
+    const item = normalizeCustomFieldOption(option);
+    if (seen.has(item)) {
+      throw new FrameworkError("CUSTOM_FIELD_INVALID", `options contains duplicate '${item}'`, { status: 400 });
+    }
+    seen.add(item);
+    normalized.push(item);
+  }
+  return { options: Object.freeze(normalized) };
+}
+
+function normalizeCustomFieldOption(value: string): string {
+  if (typeof value !== "string") {
+    throw new FrameworkError("CUSTOM_FIELD_INVALID", "Option must be a string", { status: 400 });
+  }
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    throw new FrameworkError("CUSTOM_FIELD_INVALID", "Option is required", { status: 400 });
   }
   return normalized;
 }

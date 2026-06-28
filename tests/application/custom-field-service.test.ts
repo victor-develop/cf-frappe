@@ -288,6 +288,53 @@ describe("CustomFieldService", () => {
     ).resolves.toMatchObject({ fields: [{ field: { name: "project", linkTo: "Project" } }] });
   });
 
+  it("normalizes and validates custom select field options before persisting metadata events", async () => {
+    const service = new CustomFieldService({
+      registry: createRegistry({ doctypes: [Note] }),
+      events: new InMemoryEventStore(),
+      ids: deterministicIds(["field-1"]),
+      clock: fixedClock(now)
+    });
+
+    const saved = await service.saveField({
+      actor: admin,
+      doctype: "Note",
+      field: { name: "priority", type: "select", options: [" Low ", "High"] }
+    });
+
+    expect(saved.fields[0]?.field).toMatchObject({ name: "priority", options: ["Low", "High"] });
+    await expect(
+      service.saveField({
+        actor: admin,
+        doctype: "Note",
+        field: { name: "blank_option", type: "select", options: ["Low", " "] }
+      })
+    ).rejects.toMatchObject({
+      code: "CUSTOM_FIELD_INVALID",
+      message: "Option is required"
+    });
+    await expect(
+      service.saveField({
+        actor: admin,
+        doctype: "Note",
+        field: { name: "duplicate_option", type: "select", options: ["Low", " Low "] }
+      })
+    ).rejects.toMatchObject({
+      code: "CUSTOM_FIELD_INVALID",
+      message: "options contains duplicate 'Low'"
+    });
+    await expect(
+      service.saveField({
+        actor: admin,
+        doctype: "Note",
+        field: { name: "text_options", type: "text", options: ["Low"] }
+      })
+    ).rejects.toMatchObject({
+      code: "CUSTOM_FIELD_INVALID",
+      message: "Only select custom fields can define options"
+    });
+  });
+
   it("supports custom fields on static child table DocTypes", async () => {
     const InvoiceItem = defineDocType({
       name: "Invoice Item",
