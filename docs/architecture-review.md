@@ -141,6 +141,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized single data-patch selection so retry flows no longer rely on a selected-array non-null assertion after patch-id validation.
 - Centralized single data-patch runner normalization so rollback retry no longer normalizes through a single-element array assertion.
 - Centralized runtime job schedule post-append replay consistency in a named resolver so `JobScheduleService` reports an explicit event-store/replay invariant failure instead of relying on a non-null assertion after save.
+- Centralized user notification post-append replay consistency in a named resolver so read and dismiss commands report an explicit inbox stream invariant failure instead of relying on map non-null assertions after replay.
 - Extracted available-rendition reuse selection and duplicate pending-rendition rejection from `FileService` into the file policy with focused source and overlay identity coverage.
 - Centralized file transformability rejection in the file policy so direct transforms, persisted renditions, and overlay-source transforms share one tested content-type guard.
 - Moved upload byte-limit checks and reservation-expiry timestamp planning into file policy so buffered, direct, and multipart upload flows share the same tested boundary rules.

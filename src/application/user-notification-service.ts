@@ -156,7 +156,7 @@ export class UserNotificationService {
       kind: "UserNotificationRead",
       notificationId: id
     }, command.metadata);
-    return (await this.state(tenantId, userId)).notifications.get(id)!;
+    return requireReplayedNotification(await this.state(tenantId, userId), id);
   }
 
   async dismiss(
@@ -175,7 +175,7 @@ export class UserNotificationService {
       kind: "UserNotificationDismissed",
       notificationId: id
     }, command.metadata);
-    return (await this.state(tenantId, userId)).notifications.get(id)!;
+    return requireReplayedNotification(await this.state(tenantId, userId), id);
   }
 
   private async state(tenantId: TenantId, userId: string): Promise<UserNotificationState> {
@@ -385,6 +385,19 @@ function sortedNotifications(state: UserNotificationState): readonly UserNotific
   return [...state.notifications.values()].sort(
     (left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id)
   );
+}
+
+function requireReplayedNotification(
+  state: UserNotificationState,
+  notificationId: string
+): UserNotificationRecord {
+  const notification = state.notifications.get(notificationId);
+  if (notification === undefined) {
+    throw new Error(
+      `Notification '${notificationId}' for user '${state.userId}' in tenant '${state.tenantId}' was not found after replay`
+    );
+  }
+  return notification;
 }
 
 function notificationIdentity(notification: DocumentUserNotificationPayload): string {

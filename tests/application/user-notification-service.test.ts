@@ -109,6 +109,27 @@ describe("UserNotificationService", () => {
     });
   });
 
+  it("fails explicitly when a read notification cannot be replayed after append", async () => {
+    const events = new ReplayMissingNotificationEventStore();
+    const notifications = new UserNotificationService({
+      events,
+      clock: fixedClock("2026-01-01T01:00:00.000Z"),
+      ids: deterministicIds(["read-1"])
+    });
+    const support = { id: "support@example.com", roles: ["User"], tenantId: "acme" };
+    const id = "evt_assign:user:support%40example.com";
+
+    await expect(notifications.markRead(support, id)).rejects.toThrow(
+      "Notification 'evt_assign:user:support%40example.com' for user 'support@example.com' in tenant 'acme' was not found after replay"
+    );
+    expect(events.appended).toMatchObject([
+      {
+        stream: userNotificationsStream("acme", "support@example.com"),
+        payload: { kind: "UserNotificationRead", notificationId: id }
+      }
+    ]);
+  });
+
   it("keeps user inboxes private unless inspected by a system manager", async () => {
     const notifications = new UserNotificationService({
       events: new InMemoryEventStore(),
@@ -211,6 +232,33 @@ class RacingNotificationEventStore implements EventStore {
   }
 }
 
+class ReplayMissingNotificationEventStore implements EventStore {
+  readonly appended: NewDomainEvent[] = [];
+
+  async append(
+    _stream: StreamName,
+    _expectedVersion: number,
+    events: readonly NewDomainEvent[]
+  ): Promise<readonly DomainEvent[]> {
+    this.appended.push(...events);
+    return events.map((event, index) => ({
+      ...event,
+      sequence: index + 2
+    }));
+  }
+
+  async readStream(stream: StreamName): Promise<readonly DomainEvent[]> {
+    if (this.appended.length > 0) {
+      return [];
+    }
+    return [recordedNotificationEvent(stream)];
+  }
+
+  async currentVersion(_stream: StreamName): Promise<number> {
+    return this.appended.length === 0 ? 1 : 0;
+  }
+}
+
 function concurrentNotificationEvent(stream: StreamName): NewDomainEvent {
   return {
     id: "evt_concurrent",
@@ -233,5 +281,26 @@ function concurrentNotificationEvent(stream: StreamName): NewDomainEvent {
       actorId: "manager@example.com"
     },
     metadata: {}
+  };
+}
+
+function recordedNotificationEvent(stream: StreamName): DomainEvent {
+  return {
+    ...concurrentNotificationEvent(stream),
+    id: "evt_recorded",
+    sequence: 1,
+    actorId: "owner@example.com",
+    payload: {
+      kind: "UserNotificationRecorded",
+      notificationId: "evt_assign:user:support%40example.com",
+      sourceEventId: "evt_assign",
+      eventType: "NoteAssigned",
+      payloadKind: "DocumentAssigned",
+      recipientId: "support@example.com",
+      doctype: "Note",
+      documentName: "My Note",
+      actorId: "owner@example.com",
+      subject: "owner@example.com assigned you to Note My Note"
+    }
   };
 }

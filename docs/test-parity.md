@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the job schedule replay consistency slice:
+As of the user notification replay consistency slice:
 
 - Vitest files: `170`
-- Vitest cases: `1784`
-- Remaining gap to Frappe static markers: `1000`
+- Vitest cases: `1785`
+- Remaining gap to Frappe static markers: `999`
 
 ## Implication
 
