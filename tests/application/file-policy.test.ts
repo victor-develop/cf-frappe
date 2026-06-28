@@ -41,6 +41,7 @@ import {
   fileRenditionFilename,
   fileRenditionManifestPatch,
   fileRenditionPutObjectCommand,
+  fileRenditionSnapshotManifestPatch,
   fileRenditions,
   fileRenditionView,
   fileScanFailureError,
@@ -706,6 +707,22 @@ describe("file policy", () => {
     });
     expect(fileRenditionManifestPatch([renditionEntry("a")], renditionEntry("a", { status: "failed" }))).toEqual({
       renditions: [renditionEntry("a", { status: "failed" })]
+    });
+  });
+
+  it("builds rendition manifest patches from latest snapshots", () => {
+    const replacement = renditionEntry("thumb", { status: "available" });
+    expect(fileRenditionSnapshotManifestPatch(fileSnapshot({
+      renditions: [
+        renditionEntry("thumb", { status: "pending" }),
+        { id: "invalid" },
+        renditionEntry("detail")
+      ]
+    }), replacement)).toEqual({
+      renditions: [
+        renditionEntry("detail"),
+        replacement
+      ]
     });
   });
 

@@ -1100,6 +1100,13 @@ export function fileRenditionManifestPatch(
   };
 }
 
+export function fileRenditionSnapshotManifestPatch(
+  snapshot: DocumentSnapshot,
+  rendition: FileRenditionManifestEntry
+): DocumentData {
+  return fileRenditionManifestPatch(fileRenditions(snapshot), rendition);
+}
+
 export interface FileRenditionGenerationReservation {
   readonly pending: FileRenditionManifestEntry;
   readonly patch: DocumentData;
