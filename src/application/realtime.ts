@@ -1,4 +1,4 @@
-import type { DocumentHooks } from "../core/document-hooks.js";
+import { defineDocumentHooks, type DocumentHooks } from "../core/document-hooks.js";
 import { realtimeEventFromDomainEvent, realtimeUserNotificationsFromDomainEvent } from "../core/realtime.js";
 import type { DocumentData, DocumentSnapshot, DomainEvent, TenantId } from "../core/types.js";
 import type { RealtimePublisher } from "../ports/realtime.js";
@@ -33,14 +33,14 @@ export interface DocumentDeliveryOutboxWriter {
 }
 
 export function createDocumentRealtimeHooks(publisher: RealtimePublisher): DocumentHooks {
-  return {
+  return defineDocumentHooks({
     async afterCommit({ event, snapshot }) {
       await publisher.publish(realtimeEventFromDomainEvent(event, snapshot));
       await Promise.all(
         realtimeUserNotificationsFromDomainEvent(event).map((notification) => publisher.publish(notification))
       );
     }
-  };
+  });
 }
 
 export function createDocumentDeliveryHooks(options: DocumentDeliveryHookOptions): DocumentHooks {
@@ -65,9 +65,9 @@ export function createDocumentDeliveryHooks(options: DocumentDeliveryHookOptions
       : createDocumentEmailNotificationHooks(options.emailNotifications).afterCommit
     : undefined;
   if (!outboxAfterCommit && !notificationAfterCommit && !realtimeAfterCommit && !emailAfterCommit) {
-    return {};
+    return defineDocumentHooks({});
   }
-  return {
+  return defineDocumentHooks({
     async afterCommit(context) {
       let firstError: unknown;
       try {
@@ -94,41 +94,41 @@ export function createDocumentDeliveryHooks(options: DocumentDeliveryHookOptions
         throw firstError;
       }
     }
-  };
+  });
 }
 
 export function createDocumentDeliveryOutboxHooks(
   outbox: DocumentDeliveryOutboxWriter,
   targets: readonly DocumentDeliveryOutboxTarget[]
 ): DocumentHooks {
-  return {
+  return defineDocumentHooks({
     async afterCommit({ event, snapshot }) {
       await outbox.enqueueFromDomainEvent({ event, snapshot, targets });
     }
-  };
+  });
 }
 
 export function createDocumentNotificationHooks(notifications: UserNotificationService): DocumentHooks {
-  return {
+  return defineDocumentHooks({
     async afterCommit({ event, snapshot }) {
       await notifications.recordFromDomainEvent(event, snapshot);
     }
-  };
+  });
 }
 
 export function createDocumentEmailNotificationHooks(emailNotifications: EmailNotificationService): DocumentHooks {
-  return {
+  return defineDocumentHooks({
     async afterCommit({ event, snapshot }) {
       await emailNotifications.sendFromDomainEvent(event, snapshot);
     }
-  };
+  });
 }
 
 export function createDocumentQueuedEmailNotificationHooks(
   emailNotifications: EmailNotificationService,
   deliveryQueue: EmailNotificationDeliveryQueue
 ): DocumentHooks {
-  return {
+  return defineDocumentHooks({
     async afterCommit({ event, snapshot }) {
       const deliveries = await emailNotifications.queueFromDomainEvent(event, snapshot);
       await Promise.all(
@@ -147,7 +147,7 @@ export function createDocumentQueuedEmailNotificationHooks(
           )
       );
     }
-  };
+  });
 }
 
 function deliveryOutboxTargets(options: DocumentDeliveryHookOptions): readonly DocumentDeliveryOutboxTarget[] {

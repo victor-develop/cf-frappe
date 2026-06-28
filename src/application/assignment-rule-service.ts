@@ -5,7 +5,7 @@ import {
   type AssignmentRuleState,
   type AssignmentRuleDocumentAssignment
 } from "../core/assignment-rules.js";
-import type { AfterCommitContext, DocumentHooks } from "../core/document-hooks.js";
+import { defineDocumentHooks, type AfterCommitContext, type DocumentHooks } from "../core/document-hooks.js";
 import { conflict, FrameworkError, permissionDenied } from "../core/errors.js";
 import { assignmentRulesStream } from "../core/streams.js";
 import {
@@ -95,7 +95,7 @@ export interface DocumentAssignmentRuleHookOptions {
 export function createDocumentAssignmentRuleHooks(
   options: DocumentAssignmentRuleHookOptions
 ): DocumentHooks {
-  return {
+  return defineDocumentHooks({
     async afterCommit(context) {
       const runtimeRules = await options.assignmentRules?.assignmentRulesFor(
         context.event.tenantId,
@@ -137,7 +137,7 @@ export function createDocumentAssignmentRuleHooks(
         }
       }
     }
-  };
+  });
 }
 
 export class AssignmentRuleService implements AssignmentRuleProvider {

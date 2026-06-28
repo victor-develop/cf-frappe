@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the application hook dependency slice:
+As of the frozen application hook factory slice:
 
 - Vitest files: `173`
-- Vitest cases: `1925`
-- Remaining gap to Frappe static markers: `859`
+- Vitest cases: `1927`
+- Remaining gap to Frappe static markers: `857`
 
 ## Implication
 

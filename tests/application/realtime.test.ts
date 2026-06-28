@@ -1,5 +1,8 @@
 import {
+  createDocumentEmailNotificationHooks,
   createDocumentDeliveryHooks,
+  createDocumentNotificationHooks,
+  createDocumentDeliveryOutboxHooks,
   createDocumentQueuedEmailNotificationHooks,
   createDocumentRealtimeHooks,
   createEmailNotificationDeliveryJob,
@@ -96,6 +99,34 @@ describe("in-memory realtime publisher", () => {
 });
 
 describe("document realtime hooks", () => {
+  it("returns frozen document hook definitions from delivery hook factories", () => {
+    const publisher = new InMemoryRealtimePublisher();
+    const emailNotifications = {
+      sendFromDomainEvent: vi.fn(),
+      queueFromDomainEvent: vi.fn()
+    } as unknown as EmailNotificationService;
+    const notifications = {
+      recordFromDomainEvent: vi.fn()
+    } as unknown as UserNotificationService;
+    const outbox = {
+      enqueueFromDomainEvent: vi.fn()
+    };
+    const queue = { enqueue: vi.fn() };
+
+    const hooks = [
+      createDocumentRealtimeHooks(publisher),
+      createDocumentDeliveryHooks({}),
+      createDocumentDeliveryHooks({ realtime: publisher }),
+      createDocumentDeliveryOutboxHooks(outbox, ["realtime"]),
+      createDocumentNotificationHooks(notifications),
+      createDocumentEmailNotificationHooks(emailNotifications),
+      createDocumentQueuedEmailNotificationHooks(emailNotifications, queue)
+    ];
+
+    expect(hooks.every(Object.isFrozen)).toBe(true);
+    expect(() => ((hooks[0] as { afterCommit?: unknown }).afterCommit = undefined)).toThrow(TypeError);
+  });
+
   it("publishes committed domain events to realtime topics", async () => {
     const publisher = new InMemoryRealtimePublisher();
     const hooks = createDocumentRealtimeHooks(publisher);

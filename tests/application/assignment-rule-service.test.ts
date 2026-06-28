@@ -81,6 +81,16 @@ describe("assignment rules", () => {
     expect(Object.isFrozen(doctype.assignmentRules)).toBe(true);
   });
 
+  it("returns frozen document hook definitions from assignment rule hooks", () => {
+    const hooks = createDocumentAssignmentRuleHooks({
+      documents: { assign: vi.fn() },
+      actor: manager
+    });
+
+    expect(Object.isFrozen(hooks)).toBe(true);
+    expect(() => ((hooks as { afterCommit?: unknown }).afterCommit = undefined)).toThrow(TypeError);
+  });
+
   it("rejects assignment rules with invalid event and assignee metadata", () => {
     expect(() =>
       defineDocType({
