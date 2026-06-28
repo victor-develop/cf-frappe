@@ -155,6 +155,29 @@ describe("Desk report rendering", () => {
     expect(html).not.toContain("Medium (2)");
   });
 
+  it("renders report charts with the default palette when no colors are configured", () => {
+    const html = renderReportView(reportResult([
+      {
+        name: "priority_bar",
+        label: "Priority Bar",
+        type: "bar",
+        group: "by_priority",
+        summary: "note_count",
+        orderBy: "key",
+        order: "asc",
+        colors: [],
+        showValues: true,
+        points: [
+          { key: "High", label: "High", value: 5 },
+          { key: "Low", label: "Low", value: 2 }
+        ]
+      }
+    ]));
+
+    expect(html).toContain('style="fill: #1f6feb"');
+    expect(html).toContain('style="fill: #2e7d32"');
+  });
+
   it("renders chart drilldown links by merging point queries into the current report route", () => {
     const html = renderReportView(
       reportResult([

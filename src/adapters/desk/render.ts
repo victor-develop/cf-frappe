@@ -2780,9 +2780,13 @@ function chartAriaLabel(chart: ReportRunResult["charts"][number]): string {
 }
 
 function chartColor(chart: ReportRunResult["charts"][number], index: number): string {
-  const fallback = chartPalette[index % chartPalette.length]!;
+  const fallback = chartPaletteColor(index);
   const color = chart.colors.length > 0 ? chart.colors[index % chart.colors.length] : undefined;
   return color && isReportChartColor(color) ? color : fallback;
+}
+
+function chartPaletteColor(index: number): string {
+  return chartPalette[index % chartPalette.length] ?? "#1f6feb";
 }
 
 function chartScale(points: readonly ReportRunResult["charts"][number]["points"][number][]): { readonly min: number; readonly max: number } {
