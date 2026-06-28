@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the frozen registry-options collection slice:
+As of the frozen registry-options object slice:
 
 - Vitest files: `172`
-- Vitest cases: `1918`
-- Remaining gap to Frappe static markers: `866`
+- Vitest cases: `1919`
+- Remaining gap to Frappe static markers: `865`
 
 ## Implication
 

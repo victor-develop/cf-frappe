@@ -104,7 +104,7 @@ export function registryOptionsFromApps<TDataPatchResources = unknown>(
       hooks[doctype] = [...(hooks[doctype] ?? []), ...appHooks];
     }
   }
-  return {
+  return Object.freeze({
     apps: Object.freeze(orderedApps.map(installedAppFromDefinition)),
     doctypes: Object.freeze(orderedApps.flatMap((app) => app.doctypes ?? [])),
     letterheads: Object.freeze(orderedApps.flatMap((app) => app.letterheads ?? [])),
@@ -124,7 +124,7 @@ export function registryOptionsFromApps<TDataPatchResources = unknown>(
     clientScripts: Object.freeze(orderedApps.flatMap((app) => app.clientScripts ?? [])),
     dataPatches: Object.freeze(orderedApps.flatMap((app) => app.dataPatches ?? [])) as readonly DataPatchDefinition[],
     hooks: freezeHookOptions(hooks)
-  };
+  });
 }
 
 export function resolveAppInstallOrder<TDataPatchResources = unknown>(

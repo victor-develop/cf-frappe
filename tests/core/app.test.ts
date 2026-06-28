@@ -201,6 +201,17 @@ describe("app manifests", () => {
     expect(() => ((options.hooks as Record<string, unknown>).Other = [])).toThrow(TypeError);
   });
 
+  it("returns a frozen registry option object from apps", () => {
+    const app = defineApp({
+      name: "notes",
+      doctypes: [defineDocType({ name: "Note", fields: [] })]
+    });
+    const options = registryOptionsFromApps([app]);
+
+    expect(Object.isFrozen(options)).toBe(true);
+    expect(() => ((options as { doctypes?: readonly unknown[] }).doctypes = [])).toThrow(TypeError);
+  });
+
   it("snapshots raw app manifests while normalizing registry options", () => {
     const modules = ["Notes"];
     const statusOptions = ["Open", "Closed"];
