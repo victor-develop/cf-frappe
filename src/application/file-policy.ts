@@ -1018,6 +1018,16 @@ export function failedFileRendition(command: {
   };
 }
 
+export function failedFileRenditionForError(command: {
+  readonly pending: FileRenditionManifestEntry;
+  readonly error: unknown;
+}): FileRenditionManifestEntry {
+  return failedFileRendition({
+    pending: command.pending,
+    message: command.error instanceof Error ? command.error.message : String(command.error)
+  });
+}
+
 export function completeFileRendition(command: {
   readonly pending: FileRenditionManifestEntry;
   readonly object: FileObjectMetadata;

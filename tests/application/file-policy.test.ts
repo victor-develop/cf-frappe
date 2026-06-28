@@ -20,6 +20,7 @@ import {
   ensureMultipartPartFitsReservation,
   expectedRenditionContentType,
   failedFileRendition,
+  failedFileRenditionForError,
   fileBulkDeleteFailure,
   fileBulkFailure,
   fileContentLength,
@@ -551,6 +552,28 @@ describe("file policy", () => {
       http_etag: '"object-http"',
       generated_at: "2026-06-28T01:00:00.000Z",
       generated_by: "owner@example.com"
+    });
+  });
+
+  it("maps rendition failures from thrown values", () => {
+    const pending = pendingFileRendition({
+      snapshot: fileSnapshot({ content_type: "image/png" }),
+      tenantId: "acme",
+      id: "w64-f-webp",
+      attemptId: "attempt/1",
+      sourceEtag: "source-1",
+      options: { width: 64, format: "webp" },
+      requestedAt: "2026-06-28T00:00:00.000Z",
+      requestedBy: "owner@example.com"
+    });
+
+    expect(failedFileRenditionForError({ pending, error: new Error("transform exploded") })).toMatchObject({
+      status: "failed",
+      failure_message: "transform exploded"
+    });
+    expect(failedFileRenditionForError({ pending, error: "unknown failure" })).toMatchObject({
+      status: "failed",
+      failure_message: "unknown failure"
     });
   });
 

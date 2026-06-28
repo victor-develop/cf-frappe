@@ -56,7 +56,6 @@ import {
   ensureDirectUploadMatches,
   ensureMultipartCompletionMatchesManifest,
   ensureMultipartPartFitsReservation,
-  failedFileRendition,
   fileBulkDeleteFailure,
   fileBulkFailure,
   fileContentLength,
@@ -87,6 +86,7 @@ import {
   fileTransformOverlaySource,
   fileTransformSource,
   fileSnapshotFilename,
+  failedFileRenditionForError,
   isInfectedFileScanResult,
   multipartPartManifest,
   multipartPartManifestPatch,
@@ -928,9 +928,9 @@ export class FileService {
       await this.recordRenditionManifest({
         source: command,
         command: "failRendition",
-        rendition: failedFileRendition({
+        rendition: failedFileRenditionForError({
           pending,
-          message: errorMessage(error)
+          error
         })
       }).catch(() => undefined);
       throw error;
@@ -1242,8 +1242,4 @@ export class FileService {
     ensureValidFileScanResult(result);
     return result;
   }
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
