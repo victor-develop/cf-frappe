@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the auth provider sync actor boundary slice:
+As of the OIDC authorization header parsing slice:
 
 - Vitest files: `170`
-- Vitest cases: `1795`
-- Remaining gap to Frappe static markers: `989`
+- Vitest cases: `1796`
+- Remaining gap to Frappe static markers: `988`
 
 ## Implication
 

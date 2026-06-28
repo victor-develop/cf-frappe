@@ -52,6 +52,22 @@ describe("OIDC actor resolver", () => {
     expect(fetchJwks).toHaveBeenCalledWith("https://issuer.example.com/.well-known/jwks.json");
   });
 
+  it("accepts case-insensitive Bearer schemes from the authorization header", async () => {
+    const signing = await createJwtSigner<OidcJwtClaims>();
+    const token = await signing.sign(defaultClaims());
+    const resolver = oidcActorResolver({
+      issuer: "https://login.example.com",
+      audience: "desk",
+      jwksUrl: "https://login.example.com/keys",
+      now: () => 1_000,
+      fetchJwks: async () => signing.jwks
+    });
+
+    await expect(
+      resolver(new Request("https://app.test", { headers: { authorization: `bearer ${token}` } }))
+    ).resolves.toMatchObject({ id: "owner@example.com" });
+  });
+
   it("accepts configured token sources and custom claim mapping", async () => {
     interface CustomClaims extends OidcJwtClaims {
       readonly tenant?: string;

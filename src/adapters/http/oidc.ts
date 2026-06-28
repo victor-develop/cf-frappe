@@ -331,11 +331,21 @@ function tokenFromHeader(value: string | null, scheme: string | undefined): stri
   if (scheme === undefined) {
     return trimmed;
   }
-  const match = /^(\S+)\s+(.+)$/u.exec(trimmed);
-  if (!match || match[1]!.toLowerCase() !== scheme) {
+  const parts = tokenHeaderParts(trimmed);
+  if (parts === undefined || parts.scheme.toLowerCase() !== scheme) {
     return undefined;
   }
-  return firstNonBlank(match[2]);
+  return firstNonBlank(parts.token);
+}
+
+function tokenHeaderParts(value: string): { readonly scheme: string; readonly token: string } | undefined {
+  const match = /^(\S+)\s+(.+)$/u.exec(value);
+  const scheme = match?.[1];
+  const token = match?.[2];
+  if (scheme === undefined || token === undefined) {
+    return undefined;
+  }
+  return { scheme, token };
 }
 
 function normalizeTokenSource(
