@@ -90,6 +90,7 @@ import {
   filePreparedMultipartUploadResult,
   fileDirectUploadReservationCommand,
   fileSnapshotFilename,
+  fileGeneratedRenditionReservationPlan,
   fileRenditionGenerationReservation,
   fileRenditionObjectCustomMetadata,
   fileRenditionId,
@@ -1428,6 +1429,48 @@ describe("file policy", () => {
     })).toEqual({
       command: "reserveRendition",
       input: reservation.patch,
+      expectedVersion: 9
+    });
+  });
+
+  it("plans generated rendition reservations with document commands", () => {
+    const snapshot = {
+      ...fileSnapshot({
+        content_type: "image/png",
+        renditions: [renditionEntry("existing")]
+      }),
+      version: 9
+    };
+
+    const plan = fileGeneratedRenditionReservationPlan({
+      snapshot,
+      tenantId: "acme",
+      id: "w64-f-webp",
+      attemptId: "attempt-1",
+      sourceEtag: "source-1",
+      options: { width: 64, format: "webp" },
+      requestedAt: "2026-06-28T00:00:00.000Z",
+      requestedBy: "owner@example.com"
+    });
+
+    expect(plan.pending).toMatchObject({
+      id: "w64-f-webp",
+      key: "acme/file-renditions/file_multipart/w64-f-webp-attempt-1.webp",
+      status: "pending",
+      source_etag: "source-1"
+    });
+    expect(plan.reservation).toEqual({
+      pending: plan.pending,
+      patch: {
+        renditions: [
+          renditionEntry("existing"),
+          plan.pending
+        ]
+      }
+    });
+    expect(plan.documentCommand).toEqual({
+      command: "reserveRendition",
+      input: plan.reservation.patch,
       expectedVersion: 9
     });
   });

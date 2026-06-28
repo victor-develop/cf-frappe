@@ -2578,6 +2578,32 @@ export function fileRenditionReservationDocumentCommand(command: {
   };
 }
 
+export function fileGeneratedRenditionReservationPlan(command: {
+  readonly snapshot: DocumentSnapshot;
+  readonly tenantId: string;
+  readonly id: string;
+  readonly attemptId: string;
+  readonly sourceEtag: string;
+  readonly overlay?: FileTransformOverlaySource;
+  readonly options: FileTransformOptions;
+  readonly requestedAt: string;
+  readonly requestedBy: string;
+}): {
+  readonly reservation: FileRenditionGenerationReservation;
+  readonly pending: FileRenditionManifestEntry;
+  readonly documentCommand: FileRenditionReservationDocumentCommand;
+} {
+  const reservation = fileRenditionGenerationReservation(command);
+  return {
+    reservation,
+    pending: reservation.pending,
+    documentCommand: fileRenditionReservationDocumentCommand({
+      snapshot: command.snapshot,
+      reservation
+    })
+  };
+}
+
 export interface FileRenditionReservationExecuteCommand {
   readonly actor: Actor;
   readonly doctype: string;

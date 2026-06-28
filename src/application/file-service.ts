@@ -105,14 +105,13 @@ import {
   fileObjectSourceEtag,
   filePreparedDirectUploadResult,
   filePreparedMultipartUploadResult,
-  fileRenditionGenerationReservation,
+  fileGeneratedRenditionReservationPlan,
   fileGeneratedRenditionFailurePlan,
   fileGeneratedRenditionReuseResult,
   fileGeneratedRenditionReuseStoragePlan,
   fileRenditionId,
   fileRenditionManifestExecuteCommand,
   fileRenditionReservationExecuteCommand,
-  fileRenditionReservationDocumentCommand,
   fileRenditionSnapshotPutObjectCommand,
   fileScanFailureError,
   fileScanTarget,
@@ -915,7 +914,7 @@ export class FileService {
       });
     }
 
-    const reservation = fileRenditionGenerationReservation({
+    const reservation = fileGeneratedRenditionReservationPlan({
       snapshot: downloaded.snapshot,
       tenantId,
       id: renditionId,
@@ -927,17 +926,13 @@ export class FileService {
       requestedBy: command.actor.id
     });
     const { pending } = reservation;
-    const reservationCommand = fileRenditionReservationDocumentCommand({
-      snapshot: downloaded.snapshot,
-      reservation
-    });
     await this.documents.execute(fileRenditionReservationExecuteCommand({
       actor: command.actor,
       doctype: this.fileDoctype,
       name: command.name,
       tenantId: command.tenantId,
       metadata: command.metadata,
-      reservation: reservationCommand
+      reservation: reservation.documentCommand
     }));
 
     let object: FileObjectMetadata | undefined;
