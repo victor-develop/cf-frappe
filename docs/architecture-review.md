@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted user-permission allow/revoke grant-change noop decisions into user permission policy so UserPermissionService keeps administration access, validation, event append, and replay orchestration.
 - Extracted user notification inbox access decisions, default-tenant resolution, user-id normalization, and admin delegated-inbox checks into user notification policy so UserNotificationService keeps stream replay and append orchestration.
 - Extracted audit tenant access decisions, default-tenant resolution, and cross-tenant search gating into audit policy so AuditService keeps event-store querying and recovery orchestration.
 - Extracted configured and runtime job schedule summary projection into job schedule policy so JobScheduleService keeps authorization, state loading, event writing, registry, and runner orchestration.

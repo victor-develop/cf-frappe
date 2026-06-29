@@ -15,7 +15,6 @@ import {
 } from "./user-permission-events.js";
 import {
   foldUserPermissions,
-  userPermissionGrantKey,
   type UserPermissionGrant,
   type UserPermissionProvider,
   type UserPermissionState
@@ -24,7 +23,8 @@ import {
   authorizeUserPermissionAdministration,
   ensureUserPermissionExpectedVersion,
   normalizeUserPermissionRequiredText,
-  normalizeValidUserPermissionGrant
+  normalizeValidUserPermissionGrant,
+  planUserPermissionGrantChange
 } from "./user-permission-policy.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
@@ -75,16 +75,14 @@ export class UserPermissionService implements UserPermissionProvider {
   async allow(command: AllowUserPermissionCommand): Promise<UserPermissionState> {
     return this.changePermission({
       command,
-      eventKind: "UserPermissionAllowed",
-      alreadyDone: (state, grant) => state.grants.some((existing) => userPermissionGrantKey(existing) === userPermissionGrantKey(grant))
+      eventKind: "UserPermissionAllowed"
     });
   }
 
   async revoke(command: RevokeUserPermissionCommand): Promise<UserPermissionState> {
     return this.changePermission({
       command,
-      eventKind: "UserPermissionRevoked",
-      alreadyDone: (state, grant) => state.grants.every((existing) => userPermissionGrantKey(existing) !== userPermissionGrantKey(grant))
+      eventKind: "UserPermissionRevoked"
     });
   }
 
@@ -104,7 +102,6 @@ export class UserPermissionService implements UserPermissionProvider {
   private async changePermission(options: {
     readonly command: AllowUserPermissionCommand | RevokeUserPermissionCommand;
     readonly eventKind: UserPermissionEventPayload["kind"];
-    readonly alreadyDone: (state: UserPermissionState, grant: UserPermissionGrant) => boolean;
   }): Promise<UserPermissionState> {
     const tenantId = authorizeUserPermissionAdministration({
       actor: options.command.actor,
@@ -115,7 +112,7 @@ export class UserPermissionService implements UserPermissionProvider {
     const grant = normalizeValidUserPermissionGrant(options.command);
     const state = await this.stateFor(tenantId, userId);
     ensureUserPermissionExpectedVersion(state, options.command.expectedVersion);
-    if (options.alreadyDone(state, grant)) {
+    if (planUserPermissionGrantChange({ state, grant, eventKind: options.eventKind }).status === "noop") {
       return state;
     }
     if (options.eventKind === "UserPermissionAllowed") {

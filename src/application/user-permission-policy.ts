@@ -6,9 +6,16 @@ import {
 } from "../core/types.js";
 import {
   normalizeUserPermissionGrant,
+  userPermissionGrantKey,
   type UserPermissionGrant,
   type UserPermissionState
 } from "../core/user-permissions.js";
+
+export type UserPermissionGrantChangeKind = "UserPermissionAllowed" | "UserPermissionRevoked";
+
+export type UserPermissionGrantChangeDecision =
+  | { readonly status: "append" }
+  | { readonly status: "noop" };
 
 export function resolveUserPermissionTenant(command: {
   readonly actor: Actor;
@@ -39,6 +46,20 @@ export function normalizeValidUserPermissionGrant(grant: UserPermissionGrant): U
     throw badRequest("Target name is required");
   }
   return normalized;
+}
+
+export function planUserPermissionGrantChange(options: {
+  readonly state: UserPermissionState;
+  readonly grant: UserPermissionGrant;
+  readonly eventKind: UserPermissionGrantChangeKind;
+}): UserPermissionGrantChangeDecision {
+  const hasGrant = options.state.grants.some(
+    (existing) => userPermissionGrantKey(existing) === userPermissionGrantKey(options.grant)
+  );
+  if (options.eventKind === "UserPermissionAllowed") {
+    return hasGrant ? { status: "noop" } : { status: "append" };
+  }
+  return hasGrant ? { status: "append" } : { status: "noop" };
 }
 
 export function authorizeUserPermissionAdministration(command: {

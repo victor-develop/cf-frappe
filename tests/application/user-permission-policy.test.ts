@@ -3,6 +3,7 @@ import {
   ensureUserPermissionExpectedVersion,
   normalizeUserPermissionRequiredText,
   normalizeValidUserPermissionGrant,
+  planUserPermissionGrantChange,
   resolveUserPermissionTenant
 } from "../../src/application/user-permission-policy.js";
 import { SYSTEM_MANAGER_ROLE } from "../../src/core/types.js";
@@ -56,6 +57,34 @@ describe("user permission policy", () => {
     expect(() => normalizeValidUserPermissionGrant({ targetDoctype: "Project", targetName: " " })).toThrow(
       "Target name is required"
     );
+  });
+
+  it("plans allow writes only for grants that are not already present", () => {
+    const grant = { targetDoctype: "Project", targetName: "Apollo" };
+
+    expect(planUserPermissionGrantChange({
+      state: state(1),
+      grant,
+      eventKind: "UserPermissionAllowed"
+    })).toEqual({ status: "noop" });
+    expect(planUserPermissionGrantChange({
+      state: state(1),
+      grant: { targetDoctype: "Project", targetName: "Zeus" },
+      eventKind: "UserPermissionAllowed"
+    })).toEqual({ status: "append" });
+  });
+
+  it("plans revoke writes only for grants that are currently present", () => {
+    expect(planUserPermissionGrantChange({
+      state: state(1),
+      grant: { targetDoctype: "Project", targetName: "Apollo" },
+      eventKind: "UserPermissionRevoked"
+    })).toEqual({ status: "append" });
+    expect(planUserPermissionGrantChange({
+      state: state(1),
+      grant: { targetDoctype: "Project", targetName: "Zeus" },
+      eventKind: "UserPermissionRevoked"
+    })).toEqual({ status: "noop" });
   });
 
   it("guards expected user permission versions", () => {
