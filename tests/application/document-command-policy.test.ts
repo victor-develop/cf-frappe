@@ -5,6 +5,7 @@ import {
   documentCreateValidationIssues,
   documentDomainCommandValidationIssues,
   documentMergeDisposition,
+  documentStatusChangeEventCommand,
   documentUpdateValidationIssues,
   ensureDocumentCreateAvailable,
   ensureDocumentStatus,
@@ -460,6 +461,45 @@ describe("document command policy", () => {
       eventType: "NoteWasCancelled",
       payloadKind: "DocumentCancelled"
     });
+  });
+
+  it("shapes status change event commands from policy plans", () => {
+    expect(
+      documentStatusChangeEventCommand({
+        tenantId: "acme",
+        stream: "tenant/acme/document/Note/NOTE-1",
+        doctypeName: "Note",
+        documentName: "NOTE-1",
+        actorId: "user@example.com",
+        occurredAt: "2026-06-28T02:00:00.000Z",
+        plan: planDocumentStatusChangePolicy({ name: "Note" }, "submit"),
+        metadata: { requestId: "req-1" }
+      })
+    ).toEqual({
+      tenantId: "acme",
+      stream: "tenant/acme/document/Note/NOTE-1",
+      type: "NoteSubmitted",
+      doctype: "Note",
+      documentName: "NOTE-1",
+      actorId: "user@example.com",
+      occurredAt: "2026-06-28T02:00:00.000Z",
+      payload: { kind: "DocumentSubmitted" },
+      metadata: { requestId: "req-1" }
+    });
+  });
+
+  it("defaults status change event command metadata", () => {
+    expect(
+      documentStatusChangeEventCommand({
+        tenantId: "acme",
+        stream: "tenant/acme/document/Note/NOTE-1",
+        doctypeName: "Note",
+        documentName: "NOTE-1",
+        actorId: "user@example.com",
+        occurredAt: "2026-06-28T02:00:00.000Z",
+        plan: planDocumentStatusChangePolicy({ name: "Note" }, "cancel")
+      }).metadata
+    ).toEqual({});
   });
 
   it("plans delete lifecycle changes with default event names", () => {

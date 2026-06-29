@@ -52,12 +52,14 @@ import {
   documentCreateValidationIssues,
   documentDomainCommandValidationIssues,
   documentMergeDisposition,
+  documentStatusChangeEventCommand,
   ensureDomainCommandRoleAccess,
   documentUpdateValidationIssues,
   planDocumentCopyPolicy,
   planDocumentCreatePolicy,
   planDocumentDeletePolicy,
   planDocumentStatusChangePolicy,
+  type DocumentStatusChangePolicyPlan,
   planDocumentUpdatePolicy,
   planDomainCommandPolicy,
   planWorkflowTransitionPolicy,
@@ -72,7 +74,6 @@ import {
 import { documentShareStateFromEvents } from "./document-share-events.js";
 import {
   documentDeletedPayload,
-  documentStatusChangedPayload,
   requireFirstSavedEvent,
   requireLiveDocumentSnapshot,
   requireSavedEvent,
@@ -1270,9 +1271,7 @@ export class DocumentService implements DocumentCommandExecutor {
       tenantId,
       stream,
       existing,
-      nextStatus: plan.nextStatus,
-      eventType: plan.eventType,
-      payloadKind: plan.payloadKind
+      plan
     });
   }
 
@@ -1292,9 +1291,7 @@ export class DocumentService implements DocumentCommandExecutor {
       tenantId,
       stream,
       existing,
-      nextStatus: plan.nextStatus,
-      eventType: plan.eventType,
-      payloadKind: plan.payloadKind
+      plan
     });
   }
 
@@ -1457,25 +1454,22 @@ export class DocumentService implements DocumentCommandExecutor {
     readonly tenantId: string;
     readonly stream: string;
     readonly existing: DocumentSnapshot;
-    readonly nextStatus: DocStatus;
-    readonly eventType: string;
-    readonly payloadKind: "DocumentSubmitted" | "DocumentCancelled";
+    readonly plan: DocumentStatusChangePolicyPlan;
   }): Promise<DocumentSnapshot> {
     const now = this.clock.now();
-    const event = this.newEvent({
+    const event = this.newEvent(documentStatusChangeEventCommand({
       tenantId: options.tenantId,
       stream: options.stream,
-      type: options.eventType,
-      doctype: options.doctype.name,
+      doctypeName: options.doctype.name,
       documentName: options.command.name,
       actorId: options.command.actor.id,
       occurredAt: now,
-      payload: documentStatusChangedPayload(options.payloadKind),
+      plan: options.plan,
       metadata: options.command.metadata ?? {}
-    });
+    }));
     const commit = await this.store.commit(options.stream, options.existing.version, [event], (savedEvents) => {
       const saved = requireFirstSavedEvent(savedEvents);
-      return snapshotFromCommittedDocumentEvent(options.existing, saved, { docstatus: options.nextStatus });
+      return snapshotFromCommittedDocumentEvent(options.existing, saved, { docstatus: options.plan.nextStatus });
     });
     return this.finishAfterCommit(options.doctype, commit, requireFirstSavedEvent(commit.events));
   }

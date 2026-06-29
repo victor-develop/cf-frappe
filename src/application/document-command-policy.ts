@@ -7,6 +7,7 @@ import { workflowTransitionEventType } from "./document-command-events.js";
 import {
   documentCreatedPayload,
   documentLifecycleEventType,
+  documentStatusChangedPayload,
   documentUpdatedPayload,
   type DocumentLifecycleEventPayload
 } from "./document-lifecycle-events.js";
@@ -19,6 +20,7 @@ import type {
   DocumentData,
   DocumentSnapshot,
   MutableDocumentData,
+  NewDomainEvent,
   PermissionAction,
   ValidationIssue,
   WorkflowDefinition
@@ -354,6 +356,32 @@ export function planDocumentStatusChangePolicy(
       cancelEventType: doctype.events?.cancel
     }),
     payloadKind: "DocumentCancelled"
+  };
+}
+
+export function documentStatusChangeEventCommand(input: {
+  readonly tenantId: string;
+  readonly stream: string;
+  readonly doctypeName: string;
+  readonly documentName: string;
+  readonly actorId: string;
+  readonly occurredAt: string;
+  readonly plan: Pick<DocumentStatusChangePolicyPlan, "eventType" | "payloadKind">;
+  readonly metadata?: DocumentData | undefined;
+}): Omit<
+  NewDomainEvent<Extract<DocumentLifecycleEventPayload, { readonly kind: "DocumentSubmitted" | "DocumentCancelled" }>>,
+  "id" | "sequence"
+> {
+  return {
+    tenantId: input.tenantId,
+    stream: input.stream,
+    type: input.plan.eventType,
+    doctype: input.doctypeName,
+    documentName: input.documentName,
+    actorId: input.actorId,
+    occurredAt: input.occurredAt,
+    payload: documentStatusChangedPayload(input.plan.payloadKind),
+    metadata: input.metadata ?? {}
   };
 }
 

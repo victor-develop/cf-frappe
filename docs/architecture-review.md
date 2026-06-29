@@ -92,6 +92,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized collaboration plan disposition in document collaboration policy so `DocumentService` no longer inspects share, assignment, tag, or follower noop flags.
 - Centralized collaboration event command shaping in document collaboration policy so `DocumentService` no longer repeats collaboration and share event DTO fields.
 - Centralized domain command role guards in document command policy so `DocumentService` no longer owns role-based domain-command rejection.
+- Centralized status-change event command shaping in document command policy so `DocumentService` no longer repeats submit and cancel event DTO fields.
 - Centralized readable file dashboard candidate shaping in file policy so dashboard orchestration no longer composes permission-check DTOs inline.
 - Centralized multipart completed-object reuse versus storage-completion planning in file policy so multipart orchestration no longer owns idempotent completion branching.
 - Centralized multipart completed-object read planning in file policy so multipart orchestration no longer derives object keys or upload ids before storage reads inline.
