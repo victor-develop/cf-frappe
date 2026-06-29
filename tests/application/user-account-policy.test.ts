@@ -1,6 +1,7 @@
 import {
   ensureUserAccountAdmin,
   ensureUserAccountCreatable,
+  ensureUserAccountExists,
   ensureUserAccountExpectedVersion,
   ensureUserAccountSessionCurrent,
   ensureUserRecoveryChallengeUsable,
@@ -224,6 +225,12 @@ describe("user account policy", () => {
     expect(() => ensureUserAccountCreatable(accountState({ exists: false }))).not.toThrow();
     expect(() => ensureUserAccountCreatable(accountState()))
       .toThrow("User account 'owner@example.com' already exists");
+  });
+
+  it("guards existing account commands against missing accounts", () => {
+    expect(() => ensureUserAccountExists(accountState())).not.toThrow();
+    expect(() => ensureUserAccountExists(accountState({ exists: false })))
+      .toThrow("User account 'owner@example.com' was not found");
   });
 
   it("detects enabled-state changes", () => {

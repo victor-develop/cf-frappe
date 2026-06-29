@@ -1,4 +1,4 @@
-import { FrameworkError, notFound, permissionDenied } from "../core/errors.js";
+import { FrameworkError, permissionDenied } from "../core/errors.js";
 import { userAccountsStream } from "../core/streams.js";
 import {
   DEFAULT_TENANT_ID,
@@ -46,6 +46,7 @@ import {
   emailVerificationPatch,
   ensureUserAccountAdmin,
   ensureUserAccountCreatable,
+  ensureUserAccountExists,
   ensureUserAccountExpectedVersion,
   ensureUserAccountSessionCurrent,
   ensureUserRecoveryChallengeUsable,
@@ -676,9 +677,7 @@ export class UserAccountService {
 
   private async existingStateFor(tenantId: TenantId, userId: string): Promise<UserAccountState> {
     const state = await this.stateFor(tenantId, userId);
-    if (!state.exists) {
-      throw notFound(`User account '${userId}' was not found`);
-    }
+    ensureUserAccountExists(state);
     return state;
   }
 

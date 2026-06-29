@@ -1,4 +1,4 @@
-import { badRequest, conflict, permissionDenied } from "../core/errors.js";
+import { badRequest, conflict, notFound, permissionDenied } from "../core/errors.js";
 import {
   normalizeUserRoles,
   type UserAccountEmailVerificationChallenge,
@@ -166,6 +166,12 @@ export function ensureUserAccountExpectedVersion(
 export function ensureUserAccountCreatable(state: UserAccountState): void {
   if (state.exists) {
     throw conflict(`User account '${state.userId}' already exists`);
+  }
+}
+
+export function ensureUserAccountExists(state: UserAccountState): void {
+  if (!state.exists) {
+    throw notFound(`User account '${state.userId}' was not found`);
   }
 }
 
