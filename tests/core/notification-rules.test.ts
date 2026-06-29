@@ -230,6 +230,35 @@ describe("notification rules", () => {
       }
     ]);
   });
+
+  it("derives rule notification payload kinds from source event identity", () => {
+    const event = documentEvent("evt_update", "DocumentUpdated");
+    const snapshot = noteSnapshot({ created_by: owner.id });
+    const rule = normalizeNotificationRule(noteDocType, {
+      name: "Owner alerts",
+      events: ["DocumentUpdated"],
+      recipients: [{ kind: "documentOwner" }],
+      channels: ["inbox", "email"],
+      excludeActor: false
+    });
+
+    expect(notificationRuleUserNotificationsFromDomainEvent({ event, snapshot, rules: [rule] })).toMatchObject([
+      {
+        eventId: "evt_update",
+        eventType: "NoteUpdated",
+        payloadKind: "DocumentUpdated",
+        recipientId: owner.id
+      }
+    ]);
+    expect(notificationRuleEmailNotificationsFromDomainEvent({ event, snapshot, rules: [rule] })).toMatchObject([
+      {
+        eventId: "evt_update",
+        eventType: "NoteUpdated",
+        payloadKind: "DocumentUpdated",
+        recipientId: owner.id
+      }
+    ]);
+  });
 });
 
 function ruleEvent(

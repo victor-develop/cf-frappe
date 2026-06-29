@@ -1,4 +1,5 @@
 import { FrameworkError } from "./errors.js";
+import { domainEventPayloadKind } from "./domain-events.js";
 import { matchesListFilterExpression, normalizeListFilterExpression } from "./list-view.js";
 import type {
   DocTypeDefinition,
@@ -163,7 +164,7 @@ export function notificationRuleUserNotificationsFromDomainEvent(
         kind: "DocumentUserNotification",
         eventId: context.event.id,
         eventType: context.event.type,
-        payloadKind: context.event.payload.kind,
+        payloadKind: domainEventPayloadKind(context.event),
         tenantId: context.event.tenantId,
         doctype: context.event.doctype,
         documentName: context.event.documentName,
@@ -204,7 +205,7 @@ export function notificationRuleEmailNotificationsFromDomainEvent(
         kind: "DocumentEmailNotification",
         eventId: context.event.id,
         eventType: context.event.type,
-        payloadKind: context.event.payload.kind,
+        payloadKind: domainEventPayloadKind(context.event),
         tenantId: context.event.tenantId,
         doctype: context.event.doctype,
         documentName: context.event.documentName,
