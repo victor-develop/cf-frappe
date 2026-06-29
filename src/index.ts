@@ -16,6 +16,7 @@ export * from "./application/document-access-policy.js";
 export * from "./application/document-bulk-policy.js";
 export * from "./application/document-command-policy.js";
 export * from "./application/document-delivery-outbox-consumer.js";
+export * from "./application/document-delivery-outbox-events.js";
 export * from "./application/document-delivery-outbox-service.js";
 export * from "./application/document-command-events.js";
 export * from "./application/document-collaboration-events.js";

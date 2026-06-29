@@ -1,6 +1,15 @@
 import { badRequest, conflict, notFound } from "../core/errors.js";
 import { documentDeliveryOutboxStream } from "../core/streams.js";
-import type { DocumentDeliveryOutboxTarget } from "./document-delivery-outbox-events.js";
+import {
+  documentDeliveryOutboxRecordId,
+  documentDeliveryRetryDue,
+  foldDocumentDeliveryOutbox,
+  selectedDocumentDeliveryOutboxRecords,
+  sortedDocumentDeliveryOutboxRecords,
+  type DocumentDeliveryOutboxRecord,
+  type DocumentDeliveryOutboxState,
+  type DocumentDeliveryOutboxTarget
+} from "./document-delivery-outbox-events.js";
 import type {
   DocumentData,
   DocumentSnapshot,
@@ -12,13 +21,16 @@ import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
 
-export type { DocumentDeliveryOutboxEventPayload, DocumentDeliveryOutboxTarget } from "./document-delivery-outbox-events.js";
+export type {
+  DocumentDeliveryOutboxEventPayload,
+  DocumentDeliveryOutboxRecord,
+  DocumentDeliveryOutboxStatus,
+  DocumentDeliveryOutboxTarget
+} from "./document-delivery-outbox-events.js";
 
 const MAX_OUTBOX_APPEND_ATTEMPTS = 5;
 const DEFAULT_CLAIM_LIMIT = 25;
 const MAX_CLAIM_LIMIT = 100;
-
-export type DocumentDeliveryOutboxStatus = "pending" | "claimed" | "delivered" | "failed";
 
 export interface DocumentDeliveryOutboxServiceOptions {
   readonly events: EventStore;
@@ -52,34 +64,6 @@ export interface FailDocumentDeliveryOutboxCommand extends CompleteDocumentDeliv
   readonly retryAt?: string;
 }
 
-export interface DocumentDeliveryOutboxRecord {
-  readonly id: string;
-  readonly tenantId: TenantId;
-  readonly target: DocumentDeliveryOutboxTarget;
-  readonly sourceEventId: string;
-  readonly sourceEventType: string;
-  readonly payloadKind: string;
-  readonly doctype: string;
-  readonly documentName: string;
-  readonly actorId: string;
-  readonly payload: DocumentData;
-  readonly status: DocumentDeliveryOutboxStatus;
-  readonly attempts: number;
-  readonly enqueuedAt: string;
-  readonly claimedAt?: string;
-  readonly claimId?: string;
-  readonly deliveredAt?: string;
-  readonly failedAt?: string;
-  readonly error?: string;
-  readonly retryAt?: string;
-}
-
-interface DocumentDeliveryOutboxState {
-  readonly tenantId: TenantId;
-  readonly version: number;
-  readonly records: ReadonlyMap<string, DocumentDeliveryOutboxRecord>;
-}
-
 export class DocumentDeliveryOutboxService {
   private readonly events: EventStore;
   private readonly ids: IdGenerator;
@@ -99,10 +83,10 @@ export class DocumentDeliveryOutboxService {
     }
     return this.appendWithRetry(command.event.tenantId, async (state) => {
       const uniqueTargets = [...new Set(command.targets)];
-      const recordIds = uniqueTargets.map((target) => outboxRecordId(command.event.id, target));
+      const recordIds = uniqueTargets.map((target) => documentDeliveryOutboxRecordId(command.event.id, target));
       const events = uniqueTargets
         .map((target): NewDomainEvent | undefined => {
-          const outboxId = outboxRecordId(command.event.id, target);
+          const outboxId = documentDeliveryOutboxRecordId(command.event.id, target);
           if (state.records.has(outboxId)) {
             return undefined;
           }
@@ -144,7 +128,7 @@ export class DocumentDeliveryOutboxService {
     const limit = normalizeClaimLimit(command.limit);
     return this.appendWithRetry(command.tenantId, async (state) => {
       const records = [...state.records.values()]
-        .filter((record) => record.status === "pending" || (record.status === "failed" && retryDue(record, now)))
+        .filter((record) => record.status === "pending" || (record.status === "failed" && documentDeliveryRetryDue(record, now)))
         .sort((left, right) => left.enqueuedAt.localeCompare(right.enqueuedAt) || left.id.localeCompare(right.id))
         .slice(0, limit);
       const recordIds = records.map((record) => record.id);
@@ -207,7 +191,7 @@ export class DocumentDeliveryOutboxService {
   }
 
   async list(tenantId: TenantId): Promise<readonly DocumentDeliveryOutboxRecord[]> {
-    return sortedRecords(await this.state(tenantId));
+    return sortedDocumentDeliveryOutboxRecords(await this.state(tenantId));
   }
 
   private async appendTerminalEvent(
@@ -265,11 +249,11 @@ export class DocumentDeliveryOutboxService {
       const state = await this.state(tenantId);
       const planned = await plan(state);
       if (planned.events.length === 0) {
-        return selectedRecords(planned.state ?? state, planned.recordIds);
+        return selectedDocumentDeliveryOutboxRecords(planned.state ?? state, planned.recordIds);
       }
       try {
         const saved = await this.events.append(stream, state.version, planned.events);
-        return selectedRecords(foldDocumentDeliveryOutbox(tenantId, [
+        return selectedDocumentDeliveryOutboxRecords(foldDocumentDeliveryOutbox(tenantId, [
           ...(await this.events.readStream(stream, { maxSequence: state.version })),
           ...saved
         ]), planned.recordIds);
@@ -289,82 +273,6 @@ export class DocumentDeliveryOutboxService {
       await this.events.readStream(documentDeliveryOutboxStream(tenantId))
     );
   }
-}
-
-export function foldDocumentDeliveryOutbox(
-  tenantId: TenantId,
-  events: readonly DomainEvent[]
-): DocumentDeliveryOutboxState {
-  const records = new Map<string, DocumentDeliveryOutboxRecord>();
-  let version = 0;
-  for (const event of events) {
-    version = Math.max(version, event.sequence);
-    switch (event.payload.kind) {
-      case "DocumentDeliveryOutboxEnqueued":
-        records.set(event.payload.outboxId, {
-          id: event.payload.outboxId,
-          tenantId,
-          target: event.payload.target,
-          sourceEventId: event.payload.sourceEventId,
-          sourceEventType: event.payload.sourceEventType,
-          payloadKind: event.payload.payloadKind,
-          doctype: event.payload.doctype,
-          documentName: event.payload.documentName,
-          actorId: event.payload.actorId,
-          payload: event.payload.payload ?? {},
-          status: "pending",
-          attempts: 0,
-          enqueuedAt: event.occurredAt
-        });
-        break;
-      case "DocumentDeliveryOutboxClaimed": {
-        const current = records.get(event.payload.outboxId);
-        if (current) {
-          const { error: _error, retryAt: _retryAt, ...claimable } = current;
-          records.set(current.id, {
-            ...claimable,
-            status: "claimed",
-            attempts: current.attempts + 1,
-            claimId: event.payload.claimId,
-            claimedAt: event.occurredAt
-          });
-        }
-        break;
-      }
-      case "DocumentDeliveryOutboxDelivered": {
-        const current = records.get(event.payload.outboxId);
-        if (current) {
-          const { error: _error, retryAt: _retryAt, ...deliverable } = current;
-          records.set(current.id, {
-            ...deliverable,
-            status: "delivered",
-            claimId: event.payload.claimId,
-            deliveredAt: event.occurredAt
-          });
-        }
-        break;
-      }
-      case "DocumentDeliveryOutboxFailed": {
-        const current = records.get(event.payload.outboxId);
-        if (current) {
-          records.set(current.id, {
-            ...current,
-            status: "failed",
-            claimId: event.payload.claimId,
-            failedAt: event.occurredAt,
-            error: event.payload.error,
-            ...(event.payload.retryAt === undefined ? {} : { retryAt: event.payload.retryAt })
-          });
-        }
-        break;
-      }
-    }
-  }
-  return { tenantId, version, records };
-}
-
-function outboxRecordId(eventId: string, target: DocumentDeliveryOutboxTarget): string {
-  return `${eventId}:${target}`;
 }
 
 function outboxPayload(event: DomainEvent, snapshot: DocumentSnapshot | null | undefined): DocumentData {
@@ -388,29 +296,6 @@ function ensureClaimed(record: DocumentDeliveryOutboxRecord, claimId: string): v
   if (record.status !== "claimed" || record.claimId !== claimId) {
     throw conflict(`Document delivery outbox record '${record.id}' is not claimed by '${claimId}'`);
   }
-}
-
-function retryDue(record: DocumentDeliveryOutboxRecord, now: string): boolean {
-  return record.retryAt === undefined || record.retryAt <= now;
-}
-
-function sortedRecords(state: DocumentDeliveryOutboxState): readonly DocumentDeliveryOutboxRecord[] {
-  return [...state.records.values()].sort(
-    (left, right) => left.enqueuedAt.localeCompare(right.enqueuedAt) || left.id.localeCompare(right.id)
-  );
-}
-
-function selectedRecords(
-  state: DocumentDeliveryOutboxState,
-  recordIds: readonly string[] | undefined
-): readonly DocumentDeliveryOutboxRecord[] {
-  if (recordIds === undefined) {
-    return sortedRecords(state);
-  }
-  return recordIds.flatMap((id) => {
-    const record = state.records.get(id);
-    return record ? [record] : [];
-  });
 }
 
 function isStreamConflict(error: unknown): boolean {
