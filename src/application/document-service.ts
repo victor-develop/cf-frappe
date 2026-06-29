@@ -49,10 +49,10 @@ import {
   ensureDocumentCreateAvailable,
   mergeSnapshotFromDocument,
   normalizeUnsetFields,
-  canExecuteDomainCommandForRoles,
   documentCreateValidationIssues,
   documentDomainCommandValidationIssues,
   documentMergeDisposition,
+  ensureDomainCommandRoleAccess,
   documentUpdateValidationIssues,
   planDocumentCopyPolicy,
   planDocumentCreatePolicy,
@@ -968,9 +968,7 @@ export class DocumentService implements DocumentCommandExecutor {
       `execute ${command.command} on`
     );
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
-    if (!canExecuteDomainCommandForRoles(command.actor, commandDefinition)) {
-      throw permissionDenied(`Actor '${command.actor.id}' cannot execute ${command.command}`);
-    }
+    ensureDomainCommandRoleAccess(command.actor, commandDefinition, command.command);
     ensureExpectedVersion(existing, command.expectedVersion);
     ensureDocumentStatus(existing, ["draft"], `execute ${command.command}`);
 

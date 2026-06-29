@@ -9,6 +9,7 @@ import {
   ensureDocumentCreateAvailable,
   ensureDocumentStatus,
   ensureDocumentUpdateStatus,
+  ensureDomainCommandRoleAccess,
   ensureExpectedVersion,
   ensureMergeBaseVersion,
   mergeSnapshotFromDocument,
@@ -333,6 +334,19 @@ describe("document command policy", () => {
     expect(canExecuteDomainCommandForRoles(actor, {})).toBe(true);
     expect(canExecuteDomainCommandForRoles(actor, { roles: ["System Manager", "User"] })).toBe(true);
     expect(canExecuteDomainCommandForRoles(actor, { roles: ["System Manager"] })).toBe(false);
+  });
+
+  it("allows domain command role access for eligible actors", () => {
+    expect(() => ensureDomainCommandRoleAccess(actor, {}, "close")).not.toThrow();
+    expect(() =>
+      ensureDomainCommandRoleAccess(actor, { roles: ["System Manager", "User"] }, "close")
+    ).not.toThrow();
+  });
+
+  it("rejects domain command role access for ineligible actors", () => {
+    expect(() =>
+      ensureDomainCommandRoleAccess(actor, { roles: ["System Manager"] }, "close")
+    ).toThrow("Actor 'user@example.com' cannot execute close");
   });
 
   it("resolves domain command definitions by command name", () => {

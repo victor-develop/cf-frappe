@@ -1,5 +1,5 @@
 import type { DocumentFieldMergePlan, DocumentMergeSnapshot } from "../core/document-merge.js";
-import { badRequest, conflict, FrameworkError } from "../core/errors.js";
+import { badRequest, conflict, FrameworkError, permissionDenied } from "../core/errors.js";
 import { compactData } from "../core/schema.js";
 import { allowedWorkflowTransitions, currentWorkflowState } from "../core/workflow.js";
 import { copyDocumentData } from "./document-field-policy.js";
@@ -223,6 +223,16 @@ export function canExecuteDomainCommandForRoles(
   definition: Pick<DomainCommandDefinition, "roles">
 ): boolean {
   return definition.roles === undefined || definition.roles.some((role) => actor.roles.includes(role));
+}
+
+export function ensureDomainCommandRoleAccess(
+  actor: Actor,
+  definition: Pick<DomainCommandDefinition, "roles">,
+  command: string
+): void {
+  if (!canExecuteDomainCommandForRoles(actor, definition)) {
+    throw permissionDenied(`Actor '${actor.id}' cannot execute ${command}`);
+  }
 }
 
 export function requireDomainCommandDefinition(

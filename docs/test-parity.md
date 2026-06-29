@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the collaboration event command policy slice:
+As of the domain command role guard policy slice:
 
 - Vitest files: `196`
-- Vitest cases: `2287`
-- Remaining gap to Frappe static markers: `497`
+- Vitest cases: `2289`
+- Remaining gap to Frappe static markers: `495`
 
 ## Implication
 
