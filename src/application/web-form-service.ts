@@ -1,5 +1,5 @@
 import { permissionDenied } from "../core/errors.js";
-import { assertWebFormMatchesDocType, canReadWebForm, type WebFormDefinition } from "../core/web-form.js";
+import { assertWebFormMatchesDocType, type WebFormDefinition } from "../core/web-form.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { Actor, DocTypeDefinition } from "../core/types.js";
 import type { DocumentService } from "./document-service.js";
@@ -7,9 +7,11 @@ import type { QueryService } from "./query-service.js";
 import { isPermissionDeniedError } from "./access-policy.js";
 import {
   isPublishedWebFormForActor,
+  planWebFormAccess,
   resolveWebFormMetadata,
   webFormSubmissionData,
   webFormSubmitResult,
+  type WebFormAccessDecision,
   type WebFormMetadata,
   type WebFormSubmitInput,
   type WebFormSubmitResult
@@ -37,7 +39,7 @@ export class WebFormService {
   async listWebForms(actor: Actor): Promise<readonly WebFormDefinition[]> {
     const readable: WebFormDefinition[] = [];
     for (const webForm of this.registry.listWebForms()) {
-      if (await this.canAccessWebForm(actor, webForm)) {
+      if ((await this.webFormAccess(actor, webForm)).status === "allow") {
         readable.push(webForm);
       }
     }
@@ -55,8 +57,9 @@ export class WebFormService {
   }
 
   private async resolveWebForm(actor: Actor, webForm: WebFormDefinition): Promise<WebFormMetadata> {
-    if (!(await this.canAccessWebForm(actor, webForm))) {
-      throw permissionDenied(`Actor '${actor.id}' cannot submit web form '${webForm.name}'`);
+    const decision = await this.webFormAccess(actor, webForm);
+    if (decision.status === "deny") {
+      throw permissionDenied(decision.message);
     }
     const doctype = await this.createMetaFor(actor, webForm);
     return resolveWebFormMetadata(webForm, doctype);
@@ -78,19 +81,17 @@ export class WebFormService {
     return webFormSubmitResult(metadata, document);
   }
 
-  private async canAccessWebForm(actor: Actor, webForm: WebFormDefinition): Promise<boolean> {
-    if (!isPublishedWebFormForActor(actor, webForm)) {
-      return false;
-    }
-    if (!canReadWebForm(actor, webForm)) {
-      return false;
+  private async webFormAccess(actor: Actor, webForm: WebFormDefinition): Promise<WebFormAccessDecision> {
+    const preflight = planWebFormAccess({ actor, form: webForm, createMetadataReadable: true });
+    if (preflight.status === "deny" || !isPublishedWebFormForActor(actor, webForm)) {
+      return preflight;
     }
     try {
       await this.createMetaFor(actor, webForm);
-      return true;
+      return preflight;
     } catch (error) {
       if (isPermissionDeniedError(error)) {
-        return false;
+        return planWebFormAccess({ actor, form: webForm, createMetadataReadable: false });
       }
       throw error;
     }

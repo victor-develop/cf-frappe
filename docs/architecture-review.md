@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted Web Form access decisions into web-form policy so WebFormService keeps create-metadata probes and submission orchestration.
 - Extracted Kanban read-access decisions into kanban policy so KanbanService keeps DocType metadata probes and board-query orchestration.
 - Extracted Calendar read-access decisions into calendar policy so CalendarService keeps DocType metadata probes and event-query orchestration.
 - Extracted dashboard read-access decisions into dashboard policy so DashboardService keeps metadata/report access probes and card execution orchestration.

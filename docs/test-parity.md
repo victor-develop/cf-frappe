@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the kanban read access policy slice:
+As of the web-form access policy slice:
 
 - Vitest files: `232`
-- Vitest cases: `2660`
-- Remaining gap to Frappe static markers: `124`
+- Vitest cases: `2661`
+- Remaining gap to Frappe static markers: `123`
 
 ## Implication
 

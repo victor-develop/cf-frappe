@@ -3,6 +3,7 @@ import {
   defineWebForm,
   isMissingRequiredWebFormValue,
   isPublishedWebFormForActor,
+  planWebFormAccess,
   resolveWebFormMetadata,
   SYSTEM_MANAGER_ROLE,
   webFormSubmissionData,
@@ -47,6 +48,42 @@ describe("web form policy", () => {
     expect(isPublishedWebFormForActor(guest, draft)).toBe(false);
     expect(isPublishedWebFormForActor(owner, draft)).toBe(false);
     expect(isPublishedWebFormForActor({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] }, draft)).toBe(true);
+  });
+
+  it("plans Web Form access from publish state, form roles, and create metadata readability", () => {
+    const restricted = defineWebForm({
+      ...LeadForm,
+      roles: ["Lead Creator"]
+    });
+
+    expect(
+      planWebFormAccess({
+        actor: { id: "creator", roles: ["Lead Creator"] },
+        form: restricted,
+        createMetadataReadable: true
+      })
+    ).toEqual({ status: "allow" });
+    expect(
+      planWebFormAccess({
+        actor: { id: "creator", roles: ["Lead Creator"] },
+        form: restricted,
+        createMetadataReadable: false
+      })
+    ).toEqual({ status: "deny", message: "Actor 'creator' cannot submit web form 'Lead Intake'" });
+    expect(
+      planWebFormAccess({
+        actor: { id: "guest", roles: ["Guest"] },
+        form: restricted,
+        createMetadataReadable: true
+      })
+    ).toEqual({ status: "deny", message: "Actor 'guest' cannot submit web form 'Lead Intake'" });
+    expect(
+      planWebFormAccess({
+        actor: { id: "owner", roles: ["Owner"] },
+        form: defineWebForm({ ...LeadForm, published: false }),
+        createMetadataReadable: true
+      })
+    ).toEqual({ status: "deny", message: "Actor 'owner' cannot submit web form 'Lead Intake'" });
   });
 
   it("resolves Web Form metadata from effective create metadata", () => {

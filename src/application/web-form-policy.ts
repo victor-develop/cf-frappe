@@ -1,6 +1,10 @@
 import { badRequest } from "../core/errors.js";
 import { SYSTEM_MANAGER_ROLE, type Actor, type DocTypeDefinition, type DocumentData, type DocumentSnapshot, type FieldDefinition, type JsonValue, type MutableDocumentData } from "../core/types.js";
-import type { WebFormDefinition } from "../core/web-form.js";
+import { canReadWebForm, type WebFormDefinition } from "../core/web-form.js";
+
+export type WebFormAccessDecision =
+  | { readonly status: "allow" }
+  | { readonly status: "deny"; readonly message: string };
 
 export interface WebFormResolvedField {
   readonly field: string;
@@ -27,6 +31,24 @@ export interface WebFormSubmitInput {
 export interface WebFormSubmitResult {
   readonly form: WebFormDefinition;
   readonly document: DocumentSnapshot;
+}
+
+export function planWebFormAccess(options: {
+  readonly actor: Actor;
+  readonly form: WebFormDefinition;
+  readonly createMetadataReadable: boolean;
+}): WebFormAccessDecision {
+  if (
+    !isPublishedWebFormForActor(options.actor, options.form)
+    || !canReadWebForm(options.actor, options.form)
+    || !options.createMetadataReadable
+  ) {
+    return {
+      status: "deny",
+      message: `Actor '${options.actor.id}' cannot submit web form '${options.form.name}'`
+    };
+  }
+  return { status: "allow" };
 }
 
 export function isPublishedWebFormForActor(actor: Actor, form: WebFormDefinition): boolean {
