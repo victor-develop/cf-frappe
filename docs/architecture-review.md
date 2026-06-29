@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Covered notification rule payload-kind matching so rule-generated inbox/email notifications preserve custom source event names while matching from the domain payload.
 - Covered assignment rule hook payload-kind matching so automation assignments preserve custom source event names while matching rules from the domain payload.
 - Covered email notification service payload-kind metadata matching so queued email records preserve custom source event names while matching rules and payload metadata from the domain payload.
 - Covered durable user-notification service payload-kind matching so direct inbox records preserve custom event names while deriving recipients from the domain payload.

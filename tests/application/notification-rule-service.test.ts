@@ -240,6 +240,37 @@ describe("NotificationRuleService", () => {
     ]);
   });
 
+  it("matches notification rules from payload kind when event type names are misleading", () => {
+    const event = {
+      ...documentUpdatedEvent("evt_matching_update"),
+      type: "NoteDeleted"
+    };
+    const snapshot = noteSnapshot();
+    const rules = [
+      {
+        name: "Updated note inbox",
+        events: ["DocumentUpdated"],
+        recipients: [{ kind: "user", userId: "manager@example.com" }],
+        channels: ["inbox"]
+      },
+      {
+        name: "Deleted note inbox",
+        events: ["DocumentDeleted"],
+        recipients: [{ kind: "user", userId: "deleted@example.com" }],
+        channels: ["inbox"]
+      }
+    ] as const;
+
+    expect(notificationRuleUserNotificationsFromDomainEvent({ event, snapshot, rules })).toMatchObject([
+      {
+        recipientId: "manager@example.com",
+        eventType: "NoteDeleted",
+        payloadKind: "DocumentUpdated",
+        ruleName: "Updated note inbox"
+      }
+    ]);
+  });
+
   it("can target fields introduced by upstream custom-field overlays", async () => {
     const registry = createRegistry({ doctypes: [noteDocType] });
     const store = new InMemoryDocumentStore();
