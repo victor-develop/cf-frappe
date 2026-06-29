@@ -19,7 +19,9 @@ import {
   resolveUserAccountSessionTenant,
   SYSTEM_MANAGER_ROLE,
   ensureUserAccountPasswordLoginAllowed,
+  userAccountEmailVerificationDeliveryEmail,
   userAccountPasswordHashForLogin,
+  userAccountPasswordResetDeliveryEmail,
   userAccountRolesEqual
 } from "../../src";
 import type { UserAccountState } from "../../src";
@@ -111,6 +113,49 @@ describe("user account policy", () => {
       .toThrow("Invalid credentials");
     expect(() => ensureUserAccountPasswordLoginAllowed(accountState({ enabled: false }), true))
       .toThrow("Invalid credentials");
+  });
+
+  it("selects password reset delivery email for recoverable password accounts", () => {
+    expect(userAccountPasswordResetDeliveryEmail(accountState({
+      email: "owner@example.com",
+      passwordHash: "hash:secret"
+    }), true)).toBe("owner@example.com");
+    expect(userAccountPasswordResetDeliveryEmail(accountState({
+      email: "owner@example.com",
+      passwordHash: "hash:secret"
+    }), false)).toBeUndefined();
+    expect(userAccountPasswordResetDeliveryEmail(accountState({
+      exists: false,
+      email: "owner@example.com",
+      passwordHash: "hash:secret"
+    }), true)).toBeUndefined();
+    expect(userAccountPasswordResetDeliveryEmail(accountState({
+      enabled: false,
+      email: "owner@example.com",
+      passwordHash: "hash:secret"
+    }), true)).toBeUndefined();
+    expect(userAccountPasswordResetDeliveryEmail(accountState({
+      email: "owner@example.com"
+    }), true)).toBeUndefined();
+    expect(userAccountPasswordResetDeliveryEmail(accountState({
+      passwordHash: "hash:secret"
+    }), true)).toBeUndefined();
+  });
+
+  it("selects email verification delivery email for unverified accounts", () => {
+    expect(userAccountEmailVerificationDeliveryEmail(accountState({ email: "owner@example.com" }), true))
+      .toBe("owner@example.com");
+    expect(userAccountEmailVerificationDeliveryEmail(accountState({ email: "owner@example.com" }), false))
+      .toBeUndefined();
+    expect(userAccountEmailVerificationDeliveryEmail(accountState({ exists: false, email: "owner@example.com" }), true))
+      .toBeUndefined();
+    expect(userAccountEmailVerificationDeliveryEmail(accountState({ enabled: false, email: "owner@example.com" }), true))
+      .toBeUndefined();
+    expect(userAccountEmailVerificationDeliveryEmail(accountState(), true)).toBeUndefined();
+    expect(userAccountEmailVerificationDeliveryEmail(accountState({
+      email: "owner@example.com",
+      emailVerifiedAt: now
+    }), true)).toBeUndefined();
   });
 
   it("normalizes recovery tokens", () => {

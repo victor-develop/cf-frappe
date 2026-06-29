@@ -89,6 +89,26 @@ export function ensureUserAccountPasswordLoginAllowed(state: UserAccountState, p
   }
 }
 
+export function userAccountPasswordResetDeliveryEmail(
+  state: UserAccountState,
+  recoveryAvailable: boolean
+): string | undefined {
+  if (!state.exists || !state.enabled || state.passwordHash === undefined || state.email === undefined || !recoveryAvailable) {
+    return undefined;
+  }
+  return state.email;
+}
+
+export function userAccountEmailVerificationDeliveryEmail(
+  state: UserAccountState,
+  recoveryAvailable: boolean
+): string | undefined {
+  if (!state.exists || !state.enabled || state.email === undefined || state.emailVerifiedAt !== undefined || !recoveryAvailable) {
+    return undefined;
+  }
+  return state.email;
+}
+
 export function normalizeUserRecoveryToken(token: string): string {
   const normalized = token.trim();
   if (normalized.length === 0) {

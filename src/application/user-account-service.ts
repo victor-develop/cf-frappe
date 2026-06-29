@@ -60,6 +60,8 @@ import {
   resolveUserAccountSessionTenant,
   ensureUserAccountPasswordLoginAllowed,
   userAccountPasswordHashForLogin,
+  userAccountEmailVerificationDeliveryEmail,
+  userAccountPasswordResetDeliveryEmail,
   userAccountRolesEqual
 } from "./user-account-policy.js";
 import type { UserRoleValidator } from "./user-role-validator.js";
@@ -418,8 +420,8 @@ export class UserAccountService {
     const userId = normalizeRequiredUserAccountText(command.userId, "User id");
     const state = await this.stateFor(tenantId, userId);
     const recovery = this.recovery;
-    const email = state.email;
-    if (!state.exists || !state.enabled || state.passwordHash === undefined || email === undefined || recovery === undefined) {
+    const email = userAccountPasswordResetDeliveryEmail(state, recovery !== undefined);
+    if (email === undefined || recovery === undefined) {
       return { tenantId, userId, delivered: false };
     }
     const token = this.recoveryTokens.next("tok_");
@@ -492,8 +494,8 @@ export class UserAccountService {
     const userId = normalizeRequiredUserAccountText(command.userId, "User id");
     const state = await this.stateFor(tenantId, userId);
     const recovery = this.recovery;
-    const email = state.email;
-    if (!state.exists || !state.enabled || email === undefined || state.emailVerifiedAt !== undefined || recovery === undefined) {
+    const email = userAccountEmailVerificationDeliveryEmail(state, recovery !== undefined);
+    if (email === undefined || recovery === undefined) {
       return { tenantId, userId, delivered: false };
     }
     const token = this.recoveryTokens.next("tok_");
