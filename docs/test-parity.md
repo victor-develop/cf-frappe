@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the web-page route lookup policy slice:
+As of the web-view route/item lookup policy slice:
 
 - Vitest files: `233`
-- Vitest cases: `2671`
-- Remaining gap to Frappe static markers: `113`
+- Vitest cases: `2672`
+- Remaining gap to Frappe static markers: `112`
 
 ## Implication
 

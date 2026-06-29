@@ -1,6 +1,5 @@
 import { notFound, permissionDenied } from "../core/errors.js";
 import { assertWebViewMatchesDocType, type WebViewDefinition } from "../core/web-view.js";
-import { isCanonicalWebPageRoute } from "../core/web-page.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { Actor, DocTypeDefinition } from "../core/types.js";
 import type { QueryService } from "./query-service.js";
@@ -10,6 +9,8 @@ import {
   clampWebViewOffset,
   DEFAULT_WEB_VIEW_LIMIT,
   planWebViewReadAccess,
+  planWebViewItemLookup,
+  planWebViewRouteRequest,
   resolveWebViewMetadata,
   webViewFilterExpressionOption,
   webViewFilters,
@@ -110,8 +111,9 @@ export class WebViewService {
 
   async getItem(actor: Actor, webViewName: string, route: string): Promise<{ readonly view: WebViewDefinition; readonly item: WebViewItem }> {
     const metadata = await this.getWebView(actor, webViewName);
-    if (!isCanonicalWebPageRoute(route)) {
-      throw notFound(`Web view '${metadata.view.name}' route '${route}' was not found`);
+    const routeRequest = planWebViewRouteRequest({ view: metadata.view, route });
+    if (routeRequest.status === "not-found") {
+      throw notFound(routeRequest.message);
     }
     const result = await this.queries.listDocuments(actor, metadata.doctype, {
       filters: webViewRouteFilters(metadata, route),
@@ -121,16 +123,21 @@ export class WebViewService {
       maxLimit: 1
     });
     const document = result.data[0];
-    if (document === undefined) {
-      throw notFound(`Web view '${metadata.view.name}' route '${route}' was not found`);
+    const lookup = planWebViewItemLookup({
+      view: metadata.view,
+      route,
+      ...(document === undefined ? {} : { documentName: document.name }),
+      item: document === undefined ? undefined : webViewItemFromDocument(metadata, document)
+    });
+    if (lookup.status === "not-found") {
+      throw notFound(lookup.message);
     }
-    const item = webViewItemFromDocument(metadata, document);
-    if (item === undefined) {
-      throw new Error(`Web view '${metadata.view.name}' resolved '${document.name}' without a route value`);
+    if (lookup.status === "invalid") {
+      throw new Error(lookup.message);
     }
     return {
       view: metadata.view,
-      item
+      item: lookup.item
     };
   }
 

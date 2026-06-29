@@ -3,7 +3,9 @@ import {
   clampWebViewOffset,
   defineDocType,
   defineWebView,
+  planWebViewItemLookup,
   planWebViewReadAccess,
+  planWebViewRouteRequest,
   resolveWebViewMetadata,
   webViewFilterExpressionOption,
   webViewFilters,
@@ -97,6 +99,34 @@ describe("web view policy", () => {
       filterExpression: { field: "title", operator: "contains", value: "Launch" }
     });
     expect(webViewOrderOptions(BlogView)).toEqual({ orderBy: "title", order: "asc" });
+  });
+
+  it("plans Web View route and item lookup outcomes", () => {
+    const metadata = resolveWebViewMetadata(BlogView, BlogPost);
+    const item = webViewItemFromDocument(metadata, document({ title: "Published Launch", route: "launch" }))!;
+
+    expect(planWebViewRouteRequest({ view: BlogView, route: "launch" })).toEqual({ status: "query" });
+    expect(planWebViewRouteRequest({ view: BlogView, route: "../admin" })).toEqual({
+      status: "not-found",
+      message: "Web view 'Blog' route '../admin' was not found"
+    });
+    expect(planWebViewItemLookup({ view: BlogView, route: "missing", item: undefined })).toEqual({
+      status: "not-found",
+      message: "Web view 'Blog' route 'missing' was not found"
+    });
+    expect(planWebViewItemLookup({
+      view: BlogView,
+      route: "missing-route",
+      documentName: "Published Launch",
+      item: undefined
+    })).toEqual({
+      status: "invalid",
+      message: "Web view 'Blog' resolved 'Published Launch' without a route value"
+    });
+    expect(planWebViewItemLookup({ view: BlogView, route: "launch", documentName: item.name, item })).toEqual({
+      status: "found",
+      item
+    });
   });
 
   it("clamps list limits and offsets to configured and hard bounds", () => {

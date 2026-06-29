@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted Web View route request and item lookup decisions into web-view policy so WebViewService keeps metadata resolution and QueryService orchestration.
 - Extracted Web Page route lookup decisions into web-page policy so WebPageService keeps registry visibility filtering and access orchestration.
 - Extracted Website Settings home-page resolution not-found decisions into website-settings policy so WebsiteSettingsService keeps homepage target probing and linked Web Page/Web Form/Web View orchestration.
 - Extracted projected-document read-access denial decisions into document query policy so QueryService keeps projection, user-permission, and document-share access orchestration.

@@ -54,6 +54,15 @@ export interface WebViewListResult {
   readonly nextOffset?: number;
 }
 
+export type WebViewRouteRequestDecision =
+  | { readonly status: "query" }
+  | { readonly status: "not-found"; readonly message: string };
+
+export type WebViewItemLookupDecision =
+  | { readonly status: "found"; readonly item: WebViewItem }
+  | { readonly status: "not-found"; readonly message: string }
+  | { readonly status: "invalid"; readonly message: string };
+
 export function planWebViewReadAccess(options: {
   readonly actor: Actor;
   readonly view: WebViewDefinition;
@@ -66,6 +75,33 @@ export function planWebViewReadAccess(options: {
     };
   }
   return { status: "allow" };
+}
+
+export function planWebViewRouteRequest(options: {
+  readonly view: WebViewDefinition;
+  readonly route: string;
+}): WebViewRouteRequestDecision {
+  return isCanonicalWebPageRoute(options.route)
+    ? { status: "query" }
+    : { status: "not-found", message: webViewRouteNotFoundMessage(options.view, options.route) };
+}
+
+export function planWebViewItemLookup(options: {
+  readonly view: WebViewDefinition;
+  readonly route: string;
+  readonly documentName?: string;
+  readonly item: WebViewItem | undefined;
+}): WebViewItemLookupDecision {
+  if (options.documentName === undefined) {
+    return { status: "not-found", message: webViewRouteNotFoundMessage(options.view, options.route) };
+  }
+  if (options.item === undefined) {
+    return {
+      status: "invalid",
+      message: `Web view '${options.view.name}' resolved '${options.documentName}' without a route value`
+    };
+  }
+  return { status: "found", item: options.item };
 }
 
 export function resolveWebViewMetadata(
@@ -203,4 +239,8 @@ export function webViewListResult(options: {
 
 function webViewPublishedFilters(metadata: WebViewMetadata): readonly ListDocumentsFilter[] {
   return metadata.publishedField === undefined ? [] : [{ field: metadata.publishedField.field, value: true }];
+}
+
+function webViewRouteNotFoundMessage(view: WebViewDefinition, route: string): string {
+  return `Web view '${view.name}' route '${route}' was not found`;
 }
