@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted selected data-patch apply predecessor policy from DataPatchService and covered missing, non-applied, and checksum-drifted predecessor guards directly.
 - Extracted data-patch rollback planning and retry status policy from DataPatchService and covered automatic rollback disposition, selected rollback guards, and rollback-retry guards directly.
 - Shared data-patch checksum mismatch policy across runner, service, D1, and in-memory logs while preserving applied-versus-recorded error wording.
 - Shared data-patch journal policy across D1 and in-memory logs so retry, rollback-retry, rollback-claim, checksum, and apply-unavailable errors use one status boundary.

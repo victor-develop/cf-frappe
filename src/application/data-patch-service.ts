@@ -1,4 +1,5 @@
 import { DataPatchRunner, type DataPatchRollbackRunResult, type DataPatchRunResult } from "./data-patch-runner.js";
+import { assertSelectedDataPatchPredecessorsApplied } from "./data-patch-apply-policy.js";
 import { assertDataPatchChecksumMatches } from "./data-patch-journal-policy.js";
 import {
   assertDataPatchRollbackRetryable,
@@ -255,30 +256,8 @@ export class DataPatchService<TResources = unknown> {
   }
 
   private async assertPredecessorsApplied(selected: readonly DataPatchDefinition<TResources>[]): Promise<void> {
-    const selectedIds = new Set(selected.map((patch) => patch.id));
     const recordedById = new Map((await this.log.recordedDataPatches()).map((patch) => [patch.id, patch]));
-    let blocker: DataPatchDefinition<TResources> | undefined;
-    for (const patch of this.patches) {
-      if (selectedIds.has(patch.id)) {
-        if (blocker !== undefined) {
-          throw new FrameworkError(
-            "DATA_PATCH_ORDER_VIOLATION",
-            `Data patch '${patch.id}' cannot run before earlier patch '${blocker.id}' is applied`,
-            { status: 409 }
-          );
-        }
-        continue;
-      }
-      const recorded = recordedById.get(patch.id);
-      if (recorded === undefined) {
-        blocker ??= patch;
-        continue;
-      }
-      assertChecksumMatches(patch, recorded);
-      if (recorded.status !== "applied") {
-        blocker ??= patch;
-      }
-    }
+    assertSelectedDataPatchPredecessorsApplied(this.patches, selected, recordedById);
   }
 
   private assertSelectedPatchesRollbackable(
