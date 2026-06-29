@@ -13,14 +13,13 @@ import {
   type DataPatchDashboardEntry,
   type DataPatchDashboardStatus
 } from "./data-patch-dashboard-policy.js";
-import { assertDataPatchChecksumMatches } from "./data-patch-journal-policy.js";
 import {
   assertDataPatchRollbackRetryable,
-  assertDataPatchRollbackSuccessorSafe,
+  assertDataPatchRollbackSuccessorsRolledBack,
   assertSelectedDataPatchRollbackable,
   dataPatchRollbackPlanDecision
 } from "./data-patch-rollback-policy.js";
-import { FrameworkError, permissionDenied } from "../core/errors.js";
+import { permissionDenied } from "../core/errors.js";
 import type { DataPatchDefinition } from "../core/data-patch.js";
 import { SYSTEM_MANAGER_ROLE, type Actor } from "../core/types.js";
 import type { Clock } from "../ports/clock.js";
@@ -182,7 +181,7 @@ export class DataPatchService<TResources = unknown> {
       const selected = selectDataPatches(this.patches, options.patchIds);
       this.assertSelectedPatchesRollbackable(selected, recordedById);
       const selectedIds = new Set(selected.map((patch) => patch.id));
-      this.assertNoUnsafeSuccessorsOutsideSelection(selected, selectedIds, recordedById);
+      assertDataPatchRollbackSuccessorsRolledBack(this.patches, selected, selectedIds, recordedById);
       const rollback = [...selected].reverse();
       return options.limit === undefined ? rollback : rollback.slice(0, options.limit);
     }
@@ -208,7 +207,7 @@ export class DataPatchService<TResources = unknown> {
     const patch = selectDataPatch(this.patches, patchId);
     const recordedById = new Map((await this.log.recordedDataPatches()).map((recorded) => [recorded.id, recorded]));
     this.assertSelectedPatchRollbackRetryable(patch, recordedById);
-    this.assertNoUnsafeSuccessorsOutsideSelection([patch], new Set([patch.id]), recordedById);
+    assertDataPatchRollbackSuccessorsRolledBack(this.patches, [patch], new Set([patch.id]), recordedById);
     return patch;
   }
 
@@ -251,37 +250,4 @@ export class DataPatchService<TResources = unknown> {
     assertDataPatchRollbackRetryable(patch, recorded);
   }
 
-  private assertNoUnsafeSuccessorsOutsideSelection(
-    selected: readonly DataPatchDefinition<TResources>[],
-    selectedIds: ReadonlySet<string>,
-    recordedById: ReadonlyMap<string, RecordedDataPatch>
-  ): void {
-    const earliestSelectedIndex = Math.min(...selected.map((patch) => this.patches.indexOf(patch)));
-    for (const patch of this.patches.slice(earliestSelectedIndex + 1)) {
-      if (selectedIds.has(patch.id)) {
-        continue;
-      }
-      const recorded = recordedById.get(patch.id);
-      if (recorded === undefined) {
-        continue;
-      }
-      assertChecksumMatches(patch, recorded);
-      assertDataPatchRollbackSuccessorSafe(patch.id, recorded);
-      if (recorded.status === "rolled_back") {
-        continue;
-      }
-      throw new FrameworkError(
-        "DATA_PATCH_ORDER_VIOLATION",
-        `Data patch '${selected[0]?.id ?? ""}' cannot roll back before later patch '${patch.id}' is rolled back`,
-        { status: 409 }
-      );
-    }
-  }
-}
-
-function assertChecksumMatches<TResources>(
-  patch: DataPatchDefinition<TResources>,
-  recorded: RecordedDataPatch
-): void {
-  assertDataPatchChecksumMatches(patch.id, patch.checksum, recorded.checksum);
 }

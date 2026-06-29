@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted selected data-patch rollback successor order policy from DataPatchService and covered later applied, rolled-back, pending, and checksum-drifted successor guards directly.
 - Extracted data-patch run result normalization and journal command shaping from DataPatchRunner and covered JSON cloning, serialization guards, apply/rollback completion commands, failure commands, and thrown-value formatting directly.
 - Extracted data-patch apply and rollback claim-result policy from DataPatchRunner and covered claimed, skipped, concurrent, failed, rollback-pending, rollback-failed, and checksum-drift outcomes directly.
 - Shared data-patch definition snapshot, duplicate-id, selection, single-selection, and batch-limit policy across DataPatchService and DataPatchRunner with direct registry-selection coverage.

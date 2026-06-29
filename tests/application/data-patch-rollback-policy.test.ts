@@ -2,6 +2,7 @@ import { defineDataPatch } from "../../src/core/data-patch.js";
 import type { RecordedDataPatch } from "../../src/ports/data-patch-log.js";
 import {
   assertDataPatchRollbackRetryable,
+  assertDataPatchRollbackSuccessorsRolledBack,
   assertSelectedDataPatchRollbackable,
   dataPatchRollbackPlanDecision
 } from "../../src/application/data-patch-rollback-policy.js";
@@ -45,30 +46,69 @@ describe("data patch rollback policy", () => {
       "does not declare a rollback"
     );
   });
+
+  it("guards selected rollback order against later applied successors", () => {
+    const patches = [patch({ id: "core.first", rollback: true }), patch({ id: "crm.second", rollback: true })];
+    const recordedById = new Map<string, RecordedDataPatch>([
+      ["core.first", recorded("applied", "v1", "core.first")],
+      ["crm.second", recorded("applied", "v1", "crm.second")]
+    ]);
+
+    expect(() =>
+      assertDataPatchRollbackSuccessorsRolledBack(patches, [patches[0]!], new Set(["core.first"]), recordedById)
+    ).toThrow("Data patch 'core.first' cannot roll back before later patch 'crm.second' is rolled back");
+
+    recordedById.set("crm.second", recorded("rolled_back", "v1", "crm.second"));
+    expect(() =>
+      assertDataPatchRollbackSuccessorsRolledBack(patches, [patches[0]!], new Set(["core.first"]), recordedById)
+    ).not.toThrow();
+  });
+
+  it("checks successor status and checksum before selected rollback order succeeds", () => {
+    const patches = [patch({ id: "core.first", rollback: true }), patch({ id: "crm.second", checksum: "v2", rollback: true })];
+
+    expect(() =>
+      assertDataPatchRollbackSuccessorsRolledBack(
+        patches,
+        [patches[0]!],
+        new Set(["core.first"]),
+        new Map([["crm.second", recorded("rolled_back", "v1", "crm.second")]])
+      )
+    ).toThrow("Recorded data patch 'crm.second' has checksum 'v1' but planned 'v2'");
+
+    expect(() =>
+      assertDataPatchRollbackSuccessorsRolledBack(
+        patches,
+        [patches[0]!],
+        new Set(["core.first"]),
+        new Map([["crm.second", recorded("pending", "v2", "crm.second")]])
+      )
+    ).toThrow("Data patch 'crm.second' is pending");
+  });
 });
 
-function patch(options: { readonly rollback?: boolean } = {}) {
+function patch(options: { readonly checksum?: string; readonly id?: string; readonly rollback?: boolean } = {}) {
   return defineDataPatch({
-    id: "accounts.seed",
-    checksum: "v1",
+    id: options.id ?? "accounts.seed",
+    checksum: options.checksum ?? "v1",
     run: () => undefined,
     ...(options.rollback === true ? { rollback: { run: () => undefined } } : {})
   });
 }
 
-function recorded(status: RecordedDataPatch["status"], checksum = "v1"): RecordedDataPatch {
+function recorded(status: RecordedDataPatch["status"], checksum = "v1", id = "accounts.seed"): RecordedDataPatch {
   switch (status) {
     case "pending":
-      return { id: "accounts.seed", checksum, status, claimedAt: now };
+      return { id, checksum, status, claimedAt: now };
     case "applied":
-      return { id: "accounts.seed", checksum, status, appliedAt: now };
+      return { id, checksum, status, appliedAt: now };
     case "failed":
-      return { id: "accounts.seed", checksum, status, failedAt: now, error: "boom" };
+      return { id, checksum, status, failedAt: now, error: "boom" };
     case "rollback_pending":
-      return { id: "accounts.seed", checksum, status, appliedAt: now, rollbackClaimedAt: now };
+      return { id, checksum, status, appliedAt: now, rollbackClaimedAt: now };
     case "rolled_back":
-      return { id: "accounts.seed", checksum, status, appliedAt: now, rolledBackAt: now };
+      return { id, checksum, status, appliedAt: now, rolledBackAt: now };
     case "rollback_failed":
-      return { id: "accounts.seed", checksum, status, appliedAt: now, rollbackFailedAt: now, rollbackError: "boom" };
+      return { id, checksum, status, appliedAt: now, rollbackFailedAt: now, rollbackError: "boom" };
   }
 }

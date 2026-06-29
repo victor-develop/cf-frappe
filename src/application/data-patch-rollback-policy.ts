@@ -101,6 +101,34 @@ export function assertDataPatchRollbackSuccessorSafe(id: string, recorded: Recor
   }
 }
 
+export function assertDataPatchRollbackSuccessorsRolledBack<TResources>(
+  patches: readonly DataPatchDefinition<TResources>[],
+  selected: readonly DataPatchDefinition<TResources>[],
+  selectedIds: ReadonlySet<string>,
+  recordedById: ReadonlyMap<string, RecordedDataPatch>
+): void {
+  const earliestSelectedIndex = Math.min(...selected.map((patch) => patches.indexOf(patch)));
+  for (const patch of patches.slice(earliestSelectedIndex + 1)) {
+    if (selectedIds.has(patch.id)) {
+      continue;
+    }
+    const recorded = recordedById.get(patch.id);
+    if (recorded === undefined) {
+      continue;
+    }
+    assertDataPatchChecksumMatches(patch.id, patch.checksum, recorded.checksum);
+    assertDataPatchRollbackSuccessorSafe(patch.id, recorded);
+    if (recorded.status === "rolled_back") {
+      continue;
+    }
+    throw new FrameworkError(
+      "DATA_PATCH_ORDER_VIOLATION",
+      `Data patch '${selected[0]?.id ?? ""}' cannot roll back before later patch '${patch.id}' is rolled back`,
+      { status: 409 }
+    );
+  }
+}
+
 function dataPatchRollbackNotDeclared(id: string): FrameworkError {
   return new FrameworkError(
     "DATA_PATCH_ROLLBACK_UNAVAILABLE",
