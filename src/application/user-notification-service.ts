@@ -23,6 +23,7 @@ import {
   requireAppendedUserNotificationEvent,
   requireReplayedNotification,
   sortedUserNotifications,
+  USER_NOTIFICATION_PAYLOAD_KINDS,
   userNotificationEventType,
   type UserNotificationEventPayload as UserNotificationEventPayloadForService,
   type UserNotificationRecord,
@@ -165,7 +166,9 @@ export class UserNotificationService {
     return foldUserNotifications(
       tenantId,
       userId,
-      await this.events.readStream(userNotificationsStream(tenantId, userId))
+      await this.events.readStream(userNotificationsStream(tenantId, userId), {
+        payloadKinds: USER_NOTIFICATION_PAYLOAD_KINDS
+      })
     );
   }
 

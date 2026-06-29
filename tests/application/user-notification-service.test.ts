@@ -2,6 +2,7 @@ import {
   createDocumentNotificationHooks,
   InMemoryEventStore,
   UserNotificationService,
+  USER_NOTIFICATION_PAYLOAD_KINDS,
   deterministicIds,
   fixedClock,
   userNotificationsStream
@@ -53,6 +54,23 @@ describe("UserNotificationService", () => {
     ]);
     await expect(notifications.recordFromDomainEvent(event)).resolves.toHaveLength(1);
     await expect(events.readStream(userNotificationsStream("acme", "support@example.com"))).resolves.toHaveLength(1);
+  });
+
+  it("reads user notification state through the bounded inbox payload kinds", async () => {
+    const events = new RecordingReadOptionsNotificationEventStore();
+    const notifications = new UserNotificationService({
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["record-1"])
+    });
+
+    await notifications.recordFromDomainEvent(assignmentEvent("evt_assign", "support@example.com"));
+    await notifications.inbox({ id: "support@example.com", roles: ["User"], tenantId: "acme" });
+
+    expect(events.reads).toContainEqual({
+      stream: userNotificationsStream("acme", "support@example.com"),
+      options: { payloadKinds: USER_NOTIFICATION_PAYLOAD_KINDS }
+    });
   });
 
   it("fails explicitly when recording append returns no persisted event", async () => {
@@ -269,6 +287,21 @@ class RacingNotificationEventStore implements EventStore {
 
   currentVersion(stream: StreamName): Promise<number> {
     return this.delegate.currentVersion(stream);
+  }
+}
+
+class RecordingReadOptionsNotificationEventStore extends InMemoryEventStore {
+  readonly reads: Array<{
+    readonly stream: StreamName;
+    readonly options: Parameters<EventStore["readStream"]>[1];
+  }> = [];
+
+  override readStream(
+    stream: StreamName,
+    options?: Parameters<EventStore["readStream"]>[1]
+  ): Promise<readonly DomainEvent[]> {
+    this.reads.push({ stream, options });
+    return super.readStream(stream, options);
   }
 }
 

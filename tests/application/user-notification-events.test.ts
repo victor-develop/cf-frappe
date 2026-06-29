@@ -1,9 +1,12 @@
 import {
   foldUserNotifications,
+  isUserNotificationEvent,
+  isUserNotificationPayloadKind,
   notificationIdentity,
   requireAppendedUserNotificationEvent,
   requireReplayedNotification,
   sortedUserNotifications,
+  USER_NOTIFICATION_PAYLOAD_KINDS,
   userNotificationEventType,
   userNotificationSubject
 } from "../../src";
@@ -119,7 +122,48 @@ describe("user notification events", () => {
       notificationId: "evt_assign:user:support%40example.com"
     })).toBe("UserNotificationDismissed");
   });
+
+  it("exposes the bounded user notification payload kind set", () => {
+    expect(USER_NOTIFICATION_PAYLOAD_KINDS).toEqual([
+      "UserNotificationRecorded",
+      "UserNotificationRead",
+      "UserNotificationDismissed"
+    ]);
+  });
+
+  it("narrows user notification events by payload kind when event type names are custom", () => {
+    const recorded = {
+      ...recordedEvent("evt_assign", 1, {
+        notificationId: "evt_assign:user:support%40example.com",
+        sourceEventId: "evt_assign",
+        documentName: "Alpha Note",
+        occurredAt: "2026-01-01T00:00:00.000Z"
+      }),
+      type: "DeskNotificationCreated"
+    };
+
+    expect(isUserNotificationPayloadKind("UserNotificationRecorded")).toBe(true);
+    expect(isUserNotificationPayloadKind("DocumentDeleted")).toBe(false);
+    expect(isUserNotificationEvent(recorded)).toBe(true);
+    expect(isUserNotificationEvent(otherEvent({ kind: "DocumentDeleted" }))).toBe(false);
+  });
 });
+
+function otherEvent(payload: DomainEvent["payload"], type: string = payload.kind): DomainEvent {
+  return {
+    id: "evt_other",
+    tenantId: "acme",
+    stream: "acme:Note:Alpha Note",
+    sequence: 1,
+    type,
+    doctype: "Note",
+    documentName: "Alpha Note",
+    actorId: "owner@example.com",
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    payload,
+    metadata: {}
+  };
+}
 
 function recordedEvent(
   id: string,

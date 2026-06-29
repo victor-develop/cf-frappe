@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Centralized user-notification inbox event payload-kind matching through domain events so notification inbox stream selectors can rely on bounded event helpers instead of inline source payload-kind reads.
 - Centralized user-profile event payload-kind matching through domain events so profile stream selectors can rely on bounded event helpers instead of inline source payload-kind reads.
 - Centralized print-settings event payload-kind matching through domain events so print-settings stream selectors can rely on bounded event helpers instead of inline source payload-kind reads.
 - Centralized role-catalog event payload-kind matching through domain events so role stream selectors can rely on bounded event helpers instead of inline source payload-kind reads.

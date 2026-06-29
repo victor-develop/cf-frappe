@@ -1,3 +1,4 @@
+import { domainEventPayloadKind } from "../core/domain-events.js";
 import type { DocumentUserNotificationPayload } from "../core/notifications.js";
 import type { DocTypeName, DocumentName, DomainEvent, TenantId } from "../core/types.js";
 
@@ -23,6 +24,16 @@ export type UserNotificationEventPayload =
       readonly kind: "UserNotificationDismissed";
       readonly notificationId: string;
     };
+
+export type UserNotificationPayloadKind = UserNotificationEventPayload["kind"];
+
+export const USER_NOTIFICATION_PAYLOAD_KINDS = Object.freeze([
+  "UserNotificationRecorded",
+  "UserNotificationRead",
+  "UserNotificationDismissed"
+] as const satisfies readonly UserNotificationPayloadKind[]);
+
+const USER_NOTIFICATION_PAYLOAD_KIND_SET = new Set<string>(USER_NOTIFICATION_PAYLOAD_KINDS);
 
 export interface UserNotificationRecord {
   readonly id: string;
@@ -128,8 +139,16 @@ export function sortedUserNotifications(state: UserNotificationState): readonly 
 
 export function userNotificationEventType(
   payload: UserNotificationEventPayload
-): UserNotificationEventPayload["kind"] {
+): UserNotificationPayloadKind {
   return payload.kind;
+}
+
+export function isUserNotificationPayloadKind(kind: string): kind is UserNotificationPayloadKind {
+  return USER_NOTIFICATION_PAYLOAD_KIND_SET.has(kind);
+}
+
+export function isUserNotificationEvent(event: DomainEvent): event is DomainEvent<UserNotificationEventPayload> {
+  return isUserNotificationPayloadKind(domainEventPayloadKind(event));
 }
 
 export function requireReplayedNotification(
@@ -150,7 +169,7 @@ export function requireAppendedUserNotificationEvent(
   tenantId: TenantId,
   userId: string,
   notificationId: string,
-  payloadKind: UserNotificationEventPayload["kind"]
+  payloadKind: UserNotificationPayloadKind
 ): DomainEvent {
   if (event === undefined) {
     throw new Error(
