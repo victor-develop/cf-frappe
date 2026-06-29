@@ -2,34 +2,33 @@ import { badRequest, permissionDenied } from "../core/errors.js";
 import { can } from "../core/permissions.js";
 import {
   assertReportDefinition,
-  assertReportFilterExpressionBounds,
   assertReportMatchesDocType,
   canReadReport,
   isCustomReport,
   type ReportColumnDefinition,
   type ReportDefinition,
-  type ReportFilterDefinition,
   type ReportFilterExpression,
   type ReportFilterValue,
   type ReportOrder,
-  type ReportSummaryDefinition,
-  isReportFilterGroup
+  type ReportSummaryDefinition
 } from "../core/reports.js";
 import type { ModelRegistry } from "../core/registry.js";
-import type { Actor, DocTypeDefinition, DocumentSnapshot, FieldDefinition, JsonPrimitive, JsonValue } from "../core/types.js";
+import type { Actor, DocTypeDefinition, DocumentSnapshot, JsonValue } from "../core/types.js";
 import { QueryService } from "./query-service.js";
 import { CSV_CONTENT_TYPE, csvLine, filenamePart } from "./csv.js";
 import {
   buildReportFilterControls,
   buildReportCharts,
   buildReportGroups,
-  coerceReportFilterValue,
-  isEmptyReportFilterValue,
+  combineReportFilterExpression,
   limitReportGroups,
+  materializeReportFilterExpression,
+  materializeReportFilters,
+  matchesReportFilters,
+  matchesReportRowFilters,
   projectReportDocumentRow,
   projectReportRow,
   resolveReportOrder,
-  resolvedReportFilterType,
   reportSummaryValue,
   reportSortValue,
   type ReportChartResult,
@@ -150,12 +149,12 @@ export class ReportService {
     }
     const limit = clampLimit(options.limit);
     const offset = Math.max(0, options.offset ?? 0);
-    const filterExpression = this.materializeFilterExpression(
+    const filterExpression = materializeReportFilterExpression(
       report,
       doctype,
-      combinedReportFilterExpression(report.filterExpression, options.filterExpression)
+      combineReportFilterExpression(report.filterExpression, options.filterExpression)
     );
-    const filters = this.materializeFilters(report, doctype, options.filters ?? {}, filterExpression);
+    const filters = materializeReportFilters(report, doctype, options.filters ?? {}, filterExpression);
     const order = resolveReportOrder(report, doctype, options);
     const filtered = await this.filteredDocuments(actor, report, filters, filterExpression);
     const sorted = sortReportDocuments(filtered, report, order);
@@ -197,12 +196,12 @@ export class ReportService {
       return this.exportCustomReportCsv(actor, report, doctype, options);
     }
     const limit = clampCsvExportLimit(options.limit);
-    const filterExpression = this.materializeFilterExpression(
+    const filterExpression = materializeReportFilterExpression(
       report,
       doctype,
-      combinedReportFilterExpression(report.filterExpression, options.filterExpression)
+      combineReportFilterExpression(report.filterExpression, options.filterExpression)
     );
-    const filters = this.materializeFilters(report, doctype, options.filters ?? {}, filterExpression);
+    const filters = materializeReportFilters(report, doctype, options.filters ?? {}, filterExpression);
     const order = resolveReportOrder(report, doctype, options);
     if (order.orderBy === undefined) {
       return this.exportUnorderedReportCsv(actor, report, filters, filterExpression, limit);
@@ -272,12 +271,12 @@ export class ReportService {
   ): Promise<ReportRunResult> {
     const limit = clampLimit(options.limit);
     const offset = Math.max(0, options.offset ?? 0);
-    const filterExpression = this.materializeFilterExpression(
+    const filterExpression = materializeReportFilterExpression(
       report,
       doctype,
-      combinedReportFilterExpression(report.filterExpression, options.filterExpression)
+      combineReportFilterExpression(report.filterExpression, options.filterExpression)
     );
-    const filters = this.materializeFilters(report, doctype, options.filters ?? {}, filterExpression);
+    const filters = materializeReportFilters(report, doctype, options.filters ?? {}, filterExpression);
     const order = resolveReportOrder(report, doctype, options);
     const rows = await this.customReportRows(actor, report, filters, filterExpression);
     const filtered = rows.filter((row) => matchesReportRowFilters(row, report, filters, filterExpression));
@@ -307,12 +306,12 @@ export class ReportService {
     options: ReportCsvExportOptions
   ): Promise<ReportCsvExport> {
     const limit = clampCsvExportLimit(options.limit);
-    const filterExpression = this.materializeFilterExpression(
+    const filterExpression = materializeReportFilterExpression(
       report,
       doctype,
-      combinedReportFilterExpression(report.filterExpression, options.filterExpression)
+      combineReportFilterExpression(report.filterExpression, options.filterExpression)
     );
-    const filters = this.materializeFilters(report, doctype, options.filters ?? {}, filterExpression);
+    const filters = materializeReportFilters(report, doctype, options.filters ?? {}, filterExpression);
     const order = resolveReportOrder(report, doctype, options);
     const rows = await this.customReportRows(actor, report, filters, filterExpression);
     const projected = rows
@@ -398,40 +397,6 @@ export class ReportService {
   ): Promise<readonly DocumentSnapshot[]> {
     const documents = await this.listAllReadableDocuments(actor, report.doctype);
     return documents.filter((document) => matchesReportFilters(document, report, input, filterExpression));
-  }
-
-  private materializeFilters(
-    report: ReportDefinition,
-    doctype: DocTypeDefinition,
-    input: ReportFilters,
-    filterExpression: ReportFilterExpression | undefined
-  ): ReportFilters {
-    const fields = new Map(doctype.fields.map((field) => [field.name, field]));
-    const values: Record<string, ReportFilterValue | undefined> = {};
-    for (const filter of report.filters ?? []) {
-      const type = resolvedReportFilterType(filter, fields.get(filter.field));
-      const raw = input[filter.name] ?? filter.defaultValue;
-      const value = coerceReportFilterValue(raw, type, filter.name, filter.operator ?? "eq");
-      if (filter.required && (value === undefined || value === "") && !reportFilterExpressionHasValue(filterExpression, filter.name)) {
-        throw badRequest(`Report filter '${filter.name}' is required`);
-      }
-      values[filter.name] = value;
-    }
-    return values;
-  }
-
-  private materializeFilterExpression(
-    report: ReportDefinition,
-    doctype: DocTypeDefinition,
-    expression: ReportFilterExpression | undefined
-  ): ReportFilterExpression | undefined {
-    if (expression === undefined) {
-      return undefined;
-    }
-    assertReportFilterExpressionBounds(expression);
-    const fields = new Map(doctype.fields.map((field) => [field.name, field]));
-    const filters = new Map((report.filters ?? []).map((filter) => [filter.name, filter]));
-    return materializeReportFilterExpressionNode(report, filters, fields, expression);
   }
 }
 
@@ -600,147 +565,6 @@ function compareOrderedRows(left: OrderedReportRow, right: OrderedReportRow, dir
   return compared === 0 ? left.index - right.index : compared;
 }
 
-function combinedReportFilterExpression(
-  left: ReportFilterExpression | undefined,
-  right: ReportFilterExpression | undefined
-): ReportFilterExpression | undefined {
-  if (left === undefined) {
-    return right;
-  }
-  if (right === undefined) {
-    return left;
-  }
-  return {
-    kind: "group",
-    match: "all",
-    filters: [
-      ...(isReportFilterGroup(left) && left.match === "all" ? left.filters : [left]),
-      ...(isReportFilterGroup(right) && right.match === "all" ? right.filters : [right])
-    ]
-  };
-}
-
-function materializeReportFilterExpressionNode(
-  report: ReportDefinition,
-  filters: ReadonlyMap<string, ReportFilterDefinition>,
-  fields: ReadonlyMap<string, FieldDefinition>,
-  expression: ReportFilterExpression
-): ReportFilterExpression {
-  if (isReportFilterGroup(expression)) {
-    return {
-      kind: "group",
-      match: expression.match,
-      filters: expression.filters.map((filter) =>
-        materializeReportFilterExpressionNode(report, filters, fields, filter)
-      )
-    };
-  }
-  const filter = filters.get(expression.filter);
-  if (filter === undefined) {
-    throw badRequest(`Report filter expression references unknown filter '${expression.filter}'`);
-  }
-  const type = resolvedReportFilterType(filter, fields.get(filter.field));
-  const value = coerceReportFilterValue(expression.value, type, filter.name, filter.operator ?? "eq");
-  if (isEmptyReportFilterValue(value)) {
-    throw badRequest(`Report filter expression filter '${filter.name}' is missing a value`);
-  }
-  return { filter: filter.name, value };
-}
-
-function reportFilterExpressionHasValue(
-  expression: ReportFilterExpression | undefined,
-  filterName: string
-): boolean {
-  if (expression === undefined) {
-    return false;
-  }
-  if (isReportFilterGroup(expression)) {
-    return expression.filters.some((filter) => reportFilterExpressionHasValue(filter, filterName));
-  }
-  return expression.filter === filterName && !isEmptyReportFilterValue(expression.value);
-}
-
-function matchesReportFilters(
-  document: DocumentSnapshot,
-  report: ReportDefinition,
-  filters: ReportFilters,
-  expression: ReportFilterExpression | undefined
-): boolean {
-  return (report.filters ?? []).every((filter) => {
-    const expected = filters[filter.name];
-    if (isEmptyReportFilterValue(expected)) {
-      return true;
-    }
-    return matchesReportFilterValue(document.data, filter, expected);
-  }) && matchesReportFilterExpression(document.data, report, expression);
-}
-
-function matchesReportRowFilters(
-  row: ReportRow,
-  report: ReportDefinition,
-  filters: ReportFilters,
-  expression: ReportFilterExpression | undefined
-): boolean {
-  return (report.filters ?? []).every((filter) => {
-    const expected = filters[filter.name];
-    if (isEmptyReportFilterValue(expected)) {
-      return true;
-    }
-    return matchesReportFilterValue(row, filter, expected);
-  }) && matchesReportFilterExpression(row, report, expression);
-}
-
-function matchesReportFilterExpression(
-  row: Readonly<Record<string, JsonValue | undefined>>,
-  report: ReportDefinition,
-  expression: ReportFilterExpression | undefined
-): boolean {
-  if (expression === undefined) {
-    return true;
-  }
-  if (isReportFilterGroup(expression)) {
-    return expression.match === "all"
-      ? expression.filters.every((filter) => matchesReportFilterExpression(row, report, filter))
-      : expression.filters.some((filter) => matchesReportFilterExpression(row, report, filter));
-  }
-  const filter = (report.filters ?? []).find((item) => item.name === expression.filter);
-  return filter === undefined ? false : matchesReportFilterValue(row, filter, expression.value);
-}
-
-function matchesReportFilterValue(
-  row: Readonly<Record<string, JsonValue | undefined>>,
-  filter: ReportFilterDefinition,
-  expected: ReportFilterValue
-): boolean {
-  const actual = row[filter.field];
-  switch (filter.operator ?? "eq") {
-    case "eq":
-      return actual === expected;
-    case "ne":
-      return actual !== expected;
-    case "contains":
-      return String(actual ?? "").toLowerCase().includes(String(expected).toLowerCase());
-    case "gte":
-      return compareValues(actual, scalarReportFilterValue(expected)) >= 0;
-    case "lte":
-      return compareValues(actual, scalarReportFilterValue(expected)) <= 0;
-    case "between": {
-      if (actual === undefined || actual === null) {
-        return false;
-      }
-      const [minimum, maximum] = rangeFilterValues(expected);
-      return compareValues(actual, minimum) >= 0 && compareValues(actual, maximum) <= 0;
-    }
-    case "not_between": {
-      if (actual === undefined || actual === null) {
-        return false;
-      }
-      const [minimum, maximum] = rangeFilterValues(expected);
-      return compareValues(actual, minimum) < 0 || compareValues(actual, maximum) > 0;
-    }
-  }
-}
-
 function reportCsvHeader(columns: readonly ReportColumnDefinition[]): string {
   return csvLine(columns.map((column) => column.label ?? column.name));
 }
@@ -764,36 +588,6 @@ function buildReportSummary(
   summaries: readonly ReportSummaryDefinition[]
 ): readonly ReportSummaryValue[] {
   return summaries.map((summary) => reportSummaryValue(summary, rows));
-}
-
-function rangeFilterValues(value: ReportFilterValue): readonly [JsonPrimitive, JsonPrimitive] {
-  if (!isReportFilterArray(value) || value.length !== 2) {
-    throw badRequest("Report range filter must include exactly two values");
-  }
-  const minimum = value[0];
-  const maximum = value[1];
-  if (minimum === undefined || maximum === undefined) {
-    throw badRequest("Report range filter must include exactly two values");
-  }
-  return [minimum, maximum];
-}
-
-function scalarReportFilterValue(value: ReportFilterValue): JsonPrimitive {
-  if (isReportFilterArray(value)) {
-    throw badRequest("Report filter must be scalar");
-  }
-  return value;
-}
-
-function isReportFilterArray(value: ReportFilterValue): value is readonly JsonPrimitive[] {
-  return Array.isArray(value);
-}
-
-function compareValues(actual: JsonValue | undefined, expected: JsonPrimitive): number {
-  if (typeof actual === "number" && typeof expected === "number") {
-    return actual - expected;
-  }
-  return String(actual ?? "").localeCompare(String(expected));
 }
 
 function compareDocumentValues(left: JsonValue | undefined, right: JsonValue | undefined): number {

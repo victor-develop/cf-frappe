@@ -3,9 +3,14 @@ import {
   buildReportCharts,
   buildReportGroups,
   buildReportOrderOptions,
+  combineReportFilterExpression,
   coerceReportFilterValue,
   isEmptyReportFilterValue,
   limitReportGroups,
+  materializeReportFilterExpression,
+  materializeReportFilters,
+  matchesReportFilters,
+  matchesReportRowFilters,
   primitiveReportRowValue,
   projectReportDocumentRow,
   projectReportRow,
@@ -322,6 +327,129 @@ describe("report policy", () => {
     expect(isEmptyReportFilterValue(null)).toBe(true);
     expect(isEmptyReportFilterValue("")).toBe(true);
     expect(isEmptyReportFilterValue(0)).toBe(false);
+  });
+
+  it("combines report filter expressions through an outer all group", () => {
+    expect(combineReportFilterExpression(
+      { kind: "group", match: "all", filters: [{ filter: "priority", value: "High" }] },
+      { filter: "minimum", value: 3 }
+    )).toEqual({
+      kind: "group",
+      match: "all",
+      filters: [
+        { filter: "priority", value: "High" },
+        { filter: "minimum", value: 3 }
+      ]
+    });
+    expect(combineReportFilterExpression(undefined, { filter: "priority", value: "Low" }))
+      .toEqual({ filter: "priority", value: "Low" });
+  });
+
+  it("materializes report filters and expressions with type coercion and required-filter checks", () => {
+    const doctype = {
+      name: "Task",
+      fields: [
+        { name: "priority", type: "select" as const },
+        { name: "count", type: "integer" as const },
+        { name: "title", type: "text" as const }
+      ]
+    };
+    const report = {
+      name: "Task Report",
+      doctype: "Task",
+      columns: [{ name: "title" }],
+      filters: [
+        { name: "priority", field: "priority", required: true },
+        { name: "minimum", field: "count", operator: "gte" as const },
+        { name: "title", field: "title", operator: "contains" as const }
+      ]
+    };
+    const expression = materializeReportFilterExpression(report, doctype, {
+      kind: "group",
+      match: "any",
+      filters: [
+        { filter: "priority", value: "High" },
+        { filter: "minimum", value: "3" }
+      ]
+    });
+
+    expect(expression).toEqual({
+      kind: "group",
+      match: "any",
+      filters: [
+        { filter: "priority", value: "High" },
+        { filter: "minimum", value: 3 }
+      ]
+    });
+    expect(materializeReportFilters(report, doctype, { title: "Urgent" }, expression)).toEqual({
+      priority: undefined,
+      minimum: undefined,
+      title: "Urgent"
+    });
+    expect(() => materializeReportFilters(report, doctype, {}, undefined))
+      .toThrow("Report filter 'priority' is required");
+    expect(() => materializeReportFilterExpression(report, doctype, { filter: "missing", value: "x" }))
+      .toThrow("Report filter expression references unknown filter 'missing'");
+    expect(() => materializeReportFilterExpression(report, doctype, { filter: "minimum", value: "" }))
+      .toThrow("Report filter expression filter 'minimum' is missing a value");
+  });
+
+  it("matches report rows through flat filters and compound expressions", () => {
+    const report = {
+      name: "Task Report",
+      doctype: "Task",
+      columns: [{ name: "title" }],
+      filters: [
+        { name: "priority", field: "priority" },
+        { name: "title", field: "title", operator: "contains" as const },
+        { name: "minimum", field: "count", operator: "gte" as const },
+        { name: "count_range", field: "count", operator: "between" as const },
+        { name: "outside_count", field: "count", operator: "not_between" as const }
+      ]
+    };
+    const row = { title: "High Routine", priority: "High", count: 7 };
+
+    expect(matchesReportRowFilters(row, report, { priority: "High", minimum: 5 }, undefined)).toBe(true);
+    expect(matchesReportRowFilters(row, report, { title: "routine", count_range: [6, 8] }, undefined)).toBe(true);
+    expect(matchesReportRowFilters(row, report, { outside_count: [2, 6] }, undefined)).toBe(true);
+    expect(matchesReportRowFilters(row, report, { priority: "Low" }, undefined)).toBe(false);
+    expect(matchesReportRowFilters(row, report, {}, {
+      kind: "group",
+      match: "all",
+      filters: [
+        { filter: "priority", value: "High" },
+        {
+          kind: "group",
+          match: "any",
+          filters: [
+            { filter: "title", value: "Urgent" },
+            { filter: "minimum", value: 7 }
+          ]
+        }
+      ]
+    })).toBe(true);
+  });
+
+  it("matches document report filters against document data", () => {
+    const report = {
+      name: "Task Report",
+      doctype: "Task",
+      columns: [{ name: "title" }],
+      filters: [{ name: "priority", field: "priority" }]
+    };
+    const document = {
+      tenantId: "tenant-a",
+      doctype: "Task",
+      name: "TASK-1",
+      version: 1,
+      docstatus: "draft" as const,
+      data: { title: "High Routine", priority: "High" },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-02T00:00:00.000Z"
+    };
+
+    expect(matchesReportFilters(document, report, { priority: "High" }, undefined)).toBe(true);
+    expect(matchesReportFilters(document, report, { priority: "Low" }, undefined)).toBe(false);
   });
 
   it("builds chart drilldown queries from exact report filters", () => {

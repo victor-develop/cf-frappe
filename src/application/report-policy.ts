@@ -12,9 +12,10 @@ import type {
   ReportGroupDefinition,
   ReportOrder,
   ReportDefinition,
+  ReportFilterExpression,
   ReportSummaryDefinition
 } from "../core/reports.js";
-import { isCustomReport } from "../core/reports.js";
+import { assertReportFilterExpressionBounds, isCustomReport, isReportFilterGroup } from "../core/reports.js";
 import type { DocTypeDefinition, DocumentSnapshot, FieldDefinition, FieldType, JsonPrimitive, JsonValue } from "../core/types.js";
 
 export type ReportRow = Readonly<Record<string, JsonValue>>;
@@ -447,6 +448,174 @@ export function isEmptyReportFilterValue(value: ReportFilterValue | undefined): 
   return value === undefined || value === null || value === "";
 }
 
+export function combineReportFilterExpression(
+  left: ReportFilterExpression | undefined,
+  right: ReportFilterExpression | undefined
+): ReportFilterExpression | undefined {
+  if (left === undefined) {
+    return right;
+  }
+  if (right === undefined) {
+    return left;
+  }
+  return {
+    kind: "group",
+    match: "all",
+    filters: [
+      ...(isReportFilterGroup(left) && left.match === "all" ? left.filters : [left]),
+      ...(isReportFilterGroup(right) && right.match === "all" ? right.filters : [right])
+    ]
+  };
+}
+
+export function materializeReportFilters(
+  report: ReportDefinition,
+  doctype: DocTypeDefinition,
+  input: ReportFilters,
+  filterExpression: ReportFilterExpression | undefined
+): ReportFilters {
+  const fields = new Map(doctype.fields.map((field) => [field.name, field]));
+  const values: Record<string, ReportFilterValue | undefined> = {};
+  for (const filter of report.filters ?? []) {
+    const type = resolvedReportFilterType(filter, fields.get(filter.field));
+    const raw = input[filter.name] ?? filter.defaultValue;
+    const value = coerceReportFilterValue(raw, type, filter.name, filter.operator ?? "eq");
+    if (filter.required && (value === undefined || value === "") && !reportFilterExpressionHasValue(filterExpression, filter.name)) {
+      throw badRequest(`Report filter '${filter.name}' is required`);
+    }
+    values[filter.name] = value;
+  }
+  return values;
+}
+
+export function materializeReportFilterExpression(
+  report: ReportDefinition,
+  doctype: DocTypeDefinition,
+  expression: ReportFilterExpression | undefined
+): ReportFilterExpression | undefined {
+  if (expression === undefined) {
+    return undefined;
+  }
+  assertReportFilterExpressionBounds(expression);
+  const fields = new Map(doctype.fields.map((field) => [field.name, field]));
+  const filters = new Map((report.filters ?? []).map((filter) => [filter.name, filter]));
+  return materializeReportFilterExpressionNode(filters, fields, expression);
+}
+
+export function matchesReportFilters(
+  document: DocumentSnapshot,
+  report: ReportDefinition,
+  filters: ReportFilters,
+  expression: ReportFilterExpression | undefined
+): boolean {
+  return matchesReportRowFilters(document.data, report, filters, expression);
+}
+
+export function matchesReportRowFilters(
+  row: ReportRow,
+  report: ReportDefinition,
+  filters: ReportFilters,
+  expression: ReportFilterExpression | undefined
+): boolean {
+  return (report.filters ?? []).every((filter) => {
+    const expected = filters[filter.name];
+    if (isEmptyReportFilterValue(expected)) {
+      return true;
+    }
+    return matchesReportFilterValue(row, filter, expected);
+  }) && matchesReportFilterExpression(row, report, expression);
+}
+
+function materializeReportFilterExpressionNode(
+  filters: ReadonlyMap<string, ReportFilterDefinition>,
+  fields: ReadonlyMap<string, FieldDefinition>,
+  expression: ReportFilterExpression
+): ReportFilterExpression {
+  if (isReportFilterGroup(expression)) {
+    return {
+      kind: "group",
+      match: expression.match,
+      filters: expression.filters.map((filter) =>
+        materializeReportFilterExpressionNode(filters, fields, filter)
+      )
+    };
+  }
+  const filter = filters.get(expression.filter);
+  if (filter === undefined) {
+    throw badRequest(`Report filter expression references unknown filter '${expression.filter}'`);
+  }
+  const type = resolvedReportFilterType(filter, fields.get(filter.field));
+  const value = coerceReportFilterValue(expression.value, type, filter.name, filter.operator ?? "eq");
+  if (isEmptyReportFilterValue(value)) {
+    throw badRequest(`Report filter expression filter '${filter.name}' is missing a value`);
+  }
+  return { filter: filter.name, value };
+}
+
+function reportFilterExpressionHasValue(
+  expression: ReportFilterExpression | undefined,
+  filterName: string
+): boolean {
+  if (expression === undefined) {
+    return false;
+  }
+  if (isReportFilterGroup(expression)) {
+    return expression.filters.some((filter) => reportFilterExpressionHasValue(filter, filterName));
+  }
+  return expression.filter === filterName && !isEmptyReportFilterValue(expression.value);
+}
+
+function matchesReportFilterExpression(
+  row: Readonly<Record<string, JsonValue | undefined>>,
+  report: ReportDefinition,
+  expression: ReportFilterExpression | undefined
+): boolean {
+  if (expression === undefined) {
+    return true;
+  }
+  if (isReportFilterGroup(expression)) {
+    return expression.match === "all"
+      ? expression.filters.every((filter) => matchesReportFilterExpression(row, report, filter))
+      : expression.filters.some((filter) => matchesReportFilterExpression(row, report, filter));
+  }
+  const filter = (report.filters ?? []).find((item) => item.name === expression.filter);
+  return filter === undefined ? false : matchesReportFilterValue(row, filter, expression.value);
+}
+
+function matchesReportFilterValue(
+  row: Readonly<Record<string, JsonValue | undefined>>,
+  filter: ReportFilterDefinition,
+  expected: ReportFilterValue
+): boolean {
+  const actual = row[filter.field];
+  switch (filter.operator ?? "eq") {
+    case "eq":
+      return actual === expected;
+    case "ne":
+      return actual !== expected;
+    case "contains":
+      return String(actual ?? "").toLowerCase().includes(String(expected).toLowerCase());
+    case "gte":
+      return compareReportValues(actual, scalarReportFilterValue(expected)) >= 0;
+    case "lte":
+      return compareReportValues(actual, scalarReportFilterValue(expected)) <= 0;
+    case "between": {
+      if (actual === undefined || actual === null) {
+        return false;
+      }
+      const [minimum, maximum] = rangeFilterValues(expected);
+      return compareReportValues(actual, minimum) >= 0 && compareReportValues(actual, maximum) <= 0;
+    }
+    case "not_between": {
+      if (actual === undefined || actual === null) {
+        return false;
+      }
+      const [minimum, maximum] = rangeFilterValues(expected);
+      return compareReportValues(actual, minimum) < 0 || compareReportValues(actual, maximum) > 0;
+    }
+  }
+}
+
 function reportDocumentFormulaValue(
   document: DocumentSnapshot,
   formula: NonNullable<ReportColumnDefinition["formula"]>
@@ -543,6 +712,18 @@ function scalarReportFilterValue(value: ReportFilterValue): JsonPrimitive {
     throw badRequest("Report filter must be scalar");
   }
   return value;
+}
+
+function rangeFilterValues(value: ReportFilterValue): readonly [JsonPrimitive, JsonPrimitive] {
+  if (!isReportFilterArray(value) || value.length !== 2) {
+    throw badRequest("Report range filter must include exactly two values");
+  }
+  const minimum = value[0];
+  const maximum = value[1];
+  if (minimum === undefined || maximum === undefined) {
+    throw badRequest("Report range filter must include exactly two values");
+  }
+  return [minimum, maximum];
 }
 
 function isReportFilterArray(value: ReportFilterValue): value is readonly JsonPrimitive[] {
