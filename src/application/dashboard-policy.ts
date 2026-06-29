@@ -1,15 +1,40 @@
 import type {
   DashboardCardDefinition,
+  DashboardCardSourceDefinition,
   DashboardDocumentAggregate,
   DashboardIndicatorOperator
 } from "../core/dashboard.js";
 import type { JsonPrimitive } from "../core/types.js";
+
+export interface DashboardCardShape<TValue> {
+  readonly name: string;
+  readonly label: string;
+  readonly value: TValue;
+  readonly source: DashboardCardSourceDefinition;
+  readonly description?: string;
+  readonly indicator?: string;
+}
 
 export interface DashboardDocumentAggregateState {
   readonly count: number;
   readonly sum: number;
   readonly min: number | null;
   readonly max: number | null;
+}
+
+export function dashboardCardResult<TValue>(
+  card: DashboardCardDefinition,
+  value: TValue
+): DashboardCardShape<TValue> {
+  const indicator = dashboardCardIndicator(card, value);
+  return {
+    name: card.name,
+    label: card.label ?? card.name,
+    value,
+    source: card.source,
+    ...(card.description === undefined ? {} : { description: card.description }),
+    ...(indicator === undefined ? {} : { indicator })
+  };
 }
 
 export function emptyDashboardDocumentAggregate(): DashboardDocumentAggregateState {

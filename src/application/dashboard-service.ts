@@ -8,7 +8,8 @@ import {
 import type { ModelRegistry } from "../core/registry.js";
 import type { Actor, DocumentSnapshot, JsonPrimitive, ListDocumentsFilter, ListFilterExpression } from "../core/types.js";
 import {
-  dashboardCardIndicator,
+  dashboardCardResult,
+  type DashboardCardShape,
   emptyDashboardDocumentAggregate,
   finishDashboardDocumentAggregate,
   updateDashboardDocumentAggregate
@@ -18,14 +19,7 @@ import type { ReportChartResult, ReportFilters, ReportService } from "./report-s
 
 export type DashboardCardValue = JsonPrimitive | ReportChartResult;
 
-export interface DashboardCardResult {
-  readonly name: string;
-  readonly label: string;
-  readonly value: DashboardCardValue;
-  readonly source: DashboardCardSourceDefinition;
-  readonly description?: string;
-  readonly indicator?: string;
-}
+export type DashboardCardResult = DashboardCardShape<DashboardCardValue>;
 
 export interface DashboardRunResult {
   readonly dashboard: DashboardDefinition;
@@ -71,15 +65,7 @@ export class DashboardService {
 
   private async runCard(actor: Actor, card: DashboardCardDefinition): Promise<DashboardCardResult> {
     const value = await this.cardValue(actor, card.source);
-    const indicator = dashboardCardIndicator(card, value);
-    return {
-      name: card.name,
-      label: card.label ?? card.name,
-      value,
-      source: card.source,
-      ...(card.description === undefined ? {} : { description: card.description }),
-      ...(indicator === undefined ? {} : { indicator })
-    };
+    return dashboardCardResult(card, value);
   }
 
   private async cardValue(actor: Actor, source: DashboardCardSourceDefinition): Promise<DashboardCardValue> {

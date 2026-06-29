@@ -1,4 +1,5 @@
 import {
+  dashboardCardResult,
   dashboardCardIndicator,
   dashboardIndicatorMatches,
   emptyDashboardDocumentAggregate,
@@ -7,6 +8,48 @@ import {
 } from "../../src";
 
 describe("dashboard policy", () => {
+  it("shapes dashboard card results with default labels", () => {
+    expect(dashboardCardResult({
+      name: "open_notes",
+      source: { kind: "documentCount", doctype: "Note" }
+    }, 3)).toEqual({
+      name: "open_notes",
+      label: "open_notes",
+      value: 3,
+      source: { kind: "documentCount", doctype: "Note" }
+    });
+  });
+
+  it("shapes dashboard card results with descriptions and matched indicators", () => {
+    expect(dashboardCardResult({
+      name: "open_notes",
+      label: "Open Notes",
+      description: "Open work",
+      indicator: "gray",
+      indicatorRules: [{ operator: "gte", value: 2, indicator: "green" }],
+      source: { kind: "documentCount", doctype: "Note" }
+    }, 3)).toEqual({
+      name: "open_notes",
+      label: "Open Notes",
+      description: "Open work",
+      value: 3,
+      source: { kind: "documentCount", doctype: "Note" },
+      indicator: "green"
+    });
+  });
+
+  it("omits dashboard card indicators when neither static nor rules apply", () => {
+    expect(dashboardCardResult({
+      name: "priority_chart",
+      source: { kind: "reportChart", report: "Open Notes", chart: "notes_by_priority" }
+    }, null)).toEqual({
+      name: "priority_chart",
+      label: "priority_chart",
+      value: null,
+      source: { kind: "reportChart", report: "Open Notes", chart: "notes_by_priority" }
+    });
+  });
+
   it("folds finite document aggregate values", () => {
     const aggregate = [7, 3, 11].reduce(updateDashboardDocumentAggregate, emptyDashboardDocumentAggregate());
 
