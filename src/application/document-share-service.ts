@@ -1,12 +1,11 @@
 import {
-  documentShareAllows,
   documentSharePermissionsForActor,
   foldDocumentShares,
   type DocumentShareProvider,
   type DocumentShareState
 } from "../core/document-shares.js";
 import { permissionDenied } from "../core/errors.js";
-import { can } from "../core/permissions.js";
+import { planDocumentActionAccess } from "./document-access-policy.js";
 import type { DocTypeDefinition } from "../core/types.js";
 import type { Actor, DocumentSnapshot } from "../core/types.js";
 import { documentStream } from "../core/streams.js";
@@ -35,8 +34,16 @@ export class DocumentShareService implements DocumentShareProvider {
   ): Promise<DocumentShareState> {
     const state = await this.stateFor(document);
     const sharedPermissions = documentSharePermissionsForActor(actor, state.grants);
-    if (!can(actor, doctype, "share", document) && !documentShareAllows(sharedPermissions, "share")) {
-      throw permissionDenied(`Actor '${actor.id}' cannot manage shares for ${doctype.name}/${document.name}`);
+    const decision = planDocumentActionAccess({
+      actor,
+      doctype,
+      action: "share",
+      document,
+      sharedPermissions,
+      deniedAction: "manage shares for"
+    });
+    if (decision.status === "deny") {
+      throw permissionDenied(decision.message);
     }
     return state;
   }

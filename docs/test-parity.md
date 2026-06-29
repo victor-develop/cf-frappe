@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the user-permission access decision slice:
+As of the document share management access slice:
 
-- Vitest files: `173`
-- Vitest cases: `2042`
-- Remaining gap to Frappe static markers: `742`
+- Vitest files: `174`
+- Vitest cases: `2043`
+- Remaining gap to Frappe static markers: `741`
 
 ## Implication
 
