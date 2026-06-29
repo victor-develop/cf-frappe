@@ -89,6 +89,24 @@ export interface UserRolesChangedPayloadInput {
   readonly roles: readonly string[];
 }
 
+export interface UserPasswordResetRequestedPayloadInput {
+  readonly userId: string;
+  readonly tokenHash: string;
+  readonly expiresAt: string;
+}
+
+export interface UserEmailVerificationRequestedPayloadInput {
+  readonly userId: string;
+  readonly email: string;
+  readonly tokenHash: string;
+  readonly expiresAt: string;
+}
+
+export interface UserEmailPayloadInput {
+  readonly userId: string;
+  readonly email: string;
+}
+
 export interface UserAccountStatusPayloadInput {
   readonly userId: string;
 }
@@ -110,6 +128,58 @@ export function userPasswordResetCompletedPayload(
     kind: "UserPasswordResetCompleted",
     userId: input.userId,
     passwordHash: input.passwordHash
+  };
+}
+
+export function userPasswordResetRequestedPayload(
+  input: UserPasswordResetRequestedPayloadInput
+): Extract<UserAccountEventPayload, { readonly kind: "UserPasswordResetRequested" }> {
+  return {
+    kind: "UserPasswordResetRequested",
+    userId: input.userId,
+    tokenHash: input.tokenHash,
+    expiresAt: input.expiresAt
+  };
+}
+
+export function userPasswordResetDeliveryFailedPayload(
+  input: UserAccountStatusPayloadInput
+): Extract<UserAccountEventPayload, { readonly kind: "UserPasswordResetDeliveryFailed" }> {
+  return {
+    kind: "UserPasswordResetDeliveryFailed",
+    userId: input.userId
+  };
+}
+
+export function userEmailVerificationRequestedPayload(
+  input: UserEmailVerificationRequestedPayloadInput
+): Extract<UserAccountEventPayload, { readonly kind: "UserEmailVerificationRequested" }> {
+  return {
+    kind: "UserEmailVerificationRequested",
+    userId: input.userId,
+    email: input.email,
+    tokenHash: input.tokenHash,
+    expiresAt: input.expiresAt
+  };
+}
+
+export function userEmailVerifiedPayload(
+  input: UserEmailPayloadInput
+): Extract<UserAccountEventPayload, { readonly kind: "UserEmailVerified" }> {
+  return {
+    kind: "UserEmailVerified",
+    userId: input.userId,
+    email: input.email
+  };
+}
+
+export function userEmailVerificationDeliveryFailedPayload(
+  input: UserEmailPayloadInput
+): Extract<UserAccountEventPayload, { readonly kind: "UserEmailVerificationDeliveryFailed" }> {
+  return {
+    kind: "UserEmailVerificationDeliveryFailed",
+    userId: input.userId,
+    email: input.email
   };
 }
 

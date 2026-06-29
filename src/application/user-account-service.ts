@@ -12,8 +12,13 @@ import {
 import {
   userAccountDisabledPayload,
   userAccountEnabledPayload,
+  userEmailVerificationDeliveryFailedPayload,
+  userEmailVerificationRequestedPayload,
+  userEmailVerifiedPayload,
   userPasswordChangedPayload,
+  userPasswordResetDeliveryFailedPayload,
   userPasswordResetCompletedPayload,
+  userPasswordResetRequestedPayload,
   userRolesChangedPayload,
   type UserAccountEventPayload
 } from "./user-account-events.js";
@@ -425,12 +430,11 @@ export class UserAccountService {
         documentName: userId,
         actorId: RECOVERY_ACTOR_ID,
         metadata: command.metadata,
-        payload: {
-          kind: "UserPasswordResetRequested",
+        payload: userPasswordResetRequestedPayload({
           userId,
           tokenHash,
           expiresAt
-        }
+        })
       });
     } catch (error) {
       if (isConflict(error)) {
@@ -447,10 +451,9 @@ export class UserAccountService {
         expectedVersion: lastSequence(saved, state.version),
         type: "UserPasswordResetDeliveryFailed",
         metadata: command.metadata,
-        payload: {
-          kind: "UserPasswordResetDeliveryFailed",
+        payload: userPasswordResetDeliveryFailedPayload({
           userId
-        }
+        })
       });
       return { tenantId, userId, delivered: false };
     }
@@ -506,13 +509,12 @@ export class UserAccountService {
         documentName: userId,
         actorId: RECOVERY_ACTOR_ID,
         metadata: command.metadata,
-        payload: {
-          kind: "UserEmailVerificationRequested",
+        payload: userEmailVerificationRequestedPayload({
           userId,
           email,
           tokenHash,
           expiresAt
-        }
+        })
       });
     } catch (error) {
       if (isConflict(error)) {
@@ -529,11 +531,10 @@ export class UserAccountService {
         expectedVersion: lastSequence(saved, state.version),
         type: "UserEmailVerificationDeliveryFailed",
         metadata: command.metadata,
-        payload: {
-          kind: "UserEmailVerificationDeliveryFailed",
+        payload: userEmailVerificationDeliveryFailedPayload({
           userId,
           email
-        }
+        })
       });
       return { tenantId, userId, delivered: false };
     }
@@ -558,11 +559,10 @@ export class UserAccountService {
       documentName: userId,
       actorId: RECOVERY_ACTOR_ID,
       metadata: command.metadata,
-      payload: {
-        kind: "UserEmailVerified",
+      payload: userEmailVerifiedPayload({
         userId,
         email: challenge.email
-      }
+      })
     });
     return this.refold(tenantId, userId, state.version, saved);
   }
