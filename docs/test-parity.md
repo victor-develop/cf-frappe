@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the user permission grant-change policy slice:
+As of the saved list filter merge policy slice:
 
 - Vitest files: `230`
-- Vitest cases: `2629`
-- Remaining gap to Frappe static markers: `155`
+- Vitest cases: `2630`
+- Remaining gap to Frappe static markers: `154`
 
 ## Implication
 

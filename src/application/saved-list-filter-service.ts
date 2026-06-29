@@ -1,5 +1,5 @@
 import { notFound, permissionDenied } from "../core/errors.js";
-import { andListFilterExpressions, mergeListFilters, normalizeListFilterExpression, normalizeListFilters } from "../core/list-view.js";
+import { normalizeListFilterExpression, normalizeListFilters } from "../core/list-view.js";
 import { can } from "../core/permissions.js";
 import type { ModelRegistry } from "../core/registry.js";
 import { savedListFiltersStream } from "../core/streams.js";
@@ -13,6 +13,8 @@ import {
 } from "../core/types.js";
 import {
   foldSavedListFilters,
+  mergeSavedListFilter,
+  mergeSavedListFilterInputs,
   normalizeSavedListFilterLabel,
   SAVED_LIST_FILTER_PAYLOAD_KINDS,
   savedListFilterCurrentVersion,
@@ -189,7 +191,7 @@ export class SavedListFilterService {
     savedFilter: SavedListFilter | undefined,
     explicitFilters: readonly ListDocumentsFilter[]
   ): readonly ListDocumentsFilter[] {
-    return savedFilter ? mergeListFilters(savedFilter.filters, explicitFilters) : explicitFilters;
+    return mergeSavedListFilter(savedFilter, explicitFilters);
   }
 
   mergeSavedFilterInputs(
@@ -197,15 +199,11 @@ export class SavedListFilterService {
     explicitFilters: readonly ListDocumentsFilter[],
     explicitFilterExpression: ListFilterExpression | undefined
   ): SavedListFilterMerge {
-    const filters = this.mergeSavedFilter(savedFilter, explicitFilters);
-    const filterExpression = andListFilterExpressions([
-      savedFilter?.filterExpression,
+    return mergeSavedListFilterInputs({
+      savedFilter,
+      explicitFilters,
       explicitFilterExpression
-    ]);
-    return {
-      filters,
-      ...(filterExpression === undefined ? {} : { filterExpression })
-    };
+    });
   }
 
   private async readableDoctype(actor: Actor, doctypeName: string, tenantId: TenantId): Promise<DocTypeDefinition> {

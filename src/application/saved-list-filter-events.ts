@@ -1,5 +1,6 @@
 import { badRequest } from "../core/errors.js";
 import { domainEventPayloadKind } from "../core/domain-events.js";
+import { andListFilterExpressions, mergeListFilters } from "../core/list-view.js";
 import type {
   DocTypeDefinition,
   DomainEvent,
@@ -54,6 +55,11 @@ export interface SavedListFilterState {
   readonly filters: ReadonlyMap<string, SavedListFilter>;
 }
 
+export interface SavedListFilterInputMerge {
+  readonly filters: readonly ListDocumentsFilter[];
+  readonly filterExpression?: ListFilterExpression;
+}
+
 export function foldSavedListFilters(
   tenantId: TenantId,
   doctype: DocTypeDefinition,
@@ -104,6 +110,29 @@ export function savedListFiltersForOwner(
 
 export function sortedSavedListFilters(filters: readonly SavedListFilter[]): readonly SavedListFilter[] {
   return [...filters].sort((left, right) => left.label.localeCompare(right.label) || left.id.localeCompare(right.id));
+}
+
+export function mergeSavedListFilter(
+  savedFilter: SavedListFilter | undefined,
+  explicitFilters: readonly ListDocumentsFilter[]
+): readonly ListDocumentsFilter[] {
+  return savedFilter ? mergeListFilters(savedFilter.filters, explicitFilters) : explicitFilters;
+}
+
+export function mergeSavedListFilterInputs(options: {
+  readonly savedFilter?: SavedListFilter | undefined;
+  readonly explicitFilters: readonly ListDocumentsFilter[];
+  readonly explicitFilterExpression?: ListFilterExpression | undefined;
+}): SavedListFilterInputMerge {
+  const filters = mergeSavedListFilter(options.savedFilter, options.explicitFilters);
+  const filterExpression = andListFilterExpressions([
+    options.savedFilter?.filterExpression,
+    options.explicitFilterExpression
+  ]);
+  return {
+    filters,
+    ...(filterExpression === undefined ? {} : { filterExpression })
+  };
 }
 
 export function normalizeSavedListFilterLabel(label: string): string {

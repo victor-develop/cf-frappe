@@ -2,6 +2,8 @@ import {
   foldSavedListFilters,
   isSavedListFilterEvent,
   isSavedListFilterPayloadKind,
+  mergeSavedListFilter,
+  mergeSavedListFilterInputs,
   normalizeSavedListFilterLabel,
   SAVED_LIST_FILTER_PAYLOAD_KINDS,
   savedListFilterCurrentVersion,
@@ -81,6 +83,46 @@ describe("saved list filter events", () => {
       "filter-b",
       "filter-z"
     ]);
+  });
+
+  it("merges saved and explicit list filter inputs without service orchestration", () => {
+    const savedFilter = {
+      tenantId: "acme",
+      doctype: "Note",
+      id: "filter-a",
+      label: "Important",
+      ownerId: owner.id,
+      filters: [{ field: "priority", value: "High" }],
+      filterExpression: { field: "workflow_state", value: "Open" },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    };
+
+    expect(mergeSavedListFilter(savedFilter, [{ field: "owner", value: owner.id }])).toEqual([
+      { field: "priority", value: "High" },
+      { field: "owner", value: owner.id }
+    ]);
+    expect(mergeSavedListFilter(undefined, [{ field: "owner", value: owner.id }])).toEqual([
+      { field: "owner", value: owner.id }
+    ]);
+    expect(mergeSavedListFilterInputs({
+      savedFilter,
+      explicitFilters: [{ field: "owner", value: owner.id }],
+      explicitFilterExpression: { field: "status", value: "Active" }
+    })).toEqual({
+      filters: [
+        { field: "priority", value: "High" },
+        { field: "owner", value: owner.id }
+      ],
+      filterExpression: {
+        kind: "group",
+        match: "all",
+        filters: [
+          { field: "workflow_state", value: "Open" },
+          { field: "status", value: "Active" }
+        ]
+      }
+    });
   });
 
   it("normalizes labels, exposes payload kinds, and reads append versions", () => {
