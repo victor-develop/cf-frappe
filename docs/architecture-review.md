@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted user-permission tenant/admin access, required text normalization, linked-record grant normalization, and expected-version guards from UserPermissionService into user-permission policy and covered those rules directly.
 - Extracted user-profile tenant access, required text normalization, profile patch normalization, and expected-version guards from UserProfileService into user-profile policy and covered those rules directly.
 - Extracted user-notification user/id normalization, inbox limit normalization, and inbox projection filtering/ordering/counting from UserNotificationService into user-notification policy and covered those rules directly.
 - Extracted document-delivery outbox source payload shaping, claim limit normalization, claimable-record selection, terminal claim guards, and failure error normalization from the outbox service into document-delivery outbox service policy and covered those rules directly.

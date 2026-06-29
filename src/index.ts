@@ -85,6 +85,7 @@ export * from "./application/user-profile-events.js";
 export * from "./application/user-profile-policy.js";
 export * from "./application/user-profile-service.js";
 export * from "./application/user-permission-events.js";
+export * from "./application/user-permission-policy.js";
 export * from "./application/user-permission-service.js";
 export * from "./application/user-permission-grant-validator.js";
 export * from "./application/user-role-validator.js";

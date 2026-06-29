@@ -1,4 +1,3 @@
-import { badRequest, conflict, permissionDenied } from "../core/errors.js";
 import { userPermissionsStream } from "../core/streams.js";
 import {
   DEFAULT_TENANT_ID,
@@ -16,12 +15,17 @@ import {
 } from "./user-permission-events.js";
 import {
   foldUserPermissions,
-  normalizeUserPermissionGrant,
   userPermissionGrantKey,
   type UserPermissionGrant,
   type UserPermissionProvider,
   type UserPermissionState
 } from "../core/user-permissions.js";
+import {
+  authorizeUserPermissionAdministration,
+  ensureUserPermissionExpectedVersion,
+  normalizeUserPermissionRequiredText,
+  normalizeValidUserPermissionGrant
+} from "./user-permission-policy.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
@@ -93,9 +97,8 @@ export class UserPermissionService implements UserPermissionProvider {
     userId: string,
     tenantId?: TenantId
   ): Promise<UserPermissionState> {
-    this.ensureAdmin(actor);
-    const resolvedTenantId = resolveActorTenant(actor, tenantId);
-    return this.stateFor(resolvedTenantId, normalizeRequired(userId, "User id"));
+    const resolvedTenantId = authorizeUserPermissionAdministration({ actor, tenantId, adminRoles: this.adminRoles });
+    return this.stateFor(resolvedTenantId, normalizeUserPermissionRequiredText(userId, "User id"));
   }
 
   private async changePermission(options: {
@@ -103,12 +106,15 @@ export class UserPermissionService implements UserPermissionProvider {
     readonly eventKind: UserPermissionEventPayload["kind"];
     readonly alreadyDone: (state: UserPermissionState, grant: UserPermissionGrant) => boolean;
   }): Promise<UserPermissionState> {
-    this.ensureAdmin(options.command.actor);
-    const tenantId = resolveActorTenant(options.command.actor, options.command.tenantId);
-    const userId = normalizeRequired(options.command.userId, "User id");
-    const grant = normalizeValidGrant(options.command);
+    const tenantId = authorizeUserPermissionAdministration({
+      actor: options.command.actor,
+      tenantId: options.command.tenantId,
+      adminRoles: this.adminRoles
+    });
+    const userId = normalizeUserPermissionRequiredText(options.command.userId, "User id");
+    const grant = normalizeValidUserPermissionGrant(options.command);
     const state = await this.stateFor(tenantId, userId);
-    ensureExpectedVersion(state, options.command.expectedVersion);
+    ensureUserPermissionExpectedVersion(state, options.command.expectedVersion);
     if (options.alreadyDone(state, grant)) {
       return state;
     }
@@ -140,43 +146,4 @@ export class UserPermissionService implements UserPermissionProvider {
     );
   }
 
-  private ensureAdmin(actor: Actor): void {
-    if (!this.adminRoles.some((role) => actor.roles.includes(role))) {
-      throw permissionDenied(`Actor '${actor.id}' cannot manage user permissions`);
-    }
-  }
-}
-
-function resolveActorTenant(actor: Actor, explicitTenantId: TenantId | undefined): TenantId {
-  const actorTenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
-  const tenantId = explicitTenantId ?? actorTenantId;
-  if (tenantId !== actorTenantId) {
-    throw permissionDenied(`Actor '${actor.id}' cannot manage user permissions for tenant '${tenantId}'`);
-  }
-  return tenantId;
-}
-
-function normalizeValidGrant(grant: UserPermissionGrant): UserPermissionGrant {
-  const normalized = normalizeUserPermissionGrant(grant);
-  if (normalized.targetDoctype.length === 0) {
-    throw badRequest("Target DocType is required");
-  }
-  if (normalized.targetName.length === 0) {
-    throw badRequest("Target name is required");
-  }
-  return normalized;
-}
-
-function normalizeRequired(value: string, label: string): string {
-  const normalized = value.trim();
-  if (normalized.length === 0) {
-    throw badRequest(`${label} is required`);
-  }
-  return normalized;
-}
-
-function ensureExpectedVersion(state: UserPermissionState, expectedVersion: number | undefined): void {
-  if (expectedVersion !== undefined && state.version !== expectedVersion) {
-    throw conflict(`Expected user permissions for '${state.userId}' at version ${expectedVersion}, found ${state.version}`);
-  }
 }
