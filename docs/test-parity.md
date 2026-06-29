@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the field-property event helper slice:
+As of the workflow definition payload helper slice:
 
 - Vitest files: `189`
-- Vitest cases: `2136`
-- Remaining gap to Frappe static markers: `648`
+- Vitest cases: `2138`
+- Remaining gap to Frappe static markers: `646`
 
 ## Implication
 

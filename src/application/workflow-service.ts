@@ -18,7 +18,9 @@ import {
 import {
   replayWorkflowDefinitionAppend,
   WORKFLOW_DEFINITION_PAYLOAD_KINDS,
+  workflowDefinitionClearedPayload,
   workflowDefinitionEvent,
+  workflowDefinitionSavedPayload,
   type WorkflowEventPayload
 } from "./workflow-events.js";
 import type { ModelRegistry } from "../core/registry.js";
@@ -109,11 +111,10 @@ export class WorkflowService {
     return this.appendAndFold(state, {
       actor: command.actor,
       metadata: command.metadata,
-      payload: {
-        kind: "WorkflowDefinitionSaved",
+      payload: workflowDefinitionSavedPayload({
         doctypeName: doctype.name,
         workflow
-      }
+      })
     });
   }
 
@@ -129,10 +130,9 @@ export class WorkflowService {
     return this.appendAndFold(state, {
       actor: command.actor,
       metadata: command.metadata,
-      payload: {
-        kind: "WorkflowDefinitionCleared",
+      payload: workflowDefinitionClearedPayload({
         doctypeName: doctype.name
-      }
+      })
     });
   }
 

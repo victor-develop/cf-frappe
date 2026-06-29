@@ -26,6 +26,34 @@ export const WORKFLOW_DEFINITION_PAYLOAD_KINDS = Object.freeze([
   "WorkflowDefinitionCleared"
 ] as const);
 
+export interface WorkflowDefinitionSavedPayloadInput {
+  readonly doctypeName: DocTypeName;
+  readonly workflow: WorkflowDefinition;
+}
+
+export interface WorkflowDefinitionClearedPayloadInput {
+  readonly doctypeName: DocTypeName;
+}
+
+export function workflowDefinitionSavedPayload(
+  input: WorkflowDefinitionSavedPayloadInput
+): Extract<WorkflowEventPayload, { readonly kind: "WorkflowDefinitionSaved" }> {
+  return {
+    kind: "WorkflowDefinitionSaved",
+    doctypeName: input.doctypeName,
+    workflow: input.workflow
+  };
+}
+
+export function workflowDefinitionClearedPayload(
+  input: WorkflowDefinitionClearedPayloadInput
+): Extract<WorkflowEventPayload, { readonly kind: "WorkflowDefinitionCleared" }> {
+  return {
+    kind: "WorkflowDefinitionCleared",
+    doctypeName: input.doctypeName
+  };
+}
+
 export interface WorkflowDefinitionEventOptions<TPayload extends WorkflowEventPayload> {
   readonly id: string;
   readonly tenantId: TenantId;

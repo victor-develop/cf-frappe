@@ -2,9 +2,12 @@ import {
   foldWorkflowDefinition,
   replayWorkflowDefinitionAppend,
   WORKFLOW_DEFINITION_PAYLOAD_KINDS,
+  workflowDefinitionClearedPayload,
   workflowDefinitionEvent,
+  workflowDefinitionSavedPayload,
   workflowEventsVisibleAt
 } from "../../src";
+import type { WorkflowEventPayload } from "../../src";
 import type { DomainEvent, WorkflowDefinition } from "../../src";
 
 const admin = {
@@ -20,6 +23,24 @@ const workflow: WorkflowDefinition = {
 };
 
 describe("workflow events", () => {
+  it("builds saved workflow definition payloads", () => {
+    expect(workflowPayload(workflowDefinitionSavedPayload({
+      doctypeName: "Note",
+      workflow
+    }))).toEqual({
+      kind: "WorkflowDefinitionSaved",
+      doctypeName: "Note",
+      workflow
+    });
+  });
+
+  it("builds cleared workflow definition payloads", () => {
+    expect(workflowPayload(workflowDefinitionClearedPayload({ doctypeName: "Note" }))).toEqual({
+      kind: "WorkflowDefinitionCleared",
+      doctypeName: "Note"
+    });
+  });
+
   it("creates typed workflow definition events from payload identity", () => {
     expect(workflowDefinitionEvent({
       id: "evt_workflow",
@@ -69,6 +90,10 @@ describe("workflow events", () => {
     ]);
   });
 });
+
+function workflowPayload(payload: WorkflowEventPayload): WorkflowEventPayload {
+  return payload;
+}
 
 function savedEvent(
   sequence: number,
