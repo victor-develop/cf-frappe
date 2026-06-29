@@ -5,6 +5,7 @@ import {
   SYSTEM_MANAGER_ROLE,
   UserAccountService,
   deterministicIds,
+  documentStream,
   fixedClock,
   type PasswordHasher
 } from "../../src";
@@ -437,6 +438,46 @@ describe("AuditService", () => {
       "DocumentCreated",
       "DocumentUpdated",
       "DocumentDeleted"
+    ]);
+  });
+
+  it("derives deleted recovery metadata from the source delete event identity", async () => {
+    const { audit, documents, events } = createServices(["create-1", "delete-1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Deleted Source Audit" }) });
+    await documents.delete({ actor: manager, doctype: "Note", name: "Deleted Source Audit", expectedVersion: 1 });
+    await events.append(documentStream("acme", "Note", "Deleted Source Audit"), 2, [
+      {
+        id: "evt_after-delete-comment",
+        tenantId: "acme",
+        stream: documentStream("acme", "Note", "Deleted Source Audit"),
+        type: "NoteCommentAdded",
+        doctype: "Note",
+        documentName: "Deleted Source Audit",
+        actorId: owner.id,
+        occurredAt: "2026-01-01T00:01:00.000Z",
+        payload: { kind: "DocumentCommentAdded", text: "late audit note" },
+        metadata: {}
+      }
+    ]);
+
+    const recovered = await audit.recoverDeletedDocument(admin, {
+      doctype: "Note",
+      name: "Deleted Source Audit"
+    });
+
+    expect(recovered).toMatchObject({
+      deleteEventId: "evt_delete-1",
+      deletedBy: manager.id,
+      deletedAt: "2026-01-01T00:00:00.000Z",
+      snapshot: {
+        docstatus: "deleted",
+        version: 3
+      }
+    });
+    expect(recovered.events.map((event) => event.payload.kind)).toEqual([
+      "DocumentCreated",
+      "DocumentDeleted",
+      "DocumentCommentAdded"
     ]);
   });
 

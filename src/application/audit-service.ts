@@ -1,4 +1,5 @@
 import { badRequest, notFound, permissionDenied } from "../core/errors.js";
+import { domainEventPayloadKind } from "../core/domain-events.js";
 import { foldDocument } from "../core/events.js";
 import {
   DEFAULT_TENANT_ID,
@@ -182,7 +183,7 @@ export class AuditService {
       );
     }
     const snapshot = foldDocument(events);
-    const deleted = [...events].reverse().find((event) => event.payload.kind === "DocumentDeleted");
+    const deleted = [...events].reverse().find(isDeletedDocumentEvent);
     if (!snapshot || snapshot.docstatus !== "deleted" || !deleted) {
       throw notFound(`${options.doctype}/${options.name} is not a deleted document`);
     }
@@ -243,6 +244,10 @@ function normalizeMaxDeletedDocumentEvents(value: number | undefined): number {
     throw badRequest("Deleted document recovery event limit must be a positive integer");
   }
   return value;
+}
+
+function isDeletedDocumentEvent(event: DomainEvent): boolean {
+  return domainEventPayloadKind(event) === "DocumentDeleted";
 }
 
 function redactSensitiveAuditPayload(event: DomainEvent): DomainEvent {

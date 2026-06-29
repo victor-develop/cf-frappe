@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Centralized audit deleted-event recovery selection in domain events so deleted-document recovery no longer reads source event payload kinds inline.
 - Centralized notification-rule email event-label rendering in domain events so rendered email bodies no longer read source event payload kinds inline.
 - Centralized notification-rule event-kind matching in domain events so inbox and email rule eligibility no longer reads source event payload kinds inline.
 - Centralized assignment-rule event-kind matching in domain events so assignment rule eligibility no longer reads source event payload kinds inline.
