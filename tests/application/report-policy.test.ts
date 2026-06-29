@@ -1,4 +1,6 @@
 import {
+  buildReportGroups,
+  limitReportGroups,
   primitiveReportRowValue,
   reportAggregateValue,
   reportChartDrilldown,
@@ -118,5 +120,68 @@ describe("report policy", () => {
       { key: "a", label: "Same", value: 2 },
       { key: "c", label: "After", value: 2 }
     ], "value", "asc").map((point) => point.key)).toEqual(["c", "a", "b"]);
+  });
+
+  it("builds report groups sorted by primitive group keys", () => {
+    expect(buildReportGroups(rows, [{
+      name: "by_priority",
+      label: "By Priority",
+      field: "priority",
+      summaries: [{ name: "row_count", aggregate: "count" }]
+    }])).toEqual([{
+      name: "by_priority",
+      label: "By Priority",
+      field: "priority",
+      rows: [
+        {
+          key: null,
+          label: "(empty)",
+          summaries: [{ name: "row_count", label: "row_count", aggregate: "count", type: "integer", value: 2 }]
+        },
+        {
+          key: "High",
+          label: "High",
+          summaries: [{ name: "row_count", label: "row_count", aggregate: "count", type: "integer", value: 1 }]
+        },
+        {
+          key: "Low",
+          label: "Low",
+          summaries: [{ name: "row_count", label: "row_count", aggregate: "count", type: "integer", value: 1 }]
+        }
+      ]
+    }]);
+  });
+
+  it("builds report groups with default labels and grouped summary aggregates", () => {
+    expect(buildReportGroups(rows, [{
+      name: "by_active",
+      field: "active",
+      summaries: [{ name: "total_count", aggregate: "sum", field: "count" }]
+    }])).toMatchObject([{
+      name: "by_active",
+      label: "by_active",
+      field: "active",
+      rows: [
+        { key: null, label: "(empty)", summaries: [{ name: "total_count", value: 0 }] },
+        { key: false, label: "false", summaries: [{ name: "total_count", value: 3 }] },
+        { key: true, label: "true", summaries: [{ name: "total_count", value: 7 }] }
+      ]
+    }]);
+  });
+
+  it("limits report groups by matching group definition names", () => {
+    const groups = buildReportGroups(rows, [{
+      name: "by_priority",
+      field: "priority",
+      maxRows: 2,
+      summaries: [{ name: "row_count", aggregate: "count" }]
+    }]);
+
+    expect(limitReportGroups(groups, [{
+      name: "by_priority",
+      field: "priority",
+      maxRows: 2,
+      summaries: [{ name: "row_count", aggregate: "count" }]
+    }])[0]?.rows.map((row) => row.key)).toEqual([null, "High"]);
   });
 });

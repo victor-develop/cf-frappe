@@ -17,7 +17,6 @@ import {
   type ReportFilterOperator,
   type ReportFilterValue,
   type ReportFormulaOperand,
-  type ReportGroupDefinition,
   type ReportOrder,
   type ReportSummaryDefinition,
   isReportFilterGroup
@@ -27,33 +26,30 @@ import type { Actor, DocTypeDefinition, DocumentSnapshot, FieldDefinition, Field
 import { QueryService } from "./query-service.js";
 import { CSV_CONTENT_TYPE, csvLine, filenamePart } from "./csv.js";
 import {
-  primitiveReportRowValue,
+  buildReportGroups,
+  limitReportGroups,
   reportChartDrilldown,
   reportSummaryValue,
   sortReportChartPoints,
+  type ReportGroupResult,
+  type ReportGroupRow,
   type ReportChartPoint,
   type ReportRow,
   type ReportSummaryValue
 } from "./report-policy.js";
 
 export type ReportFilters = Readonly<Record<string, ReportFilterValue | undefined>>;
-export type { ReportChartDrilldown, ReportChartPoint, ReportRow, ReportSummaryValue } from "./report-policy.js";
+export type {
+  ReportChartDrilldown,
+  ReportChartPoint,
+  ReportGroupResult,
+  ReportGroupRow,
+  ReportRow,
+  ReportSummaryValue
+} from "./report-policy.js";
 
 const DEFAULT_CSV_EXPORT_LIMIT = 10_000;
 const EMPTY_CHART_COLORS: readonly string[] = Object.freeze([]);
-
-export interface ReportGroupRow {
-  readonly key: JsonPrimitive;
-  readonly label: string;
-  readonly summaries: readonly ReportSummaryValue[];
-}
-
-export interface ReportGroupResult {
-  readonly name: string;
-  readonly label: string;
-  readonly field: string;
-  readonly rows: readonly ReportGroupRow[];
-}
 
 export interface ReportChartResult {
   readonly name: string;
@@ -972,51 +968,6 @@ function buildReportSummary(
   return summaries.map((summary) => reportSummaryValue(summary, rows));
 }
 
-function buildReportGroups(
-  rows: readonly ReportRow[],
-  groups: readonly ReportGroupDefinition[]
-): readonly ReportGroupResult[] {
-  return groups.map((group) => {
-    const buckets = new Map<string, { readonly key: JsonPrimitive; readonly rows: ReportRow[] }>();
-    for (const row of rows) {
-      const key = primitiveReportRowValue(row, group.field) ?? null;
-      const bucketKey = JSON.stringify(key);
-      const existing = buckets.get(bucketKey);
-      if (existing) {
-        existing.rows.push(row);
-      } else {
-        buckets.set(bucketKey, { key, rows: [row] });
-      }
-    }
-    const groupRows = [...buckets.values()]
-      .sort((left, right) => compareValues(left.key, right.key))
-      .map((bucket) => ({
-        key: bucket.key,
-        label: groupLabel(bucket.key),
-        summaries: buildReportSummary(bucket.rows, group.summaries)
-      }));
-    return {
-      name: group.name,
-      label: group.label ?? group.name,
-      field: group.field,
-      rows: groupRows
-    };
-  });
-}
-
-function limitReportGroups(
-  groups: readonly ReportGroupResult[],
-  definitions: readonly ReportGroupDefinition[]
-): readonly ReportGroupResult[] {
-  const maxRowsByName = new Map(definitions.map((definition) => [definition.name, definition.maxRows]));
-  return groups.map((group) => {
-    const maxRows = maxRowsByName.get(group.name);
-    return maxRows === undefined
-      ? group
-      : { ...group, rows: group.rows.slice(0, maxRows) };
-  });
-}
-
 function buildReportCharts(
   groups: readonly ReportGroupResult[],
   report: ReportDefinition
@@ -1065,10 +1016,6 @@ function exactDrilldownFilterForGroup(
   return (report.filters ?? []).find((filter) =>
     filter.field === group.field && (filter.operator ?? "eq") === "eq"
   );
-}
-
-function groupLabel(value: JsonPrimitive): string {
-  return value === null ? "(empty)" : String(value);
 }
 
 function coerceFilterValue(

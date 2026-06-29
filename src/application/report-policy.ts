@@ -3,6 +3,7 @@ import type {
   ReportChartOrder,
   ReportChartOrderBy,
   ReportFilterDefinition,
+  ReportGroupDefinition,
   ReportSummaryDefinition
 } from "../core/reports.js";
 import type { FieldType, JsonPrimitive, JsonValue } from "../core/types.js";
@@ -30,6 +31,19 @@ export interface ReportChartPoint {
   readonly label: string;
   readonly value: number | null;
   readonly drilldown?: ReportChartDrilldown;
+}
+
+export interface ReportGroupRow {
+  readonly key: JsonPrimitive;
+  readonly label: string;
+  readonly summaries: readonly ReportSummaryValue[];
+}
+
+export interface ReportGroupResult {
+  readonly name: string;
+  readonly label: string;
+  readonly field: string;
+  readonly rows: readonly ReportGroupRow[];
 }
 
 export function reportSummaryValue(
@@ -102,6 +116,51 @@ export function sortReportChartPoints(
     return comparison === 0
       ? compareReportValues(left.label, right.label) || compareReportValues(left.key, right.key)
       : comparison;
+  });
+}
+
+export function buildReportGroups(
+  rows: readonly ReportRow[],
+  groups: readonly ReportGroupDefinition[]
+): readonly ReportGroupResult[] {
+  return groups.map((group) => {
+    const buckets = new Map<string, { readonly key: JsonPrimitive; readonly rows: ReportRow[] }>();
+    for (const row of rows) {
+      const key = primitiveReportRowValue(row, group.field) ?? null;
+      const bucketKey = JSON.stringify(key);
+      const existing = buckets.get(bucketKey);
+      if (existing) {
+        existing.rows.push(row);
+      } else {
+        buckets.set(bucketKey, { key, rows: [row] });
+      }
+    }
+    const groupRows = [...buckets.values()]
+      .sort((left, right) => compareReportValues(left.key, right.key))
+      .map((bucket) => ({
+        key: bucket.key,
+        label: reportGroupLabel(bucket.key),
+        summaries: group.summaries.map((summary) => reportSummaryValue(summary, bucket.rows))
+      }));
+    return {
+      name: group.name,
+      label: group.label ?? group.name,
+      field: group.field,
+      rows: groupRows
+    };
+  });
+}
+
+export function limitReportGroups(
+  groups: readonly ReportGroupResult[],
+  definitions: readonly ReportGroupDefinition[]
+): readonly ReportGroupResult[] {
+  const maxRowsByName = new Map(definitions.map((definition) => [definition.name, definition.maxRows]));
+  return groups.map((group) => {
+    const maxRows = maxRowsByName.get(group.name);
+    return maxRows === undefined
+      ? group
+      : { ...group, rows: group.rows.slice(0, maxRows) };
   });
 }
 
@@ -183,4 +242,8 @@ function compareChartValues(left: number | null, right: number | null, direction
     return left === null ? 1 : -1;
   }
   return compareReportValues(left, right) * direction;
+}
+
+function reportGroupLabel(value: JsonPrimitive): string {
+  return value === null ? "(empty)" : String(value);
 }
