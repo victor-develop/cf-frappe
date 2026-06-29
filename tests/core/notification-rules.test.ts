@@ -259,6 +259,24 @@ describe("notification rules", () => {
       }
     ]);
   });
+
+  it("derives rendered email event labels from source event identity", () => {
+    const event = documentEvent("evt_submit", "DocumentSubmitted");
+    const snapshot = noteSnapshot({ created_by: owner.id });
+    const rule = normalizeNotificationRule(noteDocType, {
+      name: "Submission email",
+      events: ["DocumentSubmitted"],
+      recipients: [{ kind: "user", userId: "reviewer@example.com" }],
+      channels: ["email"]
+    });
+
+    expect(notificationRuleEmailNotificationsFromDomainEvent({ event, snapshot, rules: [rule] })).toMatchObject([
+      {
+        payloadKind: "DocumentSubmitted",
+        text: expect.stringContaining("Event: DocumentSubmitted")
+      }
+    ]);
+  });
 });
 
 function ruleEvent(
@@ -282,18 +300,18 @@ function ruleEvent(
   };
 }
 
-function documentEvent(id: string, kind: "DocumentUpdated"): DomainEvent {
+function documentEvent(id: string, kind: "DocumentUpdated" | "DocumentSubmitted"): DomainEvent {
   return {
     id,
     tenantId: "acme",
     stream: "acme:Note:My Note",
     sequence: 2,
-    type: "NoteUpdated",
+    type: kind === "DocumentUpdated" ? "NoteUpdated" : "NoteSubmitted",
     doctype: "Note",
     documentName: "My Note",
     actorId: owner.id,
     occurredAt: now,
-    payload: { kind, patch: { body: "Updated" } },
+    payload: kind === "DocumentUpdated" ? { kind, patch: { body: "Updated" } } : { kind },
     metadata: {}
   };
 }

@@ -366,11 +366,12 @@ function renderRuleSubject(
 }
 
 function renderRuleEmailText(subject: string, rule: NotificationRuleDefinition, event: DomainEvent): string {
+  const payloadKind = domainEventPayloadKind(event);
   return [
     subject,
     "",
     `Document: ${event.doctype} ${event.documentName}`,
-    `Event: ${event.payload.kind}`,
+    `Event: ${payloadKind}`,
     `Actor: ${event.actorId}`,
     `Rule: ${rule.name}`
   ].join("\n");
