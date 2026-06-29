@@ -224,6 +224,15 @@ export function requireDomainCommandDefinition(
   return definition;
 }
 
+export function requireWorkflowDefinition(
+  doctype: Pick<DocTypeDefinition, "name" | "workflow">
+): WorkflowDefinition {
+  if (!doctype.workflow) {
+    throw new FrameworkError("BAD_REQUEST", `${doctype.name} has no workflow`, { status: 400 });
+  }
+  return doctype.workflow;
+}
+
 export function planDomainCommandPolicy(input: {
   readonly actor: Actor;
   readonly definition: DomainCommandDefinition;

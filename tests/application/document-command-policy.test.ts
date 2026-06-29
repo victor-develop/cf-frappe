@@ -22,6 +22,7 @@ import {
   planWorkflowTransitionPolicy,
   pickCommandFields,
   requireDomainCommandDefinition,
+  requireWorkflowDefinition,
   type Actor,
   type DocTypeDefinition,
   type DocumentSnapshot
@@ -316,6 +317,19 @@ describe("document command policy", () => {
     expect(() => requireDomainCommandDefinition({ name: "Note" }, "archive")).toThrow(
       "Note has no command 'archive'"
     );
+  });
+
+  it("resolves workflow definitions from DocType metadata", () => {
+    const workflow = {
+      initialState: "Open",
+      states: ["Open", "Closed"],
+      transitions: [{ action: "close", from: "Open", to: "Closed" }]
+    };
+    expect(requireWorkflowDefinition({ name: "Note", workflow })).toBe(workflow);
+  });
+
+  it("rejects DocTypes without workflow definitions", () => {
+    expect(() => requireWorkflowDefinition({ name: "Note" })).toThrow("Note has no workflow");
   });
 
   it("plans workflow transition patches and default event types", () => {

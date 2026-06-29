@@ -59,7 +59,8 @@ import {
   planDocumentUpdatePolicy,
   planDomainCommandPolicy,
   planWorkflowTransitionPolicy,
-  requireDomainCommandDefinition
+  requireDomainCommandDefinition,
+  requireWorkflowDefinition
 } from "./document-command-policy.js";
 import {
   domainCommandAppliedPayload,
@@ -898,10 +899,7 @@ export class DocumentService implements DocumentCommandExecutor {
   async transition(command: TransitionDocumentCommand): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(command.actor, command.tenantId);
     const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
-    const workflow = doctype.workflow;
-    if (!workflow) {
-      throw new FrameworkError("BAD_REQUEST", `${doctype.name} has no workflow`, { status: 400 });
-    }
+    const workflow = requireWorkflowDefinition(doctype);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
     this.ensureDocumentActionAccess(command.actor, doctype, "transition", existing);
