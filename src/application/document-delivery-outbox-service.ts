@@ -1,10 +1,9 @@
-import { badRequest, conflict, notFound } from "../core/errors.js";
+import { notFound } from "../core/errors.js";
 import { domainEventPayloadKind } from "../core/domain-events.js";
 import { documentDeliveryOutboxStream } from "../core/streams.js";
 import {
   documentDeliveryOutboxEventType,
   documentDeliveryOutboxRecordId,
-  documentDeliveryRetryDue,
   DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS,
   foldDocumentDeliveryOutbox,
   selectedDocumentDeliveryOutboxRecords,
@@ -24,6 +23,13 @@ import type {
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
+import {
+  claimableDocumentDeliveryOutboxRecords,
+  documentDeliveryOutboxClaimLimit,
+  documentDeliveryOutboxFailureError,
+  documentDeliveryOutboxPayload,
+  ensureDocumentDeliveryOutboxClaimed
+} from "./document-delivery-outbox-service-policy.js";
 
 export type {
   DocumentDeliveryOutboxEventPayload,
@@ -33,8 +39,6 @@ export type {
 } from "./document-delivery-outbox-events.js";
 
 const MAX_OUTBOX_APPEND_ATTEMPTS = 5;
-const DEFAULT_CLAIM_LIMIT = 25;
-const MAX_CLAIM_LIMIT = 100;
 
 export interface DocumentDeliveryOutboxServiceOptions {
   readonly events: EventStore;
@@ -104,7 +108,7 @@ export class DocumentDeliveryOutboxService {
             doctype: command.event.doctype,
             documentName: command.event.documentName,
             actorId: command.event.actorId,
-            payload: outboxPayload(command.event, command.snapshot)
+            payload: documentDeliveryOutboxPayload(command.event, command.snapshot)
           };
           return {
             id: this.ids.next("evt_"),
@@ -130,12 +134,9 @@ export class DocumentDeliveryOutboxService {
   async claimPending(command: ClaimDocumentDeliveryOutboxCommand): Promise<readonly DocumentDeliveryOutboxRecord[]> {
     const now = command.now ?? this.clock.now();
     const claimId = command.claimId ?? this.ids.next("claim_");
-    const limit = normalizeClaimLimit(command.limit);
+    const limit = documentDeliveryOutboxClaimLimit(command.limit);
     return this.appendWithRetry(command.tenantId, async (state) => {
-      const records = [...state.records.values()]
-        .filter((record) => record.status === "pending" || (record.status === "failed" && documentDeliveryRetryDue(record, now)))
-        .sort((left, right) => left.enqueuedAt.localeCompare(right.enqueuedAt) || left.id.localeCompare(right.id))
-        .slice(0, limit);
+      const records = claimableDocumentDeliveryOutboxRecords(state, now, limit);
       const recordIds = records.map((record) => record.id);
       const events = records.map((record): NewDomainEvent => {
         const payload: DocumentDeliveryOutboxEventPayload = {
@@ -166,13 +167,10 @@ export class DocumentDeliveryOutboxService {
   }
 
   async markFailed(command: FailDocumentDeliveryOutboxCommand): Promise<DocumentDeliveryOutboxRecord> {
-    const normalizedError = command.error.trim();
-    if (normalizedError.length === 0) {
-      throw badRequest("Delivery failure error is required");
-    }
+    const normalizedError = documentDeliveryOutboxFailureError(command.error);
     const [record] = await this.appendWithRetry(command.tenantId, async (state) => {
       const existing = this.requireRecord(state, command.outboxId);
-      ensureClaimed(existing, command.claimId);
+      ensureDocumentDeliveryOutboxClaimed(existing, command.claimId);
       const payload: DocumentDeliveryOutboxEventPayload = {
         kind: "DocumentDeliveryOutboxFailed",
         outboxId: command.outboxId,
@@ -212,7 +210,7 @@ export class DocumentDeliveryOutboxService {
       if (existing.status === "delivered") {
         return { events: [], state, recordIds: [command.outboxId] };
       }
-      ensureClaimed(existing, command.claimId);
+      ensureDocumentDeliveryOutboxClaimed(existing, command.claimId);
       const payload: DocumentDeliveryOutboxEventPayload = {
         kind,
         outboxId: command.outboxId,
@@ -287,29 +285,6 @@ export class DocumentDeliveryOutboxService {
         payloadKinds: DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS
       })
     );
-  }
-}
-
-function outboxPayload(event: DomainEvent, snapshot: DocumentSnapshot | null | undefined): DocumentData {
-  return {
-    event: event as unknown as DocumentData,
-    ...(snapshot === undefined || snapshot === null ? {} : { snapshot: snapshot as unknown as DocumentData })
-  };
-}
-
-function normalizeClaimLimit(limit: number | undefined): number {
-  if (limit === undefined) {
-    return DEFAULT_CLAIM_LIMIT;
-  }
-  if (!Number.isSafeInteger(limit) || limit <= 0 || limit > MAX_CLAIM_LIMIT) {
-    throw badRequest(`Delivery outbox claim limit must be an integer between 1 and ${String(MAX_CLAIM_LIMIT)}`);
-  }
-  return limit;
-}
-
-function ensureClaimed(record: DocumentDeliveryOutboxRecord, claimId: string): void {
-  if (record.status !== "claimed" || record.claimId !== claimId) {
-    throw conflict(`Document delivery outbox record '${record.id}' is not claimed by '${claimId}'`);
   }
 }
 

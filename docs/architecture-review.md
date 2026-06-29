@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted document-delivery outbox source payload shaping, claim limit normalization, claimable-record selection, terminal claim guards, and failure error normalization from the outbox service into document-delivery outbox service policy and covered those rules directly.
 - Extracted email-notification delivery job string normalization, job payload parsing, deterministic idempotency key generation, and delivery result JSON shaping from email notification jobs into email-notification job policy and covered those rules directly.
 - Extracted document-delivery outbox drain limits, drain job payload parsing, drain result JSON shaping, claim guards, retry timing, and source replay validation from the drain consumer into document-delivery outbox consumer policy and covered those rules directly.
 - Extracted data-patch job payload parsing and run-result JSON shaping from data-patch job factories into data-patch job policy and covered actor parsing, patch payload parsing, apply result JSON, and rollback result JSON directly.
