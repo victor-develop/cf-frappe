@@ -5,6 +5,8 @@ import {
   findNotificationRuleEntry,
   normalizeRequiredNotificationRuleText,
   notificationRulesEqual,
+  planNotificationRuleClear,
+  planNotificationRuleSave,
   resolveNotificationRuleTenant
 } from "../../src/application/notification-rule-policy.js";
 import { SYSTEM_MANAGER_ROLE, type NotificationRuleDefinition } from "../../src/core/types.js";
@@ -75,6 +77,23 @@ describe("notification rule policy", () => {
     });
     expect(findNotificationRuleEntry(state(1), "Missing")).toBeUndefined();
     expect(enabledNotificationRules(state(1))).toEqual([enabledRule]);
+  });
+
+  it("plans notification rule saves without emitting redundant catalog events", () => {
+    const existing = findNotificationRuleEntry(state(1), "Managers on updates");
+
+    expect(planNotificationRuleSave(existing, enabledRule)).toEqual({ status: "noop" });
+    expect(planNotificationRuleSave(existing, { ...enabledRule, subject: "Changed" })).toEqual({
+      status: "append"
+    });
+    expect(planNotificationRuleSave(undefined, enabledRule)).toEqual({ status: "append" });
+  });
+
+  it("plans notification rule clears without emitting missing-rule events", () => {
+    expect(planNotificationRuleClear(findNotificationRuleEntry(state(1), "Managers on updates"))).toEqual({
+      status: "append"
+    });
+    expect(planNotificationRuleClear(findNotificationRuleEntry(state(1), "Missing"))).toEqual({ status: "noop" });
   });
 
   it("compares normalized notification rules structurally", () => {

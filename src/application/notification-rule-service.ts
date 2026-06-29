@@ -27,7 +27,8 @@ import {
   ensureNotificationRuleExpectedVersion,
   findNotificationRuleEntry,
   normalizeRequiredNotificationRuleText,
-  notificationRulesEqual
+  planNotificationRuleClear,
+  planNotificationRuleSave
 } from "./notification-rule-policy.js";
 import type { ModelRegistry } from "../core/registry.js";
 import { systemClock, type Clock } from "../ports/clock.js";
@@ -112,7 +113,7 @@ export class NotificationRuleService implements NotificationRuleProvider {
     const state = await this.stateFor(tenantId, doctype.name);
     ensureNotificationRuleExpectedVersion(state, command.expectedVersion);
     const existing = findNotificationRuleEntry(state, rule.name);
-    if (existing && notificationRulesEqual(existing.rule, rule)) {
+    if (planNotificationRuleSave(existing, rule).status === "noop") {
       return state;
     }
     return this.appendAndFold(state, {
@@ -131,7 +132,7 @@ export class NotificationRuleService implements NotificationRuleProvider {
     const ruleName = normalizeRequiredNotificationRuleText(command.ruleName, "Notification rule name");
     const state = await this.stateFor(tenantId, doctype.name);
     ensureNotificationRuleExpectedVersion(state, command.expectedVersion);
-    if (findNotificationRuleEntry(state, ruleName) === undefined) {
+    if (planNotificationRuleClear(findNotificationRuleEntry(state, ruleName)).status === "noop") {
       return state;
     }
     return this.appendAndFold(state, {

@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted notification-rule save and clear noop decisions into notification rule policy so NotificationRuleService keeps registry resolution, state loading, event append, and replay orchestration.
 - Extracted assignment-rule save, clear, and enabled-status noop decisions into assignment rule policy so AssignmentRuleService keeps registry resolution, state loading, event append, and replay orchestration.
 - Extracted role description and enabled-status noop decisions into role policy so RoleService keeps tenant/admin access, state loading, event append, and replay orchestration.
 - Extracted saved-list-filter and explicit filter/filter-expression merge rules into saved list filter helpers so SavedListFilterService keeps metadata access, event append, and replay orchestration.

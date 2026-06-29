@@ -67,6 +67,25 @@ export function findNotificationRuleEntry(
   return state.rules.find((entry) => entry.rule.name === ruleName);
 }
 
+export type NotificationRuleChangeDecision =
+  | { readonly status: "append" }
+  | { readonly status: "noop" };
+
+export function planNotificationRuleSave(
+  existing: NotificationRuleEntry | undefined,
+  rule: NotificationRuleDefinition
+): NotificationRuleChangeDecision {
+  return existing !== undefined && notificationRulesEqual(existing.rule, rule)
+    ? { status: "noop" }
+    : { status: "append" };
+}
+
+export function planNotificationRuleClear(
+  existing: NotificationRuleEntry | undefined
+): NotificationRuleChangeDecision {
+  return existing === undefined ? { status: "noop" } : { status: "append" };
+}
+
 export function enabledNotificationRules(state: NotificationRuleState): readonly NotificationRuleDefinition[] {
   return state.rules
     .filter((entry) => entry.enabled)
