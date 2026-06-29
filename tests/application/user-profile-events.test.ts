@@ -1,4 +1,4 @@
-import { userProfileChangedPayload } from "../../src";
+import { userProfileChangedPayload, userProfileEventType } from "../../src";
 import type { UserProfileEventPayload } from "../../src";
 
 describe("user profile events", () => {
@@ -17,6 +17,13 @@ describe("user profile events", () => {
         phone: null
       }
     });
+  });
+
+  it("derives user profile event types from payload identity", () => {
+    expect(userProfileEventType(userProfileChangedPayload({
+      userId: "ada@example.com",
+      profile: { fullName: "Ada Lovelace" }
+    }))).toBe("UserProfileChanged");
   });
 });
 

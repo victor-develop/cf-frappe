@@ -21,6 +21,10 @@ export function userProfileChangedPayload(
   };
 }
 
+export function userProfileEventType(payload: UserProfileEventPayload): UserProfileEventPayload["kind"] {
+  return payload.kind;
+}
+
 declare module "../core/types.js" {
   interface DomainEventPayloadMap {
     readonly UserProfileChanged: UserProfileEventPayload;

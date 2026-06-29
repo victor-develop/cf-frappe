@@ -11,6 +11,7 @@ import {
 } from "../core/types.js";
 import {
   userProfileChangedPayload,
+  userProfileEventType,
   type UserProfileEventPayload
 } from "./user-profile-events.js";
 import { foldUserAccount } from "../core/user-accounts.js";
@@ -105,19 +106,20 @@ export class UserProfileService {
     readonly profile: UserProfilePatch;
   }): Promise<readonly DomainEvent[]> {
     const stream = userProfilesStream(options.tenantId, options.userId);
+    const payload = userProfileChangedPayload({
+      userId: options.userId,
+      profile: options.profile as DocumentData
+    });
     const event: NewDomainEvent<UserProfileEventPayload> = {
       id: this.ids.next("evt_"),
       tenantId: options.tenantId,
       stream,
-      type: "UserProfileChanged",
+      type: userProfileEventType(payload),
       doctype: "__UserProfiles",
       documentName: options.userId,
       actorId: options.actorId,
       occurredAt: this.clock.now(),
-      payload: userProfileChangedPayload({
-        userId: options.userId,
-        profile: options.profile as DocumentData
-      }),
+      payload,
       metadata: options.metadata ?? {}
     };
     return this.events.append(stream, options.expectedVersion, [event]);
