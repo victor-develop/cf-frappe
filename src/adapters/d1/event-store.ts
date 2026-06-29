@@ -3,11 +3,9 @@ import type { DomainEvent, NewDomainEvent, StreamName } from "../../core/types.j
 import type { AuditDocumentEventQuery, AuditEventQuery, AuditEventStore } from "../../ports/audit-event-store.js";
 import type { EventStore } from "../../ports/event-store.js";
 import type { ReadStreamOptions } from "../../ports/document-store.js";
-import { auditDocumentEventQuery, auditEventQuery } from "./audit-event-query.js";
 import { isD1ConstraintError } from "./constraint-error.js";
+import { readD1AuditDocumentEvents, readD1EventStream, searchD1AuditEvents } from "./event-reader.js";
 import { insertEventStatements, sequenceEvents } from "./event-writer.js";
-import { eventStreamQuery } from "./read-stream-query.js";
-import { eventFromRow, type EventRow } from "./serde.js";
 
 export class D1EventStore implements EventStore, AuditEventStore {
   constructor(private readonly db: D1Database) {}
@@ -35,13 +33,7 @@ export class D1EventStore implements EventStore, AuditEventStore {
   }
 
   async readStream(stream: StreamName, options: ReadStreamOptions = {}): Promise<readonly DomainEvent[]> {
-    const query = eventStreamQuery(options);
-    const result = await this.db
-      .prepare(query.sql)
-      .bind(stream, ...query.params)
-      .all<EventRow>();
-    const events = (result.results ?? []).map(eventFromRow);
-    return query.reverseResults ? [...events].reverse() : events;
+    return readD1EventStream(this.db, stream, options);
   }
 
   async currentVersion(stream: StreamName): Promise<number> {
@@ -53,20 +45,10 @@ export class D1EventStore implements EventStore, AuditEventStore {
   }
 
   async searchEvents(query: AuditEventQuery): Promise<readonly DomainEvent[]> {
-    const prepared = auditEventQuery(query);
-    const result = await this.db
-      .prepare(prepared.sql)
-      .bind(...prepared.params)
-      .all<EventRow>();
-    return (result.results ?? []).map(eventFromRow);
+    return searchD1AuditEvents(this.db, query);
   }
 
   async readDocumentEvents(query: AuditDocumentEventQuery): Promise<readonly DomainEvent[]> {
-    const prepared = auditDocumentEventQuery(query);
-    const result = await this.db
-      .prepare(prepared.sql)
-      .bind(...prepared.params)
-      .all<EventRow>();
-    return (result.results ?? []).map(eventFromRow);
+    return readD1AuditDocumentEvents(this.db, query);
   }
 }

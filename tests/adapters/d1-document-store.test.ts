@@ -218,6 +218,20 @@ describe("D1DocumentStore", () => {
     ]);
   });
 
+  it("returns no D1 stream or audit events for empty payload kind filters", async () => {
+    const db = new FakeD1Database();
+    const store = new D1EventStore(db as unknown as D1Database);
+    await store.append(stream, 0, [
+      event,
+      updateEvent("evt2", "Two")
+    ]);
+
+    await expect(store.readStream(stream, { payloadKinds: [] })).resolves.toEqual([]);
+    await expect(store.searchEvents({ tenantId: "acme", payloadKinds: [] })).resolves.toEqual([]);
+    expect(db.statements.at(-2)?.sql).toContain("1 = 0");
+    expect(db.statements.at(-1)?.sql).toContain("1 = 0");
+  });
+
   it("searches audit events with tenant, metadata, kind, and limit filters", async () => {
     const db = new FakeD1Database();
     const store = new D1EventStore(db as unknown as D1Database);
@@ -455,6 +469,9 @@ class FakeD1PreparedStatement {
 
   async all() {
     if (this.sql.includes("FROM cf_frappe_events") && this.sql.includes("stream = ?")) {
+      if (this.sql.includes("1 = 0")) {
+        return { results: [] };
+      }
       const stream = String(this.params[0]);
       const maxSequence = this.sql.includes("sequence <= ?") ? Number(this.params[1]) : undefined;
       const limit = this.sql.includes("LIMIT ?") ? Number(this.params.at(-1)) : undefined;
@@ -475,6 +492,9 @@ class FakeD1PreparedStatement {
       };
     }
     if (this.sql.includes("FROM cf_frappe_events") && this.sql.includes("tenant_id = ?")) {
+      if (this.sql.includes("1 = 0")) {
+        return { results: [] };
+      }
       let index = 0;
       const tenantId = String(this.params[index++]);
       const doctype = this.sql.includes("doctype = ?") ? String(this.params[index++]) : undefined;

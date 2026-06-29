@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted shared D1 event-reader helpers and covered empty payload-kind filters so event and document stores use one Cloudflare persistence read path.
 - Covered D1 stream and audit payload-kind filtering so Cloudflare persistence queries ignore misleading source event names while preserving them on returned events.
 - Covered notification rule email payload-kind rendering so rule emails keep custom source event names while rendering operator-facing event labels from the domain payload.
 - Covered notification rule payload-kind matching so rule-generated inbox/email notifications preserve custom source event names while matching from the domain payload.

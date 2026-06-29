@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the D1 payload-kind filtering slice:
+As of the shared D1 event-reader slice:
 
 - Vitest files: `196`
-- Vitest cases: `2394`
-- Remaining gap to Frappe static markers: `390`
+- Vitest cases: `2395`
+- Remaining gap to Frappe static markers: `389`
 
 ## Implication
 
