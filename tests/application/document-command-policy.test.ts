@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   canExecuteDomainCommandForRoles,
+  documentUpdateValidationIssues,
   ensureDocumentStatus,
   ensureExpectedVersion,
   ensureMergeBaseVersion,
@@ -78,6 +79,32 @@ describe("document command policy", () => {
   it("normalizes unset fields for command payloads", () => {
     expect(normalizeUnsetFields(undefined)).toEqual([]);
     expect(normalizeUnsetFields([" body ", "", "title", "body"])).toEqual(["body", "title"]);
+  });
+
+  it("preserves document update validation issue ordering by validation stage", () => {
+    expect(documentUpdateValidationIssues({
+      submittedUpdateIssues: [issue("submitted")],
+      unsetIssues: [issue("unset")],
+      originIssues: [issue("origin")],
+      readOnlyIssues: [issue("readonly")],
+      validationIssues: [issue("schema"), issue("hook")],
+      linkIssues: [issue("link")]
+    }).map((item) => item.code)).toEqual([
+      "submitted",
+      "unset",
+      "origin",
+      "readonly",
+      "schema",
+      "hook",
+      "link"
+    ]);
+  });
+
+  it("omits empty document update validation issue groups", () => {
+    expect(documentUpdateValidationIssues({
+      unsetIssues: [],
+      validationIssues: [issue("schema")]
+    })).toEqual([issue("schema")]);
   });
 
   it("picks configured domain command fields from input data", () => {
@@ -332,3 +359,7 @@ describe("document command policy", () => {
     });
   });
 });
+
+function issue(code: string) {
+  return { field: code, code, message: code };
+}

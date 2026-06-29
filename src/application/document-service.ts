@@ -46,6 +46,7 @@ import {
   mergeSnapshotFromDocument,
   normalizeUnsetFields,
   canExecuteDomainCommandForRoles,
+  documentUpdateValidationIssues,
   planDocumentCopyPolicy,
   planDocumentCreatePolicy,
   planDocumentDeletePolicy,
@@ -757,14 +758,14 @@ export class DocumentService implements DocumentCommandExecutor {
       normalizedPatch,
       options.relatedDocType
     );
-    const issues = [
-      ...submittedUpdateIssues,
-      ...unsetIssues,
-      ...originIssues,
-      ...readOnlyIssues,
-      ...validationIssues,
-      ...linkIssues
-    ];
+    const issues = documentUpdateValidationIssues({
+      submittedUpdateIssues,
+      unsetIssues,
+      originIssues,
+      readOnlyIssues,
+      validationIssues,
+      linkIssues
+    });
     if (issues.length > 0) {
       throw validationFailed(issues);
     }

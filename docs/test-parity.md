@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document before/validate hook runner slice:
+As of the document update validation issue ordering slice:
 
 - Vitest files: `196`
-- Vitest cases: `2262`
-- Remaining gap to Frappe static markers: `522`
+- Vitest cases: `2264`
+- Remaining gap to Frappe static markers: `520`
 
 ## Implication
 

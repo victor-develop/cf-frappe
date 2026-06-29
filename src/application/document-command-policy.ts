@@ -20,6 +20,7 @@ import type {
   DocumentSnapshot,
   MutableDocumentData,
   PermissionAction,
+  ValidationIssue,
   WorkflowDefinition
 } from "../core/types.js";
 
@@ -63,6 +64,28 @@ export function normalizeUnsetFields(fields: readonly string[] | undefined): rea
   }
   const normalized = fields.map((field) => field.trim()).filter((field) => field.length > 0);
   return [...new Set(normalized)];
+}
+
+export interface DocumentUpdateValidationIssueGroups {
+  readonly submittedUpdateIssues?: readonly ValidationIssue[] | undefined;
+  readonly unsetIssues?: readonly ValidationIssue[] | undefined;
+  readonly originIssues?: readonly ValidationIssue[] | undefined;
+  readonly readOnlyIssues?: readonly ValidationIssue[] | undefined;
+  readonly validationIssues?: readonly ValidationIssue[] | undefined;
+  readonly linkIssues?: readonly ValidationIssue[] | undefined;
+}
+
+export function documentUpdateValidationIssues(
+  groups: DocumentUpdateValidationIssueGroups
+): readonly ValidationIssue[] {
+  return [
+    ...(groups.submittedUpdateIssues ?? []),
+    ...(groups.unsetIssues ?? []),
+    ...(groups.originIssues ?? []),
+    ...(groups.readOnlyIssues ?? []),
+    ...(groups.validationIssues ?? []),
+    ...(groups.linkIssues ?? [])
+  ];
 }
 
 export function pickCommandFields(fields: readonly string[] | undefined, input: DocumentData): DocumentData {

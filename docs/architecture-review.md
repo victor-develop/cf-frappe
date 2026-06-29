@@ -76,6 +76,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized tenant-aware DocType resolution and transitive related DocType context expansion in document tenant policy so `DocumentService` no longer owns recursive metadata graph traversal and `QueryService` shares the resolver boundary.
 - Centralized document after-commit hook execution and hook-error routing in core document hooks so `DocumentService` no longer owns hook-loop orchestration after commits.
 - Centralized before-validate hook patch folding and validation hook issue collection in core document hooks so `DocumentService` no longer owns pre-validation hook loops.
+- Centralized document update validation issue ordering and aggregation in document command policy so `DocumentService` no longer owns validation-stage concatenation before update failures.
 - Centralized readable file dashboard candidate shaping in file policy so dashboard orchestration no longer composes permission-check DTOs inline.
 - Centralized multipart completed-object reuse versus storage-completion planning in file policy so multipart orchestration no longer owns idempotent completion branching.
 - Centralized multipart completed-object read planning in file policy so multipart orchestration no longer derives object keys or upload ids before storage reads inline.
