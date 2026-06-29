@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted shared permission-denied access-probe classification from Dashboard, Calendar, Kanban, Web Form, and Web View services into application access policy and covered framework, structural, and unrelated error cases directly.
 - Extracted invalid recovery-token error creation, append-conflict classification, and saved-event version fallback from UserAccountService into user-account policy and covered those helpers directly.
 - Extracted job-schedule dashboard query normalization, dynamic field detection, static tenant resolution, schedule identity and configured-id set derivation, duplicate-id guards, effective schedule projection, and pause-until normalization from JobScheduleService into job-schedule policy and covered those rules directly.
 - Extracted email delivery claim-timeout normalization, queued/skipped replay result shaping, sent/failed delivery result shaping, queued payload header/address shaping, missing-recipient reasons, fallback email-address classification, and error-message normalization from EmailNotificationService into email-notification service policy and covered those rules directly.

@@ -3,6 +3,7 @@ import { canReadCalendar, type CalendarDefinition } from "../core/calendar.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { Actor } from "../core/types.js";
 import type { QueryService } from "./query-service.js";
+import { isPermissionDeniedError } from "./access-policy.js";
 import {
   calendarEvent,
   calendarEventLimit,
@@ -100,14 +101,10 @@ export class CalendarService {
       this.queries.getMeta(actor, calendar.doctype);
       return true;
     } catch (error) {
-      if (isPermissionDenied(error)) {
+      if (isPermissionDeniedError(error)) {
         return false;
       }
       throw error;
     }
   }
-}
-
-function isPermissionDenied(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "PERMISSION_DENIED";
 }

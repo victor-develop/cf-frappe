@@ -6,6 +6,7 @@ import {
 } from "../core/kanban.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { Actor } from "../core/types.js";
+import { isPermissionDeniedError } from "./access-policy.js";
 import type { QueryService } from "./query-service.js";
 import {
   applyDocumentToKanbanColumns,
@@ -87,14 +88,10 @@ export class KanbanService {
       this.queries.getMeta(actor, kanban.doctype);
       return true;
     } catch (error) {
-      if (isPermissionDenied(error)) {
+      if (isPermissionDeniedError(error)) {
         return false;
       }
       throw error;
     }
   }
-}
-
-function isPermissionDenied(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "PERMISSION_DENIED";
 }

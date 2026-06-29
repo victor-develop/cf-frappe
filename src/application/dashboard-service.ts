@@ -16,6 +16,7 @@ import {
   finishDashboardDocumentAggregate,
   updateDashboardDocumentAggregate
 } from "./dashboard-policy.js";
+import { isPermissionDeniedError } from "./access-policy.js";
 import type { QueryService } from "./query-service.js";
 import type { ReportFilters, ReportService } from "./report-service.js";
 
@@ -150,14 +151,10 @@ export class DashboardService {
       this.reports.getReport(actor, source.report);
       return true;
     } catch (error) {
-      if (isPermissionDenied(error)) {
+      if (isPermissionDeniedError(error)) {
         return false;
       }
       throw error;
     }
   }
-}
-
-function isPermissionDenied(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "PERMISSION_DENIED";
 }

@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the user-account recovery policy helper slice:
+As of the shared access-error policy slice:
 
-- Vitest files: `226`
-- Vitest cases: `2587`
-- Remaining gap to Frappe static markers: `197`
+- Vitest files: `227`
+- Vitest cases: `2590`
+- Remaining gap to Frappe static markers: `194`
 
 ## Implication
 

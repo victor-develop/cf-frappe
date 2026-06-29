@@ -4,6 +4,7 @@ import { isCanonicalWebPageRoute } from "../core/web-page.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { Actor, DocTypeDefinition } from "../core/types.js";
 import type { QueryService } from "./query-service.js";
+import { isPermissionDeniedError } from "./access-policy.js";
 import {
   clampWebViewLimit,
   clampWebViewOffset,
@@ -135,7 +136,7 @@ export class WebViewService {
       await this.readMetaFor(actor, webView);
       return true;
     } catch (error) {
-      if (isPermissionDenied(error)) {
+      if (isPermissionDeniedError(error)) {
         return false;
       }
       throw error;
@@ -147,8 +148,4 @@ export class WebViewService {
     assertWebViewMatchesDocType(webView, doctype);
     return doctype;
   }
-}
-
-function isPermissionDenied(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "PERMISSION_DENIED";
 }

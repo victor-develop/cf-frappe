@@ -6,6 +6,7 @@ export * from "./adapters/in-memory/index.js";
 export * from "./adapters/print/index.js";
 export * from "./application/audit-service.js";
 export * from "./application/audit-policy.js";
+export * from "./application/access-policy.js";
 export * from "./application/assignment-rule-events.js";
 export * from "./application/assignment-rule-policy.js";
 export * from "./application/assignment-rule-service.js";
