@@ -17,6 +17,8 @@ import {
   normalizeUserLoginPassword,
   normalizeUserPassword,
   normalizeUserRecoveryToken,
+  planUserAccountEnabledChange,
+  planUserAccountRoleChange,
   providerSyncCreatedEnabled,
   providerSyncCreatedRoles,
   recoveryChallengeExpired,
@@ -235,6 +237,10 @@ describe("user account policy", () => {
     expect(userAccountRolesEqual(["System Manager", "User"], ["System Manager", "User"])).toBe(true);
     expect(userAccountRolesEqual(["User", "System Manager"], ["System Manager", "User"])).toBe(false);
     expect(userAccountRolesEqual(["User"], ["User", "System Manager"])).toBe(false);
+    expect(planUserAccountRoleChange(accountState({ roles: ["User"] }), ["User"])).toEqual({ status: "noop" });
+    expect(planUserAccountRoleChange(accountState({ roles: ["User"] }), ["System Manager", "User"])).toEqual({
+      status: "append"
+    });
   });
 
   it("guards expected user account versions", () => {
@@ -261,6 +267,8 @@ describe("user account policy", () => {
     expect(userAccountEnabledChangeRequired(accountState({ enabled: true }), false)).toBe(true);
     expect(userAccountEnabledChangeRequired(accountState({ enabled: false }), false)).toBe(false);
     expect(userAccountEnabledChangeRequired(accountState({ enabled: false }), true)).toBe(true);
+    expect(planUserAccountEnabledChange(accountState({ enabled: true }), true)).toEqual({ status: "noop" });
+    expect(planUserAccountEnabledChange(accountState({ enabled: true }), false)).toEqual({ status: "append" });
   });
 
   it("normalizes recovery expiry seconds with configured defaults and bounds", () => {

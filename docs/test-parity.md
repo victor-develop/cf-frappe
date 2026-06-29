@@ -20,7 +20,7 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the saved-list-filter command policy slice:
+As of the user-account change policy slice:
 
 - Vitest files: `232`
 - Vitest cases: `2651`

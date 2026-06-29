@@ -69,10 +69,10 @@ import {
   userAccountEmailVerificationDeliveryEmail,
   userAccountEmailVerificationChallengeForCompletion,
   ensureUserAccountPasswordResettable,
-  userAccountEnabledChangeRequired,
   userAccountPasswordResetDeliveryEmail,
   userAccountSavedEventVersion,
-  userAccountRolesEqual
+  planUserAccountEnabledChange,
+  planUserAccountRoleChange
 } from "./user-account-policy.js";
 import type { UserRoleValidator } from "./user-role-validator.js";
 
@@ -296,7 +296,7 @@ export class UserAccountService {
     const state = await this.existingStateFor(tenantId, userId);
     ensureUserAccountExpectedVersion(state, command.expectedVersion);
     await this.validateRoles(tenantId, roles);
-    if (userAccountRolesEqual(state.roles, roles)) {
+    if (planUserAccountRoleChange(state, roles).status === "noop") {
       return publicUserAccount(state);
     }
     const saved = await this.appendEvent({
@@ -570,7 +570,7 @@ export class UserAccountService {
     const userId = normalizeRequiredUserAccountText(command.userId, "User id");
     const state = await this.existingStateFor(tenantId, userId);
     ensureUserAccountExpectedVersion(state, command.expectedVersion);
-    if (!userAccountEnabledChangeRequired(state, enabled)) {
+    if (planUserAccountEnabledChange(state, enabled).status === "noop") {
       return publicUserAccount(state);
     }
     const saved = await this.appendEvent({

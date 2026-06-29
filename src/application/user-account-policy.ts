@@ -167,6 +167,17 @@ export function userAccountRolesEqual(left: readonly string[], right: readonly s
   return left.length === right.length && left.every((item, index) => item === right[index]);
 }
 
+export type UserAccountChangeDecision =
+  | { readonly status: "append" }
+  | { readonly status: "noop" };
+
+export function planUserAccountRoleChange(
+  state: UserAccountState,
+  roles: readonly string[]
+): UserAccountChangeDecision {
+  return userAccountRolesEqual(state.roles, roles) ? { status: "noop" } : { status: "append" };
+}
+
 export function ensureUserAccountExpectedVersion(
   state: UserAccountState,
   expectedVersion: number | undefined
@@ -190,6 +201,13 @@ export function ensureUserAccountExists(state: UserAccountState): void {
 
 export function userAccountEnabledChangeRequired(state: UserAccountState, enabled: boolean): boolean {
   return state.enabled !== enabled;
+}
+
+export function planUserAccountEnabledChange(
+  state: UserAccountState,
+  enabled: boolean
+): UserAccountChangeDecision {
+  return userAccountEnabledChangeRequired(state, enabled) ? { status: "append" } : { status: "noop" };
 }
 
 export function normalizeRecoveryExpirySeconds(value: number | undefined, defaultSeconds: number): number {
