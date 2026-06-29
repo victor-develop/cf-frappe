@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the assignment rule event helper slice:
+As of the user permission event helper slice:
 
-- Vitest files: `186`
-- Vitest cases: `2112`
-- Remaining gap to Frappe static markers: `672`
+- Vitest files: `187`
+- Vitest cases: `2117`
+- Remaining gap to Frappe static markers: `667`
 
 ## Implication
 

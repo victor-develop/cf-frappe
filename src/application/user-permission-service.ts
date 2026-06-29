@@ -4,13 +4,16 @@ import {
   DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
   type Actor,
-  type DocTypeName,
   type DocumentData,
-  type DocumentName,
-  type NewDomainEvent,
   type TenantId
 } from "../core/types.js";
-import type { UserPermissionEventPayload } from "./user-permission-events.js";
+import {
+  replayUserPermissionAppend,
+  USER_PERMISSION_PAYLOAD_KINDS,
+  userPermissionEvent,
+  userPermissionPayload,
+  type UserPermissionEventPayload
+} from "./user-permission-events.js";
 import {
   foldUserPermissions,
   normalizeUserPermissionGrant,
@@ -68,7 +71,6 @@ export class UserPermissionService implements UserPermissionProvider {
   async allow(command: AllowUserPermissionCommand): Promise<UserPermissionState> {
     return this.changePermission({
       command,
-      eventType: "UserPermissionAllowed",
       eventKind: "UserPermissionAllowed",
       alreadyDone: (state, grant) => state.grants.some((existing) => userPermissionGrantKey(existing) === userPermissionGrantKey(grant))
     });
@@ -77,7 +79,6 @@ export class UserPermissionService implements UserPermissionProvider {
   async revoke(command: RevokeUserPermissionCommand): Promise<UserPermissionState> {
     return this.changePermission({
       command,
-      eventType: "UserPermissionRevoked",
       eventKind: "UserPermissionRevoked",
       alreadyDone: (state, grant) => state.grants.every((existing) => userPermissionGrantKey(existing) !== userPermissionGrantKey(grant))
     });
@@ -99,7 +100,6 @@ export class UserPermissionService implements UserPermissionProvider {
 
   private async changePermission(options: {
     readonly command: AllowUserPermissionCommand | RevokeUserPermissionCommand;
-    readonly eventType: "UserPermissionAllowed" | "UserPermissionRevoked";
     readonly eventKind: UserPermissionEventPayload["kind"];
     readonly alreadyDone: (state: UserPermissionState, grant: UserPermissionGrant) => boolean;
   }): Promise<UserPermissionState> {
@@ -115,31 +115,29 @@ export class UserPermissionService implements UserPermissionProvider {
     if (options.eventKind === "UserPermissionAllowed") {
       await this.validator?.validateGrant({ tenantId, grant });
     }
-    const payload: UserPermissionEventPayload = {
-      kind: options.eventKind,
-      userId,
-      targetDoctype: grant.targetDoctype,
-      targetName: grant.targetName,
-      ...(grant.applicableDoctypes !== undefined ? { applicableDoctypes: grant.applicableDoctypes } : {})
-    };
-    const event: NewDomainEvent<UserPermissionEventPayload> = {
+    const event = userPermissionEvent({
       id: this.ids.next(),
       tenantId,
       stream: userPermissionsStream(tenantId, userId),
-      type: options.eventType,
-      doctype: "__UserPermissions",
-      documentName: userId,
-      actorId: options.command.actor.id,
+      actor: options.command.actor,
       occurredAt: this.clock.now(),
-      payload,
-      metadata: options.command.metadata ?? {}
-    };
+      payload: userPermissionPayload({ kind: options.eventKind, userId, grant }),
+      ...(options.command.metadata === undefined ? {} : { metadata: options.command.metadata })
+    });
     const saved = await this.events.append(event.stream, state.version, [event]);
-    return foldUserPermissions(tenantId, userId, [...(await this.events.readStream(event.stream, { maxSequence: state.version })), ...saved]);
+    return replayUserPermissionAppend(
+      state,
+      await this.events.readStream(event.stream, { maxSequence: state.version }),
+      saved
+    );
   }
 
   private async stateFor(tenantId: TenantId, userId: string): Promise<UserPermissionState> {
-    return foldUserPermissions(tenantId, userId, await this.events.readStream(userPermissionsStream(tenantId, userId)));
+    return foldUserPermissions(
+      tenantId,
+      userId,
+      await this.events.readStream(userPermissionsStream(tenantId, userId), { payloadKinds: USER_PERMISSION_PAYLOAD_KINDS })
+    );
   }
 
   private ensureAdmin(actor: Actor): void {
