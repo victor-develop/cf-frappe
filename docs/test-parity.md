@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the audit tenant access policy slice:
+As of the user notification access policy slice:
 
 - Vitest files: `230`
-- Vitest cases: `2624`
-- Remaining gap to Frappe static markers: `160`
+- Vitest cases: `2627`
+- Remaining gap to Frappe static markers: `157`
 
 ## Implication
 

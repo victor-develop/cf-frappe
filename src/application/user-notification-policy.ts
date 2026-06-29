@@ -1,5 +1,9 @@
 import { badRequest } from "../core/errors.js";
-import type { TenantId } from "../core/types.js";
+import {
+  DEFAULT_TENANT_ID,
+  type Actor,
+  type TenantId
+} from "../core/types.js";
 import {
   sortedUserNotifications,
   type UserNotificationRecord,
@@ -19,6 +23,26 @@ export interface UserNotificationInbox {
     readonly includeDismissed: boolean;
   };
   readonly notifications: readonly UserNotificationRecord[];
+}
+
+export type UserNotificationAccessDecision =
+  | { readonly status: "allow"; readonly tenantId: TenantId; readonly userId: string }
+  | { readonly status: "deny"; readonly message: string };
+
+export function planUserNotificationAccess(options: {
+  readonly actor: Actor;
+  readonly adminRoles: readonly string[];
+  readonly explicitUserId?: string;
+}): UserNotificationAccessDecision {
+  const tenantId = options.actor.tenantId ?? DEFAULT_TENANT_ID;
+  const userId = normalizeUserNotificationUserId(options.explicitUserId ?? options.actor.id);
+  if (userId !== options.actor.id && !options.adminRoles.some((role) => options.actor.roles.includes(role))) {
+    return {
+      status: "deny",
+      message: `Actor '${options.actor.id}' cannot inspect notifications for '${userId}'`
+    };
+  }
+  return { status: "allow", tenantId, userId };
 }
 
 export function normalizeUserNotificationUserId(value: string): string {

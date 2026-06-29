@@ -2,8 +2,10 @@ import {
   normalizeUserNotificationId,
   normalizeUserNotificationInboxLimit,
   normalizeUserNotificationUserId,
+  planUserNotificationAccess,
   userNotificationInboxProjection
 } from "../../src/application/user-notification-policy.js";
+import { SYSTEM_MANAGER_ROLE } from "../../src";
 import type {
   UserNotificationRecord,
   UserNotificationState
@@ -12,6 +14,37 @@ import type {
 const now = "2026-01-01T00:00:00.000Z";
 
 describe("user notification policy", () => {
+  it("plans notification access for the actor inbox and default tenant", () => {
+    expect(planUserNotificationAccess({
+      actor: { id: "support@example.com", roles: ["User"], tenantId: "acme" },
+      adminRoles: [SYSTEM_MANAGER_ROLE]
+    })).toEqual({ status: "allow", tenantId: "acme", userId: "support@example.com" });
+
+    expect(planUserNotificationAccess({
+      actor: { id: "support@example.com", roles: ["User"] },
+      adminRoles: [SYSTEM_MANAGER_ROLE]
+    })).toEqual({ status: "allow", tenantId: "default", userId: "support@example.com" });
+  });
+
+  it("denies non-admin notification access to another inbox", () => {
+    expect(planUserNotificationAccess({
+      actor: { id: "support@example.com", roles: ["User"], tenantId: "acme" },
+      adminRoles: [SYSTEM_MANAGER_ROLE],
+      explicitUserId: "manager@example.com"
+    })).toEqual({
+      status: "deny",
+      message: "Actor 'support@example.com' cannot inspect notifications for 'manager@example.com'"
+    });
+  });
+
+  it("allows notification admins to inspect another user inbox", () => {
+    expect(planUserNotificationAccess({
+      actor: { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },
+      adminRoles: [SYSTEM_MANAGER_ROLE],
+      explicitUserId: " support@example.com "
+    })).toEqual({ status: "allow", tenantId: "acme", userId: "support@example.com" });
+  });
+
   it("normalizes notification user ids", () => {
     expect(normalizeUserNotificationUserId("  support@example.com  ")).toBe("support@example.com");
     expect(() => normalizeUserNotificationUserId(" ")).toThrow("Notification user is required");

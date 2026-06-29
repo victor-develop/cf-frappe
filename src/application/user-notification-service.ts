@@ -6,7 +6,6 @@ import {
 } from "../core/notifications.js";
 import { userNotificationsStream } from "../core/streams.js";
 import {
-  DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
   type Actor,
   type DocumentData,
@@ -34,7 +33,7 @@ import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
 import {
   normalizeUserNotificationId,
   normalizeUserNotificationInboxLimit,
-  normalizeUserNotificationUserId,
+  planUserNotificationAccess,
   userNotificationInboxProjection,
   type UserNotificationInbox
 } from "./user-notification-policy.js";
@@ -257,12 +256,15 @@ export class UserNotificationService {
   }
 
   private authorizeUser(actor: Actor, explicitUserId?: string): { readonly tenantId: TenantId; readonly userId: string } {
-    const tenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
-    const userId = normalizeUserNotificationUserId(explicitUserId ?? actor.id);
-    if (userId !== actor.id && !this.adminRoles.some((role) => actor.roles.includes(role))) {
-      throw permissionDenied(`Actor '${actor.id}' cannot inspect notifications for '${userId}'`);
+    const decision = planUserNotificationAccess({
+      actor,
+      adminRoles: this.adminRoles,
+      ...(explicitUserId === undefined ? {} : { explicitUserId })
+    });
+    if (decision.status === "deny") {
+      throw permissionDenied(decision.message);
     }
-    return { tenantId, userId };
+    return { tenantId: decision.tenantId, userId: decision.userId };
   }
 
   private async notificationsForEvent(
