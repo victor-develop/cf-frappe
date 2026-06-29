@@ -7,6 +7,7 @@ import {
   planJobHistoryAccess,
   planJobHistoryListOptions,
   planJobHistoryRecordAccess,
+  planJobHistoryRecordLookup,
   type JobDefinitionForHistory,
   type JobDefinitionSummary,
   type JobExecutionHistoryQuery
@@ -58,15 +59,18 @@ export class JobHistoryService {
 
   async get(actor: Actor, idempotencyKey: string): Promise<JobExecutionRecord> {
     const access = this.authorize(actor);
-    const record = await this.executionLog.get(idempotencyKey, { tenantId: access.tenantId });
-    if (!record) {
-      throw notFound(`Job execution '${idempotencyKey}' was not found`, "JOB_EXECUTION_NOT_FOUND");
+    const lookup = planJobHistoryRecordLookup(
+      idempotencyKey,
+      await this.executionLog.get(idempotencyKey, { tenantId: access.tenantId })
+    );
+    if (lookup.status === "missing") {
+      throw notFound(`Job execution '${lookup.idempotencyKey}' was not found`, "JOB_EXECUTION_NOT_FOUND");
     }
-    const recordAccess = planJobHistoryRecordAccess({ actor, tenantId: access.tenantId, record });
+    const recordAccess = planJobHistoryRecordAccess({ actor, tenantId: access.tenantId, record: lookup.record });
     if (recordAccess.status === "deny") {
       throw permissionDenied(recordAccess.message);
     }
-    return record;
+    return lookup.record;
   }
 
   private authorize(actor: Actor): Extract<ReturnType<typeof planJobHistoryAccess>, { readonly status: "allow" }> {

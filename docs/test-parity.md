@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the user-notification record policy slice:
+As of the job-history lookup policy slice:
 
 - Vitest files: `232`
-- Vitest cases: `2653`
-- Remaining gap to Frappe static markers: `131`
+- Vitest cases: `2654`
+- Remaining gap to Frappe static markers: `130`
 
 ## Implication
 

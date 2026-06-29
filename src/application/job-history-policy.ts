@@ -50,6 +50,10 @@ export type JobHistoryRecordAccessDecision =
   | { readonly status: "allow" }
   | { readonly status: "deny"; readonly message: string };
 
+export type JobHistoryRecordLookupDecision =
+  | { readonly status: "found"; readonly record: JobExecutionRecord }
+  | { readonly status: "missing"; readonly idempotencyKey: string };
+
 export function planJobHistoryAccess(options: {
   readonly actor: Actor;
   readonly adminRoles: readonly string[];
@@ -75,6 +79,16 @@ export function planJobHistoryRecordAccess(options: {
     status: "deny",
     message: `Actor '${options.actor.id}' cannot inspect job history for tenant '${options.record.tenantId}'`
   };
+}
+
+export function planJobHistoryRecordLookup(
+  idempotencyKey: string,
+  record: JobExecutionRecord | null | undefined
+): JobHistoryRecordLookupDecision {
+  if (record === null || record === undefined) {
+    return { status: "missing", idempotencyKey };
+  }
+  return { status: "found", record };
 }
 
 export function normalizeJobHistoryQuery(

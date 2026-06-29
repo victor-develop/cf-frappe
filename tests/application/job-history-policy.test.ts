@@ -4,6 +4,7 @@ import {
   planJobHistoryAccess,
   planJobHistoryListOptions,
   planJobHistoryRecordAccess,
+  planJobHistoryRecordLookup,
   SYSTEM_MANAGER_ROLE
 } from "../../src";
 import type { JobExecutionRecord } from "../../src";
@@ -45,6 +46,23 @@ describe("job history policy", () => {
     })).toEqual({
       status: "deny",
       message: "Actor 'admin@example.com' cannot inspect job history for tenant 'other'"
+    });
+  });
+
+  it("plans individual execution record lookups before access checks", () => {
+    const record = execution();
+
+    expect(planJobHistoryRecordLookup(record.idempotencyKey, record)).toEqual({
+      status: "found",
+      record
+    });
+    expect(planJobHistoryRecordLookup("missing", null)).toEqual({
+      status: "missing",
+      idempotencyKey: "missing"
+    });
+    expect(planJobHistoryRecordLookup("missing", undefined)).toEqual({
+      status: "missing",
+      idempotencyKey: "missing"
     });
   });
 
