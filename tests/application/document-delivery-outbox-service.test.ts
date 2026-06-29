@@ -55,6 +55,33 @@ describe("DocumentDeliveryOutboxService", () => {
     await expect(events.readStream(documentDeliveryOutboxStream("acme"))).resolves.toHaveLength(2);
   });
 
+  it("derives enqueued payload kinds from source event identity", async () => {
+    const events = new InMemoryDocumentStore();
+    const outbox = new DocumentDeliveryOutboxService({
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["enqueue-1"])
+    });
+
+    await outbox.enqueueFromDomainEvent({
+      event: domainEvent(),
+      snapshot: snapshot(),
+      targets: ["notification"]
+    });
+
+    await expect(events.readStream(documentDeliveryOutboxStream("acme"))).resolves.toMatchObject([
+      {
+        type: "DocumentDeliveryOutboxEnqueued",
+        payload: {
+          kind: "DocumentDeliveryOutboxEnqueued",
+          sourceEventId: "evt_source",
+          sourceEventType: "NoteCreated",
+          payloadKind: "DocumentCreated"
+        }
+      }
+    ]);
+  });
+
   it("claims pending records, retries failed records when due, and marks delivery terminal", async () => {
     const events = new InMemoryDocumentStore();
     const outbox = new DocumentDeliveryOutboxService({

@@ -1,4 +1,5 @@
 import { badRequest, conflict, notFound } from "../core/errors.js";
+import { domainEventPayloadKind } from "../core/domain-events.js";
 import { documentDeliveryOutboxStream } from "../core/streams.js";
 import {
   documentDeliveryOutboxEventType,
@@ -98,7 +99,7 @@ export class DocumentDeliveryOutboxService {
             target,
             sourceEventId: command.event.id,
             sourceEventType: command.event.type,
-            payloadKind: command.event.payload.kind,
+            payloadKind: domainEventPayloadKind(command.event),
             doctype: command.event.doctype,
             documentName: command.event.documentName,
             actorId: command.event.actorId,

@@ -22,6 +22,10 @@ export function cloneDomainEvent<TEvent extends DomainEvent>(event: TEvent): TEv
   };
 }
 
+export function domainEventPayloadKind(event: DomainEvent): DomainEvent["payload"]["kind"] {
+  return event.payload.kind;
+}
+
 function cloneDomainEventObject(value: unknown, field: "payload" | "metadata"): unknown {
   if (typeof value !== "object" || value === null || Array.isArray(value) || !isJsonValue(value)) {
     throw new FrameworkError("EVENT_INVALID", `Domain event ${field} must be a JSON object`, { status: 409 });
