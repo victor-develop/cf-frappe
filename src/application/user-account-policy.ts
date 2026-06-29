@@ -1,6 +1,67 @@
-import { badRequest } from "../core/errors.js";
+import { badRequest, conflict, permissionDenied } from "../core/errors.js";
+import { normalizeUserRoles, type UserAccountState } from "../core/user-accounts.js";
 
 export const MAX_ACCOUNT_RECOVERY_EXPIRY_SECONDS = 604_800;
+export const MIN_USER_PASSWORD_LENGTH = 8;
+
+export function normalizeRequiredUserAccountText(value: string, label: string): string {
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    throw badRequest(`${label} is required`);
+  }
+  return normalized;
+}
+
+export function normalizeOptionalUserEmail(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  return normalized.length === 0 ? undefined : normalized;
+}
+
+export function normalizeRequiredUserRoles(roles: readonly string[]): readonly string[] {
+  const normalized = normalizeUserRoles(roles);
+  if (normalized.length === 0) {
+    throw badRequest("At least one role is required");
+  }
+  return normalized;
+}
+
+export function normalizeUserPassword(password: string): string {
+  if (password.length < MIN_USER_PASSWORD_LENGTH) {
+    throw badRequest(`Password must be at least ${MIN_USER_PASSWORD_LENGTH} characters`);
+  }
+  return password;
+}
+
+export function normalizeUserLoginPassword(password: string): string {
+  if (password.length === 0) {
+    throw permissionDenied("Invalid credentials");
+  }
+  return password;
+}
+
+export function normalizeUserRecoveryToken(token: string): string {
+  const normalized = token.trim();
+  if (normalized.length === 0) {
+    throw permissionDenied("Invalid recovery token");
+  }
+  return normalized;
+}
+
+export function userAccountRolesEqual(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((item, index) => item === right[index]);
+}
+
+export function ensureUserAccountExpectedVersion(
+  state: UserAccountState,
+  expectedVersion: number | undefined
+): void {
+  if (expectedVersion !== undefined && state.version !== expectedVersion) {
+    throw conflict(`Expected user account '${state.userId}' at version ${expectedVersion}, found ${state.version}`);
+  }
+}
 
 export function normalizeRecoveryExpirySeconds(value: number | undefined, defaultSeconds: number): number {
   const seconds = value ?? defaultSeconds;

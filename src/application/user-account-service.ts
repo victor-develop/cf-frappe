@@ -1,4 +1,4 @@
-import { badRequest, conflict, FrameworkError, notFound, permissionDenied } from "../core/errors.js";
+import { conflict, FrameworkError, notFound, permissionDenied } from "../core/errors.js";
 import { userAccountsStream } from "../core/streams.js";
 import {
   DEFAULT_TENANT_ID,
@@ -30,7 +30,6 @@ import {
 } from "./user-account-events.js";
 import {
   foldUserAccount,
-  normalizeUserRoles,
   publicUserAccount,
   userAccountActor,
   type UserAccount,
@@ -45,15 +44,22 @@ import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
 import type { PasswordHasher } from "../ports/password-hasher.js";
 import {
   emailVerificationPatch,
+  ensureUserAccountExpectedVersion,
   normalizeRecoveryExpirySeconds,
+  normalizeOptionalUserEmail,
+  normalizeRequiredUserAccountText,
+  normalizeRequiredUserRoles,
+  normalizeUserLoginPassword,
+  normalizeUserPassword,
+  normalizeUserRecoveryToken,
   recoveryChallengeExpired,
-  recoveryExpiresAtFrom
+  recoveryExpiresAtFrom,
+  userAccountRolesEqual
 } from "./user-account-policy.js";
 import type { UserRoleValidator } from "./user-role-validator.js";
 
 export type { UserAccountEventPayload } from "./user-account-events.js";
 
-const MIN_PASSWORD_LENGTH = 8;
 const DEFAULT_PASSWORD_RESET_EXPIRY_SECONDS = 3_600;
 const DEFAULT_EMAIL_VERIFICATION_EXPIRY_SECONDS = 86_400;
 const RECOVERY_ACTOR_ID = "anonymous";
@@ -205,12 +211,12 @@ export class UserAccountService {
   async create(command: CreateUserAccountCommand): Promise<UserAccount> {
     this.ensureAdmin(command.actor);
     const tenantId = resolveActorTenant(command.actor, command.tenantId);
-    const userId = normalizeRequired(command.userId, "User id");
-    const roles = normalizeRequiredRoles(command.roles);
-    const password = normalizePassword(command.password);
-    const email = normalizeOptionalEmail(command.email);
+    const userId = normalizeRequiredUserAccountText(command.userId, "User id");
+    const roles = normalizeRequiredUserRoles(command.roles);
+    const password = normalizeUserPassword(command.password);
+    const email = normalizeOptionalUserEmail(command.email);
     const state = await this.stateFor(tenantId, userId);
-    ensureExpectedVersion(state, command.expectedVersion);
+    ensureUserAccountExpectedVersion(state, command.expectedVersion);
     if (state.exists) {
       throw conflict(`User account '${userId}' already exists`);
     }
@@ -236,7 +242,7 @@ export class UserAccountService {
   async get(actor: Actor, userId: string, tenantId?: TenantId): Promise<UserAccount> {
     this.ensureAdmin(actor);
     const resolvedTenantId = resolveActorTenant(actor, tenantId);
-    const state = await this.existingStateFor(resolvedTenantId, normalizeRequired(userId, "User id"));
+    const state = await this.existingStateFor(resolvedTenantId, normalizeRequiredUserAccountText(userId, "User id"));
     return publicUserAccount(state);
   }
 
@@ -248,10 +254,10 @@ export class UserAccountService {
   async changePassword(command: ChangeUserPasswordCommand): Promise<UserAccount> {
     this.ensureAdmin(command.actor);
     const tenantId = resolveActorTenant(command.actor, command.tenantId);
-    const userId = normalizeRequired(command.userId, "User id");
-    const password = normalizePassword(command.password);
+    const userId = normalizeRequiredUserAccountText(command.userId, "User id");
+    const password = normalizeUserPassword(command.password);
     const state = await this.existingStateFor(tenantId, userId);
-    ensureExpectedVersion(state, command.expectedVersion);
+    ensureUserAccountExpectedVersion(state, command.expectedVersion);
     const passwordHash = await this.passwords.hash(password);
     const saved = await this.appendEvent({
       tenantId,
@@ -270,12 +276,12 @@ export class UserAccountService {
   async changeRoles(command: ChangeUserRolesCommand): Promise<UserAccount> {
     this.ensureAdmin(command.actor);
     const tenantId = resolveActorTenant(command.actor, command.tenantId);
-    const userId = normalizeRequired(command.userId, "User id");
-    const roles = normalizeRequiredRoles(command.roles);
+    const userId = normalizeRequiredUserAccountText(command.userId, "User id");
+    const roles = normalizeRequiredUserRoles(command.roles);
     const state = await this.existingStateFor(tenantId, userId);
-    ensureExpectedVersion(state, command.expectedVersion);
+    ensureUserAccountExpectedVersion(state, command.expectedVersion);
     await this.validateRoles(tenantId, roles);
-    if (arrayEquals(state.roles, roles)) {
+    if (userAccountRolesEqual(state.roles, roles)) {
       return publicUserAccount(state);
     }
     const saved = await this.appendEvent({
@@ -303,13 +309,13 @@ export class UserAccountService {
   async syncProvider(command: SyncAuthProviderAccountCommand): Promise<UserAccount> {
     this.ensureAdmin(command.actor);
     const tenantId = resolveActorTenant(command.actor, command.tenantId);
-    const provider = normalizeRequired(command.provider, "Provider");
-    const subject = normalizeRequired(command.subject, "Provider subject");
-    const email = normalizeOptionalEmail(command.email);
-    const userId = normalizeRequired(command.userId ?? email ?? `${provider}:${subject}`, "User id");
-    const roles = command.roles === undefined ? undefined : normalizeRequiredRoles(command.roles);
+    const provider = normalizeRequiredUserAccountText(command.provider, "Provider");
+    const subject = normalizeRequiredUserAccountText(command.subject, "Provider subject");
+    const email = normalizeOptionalUserEmail(command.email);
+    const userId = normalizeRequiredUserAccountText(command.userId ?? email ?? `${provider}:${subject}`, "User id");
+    const roles = command.roles === undefined ? undefined : normalizeRequiredUserRoles(command.roles);
     const state = await this.stateFor(tenantId, userId);
-    ensureExpectedVersion(state, command.expectedVersion);
+    ensureUserAccountExpectedVersion(state, command.expectedVersion);
     const verifiedPatch = emailVerificationPatch(
       command.emailVerified,
       email ?? state.email,
@@ -319,7 +325,7 @@ export class UserAccountService {
     );
 
     if (!state.exists) {
-      const createdRoles = roles ?? normalizeRequiredRoles([DEFAULT_PROVIDER_ROLE]);
+      const createdRoles = roles ?? normalizeRequiredUserRoles([DEFAULT_PROVIDER_ROLE]);
       const enabled = command.enabled ?? true;
       await this.validateRoles(tenantId, createdRoles);
       const createdPayload = userAccountCreatedPayload({
@@ -392,8 +398,8 @@ export class UserAccountService {
 
   async authenticateAccount(command: AuthenticateUserAccountCommand): Promise<AuthenticatedUserAccount> {
     const tenantId = command.tenantId ?? DEFAULT_TENANT_ID;
-    const userId = normalizeRequired(command.userId, "User id");
-    const password = normalizeLoginPassword(command.password);
+    const userId = normalizeRequiredUserAccountText(command.userId, "User id");
+    const password = normalizeUserLoginPassword(command.password);
     const state = await this.stateFor(tenantId, userId);
     if (!state.exists || state.passwordHash === undefined) {
       throw permissionDenied("Invalid credentials");
@@ -410,7 +416,7 @@ export class UserAccountService {
 
   async requestPasswordReset(command: RequestUserPasswordResetCommand): Promise<AccountRecoveryRequestResult> {
     const tenantId = command.tenantId ?? DEFAULT_TENANT_ID;
-    const userId = normalizeRequired(command.userId, "User id");
+    const userId = normalizeRequiredUserAccountText(command.userId, "User id");
     const state = await this.stateFor(tenantId, userId);
     const recovery = this.recovery;
     const email = state.email;
@@ -459,9 +465,9 @@ export class UserAccountService {
 
   async resetPassword(command: ResetUserPasswordCommand): Promise<UserAccount> {
     const tenantId = command.tenantId ?? DEFAULT_TENANT_ID;
-    const userId = normalizeRequired(command.userId, "User id");
-    const token = normalizeRecoveryToken(command.token);
-    const password = normalizePassword(command.password);
+    const userId = normalizeRequiredUserAccountText(command.userId, "User id");
+    const token = normalizeUserRecoveryToken(command.token);
+    const password = normalizeUserPassword(command.password);
     const state = await this.stateFor(tenantId, userId);
     if (state.passwordHash === undefined) {
       throw invalidRecoveryToken();
@@ -484,7 +490,7 @@ export class UserAccountService {
 
   async requestEmailVerification(command: RequestUserEmailVerificationCommand): Promise<AccountRecoveryRequestResult> {
     const tenantId = command.tenantId ?? DEFAULT_TENANT_ID;
-    const userId = normalizeRequired(command.userId, "User id");
+    const userId = normalizeRequiredUserAccountText(command.userId, "User id");
     const state = await this.stateFor(tenantId, userId);
     const recovery = this.recovery;
     const email = state.email;
@@ -535,8 +541,8 @@ export class UserAccountService {
 
   async verifyEmail(command: VerifyUserEmailCommand): Promise<UserAccount> {
     const tenantId = command.tenantId ?? DEFAULT_TENANT_ID;
-    const userId = normalizeRequired(command.userId, "User id");
-    const token = normalizeRecoveryToken(command.token);
+    const userId = normalizeRequiredUserAccountText(command.userId, "User id");
+    const token = normalizeUserRecoveryToken(command.token);
     const state = await this.stateFor(tenantId, userId);
     const challenge = state.emailVerification;
     await this.ensureValidRecoveryChallenge(state, challenge, token);
@@ -562,7 +568,7 @@ export class UserAccountService {
       throw permissionDenied("Session is no longer valid");
     }
     const tenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
-    const state = await this.stateFor(tenantId, normalizeRequired(actor.id, "User id"));
+    const state = await this.stateFor(tenantId, normalizeRequiredUserAccountText(actor.id, "User id"));
     if (!state.exists || !state.enabled || state.version !== accountVersion) {
       throw permissionDenied("Session is no longer valid");
     }
@@ -572,9 +578,9 @@ export class UserAccountService {
   private async changeEnabled(command: SetUserAccountEnabledCommand, enabled: boolean): Promise<UserAccount> {
     this.ensureAdmin(command.actor);
     const tenantId = resolveActorTenant(command.actor, command.tenantId);
-    const userId = normalizeRequired(command.userId, "User id");
+    const userId = normalizeRequiredUserAccountText(command.userId, "User id");
     const state = await this.existingStateFor(tenantId, userId);
-    ensureExpectedVersion(state, command.expectedVersion);
+    ensureUserAccountExpectedVersion(state, command.expectedVersion);
     if (state.enabled === enabled) {
       return publicUserAccount(state);
     }
@@ -718,52 +724,6 @@ function resolveActorTenant(actor: Actor, explicitTenantId: TenantId | undefined
   return tenantId;
 }
 
-function normalizeRequired(value: string, label: string): string {
-  const normalized = value.trim();
-  if (normalized.length === 0) {
-    throw badRequest(`${label} is required`);
-  }
-  return normalized;
-}
-
-function normalizeOptionalEmail(value: string | undefined): string | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  const normalized = value.trim().toLowerCase();
-  return normalized.length === 0 ? undefined : normalized;
-}
-
-function normalizeRequiredRoles(roles: readonly string[]): readonly string[] {
-  const normalized = normalizeUserRoles(roles);
-  if (normalized.length === 0) {
-    throw badRequest("At least one role is required");
-  }
-  return normalized;
-}
-
-function normalizePassword(password: string): string {
-  if (password.length < MIN_PASSWORD_LENGTH) {
-    throw badRequest(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
-  }
-  return password;
-}
-
-function normalizeLoginPassword(password: string): string {
-  if (password.length === 0) {
-    throw permissionDenied("Invalid credentials");
-  }
-  return password;
-}
-
-function normalizeRecoveryToken(token: string): string {
-  const normalized = token.trim();
-  if (normalized.length === 0) {
-    throw invalidRecoveryToken();
-  }
-  return normalized;
-}
-
 function invalidRecoveryToken(): Error {
   return permissionDenied("Invalid recovery token");
 }
@@ -774,14 +734,4 @@ function isConflict(error: unknown): boolean {
 
 function lastSequence(events: readonly DomainEvent[], fallback: number): number {
   return events.at(-1)?.sequence ?? fallback;
-}
-
-function ensureExpectedVersion(state: UserAccountState, expectedVersion: number | undefined): void {
-  if (expectedVersion !== undefined && state.version !== expectedVersion) {
-    throw conflict(`Expected user account '${state.userId}' at version ${expectedVersion}, found ${state.version}`);
-  }
-}
-
-function arrayEquals(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((item, index) => item === right[index]);
 }
