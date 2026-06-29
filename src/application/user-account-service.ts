@@ -44,6 +44,7 @@ import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
 import type { PasswordHasher } from "../ports/password-hasher.js";
 import {
   emailVerificationPatch,
+  ensureUserAccountAdmin,
   ensureUserAccountExpectedVersion,
   normalizeRecoveryExpirySeconds,
   normalizeOptionalUserEmail,
@@ -54,6 +55,7 @@ import {
   normalizeUserRecoveryToken,
   recoveryChallengeExpired,
   recoveryExpiresAtFrom,
+  resolveUserAccountActorTenant,
   userAccountRolesEqual
 } from "./user-account-policy.js";
 import type { UserRoleValidator } from "./user-role-validator.js";
@@ -209,8 +211,8 @@ export class UserAccountService {
   }
 
   async create(command: CreateUserAccountCommand): Promise<UserAccount> {
-    this.ensureAdmin(command.actor);
-    const tenantId = resolveActorTenant(command.actor, command.tenantId);
+    ensureUserAccountAdmin(command.actor, this.adminRoles);
+    const tenantId = resolveUserAccountActorTenant(command.actor, command.tenantId);
     const userId = normalizeRequiredUserAccountText(command.userId, "User id");
     const roles = normalizeRequiredUserRoles(command.roles);
     const password = normalizeUserPassword(command.password);
@@ -240,20 +242,20 @@ export class UserAccountService {
   }
 
   async get(actor: Actor, userId: string, tenantId?: TenantId): Promise<UserAccount> {
-    this.ensureAdmin(actor);
-    const resolvedTenantId = resolveActorTenant(actor, tenantId);
+    ensureUserAccountAdmin(actor, this.adminRoles);
+    const resolvedTenantId = resolveUserAccountActorTenant(actor, tenantId);
     const state = await this.existingStateFor(resolvedTenantId, normalizeRequiredUserAccountText(userId, "User id"));
     return publicUserAccount(state);
   }
 
   authorizeAdministration(actor: Actor, tenantId?: TenantId): void {
-    this.ensureAdmin(actor);
-    resolveActorTenant(actor, tenantId);
+    ensureUserAccountAdmin(actor, this.adminRoles);
+    resolveUserAccountActorTenant(actor, tenantId);
   }
 
   async changePassword(command: ChangeUserPasswordCommand): Promise<UserAccount> {
-    this.ensureAdmin(command.actor);
-    const tenantId = resolveActorTenant(command.actor, command.tenantId);
+    ensureUserAccountAdmin(command.actor, this.adminRoles);
+    const tenantId = resolveUserAccountActorTenant(command.actor, command.tenantId);
     const userId = normalizeRequiredUserAccountText(command.userId, "User id");
     const password = normalizeUserPassword(command.password);
     const state = await this.existingStateFor(tenantId, userId);
@@ -274,8 +276,8 @@ export class UserAccountService {
   }
 
   async changeRoles(command: ChangeUserRolesCommand): Promise<UserAccount> {
-    this.ensureAdmin(command.actor);
-    const tenantId = resolveActorTenant(command.actor, command.tenantId);
+    ensureUserAccountAdmin(command.actor, this.adminRoles);
+    const tenantId = resolveUserAccountActorTenant(command.actor, command.tenantId);
     const userId = normalizeRequiredUserAccountText(command.userId, "User id");
     const roles = normalizeRequiredUserRoles(command.roles);
     const state = await this.existingStateFor(tenantId, userId);
@@ -307,8 +309,8 @@ export class UserAccountService {
   }
 
   async syncProvider(command: SyncAuthProviderAccountCommand): Promise<UserAccount> {
-    this.ensureAdmin(command.actor);
-    const tenantId = resolveActorTenant(command.actor, command.tenantId);
+    ensureUserAccountAdmin(command.actor, this.adminRoles);
+    const tenantId = resolveUserAccountActorTenant(command.actor, command.tenantId);
     const provider = normalizeRequiredUserAccountText(command.provider, "Provider");
     const subject = normalizeRequiredUserAccountText(command.subject, "Provider subject");
     const email = normalizeOptionalUserEmail(command.email);
@@ -576,8 +578,8 @@ export class UserAccountService {
   }
 
   private async changeEnabled(command: SetUserAccountEnabledCommand, enabled: boolean): Promise<UserAccount> {
-    this.ensureAdmin(command.actor);
-    const tenantId = resolveActorTenant(command.actor, command.tenantId);
+    ensureUserAccountAdmin(command.actor, this.adminRoles);
+    const tenantId = resolveUserAccountActorTenant(command.actor, command.tenantId);
     const userId = normalizeRequiredUserAccountText(command.userId, "User id");
     const state = await this.existingStateFor(tenantId, userId);
     ensureUserAccountExpectedVersion(state, command.expectedVersion);
@@ -691,12 +693,6 @@ export class UserAccountService {
     return foldUserAccount(tenantId, userId, await this.events.readStream(userAccountsStream(tenantId, userId)));
   }
 
-  private ensureAdmin(actor: Actor): void {
-    if (!this.adminRoles.some((role) => actor.roles.includes(role))) {
-      throw permissionDenied(`Actor '${actor.id}' cannot manage user accounts`);
-    }
-  }
-
   private async validateRoles(tenantId: TenantId, roles: readonly string[]): Promise<void> {
     await this.roleValidator?.validateRoles({ tenantId, roles });
   }
@@ -713,15 +709,6 @@ export class UserAccountService {
       throw invalidRecoveryToken();
     }
   }
-}
-
-function resolveActorTenant(actor: Actor, explicitTenantId: TenantId | undefined): TenantId {
-  const actorTenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
-  const tenantId = explicitTenantId ?? actorTenantId;
-  if (tenantId !== actorTenantId) {
-    throw permissionDenied(`Actor '${actor.id}' cannot manage user accounts for tenant '${tenantId}'`);
-  }
-  return tenantId;
 }
 
 function invalidRecoveryToken(): Error {

@@ -1,4 +1,5 @@
 import {
+  ensureUserAccountAdmin,
   ensureUserAccountExpectedVersion,
   emailVerificationPatch,
   MAX_ACCOUNT_RECOVERY_EXPIRY_SECONDS,
@@ -12,11 +13,46 @@ import {
   normalizeUserRecoveryToken,
   recoveryChallengeExpired,
   recoveryExpiresAtFrom,
+  resolveUserAccountActorTenant,
+  SYSTEM_MANAGER_ROLE,
   userAccountRolesEqual
 } from "../../src";
 import type { UserAccountState } from "../../src";
 
 describe("user account policy", () => {
+  it("guards user account administration roles", () => {
+    expect(() => ensureUserAccountAdmin(
+      { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },
+      [SYSTEM_MANAGER_ROLE]
+    )).not.toThrow();
+    expect(() => ensureUserAccountAdmin(
+      { id: "user@example.com", roles: ["User"], tenantId: "acme" },
+      [SYSTEM_MANAGER_ROLE]
+    )).toThrow("Actor 'user@example.com' cannot manage user accounts");
+  });
+
+  it("resolves user account command tenants from actor scope", () => {
+    expect(resolveUserAccountActorTenant(
+      { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] },
+      undefined
+    )).toBe("default");
+    expect(resolveUserAccountActorTenant(
+      { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },
+      undefined
+    )).toBe("acme");
+    expect(resolveUserAccountActorTenant(
+      { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },
+      "acme"
+    )).toBe("acme");
+  });
+
+  it("rejects user account command tenant escapes", () => {
+    expect(() => resolveUserAccountActorTenant(
+      { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },
+      "other"
+    )).toThrow("Actor 'admin@example.com' cannot manage user accounts for tenant 'other'");
+  });
+
   it("normalizes required account text fields", () => {
     expect(normalizeRequiredUserAccountText("  owner@example.com  ", "User id")).toBe("owner@example.com");
     expect(() => normalizeRequiredUserAccountText("   ", "User id")).toThrow("User id is required");

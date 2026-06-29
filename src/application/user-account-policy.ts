@@ -1,8 +1,24 @@
 import { badRequest, conflict, permissionDenied } from "../core/errors.js";
 import { normalizeUserRoles, type UserAccountState } from "../core/user-accounts.js";
+import { DEFAULT_TENANT_ID, type Actor, type TenantId } from "../core/types.js";
 
 export const MAX_ACCOUNT_RECOVERY_EXPIRY_SECONDS = 604_800;
 export const MIN_USER_PASSWORD_LENGTH = 8;
+
+export function ensureUserAccountAdmin(actor: Actor, adminRoles: readonly string[]): void {
+  if (!adminRoles.some((role) => actor.roles.includes(role))) {
+    throw permissionDenied(`Actor '${actor.id}' cannot manage user accounts`);
+  }
+}
+
+export function resolveUserAccountActorTenant(actor: Actor, explicitTenantId: TenantId | undefined): TenantId {
+  const actorTenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
+  const tenantId = explicitTenantId ?? actorTenantId;
+  if (tenantId !== actorTenantId) {
+    throw permissionDenied(`Actor '${actor.id}' cannot manage user accounts for tenant '${tenantId}'`);
+  }
+  return tenantId;
+}
 
 export function normalizeRequiredUserAccountText(value: string, label: string): string {
   const normalized = value.trim();
