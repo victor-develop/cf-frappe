@@ -2,7 +2,14 @@ import { badRequest, notFound } from "../core/errors.js";
 import { domainEventPayloadKind } from "../core/domain-events.js";
 import { foldDocument } from "../core/events.js";
 import type { AuditEventQuery } from "../ports/audit-event-store.js";
-import type { DocumentEventPayload, DocumentSnapshot, DomainEvent, TenantId } from "../core/types.js";
+import {
+  DEFAULT_TENANT_ID,
+  type Actor,
+  type DocumentEventPayload,
+  type DocumentSnapshot,
+  type DomainEvent,
+  type TenantId
+} from "../core/types.js";
 
 export const DEFAULT_AUDIT_LIMIT = 50;
 export const MAX_AUDIT_LIMIT = 200;
@@ -96,6 +103,10 @@ export interface AuditSearchPlan {
   readonly query: Omit<AuditEventQuery, "tenantId">;
 }
 
+export type AuditTenantAccessDecision =
+  | { readonly status: "allow"; readonly tenantId: TenantId }
+  | { readonly status: "deny"; readonly message: string };
+
 export interface DeletedDocumentAuditProjection {
   readonly tenantId: TenantId;
   readonly doctype: string;
@@ -112,6 +123,29 @@ export interface DeletedDocumentAuditProjectionInput {
   readonly doctype: string;
   readonly name: string;
   readonly events: readonly DomainEvent[];
+}
+
+export function planAuditTenantAccess(options: {
+  readonly actor: Actor;
+  readonly adminRoles: readonly string[];
+  readonly allowCrossTenantSearch: boolean;
+  readonly explicitTenantId?: TenantId;
+}): AuditTenantAccessDecision {
+  if (!options.adminRoles.some((role) => options.actor.roles.includes(role))) {
+    return {
+      status: "deny",
+      message: `Actor '${options.actor.id}' cannot search audit events`
+    };
+  }
+  const actorTenantId = options.actor.tenantId ?? DEFAULT_TENANT_ID;
+  const tenantId = options.explicitTenantId ?? actorTenantId;
+  if (!options.allowCrossTenantSearch && tenantId !== actorTenantId) {
+    return {
+      status: "deny",
+      message: `Actor '${options.actor.id}' cannot search audit events for tenant '${tenantId}'`
+    };
+  }
+  return { status: "allow", tenantId };
 }
 
 export function auditSearchPlan(options: AuditSearchPolicyInput = {}): AuditSearchPlan {

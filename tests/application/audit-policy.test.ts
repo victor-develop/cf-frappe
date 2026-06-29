@@ -6,8 +6,10 @@ import {
   documentDeletedPayload,
   normalizeAuditLimit,
   normalizeDeletedDocumentEventLimit,
+  planAuditTenantAccess,
   redactSensitiveAuditEvents,
   redactSensitiveAuditPayload,
+  SYSTEM_MANAGER_ROLE,
   userAccountCreatedPayload,
   userEmailVerificationRequestedPayload,
   userPasswordChangedPayload,
@@ -17,6 +19,50 @@ import {
 } from "../../src";
 
 describe("audit policy", () => {
+  it("allows audit admins to search their tenant or the default tenant", () => {
+    expect(planAuditTenantAccess({
+      actor: { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },
+      adminRoles: [SYSTEM_MANAGER_ROLE],
+      allowCrossTenantSearch: false
+    })).toEqual({ status: "allow", tenantId: "acme" });
+
+    expect(planAuditTenantAccess({
+      actor: { id: "platform@example.com", roles: [SYSTEM_MANAGER_ROLE] },
+      adminRoles: [SYSTEM_MANAGER_ROLE],
+      allowCrossTenantSearch: false
+    })).toEqual({ status: "allow", tenantId: "default" });
+  });
+
+  it("denies audit search to non-admin actors before planning store queries", () => {
+    expect(planAuditTenantAccess({
+      actor: { id: "reader@example.com", roles: ["User"], tenantId: "acme" },
+      adminRoles: [SYSTEM_MANAGER_ROLE],
+      allowCrossTenantSearch: false
+    })).toEqual({
+      status: "deny",
+      message: "Actor 'reader@example.com' cannot search audit events"
+    });
+  });
+
+  it("keeps cross-tenant audit search behind an explicit policy flag", () => {
+    expect(planAuditTenantAccess({
+      actor: { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },
+      adminRoles: [SYSTEM_MANAGER_ROLE],
+      allowCrossTenantSearch: false,
+      explicitTenantId: "other"
+    })).toEqual({
+      status: "deny",
+      message: "Actor 'admin@example.com' cannot search audit events for tenant 'other'"
+    });
+
+    expect(planAuditTenantAccess({
+      actor: { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },
+      adminRoles: [SYSTEM_MANAGER_ROLE],
+      allowCrossTenantSearch: true,
+      explicitTenantId: "other"
+    })).toEqual({ status: "allow", tenantId: "other" });
+  });
+
   it("builds normalized audit search filters and store queries", () => {
     const plan = auditSearchPlan({
       doctype: "Note",

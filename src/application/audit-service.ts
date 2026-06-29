@@ -1,6 +1,5 @@
 import { permissionDenied } from "../core/errors.js";
 import {
-  DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
   type Actor,
   type DocumentEventPayload,
@@ -14,6 +13,7 @@ import {
   auditSearchPlan,
   deletedDocumentAuditProjection,
   normalizeDeletedDocumentEventLimit,
+  planAuditTenantAccess,
   redactSensitiveAuditEvents
 } from "./audit-policy.js";
 
@@ -109,19 +109,16 @@ export class AuditService {
     });
   }
 
-  private isAdmin(actor: Actor): boolean {
-    return this.adminRoles.some((role) => actor.roles.includes(role));
-  }
-
   private authorizeTenant(actor: Actor, tenantId: TenantId | undefined): TenantId {
-    if (!this.isAdmin(actor)) {
-      throw permissionDenied(`Actor '${actor.id}' cannot search audit events`);
+    const decision = planAuditTenantAccess({
+      actor,
+      adminRoles: this.adminRoles,
+      allowCrossTenantSearch: this.allowCrossTenantSearch,
+      ...(tenantId === undefined ? {} : { explicitTenantId: tenantId })
+    });
+    if (decision.status === "deny") {
+      throw permissionDenied(decision.message);
     }
-    const actorTenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
-    const resolvedTenantId = tenantId ?? actorTenantId;
-    if (!this.allowCrossTenantSearch && resolvedTenantId !== actorTenantId) {
-      throw permissionDenied(`Actor '${actor.id}' cannot search audit events for tenant '${resolvedTenantId}'`);
-    }
-    return resolvedTenantId;
+    return decision.tenantId;
   }
 }

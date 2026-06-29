@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted audit tenant access decisions, default-tenant resolution, and cross-tenant search gating into audit policy so AuditService keeps event-store querying and recovery orchestration.
 - Extracted configured and runtime job schedule summary projection into job schedule policy so JobScheduleService keeps authorization, state loading, event writing, registry, and runner orchestration.
 - Extracted report run-limit normalization, CSV export limit clamping, CSV header/row rendering, and summary-list projection into report policy so ReportService keeps query/provider scanning and export orchestration.
 - Extracted print-format access checks, print-hidden field selection, print-empty value classification, and section view projection into print policy so PrintService keeps registry, query, settings, and letterhead orchestration.

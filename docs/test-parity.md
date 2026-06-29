@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the job schedule summary projection policy slice:
+As of the audit tenant access policy slice:
 
 - Vitest files: `230`
-- Vitest cases: `2621`
-- Remaining gap to Frappe static markers: `163`
+- Vitest cases: `2624`
+- Remaining gap to Frappe static markers: `160`
 
 ## Implication
 
