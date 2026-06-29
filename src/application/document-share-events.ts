@@ -1,4 +1,14 @@
-import type { DocumentSharePermission } from "../core/document-shares.js";
+import {
+  foldDocumentShares,
+  type DocumentSharePermission,
+  type DocumentShareState
+} from "../core/document-shares.js";
+import type {
+  DocTypeName,
+  DocumentName,
+  DomainEvent,
+  TenantId
+} from "../core/types.js";
 
 export type DocumentShareEventPayload =
   | {
@@ -10,6 +20,11 @@ export type DocumentShareEventPayload =
       readonly kind: "DocumentShareRevoked";
       readonly userId: string;
     };
+
+export const DOCUMENT_SHARE_PAYLOAD_KINDS = Object.freeze([
+  "DocumentShared",
+  "DocumentShareRevoked"
+] as const);
 
 export interface DocumentSharePayloadInput {
   readonly userId: string;
@@ -30,6 +45,33 @@ export function documentShareRevokedPayload(
   userId: string
 ): Extract<DocumentShareEventPayload, { readonly kind: "DocumentShareRevoked" }> {
   return { kind: "DocumentShareRevoked", userId };
+}
+
+export interface DocumentShareEventTypeOptions {
+  readonly doctypeName: DocTypeName;
+  readonly kind: DocumentShareEventPayload["kind"];
+  readonly shareEventType?: string | undefined;
+  readonly unshareEventType?: string | undefined;
+}
+
+export function documentShareEventType(options: DocumentShareEventTypeOptions): string {
+  if (options.kind === "DocumentShared") {
+    return options.shareEventType ?? `${options.doctypeName}Shared`;
+  }
+  return options.unshareEventType ?? `${options.doctypeName}ShareRevoked`;
+}
+
+export interface DocumentShareStateFromEventsOptions {
+  readonly tenantId: TenantId;
+  readonly doctype: DocTypeName;
+  readonly name: DocumentName;
+  readonly events: readonly DomainEvent[];
+}
+
+export function documentShareStateFromEvents(
+  options: DocumentShareStateFromEventsOptions
+): DocumentShareState {
+  return foldDocumentShares(options.tenantId, options.doctype, options.name, options.events);
 }
 
 declare module "../core/types.js" {

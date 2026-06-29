@@ -6,7 +6,6 @@ import {
   foldDocumentTags
 } from "../core/events.js";
 import {
-  foldDocumentShares,
   type DocumentSharePermission,
   type DocumentShareProvider
 } from "../core/document-shares.js";
@@ -58,6 +57,7 @@ import {
   domainCommandAppliedPayload,
   workflowTransitionedPayload
 } from "./document-command-events.js";
+import { documentShareStateFromEvents } from "./document-share-events.js";
 import {
   documentDeletedPayload,
   documentStatusChangedPayload,
@@ -1122,7 +1122,12 @@ export class DocumentService implements DocumentCommandExecutor {
     const access = await this.ensureSharedDocumentActionAccess(command.actor, doctype, "share", existing);
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
-    const state = foldDocumentShares(tenantId, doctype.name, command.name, events);
+    const state = documentShareStateFromEvents({
+      tenantId,
+      doctype: doctype.name,
+      name: command.name,
+      events
+    });
     const plan = planDocumentSharePolicy({
       doctype,
       currentGrants: state.grants,
@@ -1157,7 +1162,12 @@ export class DocumentService implements DocumentCommandExecutor {
     await this.ensureSharedDocumentActionAccess(command.actor, doctype, "share", existing, "revoke shares for");
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
-    const state = foldDocumentShares(tenantId, doctype.name, command.name, events);
+    const state = documentShareStateFromEvents({
+      tenantId,
+      doctype: doctype.name,
+      name: command.name,
+      events
+    });
     const plan = planDocumentShareRevocationPolicy({
       doctype,
       currentGrants: state.grants,

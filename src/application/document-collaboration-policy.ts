@@ -17,6 +17,7 @@ import {
   type DocumentCollaborationEventPayload
 } from "./document-collaboration-events.js";
 import {
+  documentShareEventType,
   documentSharedPayload,
   documentShareRevokedPayload,
   type DocumentShareEventPayload
@@ -281,7 +282,11 @@ export function planDocumentSharePolicy(input: {
   return {
     grant,
     noop: current !== undefined && documentShareGrantKey(current) === documentShareGrantKey(grant),
-    eventType: input.doctype.events?.share ?? `${input.doctype.name}Shared`,
+    eventType: documentShareEventType({
+      doctypeName: input.doctype.name,
+      kind: "DocumentShared",
+      shareEventType: input.doctype.events?.share
+    }),
     payload: documentSharedPayload({
       userId: grant.userId,
       permissions: grant.permissions
@@ -309,7 +314,11 @@ export function planDocumentShareRevocationPolicy(input: {
   return {
     userId,
     noop: input.currentGrants.every((grant) => grant.userId !== userId),
-    eventType: input.doctype.events?.unshare ?? `${input.doctype.name}ShareRevoked`,
+    eventType: documentShareEventType({
+      doctypeName: input.doctype.name,
+      kind: "DocumentShareRevoked",
+      unshareEventType: input.doctype.events?.unshare
+    }),
     payload: documentShareRevokedPayload(userId)
   };
 }

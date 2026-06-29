@@ -1,11 +1,11 @@
 import {
   documentSharePermissionsForActor,
-  foldDocumentShares,
   type DocumentShareProvider,
   type DocumentShareState
 } from "../core/document-shares.js";
 import { permissionDenied } from "../core/errors.js";
 import { planDocumentActionAccess } from "./document-access-policy.js";
+import { documentShareStateFromEvents } from "./document-share-events.js";
 import type { DocTypeDefinition } from "../core/types.js";
 import type { Actor, DocumentSnapshot } from "../core/types.js";
 import { documentStream } from "../core/streams.js";
@@ -49,11 +49,11 @@ export class DocumentShareService implements DocumentShareProvider {
   }
 
   private async stateFor(document: DocumentSnapshot): Promise<DocumentShareState> {
-    return foldDocumentShares(
-      document.tenantId,
-      document.doctype,
-      document.name,
-      await this.events.readStream(documentStream(document.tenantId, document.doctype, document.name))
-    );
+    return documentShareStateFromEvents({
+      tenantId: document.tenantId,
+      doctype: document.doctype,
+      name: document.name,
+      events: await this.events.readStream(documentStream(document.tenantId, document.doctype, document.name))
+    });
   }
 }
