@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the saved report event model slice:
+As of the workflow definition event helper slice:
 
-- Vitest files: `183`
-- Vitest cases: `2098`
-- Remaining gap to Frappe static markers: `686`
+- Vitest files: `184`
+- Vitest cases: `2102`
+- Remaining gap to Frappe static markers: `682`
 
 ## Implication
 

@@ -12,11 +12,15 @@ import {
   type Actor,
   type DocTypeDefinition,
   type DocumentData,
-  type NewDomainEvent,
   type TenantId,
   type WorkflowDefinition
 } from "../core/types.js";
-import type { WorkflowEventPayload } from "./workflow-events.js";
+import {
+  replayWorkflowDefinitionAppend,
+  WORKFLOW_DEFINITION_PAYLOAD_KINDS,
+  workflowDefinitionEvent,
+  type WorkflowEventPayload
+} from "./workflow-events.js";
 import type { ModelRegistry } from "../core/registry.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
@@ -104,7 +108,6 @@ export class WorkflowService {
     }
     return this.appendAndFold(state, {
       actor: command.actor,
-      type: "WorkflowDefinitionSaved",
       metadata: command.metadata,
       payload: {
         kind: "WorkflowDefinitionSaved",
@@ -125,7 +128,6 @@ export class WorkflowService {
     }
     return this.appendAndFold(state, {
       actor: command.actor,
-      type: "WorkflowDefinitionCleared",
       metadata: command.metadata,
       payload: {
         kind: "WorkflowDefinitionCleared",
@@ -136,10 +138,11 @@ export class WorkflowService {
 
   private async stateFor(tenantId: TenantId, doctypeName: string): Promise<WorkflowDefinitionState> {
     const stream = workflowDefinitionsStream(tenantId);
+    const events = await this.events.readStream(stream, { payloadKinds: WORKFLOW_DEFINITION_PAYLOAD_KINDS });
     return foldWorkflowDefinition(
       tenantId,
       doctypeName,
-      await this.events.readStream(stream, { payloadKinds: ["WorkflowDefinitionSaved", "WorkflowDefinitionCleared"] })
+      events
     );
   }
 
@@ -152,29 +155,25 @@ export class WorkflowService {
     state: WorkflowDefinitionState,
     options: {
       readonly actor: Actor;
-      readonly type: string;
       readonly metadata: DocumentData | undefined;
       readonly payload: TPayload;
     }
   ): Promise<WorkflowDefinitionState> {
     const stream = workflowDefinitionsStream(state.tenantId);
-    const event: NewDomainEvent<TPayload> = {
+    const event = workflowDefinitionEvent({
       id: this.ids.next("evt_"),
       tenantId: state.tenantId,
       stream,
-      type: options.type,
-      doctype: "__Workflows",
-      documentName: state.doctypeName,
-      actorId: options.actor.id,
+      actor: options.actor,
       occurredAt: this.clock.now(),
       payload: options.payload,
-      metadata: options.metadata ?? {}
-    };
+      ...(options.metadata === undefined ? {} : { metadata: options.metadata })
+    });
     const saved = await this.events.append(stream, state.version, [event]);
-    return foldWorkflowDefinition(
-      state.tenantId,
-      state.doctypeName,
-      [...(await this.events.readStream(stream, { maxSequence: state.version })), ...saved]
+    return replayWorkflowDefinitionAppend(
+      state,
+      await this.events.readStream(stream, { maxSequence: state.version }),
+      saved
     );
   }
 
