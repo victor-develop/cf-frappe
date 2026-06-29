@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted audit search limit/kind/filter/query planning, deleted-document recovery window guards, deleted-document recovery projection, and account token/password redaction from AuditService into audit policy and covered those rules directly.
 - Extracted document-history assignment, tag, and follower result shaping plus authorized-version event filtering from DocumentHistoryService into document-history policy and covered those projections directly.
 - Extracted document-history timeline entry projection, payload-kind based change diffing, docstatus/change shaping, update/comment/activity/workflow/collaboration summaries, and long-text summary normalization from DocumentHistoryService into document-history policy and covered those rules directly.
 - Extracted document-history timeline limit normalization, before-sequence normalization, ordered page selection with older-event cursors, and diff-baseline budget guards from DocumentHistoryService into document-history policy and covered those rules directly.

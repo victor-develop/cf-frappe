@@ -1,6 +1,4 @@
-import { badRequest, notFound, permissionDenied } from "../core/errors.js";
-import { domainEventPayloadKind } from "../core/domain-events.js";
-import { foldDocument } from "../core/events.js";
+import { permissionDenied } from "../core/errors.js";
 import {
   DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
@@ -11,73 +9,13 @@ import {
   type TenantId
 } from "../core/types.js";
 import type { AuditEventStore } from "../ports/audit-event-store.js";
-
-const DEFAULT_AUDIT_LIMIT = 50;
-const MAX_AUDIT_LIMIT = 200;
-const DEFAULT_DELETED_DOCUMENT_EVENT_LIMIT = 1_000;
-
-const DOCUMENT_EVENT_KINDS = new Set<DocumentEventPayload["kind"]>([
-  "DocumentCreated",
-  "DocumentUpdated",
-  "DocumentDeleted",
-  "DocumentSubmitted",
-  "DocumentCancelled",
-  "DocumentCommentAdded",
-  "DocumentActivityRecorded",
-  "DocumentAssigned",
-  "DocumentUnassigned",
-  "DocumentTagged",
-  "DocumentUntagged",
-  "DocumentFollowed",
-  "DocumentUnfollowed",
-  "DocumentShared",
-  "DocumentShareRevoked",
-  "UserPermissionAllowed",
-  "UserPermissionRevoked",
-  "UserAccountCreated",
-  "UserAuthProviderLinked",
-  "UserAuthProviderSynced",
-  "UserPasswordChanged",
-  "UserPasswordResetRequested",
-  "UserPasswordResetCompleted",
-  "UserPasswordResetDeliveryFailed",
-  "UserEmailVerificationRequested",
-  "UserEmailVerified",
-  "UserEmailVerificationDeliveryFailed",
-  "UserRolesChanged",
-  "UserAccountEnabled",
-  "UserAccountDisabled",
-  "UserProfileChanged",
-  "PrintSettingsChanged",
-  "UserNotificationRecorded",
-  "UserNotificationRead",
-  "UserNotificationDismissed",
-  "RoleCreated",
-  "RoleDescriptionChanged",
-  "RoleEnabled",
-  "RoleDisabled",
-  "SavedListFilterSaved",
-  "SavedListFilterDeleted",
-  "SavedReportSaved",
-  "SavedReportDeleted",
-  "CustomFieldSaved",
-  "CustomFieldDisabled",
-  "FieldPropertyOverrideSaved",
-  "FieldPropertyOverrideCleared",
-  "WorkflowDefinitionSaved",
-  "WorkflowDefinitionCleared",
-  "NotificationRuleSaved",
-  "NotificationRuleCleared",
-  "AssignmentRuleSaved",
-  "AssignmentRuleCleared",
-  "EmailNotificationQueued",
-  "EmailNotificationSent",
-  "EmailNotificationDeliveryClaimed",
-  "EmailNotificationFailed",
-  "EmailNotificationSkipped",
-  "WorkflowTransitioned",
-  "DomainCommandApplied"
-]);
+import {
+  assertDeletedDocumentEventWindow,
+  auditSearchPlan,
+  deletedDocumentAuditProjection,
+  normalizeDeletedDocumentEventLimit,
+  redactSensitiveAuditEvents
+} from "./audit-policy.js";
 
 export interface AuditServiceOptions {
   readonly events: AuditEventStore;
@@ -138,32 +76,17 @@ export class AuditService {
     this.events = options.events;
     this.adminRoles = options.adminRoles ?? [SYSTEM_MANAGER_ROLE];
     this.allowCrossTenantSearch = options.allowCrossTenantSearch ?? false;
-    this.maxDeletedDocumentEvents = normalizeMaxDeletedDocumentEvents(options.maxDeletedDocumentEvents);
+    this.maxDeletedDocumentEvents = normalizeDeletedDocumentEventLimit(options.maxDeletedDocumentEvents);
   }
 
   async search(actor: Actor, options: SearchAuditEventsOptions = {}): Promise<AuditSearchResult> {
     const tenantId = this.authorizeTenant(actor, options.tenantId);
-    const limit = normalizeLimit(options.limit);
-    const kind = normalizeKind(options.kind);
-    const filters = {
-      ...(options.doctype !== undefined ? { doctype: options.doctype } : {}),
-      ...(options.name !== undefined ? { name: options.name } : {}),
-      ...(options.actorId !== undefined ? { actorId: options.actorId } : {}),
-      ...(kind !== undefined ? { kind } : {}),
-      ...(options.since !== undefined ? { since: options.since } : {}),
-      ...(options.until !== undefined ? { until: options.until } : {})
-    };
+    const plan = auditSearchPlan(options);
     const events = await this.events.searchEvents({
       tenantId,
-      ...(filters.doctype !== undefined ? { doctype: filters.doctype } : {}),
-      ...(filters.name !== undefined ? { documentName: filters.name } : {}),
-      ...(filters.actorId !== undefined ? { actorId: filters.actorId } : {}),
-      ...(filters.kind !== undefined ? { payloadKinds: [filters.kind] } : {}),
-      ...(filters.since !== undefined ? { since: filters.since } : {}),
-      ...(filters.until !== undefined ? { until: filters.until } : {}),
-      limit
+      ...plan.query
     });
-    return { tenantId, limit, filters, events: events.map(redactSensitiveAuditPayload) };
+    return { tenantId, limit: plan.limit, filters: plan.filters, events: redactSensitiveAuditEvents(events) };
   }
 
   async recoverDeletedDocument(
@@ -177,26 +100,13 @@ export class AuditService {
       documentName: options.name,
       limit: this.maxDeletedDocumentEvents + 1
     });
-    if (events.length > this.maxDeletedDocumentEvents) {
-      throw badRequest(
-        `Deleted document recovery needs more than ${this.maxDeletedDocumentEvents} events; narrow or raise the configured limit`
-      );
-    }
-    const snapshot = foldDocument(events);
-    const deleted = [...events].reverse().find(isDeletedDocumentEvent);
-    if (!snapshot || snapshot.docstatus !== "deleted" || !deleted) {
-      throw notFound(`${options.doctype}/${options.name} is not a deleted document`);
-    }
-    return {
+    assertDeletedDocumentEventWindow(events, this.maxDeletedDocumentEvents);
+    return deletedDocumentAuditProjection({
       tenantId,
       doctype: options.doctype,
       name: options.name,
-      snapshot,
-      deletedAt: deleted.occurredAt,
-      deletedBy: deleted.actorId,
-      deleteEventId: deleted.id,
       events
-    };
+    });
   }
 
   private isAdmin(actor: Actor): boolean {
@@ -214,94 +124,4 @@ export class AuditService {
     }
     return resolvedTenantId;
   }
-}
-
-function normalizeLimit(limit: number | undefined): number {
-  if (limit === undefined) {
-    return DEFAULT_AUDIT_LIMIT;
-  }
-  if (!Number.isInteger(limit) || limit < 1) {
-    throw badRequest("Audit limit must be a positive integer");
-  }
-  return Math.min(limit, MAX_AUDIT_LIMIT);
-}
-
-function normalizeKind(kind: string | undefined): DocumentEventPayload["kind"] | undefined {
-  if (kind === undefined) {
-    return undefined;
-  }
-  if (!DOCUMENT_EVENT_KINDS.has(kind as DocumentEventPayload["kind"])) {
-    throw badRequest(`Unknown audit event kind '${kind}'`);
-  }
-  return kind as DocumentEventPayload["kind"];
-}
-
-function normalizeMaxDeletedDocumentEvents(value: number | undefined): number {
-  if (value === undefined) {
-    return DEFAULT_DELETED_DOCUMENT_EVENT_LIMIT;
-  }
-  if (!Number.isInteger(value) || value < 1) {
-    throw badRequest("Deleted document recovery event limit must be a positive integer");
-  }
-  return value;
-}
-
-function isDeletedDocumentEvent(event: DomainEvent): boolean {
-  return domainEventPayloadKind(event) === "DocumentDeleted";
-}
-
-function redactSensitiveAuditPayload(event: DomainEvent): DomainEvent {
-  if (isAuditEventPayloadKind(event, "UserAccountCreated")) {
-    return {
-      ...event,
-      payload: {
-        ...event.payload,
-        ...(event.payload.passwordHash === undefined ? {} : { passwordHash: "[redacted]" })
-      }
-    };
-  }
-  if (isAuditEventPayloadKind(event, "UserPasswordChanged")) {
-    return {
-      ...event,
-      payload: {
-        ...event.payload,
-        passwordHash: "[redacted]"
-      }
-    };
-  }
-  if (isAuditEventPayloadKind(event, "UserPasswordResetRequested")) {
-    return {
-      ...event,
-      payload: {
-        ...event.payload,
-        tokenHash: "[redacted]"
-      }
-    };
-  }
-  if (isAuditEventPayloadKind(event, "UserPasswordResetCompleted")) {
-    return {
-      ...event,
-      payload: {
-        ...event.payload,
-        passwordHash: "[redacted]"
-      }
-    };
-  }
-  if (isAuditEventPayloadKind(event, "UserEmailVerificationRequested")) {
-    return {
-      ...event,
-      payload: {
-        ...event.payload,
-        tokenHash: "[redacted]"
-      }
-    };
-  }
-  return event;
-}
-
-function isAuditEventPayloadKind<TKind extends DocumentEventPayload["kind"]>(
-  event: DomainEvent,
-  kind: TKind
-): event is DomainEvent<Extract<DocumentEventPayload, { readonly kind: TKind }>> {
-  return domainEventPayloadKind(event) === kind;
 }
