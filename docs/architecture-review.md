@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted calendar event-limit bounding, metadata/window filter composition, scalar event projection, title fallback, and run-result shaping from CalendarService into calendar policy and covered those rules directly.
 - Extracted custom-field tenant/admin access, required text normalization, field definition normalization, dependency-expression/default validation, expected-version guards, field equality, pending custom-field state projection, catalog append projection, and fold resequencing from CustomFieldService into custom-field policy and covered those rules directly.
 - Extracted field-property tenant/admin access, required field-name normalization, field lookup, expected-version guards, override equality, and pending override-state projection from FieldPropertyService into field-property policy and covered those rules directly.
 - Extracted print-settings tenant/admin access, patch normalization, and expected-version guards from PrintSettingsService into print-settings policy and covered those rules directly.

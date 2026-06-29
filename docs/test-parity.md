@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the custom-field policy slice:
+As of the calendar policy slice:
 
-- Vitest files: `217`
-- Vitest cases: `2511`
-- Remaining gap to Frappe static markers: `273`
+- Vitest files: `218`
+- Vitest cases: `2518`
+- Remaining gap to Frappe static markers: `266`
 
 ## Implication
 

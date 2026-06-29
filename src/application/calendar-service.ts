@@ -1,41 +1,22 @@
 import { permissionDenied } from "../core/errors.js";
-import { andListFilterExpressions } from "../core/list-view.js";
 import { canReadCalendar, type CalendarDefinition } from "../core/calendar.js";
 import type { ModelRegistry } from "../core/registry.js";
-import type { Actor, DocumentSnapshot, JsonValue, ListFilterExpression } from "../core/types.js";
+import type { Actor } from "../core/types.js";
 import type { QueryService } from "./query-service.js";
+import {
+  calendarEvent,
+  calendarEventLimit,
+  calendarFilterExpression,
+  calendarRunResult,
+  DEFAULT_CALENDAR_MAX_EVENTS,
+  type CalendarEventResult,
+  type CalendarRunOptions,
+  type CalendarRunResult
+} from "./calendar-policy.js";
 
-const DEFAULT_MAX_EVENTS = 100;
 const PAGE_SIZE = 200;
 
-export interface CalendarRunOptions {
-  readonly from?: string;
-  readonly to?: string;
-  readonly limit?: number;
-}
-
-export interface CalendarEventResult {
-  readonly name: string;
-  readonly title: string;
-  readonly doctype: string;
-  readonly docstatus: string;
-  readonly version: number;
-  readonly start: string;
-  readonly end?: string;
-  readonly allDay?: boolean;
-  readonly color?: string;
-  readonly updatedAt: string;
-  readonly data: Readonly<Record<string, JsonValue>>;
-}
-
-export interface CalendarRunResult {
-  readonly calendar: CalendarDefinition;
-  readonly from?: string;
-  readonly to?: string;
-  readonly total: number;
-  readonly hasMore: boolean;
-  readonly events: readonly CalendarEventResult[];
-}
+export type { CalendarEventResult, CalendarRunOptions, CalendarRunResult } from "./calendar-policy.js";
 
 export interface CalendarServiceOptions {
   readonly registry: ModelRegistry;
@@ -75,7 +56,7 @@ export class CalendarService {
     options: CalendarRunOptions = {}
   ): Promise<CalendarRunResult> {
     const calendar = await this.getCalendar(actor, calendarName);
-    const limit = calendarEventLimit(options.limit, calendar.maxEvents ?? DEFAULT_MAX_EVENTS);
+    const limit = calendarEventLimit(options.limit, calendar.maxEvents ?? DEFAULT_CALENDAR_MAX_EVENTS);
     const filterExpression = calendarFilterExpression(calendar, options);
     let total = 0;
     const events: CalendarEventResult[] = [];
@@ -103,14 +84,12 @@ export class CalendarService {
         break;
       }
     }
-    return {
+    return calendarRunResult({
       calendar,
-      ...(options.from === undefined ? {} : { from: options.from }),
-      ...(options.to === undefined ? {} : { to: options.to }),
+      run: options,
       total,
-      hasMore: total > events.length,
       events
-    };
+    });
   }
 
   private async canAccessCalendar(actor: Actor, calendar: CalendarDefinition): Promise<boolean> {
@@ -127,100 +106,6 @@ export class CalendarService {
       throw error;
     }
   }
-}
-
-function calendarFilterExpression(
-  calendar: CalendarDefinition,
-  options: CalendarRunOptions
-): ListFilterExpression | undefined {
-  return andListFilterExpressions([
-    calendar.filterExpression,
-    calendarWindowExpression(calendar, options)
-  ]);
-}
-
-function calendarWindowExpression(
-  calendar: CalendarDefinition,
-  options: CalendarRunOptions
-): ListFilterExpression | undefined {
-  return andListFilterExpressions([
-    options.to === undefined
-      ? undefined
-      : { field: calendar.startField, operator: "lte", value: options.to },
-    calendarFromExpression(calendar, options.from)
-  ]);
-}
-
-function calendarFromExpression(calendar: CalendarDefinition, from: string | undefined): ListFilterExpression | undefined {
-  if (from === undefined) {
-    return undefined;
-  }
-  if (calendar.endField === undefined) {
-    return { field: calendar.startField, operator: "gte", value: from };
-  }
-  return {
-    kind: "group",
-    match: "any",
-    filters: [
-      { field: calendar.endField, operator: "gte", value: from },
-      {
-        kind: "group",
-        match: "all",
-        filters: [
-          { field: calendar.endField, operator: "is", value: "not set" },
-          { field: calendar.startField, operator: "gte", value: from }
-        ]
-      }
-    ]
-  };
-}
-
-function calendarEvent(calendar: CalendarDefinition, document: DocumentSnapshot): CalendarEventResult | undefined {
-  const start = scalarString(document.data[calendar.startField]);
-  if (start === undefined) {
-    return undefined;
-  }
-  const end = calendar.endField === undefined ? undefined : scalarString(document.data[calendar.endField]);
-  const allDay = calendar.allDayField === undefined ? undefined : booleanValue(document.data[calendar.allDayField]);
-  const color = calendar.colorField === undefined ? undefined : scalarString(document.data[calendar.colorField]);
-  return {
-    name: document.name,
-    title: calendarEventTitle(calendar, document),
-    doctype: document.doctype,
-    docstatus: document.docstatus,
-    version: document.version,
-    start,
-    ...(end === undefined ? {} : { end }),
-    ...(allDay === undefined ? {} : { allDay }),
-    ...(color === undefined ? {} : { color }),
-    updatedAt: document.updatedAt,
-    data: document.data
-  };
-}
-
-function calendarEventTitle(calendar: CalendarDefinition, document: DocumentSnapshot): string {
-  if (calendar.titleField === undefined) {
-    return document.name;
-  }
-  return scalarString(document.data[calendar.titleField]) ?? document.name;
-}
-
-function scalarString(value: JsonValue | undefined): string | undefined {
-  return value === undefined || value === null || typeof value === "object" ? undefined : String(value);
-}
-
-function booleanValue(value: JsonValue | undefined): boolean | undefined {
-  return typeof value === "boolean" ? value : undefined;
-}
-
-function calendarEventLimit(requested: number | undefined, maximum: number): number {
-  if (requested === undefined) {
-    return maximum;
-  }
-  if (!Number.isInteger(requested) || requested < 1) {
-    return maximum;
-  }
-  return Math.min(requested, maximum);
 }
 
 function isPermissionDenied(error: unknown): boolean {
