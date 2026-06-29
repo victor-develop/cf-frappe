@@ -90,8 +90,8 @@ import {
   projectUniqueValueReservationWrite,
   releasedUniqueValueReservations,
   uniqueReservationOwnerStillOwnsValue,
+  uniqueValueEventCommand,
   uniqueValueReservations,
-  UNIQUE_VALUE_DOCTYPE,
   type UniqueValueReservation
 } from "./document-unique-values.js";
 import {
@@ -1719,17 +1719,12 @@ export class DocumentService implements DocumentCommandExecutor {
       return {
         reservation,
         existing,
-        event: this.newEvent({
-          tenantId: reservation.tenantId,
-          stream: reservation.stream,
-          type: eventPlan.eventType,
-          doctype: UNIQUE_VALUE_DOCTYPE,
-          documentName: eventPlan.documentName,
+        event: this.newEvent(uniqueValueEventCommand({
+          reservation,
           actorId: actor.id,
           occurredAt,
-          payload: eventPlan.payload,
-          metadata: eventPlan.metadata
-        })
+          plan: eventPlan
+        }))
       };
     });
   }
@@ -1758,17 +1753,12 @@ export class DocumentService implements DocumentCommandExecutor {
           continue;
         }
         const eventPlan = planUniqueValueReleaseEvent(decision.reservation);
-        const event = this.newEvent({
-          tenantId: decision.existing.tenantId,
-          stream: decision.reservation.stream,
-          type: eventPlan.eventType,
-          doctype: UNIQUE_VALUE_DOCTYPE,
-          documentName: eventPlan.documentName,
+        const event = this.newEvent(uniqueValueEventCommand({
+          reservation: decision.reservation,
           actorId: actor.id,
           occurredAt,
-          payload: eventPlan.payload,
-          metadata: eventPlan.metadata
-        });
+          plan: eventPlan
+        }));
         await this.store.commit(decision.reservation.stream, decision.existing.version, [event], (savedEvents) => {
           const saved = requireFirstSavedEvent(savedEvents);
           return projectUniqueValueReleaseWrite({ existing: decision.existing, saved });

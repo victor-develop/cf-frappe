@@ -13,6 +13,7 @@ import {
   projectUniqueValueReservationWrite,
   releasedUniqueValueReservations,
   uniqueReservationOwnerStillOwnsValue,
+  uniqueValueEventCommand,
   uniqueValueReservations,
   type DomainEvent,
   type DocumentSnapshot,
@@ -137,6 +138,54 @@ describe("document unique values", () => {
       eventType: "UniqueValueReleased",
       documentName: "Contact:email:s:ada@example.com",
       payload: { kind: "DocumentUpdated", patch: { active: false } },
+      metadata: { target_doctype: "Contact", target_field: "email" }
+    });
+  });
+
+  it("shapes unique-value reservation event commands from event plans", () => {
+    const reservation = reservationFor("ada@example.com");
+    const plan = planUniqueValueReservationEvent(reservation, null);
+
+    expect(
+      uniqueValueEventCommand({
+        reservation,
+        actorId: "user@example.com",
+        occurredAt: "2026-06-28T02:00:00.000Z",
+        plan
+      })
+    ).toEqual({
+      tenantId: "acme",
+      stream: "acme:__UniqueValues:Contact%3Aemail%3As%3Aada%40example%2Ecom",
+      type: "UniqueValueStarted",
+      doctype: "__UniqueValues",
+      documentName: "Contact:email:s:ada@example.com",
+      actorId: "user@example.com",
+      occurredAt: "2026-06-28T02:00:00.000Z",
+      payload: plan.payload,
+      metadata: { target_doctype: "Contact", target_field: "email" }
+    });
+  });
+
+  it("shapes unique-value release event commands from event plans", () => {
+    const reservation = reservationFor("ada@example.com");
+    const plan = planUniqueValueReleaseEvent(reservation);
+
+    expect(
+      uniqueValueEventCommand({
+        reservation,
+        actorId: "user@example.com",
+        occurredAt: "2026-06-28T02:00:00.000Z",
+        plan
+      })
+    ).toEqual({
+      tenantId: "acme",
+      stream: "acme:__UniqueValues:Contact%3Aemail%3As%3Aada%40example%2Ecom",
+      type: "UniqueValueReleased",
+      doctype: "__UniqueValues",
+      documentName: "Contact:email:s:ada@example.com",
+      actorId: "user@example.com",
+      occurredAt: "2026-06-28T02:00:00.000Z",
+      payload: plan.payload,
       metadata: { target_doctype: "Contact", target_field: "email" }
     });
   });

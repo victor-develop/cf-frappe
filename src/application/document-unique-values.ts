@@ -4,7 +4,8 @@ import type {
   DocumentData,
   DocumentSnapshot,
   DomainEvent,
-  JsonValue
+  JsonValue,
+  NewDomainEvent
 } from "../core/types.js";
 import { validationFailed } from "../core/errors.js";
 import {
@@ -191,6 +192,25 @@ export function planUniqueValueReleaseEvent(reservation: UniqueValueReservation)
     documentName: uniqueValueDocumentName(reservation),
     payload: documentUpdatedPayload({ active: false }),
     metadata: uniqueValueEventMetadata(reservation)
+  };
+}
+
+export function uniqueValueEventCommand(input: {
+  readonly reservation: UniqueValueReservation;
+  readonly actorId: string;
+  readonly occurredAt: string;
+  readonly plan: UniqueValueEventPlan;
+}): Omit<NewDomainEvent<UniqueValueEventPlan["payload"]>, "id" | "sequence"> {
+  return {
+    tenantId: input.reservation.tenantId,
+    stream: input.reservation.stream,
+    type: input.plan.eventType,
+    doctype: UNIQUE_VALUE_DOCTYPE,
+    documentName: input.plan.documentName,
+    actorId: input.actorId,
+    occurredAt: input.occurredAt,
+    payload: input.plan.payload,
+    metadata: input.plan.metadata
   };
 }
 
