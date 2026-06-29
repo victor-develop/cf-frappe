@@ -98,6 +98,29 @@ describe("document share events", () => {
     expect(isDocumentShareEvent(shared)).toBe(true);
     expect(isDocumentShareEvent(updatedEvent(2))).toBe(false);
   });
+
+  it("folds document share state by payload kind when event type names are custom", () => {
+    const misleadingUnrelated = {
+      ...updatedEvent(1),
+      type: "DocumentShared"
+    };
+    const customTypedShare = {
+      ...sharedEvent(2, "collab@example.com", ["update"]),
+      type: "NoteDelegatedByPolicy"
+    };
+
+    const state = documentShareStateFromEvents({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "Shared Note",
+      events: [misleadingUnrelated, customTypedShare]
+    });
+
+    expect(state.version).toBe(2);
+    expect(state.grants).toEqual([
+      { userId: "collab@example.com", permissions: ["read", "update"] }
+    ]);
+  });
 });
 
 function sharePayload(payload: DocumentShareEventPayload): DocumentShareEventPayload {

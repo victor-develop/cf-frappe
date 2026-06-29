@@ -1,7 +1,11 @@
 import { domainEventPayloadKind } from "../core/domain-events.js";
 import {
+  DOCUMENT_SHARE_STATE_PAYLOAD_KINDS,
   foldDocumentShares,
+  isDocumentShareStatePayloadKind,
   type DocumentSharePermission,
+  type DocumentShareStateEventPayload,
+  type DocumentShareStatePayloadKind,
   type DocumentShareState
 } from "../core/document-shares.js";
 import type {
@@ -11,25 +15,11 @@ import type {
   TenantId
 } from "../core/types.js";
 
-export type DocumentShareEventPayload =
-  | {
-      readonly kind: "DocumentShared";
-      readonly userId: string;
-      readonly permissions: readonly DocumentSharePermission[];
-    }
-  | {
-      readonly kind: "DocumentShareRevoked";
-      readonly userId: string;
-    };
+export type DocumentShareEventPayload = DocumentShareStateEventPayload;
 
-export type DocumentSharePayloadKind = DocumentShareEventPayload["kind"];
+export type DocumentSharePayloadKind = DocumentShareStatePayloadKind;
 
-export const DOCUMENT_SHARE_PAYLOAD_KINDS = Object.freeze([
-  "DocumentShared",
-  "DocumentShareRevoked"
-] as const satisfies readonly DocumentSharePayloadKind[]);
-
-const DOCUMENT_SHARE_PAYLOAD_KIND_SET = new Set<string>(DOCUMENT_SHARE_PAYLOAD_KINDS);
+export const DOCUMENT_SHARE_PAYLOAD_KINDS = DOCUMENT_SHARE_STATE_PAYLOAD_KINDS;
 
 export interface DocumentSharePayloadInput {
   readonly userId: string;
@@ -67,7 +57,7 @@ export function documentShareEventType(options: DocumentShareEventTypeOptions): 
 }
 
 export function isDocumentSharePayloadKind(kind: string): kind is DocumentSharePayloadKind {
-  return DOCUMENT_SHARE_PAYLOAD_KIND_SET.has(kind);
+  return isDocumentShareStatePayloadKind(kind);
 }
 
 export function isDocumentShareEvent(event: DomainEvent): event is DomainEvent<DocumentShareEventPayload> {

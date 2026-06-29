@@ -1,3 +1,4 @@
+import { domainEventPayloadKind } from "./domain-events.js";
 import type {
   Actor,
   DocTypeName,
@@ -32,6 +33,28 @@ export interface DocumentShareProvider {
   ): Promise<readonly DocumentSharePermission[]>;
 }
 
+export type DocumentShareStatePayloadKind =
+  | "DocumentShared"
+  | "DocumentShareRevoked";
+
+export type DocumentShareStateEventPayload =
+  | {
+      readonly kind: "DocumentShared";
+      readonly userId: string;
+      readonly permissions: readonly DocumentSharePermission[];
+    }
+  | {
+      readonly kind: "DocumentShareRevoked";
+      readonly userId: string;
+    };
+
+export const DOCUMENT_SHARE_STATE_PAYLOAD_KINDS = Object.freeze([
+  "DocumentShared",
+  "DocumentShareRevoked"
+] as const satisfies readonly DocumentShareStatePayloadKind[]);
+
+const DOCUMENT_SHARE_STATE_PAYLOAD_KIND_SET = new Set<string>(DOCUMENT_SHARE_STATE_PAYLOAD_KINDS);
+
 export function foldDocumentShares(
   tenantId: TenantId,
   doctype: DocTypeName,
@@ -42,6 +65,9 @@ export function foldDocumentShares(
   let version = 0;
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     version = Math.max(version, event.sequence);
+    if (!isDocumentShareStateEvent(event)) {
+      continue;
+    }
     switch (event.payload.kind) {
       case "DocumentShared": {
         const grant = normalizeDocumentShareGrant({
@@ -63,6 +89,22 @@ export function foldDocumentShares(
     version,
     grants: [...grants.values()].sort(compareDocumentShareGrants)
   };
+}
+
+export function documentShareStateEventType(
+  payload: DocumentShareStateEventPayload
+): DocumentShareStatePayloadKind {
+  return payload.kind;
+}
+
+export function isDocumentShareStatePayloadKind(kind: string): kind is DocumentShareStatePayloadKind {
+  return DOCUMENT_SHARE_STATE_PAYLOAD_KIND_SET.has(kind);
+}
+
+function isDocumentShareStateEvent(
+  event: DomainEvent
+): event is DomainEvent & { readonly payload: DocumentShareStateEventPayload } {
+  return isDocumentShareStatePayloadKind(domainEventPayloadKind(event));
 }
 
 export function documentSharePermissionsForActor(
