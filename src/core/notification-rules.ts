@@ -142,7 +142,8 @@ export function notificationRuleUserNotificationsFromDomainEvent(
   context: NotificationRuleEvaluationContext
 ): readonly DocumentUserNotificationPayload[] {
   const snapshot = context.snapshot;
-  if (snapshot === null || !isNotificationRuleEventKind(context.event.payload.kind)) {
+  const payloadKind = domainEventPayloadKind(context.event);
+  if (snapshot === null || !isNotificationRuleEventKind(payloadKind)) {
     return [];
   }
   const notifications: DocumentUserNotificationPayload[] = [];
@@ -182,7 +183,8 @@ export function notificationRuleEmailNotificationsFromDomainEvent(
   context: NotificationRuleEvaluationContext
 ): readonly DocumentEmailNotificationPayload[] {
   const snapshot = context.snapshot;
-  if (snapshot === null || !isNotificationRuleEventKind(context.event.payload.kind)) {
+  const payloadKind = domainEventPayloadKind(context.event);
+  if (snapshot === null || !isNotificationRuleEventKind(payloadKind)) {
     return [];
   }
   const notifications: DocumentEmailNotificationPayload[] = [];
@@ -380,8 +382,9 @@ function ruleMatches(
   snapshot: DocumentSnapshot,
   channel: NotificationRuleChannel
 ): boolean {
+  const payloadKind = domainEventPayloadKind(event);
   return (rule.enabled ?? true) !== false &&
-    rule.events.includes(event.payload.kind as NotificationRuleEventKind) &&
+    rule.events.includes(payloadKind as NotificationRuleEventKind) &&
     matchesListFilterExpression(snapshot, rule.condition) &&
     ruleChannels(rule).includes(channel);
 }

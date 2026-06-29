@@ -10,6 +10,8 @@ import {
   NotificationRuleService,
   SYSTEM_MANAGER_ROLE,
   UserNotificationService,
+  notificationRuleEmailNotificationsFromDomainEvent,
+  notificationRuleUserNotificationsFromDomainEvent,
   notificationRulesStream
 } from "../../src";
 import { data, noteDocType, now, owner } from "../helpers";
@@ -204,6 +206,38 @@ describe("NotificationRuleService", () => {
         ]
       });
     await expect(notifications.inbox(owner)).resolves.toMatchObject({ notifications: [] });
+  });
+
+  it("derives notification rule event matching from source event identity", () => {
+    const event = documentUpdatedEvent("evt_matching_update");
+    const snapshot = noteSnapshot();
+    const rules = [
+      {
+        name: "Updated note inbox",
+        events: ["DocumentUpdated"],
+        recipients: [{ kind: "user", userId: "manager@example.com" }],
+        channels: ["inbox"]
+      },
+      {
+        name: "Updated note email",
+        events: ["DocumentUpdated"],
+        recipients: [{ kind: "user", userId: "email@example.com" }],
+        channels: ["email"]
+      },
+      {
+        name: "Created note inbox",
+        events: ["DocumentCreated"],
+        recipients: [{ kind: "user", userId: "created@example.com" }],
+        channels: ["inbox"]
+      }
+    ] as const;
+
+    expect(notificationRuleUserNotificationsFromDomainEvent({ event, snapshot, rules })).toMatchObject([
+      { recipientId: "manager@example.com", ruleName: "Updated note inbox", payloadKind: "DocumentUpdated" }
+    ]);
+    expect(notificationRuleEmailNotificationsFromDomainEvent({ event, snapshot, rules })).toMatchObject([
+      { recipientId: "email@example.com", ruleName: "Updated note email", payloadKind: "DocumentUpdated" }
+    ]);
   });
 
   it("can target fields introduced by upstream custom-field overlays", async () => {
