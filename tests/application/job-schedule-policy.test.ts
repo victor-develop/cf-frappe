@@ -4,7 +4,10 @@ import {
   planJobScheduleDefinitionDelete,
   planJobScheduleDefinitionSave,
   planJobScheduleDispatch,
+  planJobScheduleEnabledOverride,
   planJobScheduleOverride,
+  planJobScheduleOverrideClear,
+  planJobSchedulePauseOverride,
   SYSTEM_MANAGER_ROLE
 } from "../../src";
 
@@ -231,6 +234,38 @@ describe("job schedule policy", () => {
       configured: false,
       exists: true
     })).toEqual({ status: "delete" });
+  });
+
+  it("plans override clear writes only when an override exists", () => {
+    expect(planJobScheduleOverrideClear({ hasOverride: false })).toEqual({ status: "noop" });
+    expect(planJobScheduleOverrideClear({ hasOverride: true })).toEqual({ status: "write" });
+  });
+
+  it("plans enabled override writes only when the effective enabled value changes", () => {
+    expect(planJobScheduleEnabledOverride({
+      configuredEnabled: true,
+      targetEnabled: true
+    })).toEqual({ status: "noop" });
+
+    expect(planJobScheduleEnabledOverride({
+      currentEnabled: false,
+      configuredEnabled: true,
+      targetEnabled: true
+    })).toEqual({ status: "write" });
+  });
+
+  it("plans pause writes only when the active pause changes", () => {
+    expect(planJobSchedulePauseOverride({
+      currentPausedUntil: "2026-01-02T00:00:00.000Z",
+      pausedUntil: "2026-01-02T00:00:00.000Z",
+      now: "2026-01-01T00:00:00.000Z"
+    })).toEqual({ status: "noop" });
+
+    expect(planJobSchedulePauseOverride({
+      currentPausedUntil: "2026-01-02T00:00:00.000Z",
+      pausedUntil: "2026-01-02T00:00:00.000Z",
+      now: "2026-01-03T00:00:00.000Z"
+    })).toEqual({ status: "write" });
   });
 });
 

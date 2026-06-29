@@ -39,6 +39,10 @@ export type JobScheduleDefinitionDeleteDecision =
   | { readonly status: "not-found"; readonly message: string }
   | { readonly status: "reject"; readonly message: string };
 
+export type JobScheduleOverrideWriteDecision =
+  | { readonly status: "write" }
+  | { readonly status: "noop" };
+
 export function planJobScheduleAccess(options: {
   readonly actor: Actor;
   readonly adminRoles: readonly string[];
@@ -168,4 +172,30 @@ export function planJobScheduleDefinitionDelete(options: {
     };
   }
   return { status: "delete" };
+}
+
+export function planJobScheduleOverrideClear(options: {
+  readonly hasOverride: boolean;
+}): JobScheduleOverrideWriteDecision {
+  return options.hasOverride ? { status: "write" } : { status: "noop" };
+}
+
+export function planJobScheduleEnabledOverride(options: {
+  readonly currentEnabled?: boolean;
+  readonly configuredEnabled: boolean;
+  readonly targetEnabled: boolean;
+}): JobScheduleOverrideWriteDecision {
+  return (options.currentEnabled ?? options.configuredEnabled) === options.targetEnabled
+    ? { status: "noop" }
+    : { status: "write" };
+}
+
+export function planJobSchedulePauseOverride(options: {
+  readonly currentPausedUntil?: string;
+  readonly pausedUntil: string;
+  readonly now: string;
+}): JobScheduleOverrideWriteDecision {
+  return options.currentPausedUntil === options.pausedUntil && Date.parse(options.pausedUntil) > Date.parse(options.now)
+    ? { status: "noop" }
+    : { status: "write" };
 }

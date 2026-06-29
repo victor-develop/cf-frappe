@@ -26,7 +26,10 @@ import {
   planJobScheduleDefinitionDelete,
   planJobScheduleDefinitionSave,
   planJobScheduleDispatch,
-  planJobScheduleOverride
+  planJobScheduleEnabledOverride,
+  planJobScheduleOverride,
+  planJobScheduleOverrideClear,
+  planJobSchedulePauseOverride
 } from "./job-schedule-policy.js";
 
 export type { JobScheduleEventPayload } from "./job-schedule-events.js";
@@ -400,7 +403,8 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       scheduleId,
       command.tenantId
     );
-    if (!state.overrides.has(summary.id)) {
+    const decision = planJobScheduleOverrideClear({ hasOverride: state.overrides.has(summary.id) });
+    if (decision.status === "noop") {
       return { schedule: this.summaryFor(schedule, index, state) };
     }
     const stream = jobScheduleOverridesStream(tenantId);
@@ -435,9 +439,15 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       scheduleId,
       command.tenantId
     );
-    const pausedUntil = normalizePauseUntil(command.pausedUntil, this.clock.now());
+    const now = this.clock.now();
+    const pausedUntil = normalizePauseUntil(command.pausedUntil, now);
     const current = state.overrides.get(summary.id);
-    if (current?.pausedUntil === pausedUntil && pauseIsActive(pausedUntil, this.clock.now())) {
+    const decision = planJobSchedulePauseOverride({
+      ...(current?.pausedUntil === undefined ? {} : { currentPausedUntil: current.pausedUntil }),
+      pausedUntil,
+      now
+    });
+    if (decision.status === "noop") {
       return { schedule: this.summaryFor(schedule, index, state) };
     }
     const stream = jobScheduleOverridesStream(tenantId);
@@ -502,7 +512,12 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       command.tenantId
     );
     const current = state.overrides.get(summary.id);
-    if ((current?.enabled ?? summary.configuredEnabled) === command.enabled) {
+    const decision = planJobScheduleEnabledOverride({
+      ...(current?.enabled === undefined ? {} : { currentEnabled: current.enabled }),
+      configuredEnabled: summary.configuredEnabled,
+      targetEnabled: command.enabled
+    });
+    if (decision.status === "noop") {
       return { schedule: this.summaryFor(schedule, index, state) };
     }
     const stream = jobScheduleOverridesStream(tenantId);
