@@ -4,6 +4,8 @@ import {
   ensureRoleExpectedVersion,
   existingRole,
   normalizeRequiredRoleName,
+  planRoleDescriptionChange,
+  planRoleStatusChange,
   resolveRoleTenant
 } from "../../src/application/role-policy.js";
 import { SYSTEM_MANAGER_ROLE } from "../../src/core/types.js";
@@ -43,6 +45,27 @@ describe("role policy", () => {
   it("finds existing roles and rejects missing roles", () => {
     expect(existingRole(state(2), "Support Lead")).toMatchObject({ name: "Support Lead", enabled: true });
     expect(() => existingRole(state(2), "Missing")).toThrow("Role 'Missing' was not found");
+  });
+
+  it("plans role description changes without emitting redundant catalog events", () => {
+    const role = existingRole(state(2), "Support Lead");
+    const roleWithoutDescription = {
+      name: role.name,
+      version: role.version,
+      enabled: role.enabled
+    };
+
+    expect(planRoleDescriptionChange(role, "Handles escalations")).toEqual({ status: "noop" });
+    expect(planRoleDescriptionChange(role, "Owns escalations")).toEqual({ status: "append" });
+    expect(planRoleDescriptionChange(roleWithoutDescription, undefined)).toEqual({ status: "noop" });
+    expect(planRoleDescriptionChange(role, undefined)).toEqual({ status: "append" });
+  });
+
+  it("plans role status changes without emitting redundant catalog events", () => {
+    const role = existingRole(state(2), "Support Lead");
+
+    expect(planRoleStatusChange(role, true)).toEqual({ status: "noop" });
+    expect(planRoleStatusChange(role, false)).toEqual({ status: "append" });
   });
 
   it("guards role uniqueness and expected catalog versions", () => {

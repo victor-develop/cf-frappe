@@ -25,7 +25,9 @@ import {
   ensureRoleDoesNotExist,
   ensureRoleExpectedVersion,
   existingRole,
-  normalizeRequiredRoleName
+  normalizeRequiredRoleName,
+  planRoleDescriptionChange,
+  planRoleStatusChange
 } from "./role-policy.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
@@ -119,7 +121,7 @@ export class RoleService {
     const state = await this.stateFor(tenantId);
     ensureRoleExpectedVersion(state, command.expectedVersion);
     const existing = existingRole(state, role);
-    if (existing.description === description) {
+    if (planRoleDescriptionChange(existing, description).status === "noop") {
       return state;
     }
     return this.appendAndFold(state, {
@@ -146,7 +148,7 @@ export class RoleService {
     const state = await this.stateFor(tenantId);
     ensureRoleExpectedVersion(state, command.expectedVersion);
     const existing = existingRole(state, role);
-    if (existing.enabled === enabled) {
+    if (planRoleStatusChange(existing, enabled).status === "noop") {
       return state;
     }
     return this.appendAndFold(state, {

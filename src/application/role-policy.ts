@@ -52,6 +52,24 @@ export function existingRole(state: RoleCatalogState, role: string): RoleRecord 
   return existing;
 }
 
+export type RoleChangeDecision =
+  | { readonly status: "append" }
+  | { readonly status: "noop" };
+
+export function planRoleDescriptionChange(
+  existing: RoleRecord,
+  description: string | undefined
+): RoleChangeDecision {
+  return existing.description === description ? { status: "noop" } : { status: "append" };
+}
+
+export function planRoleStatusChange(
+  existing: RoleRecord,
+  enabled: boolean
+): RoleChangeDecision {
+  return existing.enabled === enabled ? { status: "noop" } : { status: "append" };
+}
+
 export function ensureRoleDoesNotExist(state: RoleCatalogState, role: string): void {
   if (state.roles.some((existing) => existing.name === role)) {
     throw conflict(`Role '${role}' already exists`);

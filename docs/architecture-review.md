@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted role description and enabled-status noop decisions into role policy so RoleService keeps tenant/admin access, state loading, event append, and replay orchestration.
 - Extracted saved-list-filter and explicit filter/filter-expression merge rules into saved list filter helpers so SavedListFilterService keeps metadata access, event append, and replay orchestration.
 - Extracted user-permission allow/revoke grant-change noop decisions into user permission policy so UserPermissionService keeps administration access, validation, event append, and replay orchestration.
 - Extracted user notification inbox access decisions, default-tenant resolution, user-id normalization, and admin delegated-inbox checks into user notification policy so UserNotificationService keeps stream replay and append orchestration.
