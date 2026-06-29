@@ -2,6 +2,7 @@ import { FrameworkError } from "./errors.js";
 import { domainEventPayloadKind } from "./domain-events.js";
 import { matchesListFilterExpression, normalizeListFilterExpression } from "./list-view.js";
 import type {
+  DocTypeName,
   DocTypeDefinition,
   DocumentData,
   DocumentSnapshot,
@@ -35,6 +36,27 @@ export const NOTIFICATION_RULE_EVENT_KINDS = Object.freeze([
   "WorkflowTransitioned",
   "DomainCommandApplied"
 ] as const satisfies readonly NotificationRuleEventKind[]);
+
+export type NotificationRuleStatePayloadKind = "NotificationRuleSaved" | "NotificationRuleCleared";
+
+export type NotificationRuleStateEventPayload =
+  | {
+      readonly kind: "NotificationRuleSaved";
+      readonly doctypeName: DocTypeName;
+      readonly rule: NotificationRuleDefinition;
+    }
+  | {
+      readonly kind: "NotificationRuleCleared";
+      readonly doctypeName: DocTypeName;
+      readonly ruleName: string;
+    };
+
+export const NOTIFICATION_RULE_STATE_PAYLOAD_KINDS = Object.freeze([
+  "NotificationRuleSaved",
+  "NotificationRuleCleared"
+] as const satisfies readonly NotificationRuleStatePayloadKind[]);
+
+const NOTIFICATION_RULE_STATE_PAYLOAD_KIND_SET = new Set<string>(NOTIFICATION_RULE_STATE_PAYLOAD_KINDS);
 
 export interface NotificationRuleEntry {
   readonly tenantId: TenantId;
@@ -82,7 +104,7 @@ export function foldNotificationRules(
   const rules = new Map<string, NotificationRuleEntry>();
   let version = 0;
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
-    if (event.payload.kind !== "NotificationRuleSaved" && event.payload.kind !== "NotificationRuleCleared") {
+    if (!isNotificationRuleStateEvent(event)) {
       continue;
     }
     version = Math.max(version, event.sequence);
@@ -110,6 +132,22 @@ export function foldNotificationRules(
     version,
     rules: Object.freeze([...rules.values()].sort((left, right) => left.rule.name.localeCompare(right.rule.name)))
   });
+}
+
+export function notificationRuleStateEventType(
+  payload: NotificationRuleStateEventPayload
+): NotificationRuleStatePayloadKind {
+  return payload.kind;
+}
+
+export function isNotificationRuleStatePayloadKind(kind: string): kind is NotificationRuleStatePayloadKind {
+  return NOTIFICATION_RULE_STATE_PAYLOAD_KIND_SET.has(kind);
+}
+
+function isNotificationRuleStateEvent(
+  event: DomainEvent
+): event is DomainEvent & { readonly payload: NotificationRuleStateEventPayload } {
+  return isNotificationRuleStatePayloadKind(domainEventPayloadKind(event));
 }
 
 export function normalizeNotificationRule(

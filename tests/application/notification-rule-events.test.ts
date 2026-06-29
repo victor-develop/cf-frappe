@@ -106,6 +106,19 @@ describe("notification rule events", () => {
     expect(replayed).toMatchObject({ tenantId: "acme", doctypeName: "Note", version: 2, rules: [] });
   });
 
+  it("folds notification rule state by payload kind when event type names are custom", () => {
+    const misleadingUnrelated = otherEvent({ kind: "DocumentDeleted" }, "NotificationRuleSaved");
+    const customTypedSaved = {
+      ...savedEvent(2, rule),
+      type: "NoteNotificationConfigured"
+    };
+
+    const state = foldNotificationRules("acme", "Note", [misleadingUnrelated, customTypedSaved]);
+
+    expect(state.version).toBe(2);
+    expect(state.rules.map((entry) => entry.rule.name)).toEqual(["Managers on updates"]);
+  });
+
   it("filters notification rule events by occurrence time for delivery-time reads", () => {
     const events = [
       savedEvent(1, rule, "2026-01-01T00:00:00.000Z"),
