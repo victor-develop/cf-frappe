@@ -1,4 +1,5 @@
 import {
+  foldRoleCatalog,
   isRoleEvent,
   isRolePayloadKind,
   roleCreatedPayload,
@@ -94,6 +95,25 @@ describe("role events", () => {
     expect(isRolePayloadKind("DocumentDeleted")).toBe(false);
     expect(isRoleEvent(created)).toBe(true);
     expect(isRoleEvent(event({ kind: "DocumentDeleted" }))).toBe(false);
+  });
+
+  it("folds role catalog state by payload kind when event type names are custom", () => {
+    const misleadingUnrelated = event({ kind: "DocumentDeleted" }, "RoleCreated");
+    const customTypedRole = {
+      ...event(roleCreatedPayload({ role: "Support Lead", enabled: true }), "SupportRoleProvisioned"),
+      sequence: 2
+    };
+
+    const state = foldRoleCatalog("acme", [misleadingUnrelated, customTypedRole]);
+
+    expect(state.version).toBe(2);
+    expect(state.roles).toMatchObject([
+      {
+        name: "Support Lead",
+        enabled: true,
+        version: 2
+      }
+    ]);
   });
 });
 

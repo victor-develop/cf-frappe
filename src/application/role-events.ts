@@ -1,37 +1,18 @@
 import { domainEventPayloadKind } from "../core/domain-events.js";
+import {
+  ROLE_CATALOG_STATE_PAYLOAD_KINDS,
+  isRoleCatalogStatePayloadKind,
+  roleCatalogStateEventType,
+  type RoleCatalogStateEventPayload,
+  type RoleCatalogStatePayloadKind
+} from "../core/roles.js";
 import type { DomainEvent } from "../core/types.js";
 
-export type RoleEventPayload =
-  | {
-      readonly kind: "RoleCreated";
-      readonly role: string;
-      readonly enabled: boolean;
-      readonly description?: string;
-    }
-  | {
-      readonly kind: "RoleDescriptionChanged";
-      readonly role: string;
-      readonly description?: string;
-    }
-  | {
-      readonly kind: "RoleEnabled";
-      readonly role: string;
-    }
-  | {
-      readonly kind: "RoleDisabled";
-      readonly role: string;
-    };
+export type RoleEventPayload = RoleCatalogStateEventPayload;
 
-export type RolePayloadKind = RoleEventPayload["kind"];
+export type RolePayloadKind = RoleCatalogStatePayloadKind;
 
-export const ROLE_PAYLOAD_KINDS = Object.freeze([
-  "RoleCreated",
-  "RoleDescriptionChanged",
-  "RoleEnabled",
-  "RoleDisabled"
-] as const satisfies readonly RolePayloadKind[]);
-
-const ROLE_PAYLOAD_KIND_SET = new Set<string>(ROLE_PAYLOAD_KINDS);
+export const ROLE_PAYLOAD_KINDS = ROLE_CATALOG_STATE_PAYLOAD_KINDS;
 
 export interface RoleCreatedPayloadInput {
   readonly role: string;
@@ -98,11 +79,11 @@ export function roleStatusChangedPayload(
 }
 
 export function roleEventType(payload: RoleEventPayload): RolePayloadKind {
-  return payload.kind;
+  return roleCatalogStateEventType(payload);
 }
 
 export function isRolePayloadKind(kind: string): kind is RolePayloadKind {
-  return ROLE_PAYLOAD_KIND_SET.has(kind);
+  return isRoleCatalogStatePayloadKind(kind);
 }
 
 export function isRoleEvent(event: DomainEvent): event is DomainEvent<RoleEventPayload> {
