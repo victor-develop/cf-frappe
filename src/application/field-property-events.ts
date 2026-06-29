@@ -52,6 +52,10 @@ export function fieldPropertyOverrideClearedPayload(
   };
 }
 
+export function fieldPropertyEventType(payload: FieldPropertyEventPayload): FieldPropertyPayloadKind {
+  return payload.kind;
+}
+
 declare module "../core/types.js" {
   interface DomainEventPayloadMap {
     readonly FieldPropertyOverrideSaved: Extract<

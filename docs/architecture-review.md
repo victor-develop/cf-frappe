@@ -102,6 +102,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized role status payload shaping in role events so `RoleService` no longer chooses enabled versus disabled payloads inline.
 - Centralized user-account status payload shaping in user-account events so `UserAccountService` no longer chooses enabled versus disabled payloads inline.
 - Centralized role event type derivation in role events so `RoleService` no longer passes duplicate event type strings or chooses enabled versus disabled event types inline.
+- Centralized field-property event type derivation in field-property events so `FieldPropertyService` no longer passes duplicate event type strings beside payload identity.
 - Centralized readable file dashboard candidate shaping in file policy so dashboard orchestration no longer composes permission-check DTOs inline.
 - Centralized multipart completed-object reuse versus storage-completion planning in file policy so multipart orchestration no longer owns idempotent completion branching.
 - Centralized multipart completed-object read planning in file policy so multipart orchestration no longer derives object keys or upload ids before storage reads inline.

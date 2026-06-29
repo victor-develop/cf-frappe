@@ -19,6 +19,7 @@ import {
 } from "../core/types.js";
 import {
   FIELD_PROPERTY_PAYLOAD_KINDS,
+  fieldPropertyEventType,
   fieldPropertyOverrideClearedPayload,
   fieldPropertyOverrideSavedPayload,
   type FieldPropertyEventPayload
@@ -118,7 +119,6 @@ export class FieldPropertyService {
     }
     return this.appendAndFold(state, {
       actor: command.actor,
-      type: "FieldPropertyOverrideSaved",
       metadata: command.metadata,
       payload: fieldPropertyOverrideSavedPayload({
         doctypeName: doctype.name,
@@ -146,7 +146,6 @@ export class FieldPropertyService {
     }
     return this.appendAndFold(state, {
       actor: command.actor,
-      type: "FieldPropertyOverrideCleared",
       metadata: command.metadata,
       payload: fieldPropertyOverrideClearedPayload({
         doctypeName: doctype.name,
@@ -174,7 +173,6 @@ export class FieldPropertyService {
     state: FieldPropertyOverrideState,
     options: {
       readonly actor: Actor;
-      readonly type: string;
       readonly metadata: DocumentData | undefined;
       readonly payload: TPayload;
     }
@@ -184,7 +182,7 @@ export class FieldPropertyService {
       id: this.ids.next("evt_"),
       tenantId: state.tenantId,
       stream,
-      type: options.type,
+      type: fieldPropertyEventType(options.payload),
       doctype: "__FieldProperties",
       documentName: `${state.doctype}:${documentNameForPayload(options.payload)}`,
       actorId: options.actor.id,
@@ -419,7 +417,7 @@ function resolveActorTenant(actor: Actor, explicitTenantId: TenantId | undefined
   return tenantId;
 }
 
-function documentNameForPayload(payload: NewDomainEvent["payload"]): string {
+function documentNameForPayload(payload: FieldPropertyEventPayload): string {
   return "fieldName" in payload ? payload.fieldName : "override";
 }
 

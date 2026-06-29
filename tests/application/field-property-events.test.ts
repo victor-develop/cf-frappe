@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   FIELD_PROPERTY_PAYLOAD_KINDS,
+  fieldPropertyEventType,
   fieldPropertyOverrideClearedPayload,
   fieldPropertyOverrideSavedPayload,
   type FieldPropertyEventPayload
@@ -45,6 +46,26 @@ describe("field property events", () => {
       "FieldPropertyOverrideSaved",
       "FieldPropertyOverrideCleared"
     ]);
+  });
+
+  it("derives field-property event types from payload identity", () => {
+    expect(
+      fieldPropertyEventType(
+        fieldPropertyOverrideSavedPayload({
+          doctypeName: "Note",
+          fieldName: "priority",
+          overrides: { label: "Urgency" }
+        })
+      )
+    ).toBe("FieldPropertyOverrideSaved");
+    expect(
+      fieldPropertyEventType(
+        fieldPropertyOverrideClearedPayload({
+          doctypeName: "Note",
+          fieldName: "priority"
+        })
+      )
+    ).toBe("FieldPropertyOverrideCleared");
   });
 });
 
