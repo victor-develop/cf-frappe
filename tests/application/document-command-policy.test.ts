@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   canExecuteDomainCommandForRoles,
+  documentCreateValidationIssues,
+  documentDomainCommandValidationIssues,
   documentUpdateValidationIssues,
   ensureDocumentStatus,
   ensureExpectedVersion,
@@ -105,6 +107,28 @@ describe("document command policy", () => {
       unsetIssues: [],
       validationIssues: [issue("schema")]
     })).toEqual([issue("schema")]);
+  });
+
+  it("preserves document create validation issue ordering by validation stage", () => {
+    expect(documentCreateValidationIssues({
+      validationIssues: [issue("schema"), issue("hook")],
+      linkIssues: [issue("link")]
+    }).map((item) => item.code)).toEqual(["schema", "hook", "link"]);
+  });
+
+  it("preserves domain command validation issue ordering by validation stage", () => {
+    expect(documentDomainCommandValidationIssues({
+      originIssues: [issue("origin")],
+      readOnlyIssues: [issue("readonly")],
+      validationIssues: [issue("schema"), issue("hook")],
+      linkIssues: [issue("link")]
+    }).map((item) => item.code)).toEqual([
+      "origin",
+      "readonly",
+      "schema",
+      "hook",
+      "link"
+    ]);
   });
 
   it("picks configured domain command fields from input data", () => {

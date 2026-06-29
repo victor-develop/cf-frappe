@@ -88,6 +88,38 @@ export function documentUpdateValidationIssues(
   ];
 }
 
+export interface DocumentCreateValidationIssueGroups {
+  readonly validationIssues?: readonly ValidationIssue[] | undefined;
+  readonly linkIssues?: readonly ValidationIssue[] | undefined;
+}
+
+export function documentCreateValidationIssues(
+  groups: DocumentCreateValidationIssueGroups
+): readonly ValidationIssue[] {
+  return [
+    ...(groups.validationIssues ?? []),
+    ...(groups.linkIssues ?? [])
+  ];
+}
+
+export interface DocumentDomainCommandValidationIssueGroups {
+  readonly originIssues?: readonly ValidationIssue[] | undefined;
+  readonly readOnlyIssues?: readonly ValidationIssue[] | undefined;
+  readonly validationIssues?: readonly ValidationIssue[] | undefined;
+  readonly linkIssues?: readonly ValidationIssue[] | undefined;
+}
+
+export function documentDomainCommandValidationIssues(
+  groups: DocumentDomainCommandValidationIssueGroups
+): readonly ValidationIssue[] {
+  return [
+    ...(groups.originIssues ?? []),
+    ...(groups.readOnlyIssues ?? []),
+    ...(groups.validationIssues ?? []),
+    ...(groups.linkIssues ?? [])
+  ];
+}
+
 export function pickCommandFields(fields: readonly string[] | undefined, input: DocumentData): DocumentData {
   if (!fields) {
     return input;

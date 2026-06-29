@@ -46,6 +46,8 @@ import {
   mergeSnapshotFromDocument,
   normalizeUnsetFields,
   canExecuteDomainCommandForRoles,
+  documentCreateValidationIssues,
+  documentDomainCommandValidationIssues,
   documentUpdateValidationIssues,
   planDocumentCopyPolicy,
   planDocumentCreatePolicy,
@@ -550,10 +552,10 @@ export class DocumentService implements DocumentCommandExecutor {
       withFetchedFields,
       relatedDocType
     );
-    const issues = [
-      ...(await this.validate(doctype, data, relatedDocType)),
-      ...(await this.validateLinks(command.actor, tenantId, doctype, data, relatedDocType))
-    ];
+    const issues = documentCreateValidationIssues({
+      validationIssues: await this.validate(doctype, data, relatedDocType),
+      linkIssues: await this.validateLinks(command.actor, tenantId, doctype, data, relatedDocType)
+    });
     if (issues.length > 0) {
       throw validationFailed(issues);
     }
@@ -996,7 +998,12 @@ export class DocumentService implements DocumentCommandExecutor {
       : readonlyIssues(doctype, patchWithoutInternalFields, relatedDocType, data);
     const validationIssues = await this.validate(doctype, patchWithReadOnlyValues, relatedDocType, existing);
     const linkIssues = await this.validateLinks(command.actor, tenantId, doctype, patchWithReadOnlyValues, relatedDocType);
-    const issues = [...originIssues, ...readOnlyIssues, ...validationIssues, ...linkIssues];
+    const issues = documentDomainCommandValidationIssues({
+      originIssues,
+      readOnlyIssues,
+      validationIssues,
+      linkIssues
+    });
     if (issues.length > 0) {
       throw validationFailed(issues);
     }
