@@ -39,10 +39,11 @@ import type { JobRetryPort } from "../../application/job-retry-service.js";
 import type { JobScheduleService } from "../../application/job-schedule-service.js";
 import type { KanbanService } from "../../application/kanban-service.js";
 import type { NotificationRuleService } from "../../application/notification-rule-service.js";
-import { ensurePrintPdfRendererAvailable } from "../../application/print-policy.js";
+import { ensurePrintPdfRendererAvailable, ensurePrintServiceAvailable } from "../../application/print-policy.js";
 import type { PrintService } from "../../application/print-service.js";
 import type { PrintSettingsService } from "../../application/print-settings-service.js";
 import { QueryService } from "../../application/query-service.js";
+import { ensureReportServiceAvailable } from "../../application/report-policy.js";
 import type { ReportCsvExportOptions, ReportRunOptions, ReportService } from "../../application/report-service.js";
 import type { RoleService } from "../../application/role-service.js";
 import type { SavedListFilterService } from "../../application/saved-list-filter-service.js";
@@ -1919,9 +1920,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
   });
 
   app.get("/desk/reports/:report/print", async (c) => {
-    if (!options.reports) {
-      throw new FrameworkError("REPORT_NOT_FOUND", "Reports are not enabled", { status: 404 });
-    }
+    ensureReportServiceAvailable(options.reports);
     const actor = await options.actor(c.req.raw);
     const url = new URL(c.req.url);
     const result = await options.reports.runReport(actor, c.req.param("report"), {
@@ -1932,9 +1931,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
   });
 
   app.get("/desk/reports/:report/pdf", async (c) => {
-    if (!options.reports) {
-      throw new FrameworkError("REPORT_NOT_FOUND", "Reports are not enabled", { status: 404 });
-    }
+    ensureReportServiceAvailable(options.reports);
     ensurePrintPdfRendererAvailable(options.printPdfRenderer);
     const actor = await options.actor(c.req.raw);
     const url = new URL(c.req.url);
@@ -1952,9 +1949,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
   });
 
   app.get("/desk/reports/:report", async (c) => {
-    if (!options.reports) {
-      throw new FrameworkError("REPORT_NOT_FOUND", "Reports are not enabled", { status: 404 });
-    }
+    ensureReportServiceAvailable(options.reports);
     const actor = await options.actor(c.req.raw);
     const url = new URL(c.req.url);
     const doctypes = options.queries.listDoctypes(actor);
@@ -1988,9 +1983,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
   });
 
   app.get("/desk/reports/:report/export.csv", async (c) => {
-    if (!options.reports) {
-      throw new FrameworkError("REPORT_NOT_FOUND", "Reports are not enabled", { status: 404 });
-    }
+    ensureReportServiceAvailable(options.reports);
     const actor = await options.actor(c.req.raw);
     const url = new URL(c.req.url);
     const csv = await options.reports.exportReportCsv(actor, c.req.param("report"), deskReportCsvOptionsFromUrl(url));
@@ -1999,9 +1992,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
   });
 
   app.get("/desk/print/:format/:name/pdf", async (c) => {
-    if (!options.prints) {
-      throw new FrameworkError("PRINT_FORMAT_NOT_FOUND", "Print formats are not enabled", { status: 404 });
-    }
+    ensurePrintServiceAvailable(options.prints);
     ensurePrintPdfRendererAvailable(options.printPdfRenderer);
     const actor = await options.actor(c.req.raw);
     const view = await options.prints.printDocument(actor, c.req.param("format"), c.req.param("name"));
@@ -2010,9 +2001,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
   });
 
   app.get("/desk/print/:format/:name", async (c) => {
-    if (!options.prints) {
-      throw new FrameworkError("PRINT_FORMAT_NOT_FOUND", "Print formats are not enabled", { status: 404 });
-    }
+    ensurePrintServiceAvailable(options.prints);
     const actor = await options.actor(c.req.raw);
     const view = await options.prints.printDocument(actor, c.req.param("format"), c.req.param("name"));
     return html(renderPrintDocument(view));

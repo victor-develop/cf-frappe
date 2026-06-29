@@ -1,6 +1,7 @@
 import {
   canAccessPrintFormat,
   ensurePrintPdfRendererAvailable,
+  ensurePrintServiceAvailable,
   isPrintEmptyValue,
   planPrintFormatReadAccess,
   planPrintLetterheadReadAccess,
@@ -38,6 +39,22 @@ describe("print policy", () => {
       code: "BAD_REQUEST",
       message: "PDF print rendering is not configured",
       status: 400
+    });
+  });
+
+  it("guards print service availability before adapter print routes", () => {
+    expect(() => ensurePrintServiceAvailable({ printDocument: async () => ({}) })).not.toThrow();
+
+    let error: unknown;
+    try {
+      ensurePrintServiceAvailable(undefined);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: "PRINT_FORMAT_NOT_FOUND",
+      message: "Print formats are not enabled",
+      status: 404
     });
   });
 

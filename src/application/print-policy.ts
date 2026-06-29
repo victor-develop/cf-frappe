@@ -1,5 +1,5 @@
 import { can } from "../core/permissions.js";
-import { badRequest } from "../core/errors.js";
+import { badRequest, notFound } from "../core/errors.js";
 import {
   canReadPrintFormat,
   canReadPrintLetterhead,
@@ -35,6 +35,12 @@ export type PrintReadAccessDecision =
 export function ensurePrintPdfRendererAvailable<T>(renderer: T | undefined): asserts renderer is T {
   if (renderer === undefined) {
     throw badRequest("PDF print rendering is not configured");
+  }
+}
+
+export function ensurePrintServiceAvailable<T>(prints: T | undefined): asserts prints is T {
+  if (prints === undefined) {
+    throw notFound("Print formats are not enabled", "PRINT_FORMAT_NOT_FOUND");
   }
 }
 

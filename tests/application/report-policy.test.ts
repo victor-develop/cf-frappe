@@ -13,6 +13,7 @@ import {
   defineDocType,
   defineReport,
   ensureCustomReportProviderConfigured,
+  ensureReportServiceAvailable,
   isEmptyReportFilterValue,
   limitReportGroups,
   materializeReportFilterExpression,
@@ -92,6 +93,22 @@ describe("report policy", () => {
       providerName: undefined,
       provider: undefined
     })).toThrow("Custom report provider 'Document Report' is not configured");
+  });
+
+  it("guards report service availability before adapter report routes", () => {
+    expect(() => ensureReportServiceAvailable({ runReport: async () => ({}) })).not.toThrow();
+
+    let error: unknown;
+    try {
+      ensureReportServiceAvailable(undefined);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: "REPORT_NOT_FOUND",
+      message: "Reports are not enabled",
+      status: 404
+    });
   });
 
   it("shapes report summary values with labels, fields, types, and indicators", () => {

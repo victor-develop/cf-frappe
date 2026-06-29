@@ -1,4 +1,4 @@
-import { badRequest } from "../core/errors.js";
+import { badRequest, notFound } from "../core/errors.js";
 import { can } from "../core/permissions.js";
 import { csvLine } from "./csv.js";
 import type {
@@ -108,6 +108,12 @@ export interface ReportOrderInput {
 
 const EMPTY_CHART_COLORS: readonly string[] = Object.freeze([]);
 const DEFAULT_CSV_EXPORT_LIMIT = 10_000;
+
+export function ensureReportServiceAvailable<T>(reports: T | undefined): asserts reports is T {
+  if (reports === undefined) {
+    throw notFound("Reports are not enabled", "REPORT_NOT_FOUND");
+  }
+}
 
 export function planReportReadAccess(command: {
   readonly actor: Actor;

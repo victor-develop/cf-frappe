@@ -115,18 +115,20 @@ describe("Desk app", () => {
       readonly realtime?: boolean;
       readonly documentShares?: boolean;
       readonly printPdfRenderer?: PrintPdfRenderer;
+      readonly prints?: boolean;
+      readonly reports?: boolean;
     } = {}
   ) {
     const services = createServices(["e1", "e2", "e3", "e4"]);
     const app = createDeskApp({
       registry: services.registry,
       documents: services.documents,
-      prints: services.prints,
+      ...(options.prints === false ? {} : { prints: services.prints }),
       printSettings: services.printSettings,
       ...(options.printPdfRenderer === undefined ? {} : { printPdfRenderer: options.printPdfRenderer }),
       queries: services.queries,
       ...(options.documentShares === false ? {} : { documentShares: services.documentShares }),
-      reports: services.reports,
+      ...(options.reports === false ? {} : { reports: services.reports }),
       timeline: services.history,
       savedFilters: services.savedFilters,
       savedReports: services.savedReports,
@@ -1212,6 +1214,22 @@ describe("Desk app", () => {
 
     expect(response.status).toBe(400);
     await expect(response.text()).resolves.toContain("PDF print rendering is not configured");
+  });
+
+  it("uses the report policy error for Desk report routes when reports are disabled", async () => {
+    const { app } = makeDesk(owner, { reports: false, printPdfRenderer: new RecordingPrintPdfRenderer() });
+    const paths = [
+      "/desk/reports/Open%20Notes",
+      "/desk/reports/Open%20Notes/print",
+      "/desk/reports/Open%20Notes/pdf",
+      "/desk/reports/Open%20Notes/export.csv"
+    ];
+
+    for (const path of paths) {
+      const response = await app.request(path);
+      expect(response.status).toBe(404);
+      await expect(response.text()).resolves.toContain("Reports are not enabled");
+    }
   });
 
   it("builds, runs, exports, and deletes saved reports in Desk", async () => {
@@ -7571,6 +7589,16 @@ describe("Desk app", () => {
 
     expect(response.status).toBe(400);
     await expect(response.text()).resolves.toContain("PDF print rendering is not configured");
+  });
+
+  it("uses the print policy error for Desk document print routes when prints are disabled", async () => {
+    const { app } = makeDesk(owner, { prints: false, printPdfRenderer: new RecordingPrintPdfRenderer() });
+
+    for (const path of ["/desk/print/Note%20Standard/Desk%20Print", "/desk/print/Note%20Standard/Desk%20Print/pdf"]) {
+      const response = await app.request(path);
+      expect(response.status).toBe(404);
+      await expect(response.text()).resolves.toContain("Print formats are not enabled");
+    }
   });
 
   it("creates documents from generated forms", async () => {
