@@ -25,6 +25,19 @@ export function resolveUserAccountActorTenant(actor: Actor, explicitTenantId: Te
   return tenantId;
 }
 
+export function resolveUserAccountSessionTenant(actor: Actor): TenantId {
+  return actor.tenantId ?? DEFAULT_TENANT_ID;
+}
+
+export function ensureUserAccountSessionCurrent(
+  state: UserAccountState,
+  accountVersion: number | undefined
+): void {
+  if (accountVersion === undefined || !state.exists || !state.enabled || state.version !== accountVersion) {
+    throw permissionDenied("Session is no longer valid");
+  }
+}
+
 export function normalizeRequiredUserAccountText(value: string, label: string): string {
   const normalized = value.trim();
   if (normalized.length === 0) {

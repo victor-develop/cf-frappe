@@ -46,6 +46,7 @@ import {
   emailVerificationPatch,
   ensureUserAccountAdmin,
   ensureUserAccountExpectedVersion,
+  ensureUserAccountSessionCurrent,
   ensureUserRecoveryChallengeUsable,
   normalizeRecoveryExpirySeconds,
   normalizeOptionalUserEmail,
@@ -56,6 +57,7 @@ import {
   normalizeUserRecoveryToken,
   recoveryExpiresAtFrom,
   resolveUserAccountActorTenant,
+  resolveUserAccountSessionTenant,
   userAccountRolesEqual
 } from "./user-account-policy.js";
 import type { UserRoleValidator } from "./user-role-validator.js";
@@ -566,14 +568,9 @@ export class UserAccountService {
   }
 
   async resolveSessionActor(actor: Actor, accountVersion: number | undefined): Promise<Actor> {
-    if (accountVersion === undefined) {
-      throw permissionDenied("Session is no longer valid");
-    }
-    const tenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
+    const tenantId = resolveUserAccountSessionTenant(actor);
     const state = await this.stateFor(tenantId, normalizeRequiredUserAccountText(actor.id, "User id"));
-    if (!state.exists || !state.enabled || state.version !== accountVersion) {
-      throw permissionDenied("Session is no longer valid");
-    }
+    ensureUserAccountSessionCurrent(state, accountVersion);
     return userAccountActor(state);
   }
 

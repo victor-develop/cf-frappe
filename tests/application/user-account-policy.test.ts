@@ -1,6 +1,7 @@
 import {
   ensureUserAccountAdmin,
   ensureUserAccountExpectedVersion,
+  ensureUserAccountSessionCurrent,
   ensureUserRecoveryChallengeUsable,
   emailVerificationPatch,
   MAX_ACCOUNT_RECOVERY_EXPIRY_SECONDS,
@@ -15,6 +16,7 @@ import {
   recoveryChallengeExpired,
   recoveryExpiresAtFrom,
   resolveUserAccountActorTenant,
+  resolveUserAccountSessionTenant,
   SYSTEM_MANAGER_ROLE,
   userAccountRolesEqual
 } from "../../src";
@@ -52,6 +54,23 @@ describe("user account policy", () => {
       { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },
       "other"
     )).toThrow("Actor 'admin@example.com' cannot manage user accounts for tenant 'other'");
+  });
+
+  it("resolves session tenants from actor scope", () => {
+    expect(resolveUserAccountSessionTenant({ id: "owner@example.com", roles: ["User"] })).toBe("default");
+    expect(resolveUserAccountSessionTenant({ id: "owner@example.com", roles: ["User"], tenantId: "acme" })).toBe("acme");
+  });
+
+  it("guards session account freshness and availability", () => {
+    expect(() => ensureUserAccountSessionCurrent(accountState({ version: 3 }), 3)).not.toThrow();
+    expect(() => ensureUserAccountSessionCurrent(accountState({ version: 3 }), undefined))
+      .toThrow("Session is no longer valid");
+    expect(() => ensureUserAccountSessionCurrent(accountState({ exists: false, version: 3 }), 3))
+      .toThrow("Session is no longer valid");
+    expect(() => ensureUserAccountSessionCurrent(accountState({ enabled: false, version: 3 }), 3))
+      .toThrow("Session is no longer valid");
+    expect(() => ensureUserAccountSessionCurrent(accountState({ version: 3 }), 2))
+      .toThrow("Session is no longer valid");
   });
 
   it("normalizes required account text fields", () => {
