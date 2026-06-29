@@ -18,6 +18,7 @@ import {
 import {
   roleCreatedPayload,
   roleDescriptionChangedPayload,
+  roleEventType,
   roleStatusChangedPayload,
   type RoleEventPayload
 } from "./role-events.js";
@@ -102,7 +103,6 @@ export class RoleService {
     }
     return this.appendAndFold(state, {
       actor: command.actor,
-      type: "RoleCreated",
       metadata: command.metadata,
       payload: roleCreatedPayload({
         role,
@@ -125,7 +125,6 @@ export class RoleService {
     }
     return this.appendAndFold(state, {
       actor: command.actor,
-      type: "RoleDescriptionChanged",
       metadata: command.metadata,
       payload: roleDescriptionChangedPayload({
         role,
@@ -154,7 +153,6 @@ export class RoleService {
     }
     return this.appendAndFold(state, {
       actor: command.actor,
-      type: enabled ? "RoleEnabled" : "RoleDisabled",
       metadata: command.metadata,
       payload: roleStatusChangedPayload({ role, enabled })
     });
@@ -168,7 +166,6 @@ export class RoleService {
     state: RoleCatalogState,
     options: {
       readonly actor: Actor;
-      readonly type: string;
       readonly metadata: DocumentData | undefined;
       readonly payload: TPayload;
     }
@@ -178,7 +175,7 @@ export class RoleService {
       id: this.ids.next("evt_"),
       tenantId: state.tenantId,
       stream,
-      type: options.type,
+      type: roleEventType(options.payload),
       doctype: "__Roles",
       documentName: "catalog",
       actorId: options.actor.id,

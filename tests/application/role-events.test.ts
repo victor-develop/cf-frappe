@@ -3,6 +3,7 @@ import {
   roleDescriptionChangedPayload,
   roleDisabledPayload,
   roleEnabledPayload,
+  roleEventType,
   roleStatusChangedPayload
 } from "../../src";
 import type { RoleEventPayload } from "../../src";
@@ -64,6 +65,11 @@ describe("role events", () => {
       kind: "RoleDisabled",
       role: "Support Lead"
     });
+  });
+
+  it("derives role event types from payload identity", () => {
+    expect(roleEventType(roleCreatedPayload({ role: "Support Lead", enabled: true }))).toBe("RoleCreated");
+    expect(roleEventType(roleStatusChangedPayload({ role: "Support Lead", enabled: false }))).toBe("RoleDisabled");
   });
 });
 

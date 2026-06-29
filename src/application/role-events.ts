@@ -83,6 +83,10 @@ export function roleStatusChangedPayload(
   return input.enabled ? roleEnabledPayload(input) : roleDisabledPayload(input);
 }
 
+export function roleEventType(payload: RoleEventPayload): RoleEventPayload["kind"] {
+  return payload.kind;
+}
+
 declare module "../core/types.js" {
   interface DomainEventPayloadMap {
     readonly RoleCreated: Extract<RoleEventPayload, { readonly kind: "RoleCreated" }>;
