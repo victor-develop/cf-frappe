@@ -8,6 +8,8 @@ import {
   documentStatusChangedPayload,
   documentUpdatedPayload,
   isDocumentCreatedEvent,
+  isDocumentLifecycleEvent,
+  isDocumentLifecyclePayloadKind,
   requireFirstSavedEvent,
   requireLiveDocumentSnapshot,
   requireSavedEvent,
@@ -123,6 +125,28 @@ describe("document lifecycle events", () => {
     });
   });
 
+  it("narrows document lifecycle events by payload kind when event type names are custom", () => {
+    const imported = {
+      ...createdEvent,
+      type: "NoteImported"
+    };
+
+    expect(isDocumentLifecyclePayloadKind("DocumentCreated")).toBe(true);
+    expect(isDocumentLifecyclePayloadKind("DocumentDeliveryOutboxEnqueued")).toBe(false);
+    expect(isDocumentLifecycleEvent(imported)).toBe(true);
+    expect(isDocumentLifecycleEvent(otherEvent({
+      kind: "DocumentDeliveryOutboxEnqueued",
+      outboxId: "evt_source:notification",
+      target: "notification",
+      sourceEventId: "evt_source",
+      sourceEventType: "NoteCreated",
+      payloadKind: "DocumentCreated",
+      doctype: "Note",
+      documentName: "NOTE-1",
+      actorId: "owner@example.com"
+    }))).toBe(false);
+  });
+
   it("rejects non-create events for create snapshot projection", () => {
     expect(() =>
       snapshotFromDocumentCreatedEvent({
@@ -217,6 +241,22 @@ type DocumentLifecycleMapPayload =
 
 function lifecycleMapPayload(payload: DocumentLifecycleMapPayload): DocumentEventPayload {
   return payload;
+}
+
+function otherEvent(payload: DomainEvent["payload"], type: string = payload.kind): DomainEvent {
+  return {
+    id: "evt_other",
+    tenantId: "tenant_a",
+    stream: "tenant_a:__DocumentDeliveryOutbox:deliveries",
+    sequence: 1,
+    type,
+    doctype: "__DocumentDeliveryOutbox",
+    documentName: "deliveries",
+    actorId: "owner@example.com",
+    occurredAt: "2026-06-28T01:00:00.000Z",
+    payload,
+    metadata: {}
+  };
 }
 
 const createdEvent: DomainEvent = {

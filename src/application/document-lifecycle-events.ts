@@ -1,3 +1,4 @@
+import { domainEventPayloadKind } from "../core/domain-events.js";
 import type {
   DocTypeName,
   DocStatus,
@@ -28,13 +29,17 @@ export type DocumentLifecycleEventPayload =
       readonly kind: "DocumentCancelled";
     };
 
+export type DocumentLifecyclePayloadKind = DocumentLifecycleEventPayload["kind"];
+
 export const DOCUMENT_LIFECYCLE_PAYLOAD_KINDS = Object.freeze([
   "DocumentCreated",
   "DocumentUpdated",
   "DocumentDeleted",
   "DocumentSubmitted",
   "DocumentCancelled"
-] as const);
+] as const satisfies readonly DocumentLifecyclePayloadKind[]);
+
+const DOCUMENT_LIFECYCLE_PAYLOAD_KIND_SET = new Set<string>(DOCUMENT_LIFECYCLE_PAYLOAD_KINDS);
 
 export function documentCreatedPayload(
   data: DocumentData,
@@ -96,7 +101,15 @@ export function documentLifecycleEventType(options: DocumentLifecycleEventTypeOp
 export function isDocumentCreatedEvent(
   event: DomainEvent
 ): event is DomainEvent<Extract<DocumentLifecycleEventPayload, { readonly kind: "DocumentCreated" }>> {
-  return event.payload.kind === "DocumentCreated";
+  return domainEventPayloadKind(event) === "DocumentCreated";
+}
+
+export function isDocumentLifecyclePayloadKind(kind: string): kind is DocumentLifecyclePayloadKind {
+  return DOCUMENT_LIFECYCLE_PAYLOAD_KIND_SET.has(kind);
+}
+
+export function isDocumentLifecycleEvent(event: DomainEvent): event is DomainEvent<DocumentLifecycleEventPayload> {
+  return isDocumentLifecyclePayloadKind(domainEventPayloadKind(event));
 }
 
 export function snapshotFromDocumentCreatedEvent(event: DomainEvent): DocumentSnapshot {
