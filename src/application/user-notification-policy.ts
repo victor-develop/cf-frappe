@@ -37,6 +37,14 @@ export type UserNotificationRecordDecision =
   | { readonly status: "append" }
   | { readonly status: "noop"; readonly notification: UserNotificationRecord };
 
+export type UserNotificationLookupDecision =
+  | { readonly status: "found"; readonly notification: UserNotificationRecord }
+  | {
+      readonly status: "missing";
+      readonly message: string;
+      readonly code: "DOCUMENT_NOT_FOUND";
+    };
+
 export function planUserNotificationAccess(options: {
   readonly actor: Actor;
   readonly adminRoles: readonly string[];
@@ -65,6 +73,21 @@ export function planUserNotificationDismiss(notification: UserNotificationRecord
     return { status: "noop" };
   }
   return { status: "append" };
+}
+
+export function planUserNotificationLookup(
+  state: UserNotificationState,
+  notificationId: string
+): UserNotificationLookupDecision {
+  const notification = state.notifications.get(notificationId);
+  if (notification === undefined) {
+    return {
+      status: "missing",
+      message: `Notification '${notificationId}' was not found`,
+      code: "DOCUMENT_NOT_FOUND"
+    };
+  }
+  return { status: "found", notification };
 }
 
 export function planUserNotificationRecord(

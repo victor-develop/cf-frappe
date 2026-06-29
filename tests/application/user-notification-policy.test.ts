@@ -4,6 +4,7 @@ import {
   normalizeUserNotificationUserId,
   planUserNotificationAccess,
   planUserNotificationDismiss,
+  planUserNotificationLookup,
   planUserNotificationRecord,
   planUserNotificationRead,
   userNotificationInboxProjection
@@ -64,6 +65,20 @@ describe("user notification policy", () => {
       notification: existing
     });
     expect(planUserNotificationRecord(state([existing]), "evt_new:user:support")).toEqual({ status: "append" });
+  });
+
+  it("plans notification lookups before read and dismiss service error mapping", () => {
+    const existing = record("evt_existing:user:support");
+
+    expect(planUserNotificationLookup(state([existing]), existing.id)).toEqual({
+      status: "found",
+      notification: existing
+    });
+    expect(planUserNotificationLookup(state([existing]), "evt_missing:user:support")).toEqual({
+      status: "missing",
+      message: "Notification 'evt_missing:user:support' was not found",
+      code: "DOCUMENT_NOT_FOUND"
+    });
   });
 
   it("normalizes notification user ids", () => {

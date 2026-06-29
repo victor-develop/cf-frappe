@@ -35,6 +35,7 @@ import {
   normalizeUserNotificationInboxLimit,
   planUserNotificationAccess,
   planUserNotificationDismiss,
+  planUserNotificationLookup,
   planUserNotificationRecord,
   planUserNotificationRead,
   userNotificationInboxProjection,
@@ -221,11 +222,11 @@ export class UserNotificationService {
 
   private requireNotification(state: UserNotificationState, notificationId: string): UserNotificationRecord {
     const id = normalizeUserNotificationId(notificationId);
-    const notification = state.notifications.get(id);
-    if (!notification) {
-      throw notFound(`Notification '${id}' was not found`);
+    const decision = planUserNotificationLookup(state, id);
+    if (decision.status === "missing") {
+      throw notFound(decision.message, decision.code);
     }
-    return notification;
+    return decision.notification;
   }
 
   private async appendUserNotificationEvent(
