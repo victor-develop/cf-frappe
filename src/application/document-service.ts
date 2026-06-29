@@ -41,6 +41,7 @@ import {
 } from "./document-access-policy.js";
 import {
   ensureDocumentStatus,
+  ensureDocumentUpdateStatus,
   ensureExpectedVersion,
   ensureMergeBaseVersion,
   ensureDocumentCreateAvailable,
@@ -698,9 +699,7 @@ export class DocumentService implements DocumentCommandExecutor {
     readonly tenantId: string;
     readonly unset?: readonly string[];
   }): Promise<DocumentSnapshot> {
-    if (options.existing.docstatus !== "draft" && options.existing.docstatus !== "submitted") {
-      ensureDocumentStatus(options.existing, ["draft"], options.action);
-    }
+    ensureDocumentUpdateStatus(options.existing, options.action);
 
     const patch = options.prevalidatedPatch ??
       await this.runBeforeValidate(options.doctype, compactData(options.patch), options.existing);

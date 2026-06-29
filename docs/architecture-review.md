@@ -84,6 +84,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized AggregateCoordinator bulk failure document-name resolution through document bulk policy so Durable Object transaction failures no longer carry a local naming helper.
 - Centralized document create availability checks in document command policy so `DocumentService` no longer owns existing-live-document conflict decisions.
 - Centralized document merge disposition classification in document command policy so `DocumentService` no longer inspects merge plan structure to choose conflict, noop, or apply flow.
+- Centralized document update status gating in document command policy so `DocumentService` no longer owns draft/submitted update eligibility.
 - Centralized readable file dashboard candidate shaping in file policy so dashboard orchestration no longer composes permission-check DTOs inline.
 - Centralized multipart completed-object reuse versus storage-completion planning in file policy so multipart orchestration no longer owns idempotent completion branching.
 - Centralized multipart completed-object read planning in file policy so multipart orchestration no longer derives object keys or upload ids before storage reads inline.

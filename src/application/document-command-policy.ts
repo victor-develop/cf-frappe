@@ -58,6 +58,12 @@ export function ensureDocumentStatus(
   }
 }
 
+export function ensureDocumentUpdateStatus(document: DocumentSnapshot, action: string): void {
+  if (document.docstatus !== "draft" && document.docstatus !== "submitted") {
+    ensureDocumentStatus(document, ["draft"], action);
+  }
+}
+
 export function normalizeUnsetFields(fields: readonly string[] | undefined): readonly string[] {
   if (fields === undefined) {
     return [];

@@ -8,6 +8,7 @@ import {
   documentUpdateValidationIssues,
   ensureDocumentCreateAvailable,
   ensureDocumentStatus,
+  ensureDocumentUpdateStatus,
   ensureExpectedVersion,
   ensureMergeBaseVersion,
   mergeSnapshotFromDocument,
@@ -77,6 +78,20 @@ describe("document command policy", () => {
     expect(() => ensureDocumentStatus(snapshot, ["draft"], "submit")).not.toThrow();
     expect(() => ensureDocumentStatus({ ...snapshot, docstatus: "submitted" }, ["draft"], "update")).toThrow(
       "Cannot update Note/NOTE-1 while it is submitted"
+    );
+  });
+
+  it("allows draft and submitted documents through update status policy", () => {
+    expect(() => ensureDocumentUpdateStatus(snapshot, "update")).not.toThrow();
+    expect(() => ensureDocumentUpdateStatus({ ...snapshot, docstatus: "submitted" }, "merge")).not.toThrow();
+  });
+
+  it("rejects non-editable documents through update status policy", () => {
+    expect(() => ensureDocumentUpdateStatus({ ...snapshot, docstatus: "cancelled" }, "update")).toThrow(
+      "Cannot update Note/NOTE-1 while it is cancelled"
+    );
+    expect(() => ensureDocumentUpdateStatus({ ...snapshot, docstatus: "deleted" }, "merge")).toThrow(
+      "Cannot merge Note/NOTE-1 while it is deleted"
     );
   });
 

@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document merge disposition policy slice:
+As of the document update status policy slice:
 
 - Vitest files: `196`
-- Vitest cases: `2275`
-- Remaining gap to Frappe static markers: `509`
+- Vitest cases: `2277`
+- Remaining gap to Frappe static markers: `507`
 
 ## Implication
 
