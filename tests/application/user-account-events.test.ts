@@ -7,6 +7,8 @@ import {
   userAccountEnabledPayload,
   userAccountDocumentName,
   userAccountEvent,
+  userAuthProviderChangePayload,
+  userAuthProviderCreatedPayloads,
   userAuthProviderLinkedPayload,
   userAuthProviderSyncedPayload,
   userEmailVerificationDeliveryFailedPayload,
@@ -66,6 +68,87 @@ describe("user account events", () => {
       provider: "google",
       subject: "sub_123"
     }))).toEqual({
+      kind: "UserAuthProviderSynced",
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123"
+    });
+  });
+
+  it("builds provider-created account and link payloads together", () => {
+    const [created, linked] = userAuthProviderCreatedPayloads({
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123",
+      email: "owner@example.com",
+      roles: ["User"],
+      enabled: true,
+      emailVerifiedAt: "2026-01-01T00:00:00.000Z"
+    });
+
+    expect(userAccountPayload(created)).toEqual({
+      kind: "UserAccountCreated",
+      userId: "owner@example.com",
+      email: "owner@example.com",
+      roles: ["User"],
+      enabled: true,
+      emailVerifiedAt: "2026-01-01T00:00:00.000Z"
+    });
+    expect(userAccountPayload(linked)).toEqual({
+      kind: "UserAuthProviderLinked",
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123",
+      email: "owner@example.com",
+      roles: ["User"],
+      enabled: true,
+      emailVerifiedAt: "2026-01-01T00:00:00.000Z"
+    });
+  });
+
+  it("omits cleared provider verification from account-created payloads", () => {
+    const [created, linked] = userAuthProviderCreatedPayloads({
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123",
+      roles: ["User"],
+      enabled: true,
+      emailVerifiedAt: null
+    });
+
+    expect(userAccountPayload(created)).toEqual({
+      kind: "UserAccountCreated",
+      userId: "owner@example.com",
+      roles: ["User"],
+      enabled: true
+    });
+    expect(userAccountPayload(linked)).toEqual({
+      kind: "UserAuthProviderLinked",
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123",
+      roles: ["User"],
+      enabled: true,
+      emailVerifiedAt: null
+    });
+  });
+
+  it("selects provider link or sync payloads from link state", () => {
+    expect(userAccountPayload(userAuthProviderChangePayload({
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123"
+    }, undefined))).toEqual({
+      kind: "UserAuthProviderLinked",
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123"
+    });
+    expect(userAccountPayload(userAuthProviderChangePayload({
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123"
+    }, baseProviderLink()))).toEqual({
       kind: "UserAuthProviderSynced",
       userId: "owner@example.com",
       provider: "google",

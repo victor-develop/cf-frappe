@@ -128,6 +128,11 @@ export interface UserAuthProviderPayloadInput {
   readonly emailVerifiedAt?: string | null;
 }
 
+export interface UserAuthProviderCreatedPayloadsInput extends UserAuthProviderPayloadInput {
+  readonly roles: readonly string[];
+  readonly enabled: boolean;
+}
+
 export interface UserRolesChangedPayloadInput {
   readonly userId: string;
   readonly roles: readonly string[];
@@ -207,6 +212,31 @@ export function userAuthProviderSyncedPayload(
     ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
     ...(input.emailVerifiedAt === undefined ? {} : { emailVerifiedAt: input.emailVerifiedAt })
   };
+}
+
+export function userAuthProviderCreatedPayloads(
+  input: UserAuthProviderCreatedPayloadsInput
+): readonly [
+  Extract<UserAccountEventPayload, { readonly kind: "UserAccountCreated" }>,
+  Extract<UserAccountEventPayload, { readonly kind: "UserAuthProviderLinked" }>
+] {
+  return [
+    userAccountCreatedPayload({
+      userId: input.userId,
+      ...(input.email === undefined ? {} : { email: input.email }),
+      roles: input.roles,
+      enabled: input.enabled,
+      ...(typeof input.emailVerifiedAt === "string" ? { emailVerifiedAt: input.emailVerifiedAt } : {})
+    }),
+    userAuthProviderLinkedPayload(input)
+  ];
+}
+
+export function userAuthProviderChangePayload(
+  input: UserAuthProviderPayloadInput,
+  existingLink: UserAuthProviderLink | undefined
+): UserAuthProviderChangePayload {
+  return existingLink === undefined ? userAuthProviderLinkedPayload(input) : userAuthProviderSyncedPayload(input);
 }
 
 export function userPasswordResetCompletedPayload(
