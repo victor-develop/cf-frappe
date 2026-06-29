@@ -4,6 +4,7 @@ import {
   normalizeUserNotificationUserId,
   planUserNotificationAccess,
   planUserNotificationDismiss,
+  planUserNotificationRecord,
   planUserNotificationRead,
   userNotificationInboxProjection
 } from "../../src/application/user-notification-policy.js";
@@ -54,6 +55,15 @@ describe("user notification policy", () => {
     expect(planUserNotificationDismiss(record("evt_dismissed:user:support", { dismissed: true }))).toEqual({
       status: "noop"
     });
+  });
+
+  it("plans notification recording idempotently from folded inbox state", () => {
+    const existing = record("evt_existing:user:support");
+    expect(planUserNotificationRecord(state([existing]), existing.id)).toEqual({
+      status: "noop",
+      notification: existing
+    });
+    expect(planUserNotificationRecord(state([existing]), "evt_new:user:support")).toEqual({ status: "append" });
   });
 
   it("normalizes notification user ids", () => {

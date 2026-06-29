@@ -35,6 +35,7 @@ import {
   normalizeUserNotificationInboxLimit,
   planUserNotificationAccess,
   planUserNotificationDismiss,
+  planUserNotificationRecord,
   planUserNotificationRead,
   userNotificationInboxProjection,
   type UserNotificationInbox
@@ -166,9 +167,9 @@ export class UserNotificationService {
     const notificationId = notificationIdentity(notification);
     for (let attempt = 1; attempt <= MAX_NOTIFICATION_APPEND_ATTEMPTS; attempt += 1) {
       const state = await this.state(notification.tenantId, notification.recipientId);
-      const existing = state.notifications.get(notificationId);
-      if (existing) {
-        return existing;
+      const decision = planUserNotificationRecord(state, notificationId);
+      if (decision.status === "noop") {
+        return decision.notification;
       }
       const stream = userNotificationsStream(notification.tenantId, notification.recipientId);
       try {

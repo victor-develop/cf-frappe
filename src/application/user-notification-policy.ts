@@ -33,6 +33,10 @@ export type UserNotificationChangeDecision =
   | { readonly status: "append" }
   | { readonly status: "noop" };
 
+export type UserNotificationRecordDecision =
+  | { readonly status: "append" }
+  | { readonly status: "noop"; readonly notification: UserNotificationRecord };
+
 export function planUserNotificationAccess(options: {
   readonly actor: Actor;
   readonly adminRoles: readonly string[];
@@ -59,6 +63,17 @@ export function planUserNotificationRead(notification: UserNotificationRecord): 
 export function planUserNotificationDismiss(notification: UserNotificationRecord): UserNotificationChangeDecision {
   if (notification.dismissed) {
     return { status: "noop" };
+  }
+  return { status: "append" };
+}
+
+export function planUserNotificationRecord(
+  state: UserNotificationState,
+  notificationId: string
+): UserNotificationRecordDecision {
+  const existing = state.notifications.get(notificationId);
+  if (existing) {
+    return { status: "noop", notification: existing };
   }
   return { status: "append" };
 }
