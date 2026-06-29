@@ -6,6 +6,7 @@ import {
   createJobScheduleSavedEvent,
   foldJobScheduleDefinitions,
   foldJobScheduleOverrides,
+  isJobScheduleEventPayloadKind,
   jobScheduleDeletedPayload,
   jobScheduleDefinitionKey,
   jobScheduleDefinitionsStream,
@@ -160,6 +161,24 @@ describe("job schedule events", () => {
         kind: "JobScheduleOverrideCleared",
         scheduleId: "daily"
       }
+    });
+  });
+
+  it("matches runtime schedule event payload kinds independently from event type names", () => {
+    const event = scheduleEvent(1, "CustomScheduleSaved", {
+      kind: "JobScheduleSaved",
+      scheduleId: "runtime-daily",
+      cron: "0 0 * * *",
+      jobName: "reports.daily",
+      tenantId: "acme",
+      enabled: true
+    });
+
+    expect(isJobScheduleEventPayloadKind(event, "JobScheduleSaved")).toBe(true);
+    expect(isJobScheduleEventPayloadKind(event, "JobScheduleDeleted")).toBe(false);
+    expect(foldJobScheduleDefinitions([event]).schedules.get(jobScheduleDefinitionKey("acme", "runtime-daily"))).toMatchObject({
+      id: "runtime-daily",
+      jobName: "reports.daily"
     });
   });
 

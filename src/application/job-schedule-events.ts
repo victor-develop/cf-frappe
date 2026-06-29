@@ -255,13 +255,20 @@ export function jobScheduleDefinitionKey(tenantId: TenantId, scheduleId: string)
   return JSON.stringify([tenantId, scheduleId]);
 }
 
+export function isJobScheduleEventPayloadKind<TKind extends JobScheduleEventPayload["kind"]>(
+  event: DomainEvent,
+  kind: TKind
+): event is DomainEvent<Extract<JobScheduleEventPayload, { readonly kind: TKind }>> {
+  return event.payload.kind === kind;
+}
+
 export function foldJobScheduleOverrides(
   tenantId: TenantId,
   events: readonly DomainEvent[]
 ): JobScheduleOverrideState {
   const overrides = new Map<string, JobScheduleOverrideRecord>();
   for (const event of events) {
-    if (event.payload.kind === "JobScheduleOverrideSet") {
+    if (isJobScheduleEventPayloadKind(event, "JobScheduleOverrideSet")) {
       const current = overrides.get(event.payload.scheduleId);
       overrides.set(event.payload.scheduleId, {
         ...current,
@@ -272,7 +279,7 @@ export function foldJobScheduleOverrides(
       });
       continue;
     }
-    if (event.payload.kind === "JobSchedulePaused") {
+    if (isJobScheduleEventPayloadKind(event, "JobSchedulePaused")) {
       const current = overrides.get(event.payload.scheduleId);
       overrides.set(event.payload.scheduleId, {
         ...current,
@@ -283,7 +290,7 @@ export function foldJobScheduleOverrides(
       });
       continue;
     }
-    if (event.payload.kind === "JobScheduleOverrideCleared") {
+    if (isJobScheduleEventPayloadKind(event, "JobScheduleOverrideCleared")) {
       overrides.delete(event.payload.scheduleId);
     }
   }
@@ -297,7 +304,7 @@ export function foldJobScheduleOverrides(
 export function foldJobScheduleDefinitions(events: readonly DomainEvent[]): JobScheduleDefinitionState {
   const schedules = new Map<string, RuntimeJobScheduleRecord>();
   for (const event of events) {
-    if (event.payload.kind === "JobScheduleSaved") {
+    if (isJobScheduleEventPayloadKind(event, "JobScheduleSaved")) {
       schedules.set(jobScheduleDefinitionKey(event.payload.tenantId, event.payload.scheduleId), {
         id: event.payload.scheduleId,
         cron: event.payload.cron,
@@ -313,7 +320,7 @@ export function foldJobScheduleDefinitions(events: readonly DomainEvent[]): JobS
       });
       continue;
     }
-    if (event.payload.kind === "JobScheduleDeleted") {
+    if (isJobScheduleEventPayloadKind(event, "JobScheduleDeleted")) {
       schedules.delete(jobScheduleDefinitionKey(event.payload.tenantId, event.payload.scheduleId));
     }
   }
