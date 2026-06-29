@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the job history policy slice:
+As of the job schedule policy slice:
 
-- Vitest files: `176`
-- Vitest cases: `2053`
-- Remaining gap to Frappe static markers: `731`
+- Vitest files: `177`
+- Vitest cases: `2058`
+- Remaining gap to Frappe static markers: `726`
 
 ## Implication
 

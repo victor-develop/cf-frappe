@@ -20,6 +20,11 @@ import {
   MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH,
   type JobMessage
 } from "../ports/job-queue.js";
+import {
+  canInspectJobSchedule,
+  planJobScheduleAccess,
+  planJobScheduleDispatch
+} from "./job-schedule-policy.js";
 
 export type { JobScheduleEventPayload } from "./job-schedule-events.js";
 
@@ -232,7 +237,7 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
     ]);
     return {
       schedules: this.summarizeSchedules(overrides, definitions)
-        .filter((schedule) => canInspectSchedule(schedule, tenantId))
+        .filter((schedule) => canInspectJobSchedule(schedule, tenantId))
         .filter((schedule) => filters.cron === undefined || schedule.cron === filters.cron)
         .filter((schedule) => filters.jobName === undefined || schedule.jobName === filters.jobName),
       filters
@@ -245,20 +250,12 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       throw notFound("Job schedule dispatch is not enabled", "JOB_SCHEDULE_NOT_FOUND");
     }
     const { schedule, summary } = await this.requireSchedule(scheduleId, tenantId);
-    if (!canInspectSchedule(summary, tenantId)) {
-      throw notFound(`Job schedule '${scheduleId}' was not found`, "JOB_SCHEDULE_NOT_FOUND");
+    const decision = planJobScheduleDispatch({ scheduleId, tenantId, summary });
+    if (decision.status === "not-found") {
+      throw notFound(decision.message, "JOB_SCHEDULE_NOT_FOUND");
     }
-    if (summary.dynamic.tenantId) {
-      throw badRequest("Dynamic tenant job schedules cannot be manually dispatched");
-    }
-    if (summary.dynamic.enabled) {
-      throw badRequest("Dynamic enabled job schedules cannot be manually dispatched");
-    }
-    if (!summary.enabled) {
-      throw badRequest("Disabled job schedules cannot be manually dispatched");
-    }
-    if (!summary.registered) {
-      throw badRequest(`Scheduled job '${schedule.jobName}' is not registered`);
+    if (decision.status === "reject") {
+      throw badRequest(decision.message);
     }
     const message = await this.runner.run(effectiveSchedule(schedule, summary) as TSchedule, actor);
     return { schedule: summary, message };
@@ -532,7 +529,7 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
     const tenantId = this.authorize(actor, explicitTenantId);
     const events = this.requireOverrides();
     const { schedule, index, summary } = await this.requireSchedule(scheduleId, tenantId);
-    if (!canInspectSchedule(summary, tenantId)) {
+    if (!canInspectJobSchedule(summary, tenantId)) {
       throw notFound(`Job schedule '${scheduleId}' was not found`, "JOB_SCHEDULE_NOT_FOUND");
     }
     if (summary.source === "runtime") {
@@ -558,15 +555,15 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
   }
 
   private authorize(actor: Actor, explicitTenantId?: TenantId): TenantId {
-    if (!this.adminRoles.some((role) => actor.roles.includes(role))) {
-      throw permissionDenied(`Actor '${actor.id}' cannot inspect job schedules`);
+    const decision = planJobScheduleAccess({
+      actor,
+      adminRoles: this.adminRoles,
+      ...(explicitTenantId === undefined ? {} : { explicitTenantId })
+    });
+    if (decision.status === "deny") {
+      throw permissionDenied(decision.message);
     }
-    const actorTenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
-    const tenantId = explicitTenantId ?? actorTenantId;
-    if (tenantId !== actorTenantId) {
-      throw permissionDenied(`Actor '${actor.id}' cannot inspect job schedules for tenant '${tenantId}'`);
-    }
-    return tenantId;
+    return decision.tenantId;
   }
 
   private async requireSchedule(scheduleId: string, tenantId: TenantId): Promise<{
@@ -722,13 +719,6 @@ function staticTenantId(schedule: JobScheduleDefinitionForAdmin): TenantId | und
     return undefined;
   }
   return typeof schedule.tenantId === "string" ? schedule.tenantId : DEFAULT_TENANT_ID;
-}
-
-function canInspectSchedule(schedule: JobScheduleSummary, tenantId: TenantId): boolean {
-  if (schedule.dynamic.tenantId) {
-    return tenantId === DEFAULT_TENANT_ID;
-  }
-  return schedule.tenantId === tenantId;
 }
 
 function scheduleIdentity(schedule: JobScheduleDefinitionForAdmin, index: number): string {
