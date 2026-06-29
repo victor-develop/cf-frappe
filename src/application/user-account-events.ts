@@ -1,3 +1,12 @@
+import { foldUserAccount, type UserAccountState } from "../core/user-accounts.js";
+import type {
+  DocumentData,
+  DomainEvent,
+  NewDomainEvent,
+  StreamName,
+  TenantId
+} from "../core/types.js";
+
 export type UserAccountEventPayload =
   | {
       readonly kind: "UserAccountCreated";
@@ -78,6 +87,22 @@ export type UserAccountEventPayload =
       readonly kind: "UserAccountDisabled";
       readonly userId: string;
     };
+
+export const USER_ACCOUNT_PAYLOAD_KINDS = Object.freeze([
+  "UserAccountCreated",
+  "UserAuthProviderLinked",
+  "UserAuthProviderSynced",
+  "UserPasswordChanged",
+  "UserPasswordResetRequested",
+  "UserPasswordResetCompleted",
+  "UserPasswordResetDeliveryFailed",
+  "UserEmailVerificationRequested",
+  "UserEmailVerified",
+  "UserEmailVerificationDeliveryFailed",
+  "UserRolesChanged",
+  "UserAccountEnabled",
+  "UserAccountDisabled"
+] as const);
 
 export interface UserPasswordChangedPayloadInput {
   readonly userId: string;
@@ -272,6 +297,46 @@ export function userAccountDisabledPayload(
     kind: "UserAccountDisabled",
     userId: input.userId
   };
+}
+
+export interface UserAccountEventOptions<TPayload extends UserAccountEventPayload> {
+  readonly id: string;
+  readonly tenantId: TenantId;
+  readonly stream: StreamName;
+  readonly actorId: string;
+  readonly occurredAt: string;
+  readonly payload: TPayload;
+  readonly metadata?: DocumentData;
+}
+
+export function userAccountEvent<TPayload extends UserAccountEventPayload>(
+  options: UserAccountEventOptions<TPayload>
+): NewDomainEvent<TPayload> {
+  return {
+    id: options.id,
+    tenantId: options.tenantId,
+    stream: options.stream,
+    type: options.payload.kind,
+    doctype: "__UserAccounts",
+    documentName: userAccountDocumentName(options.payload),
+    actorId: options.actorId,
+    occurredAt: options.occurredAt,
+    payload: options.payload,
+    metadata: options.metadata ?? {}
+  };
+}
+
+export function userAccountDocumentName(payload: UserAccountEventPayload): string {
+  return payload.userId;
+}
+
+export function replayUserAccountAppend(
+  tenantId: TenantId,
+  userId: string,
+  previousEvents: readonly DomainEvent[],
+  savedEvents: readonly DomainEvent[]
+): UserAccountState {
+  return foldUserAccount(tenantId, userId, [...previousEvents, ...savedEvents]);
 }
 
 declare module "../core/types.js" {

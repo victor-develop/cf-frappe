@@ -1,7 +1,10 @@
 import {
+  replayUserAccountAppend,
   userAccountCreatedPayload,
   userAccountDisabledPayload,
   userAccountEnabledPayload,
+  userAccountDocumentName,
+  userAccountEvent,
   userAuthProviderLinkedPayload,
   userAuthProviderSyncedPayload,
   userEmailVerificationDeliveryFailedPayload,
@@ -11,9 +14,10 @@ import {
   userPasswordResetDeliveryFailedPayload,
   userPasswordResetCompletedPayload,
   userPasswordResetRequestedPayload,
-  userRolesChangedPayload
+  userRolesChangedPayload,
+  USER_ACCOUNT_PAYLOAD_KINDS
 } from "../../src";
-import type { UserAccountEventPayload } from "../../src";
+import type { DomainEvent, UserAccountEventPayload } from "../../src";
 
 describe("user account events", () => {
   it("builds account creation payloads", () => {
@@ -160,8 +164,110 @@ describe("user account events", () => {
       userId: "owner@example.com"
     });
   });
+
+  it("creates typed user account events from payload identity", () => {
+    const payload = userPasswordChangedPayload({
+      userId: "owner@example.com",
+      passwordHash: "hash:secret-456"
+    });
+
+    expect(userAccountEvent({
+      id: "evt_account",
+      tenantId: "acme",
+      stream: "acme:__UserAccounts:owner@example.com",
+      actorId: "admin@example.com",
+      occurredAt: "2026-01-01T00:00:00.000Z",
+      payload,
+      metadata: { reason: "rotation" }
+    })).toMatchObject({
+      id: "evt_account",
+      type: "UserPasswordChanged",
+      doctype: "__UserAccounts",
+      documentName: "owner@example.com",
+      actorId: "admin@example.com",
+      payload,
+      metadata: { reason: "rotation" }
+    });
+  });
+
+  it("derives document names from user account payloads", () => {
+    expect(userAccountDocumentName(userAccountDisabledPayload({ userId: "owner@example.com" }))).toBe("owner@example.com");
+  });
+
+  it("replays appended account events against the previous stream prefix", () => {
+    const previous = [accountCreatedEvent(1)];
+    const saved = [rolesChangedEvent(2)];
+
+    expect(replayUserAccountAppend("acme", "owner@example.com", previous, saved)).toMatchObject({
+      tenantId: "acme",
+      userId: "owner@example.com",
+      version: 2,
+      roles: ["System Manager", "User"]
+    });
+  });
+
+  it("exposes the bounded user account payload kind set", () => {
+    expect(USER_ACCOUNT_PAYLOAD_KINDS).toEqual([
+      "UserAccountCreated",
+      "UserAuthProviderLinked",
+      "UserAuthProviderSynced",
+      "UserPasswordChanged",
+      "UserPasswordResetRequested",
+      "UserPasswordResetCompleted",
+      "UserPasswordResetDeliveryFailed",
+      "UserEmailVerificationRequested",
+      "UserEmailVerified",
+      "UserEmailVerificationDeliveryFailed",
+      "UserRolesChanged",
+      "UserAccountEnabled",
+      "UserAccountDisabled"
+    ]);
+  });
 });
 
 function userAccountPayload(payload: UserAccountEventPayload): UserAccountEventPayload {
   return payload;
+}
+
+function accountCreatedEvent(sequence: number): DomainEvent {
+  return {
+    id: `evt_${sequence}`,
+    tenantId: "acme",
+    stream: "acme:__UserAccounts:owner@example.com",
+    sequence,
+    type: "UserAccountCreated",
+    doctype: "__UserAccounts",
+    documentName: "owner@example.com",
+    actorId: "admin@example.com",
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    payload: {
+      kind: "UserAccountCreated",
+      userId: "owner@example.com",
+      email: "owner@example.com",
+      roles: ["User"],
+      passwordHash: "hash:secret-123",
+      enabled: true
+    },
+    metadata: {}
+  };
+}
+
+function rolesChangedEvent(sequence: number): DomainEvent {
+  return {
+    id: `evt_${sequence}`,
+    tenantId: "acme",
+    stream: "acme:__UserAccounts:owner@example.com",
+    sequence,
+    type: "UserRolesChanged",
+    doctype: "__UserAccounts",
+    documentName: "owner@example.com",
+    actorId: "admin@example.com",
+    occurredAt: "2026-01-01T00:05:00.000Z",
+    payload: {
+      kind: "UserRolesChanged",
+      userId: "owner@example.com",
+      roles: ["System Manager", "User"]
+    },
+    metadata: {}
+  };
 }

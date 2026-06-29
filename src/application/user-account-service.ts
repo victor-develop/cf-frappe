@@ -6,13 +6,13 @@ import {
   type Actor,
   type DocumentData,
   type DomainEvent,
-  type NewDomainEvent,
   type TenantId
 } from "../core/types.js";
 import {
   userAccountDisabledPayload,
   userAccountCreatedPayload,
   userAccountEnabledPayload,
+  userAccountEvent,
   userAuthProviderLinkedPayload,
   userAuthProviderSyncedPayload,
   userEmailVerificationDeliveryFailedPayload,
@@ -22,6 +22,7 @@ import {
   userPasswordResetDeliveryFailedPayload,
   userPasswordResetCompletedPayload,
   userPasswordResetRequestedPayload,
+  replayUserAccountAppend,
   userRolesChangedPayload,
   type UserAccountEventPayload
 } from "./user-account-events.js";
@@ -213,8 +214,6 @@ export class UserAccountService {
       tenantId,
       stream: userAccountsStream(tenantId, userId),
       expectedVersion: state.version,
-      type: "UserAccountCreated",
-      documentName: userId,
       actorId: command.actor.id,
       metadata: command.metadata,
       payload: userAccountCreatedPayload({
@@ -252,8 +251,6 @@ export class UserAccountService {
       tenantId,
       stream: userAccountsStream(tenantId, userId),
       expectedVersion: state.version,
-      type: "UserPasswordChanged",
-      documentName: userId,
       actorId: command.actor.id,
       metadata: command.metadata,
       payload: userPasswordChangedPayload({
@@ -279,8 +276,6 @@ export class UserAccountService {
       tenantId,
       stream: userAccountsStream(tenantId, userId),
       expectedVersion: state.version,
-      type: "UserRolesChanged",
-      documentName: userId,
       actorId: command.actor.id,
       metadata: command.metadata,
       payload: userRolesChangedPayload({
@@ -341,12 +336,11 @@ export class UserAccountService {
         tenantId,
         stream: userAccountsStream(tenantId, userId),
         expectedVersion: state.version,
-        documentName: userId,
         actorId: command.actor.id,
         metadata: command.metadata,
         events: [
-          { type: "UserAccountCreated", payload: createdPayload },
-          { type: "UserAuthProviderLinked", payload: linkedPayload }
+          { payload: createdPayload },
+          { payload: linkedPayload }
         ]
       });
       return publicUserAccount(foldUserAccount(tenantId, userId, saved));
@@ -375,12 +369,10 @@ export class UserAccountService {
       tenantId,
       stream: userAccountsStream(tenantId, userId),
       expectedVersion: state.version,
-      documentName: userId,
       actorId: command.actor.id,
       metadata: command.metadata,
       events: [
         {
-          type: link === undefined ? "UserAuthProviderLinked" : "UserAuthProviderSynced",
           payload
         }
       ]
@@ -428,8 +420,6 @@ export class UserAccountService {
         tenantId,
         stream: userAccountsStream(tenantId, userId),
         expectedVersion: state.version,
-        type: "UserPasswordResetRequested",
-        documentName: userId,
         actorId: RECOVERY_ACTOR_ID,
         metadata: command.metadata,
         payload: userPasswordResetRequestedPayload({
@@ -451,7 +441,6 @@ export class UserAccountService {
         tenantId,
         userId,
         expectedVersion: lastSequence(saved, state.version),
-        type: "UserPasswordResetDeliveryFailed",
         metadata: command.metadata,
         payload: userPasswordResetDeliveryFailedPayload({
           userId
@@ -477,8 +466,6 @@ export class UserAccountService {
       tenantId,
       stream: userAccountsStream(tenantId, userId),
       expectedVersion: state.version,
-      type: "UserPasswordResetCompleted",
-      documentName: userId,
       actorId: RECOVERY_ACTOR_ID,
       metadata: command.metadata,
       payload: userPasswordResetCompletedPayload({
@@ -507,8 +494,6 @@ export class UserAccountService {
         tenantId,
         stream: userAccountsStream(tenantId, userId),
         expectedVersion: state.version,
-        type: "UserEmailVerificationRequested",
-        documentName: userId,
         actorId: RECOVERY_ACTOR_ID,
         metadata: command.metadata,
         payload: userEmailVerificationRequestedPayload({
@@ -531,7 +516,6 @@ export class UserAccountService {
         tenantId,
         userId,
         expectedVersion: lastSequence(saved, state.version),
-        type: "UserEmailVerificationDeliveryFailed",
         metadata: command.metadata,
         payload: userEmailVerificationDeliveryFailedPayload({
           userId,
@@ -557,8 +541,6 @@ export class UserAccountService {
       tenantId,
       stream: userAccountsStream(tenantId, userId),
       expectedVersion: state.version,
-      type: "UserEmailVerified",
-      documentName: userId,
       actorId: RECOVERY_ACTOR_ID,
       metadata: command.metadata,
       payload: userEmailVerifiedPayload({
@@ -594,8 +576,6 @@ export class UserAccountService {
       tenantId,
       stream: userAccountsStream(tenantId, userId),
       expectedVersion: state.version,
-      type: enabled ? "UserAccountEnabled" : "UserAccountDisabled",
-      documentName: userId,
       actorId: command.actor.id,
       metadata: command.metadata,
       payload: enabled ? userAccountEnabledPayload({ userId }) : userAccountDisabledPayload({ userId })
@@ -610,10 +590,11 @@ export class UserAccountService {
     saved: readonly DomainEvent[]
   ): Promise<UserAccount> {
     return publicUserAccount(
-      foldUserAccount(
+      replayUserAccountAppend(
         tenantId,
         userId,
-        [...(await this.events.readStream(userAccountsStream(tenantId, userId), { maxSequence: previousVersion })), ...saved]
+        await this.events.readStream(userAccountsStream(tenantId, userId), { maxSequence: previousVersion }),
+        saved
       )
     );
   }
@@ -622,8 +603,6 @@ export class UserAccountService {
     readonly tenantId: TenantId;
     readonly stream: string;
     readonly expectedVersion: number;
-    readonly type: string;
-    readonly documentName: string;
     readonly actorId: string;
     readonly metadata: DocumentData | undefined;
     readonly payload: TPayload;
@@ -632,10 +611,9 @@ export class UserAccountService {
       tenantId: options.tenantId,
       stream: options.stream,
       expectedVersion: options.expectedVersion,
-      documentName: options.documentName,
       actorId: options.actorId,
       metadata: options.metadata,
-      events: [{ type: options.type, payload: options.payload }]
+      events: [{ payload: options.payload }]
     });
   }
 
@@ -643,11 +621,9 @@ export class UserAccountService {
     readonly tenantId: TenantId;
     readonly stream: string;
     readonly expectedVersion: number;
-    readonly documentName: string;
     readonly actorId: string;
     readonly metadata: DocumentData | undefined;
     readonly events: readonly {
-      readonly type: string;
       readonly payload: UserAccountEventPayload;
     }[];
   }) {
@@ -655,17 +631,14 @@ export class UserAccountService {
     return this.events.append(
       options.stream,
       options.expectedVersion,
-      options.events.map<NewDomainEvent<UserAccountEventPayload>>((item) => ({
+      options.events.map((item) => userAccountEvent({
         id: this.ids.next("evt_"),
         tenantId: options.tenantId,
         stream: options.stream,
-        type: item.type,
-        doctype: "__UserAccounts",
-        documentName: options.documentName,
         actorId: options.actorId,
         occurredAt,
         payload: item.payload,
-        metadata: options.metadata ?? {}
+        ...(options.metadata === undefined ? {} : { metadata: options.metadata })
       }))
     );
   }
@@ -674,7 +647,6 @@ export class UserAccountService {
     readonly tenantId: TenantId;
     readonly userId: string;
     readonly expectedVersion: number;
-    readonly type: string;
     readonly metadata: DocumentData | undefined;
     readonly payload: TPayload;
   }): Promise<void> {
@@ -683,8 +655,6 @@ export class UserAccountService {
         tenantId: options.tenantId,
         stream: userAccountsStream(options.tenantId, options.userId),
         expectedVersion: options.expectedVersion,
-        type: options.type,
-        documentName: options.userId,
         actorId: RECOVERY_ACTOR_ID,
         metadata: options.metadata,
         payload: options.payload
