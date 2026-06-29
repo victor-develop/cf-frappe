@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Centralized user-permission state event payload-kind matching through core user-permission helpers so state folds and application event helpers share bounded payload-kind knowledge without a core-to-application dependency.
 - Centralized user-profile state event payload-kind matching through core user-profile helpers so state folds and application event helpers share bounded payload-kind knowledge without a core-to-application dependency.
 - Centralized role-catalog state event payload-kind matching through core role helpers so state folds and application event helpers share bounded payload-kind knowledge without a core-to-application dependency.
 - Centralized workflow-definition state event payload-kind matching through core workflow helpers so state folds and application event helpers share bounded payload-kind knowledge without a core-to-application dependency.

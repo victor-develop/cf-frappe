@@ -1,40 +1,28 @@
 import { domainEventPayloadKind } from "../core/domain-events.js";
-import { foldUserPermissions, type UserPermissionGrant, type UserPermissionState } from "../core/user-permissions.js";
+import {
+  USER_PERMISSION_STATE_PAYLOAD_KINDS,
+  foldUserPermissions,
+  isUserPermissionStatePayloadKind,
+  userPermissionStateEventType,
+  type UserPermissionGrant,
+  type UserPermissionState,
+  type UserPermissionStateEventPayload,
+  type UserPermissionStatePayloadKind
+} from "../core/user-permissions.js";
 import type {
   Actor,
-  DocTypeName,
   DocumentData,
-  DocumentName,
   DomainEvent,
   NewDomainEvent,
   StreamName,
   TenantId
 } from "../core/types.js";
 
-export type UserPermissionEventPayload =
-  | {
-      readonly kind: "UserPermissionAllowed";
-      readonly userId: string;
-      readonly targetDoctype: DocTypeName;
-      readonly targetName: DocumentName;
-      readonly applicableDoctypes?: readonly DocTypeName[];
-    }
-  | {
-      readonly kind: "UserPermissionRevoked";
-      readonly userId: string;
-      readonly targetDoctype: DocTypeName;
-      readonly targetName: DocumentName;
-      readonly applicableDoctypes?: readonly DocTypeName[];
-    };
+export type UserPermissionEventPayload = UserPermissionStateEventPayload;
 
-export type UserPermissionPayloadKind = UserPermissionEventPayload["kind"];
+export type UserPermissionPayloadKind = UserPermissionStatePayloadKind;
 
-export const USER_PERMISSION_PAYLOAD_KINDS = Object.freeze([
-  "UserPermissionAllowed",
-  "UserPermissionRevoked"
-] as const satisfies readonly UserPermissionPayloadKind[]);
-
-const USER_PERMISSION_PAYLOAD_KIND_SET = new Set<string>(USER_PERMISSION_PAYLOAD_KINDS);
+export const USER_PERMISSION_PAYLOAD_KINDS = USER_PERMISSION_STATE_PAYLOAD_KINDS;
 
 export interface UserPermissionPayloadOptions {
   readonly kind: UserPermissionEventPayload["kind"];
@@ -80,11 +68,11 @@ export function userPermissionEvent<TPayload extends UserPermissionEventPayload>
 }
 
 export function userPermissionEventType(payload: UserPermissionEventPayload): UserPermissionPayloadKind {
-  return payload.kind;
+  return userPermissionStateEventType(payload);
 }
 
 export function isUserPermissionPayloadKind(kind: string): kind is UserPermissionPayloadKind {
-  return USER_PERMISSION_PAYLOAD_KIND_SET.has(kind);
+  return isUserPermissionStatePayloadKind(kind);
 }
 
 export function isUserPermissionEvent(event: DomainEvent): event is DomainEvent<UserPermissionEventPayload> {

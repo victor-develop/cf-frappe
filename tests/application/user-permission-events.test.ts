@@ -122,6 +122,19 @@ describe("user permission events", () => {
     expect(isUserPermissionEvent(imported)).toBe(true);
     expect(isUserPermissionEvent(event({ kind: "DocumentDeleted" }))).toBe(false);
   });
+
+  it("folds user permission state by payload kind when event type names are custom", () => {
+    const misleadingUnrelated = event({ kind: "DocumentDeleted" }, "UserPermissionAllowed");
+    const customTypedAllowed = {
+      ...allowedEvent(2),
+      type: "ProjectAccessGrantedByPolicy"
+    };
+
+    const state = foldUserPermissions("acme", "owner@example.com", [misleadingUnrelated, customTypedAllowed]);
+
+    expect(state.version).toBe(2);
+    expect(state.grants).toEqual([grant]);
+  });
 });
 
 function event(payload: DomainEvent["payload"], type: string = payload.kind): DomainEvent {

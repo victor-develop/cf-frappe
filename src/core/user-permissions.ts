@@ -1,3 +1,4 @@
+import { domainEventPayloadKind } from "./domain-events.js";
 import type {
   Actor,
   DocTypeDefinition,
@@ -26,6 +27,33 @@ export interface UserPermissionProvider {
   permissionsFor(actor: Actor, tenantId: TenantId): Promise<readonly UserPermissionGrant[]>;
 }
 
+export type UserPermissionStatePayloadKind =
+  | "UserPermissionAllowed"
+  | "UserPermissionRevoked";
+
+export type UserPermissionStateEventPayload =
+  | {
+      readonly kind: "UserPermissionAllowed";
+      readonly userId: string;
+      readonly targetDoctype: DocTypeName;
+      readonly targetName: DocumentName;
+      readonly applicableDoctypes?: readonly DocTypeName[];
+    }
+  | {
+      readonly kind: "UserPermissionRevoked";
+      readonly userId: string;
+      readonly targetDoctype: DocTypeName;
+      readonly targetName: DocumentName;
+      readonly applicableDoctypes?: readonly DocTypeName[];
+    };
+
+export const USER_PERMISSION_STATE_PAYLOAD_KINDS = Object.freeze([
+  "UserPermissionAllowed",
+  "UserPermissionRevoked"
+] as const satisfies readonly UserPermissionStatePayloadKind[]);
+
+const USER_PERMISSION_STATE_PAYLOAD_KIND_SET = new Set<string>(USER_PERMISSION_STATE_PAYLOAD_KINDS);
+
 export function foldUserPermissions(
   tenantId: TenantId,
   userId: string,
@@ -35,6 +63,9 @@ export function foldUserPermissions(
   let version = 0;
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     version = Math.max(version, event.sequence);
+    if (!isUserPermissionStateEvent(event)) {
+      continue;
+    }
     switch (event.payload.kind) {
       case "UserPermissionAllowed": {
         if (event.payload.userId !== userId) {
@@ -71,6 +102,22 @@ export function foldUserPermissions(
     version,
     grants: [...grants.values()].sort(compareUserPermissionGrants)
   };
+}
+
+export function userPermissionStateEventType(
+  payload: UserPermissionStateEventPayload
+): UserPermissionStatePayloadKind {
+  return payload.kind;
+}
+
+export function isUserPermissionStatePayloadKind(kind: string): kind is UserPermissionStatePayloadKind {
+  return USER_PERMISSION_STATE_PAYLOAD_KIND_SET.has(kind);
+}
+
+function isUserPermissionStateEvent(
+  event: DomainEvent
+): event is DomainEvent & { readonly payload: UserPermissionStateEventPayload } {
+  return isUserPermissionStatePayloadKind(domainEventPayloadKind(event));
 }
 
 export function normalizeUserPermissionGrant(grant: UserPermissionGrant): UserPermissionGrant {
