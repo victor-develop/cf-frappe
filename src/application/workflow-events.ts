@@ -1,3 +1,4 @@
+import { domainEventPayloadKind } from "../core/domain-events.js";
 import { foldWorkflowDefinition, type WorkflowDefinitionState } from "../core/workflow.js";
 import type {
   Actor,
@@ -21,10 +22,14 @@ export type WorkflowEventPayload =
       readonly doctypeName: DocTypeName;
     };
 
+export type WorkflowPayloadKind = WorkflowEventPayload["kind"];
+
 export const WORKFLOW_DEFINITION_PAYLOAD_KINDS = Object.freeze([
   "WorkflowDefinitionSaved",
   "WorkflowDefinitionCleared"
-] as const);
+] as const satisfies readonly WorkflowPayloadKind[]);
+
+const WORKFLOW_DEFINITION_PAYLOAD_KIND_SET = new Set<string>(WORKFLOW_DEFINITION_PAYLOAD_KINDS);
 
 export interface WorkflowDefinitionSavedPayloadInput {
   readonly doctypeName: DocTypeName;
@@ -81,8 +86,16 @@ export function workflowDefinitionEvent<TPayload extends WorkflowEventPayload>(
   };
 }
 
-export function workflowDefinitionEventType(payload: WorkflowEventPayload): WorkflowEventPayload["kind"] {
+export function workflowDefinitionEventType(payload: WorkflowEventPayload): WorkflowPayloadKind {
   return payload.kind;
+}
+
+export function isWorkflowPayloadKind(kind: string): kind is WorkflowPayloadKind {
+  return WORKFLOW_DEFINITION_PAYLOAD_KIND_SET.has(kind);
+}
+
+export function isWorkflowEvent(event: DomainEvent): event is DomainEvent<WorkflowEventPayload> {
+  return isWorkflowPayloadKind(domainEventPayloadKind(event));
 }
 
 export function workflowEventsVisibleAt(

@@ -1,5 +1,7 @@
 import {
   foldWorkflowDefinition,
+  isWorkflowEvent,
+  isWorkflowPayloadKind,
   replayWorkflowDefinitionAppend,
   WORKFLOW_DEFINITION_PAYLOAD_KINDS,
   workflowDefinitionClearedPayload,
@@ -102,10 +104,38 @@ describe("workflow events", () => {
       "WorkflowDefinitionCleared"
     ]);
   });
+
+  it("narrows workflow events by payload kind when event type names are custom", () => {
+    const saved = {
+      ...savedEvent(1, workflow),
+      type: "NoteWorkflowConfigured"
+    };
+
+    expect(isWorkflowPayloadKind("WorkflowDefinitionSaved")).toBe(true);
+    expect(isWorkflowPayloadKind("DocumentDeleted")).toBe(false);
+    expect(isWorkflowEvent(saved)).toBe(true);
+    expect(isWorkflowEvent(otherEvent({ kind: "DocumentDeleted" }))).toBe(false);
+  });
 });
 
 function workflowPayload(payload: WorkflowEventPayload): WorkflowEventPayload {
   return payload;
+}
+
+function otherEvent(payload: DomainEvent["payload"], type: string = payload.kind): DomainEvent {
+  return {
+    id: "evt_other",
+    tenantId: "acme",
+    stream: "acme:Note:NOTE-1",
+    sequence: 1,
+    type,
+    doctype: "Note",
+    documentName: "NOTE-1",
+    actorId: admin.id,
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    payload,
+    metadata: {}
+  };
 }
 
 function savedEvent(
