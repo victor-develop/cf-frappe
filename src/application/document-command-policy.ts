@@ -36,6 +36,20 @@ export function ensureMergeBaseVersion(baseVersion: number): void {
   }
 }
 
+export function requireMergeBaseSnapshot<TSnapshot extends Pick<DocumentSnapshot, "version">>(input: {
+  readonly base: TSnapshot | null | undefined;
+  readonly baseVersion: number;
+  readonly doctypeName: string;
+  readonly documentName: string;
+}): TSnapshot {
+  if (!input.base || input.base.version !== input.baseVersion) {
+    throw conflict(
+      `Merge base version ${String(input.baseVersion)} was not found for ${input.doctypeName}/${input.documentName}`
+    );
+  }
+  return input.base;
+}
+
 export function mergeSnapshotFromDocument(document: DocumentSnapshot): DocumentMergeSnapshot {
   return {
     version: document.version,

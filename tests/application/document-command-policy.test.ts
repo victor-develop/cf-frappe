@@ -22,6 +22,7 @@ import {
   planWorkflowTransitionPolicy,
   pickCommandFields,
   requireDomainCommandDefinition,
+  requireMergeBaseSnapshot,
   requireWorkflowDefinition,
   type Actor,
   type DocTypeDefinition,
@@ -66,6 +67,36 @@ describe("document command policy", () => {
     expect(() => ensureMergeBaseVersion(2)).not.toThrow();
     expect(() => ensureMergeBaseVersion(-1)).toThrow("baseVersion must be a non-negative integer");
     expect(() => ensureMergeBaseVersion(1.5)).toThrow("baseVersion must be a non-negative integer");
+  });
+
+  it("resolves merge base snapshots by requested version", () => {
+    expect(
+      requireMergeBaseSnapshot({
+        base: snapshot,
+        baseVersion: 3,
+        doctypeName: "Note",
+        documentName: "NOTE-1"
+      })
+    ).toBe(snapshot);
+  });
+
+  it("rejects missing or mismatched merge base snapshots", () => {
+    expect(() =>
+      requireMergeBaseSnapshot({
+        base: null,
+        baseVersion: 2,
+        doctypeName: "Note",
+        documentName: "NOTE-1"
+      })
+    ).toThrow("Merge base version 2 was not found for Note/NOTE-1");
+    expect(() =>
+      requireMergeBaseSnapshot({
+        base: snapshot,
+        baseVersion: 2,
+        doctypeName: "Note",
+        documentName: "NOTE-1"
+      })
+    ).toThrow("Merge base version 2 was not found for Note/NOTE-1");
   });
 
   it("projects documents into merge snapshots", () => {

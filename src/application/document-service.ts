@@ -60,6 +60,7 @@ import {
   planDomainCommandPolicy,
   planWorkflowTransitionPolicy,
   requireDomainCommandDefinition,
+  requireMergeBaseSnapshot,
   requireWorkflowDefinition
 } from "./document-command-policy.js";
 import {
@@ -652,10 +653,12 @@ export class DocumentService implements DocumentCommandExecutor {
     await this.ensureSharedDocumentActionAccess(command.actor, doctype, "update", existing);
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
 
-    const base = foldDocument(events.filter((event) => event.sequence <= command.baseVersion));
-    if (!base || base.version !== command.baseVersion) {
-      throw conflict(`Merge base version ${String(command.baseVersion)} was not found for ${doctype.name}/${command.name}`);
-    }
+    const base = requireMergeBaseSnapshot({
+      base: foldDocument(events.filter((event) => event.sequence <= command.baseVersion)),
+      baseVersion: command.baseVersion,
+      doctypeName: doctype.name,
+      documentName: command.name
+    });
 
     const patch = await this.runBeforeValidate(doctype, compactData(command.patch), existing);
     const normalizedPatch = preserveReadOnlyTableValues(doctype, patch, existing, relatedDocType);
