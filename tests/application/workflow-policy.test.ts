@@ -1,6 +1,8 @@
 import {
   authorizeWorkflowAdministration,
   ensureWorkflowExpectedVersion,
+  planWorkflowDefinitionClear,
+  planWorkflowDefinitionSave,
   resolveWorkflowTenant,
   workflowDefinitionsEqual
 } from "../../src/application/workflow-policy.js";
@@ -53,6 +55,19 @@ describe("workflow policy", () => {
     expect(workflowDefinitionsEqual(undefined, workflow)).toBe(false);
     expect(workflowDefinitionsEqual({ ...workflow }, workflow)).toBe(true);
     expect(workflowDefinitionsEqual({ ...workflow, initialState: "Closed" }, workflow)).toBe(false);
+  });
+
+  it("plans workflow definition saves without emitting redundant catalog events", () => {
+    expect(planWorkflowDefinitionSave(undefined, workflow)).toEqual({ status: "append" });
+    expect(planWorkflowDefinitionSave({ ...workflow }, workflow)).toEqual({ status: "noop" });
+    expect(planWorkflowDefinitionSave({ ...workflow, initialState: "Closed" }, workflow)).toEqual({
+      status: "append"
+    });
+  });
+
+  it("plans workflow definition clears without emitting missing-definition events", () => {
+    expect(planWorkflowDefinitionClear(workflow)).toEqual({ status: "append" });
+    expect(planWorkflowDefinitionClear(undefined)).toEqual({ status: "noop" });
   });
 });
 

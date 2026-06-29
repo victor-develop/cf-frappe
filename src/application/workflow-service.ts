@@ -25,7 +25,8 @@ import {
 import {
   authorizeWorkflowAdministration,
   ensureWorkflowExpectedVersion,
-  workflowDefinitionsEqual
+  planWorkflowDefinitionClear,
+  planWorkflowDefinitionSave
 } from "./workflow-policy.js";
 import type { ModelRegistry } from "../core/registry.js";
 import { systemClock, type Clock } from "../ports/clock.js";
@@ -107,7 +108,7 @@ export class WorkflowService {
     const workflow = normalizeWorkflowDefinition(doctype, command.workflow);
     const state = await this.stateFor(tenantId, doctype.name);
     ensureWorkflowExpectedVersion(state, command.expectedVersion);
-    if (workflowDefinitionsEqual(state.workflow, workflow)) {
+    if (planWorkflowDefinitionSave(state.workflow, workflow).status === "noop") {
       return state;
     }
     return this.appendAndFold(state, {
@@ -125,7 +126,7 @@ export class WorkflowService {
     const doctype = this.registry.get(command.doctype);
     const state = await this.stateFor(tenantId, doctype.name);
     ensureWorkflowExpectedVersion(state, command.expectedVersion);
-    if (state.workflow === undefined) {
+    if (planWorkflowDefinitionClear(state.workflow).status === "noop") {
       return state;
     }
     return this.appendAndFold(state, {

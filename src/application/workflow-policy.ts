@@ -45,3 +45,20 @@ export function workflowDefinitionsEqual(
 ): boolean {
   return left !== undefined && JSON.stringify(left) === JSON.stringify(right);
 }
+
+export type WorkflowDefinitionChangeDecision =
+  | { readonly status: "append" }
+  | { readonly status: "noop" };
+
+export function planWorkflowDefinitionSave(
+  existing: WorkflowDefinition | undefined,
+  workflow: WorkflowDefinition
+): WorkflowDefinitionChangeDecision {
+  return workflowDefinitionsEqual(existing, workflow) ? { status: "noop" } : { status: "append" };
+}
+
+export function planWorkflowDefinitionClear(
+  existing: WorkflowDefinition | undefined
+): WorkflowDefinitionChangeDecision {
+  return existing === undefined ? { status: "noop" } : { status: "append" };
+}
