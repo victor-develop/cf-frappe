@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Centralized document-delivery outbox source-event payload-kind validation in domain events so replayed delivery records no longer inspect source event payload kinds inline.
 - Centralized document-history timeline event-kind projection in domain events so timeline entries no longer read source event payload kinds inline.
 - Centralized audit deleted-event recovery selection in domain events so deleted-document recovery no longer reads source event payload kinds inline.
 - Centralized notification-rule email event-label rendering in domain events so rendered email bodies no longer read source event payload kinds inline.

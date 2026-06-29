@@ -26,9 +26,19 @@ export function domainEventPayloadKind(event: DomainEvent): DomainEvent["payload
   return event.payload.kind;
 }
 
+export function hasDomainEventPayloadKind<TValue>(value: TValue): value is TValue & {
+  readonly payload: { readonly kind: string };
+} {
+  return isRecord(value) && isRecord(value.payload) && typeof value.payload.kind === "string";
+}
+
 function cloneDomainEventObject(value: unknown, field: "payload" | "metadata"): unknown {
   if (typeof value !== "object" || value === null || Array.isArray(value) || !isJsonValue(value)) {
     throw new FrameworkError("EVENT_INVALID", `Domain event ${field} must be a JSON object`, { status: 409 });
   }
   return cloneJsonValue(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

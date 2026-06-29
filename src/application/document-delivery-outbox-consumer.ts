@@ -1,5 +1,5 @@
 import { badRequest, notFound } from "../core/errors.js";
-import { domainEventPayloadKind } from "../core/domain-events.js";
+import { domainEventPayloadKind, hasDomainEventPayloadKind } from "../core/domain-events.js";
 import { realtimeEventFromDomainEvent, realtimeUserNotificationsFromDomainEvent } from "../core/realtime.js";
 import type { JobDefinition, JobPayload } from "../core/jobs.js";
 import type { DocumentData, DocumentSnapshot, DomainEvent, TenantId } from "../core/types.js";
@@ -383,8 +383,7 @@ function isDomainEvent(value: unknown): value is DomainEvent {
     typeof value.documentName === "string" &&
     typeof value.actorId === "string" &&
     typeof value.occurredAt === "string" &&
-    isRecord(value.payload) &&
-    typeof value.payload.kind === "string" &&
+    hasDomainEventPayloadKind(value) &&
     isRecord(value.metadata)
   );
 }

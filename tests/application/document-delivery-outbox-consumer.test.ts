@@ -12,6 +12,7 @@ import {
   JobExecutor,
   type DocumentData,
   type DomainEvent,
+  type DocumentDeliveryOutboxRecord,
   type DocumentSnapshot,
   type JobMessage
 } from "../../src";
@@ -236,6 +237,76 @@ describe("DocumentDeliveryOutboxConsumer", () => {
       outcomes: [{ outboxId: "evt_source:email", status: "delivered", attempts: 1 }]
     });
     expect(queuedEmailMessages).toEqual([{ tenantId: "acme", messageId: "msg_ready" }]);
+  });
+
+  it("rejects replayed source events without a domain payload kind", async () => {
+    const source = domainEvent();
+    const record: DocumentDeliveryOutboxRecord = {
+      id: "evt_source:notification",
+      tenantId: "acme",
+      target: "notification",
+      sourceEventId: source.id,
+      sourceEventType: source.type,
+      payloadKind: "DocumentCreated",
+      doctype: source.doctype,
+      documentName: source.documentName,
+      actorId: source.actorId,
+      payload: { event: { ...source, payload: {} }, snapshot: snapshot() } as unknown as DocumentData,
+      status: "claimed",
+      attempts: 1,
+      enqueuedAt: now,
+      claimedAt: now,
+      claimId: "claim-1"
+    };
+    const failed: DocumentDeliveryOutboxRecord[] = [];
+    const consumer = new DocumentDeliveryOutboxConsumer({
+      clock: fixedClock(now),
+      deliveries: createDocumentDeliveryOutboxDeliveryHandlers({
+        notifications: {
+          async recordFromDomainEvent() {
+            throw new Error("should fail before delivery");
+          }
+        }
+      }),
+      outbox: {
+        async claimPending() {
+          return [record];
+        },
+        async markDelivered() {
+          throw new Error("should not mark invalid source events as delivered");
+        },
+        async markFailed(command) {
+          const failedRecord: DocumentDeliveryOutboxRecord = {
+            ...record,
+            status: "failed",
+            error: command.error,
+            ...(command.retryAt === undefined ? {} : { retryAt: command.retryAt })
+          };
+          failed.push(failedRecord);
+          return failedRecord;
+        }
+      }
+    });
+
+    await expect(consumer.drain({ tenantId: "acme", claimId: "claim-1", now })).resolves.toMatchObject({
+      claimed: 1,
+      delivered: 0,
+      failed: 1,
+      outcomes: [
+        {
+          outboxId: "evt_source:notification",
+          status: "failed",
+          error: "Document delivery outbox record 'evt_source:notification' does not contain a source domain event"
+        }
+      ]
+    });
+    expect(failed).toMatchObject([
+      {
+        id: "evt_source:notification",
+        status: "failed",
+        error: "Document delivery outbox record 'evt_source:notification' does not contain a source domain event"
+      }
+    ]);
   });
 
   it("derives replayed queued email metadata payload kinds from source event identity", async () => {

@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document-history timeline event-kind derivation slice:
+As of the document-delivery outbox source-event payload-kind validation slice:
 
 - Vitest files: `196`
-- Vitest cases: `2333`
-- Remaining gap to Frappe static markers: `451`
+- Vitest cases: `2334`
+- Remaining gap to Frappe static markers: `450`
 
 ## Implication
 
