@@ -4,6 +4,7 @@ import {
   requireAppendedUserNotificationEvent,
   requireReplayedNotification,
   sortedUserNotifications,
+  userNotificationEventType,
   userNotificationSubject
 } from "../../src";
 import type { DomainEvent } from "../../src";
@@ -95,6 +96,28 @@ describe("user notification events", () => {
     )).toThrow(
       "User notification append for 'evt_assign:user:support%40example.com' and user 'support@example.com' in tenant 'acme' did not return 'UserNotificationRecorded'"
     );
+  });
+
+  it("derives user notification event types from payload identity", () => {
+    expect(userNotificationEventType({
+      kind: "UserNotificationRecorded",
+      notificationId: "evt_assign:user:support%40example.com",
+      sourceEventId: "evt_assign",
+      eventType: "NoteAssigned",
+      payloadKind: "DocumentAssigned",
+      recipientId: "support@example.com",
+      doctype: "Note",
+      documentName: "Alpha Note",
+      actorId: "owner@example.com"
+    })).toBe("UserNotificationRecorded");
+    expect(userNotificationEventType({
+      kind: "UserNotificationRead",
+      notificationId: "evt_assign:user:support%40example.com"
+    })).toBe("UserNotificationRead");
+    expect(userNotificationEventType({
+      kind: "UserNotificationDismissed",
+      notificationId: "evt_assign:user:support%40example.com"
+    })).toBe("UserNotificationDismissed");
   });
 });
 

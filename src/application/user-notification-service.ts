@@ -23,6 +23,7 @@ import {
   requireAppendedUserNotificationEvent,
   requireReplayedNotification,
   sortedUserNotifications,
+  userNotificationEventType,
   type UserNotificationEventPayload as UserNotificationEventPayloadForService,
   type UserNotificationRecord,
   type UserNotificationState
@@ -181,29 +182,30 @@ export class UserNotificationService {
       }
       const stream = userNotificationsStream(notification.tenantId, notification.recipientId);
       try {
+        const payload: Extract<UserNotificationEventPayloadForService, { readonly kind: "UserNotificationRecorded" }> = {
+          kind: "UserNotificationRecorded",
+          notificationId,
+          sourceEventId: notification.eventId,
+          eventType: notification.eventType,
+          payloadKind: notification.payloadKind,
+          recipientId: notification.recipientId,
+          doctype: notification.doctype,
+          documentName: notification.documentName,
+          actorId: notification.actorId,
+          ...(notification.subject === undefined ? {} : { subject: notification.subject }),
+          ...(notification.ruleName === undefined ? {} : { ruleName: notification.ruleName })
+        };
         const [saved] = await this.events.append(stream, state.version, [
           {
             id: this.ids.next("evt_"),
             tenantId: notification.tenantId,
             stream,
-            type: "UserNotificationRecorded",
+            type: userNotificationEventType(payload),
             doctype: "__UserNotifications",
             documentName: notification.recipientId,
             actorId: notification.actorId,
             occurredAt,
-            payload: {
-              kind: "UserNotificationRecorded",
-              notificationId,
-              sourceEventId: notification.eventId,
-              eventType: notification.eventType,
-              payloadKind: notification.payloadKind,
-              recipientId: notification.recipientId,
-              doctype: notification.doctype,
-              documentName: notification.documentName,
-              actorId: notification.actorId,
-              ...(notification.subject === undefined ? {} : { subject: notification.subject }),
-              ...(notification.ruleName === undefined ? {} : { ruleName: notification.ruleName })
-            },
+            payload,
             metadata: {}
           } satisfies NewDomainEvent
         ]);
@@ -247,7 +249,7 @@ export class UserNotificationService {
         id: this.ids.next("evt_"),
         tenantId: state.tenantId,
         stream,
-        type: payload.kind,
+        type: userNotificationEventType(payload),
         doctype: "__UserNotifications",
         documentName: state.userId,
         actorId: actor.id,

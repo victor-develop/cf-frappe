@@ -126,6 +126,12 @@ export function sortedUserNotifications(state: UserNotificationState): readonly 
   );
 }
 
+export function userNotificationEventType(
+  payload: UserNotificationEventPayload
+): UserNotificationEventPayload["kind"] {
+  return payload.kind;
+}
+
 export function requireReplayedNotification(
   state: UserNotificationState,
   notificationId: string
