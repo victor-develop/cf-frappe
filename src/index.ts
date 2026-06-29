@@ -5,6 +5,7 @@ export * from "./adapters/http/index.js";
 export * from "./adapters/in-memory/index.js";
 export * from "./adapters/print/index.js";
 export * from "./application/audit-service.js";
+export * from "./application/assignment-rule-events.js";
 export * from "./application/assignment-rule-service.js";
 export * from "./application/calendar-service.js";
 export * from "./application/custom-field-service.js";

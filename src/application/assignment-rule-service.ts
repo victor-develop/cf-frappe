@@ -15,10 +15,15 @@ import {
   type AssignmentRuleDefinition,
   type DocTypeDefinition,
   type DocumentData,
-  type NewDomainEvent,
   type TenantId
 } from "../core/types.js";
-import type { AssignmentRuleEventPayload } from "./assignment-rule-events.js";
+import {
+  assignmentRuleEvent,
+  assignmentRuleEventsVisibleAt,
+  ASSIGNMENT_RULE_PAYLOAD_KINDS,
+  replayAssignmentRuleAppend,
+  type AssignmentRuleEventPayload
+} from "./assignment-rule-events.js";
 import type { ModelRegistry } from "../core/registry.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
@@ -192,7 +197,6 @@ export class AssignmentRuleService implements AssignmentRuleProvider {
     }
     return this.appendAndFold(state, {
       actor: command.actor,
-      type: "AssignmentRuleSaved",
       metadata: command.metadata,
       payload: {
         kind: "AssignmentRuleSaved",
@@ -214,7 +218,6 @@ export class AssignmentRuleService implements AssignmentRuleProvider {
     }
     return this.appendAndFold(state, {
       actor: command.actor,
-      type: "AssignmentRuleCleared",
       metadata: command.metadata,
       payload: {
         kind: "AssignmentRuleCleared",
@@ -244,7 +247,6 @@ export class AssignmentRuleService implements AssignmentRuleProvider {
     }
     return this.appendAndFold(state, {
       actor: command.actor,
-      type: "AssignmentRuleSaved",
       metadata: command.metadata,
       payload: {
         kind: "AssignmentRuleSaved",
@@ -263,10 +265,8 @@ export class AssignmentRuleService implements AssignmentRuleProvider {
     options: { readonly occurredAt?: string } = {}
   ): Promise<AssignmentRuleState> {
     const stream = assignmentRulesStream(tenantId);
-    const events = await this.events.readStream(stream, { payloadKinds: ["AssignmentRuleSaved", "AssignmentRuleCleared"] });
-    const occurredAt = options.occurredAt;
-    const boundedEvents = occurredAt === undefined ? events : events.filter((event) => event.occurredAt <= occurredAt);
-    return foldAssignmentRules(tenantId, doctypeName, boundedEvents);
+    const events = await this.events.readStream(stream, { payloadKinds: ASSIGNMENT_RULE_PAYLOAD_KINDS });
+    return foldAssignmentRules(tenantId, doctypeName, assignmentRuleEventsVisibleAt(events, options.occurredAt));
   }
 
   private async preAssignmentRuleDocTypeFor(doctypeName: string, tenantId: TenantId): Promise<DocTypeDefinition> {
@@ -280,29 +280,25 @@ export class AssignmentRuleService implements AssignmentRuleProvider {
     state: AssignmentRuleState,
     options: {
       readonly actor: Actor;
-      readonly type: string;
       readonly metadata: DocumentData | undefined;
       readonly payload: TPayload;
     }
   ): Promise<AssignmentRuleState> {
     const stream = assignmentRulesStream(state.tenantId);
-    const event: NewDomainEvent<TPayload> = {
+    const event = assignmentRuleEvent({
       id: this.ids.next("evt_"),
       tenantId: state.tenantId,
       stream,
-      type: options.type,
-      doctype: "__AssignmentRules",
-      documentName: `${state.doctypeName}:${ruleNameForPayload(options.payload)}`,
-      actorId: options.actor.id,
+      actor: options.actor,
       occurredAt: this.clock.now(),
       payload: options.payload,
-      metadata: options.metadata ?? {}
-    };
+      ...(options.metadata === undefined ? {} : { metadata: options.metadata })
+    });
     const saved = await this.events.append(stream, state.version, [event]);
-    return foldAssignmentRules(
-      state.tenantId,
-      state.doctypeName,
-      [...(await this.events.readStream(stream, { maxSequence: state.version })), ...saved]
+    return replayAssignmentRuleAppend(
+      state,
+      await this.events.readStream(stream, { maxSequence: state.version }),
+      saved
     );
   }
 
@@ -368,13 +364,6 @@ function normalizeRequiredString(value: string, label: string): string {
     throw new FrameworkError("ASSIGNMENT_RULE_INVALID", `${label} is required`, { status: 400 });
   }
   return normalized;
-}
-
-function ruleNameForPayload(payload: AssignmentRuleEventPayload): string {
-  if (payload.kind === "AssignmentRuleSaved") {
-    return payload.rule.name;
-  }
-  return payload.ruleName;
 }
 
 function jsonEqual(left: unknown, right: unknown): boolean {
