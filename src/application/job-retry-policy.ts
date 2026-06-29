@@ -10,6 +10,10 @@ export type JobRetryExecutionDecision =
   | { readonly status: "retry"; readonly command: DispatchJobCommand }
   | { readonly status: "reject"; readonly message: string };
 
+export type JobRetryExecutionLookupDecision =
+  | { readonly status: "found"; readonly original: JobExecutionRecord }
+  | { readonly status: "missing"; readonly idempotencyKey: string };
+
 export function planJobRetryAccess(options: {
   readonly actor: Actor;
   readonly adminRoles: readonly string[];
@@ -21,6 +25,16 @@ export function planJobRetryAccess(options: {
     status: "deny",
     message: `Actor '${options.actor.id}' cannot retry jobs`
   };
+}
+
+export function planJobRetryExecutionLookup(
+  idempotencyKey: string,
+  original: JobExecutionRecord | null | undefined
+): JobRetryExecutionLookupDecision {
+  if (original === null || original === undefined) {
+    return { status: "missing", idempotencyKey };
+  }
+  return { status: "found", original };
 }
 
 export function planJobExecutionRetry(options: {

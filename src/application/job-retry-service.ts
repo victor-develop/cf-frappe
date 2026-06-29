@@ -5,7 +5,11 @@ import { systemClock } from "../ports/clock.js";
 import type { JobExecutionLogReader, JobExecutionRecord } from "../ports/job-execution-log.js";
 import type { JobMessage } from "../ports/job-queue.js";
 import type { JobDispatcher } from "./job-dispatcher.js";
-import { planJobExecutionRetry, planJobRetryAccess } from "./job-retry-policy.js";
+import {
+  planJobExecutionRetry,
+  planJobRetryAccess,
+  planJobRetryExecutionLookup
+} from "./job-retry-policy.js";
 
 export interface JobRetryServiceOptions<TResources = unknown> {
   readonly executionLog: JobExecutionLogReader;
@@ -41,15 +45,18 @@ export class JobRetryService<TResources = unknown> implements JobRetryPort {
     if (access.status === "deny") {
       throw permissionDenied(access.message);
     }
-    const original = await this.executionLog.get(idempotencyKey, { tenantId: access.tenantId });
-    if (!original) {
-      throw notFound(`Job execution '${idempotencyKey}' was not found`, "JOB_EXECUTION_NOT_FOUND");
+    const lookup = planJobRetryExecutionLookup(
+      idempotencyKey,
+      await this.executionLog.get(idempotencyKey, { tenantId: access.tenantId })
+    );
+    if (lookup.status === "missing") {
+      throw notFound(`Job execution '${lookup.idempotencyKey}' was not found`, "JOB_EXECUTION_NOT_FOUND");
     }
-    const retry = planJobExecutionRetry({ actor, original, retriedAt: this.clock.now() });
+    const retry = planJobExecutionRetry({ actor, original: lookup.original, retriedAt: this.clock.now() });
     if (retry.status === "reject") {
       throw badRequest(retry.message);
     }
     const message = await this.dispatcher.dispatch(retry.command);
-    return { original, message };
+    return { original: lookup.original, message };
   }
 }

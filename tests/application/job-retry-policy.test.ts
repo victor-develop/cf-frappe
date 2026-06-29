@@ -1,6 +1,7 @@
 import {
   planJobExecutionRetry,
   planJobRetryAccess,
+  planJobRetryExecutionLookup,
   retryMetadata,
   SYSTEM_MANAGER_ROLE
 } from "../../src";
@@ -25,6 +26,23 @@ describe("job retry policy", () => {
     })).toEqual({
       status: "deny",
       message: "Actor 'reader@example.com' cannot retry jobs"
+    });
+  });
+
+  it("plans retry execution lookups before retry eligibility checks", () => {
+    const original = execution();
+
+    expect(planJobRetryExecutionLookup(original.idempotencyKey, original)).toEqual({
+      status: "found",
+      original
+    });
+    expect(planJobRetryExecutionLookup("missing", null)).toEqual({
+      status: "missing",
+      idempotencyKey: "missing"
+    });
+    expect(planJobRetryExecutionLookup("missing", undefined)).toEqual({
+      status: "missing",
+      idempotencyKey: "missing"
     });
   });
 
