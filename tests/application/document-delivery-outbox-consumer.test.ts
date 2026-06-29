@@ -427,6 +427,56 @@ describe("DocumentDeliveryOutboxConsumer", () => {
     ]);
   });
 
+  it("publishes replayed realtime user notifications from payload kind instead of source event type", async () => {
+    const outbox = new DocumentDeliveryOutboxService({
+      events: new InMemoryDocumentStore(),
+      ids: deterministicIds(["enqueue-realtime", "claim-realtime", "deliver-realtime"]),
+      clock: fixedClock(now)
+    });
+    await outbox.enqueueFromDomainEvent({
+      event: {
+        ...domainEvent(),
+        type: "NoteDeleted",
+        payload: { kind: "DocumentAssigned", assigneeId: "support@example.com" }
+      },
+      snapshot: snapshot(),
+      targets: ["realtime"]
+    });
+    const realtime = new InMemoryRealtimePublisher();
+    const consumer = new DocumentDeliveryOutboxConsumer({
+      outbox,
+      clock: fixedClock(now),
+      deliveries: createDocumentDeliveryOutboxDeliveryHandlers({ realtime })
+    });
+
+    await expect(consumer.drain({ tenantId: "acme", claimId: "claim-1", now })).resolves.toMatchObject({
+      claimed: 1,
+      delivered: 1,
+      failed: 0,
+      outcomes: [{ outboxId: "evt_source:realtime", status: "delivered", attempts: 1 }]
+    });
+
+    expect(realtime.events()).toMatchObject([
+      {
+        id: "evt_source",
+        type: "NoteDeleted",
+        topics: ["tenant:acme", "doctype:acme:Note", "document:acme:Note:One"]
+      },
+      {
+        id: "evt_source:user:support%40example.com",
+        type: "NoteDeleted",
+        topics: ["user:acme:support%40example.com"],
+        payload: {
+          kind: "DocumentUserNotification",
+          eventId: "evt_source",
+          eventType: "NoteDeleted",
+          payloadKind: "DocumentAssigned",
+          recipientId: "support@example.com"
+        }
+      }
+    ]);
+  });
+
   it("runs through the built-in drain job", async () => {
     const registry = createJobRegistry({
       jobs: [createDocumentDeliveryOutboxDrainJob()]
