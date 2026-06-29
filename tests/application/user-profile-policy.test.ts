@@ -1,5 +1,6 @@
 import {
   authorizeUserProfileAccess,
+  ensureUserProfileAccountExists,
   ensureUserProfileExpectedVersion,
   normalizeUserProfilePatchInput,
   normalizeUserProfileRequiredText,
@@ -7,6 +8,7 @@ import {
   resolveUserProfileTenant
 } from "../../src/application/user-profile-policy.js";
 import { SYSTEM_MANAGER_ROLE } from "../../src/core/types.js";
+import type { UserAccountState } from "../../src/core/user-accounts.js";
 import type { UserProfileState } from "../../src/core/user-profiles.js";
 
 const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
@@ -65,6 +67,20 @@ describe("user profile policy", () => {
     expect(planUserProfilePatchChange({ fullName: "Ada Lovelace" })).toEqual({ status: "write" });
   });
 
+  it("requires the backing user account before profile access", () => {
+    expect(() => ensureUserProfileAccountExists(accountState(true))).not.toThrow();
+    expect(() => ensureUserProfileAccountExists(accountState(false))).toThrow(
+      "User account 'owner@example.com' was not found"
+    );
+    let error: unknown;
+    try {
+      ensureUserProfileAccountExists(accountState(false));
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({ code: "DOCUMENT_NOT_FOUND" });
+  });
+
   it("guards expected profile versions", () => {
     expect(() => ensureUserProfileExpectedVersion(state(1), undefined)).not.toThrow();
     expect(() => ensureUserProfileExpectedVersion(state(1), 1)).not.toThrow();
@@ -80,5 +96,17 @@ function state(version: number): UserProfileState {
     userId: owner.id,
     version,
     profile: { fullName: "Ada Lovelace" }
+  };
+}
+
+function accountState(exists: boolean): UserAccountState {
+  return {
+    tenantId: "acme",
+    userId: owner.id,
+    version: exists ? 1 : 0,
+    exists,
+    roles: exists ? ["User"] : [],
+    providers: [],
+    enabled: exists
   };
 }

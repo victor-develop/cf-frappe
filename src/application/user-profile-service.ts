@@ -1,4 +1,3 @@
-import { notFound } from "../core/errors.js";
 import { userAccountsStream, userProfilesStream } from "../core/streams.js";
 import {
   SYSTEM_MANAGER_ROLE,
@@ -26,6 +25,7 @@ import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
 import {
   authorizeUserProfileAccess,
+  ensureUserProfileAccountExists,
   ensureUserProfileExpectedVersion,
   normalizeUserProfilePatchInput,
   normalizeUserProfileRequiredText,
@@ -131,9 +131,7 @@ export class UserProfileService {
 
   private async ensureAccountExists(tenantId: TenantId, userId: string): Promise<void> {
     const account = foldUserAccount(tenantId, userId, await this.events.readStream(userAccountsStream(tenantId, userId)));
-    if (!account.exists) {
-      throw notFound(`User account '${userId}' was not found`);
-    }
+    ensureUserProfileAccountExists(account);
   }
 
   private async stateFor(tenantId: TenantId, userId: string): Promise<UserProfileState> {

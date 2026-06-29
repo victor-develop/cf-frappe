@@ -4,12 +4,14 @@ import {
   type Actor,
   type TenantId
 } from "../core/types.js";
+import type { UserAccountState } from "../core/user-accounts.js";
 import {
   normalizeUserProfilePatch,
   type UserProfileInput,
   type UserProfilePatch,
   type UserProfileState
 } from "../core/user-profiles.js";
+import { ensureUserAccountExists } from "./user-account-policy.js";
 
 export function resolveUserProfileTenant(command: {
   readonly actor: Actor;
@@ -64,6 +66,10 @@ export type UserProfilePatchChangeDecision =
 
 export function planUserProfilePatchChange(patch: UserProfilePatch): UserProfilePatchChangeDecision {
   return Object.keys(patch).length === 0 ? { status: "noop" } : { status: "write" };
+}
+
+export function ensureUserProfileAccountExists(state: UserAccountState): void {
+  ensureUserAccountExists(state);
 }
 
 export function ensureUserProfileExpectedVersion(
