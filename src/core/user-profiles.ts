@@ -1,4 +1,5 @@
-import type { DomainEvent, TenantId } from "./types.js";
+import { domainEventPayloadKind } from "./domain-events.js";
+import type { DocumentData, DomainEvent, TenantId } from "./types.js";
 
 export const USER_PROFILE_FIELDS = [
   "firstName",
@@ -37,6 +38,20 @@ export interface UserProfileState {
   readonly updatedAt?: string;
 }
 
+export type UserProfileStatePayloadKind = "UserProfileChanged";
+
+export interface UserProfileStateEventPayload {
+  readonly kind: "UserProfileChanged";
+  readonly userId: string;
+  readonly profile: DocumentData;
+}
+
+export const USER_PROFILE_STATE_PAYLOAD_KINDS = Object.freeze([
+  "UserProfileChanged"
+] as const satisfies readonly UserProfileStatePayloadKind[]);
+
+const USER_PROFILE_STATE_PAYLOAD_KIND_SET = new Set<string>(USER_PROFILE_STATE_PAYLOAD_KINDS);
+
 export function foldUserProfile(
   tenantId: TenantId,
   userId: string,
@@ -50,21 +65,31 @@ export function foldUserProfile(
   };
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     state = { ...state, version: Math.max(state.version, event.sequence) };
-    switch (event.payload.kind) {
-      case "UserProfileChanged":
-        if (event.payload.userId !== userId) {
-          break;
-        }
-        state = {
-          ...state,
-          version: event.sequence,
-          profile: applyUserProfilePatch(state.profile, normalizeUserProfilePatch(event.payload.profile)),
-          updatedAt: event.occurredAt
-        };
-        break;
+    if (!isUserProfileStateEvent(event) || event.payload.userId !== userId) {
+      continue;
     }
+    state = {
+      ...state,
+      version: event.sequence,
+      profile: applyUserProfilePatch(state.profile, normalizeUserProfilePatch(event.payload.profile)),
+      updatedAt: event.occurredAt
+    };
   }
   return state;
+}
+
+export function userProfileStateEventType(payload: UserProfileStateEventPayload): UserProfileStatePayloadKind {
+  return payload.kind;
+}
+
+export function isUserProfileStatePayloadKind(kind: string): kind is UserProfileStatePayloadKind {
+  return USER_PROFILE_STATE_PAYLOAD_KIND_SET.has(kind);
+}
+
+function isUserProfileStateEvent(
+  event: DomainEvent
+): event is DomainEvent & { readonly payload: UserProfileStateEventPayload } {
+  return isUserProfileStatePayloadKind(domainEventPayloadKind(event));
 }
 
 export function normalizeUserProfilePatch(input: Record<string, unknown>): UserProfilePatch {

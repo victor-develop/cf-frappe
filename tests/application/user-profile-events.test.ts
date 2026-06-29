@@ -1,4 +1,5 @@
 import {
+  foldUserProfile,
   isUserProfileEvent,
   isUserProfilePayloadKind,
   userProfileChangedPayload,
@@ -49,6 +50,26 @@ describe("user profile events", () => {
     expect(isUserProfilePayloadKind("DocumentDeleted")).toBe(false);
     expect(isUserProfileEvent(changed)).toBe(true);
     expect(isUserProfileEvent(event({ kind: "DocumentDeleted" }))).toBe(false);
+  });
+
+  it("folds user profile state by payload kind when event type names are custom", () => {
+    const misleadingUnrelated = event({ kind: "DocumentDeleted" }, "UserProfileChanged");
+    const customTypedChange = {
+      ...event(userProfileChangedPayload({
+        userId: "ada@example.com",
+        profile: {
+          fullName: "Ada Lovelace"
+        }
+      }), "DeskProfileUpdated"),
+      sequence: 2
+    };
+
+    const state = foldUserProfile("acme", "ada@example.com", [misleadingUnrelated, customTypedChange]);
+
+    expect(state.version).toBe(2);
+    expect(state.profile).toEqual({
+      fullName: "Ada Lovelace"
+    });
   });
 });
 

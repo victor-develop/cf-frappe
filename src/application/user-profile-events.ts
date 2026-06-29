@@ -1,19 +1,18 @@
 import { domainEventPayloadKind } from "../core/domain-events.js";
+import {
+  USER_PROFILE_STATE_PAYLOAD_KINDS,
+  isUserProfileStatePayloadKind,
+  userProfileStateEventType,
+  type UserProfileStateEventPayload,
+  type UserProfileStatePayloadKind
+} from "../core/user-profiles.js";
 import type { DocumentData, DomainEvent } from "../core/types.js";
 
-export type UserProfileEventPayload = {
-  readonly kind: "UserProfileChanged";
-  readonly userId: string;
-  readonly profile: DocumentData;
-};
+export type UserProfileEventPayload = UserProfileStateEventPayload;
 
-export type UserProfilePayloadKind = UserProfileEventPayload["kind"];
+export type UserProfilePayloadKind = UserProfileStatePayloadKind;
 
-export const USER_PROFILE_PAYLOAD_KINDS = Object.freeze([
-  "UserProfileChanged"
-] as const satisfies readonly UserProfilePayloadKind[]);
-
-const USER_PROFILE_PAYLOAD_KIND_SET = new Set<string>(USER_PROFILE_PAYLOAD_KINDS);
+export const USER_PROFILE_PAYLOAD_KINDS = USER_PROFILE_STATE_PAYLOAD_KINDS;
 
 export interface UserProfileChangedPayloadInput {
   readonly userId: string;
@@ -31,11 +30,11 @@ export function userProfileChangedPayload(
 }
 
 export function userProfileEventType(payload: UserProfileEventPayload): UserProfilePayloadKind {
-  return payload.kind;
+  return userProfileStateEventType(payload);
 }
 
 export function isUserProfilePayloadKind(kind: string): kind is UserProfilePayloadKind {
-  return USER_PROFILE_PAYLOAD_KIND_SET.has(kind);
+  return isUserProfileStatePayloadKind(kind);
 }
 
 export function isUserProfileEvent(event: DomainEvent): event is DomainEvent<UserProfileEventPayload> {
