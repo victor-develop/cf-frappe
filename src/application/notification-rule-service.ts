@@ -15,8 +15,10 @@ import {
   type TenantId
 } from "../core/types.js";
 import {
+  notificationRuleClearedPayload,
   notificationRuleEvent,
   notificationRuleEventsVisibleAt,
+  notificationRuleSavedPayload,
   NOTIFICATION_RULE_PAYLOAD_KINDS,
   replayNotificationRuleAppend,
   type NotificationRuleEventPayload
@@ -114,11 +116,10 @@ export class NotificationRuleService implements NotificationRuleProvider {
     return this.appendAndFold(state, {
       actor: command.actor,
       metadata: command.metadata,
-      payload: {
-        kind: "NotificationRuleSaved",
+      payload: notificationRuleSavedPayload({
         doctypeName: doctype.name,
         rule
-      }
+      })
     });
   }
 
@@ -135,11 +136,10 @@ export class NotificationRuleService implements NotificationRuleProvider {
     return this.appendAndFold(state, {
       actor: command.actor,
       metadata: command.metadata,
-      payload: {
-        kind: "NotificationRuleCleared",
+      payload: notificationRuleClearedPayload({
         doctypeName: doctype.name,
         ruleName
-      }
+      })
     });
   }
 

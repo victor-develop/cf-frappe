@@ -27,6 +27,36 @@ export const NOTIFICATION_RULE_PAYLOAD_KINDS = Object.freeze([
   "NotificationRuleCleared"
 ] as const);
 
+export interface NotificationRuleSavedPayloadInput {
+  readonly doctypeName: DocTypeName;
+  readonly rule: NotificationRuleDefinition;
+}
+
+export interface NotificationRuleClearedPayloadInput {
+  readonly doctypeName: DocTypeName;
+  readonly ruleName: string;
+}
+
+export function notificationRuleSavedPayload(
+  input: NotificationRuleSavedPayloadInput
+): Extract<NotificationRuleEventPayload, { readonly kind: "NotificationRuleSaved" }> {
+  return {
+    kind: "NotificationRuleSaved",
+    doctypeName: input.doctypeName,
+    rule: input.rule
+  };
+}
+
+export function notificationRuleClearedPayload(
+  input: NotificationRuleClearedPayloadInput
+): Extract<NotificationRuleEventPayload, { readonly kind: "NotificationRuleCleared" }> {
+  return {
+    kind: "NotificationRuleCleared",
+    doctypeName: input.doctypeName,
+    ruleName: input.ruleName
+  };
+}
+
 export interface NotificationRuleEventOptions<TPayload extends NotificationRuleEventPayload> {
   readonly id: string;
   readonly tenantId: TenantId;

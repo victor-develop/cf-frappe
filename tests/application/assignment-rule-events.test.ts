@@ -1,13 +1,15 @@
 import {
+  assignmentRuleClearedPayload,
   assignmentRuleDocumentName,
   assignmentRuleEvent,
   assignmentRuleEventsVisibleAt,
   assignmentRuleNameForPayload,
+  assignmentRuleSavedPayload,
   ASSIGNMENT_RULE_PAYLOAD_KINDS,
   foldAssignmentRules,
   replayAssignmentRuleAppend
 } from "../../src";
-import type { AssignmentRuleDefinition, DomainEvent } from "../../src";
+import type { AssignmentRuleDefinition, AssignmentRuleEventPayload, DomainEvent } from "../../src";
 
 const admin = {
   id: "admin@example.com",
@@ -22,6 +24,28 @@ const rule: AssignmentRuleDefinition = {
 };
 
 describe("assignment rule events", () => {
+  it("builds saved assignment rule payloads", () => {
+    expect(assignmentRulePayload(assignmentRuleSavedPayload({
+      doctypeName: "Ticket",
+      rule
+    }))).toEqual({
+      kind: "AssignmentRuleSaved",
+      doctypeName: "Ticket",
+      rule
+    });
+  });
+
+  it("builds cleared assignment rule payloads", () => {
+    expect(assignmentRulePayload(assignmentRuleClearedPayload({
+      doctypeName: "Ticket",
+      ruleName: "High priority triage"
+    }))).toEqual({
+      kind: "AssignmentRuleCleared",
+      doctypeName: "Ticket",
+      ruleName: "High priority triage"
+    });
+  });
+
   it("creates typed assignment rule events from payload identity", () => {
     expect(assignmentRuleEvent({
       id: "evt_rule",
@@ -83,6 +107,10 @@ describe("assignment rule events", () => {
     ]);
   });
 });
+
+function assignmentRulePayload(payload: AssignmentRuleEventPayload): AssignmentRuleEventPayload {
+  return payload;
+}
 
 function savedEvent(
   sequence: number,

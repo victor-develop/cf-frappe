@@ -27,6 +27,36 @@ export const ASSIGNMENT_RULE_PAYLOAD_KINDS = Object.freeze([
   "AssignmentRuleCleared"
 ] as const);
 
+export interface AssignmentRuleSavedPayloadInput {
+  readonly doctypeName: DocTypeName;
+  readonly rule: AssignmentRuleDefinition;
+}
+
+export interface AssignmentRuleClearedPayloadInput {
+  readonly doctypeName: DocTypeName;
+  readonly ruleName: string;
+}
+
+export function assignmentRuleSavedPayload(
+  input: AssignmentRuleSavedPayloadInput
+): Extract<AssignmentRuleEventPayload, { readonly kind: "AssignmentRuleSaved" }> {
+  return {
+    kind: "AssignmentRuleSaved",
+    doctypeName: input.doctypeName,
+    rule: input.rule
+  };
+}
+
+export function assignmentRuleClearedPayload(
+  input: AssignmentRuleClearedPayloadInput
+): Extract<AssignmentRuleEventPayload, { readonly kind: "AssignmentRuleCleared" }> {
+  return {
+    kind: "AssignmentRuleCleared",
+    doctypeName: input.doctypeName,
+    ruleName: input.ruleName
+  };
+}
+
 export interface AssignmentRuleEventOptions<TPayload extends AssignmentRuleEventPayload> {
   readonly id: string;
   readonly tenantId: TenantId;

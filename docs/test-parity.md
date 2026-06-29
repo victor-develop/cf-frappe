@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the job schedule payload helper slice:
+As of the rule payload helper slice:
 
 - Vitest files: `189`
-- Vitest cases: `2140`
-- Remaining gap to Frappe static markers: `644`
+- Vitest cases: `2144`
+- Remaining gap to Frappe static markers: `640`
 
 ## Implication
 

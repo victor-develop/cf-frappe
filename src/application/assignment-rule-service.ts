@@ -18,8 +18,10 @@ import {
   type TenantId
 } from "../core/types.js";
 import {
+  assignmentRuleClearedPayload,
   assignmentRuleEvent,
   assignmentRuleEventsVisibleAt,
+  assignmentRuleSavedPayload,
   ASSIGNMENT_RULE_PAYLOAD_KINDS,
   replayAssignmentRuleAppend,
   type AssignmentRuleEventPayload
@@ -198,11 +200,10 @@ export class AssignmentRuleService implements AssignmentRuleProvider {
     return this.appendAndFold(state, {
       actor: command.actor,
       metadata: command.metadata,
-      payload: {
-        kind: "AssignmentRuleSaved",
+      payload: assignmentRuleSavedPayload({
         doctypeName: doctype.name,
         rule
-      }
+      })
     });
   }
 
@@ -219,11 +220,10 @@ export class AssignmentRuleService implements AssignmentRuleProvider {
     return this.appendAndFold(state, {
       actor: command.actor,
       metadata: command.metadata,
-      payload: {
-        kind: "AssignmentRuleCleared",
+      payload: assignmentRuleClearedPayload({
         doctypeName: doctype.name,
         ruleName
-      }
+      })
     });
   }
 

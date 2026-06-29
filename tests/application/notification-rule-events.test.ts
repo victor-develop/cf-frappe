@@ -1,13 +1,15 @@
 import {
   foldNotificationRules,
+  notificationRuleClearedPayload,
   notificationRuleDocumentName,
   notificationRuleEvent,
   notificationRuleEventsVisibleAt,
   notificationRuleNameForPayload,
+  notificationRuleSavedPayload,
   NOTIFICATION_RULE_PAYLOAD_KINDS,
   replayNotificationRuleAppend
 } from "../../src";
-import type { DomainEvent, NotificationRuleDefinition } from "../../src";
+import type { DomainEvent, NotificationRuleDefinition, NotificationRuleEventPayload } from "../../src";
 
 const admin = {
   id: "admin@example.com",
@@ -22,6 +24,28 @@ const rule: NotificationRuleDefinition = {
 };
 
 describe("notification rule events", () => {
+  it("builds saved notification rule payloads", () => {
+    expect(notificationRulePayload(notificationRuleSavedPayload({
+      doctypeName: "Note",
+      rule
+    }))).toEqual({
+      kind: "NotificationRuleSaved",
+      doctypeName: "Note",
+      rule
+    });
+  });
+
+  it("builds cleared notification rule payloads", () => {
+    expect(notificationRulePayload(notificationRuleClearedPayload({
+      doctypeName: "Note",
+      ruleName: "Managers on updates"
+    }))).toEqual({
+      kind: "NotificationRuleCleared",
+      doctypeName: "Note",
+      ruleName: "Managers on updates"
+    });
+  });
+
   it("creates typed notification rule events from payload identity", () => {
     expect(notificationRuleEvent({
       id: "evt_rule",
@@ -83,6 +107,10 @@ describe("notification rule events", () => {
     ]);
   });
 });
+
+function notificationRulePayload(payload: NotificationRuleEventPayload): NotificationRuleEventPayload {
+  return payload;
+}
 
 function savedEvent(
   sequence: number,
