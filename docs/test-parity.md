@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the shared data-patch journal policy slice:
+As of the shared data-patch checksum policy slice:
 
 - Vitest files: `197`
-- Vitest cases: `2401`
-- Remaining gap to Frappe static markers: `383`
+- Vitest cases: `2402`
+- Remaining gap to Frappe static markers: `382`
 
 ## Implication
 

@@ -1,4 +1,5 @@
 import { DataPatchRunner, type DataPatchRollbackRunResult, type DataPatchRunResult } from "./data-patch-runner.js";
+import { assertDataPatchChecksumMatches } from "./data-patch-journal-policy.js";
 import { FrameworkError, badRequest, notFound, permissionDenied } from "../core/errors.js";
 import { assertDataPatchId, defineDataPatch, type DataPatchDefinition } from "../core/data-patch.js";
 import { SYSTEM_MANAGER_ROLE, type Actor, type JsonValue } from "../core/types.js";
@@ -560,14 +561,7 @@ function assertChecksumMatches<TResources>(
   patch: DataPatchDefinition<TResources>,
   recorded: RecordedDataPatch
 ): void {
-  if (patch.checksum === recorded.checksum) {
-    return;
-  }
-  throw new FrameworkError(
-    "DATA_PATCH_CHECKSUM_MISMATCH",
-    `Recorded data patch '${patch.id}' has checksum '${recorded.checksum}' but planned '${patch.checksum}'`,
-    { status: 409 }
-  );
+  assertDataPatchChecksumMatches(patch.id, patch.checksum, recorded.checksum);
 }
 
 function dashboardTotals(patches: readonly DataPatchDashboardEntry[]): DataPatchDashboard["totals"] {

@@ -1,4 +1,8 @@
 import { defineDataPatch, type DataPatchDefinition } from "../core/data-patch.js";
+import {
+  assertAppliedDataPatchChecksumMatches,
+  assertDataPatchChecksumMatches
+} from "./data-patch-journal-policy.js";
 import { badRequest, FrameworkError } from "../core/errors.js";
 import { cloneJsonValue, isJsonValue } from "../core/json.js";
 import type { JsonValue } from "../core/types.js";
@@ -301,14 +305,7 @@ function patchChecksum<TResources>(patch: DataPatchDefinition<TResources>): stri
 }
 
 function assertChecksumMatches<TResources>(patch: DataPatchDefinition<TResources>, applied: AppliedDataPatch): void {
-  const checksum = patchChecksum(patch);
-  if (checksum !== applied.checksum) {
-    throw new FrameworkError(
-      "DATA_PATCH_CHECKSUM_MISMATCH",
-      `Applied data patch '${patch.id}' has checksum '${applied.checksum}' but planned '${checksum}'`,
-      { status: 409 }
-    );
-  }
+  assertAppliedDataPatchChecksumMatches(patch.id, patchChecksum(patch), applied.checksum);
 }
 
 function assertRecordedPatchAllowsSkip<TResources>(
@@ -362,14 +359,7 @@ function appliedPatchFromRecord(record: RecordedDataPatch & { readonly status: "
 }
 
 function assertChecksumValueMatches<TResources>(patch: DataPatchDefinition<TResources>, appliedChecksum: string): void {
-  const checksum = patchChecksum(patch);
-  if (checksum !== appliedChecksum) {
-    throw new FrameworkError(
-      "DATA_PATCH_CHECKSUM_MISMATCH",
-      `Recorded data patch '${patch.id}' has checksum '${appliedChecksum}' but planned '${checksum}'`,
-      { status: 409 }
-    );
-  }
+  assertDataPatchChecksumMatches(patch.id, patchChecksum(patch), appliedChecksum);
 }
 
 function normalizeResult(result: JsonValue | void, label: string): JsonValue | undefined {

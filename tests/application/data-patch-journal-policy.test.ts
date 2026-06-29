@@ -1,4 +1,6 @@
 import {
+  assertAppliedDataPatchChecksumMatches,
+  assertDataPatchChecksumMatches,
   assertRetryableFailedJournal,
   assertRetryableRollbackFailedJournal,
   assertRollbackClaimableJournal
@@ -49,6 +51,15 @@ describe("data patch journal policy", () => {
     );
     expect(() => assertRollbackClaimableJournal(journal("corrupt"), "accounts.seed", "v1")).toThrow(
       "invalid journal status 'corrupt'"
+    );
+  });
+
+  it("formats recorded and applied checksum mismatches for their callers", () => {
+    expect(() => assertDataPatchChecksumMatches("accounts.seed", "v1", "v2")).toThrow(
+      "Recorded data patch 'accounts.seed' has checksum 'v2' but planned 'v1'"
+    );
+    expect(() => assertAppliedDataPatchChecksumMatches("accounts.seed", "v1", "v2")).toThrow(
+      "Applied data patch 'accounts.seed' has checksum 'v2' but planned 'v1'"
     );
   });
 });

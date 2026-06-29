@@ -114,6 +114,21 @@ export function assertDataPatchChecksumMatches(id: string, plannedChecksum: stri
   );
 }
 
+export function assertAppliedDataPatchChecksumMatches(
+  id: string,
+  plannedChecksum: string,
+  appliedChecksum: string
+): void {
+  if (plannedChecksum === appliedChecksum) {
+    return;
+  }
+  throw new FrameworkError(
+    "DATA_PATCH_CHECKSUM_MISMATCH",
+    `Applied data patch '${id}' has checksum '${appliedChecksum}' but planned '${plannedChecksum}'`,
+    { status: 409 }
+  );
+}
+
 export function invalidDataPatchJournalStatus(journal: DataPatchJournalState): FrameworkError {
   return new FrameworkError(
     "DATA_PATCH_INVALID",
