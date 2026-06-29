@@ -9,6 +9,10 @@ import {
   jobScheduleDefinitionKey,
   jobScheduleDefinitionsStream,
   jobScheduleOverridesStream,
+  requireSavedRuntimeJobSchedule,
+  runtimeJobScheduleForTenant,
+  runtimeJobScheduleIndex,
+  runtimeJobSchedules,
   type DomainEvent,
   type JobScheduleEventPayload
 } from "../../src";
@@ -187,6 +191,67 @@ describe("job schedule events", () => {
       updatedBy: "admin@example.com"
     });
     expect(state.schedules.has(jobScheduleDefinitionKey("beta", "runtime-daily"))).toBe(false);
+  });
+
+  it("selects runtime schedules deterministically and by tenant key", () => {
+    const state = foldJobScheduleDefinitions([
+      scheduleEvent(1, "JobScheduleSaved", {
+        kind: "JobScheduleSaved",
+        scheduleId: "z-last",
+        cron: "0 2 * * *",
+        jobName: "reports.daily",
+        tenantId: "beta",
+        enabled: true
+      }),
+      scheduleEvent(2, "JobScheduleSaved", {
+        kind: "JobScheduleSaved",
+        scheduleId: "a-first",
+        cron: "0 0 * * *",
+        jobName: "reports.daily",
+        tenantId: "acme",
+        enabled: true
+      }),
+      scheduleEvent(3, "JobScheduleSaved", {
+        kind: "JobScheduleSaved",
+        scheduleId: "m-middle",
+        cron: "0 1 * * *",
+        jobName: "reports.daily",
+        tenantId: "acme",
+        enabled: true
+      })
+    ]);
+
+    expect(runtimeJobSchedules(state).map((schedule) => `${schedule.tenantId}:${schedule.id}`)).toEqual([
+      "acme:a-first",
+      "acme:m-middle",
+      "beta:z-last"
+    ]);
+    expect(runtimeJobScheduleForTenant(state, "acme", "m-middle")).toMatchObject({
+      id: "m-middle",
+      tenantId: "acme"
+    });
+    expect(runtimeJobScheduleIndex(state, "acme", "m-middle")).toBe(1);
+    expect(runtimeJobScheduleIndex(state, "missing", "nope")).toBe(0);
+  });
+
+  it("requires saved runtime schedules after replay", () => {
+    const state = foldJobScheduleDefinitions([
+      scheduleEvent(1, "JobScheduleSaved", {
+        kind: "JobScheduleSaved",
+        scheduleId: "runtime-daily",
+        cron: "0 0 * * *",
+        jobName: "reports.daily",
+        tenantId: "acme",
+        enabled: true
+      })
+    ]);
+
+    expect(requireSavedRuntimeJobSchedule(state, "acme", "runtime-daily")).toMatchObject({
+      id: "runtime-daily"
+    });
+    expect(() => requireSavedRuntimeJobSchedule(state, "acme", "missing")).toThrow(
+      "Saved job schedule 'missing' for tenant 'acme' was not found after replay"
+    );
   });
 });
 

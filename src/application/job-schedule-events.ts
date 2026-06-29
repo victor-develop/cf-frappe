@@ -241,6 +241,43 @@ export function foldJobScheduleDefinitions(events: readonly DomainEvent[]): JobS
   };
 }
 
+export function runtimeJobSchedules(state: JobScheduleDefinitionState): readonly RuntimeJobScheduleRecord[] {
+  return [...state.schedules.values()].sort(
+    (left, right) => left.tenantId.localeCompare(right.tenantId) || left.id.localeCompare(right.id)
+  );
+}
+
+export function runtimeJobScheduleForTenant(
+  state: JobScheduleDefinitionState,
+  tenantId: TenantId,
+  scheduleId: string
+): RuntimeJobScheduleRecord | undefined {
+  return state.schedules.get(jobScheduleDefinitionKey(tenantId, scheduleId));
+}
+
+export function requireSavedRuntimeJobSchedule(
+  state: JobScheduleDefinitionState,
+  tenantId: TenantId,
+  scheduleId: string
+): RuntimeJobScheduleRecord {
+  const schedule = runtimeJobScheduleForTenant(state, tenantId, scheduleId);
+  if (schedule === undefined) {
+    throw new Error(`Saved job schedule '${scheduleId}' for tenant '${tenantId}' was not found after replay`);
+  }
+  return schedule;
+}
+
+export function runtimeJobScheduleIndex(
+  state: JobScheduleDefinitionState,
+  tenantId: TenantId,
+  scheduleId: string
+): number {
+  const index = runtimeJobSchedules(state).findIndex(
+    (schedule) => schedule.tenantId === tenantId && schedule.id === scheduleId
+  );
+  return index < 0 ? 0 : index;
+}
+
 function jobScheduleEventEnvelope(
   options: JobScheduleEventEnvelopeOptions,
   stream: string,
