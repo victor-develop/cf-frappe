@@ -26,11 +26,12 @@ import {
   authorizeFieldPropertyAdministration,
   ensureFieldPropertyExpectedVersion,
   fieldPropertyEventDocumentName,
-  fieldPropertyOverridesEqual,
   findFieldPropertyOverride,
   normalizeFieldPropertyOverrideExpressions,
   normalizeFieldPropertyOverrides,
   normalizeRequiredFieldPropertyText,
+  planFieldPropertyOverrideClear,
+  planFieldPropertyOverrideSave,
   replaceFieldPropertyOverride,
   requireFieldPropertyField
 } from "./field-property-policy.js";
@@ -121,7 +122,7 @@ export class FieldPropertyService {
     const effective = applyFieldPropertyOverridesToDocType(doctype, pending);
     overrides = normalizeFieldPropertyOverrideExpressions(effective, field.name, overrides);
     const existing = findFieldPropertyOverride(state, field.name);
-    if (existing && fieldPropertyOverridesEqual(existing.overrides, overrides)) {
+    if (planFieldPropertyOverrideSave(existing, overrides).status === "noop") {
       return state;
     }
     return this.appendAndFold(state, {
@@ -147,7 +148,7 @@ export class FieldPropertyService {
         status: 400
       });
     }
-    if (!existing) {
+    if (planFieldPropertyOverrideClear(existing).status === "noop") {
       return state;
     }
     return this.appendAndFold(state, {

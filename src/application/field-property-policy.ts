@@ -83,6 +83,25 @@ export function fieldPropertyOverridesEqual(
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+export type FieldPropertyOverrideChangeDecision =
+  | { readonly status: "append" }
+  | { readonly status: "noop" };
+
+export function planFieldPropertyOverrideSave(
+  existing: FieldPropertyOverrideEntry | undefined,
+  overrides: FieldPropertyOverrides
+): FieldPropertyOverrideChangeDecision {
+  return existing !== undefined && fieldPropertyOverridesEqual(existing.overrides, overrides)
+    ? { status: "noop" }
+    : { status: "append" };
+}
+
+export function planFieldPropertyOverrideClear(
+  existing: FieldPropertyOverrideEntry | undefined
+): FieldPropertyOverrideChangeDecision {
+  return existing === undefined ? { status: "noop" } : { status: "append" };
+}
+
 export function replaceFieldPropertyOverride(
   state: FieldPropertyOverrideState,
   fieldName: string,

@@ -7,6 +7,8 @@ import {
   normalizeFieldPropertyOverrideExpressions,
   normalizeFieldPropertyOverrides,
   normalizeRequiredFieldPropertyText,
+  planFieldPropertyOverrideClear,
+  planFieldPropertyOverrideSave,
   replaceFieldPropertyOverride,
   requireFieldPropertyField,
   resolveFieldPropertyTenant
@@ -69,6 +71,23 @@ describe("field property policy", () => {
     expect(findFieldPropertyOverride(state(1), "missing")).toBeUndefined();
     expect(fieldPropertyOverridesEqual({ label: "Urgency" }, { label: "Urgency" })).toBe(true);
     expect(fieldPropertyOverridesEqual({ label: "Urgency" }, { label: "Priority" })).toBe(false);
+  });
+
+  it("plans field-property override saves without emitting redundant events", () => {
+    const existing = findFieldPropertyOverride(state(1), "priority");
+
+    expect(planFieldPropertyOverrideSave(existing, { label: "Urgency" })).toEqual({ status: "noop" });
+    expect(planFieldPropertyOverrideSave(existing, { label: "Priority" })).toEqual({ status: "append" });
+    expect(planFieldPropertyOverrideSave(undefined, { label: "Urgency" })).toEqual({ status: "append" });
+  });
+
+  it("plans field-property override clears without emitting missing-override events", () => {
+    expect(planFieldPropertyOverrideClear(findFieldPropertyOverride(state(1), "priority"))).toEqual({
+      status: "append"
+    });
+    expect(planFieldPropertyOverrideClear(findFieldPropertyOverride(state(1), "missing"))).toEqual({
+      status: "noop"
+    });
   });
 
   it("projects pending override state while preserving create timestamps", () => {
