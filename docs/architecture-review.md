@@ -112,6 +112,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized workflow-definition event type derivation in workflow events so workflow save and clear appends no longer read payload kinds inline in the event factory.
 - Centralized notification-rule event type derivation in notification-rule events so saved and cleared notification-rule appends no longer read payload kinds inline in the event factory.
 - Centralized user-permission event type derivation in user-permission events so allow and revoke appends no longer read payload kinds inline in the event factory.
+- Centralized user-account event type derivation in user-account events so account, auth-provider, password, email verification, role, and status appends no longer read payload kinds inline in the event factory.
 - Centralized readable file dashboard candidate shaping in file policy so dashboard orchestration no longer composes permission-check DTOs inline.
 - Centralized multipart completed-object reuse versus storage-completion planning in file policy so multipart orchestration no longer owns idempotent completion branching.
 - Centralized multipart completed-object read planning in file policy so multipart orchestration no longer derives object keys or upload ids before storage reads inline.

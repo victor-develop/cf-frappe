@@ -7,6 +7,7 @@ import {
   userAccountEnabledPayload,
   userAccountDocumentName,
   userAccountEvent,
+  userAccountEventType,
   userAccountStatusChangedPayload,
   userAuthProviderChangePayload,
   userAuthProviderCreatedPayloads,
@@ -309,6 +310,29 @@ describe("user account events", () => {
       kind: "UserAccountDisabled",
       userId: "owner@example.com"
     });
+  });
+
+  it("derives user account event types from payload identity", () => {
+    expect(userAccountEventType(userAccountCreatedPayload({
+      userId: "owner@example.com",
+      email: "owner@example.com",
+      roles: ["User"],
+      enabled: true
+    }))).toBe("UserAccountCreated");
+    expect(userAccountEventType(userAuthProviderSyncedPayload({
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123"
+    }))).toBe("UserAuthProviderSynced");
+    expect(userAccountEventType(userPasswordResetCompletedPayload({
+      userId: "owner@example.com",
+      passwordHash: "hash:reset-456"
+    }))).toBe("UserPasswordResetCompleted");
+    expect(userAccountEventType(userRolesChangedPayload({
+      userId: "owner@example.com",
+      roles: ["System Manager", "User"]
+    }))).toBe("UserRolesChanged");
+    expect(userAccountEventType(userAccountDisabledPayload({ userId: "owner@example.com" }))).toBe("UserAccountDisabled");
   });
 
   it("creates typed user account events from payload identity", () => {

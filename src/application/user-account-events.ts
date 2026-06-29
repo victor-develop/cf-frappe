@@ -368,7 +368,7 @@ export function userAccountEvent<TPayload extends UserAccountEventPayload>(
     id: options.id,
     tenantId: options.tenantId,
     stream: options.stream,
-    type: options.payload.kind,
+    type: userAccountEventType(options.payload),
     doctype: "__UserAccounts",
     documentName: userAccountDocumentName(options.payload),
     actorId: options.actorId,
@@ -380,6 +380,10 @@ export function userAccountEvent<TPayload extends UserAccountEventPayload>(
 
 export function userAccountDocumentName(payload: UserAccountEventPayload): string {
   return payload.userId;
+}
+
+export function userAccountEventType(payload: UserAccountEventPayload): UserAccountEventPayload["kind"] {
+  return payload.kind;
 }
 
 export function replayUserAccountAppend(
