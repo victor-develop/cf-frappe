@@ -1,7 +1,9 @@
 import {
   primitiveReportRowValue,
   reportAggregateValue,
-  reportSummaryValue
+  reportChartDrilldown,
+  reportSummaryValue,
+  sortReportChartPoints
 } from "../../src";
 
 describe("report policy", () => {
@@ -72,5 +74,49 @@ describe("report policy", () => {
     expect(primitiveReportRowValue(rows[2]!, "priority")).toBeNull();
     expect(primitiveReportRowValue({ meta: { nested: true } }, "meta")).toBeUndefined();
     expect(primitiveReportRowValue({}, "missing")).toBeUndefined();
+  });
+
+  it("builds chart drilldown queries from exact report filters", () => {
+    expect(reportChartDrilldown({ name: "priority" }, "High")).toEqual({
+      filter: "priority",
+      value: "High",
+      query: "filter_priority=High"
+    });
+    expect(reportChartDrilldown({ name: "count" }, 7)).toEqual({
+      filter: "count",
+      value: 7,
+      query: "filter_count=7"
+    });
+  });
+
+  it("omits chart drilldowns for empty group keys", () => {
+    expect(reportChartDrilldown({ name: "priority" }, null)).toBeUndefined();
+  });
+
+  it("sorts chart points by value with nulls last", () => {
+    expect(sortReportChartPoints([
+      { key: "empty", label: "Empty", value: null },
+      { key: "low", label: "Low", value: 1 },
+      { key: "high", label: "High", value: 3 }
+    ], "value", "desc").map((point) => point.key)).toEqual(["high", "low", "empty"]);
+  });
+
+  it("sorts chart points by label and key", () => {
+    expect(sortReportChartPoints([
+      { key: "b", label: "Beta", value: 1 },
+      { key: "a", label: "Alpha", value: 2 }
+    ], "label", "asc").map((point) => point.key)).toEqual(["a", "b"]);
+    expect(sortReportChartPoints([
+      { key: "b", label: "Beta", value: 1 },
+      { key: "a", label: "Alpha", value: 2 }
+    ], "key", "desc").map((point) => point.key)).toEqual(["b", "a"]);
+  });
+
+  it("uses label and key tie-breakers for chart point value ties", () => {
+    expect(sortReportChartPoints([
+      { key: "b", label: "Same", value: 2 },
+      { key: "a", label: "Same", value: 2 },
+      { key: "c", label: "After", value: 2 }
+    ], "value", "asc").map((point) => point.key)).toEqual(["c", "a", "b"]);
   });
 });

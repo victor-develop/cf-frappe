@@ -1,5 +1,10 @@
 import { badRequest } from "../core/errors.js";
-import type { ReportSummaryDefinition } from "../core/reports.js";
+import type {
+  ReportChartOrder,
+  ReportChartOrderBy,
+  ReportFilterDefinition,
+  ReportSummaryDefinition
+} from "../core/reports.js";
 import type { FieldType, JsonPrimitive, JsonValue } from "../core/types.js";
 
 export type ReportRow = Readonly<Record<string, JsonValue>>;
@@ -12,6 +17,19 @@ export interface ReportSummaryValue {
   readonly field?: string;
   readonly type?: FieldType;
   readonly indicator?: string;
+}
+
+export interface ReportChartDrilldown {
+  readonly filter: string;
+  readonly value: JsonPrimitive;
+  readonly query: string;
+}
+
+export interface ReportChartPoint {
+  readonly key: JsonPrimitive;
+  readonly label: string;
+  readonly value: number | null;
+  readonly drilldown?: ReportChartDrilldown;
 }
 
 export function reportSummaryValue(
@@ -55,6 +73,36 @@ export function primitiveReportRowValue(row: ReportRow, field: string): JsonPrim
     return value;
   }
   return undefined;
+}
+
+export function reportChartDrilldown(
+  filter: Pick<ReportFilterDefinition, "name">,
+  value: JsonPrimitive
+): ReportChartDrilldown | undefined {
+  if (value === null) {
+    return undefined;
+  }
+  const params = new URLSearchParams();
+  params.set(`filter_${filter.name}`, String(value));
+  return {
+    filter: filter.name,
+    value,
+    query: params.toString()
+  };
+}
+
+export function sortReportChartPoints(
+  points: readonly ReportChartPoint[],
+  orderBy: ReportChartOrderBy,
+  order: ReportChartOrder
+): readonly ReportChartPoint[] {
+  const direction = order === "desc" ? -1 : 1;
+  return [...points].sort((left, right) => {
+    const comparison = compareChartPoints(left, right, orderBy, direction);
+    return comparison === 0
+      ? compareReportValues(left.label, right.label) || compareReportValues(left.key, right.key)
+      : comparison;
+  });
 }
 
 function requiredSummaryField(summary: ReportSummaryDefinition): string {
@@ -110,4 +158,29 @@ function compareReportValues(actual: JsonValue | undefined, expected: JsonPrimit
     return actual - expected;
   }
   return String(actual ?? "").localeCompare(String(expected));
+}
+
+function compareChartPoints(
+  left: ReportChartPoint,
+  right: ReportChartPoint,
+  orderBy: ReportChartOrderBy,
+  direction: number
+): number {
+  if (orderBy === "value") {
+    return compareChartValues(left.value, right.value, direction);
+  }
+  if (orderBy === "label") {
+    return compareReportValues(left.label, right.label) * direction;
+  }
+  return compareReportValues(left.key, right.key) * direction;
+}
+
+function compareChartValues(left: number | null, right: number | null, direction: number): number {
+  if (left === null || right === null) {
+    if (left === right) {
+      return 0;
+    }
+    return left === null ? 1 : -1;
+  }
+  return compareReportValues(left, right) * direction;
 }

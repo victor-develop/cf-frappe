@@ -28,12 +28,16 @@ import { QueryService } from "./query-service.js";
 import { CSV_CONTENT_TYPE, csvLine, filenamePart } from "./csv.js";
 import {
   primitiveReportRowValue,
+  reportChartDrilldown,
   reportSummaryValue,
+  sortReportChartPoints,
+  type ReportChartPoint,
   type ReportRow,
   type ReportSummaryValue
 } from "./report-policy.js";
 
 export type ReportFilters = Readonly<Record<string, ReportFilterValue | undefined>>;
+export type { ReportChartDrilldown, ReportChartPoint, ReportRow, ReportSummaryValue } from "./report-policy.js";
 
 const DEFAULT_CSV_EXPORT_LIMIT = 10_000;
 const EMPTY_CHART_COLORS: readonly string[] = Object.freeze([]);
@@ -49,19 +53,6 @@ export interface ReportGroupResult {
   readonly label: string;
   readonly field: string;
   readonly rows: readonly ReportGroupRow[];
-}
-
-export interface ReportChartDrilldown {
-  readonly filter: string;
-  readonly value: JsonPrimitive;
-  readonly query: string;
-}
-
-export interface ReportChartPoint {
-  readonly key: JsonPrimitive;
-  readonly label: string;
-  readonly value: number | null;
-  readonly drilldown?: ReportChartDrilldown;
 }
 
 export interface ReportChartResult {
@@ -1035,7 +1026,7 @@ function buildReportCharts(
     const drilldownFilter = group === undefined ? undefined : exactDrilldownFilterForGroup(report, group);
     const orderBy = chart.orderBy ?? "key";
     const order = chart.order ?? "asc";
-    const points = sortChartPoints(
+    const points = sortReportChartPoints(
       (group?.rows ?? []).map((row) => {
         const summary = row.summaries.find((item) => item.name === chart.summary);
         const drilldown = drilldownFilter === undefined ? undefined : reportChartDrilldown(drilldownFilter, row.key);
@@ -1074,61 +1065,6 @@ function exactDrilldownFilterForGroup(
   return (report.filters ?? []).find((filter) =>
     filter.field === group.field && (filter.operator ?? "eq") === "eq"
   );
-}
-
-function reportChartDrilldown(
-  filter: ReportFilterDefinition,
-  value: JsonPrimitive
-): ReportChartDrilldown | undefined {
-  if (value === null) {
-    return undefined;
-  }
-  const params = new URLSearchParams();
-  params.set(`filter_${filter.name}`, String(value));
-  return {
-    filter: filter.name,
-    value,
-    query: params.toString()
-  };
-}
-
-function sortChartPoints(
-  points: readonly ReportChartPoint[],
-  orderBy: ReportChartOrderBy,
-  order: ReportChartOrder
-): readonly ReportChartPoint[] {
-  const direction = order === "desc" ? -1 : 1;
-  return [...points].sort((left, right) => {
-    const comparison = compareChartPoints(left, right, orderBy, direction);
-    return comparison === 0
-      ? compareValues(left.label, right.label) || compareValues(left.key, right.key)
-      : comparison;
-  });
-}
-
-function compareChartPoints(
-  left: ReportChartPoint,
-  right: ReportChartPoint,
-  orderBy: ReportChartOrderBy,
-  direction: number
-): number {
-  if (orderBy === "value") {
-    return compareChartValues(left.value, right.value, direction);
-  }
-  if (orderBy === "label") {
-    return compareValues(left.label, right.label) * direction;
-  }
-  return compareValues(left.key, right.key) * direction;
-}
-
-function compareChartValues(left: number | null, right: number | null, direction: number): number {
-  if (left === null || right === null) {
-    if (left === right) {
-      return 0;
-    }
-    return left === null ? 1 : -1;
-  }
-  return compareValues(left, right) * direction;
 }
 
 function groupLabel(value: JsonPrimitive): string {
