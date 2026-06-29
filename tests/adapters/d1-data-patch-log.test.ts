@@ -1,4 +1,11 @@
 import { D1DataPatchLog } from "../../src";
+import {
+  appliedDataPatchFromRow,
+  claimResultFromRow,
+  recordedDataPatchFromRow,
+  serializedPatchResult,
+  type DataPatchRow
+} from "../../src/adapters/d1/data-patch-serde.js";
 import type { DocumentData, JsonValue } from "../../src";
 import { now } from "../helpers";
 
@@ -156,6 +163,50 @@ describe("D1DataPatchLog", () => {
         rollbackResult: { undone: { count: 1 }, ids: ["one"] }
       }
     ]);
+  });
+
+  it("maps D1 data patch rows and result JSON through extracted serde", () => {
+    const serialized = serializedPatchResult("accounts.seed", "result_json", { touched: [1] });
+    expect(serialized).toBe('{"touched":[1]}');
+
+    const applied = appliedDataPatchFromRow(dataPatchRow({
+      status: "applied",
+      applied_at: now,
+      result_json: serialized,
+      result_present: 1
+    }));
+    expect(applied).toEqual({
+      id: "accounts.seed",
+      checksum: "v1",
+      appliedAt: now,
+      result: { touched: [1] }
+    });
+
+    const rolledBack = recordedDataPatchFromRow(dataPatchRow({
+      status: "rolled_back",
+      applied_at: now,
+      result_json: "null",
+      result_present: 1,
+      rolled_back_at: "2026-01-01T00:01:00.000Z",
+      rollback_result_json: '{"undone":true}',
+      rollback_result_present: 1
+    }));
+    expect(rolledBack).toEqual({
+      id: "accounts.seed",
+      checksum: "v1",
+      appliedAt: now,
+      result: null,
+      rolledBackAt: "2026-01-01T00:01:00.000Z",
+      rollbackResult: { undone: true },
+      status: "rolled_back"
+    });
+
+    expect(() => claimResultFromRow(dataPatchRow({ status: "rollback_pending" }), "claim-apply")).toThrow(
+      "cannot be applied because journal status is 'rollback_pending'"
+    );
+    expect(() => serializedPatchResult("bad.apply", "result_json", Number.POSITIVE_INFINITY as never)).toThrow(
+      "invalid result_json"
+    );
   });
 
   it("returns pending and failed claim states without taking ownership", async () => {
@@ -721,6 +772,29 @@ describe("D1DataPatchLog", () => {
     ]);
   });
 });
+
+function dataPatchRow(overrides: Partial<DataPatchRow> = {}): DataPatchRow {
+  return {
+    id: "accounts.seed",
+    checksum: "v1",
+    status: "pending",
+    claim_id: "claim-1",
+    claimed_at: now,
+    applied_at: null,
+    failed_at: null,
+    error: null,
+    result_json: null,
+    result_present: 0,
+    rollback_claim_id: null,
+    rollback_claimed_at: null,
+    rolled_back_at: null,
+    rollback_failed_at: null,
+    rollback_error: null,
+    rollback_result_json: null,
+    rollback_result_present: 0,
+    ...overrides
+  };
+}
 
 class FakeD1Database {
   readonly patches = new Map<string, {
