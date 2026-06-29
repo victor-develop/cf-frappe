@@ -100,6 +100,7 @@ export * from "./application/user-role-validator.js";
 export * from "./application/workflow-events.js";
 export * from "./application/workflow-policy.js";
 export * from "./application/workflow-service.js";
+export * from "./application/web-form-policy.js";
 export * from "./application/web-form-service.js";
 export * from "./application/web-page-service.js";
 export * from "./application/web-view-policy.js";

@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted Web Form published/admin access, create-metadata field resolution, declared-field submission data shaping, required-value preflight, and submit-result shaping from WebFormService into web-form policy and covered those rules directly.
 - Extracted web-view metadata field resolution, published/route filter shaping, filter-expression and ordering query options, limit/offset clamping, scan-budget page sizing, safe-route item projection, and list-result shaping from WebViewService into web-view policy and covered those rules directly.
 - Extracted kanban card-limit defaults, immutable column state initialization, document-to-column projection, scalar column coercion, card title fallback, and run-result shaping from KanbanService into kanban policy and covered those rules directly.
 - Extracted calendar event-limit bounding, metadata/window filter composition, scalar event projection, title fallback, and run-result shaping from CalendarService into calendar policy and covered those rules directly.
