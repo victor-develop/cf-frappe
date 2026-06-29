@@ -16,8 +16,8 @@ import {
   InMemoryRealtimePublisher
 } from "../../src";
 import { UserNotificationService, deterministicIds, fixedClock, JobDispatcher } from "../../src";
-import { createServices, data, now, owner } from "../helpers";
-import type { AfterCommitContext, JsonValue, RealtimeEvent, RealtimePublishResult } from "../../src";
+import { createServices, data, noteDocType, now, owner } from "../helpers";
+import type { AfterCommitContext, DomainEvent, JsonValue, RealtimeEvent, RealtimePublishResult } from "../../src";
 
 describe("in-memory realtime publisher", () => {
   it("clones published events before storing them", async () => {
@@ -572,6 +572,76 @@ describe("document realtime hooks", () => {
         metadata: {
           sourceEventId: "evt_assign-1",
           sourceEventType: "NoteAssigned",
+          sourcePayloadKind: "DocumentAssigned",
+          ruleName: "Email assignees",
+          recipientId: "support@example.com"
+        }
+      }
+    ]);
+  });
+
+  it("queues email notifications from payload kind when source event type names are misleading", async () => {
+    const emailNotifications = new EmailNotificationService({
+      events: new InMemoryEventStore(),
+      from: { email: "notifications@example.com" },
+      sender: { async send() { return {}; } },
+      notificationRules: {
+        async notificationRulesFor() {
+          return [
+            {
+              name: "Email assignees",
+              events: ["DocumentAssigned"],
+              recipients: [{ kind: "user", userId: "support@example.com" }],
+              channels: ["email"]
+            }
+          ];
+        }
+      }
+    });
+    const enqueued: Array<{ readonly tenantId: string; readonly messageId: string; readonly metadata: unknown }> = [];
+    const hooks = createDocumentQueuedEmailNotificationHooks(emailNotifications, {
+      async enqueue(tenantId, messageId, options) {
+        enqueued.push({ tenantId, messageId, metadata: options?.metadata });
+      }
+    });
+    const event = {
+      id: "evt_assign-1",
+      tenantId: "acme",
+      stream: "acme:Note:Queue Metadata",
+      sequence: 2,
+      type: "NoteDeleted",
+      doctype: "Note",
+      documentName: "Queue Metadata",
+      actorId: owner.id,
+      occurredAt: now,
+      payload: { kind: "DocumentAssigned", assigneeId: "support@example.com" },
+      metadata: {}
+    } satisfies DomainEvent;
+    const snapshot = {
+      tenantId: "acme",
+      doctype: "Note",
+      name: "Queue Metadata",
+      version: 2,
+      docstatus: "draft",
+      data: data({ title: "Queue Metadata" }),
+      createdAt: now,
+      updatedAt: now
+    } as const;
+
+    await hooks.afterCommit?.({
+      doctype: noteDocType,
+      data: data({ title: "Queue Metadata" }),
+      event,
+      snapshot
+    } satisfies AfterCommitContext);
+
+    expect(enqueued).toEqual([
+      {
+        tenantId: "acme",
+        messageId: "evt_assign-1:rule:Email%20assignees:email:support%40example.com",
+        metadata: {
+          sourceEventId: "evt_assign-1",
+          sourceEventType: "NoteDeleted",
           sourcePayloadKind: "DocumentAssigned",
           ruleName: "Email assignees",
           recipientId: "support@example.com"
