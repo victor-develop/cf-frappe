@@ -3,6 +3,7 @@ import {
   clampWebViewOffset,
   defineDocType,
   defineWebView,
+  planWebViewReadAccess,
   resolveWebViewMetadata,
   webViewFilterExpressionOption,
   webViewFilters,
@@ -40,6 +41,35 @@ const BlogView = defineWebView({
 });
 
 describe("web view policy", () => {
+  it("plans Web View read access from roles and metadata readability", () => {
+    const restricted = defineWebView({
+      ...BlogView,
+      roles: ["Website Editor"]
+    });
+
+    expect(
+      planWebViewReadAccess({
+        actor: { id: "editor", roles: ["Website Editor"] },
+        view: restricted,
+        metadataReadable: true
+      })
+    ).toEqual({ status: "allow" });
+    expect(
+      planWebViewReadAccess({
+        actor: { id: "editor", roles: ["Website Editor"] },
+        view: restricted,
+        metadataReadable: false
+      })
+    ).toEqual({ status: "deny", message: "Actor 'editor' cannot read web view 'Blog'" });
+    expect(
+      planWebViewReadAccess({
+        actor: { id: "guest", roles: ["Guest"] },
+        view: restricted,
+        metadataReadable: true
+      })
+    ).toEqual({ status: "deny", message: "Actor 'guest' cannot read web view 'Blog'" });
+  });
+
   it("resolves Web View metadata fields from effective DocType metadata", () => {
     expect(resolveWebViewMetadata(BlogView, BlogPost)).toEqual({
       view: BlogView,

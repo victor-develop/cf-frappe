@@ -1,7 +1,8 @@
 import { badRequest } from "../core/errors.js";
 import { isCanonicalWebPageRoute } from "../core/web-page.js";
-import type { WebViewDefinition } from "../core/web-view.js";
+import { canReadWebView, type WebViewDefinition } from "../core/web-view.js";
 import type {
+  Actor,
   DocTypeDefinition,
   DocumentSnapshot,
   FieldDefinition,
@@ -14,6 +15,10 @@ import type {
 export const DEFAULT_WEB_VIEW_LIMIT = 20;
 export const MAX_WEB_VIEW_LIMIT = 200;
 export const MAX_WEB_VIEW_SCAN_DOCUMENTS = 1_000;
+
+export type WebViewReadAccessDecision =
+  | { readonly status: "allow" }
+  | { readonly status: "deny"; readonly message: string };
 
 export interface WebViewResolvedField {
   readonly field: string;
@@ -47,6 +52,20 @@ export interface WebViewListResult {
   readonly offset: number;
   readonly hasMore: boolean;
   readonly nextOffset?: number;
+}
+
+export function planWebViewReadAccess(options: {
+  readonly actor: Actor;
+  readonly view: WebViewDefinition;
+  readonly metadataReadable: boolean;
+}): WebViewReadAccessDecision {
+  if (!canReadWebView(options.actor, options.view) || !options.metadataReadable) {
+    return {
+      status: "deny",
+      message: `Actor '${options.actor.id}' cannot read web view '${options.view.name}'`
+    };
+  }
+  return { status: "allow" };
 }
 
 export function resolveWebViewMetadata(

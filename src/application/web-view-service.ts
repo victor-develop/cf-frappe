@@ -1,5 +1,5 @@
 import { notFound, permissionDenied } from "../core/errors.js";
-import { assertWebViewMatchesDocType, canReadWebView, type WebViewDefinition } from "../core/web-view.js";
+import { assertWebViewMatchesDocType, type WebViewDefinition } from "../core/web-view.js";
 import { isCanonicalWebPageRoute } from "../core/web-page.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { Actor, DocTypeDefinition } from "../core/types.js";
@@ -9,6 +9,7 @@ import {
   clampWebViewLimit,
   clampWebViewOffset,
   DEFAULT_WEB_VIEW_LIMIT,
+  planWebViewReadAccess,
   resolveWebViewMetadata,
   webViewFilterExpressionOption,
   webViewFilters,
@@ -19,7 +20,8 @@ import {
   webViewRouteFilters,
   type WebViewItem,
   type WebViewListResult,
-  type WebViewMetadata
+  type WebViewMetadata,
+  type WebViewReadAccessDecision
 } from "./web-view-policy.js";
 
 export type { WebViewItem, WebViewListResult, WebViewMetadata, WebViewResolvedField } from "./web-view-policy.js";
@@ -28,6 +30,10 @@ export interface WebViewServiceOptions {
   readonly registry: ModelRegistry;
   readonly queries: QueryService;
 }
+
+type WebViewReadAccessProbe =
+  | (Extract<WebViewReadAccessDecision, { readonly status: "allow" }> & { readonly doctype: DocTypeDefinition })
+  | Extract<WebViewReadAccessDecision, { readonly status: "deny" }>;
 
 export class WebViewService {
   private readonly registry: ModelRegistry;
@@ -41,7 +47,7 @@ export class WebViewService {
   async listWebViews(actor: Actor): Promise<readonly WebViewDefinition[]> {
     const readable: WebViewDefinition[] = [];
     for (const webView of this.registry.listWebViews()) {
-      if (await this.canAccessWebView(actor, webView)) {
+      if ((await this.webViewReadAccess(actor, webView)).status === "allow") {
         readable.push(webView);
       }
     }
@@ -50,11 +56,11 @@ export class WebViewService {
 
   async getWebView(actor: Actor, webViewName: string): Promise<WebViewMetadata> {
     const webView = this.registry.getWebView(webViewName);
-    if (!canReadWebView(actor, webView)) {
-      throw permissionDenied(`Actor '${actor.id}' cannot read web view '${webView.name}'`);
+    const decision = await this.webViewReadAccess(actor, webView);
+    if (decision.status === "deny") {
+      throw permissionDenied(decision.message);
     }
-    const doctype = await this.readMetaFor(actor, webView);
-    return resolveWebViewMetadata(webView, doctype);
+    return resolveWebViewMetadata(webView, decision.doctype);
   }
 
   async listItems(
@@ -128,16 +134,20 @@ export class WebViewService {
     };
   }
 
-  private async canAccessWebView(actor: Actor, webView: WebViewDefinition): Promise<boolean> {
-    if (!canReadWebView(actor, webView)) {
-      return false;
+  private async webViewReadAccess(actor: Actor, webView: WebViewDefinition): Promise<WebViewReadAccessProbe> {
+    const preflight = planWebViewReadAccess({ actor, view: webView, metadataReadable: true });
+    if (preflight.status === "deny") {
+      return preflight;
     }
     try {
-      await this.readMetaFor(actor, webView);
-      return true;
+      const doctype = await this.readMetaFor(actor, webView);
+      return { ...preflight, doctype };
     } catch (error) {
       if (isPermissionDeniedError(error)) {
-        return false;
+        const denied = planWebViewReadAccess({ actor, view: webView, metadataReadable: false });
+        if (denied.status === "deny") {
+          return denied;
+        }
       }
       throw error;
     }
