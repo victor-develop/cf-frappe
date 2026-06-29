@@ -6,6 +6,7 @@ import { copyDocumentData } from "./document-field-policy.js";
 import { workflowTransitionEventType } from "./document-command-events.js";
 import {
   documentCreatedPayload,
+  documentDeletedPayload,
   documentLifecycleEventType,
   documentStatusChangedPayload,
   documentUpdatedPayload,
@@ -404,6 +405,29 @@ export function planDocumentDeletePolicy(
       deleteEventType: doctype.events?.delete
     }),
     payloadKind: "DocumentDeleted"
+  };
+}
+
+export function documentDeleteEventCommand(input: {
+  readonly tenantId: string;
+  readonly stream: string;
+  readonly doctypeName: string;
+  readonly documentName: string;
+  readonly actorId: string;
+  readonly occurredAt: string;
+  readonly plan: Pick<DocumentDeletePolicyPlan, "eventType">;
+  readonly metadata?: DocumentData | undefined;
+}): Omit<NewDomainEvent<Extract<DocumentLifecycleEventPayload, { readonly kind: "DocumentDeleted" }>>, "id" | "sequence"> {
+  return {
+    tenantId: input.tenantId,
+    stream: input.stream,
+    type: input.plan.eventType,
+    doctype: input.doctypeName,
+    documentName: input.documentName,
+    actorId: input.actorId,
+    occurredAt: input.occurredAt,
+    payload: documentDeletedPayload(),
+    metadata: input.metadata ?? {}
   };
 }
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   canExecuteDomainCommandForRoles,
   documentCreateValidationIssues,
+  documentDeleteEventCommand,
   documentDomainCommandValidationIssues,
   documentMergeDisposition,
   documentStatusChangeEventCommand,
@@ -518,6 +519,45 @@ describe("document command policy", () => {
       eventType: "NoteWasDeleted",
       payloadKind: "DocumentDeleted"
     });
+  });
+
+  it("shapes delete event commands from policy plans", () => {
+    expect(
+      documentDeleteEventCommand({
+        tenantId: "acme",
+        stream: "tenant/acme/document/Note/NOTE-1",
+        doctypeName: "Note",
+        documentName: "NOTE-1",
+        actorId: "user@example.com",
+        occurredAt: "2026-06-28T02:00:00.000Z",
+        plan: planDocumentDeletePolicy({ name: "Note" }),
+        metadata: { requestId: "req-1" }
+      })
+    ).toEqual({
+      tenantId: "acme",
+      stream: "tenant/acme/document/Note/NOTE-1",
+      type: "NoteDeleted",
+      doctype: "Note",
+      documentName: "NOTE-1",
+      actorId: "user@example.com",
+      occurredAt: "2026-06-28T02:00:00.000Z",
+      payload: { kind: "DocumentDeleted" },
+      metadata: { requestId: "req-1" }
+    });
+  });
+
+  it("defaults delete event command metadata", () => {
+    expect(
+      documentDeleteEventCommand({
+        tenantId: "acme",
+        stream: "tenant/acme/document/Note/NOTE-1",
+        doctypeName: "Note",
+        documentName: "NOTE-1",
+        actorId: "user@example.com",
+        occurredAt: "2026-06-28T02:00:00.000Z",
+        plan: planDocumentDeletePolicy({ name: "Note", events: { delete: "NoteWasDeleted" } })
+      }).metadata
+    ).toEqual({});
   });
 
   it("plans duplicate data without copying no-copy fields", () => {

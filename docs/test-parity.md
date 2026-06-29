@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the status-change event command policy slice:
+As of the delete event command policy slice:
 
 - Vitest files: `196`
-- Vitest cases: `2291`
-- Remaining gap to Frappe static markers: `493`
+- Vitest cases: `2293`
+- Remaining gap to Frappe static markers: `491`
 
 ## Implication
 

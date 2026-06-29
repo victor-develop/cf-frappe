@@ -49,6 +49,7 @@ import {
   ensureDocumentCreateAvailable,
   mergeSnapshotFromDocument,
   normalizeUnsetFields,
+  documentDeleteEventCommand,
   documentCreateValidationIssues,
   documentDomainCommandValidationIssues,
   documentMergeDisposition,
@@ -73,7 +74,6 @@ import {
 } from "./document-command-events.js";
 import { documentShareStateFromEvents } from "./document-share-events.js";
 import {
-  documentDeletedPayload,
   requireFirstSavedEvent,
   requireLiveDocumentSnapshot,
   requireSavedEvent,
@@ -1213,17 +1213,16 @@ export class DocumentService implements DocumentCommandExecutor {
 
     const now = this.clock.now();
     const uniqueReservations = uniqueValueReservations(tenantId, doctype, existing.data, existing.name);
-    const event = this.newEvent({
+    const event = this.newEvent(documentDeleteEventCommand({
       tenantId,
       stream,
-      type: plan.eventType,
-      doctype: doctype.name,
+      doctypeName: doctype.name,
       documentName: command.name,
       actorId: command.actor.id,
       occurredAt: now,
-      payload: documentDeletedPayload(),
+      plan,
       metadata: command.metadata ?? {}
-    });
+    }));
     const commit = await this.store.commit(stream, existing.version, [event], (savedEvents) => {
       const saved = requireFirstSavedEvent(savedEvents);
       return snapshotFromCommittedDocumentEvent(existing, saved, { docstatus: plan.nextStatus });
