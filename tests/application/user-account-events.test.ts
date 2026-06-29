@@ -1,4 +1,5 @@
 import {
+  findUserAuthProviderLink,
   providerSyncChangesState,
   replayUserAccountAppend,
   userAccountCreatedPayload,
@@ -223,6 +224,21 @@ describe("user account events", () => {
       "UserAccountEnabled",
       "UserAccountDisabled"
     ]);
+  });
+
+  it("finds provider links by provider and subject", () => {
+    expect(findUserAuthProviderLink([
+      baseProviderLink(),
+      { ...baseProviderLink(), provider: "github", subject: "gh_456" }
+    ], "github", "gh_456")).toMatchObject({
+      provider: "github",
+      subject: "gh_456"
+    });
+  });
+
+  it("does not match provider links by provider or subject alone", () => {
+    expect(findUserAuthProviderLink([baseProviderLink()], "google", "other_sub")).toBeUndefined();
+    expect(findUserAuthProviderLink([baseProviderLink()], "github", "sub_123")).toBeUndefined();
   });
 
   it("detects no-op provider sync payloads", () => {

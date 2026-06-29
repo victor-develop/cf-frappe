@@ -344,6 +344,14 @@ export type UserAuthProviderChangePayload = Extract<
   { readonly kind: "UserAuthProviderSynced" | "UserAuthProviderLinked" }
 >;
 
+export function findUserAuthProviderLink(
+  providers: readonly UserAuthProviderLink[],
+  provider: string,
+  subject: string
+): UserAuthProviderLink | undefined {
+  return providers.find((link) => link.provider === provider && link.subject === subject);
+}
+
 export function providerSyncChangesState(
   state: UserAccountState,
   link: UserAuthProviderLink,

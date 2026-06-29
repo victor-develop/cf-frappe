@@ -12,6 +12,7 @@ import {
   userAccountDisabledPayload,
   userAccountCreatedPayload,
   userAccountEnabledPayload,
+  findUserAuthProviderLink,
   userAccountEvent,
   userAuthProviderLinkedPayload,
   userAuthProviderSyncedPayload,
@@ -34,7 +35,6 @@ import {
   userAccountActor,
   type UserAccount,
   type UserAccountEmailVerificationChallenge,
-  type UserAuthProviderLink,
   type UserAccountRecoveryChallenge,
   type UserAccountState
 } from "../core/user-accounts.js";
@@ -350,7 +350,7 @@ export class UserAccountService {
     if (roles !== undefined) {
       await this.validateRoles(tenantId, roles);
     }
-    const link = providerLink(state.providers, provider, subject);
+    const link = findUserAuthProviderLink(state.providers, provider, subject);
     const providerPayloadInput = {
       userId,
       provider,
@@ -814,14 +814,6 @@ function emailVerificationPatch(
     throw badRequest("email is required when emailVerified is true");
   }
   return currentEmail === effectiveEmail ? currentEmailVerifiedAt ?? now : now;
-}
-
-function providerLink(
-  providers: readonly UserAuthProviderLink[],
-  provider: string,
-  subject: string
-): UserAuthProviderLink | undefined {
-  return providers.find((link) => link.provider === provider && link.subject === subject);
 }
 
 function arrayEquals(left: readonly string[], right: readonly string[]): boolean {
