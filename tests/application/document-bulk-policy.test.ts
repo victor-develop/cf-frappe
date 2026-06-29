@@ -132,4 +132,22 @@ describe("document bulk policy", () => {
       metadata: { source: "bulk-action" }
     });
   });
+
+  it("omits absent optional fields from shaped bulk single-document commands", () => {
+    expect(
+      bulkNamedCommand(
+        {
+          actor: { id: "owner@example.com", roles: ["User"], tenantId: "acme" },
+          doctype: "Note",
+          documents: []
+        },
+        { name: "NOTE-1" }
+      )
+    ).toEqual({
+      actor: { id: "owner@example.com", roles: ["User"], tenantId: "acme" },
+      doctype: "Note",
+      name: "NOTE-1",
+      metadata: {}
+    });
+  });
 });

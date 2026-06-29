@@ -29,9 +29,9 @@ import type {
   UnfollowDocumentCommand,
   UpdateDocumentCommand
 } from "../application/document-service.js";
-import { runBulkDocumentSelections } from "../application/document-bulk-policy.js";
+import { bulkNamedCommand, runBulkDocumentSelections } from "../application/document-bulk-policy.js";
 import type { ModelRegistry } from "../core/registry.js";
-import type { Actor, DocumentData, DocumentSnapshot } from "../core/types.js";
+import type { Actor, DocumentSnapshot } from "../core/types.js";
 import { DEFAULT_TENANT_ID, type DocTypeDefinition } from "../core/types.js";
 import type {
   AggregateCoordinatorCommand,
@@ -276,27 +276,6 @@ function snapshotResult(result: AggregateCoordinatorCommandResult): DocumentSnap
 
 function resolveTenant(command: { readonly actor: { readonly tenantId?: string }; readonly tenantId?: string }): string {
   return command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
-}
-
-function bulkNamedCommand(
-  command: BulkDocumentsCommand,
-  selection: { readonly name: string; readonly expectedVersion?: number }
-): {
-  readonly actor: Actor;
-  readonly doctype: string;
-  readonly name: string;
-  readonly tenantId?: string;
-  readonly expectedVersion?: number;
-  readonly metadata: DocumentData;
-} {
-  return {
-    actor: command.actor,
-    doctype: command.doctype,
-    name: selection.name,
-    ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
-    ...(selection.expectedVersion === undefined ? {} : { expectedVersion: selection.expectedVersion }),
-    metadata: command.metadata ?? {}
-  };
 }
 
 function previewName(doctype: DocTypeDefinition, data: Record<string, unknown>): string | null {

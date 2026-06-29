@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document bulk selection result aggregation slice:
+As of the Durable Object bulk command shaping slice:
 
 - Vitest files: `196`
-- Vitest cases: `2268`
-- Remaining gap to Frappe static markers: `516`
+- Vitest cases: `2269`
+- Remaining gap to Frappe static markers: `515`
 
 ## Implication
 
