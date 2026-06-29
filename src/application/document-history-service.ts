@@ -253,21 +253,25 @@ function diffEvent(
   before: DocumentSnapshot | null,
   after: DocumentSnapshot | null
 ): readonly DocumentTimelineChange[] {
-  switch (event.payload.kind) {
-    case "DocumentCreated": {
-      const data = event.payload.data;
-      return [
-        change("docstatus", undefined, event.payload.docstatus),
-        ...Object.keys(data)
-          .sort()
-          .map((field) => change(field, undefined, data[field]))
-      ];
-    }
-    case "DocumentUpdated":
-      return diffPatch(event.payload.patch, before, after, event.payload.unset);
-    case "WorkflowTransitioned":
-    case "DomainCommandApplied":
-      return diffPatch(event.payload.patch, before, after);
+  if (isTimelineEventPayloadKind(event, "DocumentCreated")) {
+    const data = event.payload.data;
+    return [
+      change("docstatus", undefined, event.payload.docstatus),
+      ...Object.keys(data)
+        .sort()
+        .map((field) => change(field, undefined, data[field]))
+    ];
+  }
+  if (isTimelineEventPayloadKind(event, "DocumentUpdated")) {
+    return diffPatch(event.payload.patch, before, after, event.payload.unset);
+  }
+  if (
+    isTimelineEventPayloadKind(event, "WorkflowTransitioned") ||
+    isTimelineEventPayloadKind(event, "DomainCommandApplied")
+  ) {
+    return diffPatch(event.payload.patch, before, after);
+  }
+  switch (domainEventPayloadKind(event)) {
     case "DocumentDeleted":
     case "DocumentSubmitted":
     case "DocumentCancelled":
@@ -336,6 +340,14 @@ function diffEvent(
     case "DocumentDeliveryOutboxFailed":
       return [];
   }
+  return [];
+}
+
+function isTimelineEventPayloadKind<TKind extends DocumentEventPayload["kind"]>(
+  event: DomainEvent,
+  kind: TKind
+): event is DomainEvent<Extract<DocumentEventPayload, { readonly kind: TKind }>> {
+  return domainEventPayloadKind(event) === kind;
 }
 
 function diffPatch(

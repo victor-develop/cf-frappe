@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Centralized document-history timeline diff payload-kind matching through domain event helpers so timeline changes ignore misleading event type names.
 - Centralized saved report and saved list filter event payload-kind matching through bounded event helpers so saved view folds ignore misleading event type names.
 - Centralized document-delivery outbox event payload-kind matching through bounded event helpers so outbox folds ignore misleading event type names.
 - Centralized email-notification outbox event payload-kind matching through bounded event helpers so outbox folds ignore misleading event type names.

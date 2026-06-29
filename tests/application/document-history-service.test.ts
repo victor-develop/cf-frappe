@@ -328,6 +328,37 @@ describe("DocumentHistoryService", () => {
     });
   });
 
+  it("calculates timeline changes from payload kind instead of misleading event type names", async () => {
+    const { documents, events, queries } = createServices(["create-1", "update-1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Misleading Type Note" }) });
+    await documents.update({ actor: owner, doctype: "Note", name: "Misleading Type Note", patch: { body: "Typed" } });
+    const committedEvents = await events.readStream("acme:Note:Misleading%20Type%20Note");
+    const history = new DocumentHistoryService({
+      queries,
+      events: {
+        readStream: async () =>
+          committedEvents.map((event) =>
+            event.sequence === 2
+              ? {
+                  ...event,
+                  type: "NoteDeleted"
+                }
+              : event
+          )
+      }
+    });
+
+    const timeline = await history.getTimeline(owner, "Note", "Misleading Type Note");
+
+    expect(timeline.entries[1]).toMatchObject({
+      sequence: 2,
+      type: "NoteDeleted",
+      kind: "DocumentUpdated",
+      summary: "Updated body",
+      changes: [{ field: "body", oldValue: "Body", newValue: "Typed" }]
+    });
+  });
+
   it("returns bounded timeline pages with an older-event cursor", async () => {
     const { documents, history } = createServices(["create-1", "update-1", "update-2", "update-3"]);
     await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Paged Note" }) });
