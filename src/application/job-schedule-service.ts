@@ -45,6 +45,7 @@ import {
   normalizeJobScheduleRuntimeDefinition,
   normalizeJobScheduleText,
   ensureJobScheduleCapabilityResourceAvailable,
+  ensureJobScheduleRuntimeCronTriggerConfigured,
   planJobScheduleAccess,
   planJobScheduleCapability,
   planJobScheduleDefinitionDelete,
@@ -263,7 +264,7 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
         idempotencyKeyProvided: command.idempotencyKey !== undefined
       }
     });
-    this.ensureRuntimeCronTrigger(schedule.cron);
+    ensureJobScheduleRuntimeCronTriggerConfigured(schedule.cron, this.runtimeCronTriggers);
     const saveDecision = planJobScheduleDefinitionSave({
       scheduleId: schedule.id,
       jobName: schedule.jobName,
@@ -613,13 +614,6 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
         payloadKinds: JOB_SCHEDULE_DEFINITION_PAYLOAD_KINDS
       })
     );
-  }
-
-  private ensureRuntimeCronTrigger(cron: string): void {
-    if (this.runtimeCronTriggers === undefined || this.runtimeCronTriggers.has(cron)) {
-      return;
-    }
-    throw badRequest(`Job schedule cron '${cron}' is not configured as a Worker Cron Trigger`);
   }
 }
 

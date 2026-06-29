@@ -217,6 +217,16 @@ export function ensureJobScheduleCapabilityResourceAvailable<T>(
   }
 }
 
+export function ensureJobScheduleRuntimeCronTriggerConfigured(
+  cron: string,
+  runtimeCronTriggers: ReadonlySet<string> | undefined
+): void {
+  if (runtimeCronTriggers === undefined || runtimeCronTriggers.has(cron)) {
+    return;
+  }
+  throw badRequest(`Job schedule cron '${cron}' is not configured as a Worker Cron Trigger`);
+}
+
 export function canInspectJobSchedule(
   schedule: JobScheduleVisibilitySummary,
   tenantId: TenantId

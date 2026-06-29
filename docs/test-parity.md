@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the job-schedule capability resource availability policy slice:
+As of the job-schedule runtime Cron Trigger configuration policy slice:
 
 - Vitest files: `233`
-- Vitest cases: `2686`
-- Remaining gap to Frappe static markers: `98`
+- Vitest cases: `2687`
+- Remaining gap to Frappe static markers: `97`
 
 ## Implication
 

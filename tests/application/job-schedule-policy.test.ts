@@ -4,6 +4,7 @@ import {
   dynamicJobScheduleFields,
   effectiveJobSchedule,
   ensureJobScheduleCapabilityResourceAvailable,
+  ensureJobScheduleRuntimeCronTriggerConfigured,
   ensureUniqueJobScheduleIds,
   isDynamicJobScheduleValue,
   jobScheduleIdentity,
@@ -98,6 +99,25 @@ describe("job schedule policy", () => {
         status: 404
       });
     }
+  });
+
+  it("guards runtime schedule cron triggers against Worker configuration", () => {
+    expect(() => ensureJobScheduleRuntimeCronTriggerConfigured("0 0 * * *", undefined)).not.toThrow();
+    expect(() =>
+      ensureJobScheduleRuntimeCronTriggerConfigured("0 0 * * *", new Set(["0 0 * * *"]))
+    ).not.toThrow();
+
+    let error: unknown;
+    try {
+      ensureJobScheduleRuntimeCronTriggerConfigured("0 1 * * *", new Set(["0 0 * * *"]));
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Job schedule cron '0 1 * * *' is not configured as a Worker Cron Trigger",
+      status: 400
+    });
   });
 
   it("plans configured and runtime schedule lookup misses before service error mapping", () => {
