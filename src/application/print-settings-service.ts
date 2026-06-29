@@ -1,7 +1,5 @@
-import { FrameworkError, badRequest, conflict, permissionDenied } from "../core/errors.js";
 import {
   foldPrintSettings,
-  normalizePrintSettingsPatch,
   printSettingsPatchData,
   type PrintSettingsInput,
   type PrintSettingsPatch,
@@ -23,6 +21,11 @@ import {
   PRINT_SETTINGS_PAYLOAD_KINDS,
   type PrintSettingsEventPayload
 } from "./print-settings-events.js";
+import {
+  authorizePrintSettingsAdministration,
+  ensurePrintSettingsExpectedVersion,
+  normalizePrintSettingsPatchInput
+} from "./print-settings-policy.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
@@ -58,25 +61,22 @@ export class PrintSettingsService {
   }
 
   async get(actor: Actor, tenantId?: TenantId): Promise<PrintSettingsState> {
-    this.authorizeAdministration(actor, tenantId);
-    return this.stateFor(resolveActorTenant(actor, tenantId));
+    return this.stateFor(this.authorizeAdministration(actor, tenantId));
   }
 
   async defaultsFor(actor: Actor): Promise<PrintSettingsState> {
     return this.stateFor(actor.tenantId ?? DEFAULT_TENANT_ID);
   }
 
-  authorizeAdministration(actor: Actor, tenantId?: TenantId): void {
-    this.ensureAdmin(actor);
-    resolveActorTenant(actor, tenantId);
+  authorizeAdministration(actor: Actor, tenantId?: TenantId): TenantId {
+    return authorizePrintSettingsAdministration({ actor, tenantId, adminRoles: this.adminRoles });
   }
 
   async change(command: ChangePrintSettingsCommand): Promise<PrintSettingsState> {
-    this.ensureAdmin(command.actor);
-    const tenantId = resolveActorTenant(command.actor, command.tenantId);
-    const patch = normalizeSettingsPatch(command.settings);
+    const tenantId = this.authorizeAdministration(command.actor, command.tenantId);
+    const patch = normalizePrintSettingsPatchInput(command.settings);
     const state = await this.stateFor(tenantId);
-    ensureExpectedVersion(state, command.expectedVersion);
+    ensurePrintSettingsExpectedVersion(state, command.expectedVersion);
     if (Object.keys(patch).length === 0) {
       return state;
     }
@@ -124,37 +124,5 @@ export class PrintSettingsService {
     return foldPrintSettings(tenantId, await this.events.readStream(printSettingsStream(tenantId), {
       payloadKinds: PRINT_SETTINGS_PAYLOAD_KINDS
     }));
-  }
-
-  private ensureAdmin(actor: Actor): void {
-    if (!this.adminRoles.some((role) => actor.roles.includes(role))) {
-      throw permissionDenied(`Actor '${actor.id}' cannot manage print settings`);
-    }
-  }
-}
-
-function resolveActorTenant(actor: Actor, explicitTenantId: TenantId | undefined): TenantId {
-  const actorTenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
-  const tenantId = explicitTenantId ?? actorTenantId;
-  if (tenantId !== actorTenantId) {
-    throw permissionDenied(`Actor '${actor.id}' cannot manage print settings for tenant '${tenantId}'`);
-  }
-  return tenantId;
-}
-
-function normalizeSettingsPatch(input: PrintSettingsInput | Record<string, unknown>): PrintSettingsPatch {
-  try {
-    return normalizePrintSettingsPatch(input as Record<string, unknown>);
-  } catch (error) {
-    if (error instanceof FrameworkError) {
-      throw error;
-    }
-    throw badRequest(error instanceof Error ? error.message : "Print settings are invalid");
-  }
-}
-
-function ensureExpectedVersion(state: PrintSettingsState, expectedVersion: number | undefined): void {
-  if (expectedVersion !== undefined && state.version !== expectedVersion) {
-    throw conflict(`Expected print settings at version ${expectedVersion}, found ${state.version}`);
   }
 }

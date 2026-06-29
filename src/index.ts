@@ -66,6 +66,7 @@ export * from "./application/notification-rule-policy.js";
 export * from "./application/notification-rule-service.js";
 export * from "./application/print-service.js";
 export * from "./application/print-settings-events.js";
+export * from "./application/print-settings-policy.js";
 export * from "./application/print-settings-service.js";
 export * from "./application/query-service.js";
 export * from "./application/realtime.js";
