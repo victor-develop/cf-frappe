@@ -2,6 +2,7 @@ import {
   dashboardCardResult,
   dashboardCardIndicator,
   dashboardIndicatorMatches,
+  dashboardReportCardValue,
   emptyDashboardDocumentAggregate,
   finishDashboardDocumentAggregate,
   updateDashboardDocumentAggregate
@@ -48,6 +49,50 @@ describe("dashboard policy", () => {
       value: null,
       source: { kind: "reportChart", report: "Open Notes", chart: "notes_by_priority" }
     });
+  });
+
+  it("selects report chart values for dashboard cards", () => {
+    const chart = {
+      name: "notes_by_priority",
+      label: "Notes by Priority",
+      type: "bar" as const,
+      group: "by_priority",
+      summary: "note_count",
+      orderBy: "key" as const,
+      order: "asc" as const,
+      colors: [],
+      showValues: false,
+      points: [{ key: "High", label: "High", value: 3 }]
+    };
+
+    expect(dashboardReportCardValue(
+      { kind: "reportChart", report: "Open Notes", chart: "notes_by_priority" },
+      { charts: [chart], summary: [] }
+    )).toBe(chart);
+  });
+
+  it("returns null when dashboard report chart values are missing", () => {
+    expect(dashboardReportCardValue(
+      { kind: "reportChart", report: "Open Notes", chart: "missing_chart" },
+      { charts: [], summary: [] }
+    )).toBeNull();
+  });
+
+  it("selects report summary values for dashboard cards", () => {
+    expect(dashboardReportCardValue(
+      { kind: "reportSummary", report: "Open Notes", summary: "total_count" },
+      {
+        charts: [],
+        summary: [{ name: "total_count", label: "Total Count", aggregate: "count", value: 3 }]
+      }
+    )).toBe(3);
+  });
+
+  it("returns null when dashboard report summary values are missing", () => {
+    expect(dashboardReportCardValue(
+      { kind: "reportSummary", report: "Open Notes", summary: "missing_summary" },
+      { charts: [], summary: [] }
+    )).toBeNull();
   });
 
   it("folds finite document aggregate values", () => {

@@ -9,15 +9,15 @@ import type { ModelRegistry } from "../core/registry.js";
 import type { Actor, DocumentSnapshot, JsonPrimitive, ListDocumentsFilter, ListFilterExpression } from "../core/types.js";
 import {
   dashboardCardResult,
+  dashboardReportCardValue,
+  type DashboardCardValue,
   type DashboardCardShape,
   emptyDashboardDocumentAggregate,
   finishDashboardDocumentAggregate,
   updateDashboardDocumentAggregate
 } from "./dashboard-policy.js";
 import type { QueryService } from "./query-service.js";
-import type { ReportChartResult, ReportFilters, ReportService } from "./report-service.js";
-
-export type DashboardCardValue = JsonPrimitive | ReportChartResult;
+import type { ReportFilters, ReportService } from "./report-service.js";
 
 export type DashboardCardResult = DashboardCardShape<DashboardCardValue>;
 
@@ -79,10 +79,7 @@ export class DashboardService {
       filters: (source.filters ?? {}) as ReportFilters,
       limit: 1
     });
-    if (source.kind === "reportChart") {
-      return result.charts.find((chart) => chart.name === source.chart) ?? null;
-    }
-    return result.summary.find((summary) => summary.name === source.summary)?.value ?? null;
+    return dashboardReportCardValue(source, result);
   }
 
   private async countReadableDocuments(

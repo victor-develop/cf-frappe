@@ -5,6 +5,9 @@ import type {
   DashboardIndicatorOperator
 } from "../core/dashboard.js";
 import type { JsonPrimitive } from "../core/types.js";
+import type { ReportChartResult, ReportRunResult } from "./report-service.js";
+
+export type DashboardCardValue = JsonPrimitive | ReportChartResult;
 
 export interface DashboardCardShape<TValue> {
   readonly name: string;
@@ -35,6 +38,16 @@ export function dashboardCardResult<TValue>(
     ...(card.description === undefined ? {} : { description: card.description }),
     ...(indicator === undefined ? {} : { indicator })
   };
+}
+
+export function dashboardReportCardValue(
+  source: Extract<DashboardCardSourceDefinition, { readonly kind: "reportChart" | "reportSummary" }>,
+  result: Pick<ReportRunResult, "charts" | "summary">
+): DashboardCardValue {
+  if (source.kind === "reportChart") {
+    return result.charts.find((chart) => chart.name === source.chart) ?? null;
+  }
+  return result.summary.find((summary) => summary.name === source.summary)?.value ?? null;
 }
 
 export function emptyDashboardDocumentAggregate(): DashboardDocumentAggregateState {
