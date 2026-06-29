@@ -33,7 +33,6 @@ import {
 } from "./document-bulk-policy.js";
 import {
   canReadLinkedDocumentTarget,
-  canUseDocumentAction,
   documentSatisfiesUserPermissions,
   planDocTypeActionAccess,
   planDocumentActionAccess,
@@ -619,9 +618,7 @@ export class DocumentService implements DocumentCommandExecutor {
     const { doctype, relatedDocType } = await this.doctypeContext(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
-    if (!(await this.canActOnDocument(command.actor, doctype, "update", existing))) {
-      throw permissionDenied(`Actor '${command.actor.id}' cannot update ${doctype.name}/${command.name}`);
-    }
+    await this.ensureSharedDocumentActionAccess(command.actor, doctype, "update", existing);
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
     return this.applyDocumentUpdate({
@@ -643,9 +640,7 @@ export class DocumentService implements DocumentCommandExecutor {
     const { doctype, relatedDocType } = await this.doctypeContext(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, command.name);
-    if (!(await this.canActOnDocument(command.actor, doctype, "update", existing))) {
-      throw permissionDenied(`Actor '${command.actor.id}' cannot update ${doctype.name}/${command.name}`);
-    }
+    await this.ensureSharedDocumentActionAccess(command.actor, doctype, "update", existing);
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
 
     const base = foldDocument(events.filter((event) => event.sequence <= command.baseVersion));
@@ -843,9 +838,7 @@ export class DocumentService implements DocumentCommandExecutor {
     const { doctype, relatedDocType } = await this.doctypeContext(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
-    if (!(await this.canActOnDocument(command.actor, doctype, "read", existing))) {
-      throw permissionDenied(`Actor '${command.actor.id}' cannot duplicate ${doctype.name}/${command.name}`);
-    }
+    await this.ensureSharedDocumentActionAccess(command.actor, doctype, "read", existing, "duplicate");
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
     const plan = planDocumentCopyPolicy({
@@ -872,9 +865,7 @@ export class DocumentService implements DocumentCommandExecutor {
     const { doctype, relatedDocType } = await this.doctypeContext(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
-    if (!(await this.canActOnDocument(command.actor, doctype, "read", existing))) {
-      throw permissionDenied(`Actor '${command.actor.id}' cannot amend ${doctype.name}/${command.name}`);
-    }
+    await this.ensureSharedDocumentActionAccess(command.actor, doctype, "read", existing, "amend");
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
     ensureDocumentStatus(existing, ["cancelled"], "amend");
@@ -964,9 +955,13 @@ export class DocumentService implements DocumentCommandExecutor {
       input: command.input,
       now
     });
-    if (!(await this.canActOnDocument(command.actor, doctype, commandPlan.permissionAction, existing))) {
-      throw permissionDenied(`Actor '${command.actor.id}' cannot execute ${command.command} on ${doctype.name}/${command.name}`);
-    }
+    await this.ensureSharedDocumentActionAccess(
+      command.actor,
+      doctype,
+      commandPlan.permissionAction,
+      existing,
+      `execute ${command.command} on`
+    );
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     if (!canExecuteDomainCommandForRoles(command.actor, commandDefinition)) {
       throw permissionDenied(`Actor '${command.actor.id}' cannot execute ${command.command}`);
@@ -1123,24 +1118,7 @@ export class DocumentService implements DocumentCommandExecutor {
     const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, command.name);
-    const shareLookup = planDocumentSharedPermissionLookup({
-      actor: command.actor,
-      doctype,
-      action: "share",
-      document: existing
-    });
-    const sharedPermissions = shareLookup.status === "read-shares"
-      ? (await this.documentShares?.sharedPermissionsFor(command.actor, existing)) ?? []
-      : shareLookup.sharedPermissions;
-    if (!canUseDocumentAction({
-      actor: command.actor,
-      doctype,
-      action: "share",
-      document: existing,
-      sharedPermissions
-    })) {
-      throw permissionDenied(`Actor '${command.actor.id}' cannot share ${doctype.name}/${command.name}`);
-    }
+    const access = await this.ensureSharedDocumentActionAccess(command.actor, doctype, "share", existing);
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
     const state = foldDocumentShares(tenantId, doctype.name, command.name, events);
@@ -1149,8 +1127,8 @@ export class DocumentService implements DocumentCommandExecutor {
       currentGrants: state.grants,
       command
     });
-    if (shareLookup.status === "read-shares") {
-      ensureSharedGrantIsDelegable(command.actor, doctype, existing, sharedPermissions, plan.grant);
+    if (access.lookup.status === "read-shares") {
+      ensureSharedGrantIsDelegable(command.actor, doctype, existing, access.sharedPermissions, plan.grant);
     }
     if (plan.noop) {
       return existing;
@@ -1175,9 +1153,7 @@ export class DocumentService implements DocumentCommandExecutor {
     const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, command.name);
-    if (!(await this.canActOnDocument(command.actor, doctype, "share", existing))) {
-      throw permissionDenied(`Actor '${command.actor.id}' cannot revoke shares for ${doctype.name}/${command.name}`);
-    }
+    await this.ensureSharedDocumentActionAccess(command.actor, doctype, "share", existing, "revoke shares for");
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
     const state = foldDocumentShares(tenantId, doctype.name, command.name, events);
@@ -1624,22 +1600,6 @@ export class DocumentService implements DocumentCommandExecutor {
     });
   }
 
-  private async canActOnDocument(
-    actor: Actor,
-    doctype: DocTypeDefinition,
-    action: PermissionAction,
-    document: DocumentSnapshot
-  ): Promise<boolean> {
-    const sharedPermissions = await this.sharedPermissionsForAction(actor, doctype, action, document);
-    return canUseDocumentAction({
-      actor,
-      doctype,
-      action,
-      document,
-      sharedPermissions
-    });
-  }
-
   private async sharedPermissionsForAction(
     actor: Actor,
     doctype: DocTypeDefinition,
@@ -1680,6 +1640,34 @@ export class DocumentService implements DocumentCommandExecutor {
     if (decision.status === "deny") {
       throw permissionDenied(decision.message);
     }
+  }
+
+  private async ensureSharedDocumentActionAccess(
+    actor: Actor,
+    doctype: DocTypeDefinition,
+    action: PermissionAction,
+    document: DocumentSnapshot,
+    deniedAction?: string
+  ): Promise<{
+    readonly lookup: ReturnType<typeof planDocumentSharedPermissionLookup>;
+    readonly sharedPermissions: readonly DocumentSharePermission[];
+  }> {
+    const lookup = planDocumentSharedPermissionLookup({ actor, doctype, action, document });
+    const sharedPermissions = lookup.status === "read-shares"
+      ? (await this.documentShares?.sharedPermissionsFor(actor, document)) ?? []
+      : lookup.sharedPermissions;
+    const decision = planDocumentActionAccess({
+      actor,
+      doctype,
+      action,
+      document,
+      sharedPermissions,
+      ...(deniedAction === undefined ? {} : { deniedAction })
+    });
+    if (decision.status === "deny") {
+      throw permissionDenied(decision.message);
+    }
+    return { lookup, sharedPermissions };
   }
 
   private async doctypeContext(

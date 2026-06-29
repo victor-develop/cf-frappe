@@ -1874,6 +1874,56 @@ describe("DocumentService", () => {
     });
   });
 
+  it("allows shared command access to execute commands and revoke delegated shares", async () => {
+    const { documents, queries } = createServices(["e1", "share-collab", "archive-1", "delegate-1", "revoke-1"]);
+    const collaborator = { ...owner, id: "collab@example.com" };
+    const delegated = { ...owner, id: "delegated@example.com" };
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Shared Command" }) });
+    await documents.share({
+      actor: owner,
+      doctype: "Note",
+      name: "Shared Command",
+      userId: collaborator.id,
+      permissions: ["update", "share"],
+      expectedVersion: 1
+    });
+
+    await expect(
+      documents.execute({
+        actor: collaborator,
+        doctype: "Note",
+        name: "Shared Command",
+        command: "archive",
+        input: {},
+        expectedVersion: 2
+      })
+    ).resolves.toMatchObject({ version: 3, data: { workflow_state: "Closed" } });
+    await documents.share({
+      actor: collaborator,
+      doctype: "Note",
+      name: "Shared Command",
+      userId: delegated.id,
+      permissions: ["read"],
+      expectedVersion: 3
+    });
+    await expect(queries.getDocument(delegated, "Note", "Shared Command")).resolves.toMatchObject({
+      name: "Shared Command"
+    });
+
+    await expect(
+      documents.revokeShare({
+        actor: collaborator,
+        doctype: "Note",
+        name: "Shared Command",
+        userId: delegated.id,
+        expectedVersion: 4
+      })
+    ).resolves.toMatchObject({ version: 5 });
+    await expect(queries.getDocument(delegated, "Note", "Shared Command")).rejects.toMatchObject({
+      code: "PERMISSION_DENIED"
+    });
+  });
+
   it("does not let shared share-only access delegate update permissions", async () => {
     const { documents, queries } = createServices(["e1", "share-1", "delegate-1", "delegate-2"]);
     const collaborator = { ...owner, id: "collab@example.com" };
