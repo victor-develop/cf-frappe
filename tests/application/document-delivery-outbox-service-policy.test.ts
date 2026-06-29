@@ -3,6 +3,7 @@ import {
   documentDeliveryOutboxClaimLimit,
   documentDeliveryOutboxFailureError,
   documentDeliveryOutboxPayload,
+  documentDeliveryOutboxRecordLookup,
   ensureDocumentDeliveryOutboxClaimed
 } from "../../src/application/document-delivery-outbox-service-policy.js";
 import type {
@@ -62,6 +63,19 @@ describe("document delivery outbox service policy", () => {
       "evt_same_time_a:email",
       "evt_same_time_b:email"
     ]);
+  });
+
+  it("plans record lookups before service error mapping", () => {
+    const existing = record("evt_source:email");
+
+    expect(documentDeliveryOutboxRecordLookup(state([existing]), existing.id)).toEqual({
+      status: "found",
+      record: existing
+    });
+    expect(documentDeliveryOutboxRecordLookup(state([existing]), "missing:email")).toEqual({
+      status: "missing",
+      message: "Document delivery outbox record 'missing:email' was not found"
+    });
   });
 
   it("guards terminal events by active claim", () => {

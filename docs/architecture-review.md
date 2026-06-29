@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted document-delivery outbox record lookup decisions into document-delivery outbox service policy so DocumentDeliveryOutboxService keeps stream replay, claim/deliver/fail append orchestration, conflict retries, and framework error mapping.
 - Extracted user-notification lookup decisions into user-notification policy so UserNotificationService keeps inbox stream reads, read/dismiss event appends, replay verification, notification rule expansion, and framework error mapping.
 - Extracted custom-field disable missing-field decisions into custom-field policy so CustomFieldService keeps tenant authorization, registry metadata reads, event replay, catalog append orchestration, and framework error mapping.
 - Extracted saved-report and saved-list-filter get lookup decisions into policy so their services keep DocType access checks, owner stream reads, event append orchestration, report execution/export delegation, and framework error mapping.

@@ -28,6 +28,7 @@ import {
   documentDeliveryOutboxClaimLimit,
   documentDeliveryOutboxFailureError,
   documentDeliveryOutboxPayload,
+  documentDeliveryOutboxRecordLookup,
   ensureDocumentDeliveryOutboxClaimed
 } from "./document-delivery-outbox-service-policy.js";
 import { isDocumentConflictError } from "./concurrency-policy.js";
@@ -236,11 +237,11 @@ export class DocumentDeliveryOutboxService {
   }
 
   private requireRecord(state: DocumentDeliveryOutboxState, outboxId: string): DocumentDeliveryOutboxRecord {
-    const record = state.records.get(outboxId);
-    if (!record) {
-      throw notFound(`Document delivery outbox record '${outboxId}' was not found`);
+    const decision = documentDeliveryOutboxRecordLookup(state, outboxId);
+    if (decision.status === "missing") {
+      throw notFound(decision.message);
     }
-    return record;
+    return decision.record;
   }
 
   private async appendWithRetry(

@@ -9,6 +9,10 @@ import {
 export const DOCUMENT_DELIVERY_OUTBOX_DEFAULT_CLAIM_LIMIT = 25;
 export const DOCUMENT_DELIVERY_OUTBOX_MAX_CLAIM_LIMIT = 100;
 
+export type DocumentDeliveryOutboxRecordLookupDecision =
+  | { readonly status: "found"; readonly record: DocumentDeliveryOutboxRecord }
+  | { readonly status: "missing"; readonly message: string };
+
 export function documentDeliveryOutboxPayload(
   event: DomainEvent,
   snapshot: DocumentSnapshot | null | undefined
@@ -31,6 +35,20 @@ export function documentDeliveryOutboxClaimLimit(limit: number | undefined): num
     );
   }
   return limit;
+}
+
+export function documentDeliveryOutboxRecordLookup(
+  state: DocumentDeliveryOutboxState,
+  outboxId: string
+): DocumentDeliveryOutboxRecordLookupDecision {
+  const record = state.records.get(outboxId);
+  if (record === undefined) {
+    return {
+      status: "missing",
+      message: `Document delivery outbox record '${outboxId}' was not found`
+    };
+  }
+  return { status: "found", record };
 }
 
 export function claimableDocumentDeliveryOutboxRecords(
