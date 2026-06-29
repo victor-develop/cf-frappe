@@ -132,6 +132,50 @@ describe("assignment rules", () => {
     ]);
   });
 
+  it("matches assignment rules from payload kind when event type names are misleading", async () => {
+    const assigned: Array<Parameters<DocumentService["assign"]>[0]> = [];
+    const hooks = createDocumentAssignmentRuleHooks({
+      documents: {
+        assign: async (command) => {
+          assigned.push(command);
+          return ticketSnapshot();
+        }
+      },
+      actor: manager
+    });
+
+    await hooks.afterCommit?.({
+      doctype: ticketDocType({
+        assignmentRules: [
+          {
+            name: "Created document triage",
+            events: ["DocumentCreated"],
+            assignees: [{ kind: "user", userId: "manager@example.com" }]
+          }
+        ]
+      }),
+      data: ticketSnapshot().data,
+      event: {
+        ...ticketEvent("DocumentCreated"),
+        type: "TicketDeleted"
+      },
+      snapshot: ticketSnapshot()
+    });
+
+    expect(assigned).toMatchObject([
+      {
+        doctype: "Ticket",
+        name: "Feature",
+        assignee: "manager@example.com",
+        metadata: {
+          sourceEventId: "evt_DocumentCreated",
+          sourcePayloadKind: "DocumentCreated",
+          assignmentRuleName: "Created document triage"
+        }
+      }
+    ]);
+  });
+
   it("derives assignment rule event matching from source event identity", () => {
     expect(
       assignmentRuleAssignmentsFromDomainEvent({

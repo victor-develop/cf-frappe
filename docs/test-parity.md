@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the email notification service payload-kind metadata slice:
+As of the assignment rule hook payload-kind matching slice:
 
 - Vitest files: `196`
-- Vitest cases: `2390`
-- Remaining gap to Frappe static markers: `394`
+- Vitest cases: `2391`
+- Remaining gap to Frappe static markers: `393`
 
 ## Implication
 
