@@ -1,4 +1,5 @@
 import { badRequest } from "../core/errors.js";
+import { domainEventPayloadKind } from "../core/domain-events.js";
 import type {
   DocTypeDefinition,
   DomainEvent,
@@ -25,10 +26,14 @@ export type SavedListFilterEventPayload =
       readonly ownerId: string;
     };
 
+export type SavedListFilterPayloadKind = SavedListFilterEventPayload["kind"];
+
 export const SAVED_LIST_FILTER_PAYLOAD_KINDS = Object.freeze([
   "SavedListFilterSaved",
   "SavedListFilterDeleted"
-] as const);
+] as const satisfies readonly SavedListFilterPayloadKind[]);
+
+const SAVED_LIST_FILTER_PAYLOAD_KIND_SET = new Set<string>(SAVED_LIST_FILTER_PAYLOAD_KINDS);
 
 export interface SavedListFilter {
   readonly tenantId: TenantId;
@@ -117,6 +122,14 @@ export function savedListFilterEvent<TPayload extends SavedListFilterEventPayloa
   event: NewDomainEvent<TPayload>
 ): NewDomainEvent<TPayload> {
   return event;
+}
+
+export function isSavedListFilterPayloadKind(kind: string): kind is SavedListFilterPayloadKind {
+  return SAVED_LIST_FILTER_PAYLOAD_KIND_SET.has(kind);
+}
+
+export function isSavedListFilterEvent(event: DomainEvent): event is DomainEvent<SavedListFilterEventPayload> {
+  return isSavedListFilterPayloadKind(domainEventPayloadKind(event));
 }
 
 declare module "../core/types.js" {

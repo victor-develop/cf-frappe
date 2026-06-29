@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Centralized saved-list-filter event payload-kind matching through domain events so saved-filter stream selectors can rely on bounded event helpers instead of inline source payload-kind reads.
 - Centralized user-permission event payload-kind matching through domain events so linked-record permission stream filters can rely on bounded event helpers instead of inline source payload-kind reads.
 - Centralized field-property event payload-kind matching through domain events so field-property stream filters no longer need to read source event payload kinds inline.
 - Centralized custom-field event payload-kind matching through domain events so catalog stream filters no longer read source event payload kinds inline.

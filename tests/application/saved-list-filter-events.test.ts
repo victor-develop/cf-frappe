@@ -1,5 +1,7 @@
 import {
   foldSavedListFilters,
+  isSavedListFilterEvent,
+  isSavedListFilterPayloadKind,
   normalizeSavedListFilterLabel,
   SAVED_LIST_FILTER_PAYLOAD_KINDS,
   savedListFilterCurrentVersion,
@@ -116,7 +118,38 @@ describe("saved list filter events", () => {
       metadata: {}
     }).payload.kind).toBe("SavedListFilterDeleted");
   });
+
+  it("narrows saved list filter events by payload kind when event type names are custom", () => {
+    const saved = savedEvent(1, {
+      filterId: "filter-a",
+      label: "Alpha",
+      ownerId: owner.id,
+      filters: [{ field: "priority", value: "High" }]
+    });
+    const imported = { ...saved, type: "NoteListViewPresetImported" };
+
+    expect(isSavedListFilterPayloadKind("SavedListFilterSaved")).toBe(true);
+    expect(isSavedListFilterPayloadKind("DocumentDeleted")).toBe(false);
+    expect(isSavedListFilterEvent(imported)).toBe(true);
+    expect(isSavedListFilterEvent(otherEvent({ kind: "DocumentDeleted" }))).toBe(false);
+  });
 });
+
+function otherEvent(payload: DomainEvent["payload"], type: string = payload.kind): DomainEvent {
+  return {
+    id: "evt_other",
+    tenantId: "acme",
+    stream: "acme:Note:NOTE-1",
+    sequence: 1,
+    type,
+    doctype: "Note",
+    documentName: "NOTE-1",
+    actorId: owner.id,
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    payload,
+    metadata: {}
+  };
+}
 
 function savedEvent(
   sequence: number,
