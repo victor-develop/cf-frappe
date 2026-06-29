@@ -2,7 +2,6 @@ import { documentEmailNotificationsFromRules } from "../core/notifications.js";
 import { emailOutboxStream, userAccountsStream } from "../core/streams.js";
 import type { DocumentSnapshot, DomainEvent, NewDomainEvent, NotificationRuleDefinition, TenantId } from "../core/types.js";
 import { foldUserAccount } from "../core/user-accounts.js";
-import { FrameworkError } from "../core/errors.js";
 import {
   EMAIL_OUTBOX_PAYLOAD_KINDS,
   claimedDeliveryId,
@@ -31,6 +30,7 @@ import {
   type DocumentEmailNotificationDelivery,
   type DocumentEmailNotificationQueueResult
 } from "./email-notification-service-policy.js";
+import { isDocumentConflictError } from "./concurrency-policy.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EmailAddress, EmailMessage, EmailSender } from "../ports/email.js";
 import type { EventStore } from "../ports/event-store.js";
@@ -268,7 +268,7 @@ export class EmailNotificationService {
       ]);
       return true;
     } catch (error) {
-      if (isConflict(error)) {
+      if (isDocumentConflictError(error)) {
         return false;
       }
       throw error;
@@ -295,7 +295,7 @@ export class EmailNotificationService {
         claimId
       });
     } catch (error) {
-      if (isConflict(error)) {
+      if (isDocumentConflictError(error)) {
         return undefined;
       }
       throw error;
@@ -358,8 +358,4 @@ export class UserAccountEmailRecipientResolver implements EmailRecipientResolver
       ? { email: account.email }
       : undefined;
   }
-}
-
-function isConflict(error: unknown): boolean {
-  return error instanceof FrameworkError && error.code === "DOCUMENT_CONFLICT";
 }

@@ -1,4 +1,4 @@
-import { FrameworkError, notFound, permissionDenied } from "../core/errors.js";
+import { notFound, permissionDenied } from "../core/errors.js";
 import {
   documentUserNotificationsFromDomainEvent,
   documentUserNotificationsFromRules,
@@ -38,6 +38,7 @@ import {
   userNotificationInboxProjection,
   type UserNotificationInbox
 } from "./user-notification-policy.js";
+import { isDocumentConflictError } from "./concurrency-policy.js";
 
 const MAX_NOTIFICATION_APPEND_ATTEMPTS = 5;
 
@@ -207,7 +208,7 @@ export class UserNotificationService {
           )
         );
       } catch (error) {
-        if (isStreamConflict(error) && attempt < MAX_NOTIFICATION_APPEND_ATTEMPTS) {
+        if (isDocumentConflictError(error) && attempt < MAX_NOTIFICATION_APPEND_ATTEMPTS) {
           continue;
         }
         throw error;
@@ -282,8 +283,4 @@ export class UserNotificationService {
       ...documentUserNotificationsFromRules(event, snapshot ?? null, rules)
     ];
   }
-}
-
-function isStreamConflict(error: unknown): boolean {
-  return error instanceof FrameworkError && error.code === "DOCUMENT_CONFLICT";
 }

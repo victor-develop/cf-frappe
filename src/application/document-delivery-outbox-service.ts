@@ -30,6 +30,7 @@ import {
   documentDeliveryOutboxPayload,
   ensureDocumentDeliveryOutboxClaimed
 } from "./document-delivery-outbox-service-policy.js";
+import { isDocumentConflictError } from "./concurrency-policy.js";
 
 export type {
   DocumentDeliveryOutboxEventPayload,
@@ -269,7 +270,7 @@ export class DocumentDeliveryOutboxService {
           ...saved
         ]), planned.recordIds);
       } catch (error) {
-        if (isStreamConflict(error) && attempt < MAX_OUTBOX_APPEND_ATTEMPTS) {
+        if (isDocumentConflictError(error) && attempt < MAX_OUTBOX_APPEND_ATTEMPTS) {
           continue;
         }
         throw error;
@@ -286,8 +287,4 @@ export class DocumentDeliveryOutboxService {
       })
     );
   }
-}
-
-function isStreamConflict(error: unknown): boolean {
-  return error instanceof Error && (error as { readonly code?: string }).code === "DOCUMENT_CONFLICT";
 }

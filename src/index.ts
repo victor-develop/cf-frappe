@@ -12,6 +12,7 @@ export * from "./application/assignment-rule-policy.js";
 export * from "./application/assignment-rule-service.js";
 export * from "./application/calendar-policy.js";
 export * from "./application/calendar-service.js";
+export * from "./application/concurrency-policy.js";
 export * from "./application/custom-field-events.js";
 export * from "./application/custom-field-policy.js";
 export * from "./application/custom-field-service.js";

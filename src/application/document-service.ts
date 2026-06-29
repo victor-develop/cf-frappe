@@ -32,6 +32,7 @@ import {
   bulkDocumentFailure,
   runBulkDocumentSelections
 } from "./document-bulk-policy.js";
+import { isDocumentConflictError } from "./concurrency-policy.js";
 import {
   canReadLinkedDocumentTarget,
   documentSatisfiesUserPermissions,
@@ -1843,7 +1844,7 @@ export class DocumentService implements DocumentCommandExecutor {
         });
         return renderNamingSeries(pattern, next);
       } catch (error) {
-        if (isDocumentConflict(error) && attempt + 1 < NAMING_SERIES_MAX_ATTEMPTS) {
+        if (isDocumentConflictError(error) && attempt + 1 < NAMING_SERIES_MAX_ATTEMPTS) {
           continue;
         }
         throw error;
@@ -1851,8 +1852,4 @@ export class DocumentService implements DocumentCommandExecutor {
     }
     throw conflict(`Could not allocate naming series '${pattern}' for ${doctype.name}`);
   }
-}
-
-function isDocumentConflict(error: unknown): boolean {
-  return error instanceof FrameworkError && error.code === "DOCUMENT_CONFLICT";
 }
