@@ -23,6 +23,17 @@ export interface DocumentDeliveryOutboxDrainResult {
   readonly outcomes: readonly DocumentDeliveryOutboxDeliveryOutcome[];
 }
 
+export function documentDeliveryOutboxErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export function hasQueuedDocumentDeliveryEmailMessageId<TDelivery extends {
+  readonly status: string;
+  readonly messageId?: string;
+}>(delivery: TDelivery): delivery is TDelivery & { readonly messageId: string } {
+  return delivery.status === "queued" && delivery.messageId !== undefined;
+}
+
 export function documentDeliveryOutboxDrainLimit(limit: number | undefined): number {
   if (limit === undefined) {
     return DOCUMENT_DELIVERY_OUTBOX_DEFAULT_DRAIN_LIMIT;

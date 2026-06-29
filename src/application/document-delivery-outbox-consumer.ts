@@ -12,10 +12,12 @@ import type {
 import {
   documentDeliveryOutboxDrainLimit,
   documentDeliveryOutboxDrainResultJson,
+  documentDeliveryOutboxErrorMessage,
   documentDeliveryOutboxRecordClaimId,
   documentDeliveryOutboxRetryAt,
   documentDeliveryOutboxRetryDelaySeconds,
   documentDeliveryOutboxSourceFromRecord,
+  hasQueuedDocumentDeliveryEmailMessageId,
   parseDocumentDeliveryOutboxDrainJobClaimId,
   parseDocumentDeliveryOutboxDrainJobLimit,
   type DocumentDeliveryOutboxDeliveryOutcome,
@@ -99,13 +101,6 @@ export interface DocumentDeliveryOutboxDeliveryServices {
     recordFromDomainEvent(event: DomainEvent, snapshot?: DocumentSnapshot | null): Promise<unknown>;
   };
   readonly realtime?: RealtimePublisher;
-}
-
-interface EmailNotificationQueueResult {
-  readonly status: string;
-  readonly messageId?: string;
-  readonly ruleName?: string;
-  readonly recipientId?: string;
 }
 
 export interface DocumentDeliveryOutboxDrainJobResources {
@@ -196,7 +191,7 @@ export class DocumentDeliveryOutboxConsumer {
         attempts: delivered.attempts
       };
     } catch (error) {
-      return this.fail(record, claimId, now, errorMessage(error));
+      return this.fail(record, claimId, now, documentDeliveryOutboxErrorMessage(error));
     }
   }
 
@@ -283,7 +278,7 @@ export function createDocumentDeliveryOutboxDeliveryHandlers(
                 const deliveries = await emailNotifications.queueFromDomainEvent(source.event, source.snapshot);
                 await Promise.all(
                   deliveries
-                    .filter(hasQueuedEmailMessageId)
+                    .filter(hasQueuedDocumentDeliveryEmailMessageId)
                     .map((delivery) =>
                       emailNotificationDeliveryQueue.enqueue(source.event.tenantId, delivery.messageId, {
                         metadata: {
@@ -304,12 +299,6 @@ export function createDocumentDeliveryOutboxDeliveryHandlers(
           }
         })
   };
-}
-
-function hasQueuedEmailMessageId<TDelivery extends EmailNotificationQueueResult>(
-  delivery: TDelivery
-): delivery is TDelivery & { readonly messageId: string } {
-  return delivery.status === "queued" && delivery.messageId !== undefined;
 }
 
 export function createDocumentDeliveryOutboxDrainJob<
@@ -335,8 +324,4 @@ export function createDocumentDeliveryOutboxDrainJob<
       return documentDeliveryOutboxDrainResultJson(result);
     }
   };
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

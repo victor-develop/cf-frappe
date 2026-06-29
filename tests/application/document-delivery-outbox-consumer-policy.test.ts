@@ -1,10 +1,12 @@
 import {
   documentDeliveryOutboxDrainLimit,
   documentDeliveryOutboxDrainResultJson,
+  documentDeliveryOutboxErrorMessage,
   documentDeliveryOutboxRecordClaimId,
   documentDeliveryOutboxRetryAt,
   documentDeliveryOutboxRetryDelaySeconds,
   documentDeliveryOutboxSourceFromRecord,
+  hasQueuedDocumentDeliveryEmailMessageId,
   parseDocumentDeliveryOutboxDrainJobClaimId,
   parseDocumentDeliveryOutboxDrainJobLimit
 } from "../../src/application/document-delivery-outbox-consumer-policy.js";
@@ -14,6 +16,24 @@ import type { DocumentData, DomainEvent, DocumentSnapshot } from "../../src/core
 const now = "2026-01-01T00:00:00.000Z";
 
 describe("document delivery outbox consumer policy", () => {
+  it("normalizes thrown delivery failures into retryable error messages", () => {
+    expect(documentDeliveryOutboxErrorMessage(new Error("provider down"))).toBe("provider down");
+    expect(documentDeliveryOutboxErrorMessage("plain failure")).toBe("plain failure");
+    expect(documentDeliveryOutboxErrorMessage(undefined)).toBe("undefined");
+  });
+
+  it("selects queued email deliveries that can be enqueued by message id", () => {
+    const deliveries = [
+      { status: "queued" },
+      { status: "queued", messageId: "msg_ready" },
+      { status: "skipped", messageId: "msg_skipped" }
+    ];
+
+    expect(deliveries.filter(hasQueuedDocumentDeliveryEmailMessageId)).toEqual([
+      { status: "queued", messageId: "msg_ready" }
+    ]);
+  });
+
   it("normalizes drain limits with bounded defaults", () => {
     expect(documentDeliveryOutboxDrainLimit(undefined)).toBe(25);
     expect(documentDeliveryOutboxDrainLimit(100)).toBe(100);
