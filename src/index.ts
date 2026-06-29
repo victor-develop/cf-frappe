@@ -13,6 +13,7 @@ export * from "./application/custom-field-service.js";
 export * from "./application/dashboard-policy.js";
 export * from "./application/dashboard-service.js";
 export * from "./application/data-patch-runner.js";
+export * from "./application/data-patch-run-policy.js";
 export * from "./application/data-patch-service.js";
 export * from "./application/data-patch-claim-policy.js";
 export * from "./application/data-patch-dashboard-policy.js";

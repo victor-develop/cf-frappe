@@ -9,9 +9,21 @@ import {
   normalizeSingleDataPatchDefinition,
   snapshotDataPatchDefinitions
 } from "./data-patch-definition-policy.js";
-import { badRequest, FrameworkError } from "../core/errors.js";
-import { cloneJsonValue, isJsonValue } from "../core/json.js";
+import { FrameworkError } from "../core/errors.js";
 import type { JsonValue } from "../core/types.js";
+import {
+  dataPatchRollbackCompleteCommand,
+  dataPatchRollbackFailureCommand,
+  dataPatchRollbackRecord,
+  dataPatchRunCompleteCommand,
+  dataPatchRunFailureCommand,
+  dataPatchRunRecord,
+  normalizeDataPatchRunResult,
+  type DataPatchRollbackRecord,
+  type DataPatchRollbackRunResult,
+  type DataPatchRunRecord,
+  type DataPatchRunResult
+} from "./data-patch-run-policy.js";
 import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
 import type { IdGenerator } from "../ports/id-generator.js";
@@ -31,29 +43,7 @@ export interface DataPatchRunnerOptions<TResources = unknown> {
   readonly ids?: IdGenerator;
 }
 
-export interface DataPatchRunRecord {
-  readonly id: string;
-  readonly checksum: string;
-  readonly appliedAt: string;
-  readonly result?: JsonValue;
-}
-
-export interface DataPatchRunResult {
-  readonly applied: readonly DataPatchRunRecord[];
-  readonly skipped: readonly AppliedDataPatch[];
-}
-
-export interface DataPatchRollbackRecord {
-  readonly id: string;
-  readonly checksum: string;
-  readonly rolledBackAt: string;
-  readonly result?: JsonValue;
-}
-
-export interface DataPatchRollbackRunResult {
-  readonly rolledBack: readonly DataPatchRollbackRecord[];
-  readonly skipped: readonly RolledBackDataPatch[];
-}
+export type { DataPatchRollbackRecord, DataPatchRollbackRunResult, DataPatchRunRecord, DataPatchRunResult };
 
 export class DataPatchRunner<TResources = unknown> {
   private readonly clock: Clock;
@@ -115,28 +105,16 @@ export class DataPatchRunner<TResources = unknown> {
 
       let result: JsonValue | undefined;
       try {
-        result = normalizeResult(await patch.run({ resources: this.resources }), "Data patch result");
+        result = normalizeDataPatchRunResult(await patch.run({ resources: this.resources }), "Data patch result");
       } catch (error) {
-        await this.log.failDataPatch({
-          id: patch.id,
-          checksum: patch.checksum,
-          claimId: decision.claim.claimId,
-          failedAt: this.clock.now(),
-          error: errorMessage(error)
-        });
+        await this.log.failDataPatch(
+          dataPatchRunFailureCommand(patch.id, patch.checksum, decision.claim.claimId, this.clock.now(), error)
+        );
         throw error;
       }
 
-      const record = {
-        id: patch.id,
-        checksum: patch.checksum,
-        appliedAt: this.clock.now(),
-        ...(result === undefined ? {} : { result })
-      };
-      await this.log.completeDataPatch({
-        ...record,
-        claimId: decision.claim.claimId
-      });
+      const record = dataPatchRunRecord(patch.id, patch.checksum, this.clock.now(), result);
+      await this.log.completeDataPatch(dataPatchRunCompleteCommand(record, decision.claim.claimId));
       applied.push(record);
       recordedById.set(record.id, { ...record, status: "applied" });
     }
@@ -208,42 +186,19 @@ export class DataPatchRunner<TResources = unknown> {
     }
     let result: JsonValue | undefined;
     try {
-      result = normalizeResult(await patch.rollback.run({ resources: this.resources }), "Data patch rollback result");
+      result = normalizeDataPatchRunResult(
+        await patch.rollback.run({ resources: this.resources }),
+        "Data patch rollback result"
+      );
     } catch (error) {
-      await this.log.failDataPatchRollback({
-        id: patch.id,
-        checksum: patch.checksum,
-        claimId: claim.claimId,
-        failedAt: this.clock.now(),
-        error: errorMessage(error)
-      });
+      await this.log.failDataPatchRollback(
+        dataPatchRollbackFailureCommand(patch.id, patch.checksum, claim.claimId, this.clock.now(), error)
+      );
       throw error;
     }
 
-    const record = {
-      id: patch.id,
-      checksum: patch.checksum,
-      rolledBackAt: this.clock.now(),
-      ...(result === undefined ? {} : { result })
-    };
-    await this.log.completeDataPatchRollback({
-      ...record,
-      claimId: claim.claimId
-    });
+    const record = dataPatchRollbackRecord(patch.id, patch.checksum, this.clock.now(), result);
+    await this.log.completeDataPatchRollback(dataPatchRollbackCompleteCommand(record, claim.claimId));
     return record;
   }
-}
-
-function normalizeResult(result: JsonValue | void, label: string): JsonValue | undefined {
-  if (result === undefined) {
-    return undefined;
-  }
-  if (!isJsonValue(result)) {
-    throw badRequest(`${label} must be JSON-serializable`);
-  }
-  return cloneJsonValue(result);
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
