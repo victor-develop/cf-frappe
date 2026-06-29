@@ -25,6 +25,11 @@ export type JobScheduleDispatchDecision =
   | { readonly status: "not-found"; readonly message: string }
   | { readonly status: "reject"; readonly message: string };
 
+export type JobScheduleOverrideDecision =
+  | { readonly status: "override" }
+  | { readonly status: "not-found"; readonly message: string }
+  | { readonly status: "reject"; readonly message: string };
+
 export function planJobScheduleAccess(options: {
   readonly actor: Actor;
   readonly adminRoles: readonly string[];
@@ -81,4 +86,36 @@ export function planJobScheduleDispatch(options: {
     return { status: "reject", message: `Scheduled job '${options.summary.jobName}' is not registered` };
   }
   return { status: "dispatch" };
+}
+
+export function planJobScheduleOverride(options: {
+  readonly scheduleId: string;
+  readonly tenantId: TenantId;
+  readonly summary: JobScheduleVisibilitySummary & {
+    readonly source: "configured" | "runtime";
+    readonly dynamic: JobScheduleVisibilitySummary["dynamic"] & {
+      readonly enabled: boolean;
+    };
+  };
+  readonly hasScheduleId: boolean;
+}): JobScheduleOverrideDecision {
+  if (!canInspectJobSchedule(options.summary, options.tenantId)) {
+    return {
+      status: "not-found",
+      message: `Job schedule '${options.scheduleId}' was not found`
+    };
+  }
+  if (options.summary.source === "runtime") {
+    return { status: "reject", message: "Runtime job schedules must be edited directly" };
+  }
+  if (options.summary.dynamic.tenantId) {
+    return { status: "reject", message: "Dynamic tenant job schedules cannot be overridden" };
+  }
+  if (options.summary.dynamic.enabled) {
+    return { status: "reject", message: "Dynamic enabled job schedules cannot be overridden" };
+  }
+  if (!options.hasScheduleId) {
+    return { status: "reject", message: "Job schedule id is required for runtime overrides" };
+  }
+  return { status: "override" };
 }

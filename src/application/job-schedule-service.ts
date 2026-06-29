@@ -23,7 +23,8 @@ import {
 import {
   canInspectJobSchedule,
   planJobScheduleAccess,
-  planJobScheduleDispatch
+  planJobScheduleDispatch,
+  planJobScheduleOverride
 } from "./job-schedule-policy.js";
 
 export type { JobScheduleEventPayload } from "./job-schedule-events.js";
@@ -529,20 +530,17 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
     const tenantId = this.authorize(actor, explicitTenantId);
     const events = this.requireOverrides();
     const { schedule, index, summary } = await this.requireSchedule(scheduleId, tenantId);
-    if (!canInspectJobSchedule(summary, tenantId)) {
-      throw notFound(`Job schedule '${scheduleId}' was not found`, "JOB_SCHEDULE_NOT_FOUND");
+    const decision = planJobScheduleOverride({
+      scheduleId,
+      tenantId,
+      summary,
+      hasScheduleId: schedule.id !== undefined
+    });
+    if (decision.status === "not-found") {
+      throw notFound(decision.message, "JOB_SCHEDULE_NOT_FOUND");
     }
-    if (summary.source === "runtime") {
-      throw badRequest("Runtime job schedules must be edited directly");
-    }
-    if (summary.dynamic.tenantId) {
-      throw badRequest("Dynamic tenant job schedules cannot be overridden");
-    }
-    if (summary.dynamic.enabled) {
-      throw badRequest("Dynamic enabled job schedules cannot be overridden");
-    }
-    if (schedule.id === undefined) {
-      throw badRequest("Job schedule id is required for runtime overrides");
+    if (decision.status === "reject") {
+      throw badRequest(decision.message);
     }
     return {
       tenantId,

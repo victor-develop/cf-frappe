@@ -2,6 +2,7 @@ import {
   canInspectJobSchedule,
   planJobScheduleAccess,
   planJobScheduleDispatch,
+  planJobScheduleOverride,
   SYSTEM_MANAGER_ROLE
 } from "../../src";
 
@@ -103,10 +104,78 @@ describe("job schedule policy", () => {
       summary: scheduleSummary()
     })).toEqual({ status: "dispatch" });
   });
+
+  it("plans override visibility before runtime and dynamic rejection", () => {
+    expect(planJobScheduleOverride({
+      scheduleId: "daily",
+      tenantId: "other",
+      summary: scheduleSummary({ tenantId: "acme" }),
+      hasScheduleId: true
+    })).toEqual({
+      status: "not-found",
+      message: "Job schedule 'daily' was not found"
+    });
+
+    expect(planJobScheduleOverride({
+      scheduleId: "runtime-daily",
+      tenantId: "acme",
+      summary: scheduleSummary({ source: "runtime" }),
+      hasScheduleId: true
+    })).toEqual({
+      status: "reject",
+      message: "Runtime job schedules must be edited directly"
+    });
+  });
+
+  it("rejects dynamic tenant and dynamic enabled schedule overrides", () => {
+    expect(planJobScheduleOverride({
+      scheduleId: "daily",
+      tenantId: "default",
+      summary: withoutTenantId(scheduleSummary({
+        dynamic: { tenantId: true, enabled: false }
+      })),
+      hasScheduleId: true
+    })).toEqual({
+      status: "reject",
+      message: "Dynamic tenant job schedules cannot be overridden"
+    });
+
+    expect(planJobScheduleOverride({
+      scheduleId: "daily",
+      tenantId: "acme",
+      summary: scheduleSummary({ dynamic: { tenantId: false, enabled: true } }),
+      hasScheduleId: true
+    })).toEqual({
+      status: "reject",
+      message: "Dynamic enabled job schedules cannot be overridden"
+    });
+  });
+
+  it("requires an explicit schedule id before override events can be written", () => {
+    expect(planJobScheduleOverride({
+      scheduleId: "1",
+      tenantId: "acme",
+      summary: scheduleSummary(),
+      hasScheduleId: false
+    })).toEqual({
+      status: "reject",
+      message: "Job schedule id is required for runtime overrides"
+    });
+  });
+
+  it("allows tenant-visible static schedules with stable ids to be overridden", () => {
+    expect(planJobScheduleOverride({
+      scheduleId: "daily",
+      tenantId: "acme",
+      summary: scheduleSummary(),
+      hasScheduleId: true
+    })).toEqual({ status: "override" });
+  });
 });
 
 function scheduleSummary(overrides: {
   readonly tenantId?: string;
+  readonly source?: "configured" | "runtime";
   readonly jobName?: string;
   readonly enabled?: boolean;
   readonly registered?: boolean;
@@ -117,6 +186,7 @@ function scheduleSummary(overrides: {
 } = {}) {
   return {
     tenantId: "acme",
+    source: "configured" as const,
     jobName: "reports.daily",
     enabled: true,
     registered: true,
