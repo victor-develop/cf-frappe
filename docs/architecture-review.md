@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted user-notification read and dismiss idempotency decisions into user-notification policy so UserNotificationService keeps access checks, stream loading, event append, and replay orchestration.
 - Extracted user-account role and enabled-status change decisions into user-account policy so UserAccountService keeps administration, role validation, stream loading, event append, and replay orchestration.
 - Extracted saved-list-filter command target decisions and saved-filter write projection into saved-list-filter policy so SavedListFilterService keeps permission checks, effective DocType resolution, filter normalization, event append, and merge orchestration.
 - Extracted saved-report command target decisions and saved-report write projection into saved-report policy so SavedReportService keeps permission checks, stream loading, report definition normalization, event append, and report execution/export orchestration.

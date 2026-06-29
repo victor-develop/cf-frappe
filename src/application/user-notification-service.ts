@@ -34,6 +34,8 @@ import {
   normalizeUserNotificationId,
   normalizeUserNotificationInboxLimit,
   planUserNotificationAccess,
+  planUserNotificationDismiss,
+  planUserNotificationRead,
   userNotificationInboxProjection,
   type UserNotificationInbox
 } from "./user-notification-policy.js";
@@ -118,7 +120,7 @@ export class UserNotificationService {
     const state = await this.state(tenantId, userId);
     const id = normalizeUserNotificationId(notificationId);
     const notification = this.requireNotification(state, id);
-    if (notification.read) {
+    if (planUserNotificationRead(notification).status === "noop") {
       return notification;
     }
     await this.appendUserNotificationEvent(state, actor, {
@@ -137,7 +139,7 @@ export class UserNotificationService {
     const state = await this.state(tenantId, userId);
     const id = normalizeUserNotificationId(notificationId);
     const notification = this.requireNotification(state, id);
-    if (notification.dismissed) {
+    if (planUserNotificationDismiss(notification).status === "noop") {
       return notification;
     }
     await this.appendUserNotificationEvent(state, actor, {

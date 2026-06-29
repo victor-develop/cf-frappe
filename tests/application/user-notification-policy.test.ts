@@ -3,6 +3,8 @@ import {
   normalizeUserNotificationInboxLimit,
   normalizeUserNotificationUserId,
   planUserNotificationAccess,
+  planUserNotificationDismiss,
+  planUserNotificationRead,
   userNotificationInboxProjection
 } from "../../src/application/user-notification-policy.js";
 import { SYSTEM_MANAGER_ROLE } from "../../src";
@@ -43,6 +45,15 @@ describe("user notification policy", () => {
       adminRoles: [SYSTEM_MANAGER_ROLE],
       explicitUserId: " support@example.com "
     })).toEqual({ status: "allow", tenantId: "acme", userId: "support@example.com" });
+  });
+
+  it("plans notification read and dismissal changes idempotently", () => {
+    expect(planUserNotificationRead(record("evt_unread:user:support"))).toEqual({ status: "append" });
+    expect(planUserNotificationRead(record("evt_read:user:support", { read: true }))).toEqual({ status: "noop" });
+    expect(planUserNotificationDismiss(record("evt_active:user:support"))).toEqual({ status: "append" });
+    expect(planUserNotificationDismiss(record("evt_dismissed:user:support", { dismissed: true }))).toEqual({
+      status: "noop"
+    });
   });
 
   it("normalizes notification user ids", () => {

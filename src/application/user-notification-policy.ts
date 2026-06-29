@@ -29,6 +29,10 @@ export type UserNotificationAccessDecision =
   | { readonly status: "allow"; readonly tenantId: TenantId; readonly userId: string }
   | { readonly status: "deny"; readonly message: string };
 
+export type UserNotificationChangeDecision =
+  | { readonly status: "append" }
+  | { readonly status: "noop" };
+
 export function planUserNotificationAccess(options: {
   readonly actor: Actor;
   readonly adminRoles: readonly string[];
@@ -43,6 +47,20 @@ export function planUserNotificationAccess(options: {
     };
   }
   return { status: "allow", tenantId, userId };
+}
+
+export function planUserNotificationRead(notification: UserNotificationRecord): UserNotificationChangeDecision {
+  if (notification.read) {
+    return { status: "noop" };
+  }
+  return { status: "append" };
+}
+
+export function planUserNotificationDismiss(notification: UserNotificationRecord): UserNotificationChangeDecision {
+  if (notification.dismissed) {
+    return { status: "noop" };
+  }
+  return { status: "append" };
 }
 
 export function normalizeUserNotificationUserId(value: string): string {
