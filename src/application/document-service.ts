@@ -35,8 +35,9 @@ import {
   documentSatisfiesUserPermissions,
   planDocTypeActionAccess,
   planDocumentActionAccess,
-  planDocumentSharedPermissionLookup,
-  planDocumentUserPermissionAccess
+  planDocumentUserPermissionAccess,
+  resolveDocumentSharedPermissionsForAction,
+  type DocumentSharedPermissionResolution
 } from "./document-access-policy.js";
 import {
   ensureDocumentStatus,
@@ -1611,10 +1612,22 @@ export class DocumentService implements DocumentCommandExecutor {
     action: PermissionAction,
     document: DocumentSnapshot
   ): Promise<readonly DocumentSharePermission[]> {
-    const lookup = planDocumentSharedPermissionLookup({ actor, doctype, action, document });
-    return lookup.status === "read-shares"
-      ? (await this.documentShares?.sharedPermissionsFor(actor, document)) ?? []
-      : lookup.sharedPermissions;
+    const access = await resolveDocumentSharedPermissionsForAction({
+      actor,
+      doctype,
+      action,
+      document,
+      readSharedPermissions: (shareActor, shareDocument) =>
+        this.readSharedPermissions(shareActor, shareDocument)
+    });
+    return access.sharedPermissions;
+  }
+
+  private async readSharedPermissions(
+    actor: Actor,
+    document: DocumentSnapshot
+  ): Promise<readonly DocumentSharePermission[]> {
+    return (await this.documentShares?.sharedPermissionsFor(actor, document)) ?? [];
   }
 
   private ensureDocTypeActionAccess(
@@ -1653,26 +1666,27 @@ export class DocumentService implements DocumentCommandExecutor {
     action: PermissionAction,
     document: DocumentSnapshot,
     deniedAction?: string
-  ): Promise<{
-    readonly lookup: ReturnType<typeof planDocumentSharedPermissionLookup>;
-    readonly sharedPermissions: readonly DocumentSharePermission[];
-  }> {
-    const lookup = planDocumentSharedPermissionLookup({ actor, doctype, action, document });
-    const sharedPermissions = lookup.status === "read-shares"
-      ? (await this.documentShares?.sharedPermissionsFor(actor, document)) ?? []
-      : lookup.sharedPermissions;
+  ): Promise<DocumentSharedPermissionResolution> {
+    const access = await resolveDocumentSharedPermissionsForAction({
+      actor,
+      doctype,
+      action,
+      document,
+      readSharedPermissions: (shareActor, shareDocument) =>
+        this.readSharedPermissions(shareActor, shareDocument)
+    });
     const decision = planDocumentActionAccess({
       actor,
       doctype,
       action,
       document,
-      sharedPermissions,
+      sharedPermissions: access.sharedPermissions,
       ...(deniedAction === undefined ? {} : { deniedAction })
     });
     if (decision.status === "deny") {
       throw permissionDenied(decision.message);
     }
-    return { lookup, sharedPermissions };
+    return access;
   }
 
   private async doctypeContext(

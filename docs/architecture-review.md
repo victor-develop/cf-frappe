@@ -72,6 +72,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Extracted after-commit hook context shaping from `DocumentService` into `src/core/document-hooks.ts`, covering committed snapshot data and no-current-snapshot contexts behind focused unit tests.
 - Extracted live-document fold guards from `DocumentService` into `src/application/document-lifecycle-events.ts`, covering live snapshots, missing streams, and deleted snapshots behind focused unit tests.
 - Added `DocumentStore.commitBatch` and wired document create/update unique-value reservations plus the document event through one multi-stream commit, with D1 and in-memory adapters committing all event streams and projections atomically and focused tests proving failed unique commands no longer leave compensating reservation events.
+- Centralized shared-permission resolution in document access policy so `DocumentService` and `QueryService` share the same skip-versus-read decision before consulting the document-share provider.
 - Centralized readable file dashboard candidate shaping in file policy so dashboard orchestration no longer composes permission-check DTOs inline.
 - Centralized multipart completed-object reuse versus storage-completion planning in file policy so multipart orchestration no longer owns idempotent completion branching.
 - Centralized multipart completed-object read planning in file policy so multipart orchestration no longer derives object keys or upload ids before storage reads inline.

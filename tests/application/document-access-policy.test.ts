@@ -11,6 +11,7 @@ import {
   planDocumentActionAccess,
   planDocumentSharedPermissionLookup,
   planDocumentUserPermissionAccess,
+  resolveDocumentSharedPermissionsForAction,
   type Actor,
   type DocumentSnapshot
 } from "../../src";
@@ -142,6 +143,47 @@ describe("document access policy", () => {
       action: "update",
       document: task
     })).toEqual({ status: "read-shares" });
+  });
+
+  it("resolves shared permissions without reading shares when static permissions allow the action", async () => {
+    let reads = 0;
+
+    await expect(resolveDocumentSharedPermissionsForAction({
+      actor: reader,
+      doctype: Task,
+      action: "update",
+      document: task,
+      readSharedPermissions: async () => {
+        reads += 1;
+        return ["read"];
+      }
+    })).resolves.toEqual({
+      lookup: { status: "skip", sharedPermissions: [] },
+      sharedPermissions: []
+    });
+    expect(reads).toBe(0);
+  });
+
+  it("resolves shared permissions by reading shares when static permissions deny the action", async () => {
+    let requestedActor: Actor | undefined;
+    let requestedDocument: DocumentSnapshot | undefined;
+
+    await expect(resolveDocumentSharedPermissionsForAction({
+      actor: collaborator,
+      doctype: Task,
+      action: "update",
+      document: task,
+      readSharedPermissions: async (actor, document) => {
+        requestedActor = actor;
+        requestedDocument = document;
+        return ["read", "update"];
+      }
+    })).resolves.toEqual({
+      lookup: { status: "read-shares" },
+      sharedPermissions: ["read", "update"]
+    });
+    expect(requestedActor).toBe(collaborator);
+    expect(requestedDocument).toBe(task);
   });
 
   it("rejects deleted documents from visible access even when permissions match", () => {

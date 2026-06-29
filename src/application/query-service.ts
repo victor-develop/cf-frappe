@@ -20,7 +20,7 @@ import {
   canUseDocTypeAction,
   canUseVisibleDocument,
   planDocTypeActionAccess,
-  planDocumentSharedPermissionLookup
+  resolveDocumentSharedPermissionsForAction
 } from "./document-access-policy.js";
 import {
   DEFAULT_TENANT_ID,
@@ -570,13 +570,18 @@ export class QueryService {
     action: PermissionAction,
     document: DocumentSnapshot
   ): Promise<readonly DocumentSharePermission[]> {
-    const lookup = planDocumentSharedPermissionLookup({ actor, doctype, action, document });
-    return lookup.status === "read-shares"
-      ? await this.sharedPermissionsFor(actor, document)
-      : lookup.sharedPermissions;
+    const access = await resolveDocumentSharedPermissionsForAction({
+      actor,
+      doctype,
+      action,
+      document,
+      readSharedPermissions: (shareActor, shareDocument) =>
+        this.readSharedPermissions(shareActor, shareDocument)
+    });
+    return access.sharedPermissions;
   }
 
-  private async sharedPermissionsFor(
+  private async readSharedPermissions(
     actor: Actor,
     document: DocumentSnapshot
   ): Promise<readonly DocumentSharePermission[]> {

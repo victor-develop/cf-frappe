@@ -46,6 +46,11 @@ export type DocumentSharedPermissionLookup =
   | { readonly status: "skip"; readonly sharedPermissions: readonly [] }
   | { readonly status: "read-shares" };
 
+export interface DocumentSharedPermissionResolution {
+  readonly lookup: DocumentSharedPermissionLookup;
+  readonly sharedPermissions: readonly DocumentSharePermission[];
+}
+
 export function canUseDocTypeAction(options: DocTypeActionAccessOptions): boolean {
   return can(options.actor, options.doctype, options.action);
 }
@@ -91,6 +96,23 @@ export function planDocumentSharedPermissionLookup(
     return { status: "skip", sharedPermissions: [] };
   }
   return { status: "read-shares" };
+}
+
+export async function resolveDocumentSharedPermissionsForAction(
+  options: DocumentActionAccessOptions & {
+    readonly readSharedPermissions: (
+      actor: Actor,
+      document: DocumentSnapshot
+    ) => Promise<readonly DocumentSharePermission[]>;
+  }
+): Promise<DocumentSharedPermissionResolution> {
+  const lookup = planDocumentSharedPermissionLookup(options);
+  return {
+    lookup,
+    sharedPermissions: lookup.status === "read-shares"
+      ? await options.readSharedPermissions(options.actor, options.document)
+      : lookup.sharedPermissions
+  };
 }
 
 export interface DocumentVisibleAccessOptions extends DocumentActionAccessOptions {
