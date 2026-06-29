@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document-delivery outbox source type/payload-kind metadata slice:
+As of the replayed queued email source type/payload-kind metadata slice:
 
 - Vitest files: `196`
-- Vitest cases: `2386`
-- Remaining gap to Frappe static markers: `398`
+- Vitest cases: `2387`
+- Remaining gap to Frappe static markers: `397`
 
 ## Implication
 

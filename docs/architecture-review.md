@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Covered replayed queued email source type/payload-kind metadata separation so drain consumers keep custom source event names while deriving payload kind from the replayed domain payload.
 - Covered document-delivery outbox source type/payload-kind metadata separation so delivery records keep custom event names while deriving source payload kind from the domain payload.
 - Covered queued email hook source payload-kind matching so rule-driven job enqueue metadata stays correct when source event type names are misleading.
 - Centralized direct user-notification recipient payload-kind matching through domain event helpers so notification recipients ignore misleading event type names.
