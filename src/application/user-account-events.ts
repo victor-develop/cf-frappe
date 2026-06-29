@@ -84,6 +84,25 @@ export interface UserPasswordChangedPayloadInput {
   readonly passwordHash: string;
 }
 
+export interface UserAccountCreatedPayloadInput {
+  readonly userId: string;
+  readonly email?: string;
+  readonly roles: readonly string[];
+  readonly passwordHash?: string;
+  readonly enabled: boolean;
+  readonly emailVerifiedAt?: string;
+}
+
+export interface UserAuthProviderPayloadInput {
+  readonly userId: string;
+  readonly provider: string;
+  readonly subject: string;
+  readonly email?: string;
+  readonly roles?: readonly string[];
+  readonly enabled?: boolean;
+  readonly emailVerifiedAt?: string | null;
+}
+
 export interface UserRolesChangedPayloadInput {
   readonly userId: string;
   readonly roles: readonly string[];
@@ -118,6 +137,50 @@ export function userPasswordChangedPayload(
     kind: "UserPasswordChanged",
     userId: input.userId,
     passwordHash: input.passwordHash
+  };
+}
+
+export function userAccountCreatedPayload(
+  input: UserAccountCreatedPayloadInput
+): Extract<UserAccountEventPayload, { readonly kind: "UserAccountCreated" }> {
+  return {
+    kind: "UserAccountCreated",
+    userId: input.userId,
+    ...(input.email === undefined ? {} : { email: input.email }),
+    roles: input.roles,
+    ...(input.passwordHash === undefined ? {} : { passwordHash: input.passwordHash }),
+    enabled: input.enabled,
+    ...(input.emailVerifiedAt === undefined ? {} : { emailVerifiedAt: input.emailVerifiedAt })
+  };
+}
+
+export function userAuthProviderLinkedPayload(
+  input: UserAuthProviderPayloadInput
+): Extract<UserAccountEventPayload, { readonly kind: "UserAuthProviderLinked" }> {
+  return {
+    kind: "UserAuthProviderLinked",
+    userId: input.userId,
+    provider: input.provider,
+    subject: input.subject,
+    ...(input.email === undefined ? {} : { email: input.email }),
+    ...(input.roles === undefined ? {} : { roles: input.roles }),
+    ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
+    ...(input.emailVerifiedAt === undefined ? {} : { emailVerifiedAt: input.emailVerifiedAt })
+  };
+}
+
+export function userAuthProviderSyncedPayload(
+  input: UserAuthProviderPayloadInput
+): Extract<UserAccountEventPayload, { readonly kind: "UserAuthProviderSynced" }> {
+  return {
+    kind: "UserAuthProviderSynced",
+    userId: input.userId,
+    provider: input.provider,
+    subject: input.subject,
+    ...(input.email === undefined ? {} : { email: input.email }),
+    ...(input.roles === undefined ? {} : { roles: input.roles }),
+    ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
+    ...(input.emailVerifiedAt === undefined ? {} : { emailVerifiedAt: input.emailVerifiedAt })
   };
 }
 

@@ -11,7 +11,10 @@ import {
 } from "../core/types.js";
 import {
   userAccountDisabledPayload,
+  userAccountCreatedPayload,
   userAccountEnabledPayload,
+  userAuthProviderLinkedPayload,
+  userAuthProviderSyncedPayload,
   userEmailVerificationDeliveryFailedPayload,
   userEmailVerificationRequestedPayload,
   userEmailVerifiedPayload,
@@ -214,14 +217,13 @@ export class UserAccountService {
       documentName: userId,
       actorId: command.actor.id,
       metadata: command.metadata,
-      payload: {
-        kind: "UserAccountCreated",
+      payload: userAccountCreatedPayload({
         userId,
         ...(email === undefined ? {} : { email }),
         roles,
         passwordHash,
         enabled: command.enabled ?? true
-      }
+      })
     });
     return publicUserAccount(foldUserAccount(tenantId, userId, saved));
   }
@@ -319,16 +321,14 @@ export class UserAccountService {
       const createdRoles = roles ?? normalizeRequiredRoles([DEFAULT_PROVIDER_ROLE]);
       const enabled = command.enabled ?? true;
       await this.validateRoles(tenantId, createdRoles);
-      const createdPayload = {
-        kind: "UserAccountCreated",
+      const createdPayload = userAccountCreatedPayload({
         userId,
         ...(email === undefined ? {} : { email }),
         roles: createdRoles,
         enabled,
         ...(typeof verifiedPatch === "string" ? { emailVerifiedAt: verifiedPatch } : {})
-      } satisfies UserAccountEventPayload;
-      const linkedPayload = {
-        kind: "UserAuthProviderLinked",
+      });
+      const linkedPayload = userAuthProviderLinkedPayload({
         userId,
         provider,
         subject,
@@ -336,7 +336,7 @@ export class UserAccountService {
         roles: createdRoles,
         enabled,
         ...(verifiedPatch === undefined ? {} : { emailVerifiedAt: verifiedPatch })
-      } satisfies UserAccountEventPayload;
+      });
       const saved = await this.appendEvents({
         tenantId,
         stream: userAccountsStream(tenantId, userId),
@@ -356,8 +356,7 @@ export class UserAccountService {
       await this.validateRoles(tenantId, roles);
     }
     const link = providerLink(state.providers, provider, subject);
-    const payload = {
-      kind: link === undefined ? "UserAuthProviderLinked" : "UserAuthProviderSynced",
+    const providerPayloadInput = {
       userId,
       provider,
       subject,
@@ -365,7 +364,10 @@ export class UserAccountService {
       ...(roles === undefined ? {} : { roles }),
       ...(command.enabled === undefined ? {} : { enabled: command.enabled }),
       ...(verifiedPatch === undefined ? {} : { emailVerifiedAt: verifiedPatch })
-    } satisfies UserAccountEventPayload;
+    };
+    const payload = link === undefined
+      ? userAuthProviderLinkedPayload(providerPayloadInput)
+      : userAuthProviderSyncedPayload(providerPayloadInput);
     if (link !== undefined && !providerSyncChangesState(state, link, payload)) {
       return publicUserAccount(state);
     }

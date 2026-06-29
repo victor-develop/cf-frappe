@@ -1,6 +1,9 @@
 import {
+  userAccountCreatedPayload,
   userAccountDisabledPayload,
   userAccountEnabledPayload,
+  userAuthProviderLinkedPayload,
+  userAuthProviderSyncedPayload,
   userEmailVerificationDeliveryFailedPayload,
   userEmailVerificationRequestedPayload,
   userEmailVerifiedPayload,
@@ -13,6 +16,57 @@ import {
 import type { UserAccountEventPayload } from "../../src";
 
 describe("user account events", () => {
+  it("builds account creation payloads", () => {
+    expect(userAccountPayload(userAccountCreatedPayload({
+      userId: "owner@example.com",
+      email: "owner@example.com",
+      roles: ["User"],
+      passwordHash: "hash:secret-123",
+      enabled: true,
+      emailVerifiedAt: "2026-01-01T00:00:00.000Z"
+    }))).toEqual({
+      kind: "UserAccountCreated",
+      userId: "owner@example.com",
+      email: "owner@example.com",
+      roles: ["User"],
+      passwordHash: "hash:secret-123",
+      enabled: true,
+      emailVerifiedAt: "2026-01-01T00:00:00.000Z"
+    });
+  });
+
+  it("builds auth provider linked and synced payloads", () => {
+    expect(userAccountPayload(userAuthProviderLinkedPayload({
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123",
+      email: "owner@example.com",
+      roles: ["User"],
+      enabled: true,
+      emailVerifiedAt: null
+    }))).toEqual({
+      kind: "UserAuthProviderLinked",
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123",
+      email: "owner@example.com",
+      roles: ["User"],
+      enabled: true,
+      emailVerifiedAt: null
+    });
+
+    expect(userAccountPayload(userAuthProviderSyncedPayload({
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123"
+    }))).toEqual({
+      kind: "UserAuthProviderSynced",
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123"
+    });
+  });
+
   it("builds password change payloads", () => {
     expect(userAccountPayload(userPasswordChangedPayload({
       userId: "owner@example.com",
