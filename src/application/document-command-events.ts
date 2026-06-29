@@ -1,4 +1,5 @@
-import type { DocTypeName, DocumentData } from "../core/types.js";
+import { domainEventPayloadKind } from "../core/domain-events.js";
+import type { DocTypeName, DocumentData, DomainEvent } from "../core/types.js";
 
 export type DocumentCommandEventPayload =
   | {
@@ -15,10 +16,14 @@ export type DocumentCommandEventPayload =
       readonly patch: DocumentData;
     };
 
+export type DocumentCommandPayloadKind = DocumentCommandEventPayload["kind"];
+
 export const DOCUMENT_COMMAND_PAYLOAD_KINDS = Object.freeze([
   "WorkflowTransitioned",
   "DomainCommandApplied"
-] as const);
+] as const satisfies readonly DocumentCommandPayloadKind[]);
+
+const DOCUMENT_COMMAND_PAYLOAD_KIND_SET = new Set<string>(DOCUMENT_COMMAND_PAYLOAD_KINDS);
 
 export interface WorkflowTransitionPayloadInput {
   readonly action: string;
@@ -64,6 +69,14 @@ export interface WorkflowTransitionEventTypeOptions {
 
 export function workflowTransitionEventType(options: WorkflowTransitionEventTypeOptions): string {
   return options.transitionEventType ?? `${options.doctypeName}${capitalizeAction(options.action)}`;
+}
+
+export function isDocumentCommandPayloadKind(kind: string): kind is DocumentCommandPayloadKind {
+  return DOCUMENT_COMMAND_PAYLOAD_KIND_SET.has(kind);
+}
+
+export function isDocumentCommandEvent(event: DomainEvent): event is DomainEvent<DocumentCommandEventPayload> {
+  return isDocumentCommandPayloadKind(domainEventPayloadKind(event));
 }
 
 function capitalizeAction(action: string): string {
