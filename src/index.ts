@@ -67,6 +67,7 @@ export * from "./application/saved-report-service.js";
 export * from "./application/saved-list-filter-events.js";
 export * from "./application/saved-list-filter-service.js";
 export * from "./application/user-account-events.js";
+export * from "./application/user-account-policy.js";
 export * from "./application/user-account-service.js";
 export * from "./application/user-notification-events.js";
 export * from "./application/user-notification-service.js";

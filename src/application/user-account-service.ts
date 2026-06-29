@@ -43,6 +43,12 @@ import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
 import type { PasswordHasher } from "../ports/password-hasher.js";
+import {
+  emailVerificationPatch,
+  normalizeRecoveryExpirySeconds,
+  recoveryChallengeExpired,
+  recoveryExpiresAtFrom
+} from "./user-account-policy.js";
 import type { UserRoleValidator } from "./user-role-validator.js";
 
 export type { UserAccountEventPayload } from "./user-account-events.js";
@@ -50,7 +56,6 @@ export type { UserAccountEventPayload } from "./user-account-events.js";
 const MIN_PASSWORD_LENGTH = 8;
 const DEFAULT_PASSWORD_RESET_EXPIRY_SECONDS = 3_600;
 const DEFAULT_EMAIL_VERIFICATION_EXPIRY_SECONDS = 86_400;
-const MAX_ACCOUNT_RECOVERY_EXPIRY_SECONDS = 604_800;
 const RECOVERY_ACTOR_ID = "anonymous";
 const DEFAULT_PROVIDER_ROLE = "User";
 
@@ -413,7 +418,7 @@ export class UserAccountService {
       return { tenantId, userId, delivered: false };
     }
     const token = this.recoveryTokens.next("tok_");
-    const expiresAt = expiresAtFrom(this.clock.now(), this.passwordResetExpiresInSeconds);
+    const expiresAt = recoveryExpiresAtFrom(this.clock.now(), this.passwordResetExpiresInSeconds);
     const tokenHash = await this.tokenSecrets.hash(token);
     let saved: readonly DomainEvent[];
     try {
@@ -487,7 +492,7 @@ export class UserAccountService {
       return { tenantId, userId, delivered: false };
     }
     const token = this.recoveryTokens.next("tok_");
-    const expiresAt = expiresAtFrom(this.clock.now(), this.emailVerificationExpiresInSeconds);
+    const expiresAt = recoveryExpiresAtFrom(this.clock.now(), this.emailVerificationExpiresInSeconds);
     const tokenHash = await this.tokenSecrets.hash(token);
     let saved: readonly DomainEvent[];
     try {
@@ -695,7 +700,7 @@ export class UserAccountService {
     challenge: UserAccountRecoveryChallenge | UserAccountEmailVerificationChallenge | undefined,
     token: string
   ): Promise<void> {
-    if (!state.exists || !state.enabled || challenge === undefined || isExpired(challenge.expiresAt, this.clock.now())) {
+    if (!state.exists || !state.enabled || challenge === undefined || recoveryChallengeExpired(challenge.expiresAt, this.clock.now())) {
       throw invalidRecoveryToken();
     }
     if (!(await this.tokenSecrets.verify(token, challenge.tokenHash))) {
@@ -759,26 +764,6 @@ function normalizeRecoveryToken(token: string): string {
   return normalized;
 }
 
-function normalizeRecoveryExpirySeconds(value: number | undefined, defaultSeconds: number): number {
-  const seconds = value ?? defaultSeconds;
-  if (!Number.isInteger(seconds) || seconds < 1 || seconds > MAX_ACCOUNT_RECOVERY_EXPIRY_SECONDS) {
-    throw badRequest(`Recovery token expiry must be between 1 and ${MAX_ACCOUNT_RECOVERY_EXPIRY_SECONDS} seconds`);
-  }
-  return seconds;
-}
-
-function expiresAtFrom(now: string, seconds: number): string {
-  const nowMillis = Date.parse(now);
-  if (!Number.isFinite(nowMillis)) {
-    throw new Error(`Clock returned invalid timestamp '${now}'`);
-  }
-  return new Date(nowMillis + seconds * 1_000).toISOString();
-}
-
-function isExpired(expiresAt: string, now: string): boolean {
-  return Date.parse(expiresAt) <= Date.parse(now);
-}
-
 function invalidRecoveryToken(): Error {
   return permissionDenied("Invalid recovery token");
 }
@@ -795,25 +780,6 @@ function ensureExpectedVersion(state: UserAccountState, expectedVersion: number 
   if (expectedVersion !== undefined && state.version !== expectedVersion) {
     throw conflict(`Expected user account '${state.userId}' at version ${expectedVersion}, found ${state.version}`);
   }
-}
-
-function emailVerificationPatch(
-  emailVerified: boolean | undefined,
-  effectiveEmail: string | undefined,
-  currentEmail: string | undefined,
-  currentEmailVerifiedAt: string | undefined,
-  now: string
-): string | null | undefined {
-  if (emailVerified === undefined) {
-    return undefined;
-  }
-  if (!emailVerified) {
-    return null;
-  }
-  if (effectiveEmail === undefined) {
-    throw badRequest("email is required when emailVerified is true");
-  }
-  return currentEmail === effectiveEmail ? currentEmailVerifiedAt ?? now : now;
 }
 
 function arrayEquals(left: readonly string[], right: readonly string[]): boolean {
