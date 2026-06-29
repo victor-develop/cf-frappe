@@ -2,6 +2,7 @@ import { defineDocType } from "../../src";
 import type { Actor, DocumentSnapshot } from "../../src";
 import {
   collaborationCollectionChange,
+  documentCollaborationPlanDisposition,
   ensureSharedGrantDelegabilityForLookup,
   ensureSharedGrantIsDelegable,
   normalizeActivity,
@@ -123,6 +124,11 @@ describe("document collaboration policy", () => {
       value: "b@example.com",
       noop: true
     });
+  });
+
+  it("classifies collaboration plans by noop disposition", () => {
+    expect(documentCollaborationPlanDisposition({ noop: true })).toBe("noop");
+    expect(documentCollaborationPlanDisposition({ noop: false })).toBe("commit");
   });
 
   it("plans assignment collection events with custom event names and noop state", () => {

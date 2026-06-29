@@ -82,6 +82,12 @@ export interface DocumentShareRevocationPlan extends DocumentShareEventPlan {
   readonly userId: string;
 }
 
+export type DocumentCollaborationPlanDisposition = "noop" | "commit";
+
+export function documentCollaborationPlanDisposition(plan: { readonly noop: boolean }): DocumentCollaborationPlanDisposition {
+  return plan.noop ? "noop" : "commit";
+}
+
 export function collaborationCollectionChange(
   currentValues: readonly string[],
   value: string,

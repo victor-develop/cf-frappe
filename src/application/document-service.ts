@@ -15,6 +15,7 @@ import {
   type DocumentFieldMergePlan
 } from "../core/document-merge.js";
 import {
+  documentCollaborationPlanDisposition,
   ensureSharedGrantDelegabilityForLookup,
   type CollaborationCollectionAction,
   planDocumentActivityPolicy,
@@ -1148,7 +1149,7 @@ export class DocumentService implements DocumentCommandExecutor {
       actorPermissions: access.sharedPermissions,
       grant: plan.grant
     });
-    if (plan.noop) {
+    if (documentCollaborationPlanDisposition(plan) === "noop") {
       return existing;
     }
     const now = this.clock.now();
@@ -1185,7 +1186,7 @@ export class DocumentService implements DocumentCommandExecutor {
       currentGrants: state.grants,
       userId: command.userId
     });
-    if (plan.noop) {
+    if (documentCollaborationPlanDisposition(plan) === "noop") {
       return existing;
     }
     const now = this.clock.now();
@@ -1356,7 +1357,7 @@ export class DocumentService implements DocumentCommandExecutor {
       assignee: options.command.assignee,
       action: options.action
     });
-    if (plan.noop) {
+    if (documentCollaborationPlanDisposition(plan) === "noop") {
       return existing;
     }
     const now = this.clock.now();
@@ -1391,7 +1392,7 @@ export class DocumentService implements DocumentCommandExecutor {
       tag: options.command.tag,
       action: options.action
     });
-    if (plan.noop) {
+    if (documentCollaborationPlanDisposition(plan) === "noop") {
       return existing;
     }
     const now = this.clock.now();
@@ -1427,7 +1428,7 @@ export class DocumentService implements DocumentCommandExecutor {
       follower: options.command.follower,
       action: options.action
     });
-    if (plan.noop) {
+    if (documentCollaborationPlanDisposition(plan) === "noop") {
       return existing;
     }
     const now = this.clock.now();
