@@ -24,6 +24,12 @@ import {
   type SavedListFilter,
   type SavedListFilterEventPayload
 } from "./saved-list-filter-events.js";
+import {
+  findSavedListFilter,
+  planSavedListFilterDelete,
+  planSavedListFilterSave,
+  projectSavedListFilterSave
+} from "./saved-list-filter-policy.js";
 import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
@@ -95,7 +101,7 @@ export class SavedListFilterService {
     tenantId = resolveTenant(actor)
   ): Promise<SavedListFilter> {
     const doctype = await this.readableDoctype(actor, doctypeName, tenantId);
-    const filter = (await this.readAll(tenantId, doctype, actor.id)).find((item) => item.id === id);
+    const filter = findSavedListFilter(await this.readAll(tenantId, doctype, actor.id), id);
     if (!filter) {
       throw notFound(`Saved filter '${id}' was not found`);
     }
@@ -110,9 +116,10 @@ export class SavedListFilterService {
       payloadKinds: SAVED_LIST_FILTER_PAYLOAD_KINDS
     });
     const current = savedListFiltersForOwner(foldSavedListFilters(tenantId, doctype, events), command.actor.id);
-    const existing = command.id ? current.find((filter) => filter.id === command.id) : undefined;
-    if (command.id && !existing) {
-      throw notFound(`Saved filter '${command.id}' was not found`);
+    const existing = command.id === undefined ? undefined : findSavedListFilter(current, command.id);
+    const decision = planSavedListFilterSave(existing, command.id);
+    if (decision.status === "missing") {
+      throw notFound(decision.message);
     }
     const id = command.id ?? this.ids.next("filter_");
     const label = normalizeSavedListFilterLabel(command.label);
@@ -141,17 +148,17 @@ export class SavedListFilterService {
       metadata: {}
     });
     await this.events.append(stream, savedListFilterCurrentVersion(events), [event]);
-    return {
+    return projectSavedListFilterSave({
       tenantId,
       doctype: doctype.name,
       id,
       label,
       ownerId: command.actor.id,
       filters: normalizedFilters,
-      ...(normalizedFilterExpression === undefined ? {} : { filterExpression: normalizedFilterExpression }),
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now
-    };
+      filterExpression: normalizedFilterExpression,
+      existing,
+      now
+    });
   }
 
   async delete(command: DeleteListFilterCommand): Promise<void> {
@@ -161,10 +168,13 @@ export class SavedListFilterService {
     const events = await this.events.readStream(stream, {
       payloadKinds: SAVED_LIST_FILTER_PAYLOAD_KINDS
     });
-    const existing = savedListFiltersForOwner(foldSavedListFilters(tenantId, doctype, events), command.actor.id)
-      .find((filter) => filter.id === command.id);
-    if (!existing) {
-      throw notFound(`Saved filter '${command.id}' was not found`);
+    const existing = findSavedListFilter(
+      savedListFiltersForOwner(foldSavedListFilters(tenantId, doctype, events), command.actor.id),
+      command.id
+    );
+    const decision = planSavedListFilterDelete(existing, command.id);
+    if (decision.status === "missing") {
+      throw notFound(decision.message);
     }
     const now = this.clock.now();
     await this.events.append(stream, savedListFilterCurrentVersion(events), [

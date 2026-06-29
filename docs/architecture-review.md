@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted saved-list-filter command target decisions and saved-filter write projection into saved-list-filter policy so SavedListFilterService keeps permission checks, effective DocType resolution, filter normalization, event append, and merge orchestration.
 - Extracted saved-report command target decisions and saved-report write projection into saved-report policy so SavedReportService keeps permission checks, stream loading, report definition normalization, event append, and report execution/export orchestration.
 - Extracted custom-field save and disable change decisions into custom-field policy so CustomFieldService keeps registry resolution, validation, event append, and replay orchestration.
 - Extracted field-property save and clear noop decisions into field-property policy so FieldPropertyService keeps metadata resolution, effective DocType projection, event append, and replay orchestration.
