@@ -2,6 +2,7 @@ import { defineDocType } from "../../src";
 import type { Actor, DocumentSnapshot } from "../../src";
 import {
   collaborationCollectionChange,
+  documentCollaborationEventCommand,
   documentCollaborationPlanDisposition,
   ensureSharedGrantDelegabilityForLookup,
   ensureSharedGrantIsDelegable,
@@ -129,6 +130,45 @@ describe("document collaboration policy", () => {
   it("classifies collaboration plans by noop disposition", () => {
     expect(documentCollaborationPlanDisposition({ noop: true })).toBe("noop");
     expect(documentCollaborationPlanDisposition({ noop: false })).toBe("commit");
+  });
+
+  it("shapes collaboration event commands from plans and metadata", () => {
+    expect(
+      documentCollaborationEventCommand({
+        tenantId: "acme",
+        stream: "tenant/acme/document/Note/NOTE-1",
+        doctypeName: "Note",
+        documentName: "NOTE-1",
+        actorId: "owner@example.com",
+        occurredAt: "2026-01-01T00:00:00.000Z",
+        plan: planDocumentCommentPolicy(Note, " hello "),
+        metadata: { requestId: "req-1" }
+      })
+    ).toEqual({
+      tenantId: "acme",
+      stream: "tenant/acme/document/Note/NOTE-1",
+      type: "NoteCommentAdded",
+      doctype: "Note",
+      documentName: "NOTE-1",
+      actorId: "owner@example.com",
+      occurredAt: "2026-01-01T00:00:00.000Z",
+      payload: { kind: "DocumentCommentAdded", text: "hello" },
+      metadata: { requestId: "req-1" }
+    });
+  });
+
+  it("defaults collaboration event command metadata", () => {
+    expect(
+      documentCollaborationEventCommand({
+        tenantId: "acme",
+        stream: "tenant/acme/document/Note/NOTE-1",
+        doctypeName: "Note",
+        documentName: "NOTE-1",
+        actorId: "owner@example.com",
+        occurredAt: "2026-01-01T00:00:00.000Z",
+        plan: planDocumentCommentPolicy(Note, "hello")
+      }).metadata
+    ).toEqual({});
   });
 
   it("plans assignment collection events with custom event names and noop state", () => {

@@ -15,6 +15,7 @@ import {
   type DocumentFieldMergePlan
 } from "../core/document-merge.js";
 import {
+  documentCollaborationEventCommand,
   documentCollaborationPlanDisposition,
   ensureSharedGrantDelegabilityForLookup,
   type CollaborationCollectionAction,
@@ -1042,17 +1043,16 @@ export class DocumentService implements DocumentCommandExecutor {
     ensureExpectedVersion(existing, command.expectedVersion);
     const plan = planDocumentCommentPolicy(doctype, command.text);
     const now = this.clock.now();
-    const event = this.newEvent({
+    const event = this.newEvent(documentCollaborationEventCommand({
       tenantId,
       stream,
-      type: plan.eventType,
-      doctype: doctype.name,
+      doctypeName: doctype.name,
       documentName: command.name,
       actorId: command.actor.id,
       occurredAt: now,
-      payload: plan.payload,
+      plan,
       metadata: command.metadata ?? {}
-    });
+    }));
     return this.commitDocumentEvent(doctype, existing, stream, event);
   }
 
@@ -1066,17 +1066,16 @@ export class DocumentService implements DocumentCommandExecutor {
     ensureExpectedVersion(existing, command.expectedVersion);
     const plan = planDocumentActivityPolicy(doctype, command);
     const now = this.clock.now();
-    const event = this.newEvent({
+    const event = this.newEvent(documentCollaborationEventCommand({
       tenantId,
       stream,
-      type: plan.eventType,
-      doctype: doctype.name,
+      doctypeName: doctype.name,
       documentName: command.name,
       actorId: command.actor.id,
       occurredAt: now,
-      payload: plan.payload,
+      plan,
       metadata: command.metadata ?? {}
-    });
+    }));
     return this.commitDocumentEvent(doctype, existing, stream, event);
   }
 
@@ -1153,17 +1152,16 @@ export class DocumentService implements DocumentCommandExecutor {
       return existing;
     }
     const now = this.clock.now();
-    const event = this.newEvent({
+    const event = this.newEvent(documentCollaborationEventCommand({
       tenantId,
       stream,
-      type: plan.eventType,
-      doctype: doctype.name,
+      doctypeName: doctype.name,
       documentName: command.name,
       actorId: command.actor.id,
       occurredAt: now,
-      payload: plan.payload,
+      plan,
       metadata: command.metadata ?? {}
-    });
+    }));
     return this.commitDocumentEvent(doctype, existing, stream, event);
   }
 
@@ -1190,17 +1188,16 @@ export class DocumentService implements DocumentCommandExecutor {
       return existing;
     }
     const now = this.clock.now();
-    const event = this.newEvent({
+    const event = this.newEvent(documentCollaborationEventCommand({
       tenantId,
       stream,
-      type: plan.eventType,
-      doctype: doctype.name,
+      doctypeName: doctype.name,
       documentName: command.name,
       actorId: command.actor.id,
       occurredAt: now,
-      payload: plan.payload,
+      plan,
       metadata: command.metadata ?? {}
-    });
+    }));
     return this.commitDocumentEvent(doctype, existing, stream, event);
   }
 
@@ -1361,17 +1358,16 @@ export class DocumentService implements DocumentCommandExecutor {
       return existing;
     }
     const now = this.clock.now();
-    const event = this.newEvent({
+    const event = this.newEvent(documentCollaborationEventCommand({
       tenantId,
       stream,
-      type: plan.eventType,
-      doctype: doctype.name,
+      doctypeName: doctype.name,
       documentName: options.command.name,
       actorId: options.command.actor.id,
       occurredAt: now,
-      payload: plan.payload,
+      plan,
       metadata: options.command.metadata ?? {}
-    });
+    }));
     return this.commitDocumentEvent(doctype, existing, stream, event);
   }
 
@@ -1396,17 +1392,16 @@ export class DocumentService implements DocumentCommandExecutor {
       return existing;
     }
     const now = this.clock.now();
-    const event = this.newEvent({
+    const event = this.newEvent(documentCollaborationEventCommand({
       tenantId,
       stream,
-      type: plan.eventType,
-      doctype: doctype.name,
+      doctypeName: doctype.name,
       documentName: options.command.name,
       actorId: options.command.actor.id,
       occurredAt: now,
-      payload: plan.payload,
+      plan,
       metadata: options.command.metadata ?? {}
-    });
+    }));
     return this.commitDocumentEvent(doctype, existing, stream, event);
   }
 
@@ -1432,17 +1427,16 @@ export class DocumentService implements DocumentCommandExecutor {
       return existing;
     }
     const now = this.clock.now();
-    const event = this.newEvent({
+    const event = this.newEvent(documentCollaborationEventCommand({
       tenantId,
       stream,
-      type: plan.eventType,
-      doctype: doctype.name,
+      doctypeName: doctype.name,
       documentName: options.command.name,
       actorId: options.command.actor.id,
       occurredAt: now,
-      payload: plan.payload,
+      plan,
       metadata: options.command.metadata ?? {}
-    });
+    }));
     return this.commitDocumentEvent(doctype, existing, stream, event);
   }
 

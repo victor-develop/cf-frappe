@@ -7,7 +7,7 @@ import {
   type DocumentSharePermission
 } from "../core/document-shares.js";
 import { badRequest, permissionDenied } from "../core/errors.js";
-import type { Actor, DocTypeDefinition, DocumentSnapshot } from "../core/types.js";
+import type { Actor, DocTypeDefinition, DocumentData, DocumentSnapshot, NewDomainEvent } from "../core/types.js";
 import {
   documentCollaborationEventType,
   documentActivityRecordedPayload,
@@ -86,6 +86,31 @@ export type DocumentCollaborationPlanDisposition = "noop" | "commit";
 
 export function documentCollaborationPlanDisposition(plan: { readonly noop: boolean }): DocumentCollaborationPlanDisposition {
   return plan.noop ? "noop" : "commit";
+}
+
+type DocumentCollaborationCommandPayload = DocumentCollaborationEventPayload | DocumentShareEventPayload;
+
+export function documentCollaborationEventCommand(input: {
+  readonly tenantId: string;
+  readonly stream: string;
+  readonly doctypeName: string;
+  readonly documentName: string;
+  readonly actorId: string;
+  readonly occurredAt: string;
+  readonly plan: DocumentCollaborationEventPlan | DocumentShareEventPlan;
+  readonly metadata?: DocumentData | undefined;
+}): Omit<NewDomainEvent<DocumentCollaborationCommandPayload>, "id" | "sequence"> {
+  return {
+    tenantId: input.tenantId,
+    stream: input.stream,
+    type: input.plan.eventType,
+    doctype: input.doctypeName,
+    documentName: input.documentName,
+    actorId: input.actorId,
+    occurredAt: input.occurredAt,
+    payload: input.plan.payload,
+    metadata: input.metadata ?? {}
+  };
 }
 
 export function collaborationCollectionChange(
