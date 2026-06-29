@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the web-page access policy slice:
+As of the print access policy slice:
 
 - Vitest files: `233`
-- Vitest cases: `2663`
-- Remaining gap to Frappe static markers: `121`
+- Vitest cases: `2664`
+- Remaining gap to Frappe static markers: `120`
 
 ## Implication
 

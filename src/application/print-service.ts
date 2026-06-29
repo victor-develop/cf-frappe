@@ -1,6 +1,5 @@
 import { permissionDenied } from "../core/errors.js";
 import {
-  canReadPrintLetterhead,
   mergePrintLayouts,
   type PrintFormatDefinition,
   type PrintLetterheadDefinition
@@ -9,11 +8,13 @@ import type { ModelRegistry } from "../core/registry.js";
 import type { Actor } from "../core/types.js";
 import type { PrintSettingsService } from "./print-settings-service.js";
 import {
-  canAccessPrintFormat,
+  planPrintFormatReadAccess,
+  planPrintLetterheadReadAccess,
   printDocumentSections,
   printHiddenFields,
   type PrintDocumentView,
   type PrintFieldView,
+  type PrintReadAccessDecision,
   type PrintSectionView
 } from "./print-policy.js";
 import { QueryService } from "./query-service.js";
@@ -40,13 +41,17 @@ export class PrintService {
   listPrintFormats(actor: Actor, doctype?: string): readonly PrintFormatDefinition[] {
     return this.registry
       .listPrintFormats()
-      .filter((format) => (doctype === undefined || format.doctype === doctype) && this.canAccess(actor, format));
+      .filter((format) =>
+        (doctype === undefined || format.doctype === doctype) &&
+        this.printFormatReadAccess(actor, format).status === "allow"
+      );
   }
 
   getPrintFormat(actor: Actor, formatName: string): PrintFormatDefinition {
     const format = this.registry.getPrintFormat(formatName);
-    if (!this.canAccess(actor, format)) {
-      throw permissionDenied(`Actor '${actor.id}' cannot read print format '${format.name}'`);
+    const decision = this.printFormatReadAccess(actor, format);
+    if (decision.status === "deny") {
+      throw permissionDenied(decision.message);
     }
     return format;
   }
@@ -54,13 +59,14 @@ export class PrintService {
   listPrintLetterheads(actor: Actor): readonly PrintLetterheadDefinition[] {
     return this.registry
       .listPrintLetterheads()
-      .filter((letterhead) => canReadPrintLetterhead(actor, letterhead));
+      .filter((letterhead) => planPrintLetterheadReadAccess({ actor, letterhead }).status === "allow");
   }
 
   getPrintLetterhead(actor: Actor, letterheadName: string): PrintLetterheadDefinition {
     const letterhead = this.registry.getPrintLetterhead(letterheadName);
-    if (!canReadPrintLetterhead(actor, letterhead)) {
-      throw permissionDenied(`Actor '${actor.id}' cannot read print letterhead '${letterhead.name}'`);
+    const decision = planPrintLetterheadReadAccess({ actor, letterhead });
+    if (decision.status === "deny") {
+      throw permissionDenied(decision.message);
     }
     return letterhead;
   }
@@ -82,10 +88,10 @@ export class PrintService {
     };
   }
 
-  private canAccess(actor: Actor, format: PrintFormatDefinition): boolean {
+  private printFormatReadAccess(actor: Actor, format: PrintFormatDefinition): PrintReadAccessDecision {
     const doctype = this.registry.get(format.doctype);
     const letterhead = format.letterhead ? this.registry.getPrintLetterhead(format.letterhead) : undefined;
-    return canAccessPrintFormat({ actor, format, doctype, letterhead });
+    return planPrintFormatReadAccess({ actor, format, doctype, letterhead });
   }
 
 }

@@ -27,6 +27,10 @@ export interface PrintDocumentView {
   readonly sections: readonly PrintSectionView[];
 }
 
+export type PrintReadAccessDecision =
+  | { readonly status: "allow" }
+  | { readonly status: "deny"; readonly message: string };
+
 export function canAccessPrintFormat(command: {
   readonly actor: Actor;
   readonly format: PrintFormatDefinition;
@@ -39,6 +43,34 @@ export function canAccessPrintFormat(command: {
     (command.format.letterhead === undefined ||
       (command.letterhead !== undefined && canReadPrintLetterhead(command.actor, command.letterhead)))
   );
+}
+
+export function planPrintFormatReadAccess(command: {
+  readonly actor: Actor;
+  readonly format: PrintFormatDefinition;
+  readonly doctype: DocTypeDefinition;
+  readonly letterhead?: PrintLetterheadDefinition | undefined;
+}): PrintReadAccessDecision {
+  if (!canAccessPrintFormat(command)) {
+    return {
+      status: "deny",
+      message: `Actor '${command.actor.id}' cannot read print format '${command.format.name}'`
+    };
+  }
+  return { status: "allow" };
+}
+
+export function planPrintLetterheadReadAccess(command: {
+  readonly actor: Actor;
+  readonly letterhead: PrintLetterheadDefinition;
+}): PrintReadAccessDecision {
+  if (!canReadPrintLetterhead(command.actor, command.letterhead)) {
+    return {
+      status: "deny",
+      message: `Actor '${command.actor.id}' cannot read print letterhead '${command.letterhead.name}'`
+    };
+  }
+  return { status: "allow" };
 }
 
 export function printDocumentSections(

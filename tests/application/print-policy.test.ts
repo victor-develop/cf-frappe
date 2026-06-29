@@ -1,6 +1,8 @@
 import {
   canAccessPrintFormat,
   isPrintEmptyValue,
+  planPrintFormatReadAccess,
+  planPrintLetterheadReadAccess,
   printDocumentSections,
   printHiddenFields,
   printSectionView
@@ -92,6 +94,31 @@ describe("print policy", () => {
     expect(canAccessPrintFormat({ actor: guest, format, doctype, letterhead })).toBe(false);
     expect(canAccessPrintFormat({ actor, format, doctype, letterhead: restrictedLetterhead })).toBe(false);
     expect(canAccessPrintFormat({ actor, format, doctype })).toBe(false);
+  });
+
+  it("plans print format and letterhead read access with service-ready denial messages", () => {
+    const format = definePrintFormat({
+      name: "Printable Standard",
+      doctype: "Printable",
+      sections: [{ fields: [{ field: "title" }] }],
+      roles: ["User"]
+    });
+    const letterhead = definePrintLetterhead({
+      name: "Restricted",
+      headerHtml: "<strong>Restricted</strong>",
+      roles: ["User"]
+    });
+
+    expect(planPrintFormatReadAccess({ actor, format, doctype })).toEqual({ status: "allow" });
+    expect(planPrintFormatReadAccess({ actor: guest, format, doctype })).toEqual({
+      status: "deny",
+      message: "Actor 'guest@example.com' cannot read print format 'Printable Standard'"
+    });
+    expect(planPrintLetterheadReadAccess({ actor, letterhead })).toEqual({ status: "allow" });
+    expect(planPrintLetterheadReadAccess({ actor: guest, letterhead })).toEqual({
+      status: "deny",
+      message: "Actor 'guest@example.com' cannot read print letterhead 'Restricted'"
+    });
   });
 });
 

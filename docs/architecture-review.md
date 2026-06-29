@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted print format and letterhead read-access decisions into print policy so PrintService keeps registry, settings, query, and print-view orchestration.
 - Extracted Web Page read-access decisions into web-page policy so WebPageService keeps registry lookup and route resolution orchestration.
 - Extracted Web View read-access decisions into web-view policy so WebViewService keeps DocType metadata probes and list/detail orchestration.
 - Extracted Web Form access decisions into web-form policy so WebFormService keeps create-metadata probes and submission orchestration.
