@@ -1,11 +1,13 @@
 import { badRequest, conflict, notFound } from "../core/errors.js";
 import { documentDeliveryOutboxStream } from "../core/streams.js";
 import {
+  documentDeliveryOutboxEventType,
   documentDeliveryOutboxRecordId,
   documentDeliveryRetryDue,
   foldDocumentDeliveryOutbox,
   selectedDocumentDeliveryOutboxRecords,
   sortedDocumentDeliveryOutboxRecords,
+  type DocumentDeliveryOutboxEventPayload,
   type DocumentDeliveryOutboxRecord,
   type DocumentDeliveryOutboxState,
   type DocumentDeliveryOutboxTarget
@@ -90,27 +92,28 @@ export class DocumentDeliveryOutboxService {
           if (state.records.has(outboxId)) {
             return undefined;
           }
+          const payload: DocumentDeliveryOutboxEventPayload = {
+            kind: "DocumentDeliveryOutboxEnqueued",
+            outboxId,
+            target,
+            sourceEventId: command.event.id,
+            sourceEventType: command.event.type,
+            payloadKind: command.event.payload.kind,
+            doctype: command.event.doctype,
+            documentName: command.event.documentName,
+            actorId: command.event.actorId,
+            payload: outboxPayload(command.event, command.snapshot)
+          };
           return {
             id: this.ids.next("evt_"),
             tenantId: command.event.tenantId,
             stream: documentDeliveryOutboxStream(command.event.tenantId),
-            type: "DocumentDeliveryOutboxEnqueued",
+            type: documentDeliveryOutboxEventType(payload),
             doctype: "__DocumentDeliveryOutbox",
             documentName: outboxId,
             actorId: command.event.actorId,
             occurredAt: command.event.occurredAt,
-            payload: {
-              kind: "DocumentDeliveryOutboxEnqueued",
-              outboxId,
-              target,
-              sourceEventId: command.event.id,
-              sourceEventType: command.event.type,
-              payloadKind: command.event.payload.kind,
-              doctype: command.event.doctype,
-              documentName: command.event.documentName,
-              actorId: command.event.actorId,
-              payload: outboxPayload(command.event, command.snapshot)
-            },
+            payload,
             metadata: command.metadata ?? {}
           };
         })
@@ -132,22 +135,25 @@ export class DocumentDeliveryOutboxService {
         .sort((left, right) => left.enqueuedAt.localeCompare(right.enqueuedAt) || left.id.localeCompare(right.id))
         .slice(0, limit);
       const recordIds = records.map((record) => record.id);
-      const events = records.map((record): NewDomainEvent => ({
-        id: this.ids.next("evt_"),
-        tenantId: command.tenantId,
-        stream: documentDeliveryOutboxStream(command.tenantId),
-        type: "DocumentDeliveryOutboxClaimed",
-        doctype: "__DocumentDeliveryOutbox",
-        documentName: record.id,
-        actorId: "system",
-        occurredAt: now,
-        payload: {
+      const events = records.map((record): NewDomainEvent => {
+        const payload: DocumentDeliveryOutboxEventPayload = {
           kind: "DocumentDeliveryOutboxClaimed",
           outboxId: record.id,
           claimId
-        },
-        metadata: {}
-      }));
+        };
+        return {
+          id: this.ids.next("evt_"),
+          tenantId: command.tenantId,
+          stream: documentDeliveryOutboxStream(command.tenantId),
+          type: documentDeliveryOutboxEventType(payload),
+          doctype: "__DocumentDeliveryOutbox",
+          documentName: record.id,
+          actorId: "system",
+          occurredAt: now,
+          payload,
+          metadata: {}
+        };
+      });
       return { events, recordIds };
     });
   }
@@ -165,24 +171,25 @@ export class DocumentDeliveryOutboxService {
     const [record] = await this.appendWithRetry(command.tenantId, async (state) => {
       const existing = this.requireRecord(state, command.outboxId);
       ensureClaimed(existing, command.claimId);
+      const payload: DocumentDeliveryOutboxEventPayload = {
+        kind: "DocumentDeliveryOutboxFailed",
+        outboxId: command.outboxId,
+        claimId: command.claimId,
+        error: normalizedError,
+        ...(command.retryAt === undefined ? {} : { retryAt: command.retryAt })
+      };
       return {
         recordIds: [command.outboxId],
         events: [{
           id: this.ids.next("evt_"),
           tenantId: command.tenantId,
           stream: documentDeliveryOutboxStream(command.tenantId),
-          type: "DocumentDeliveryOutboxFailed",
+          type: documentDeliveryOutboxEventType(payload),
           doctype: "__DocumentDeliveryOutbox",
           documentName: command.outboxId,
           actorId: "system",
           occurredAt: this.clock.now(),
-          payload: {
-            kind: "DocumentDeliveryOutboxFailed",
-            outboxId: command.outboxId,
-            claimId: command.claimId,
-            error: normalizedError,
-            ...(command.retryAt === undefined ? {} : { retryAt: command.retryAt })
-          },
+          payload,
           metadata: command.metadata ?? {}
         }]
       };
@@ -204,22 +211,23 @@ export class DocumentDeliveryOutboxService {
         return { events: [], state, recordIds: [command.outboxId] };
       }
       ensureClaimed(existing, command.claimId);
+      const payload: DocumentDeliveryOutboxEventPayload = {
+        kind,
+        outboxId: command.outboxId,
+        claimId: command.claimId
+      };
       return {
         recordIds: [command.outboxId],
         events: [{
           id: this.ids.next("evt_"),
           tenantId: command.tenantId,
           stream: documentDeliveryOutboxStream(command.tenantId),
-          type: kind,
+          type: documentDeliveryOutboxEventType(payload),
           doctype: "__DocumentDeliveryOutbox",
           documentName: command.outboxId,
           actorId: "system",
           occurredAt: this.clock.now(),
-          payload: {
-            kind,
-            outboxId: command.outboxId,
-            claimId: command.claimId
-          },
+          payload,
           metadata: command.metadata ?? {}
         }]
       };

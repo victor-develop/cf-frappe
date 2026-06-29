@@ -1,4 +1,5 @@
 import {
+  documentDeliveryOutboxEventType,
   documentDeliveryOutboxRecordId,
   documentDeliveryRetryDue,
   foldDocumentDeliveryOutbox,
@@ -8,6 +9,38 @@ import {
 import type { DomainEvent } from "../../src";
 
 describe("document delivery outbox events", () => {
+  it("derives document delivery outbox event types from payload identity", () => {
+    const outboxId = documentDeliveryOutboxRecordId("evt_source", "email");
+
+    expect(documentDeliveryOutboxEventType({
+      kind: "DocumentDeliveryOutboxEnqueued",
+      outboxId,
+      target: "email",
+      sourceEventId: "evt_source",
+      sourceEventType: "NoteUpdated",
+      payloadKind: "DocumentUpdated",
+      doctype: "Note",
+      documentName: "One",
+      actorId: "owner@example.com"
+    })).toBe("DocumentDeliveryOutboxEnqueued");
+    expect(documentDeliveryOutboxEventType({
+      kind: "DocumentDeliveryOutboxClaimed",
+      outboxId,
+      claimId: "claim-1"
+    })).toBe("DocumentDeliveryOutboxClaimed");
+    expect(documentDeliveryOutboxEventType({
+      kind: "DocumentDeliveryOutboxDelivered",
+      outboxId,
+      claimId: "claim-1"
+    })).toBe("DocumentDeliveryOutboxDelivered");
+    expect(documentDeliveryOutboxEventType({
+      kind: "DocumentDeliveryOutboxFailed",
+      outboxId,
+      claimId: "claim-1",
+      error: "queue unavailable"
+    })).toBe("DocumentDeliveryOutboxFailed");
+  });
+
   it("folds claim, failure, retry, and delivery transitions", () => {
     const outboxId = documentDeliveryOutboxRecordId("evt_source", "email");
     const state = foldDocumentDeliveryOutbox("acme", [

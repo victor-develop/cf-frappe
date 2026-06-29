@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the user-notification event-type derivation slice:
+As of the document-delivery outbox event-type derivation slice:
 
 - Vitest files: `196`
-- Vitest cases: `2313`
-- Remaining gap to Frappe static markers: `471`
+- Vitest cases: `2314`
+- Remaining gap to Frappe static markers: `470`
 
 ## Implication
 

@@ -106,6 +106,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized print-settings event type derivation in print-settings events so `PrintSettingsService` no longer hard-codes the changed event type beside payload identity.
 - Centralized user-profile event type derivation in user-profile events so `UserProfileService` no longer hard-codes the changed event type beside payload identity.
 - Centralized user-notification event type derivation in user-notification events so notification recording, read, and dismiss appends no longer repeat event type strings beside payload identity.
+- Centralized document delivery outbox event type derivation in document-delivery outbox events so enqueue, claim, delivery, and failure appends no longer repeat event type strings beside payload identity.
 - Centralized readable file dashboard candidate shaping in file policy so dashboard orchestration no longer composes permission-check DTOs inline.
 - Centralized multipart completed-object reuse versus storage-completion planning in file policy so multipart orchestration no longer owns idempotent completion branching.
 - Centralized multipart completed-object read planning in file policy so multipart orchestration no longer derives object keys or upload ids before storage reads inline.

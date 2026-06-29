@@ -67,6 +67,12 @@ export function documentDeliveryOutboxRecordId(eventId: string, target: Document
   return `${eventId}:${target}`;
 }
 
+export function documentDeliveryOutboxEventType(
+  payload: DocumentDeliveryOutboxEventPayload
+): DocumentDeliveryOutboxEventPayload["kind"] {
+  return payload.kind;
+}
+
 export function foldDocumentDeliveryOutbox(
   tenantId: TenantId,
   events: readonly DomainEvent[]
