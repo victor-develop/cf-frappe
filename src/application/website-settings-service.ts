@@ -1,33 +1,28 @@
 import { notFound, permissionDenied } from "../core/errors.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { Actor } from "../core/types.js";
-import {
-  canReadWebsiteNavigationItem,
-  canReadWebsiteSettings,
-  websiteNavigationItemHref,
-  type WebsiteNavigationItemDefinition,
-  type WebsiteSettingsDefinition
-} from "../core/website-settings.js";
-import type { WebsiteThemeDefinition } from "../core/website-theme.js";
+import type { WebsiteNavigationItemDefinition, WebsiteSettingsDefinition } from "../core/website-settings.js";
 import type { WebFormService } from "./web-form-service.js";
 import type { WebPageService } from "./web-page-service.js";
 import type { WebViewService } from "./web-view-service.js";
 import type { WebsiteThemeService } from "./website-theme-service.js";
+import {
+  isExpectedWebsiteSettingsAccessMiss,
+  isPublishedWebsiteSettingsForActor,
+  shouldResolveWebsiteNavigationItem,
+  visibleWebsiteHomePageRoute,
+  websiteNavigationItemResult,
+  websiteNavigationStaticHref,
+  websitePageHomeHref,
+  websiteSettingsResult,
+  websiteStaticHomeHref,
+  websiteWebFormHref,
+  websiteWebViewHref,
+  type ResolvedWebsiteSettings,
+  type WebsiteNavigationItem
+} from "./website-settings-policy.js";
 
-export interface WebsiteNavigationItem {
-  readonly name: string;
-  readonly label: string;
-  readonly href: string;
-}
-
-export interface ResolvedWebsiteSettings {
-  readonly title: string;
-  readonly description?: string;
-  readonly homePageRoute?: string;
-  readonly homePageHref?: string;
-  readonly theme?: WebsiteThemeDefinition;
-  readonly navItems: readonly WebsiteNavigationItem[];
-}
+export type { ResolvedWebsiteSettings, WebsiteNavigationItem } from "./website-settings-policy.js";
 
 export interface WebsiteSettingsServiceOptions {
   readonly registry: ModelRegistry;
@@ -56,18 +51,16 @@ export class WebsiteSettingsService {
     const settings = this.readSettings(actor);
     const homePageHref = await this.homePageHref(actor, settings);
     const navItems = await Promise.all((settings.navItems ?? []).map((item) => this.resolveNavigationItem(actor, item)));
-    return {
-      title: settings.title,
-      ...(settings.description === undefined ? {} : { description: settings.description }),
-      ...(settings.homePageRoute !== undefined && this.canReadPageRoute(actor, settings.homePageRoute)
-        ? { homePageRoute: settings.homePageRoute }
-        : {}),
+    const homePageRoute = visibleWebsiteHomePageRoute(settings, (route) => this.canReadPageRoute(actor, route));
+    return websiteSettingsResult({
+      settings,
+      ...(homePageRoute === undefined ? {} : { homePageRoute }),
       ...(homePageHref === undefined ? {} : { homePageHref }),
       ...(settings.theme === undefined || this.websiteThemes === undefined
         ? {}
         : { theme: this.websiteThemes.getWebsiteTheme(settings.theme) }),
       navItems: navItems.flat()
-    };
+    });
   }
 
   async getHomePageHref(actor: Actor): Promise<string> {
@@ -81,15 +74,16 @@ export class WebsiteSettingsService {
 
   getHomePageRoute(actor: Actor): string {
     const settings = this.readSettings(actor);
-    if (settings.homePageRoute === undefined || !this.canReadPageRoute(actor, settings.homePageRoute)) {
+    const route = visibleWebsiteHomePageRoute(settings, (candidate) => this.canReadPageRoute(actor, candidate));
+    if (route === undefined) {
       throw notFound("Website home page was not found", "WEBSITE_SETTINGS_NOT_FOUND");
     }
-    return settings.homePageRoute;
+    return route;
   }
 
   private async homePageHref(actor: Actor, settings: WebsiteSettingsDefinition): Promise<string | undefined> {
     if (settings.homePageRoute !== undefined) {
-      return this.canReadPageRoute(actor, settings.homePageRoute) ? `/page/${settings.homePageRoute}` : undefined;
+      return websitePageHomeHref(settings, (route) => this.canReadPageRoute(actor, route));
     }
     if (settings.homePageWebForm !== undefined) {
       return this.webFormHref(actor, settings.homePageWebForm);
@@ -97,12 +91,12 @@ export class WebsiteSettingsService {
     if (settings.homePageWebView !== undefined) {
       return this.webViewHref(actor, settings.homePageWebView);
     }
-    return settings.homePageHref;
+    return websiteStaticHomeHref(settings);
   }
 
   private readSettings(actor: Actor): WebsiteSettingsDefinition {
     const settings = this.registry.getWebsiteSettings();
-    if (settings.published === false || !canReadWebsiteSettings(actor, settings)) {
+    if (!isPublishedWebsiteSettingsForActor(actor, settings)) {
       throw permissionDenied(`Actor '${actor.id}' cannot read website settings`);
     }
     return settings;
@@ -112,20 +106,11 @@ export class WebsiteSettingsService {
     actor: Actor,
     item: WebsiteNavigationItemDefinition
   ): Promise<readonly WebsiteNavigationItem[]> {
-    if (!canReadWebsiteNavigationItem(actor, item) || !this.canReadPageRoute(actor, item.pageRoute)) {
+    if (!shouldResolveWebsiteNavigationItem(actor, item, (route) => this.canReadPageRoute(actor, route))) {
       return [];
     }
     const href = await this.navigationItemHref(actor, item);
-    if (href === undefined) {
-      return [];
-    }
-    return [
-      {
-        name: item.name,
-        label: item.label,
-        href
-      }
-    ];
+    return websiteNavigationItemResult(item, href);
   }
 
   private async navigationItemHref(actor: Actor, item: WebsiteNavigationItemDefinition): Promise<string | undefined> {
@@ -135,7 +120,7 @@ export class WebsiteSettingsService {
     if (item.webView !== undefined) {
       return this.webViewHref(actor, item.webView);
     }
-    return websiteNavigationItemHref(item);
+    return websiteNavigationStaticHref(item);
   }
 
   private canReadPageRoute(actor: Actor, route: string | undefined): boolean {
@@ -146,7 +131,7 @@ export class WebsiteSettingsService {
       this.webPages.getWebPageByRoute(actor, route);
       return true;
     } catch (error) {
-      if (isExpectedAccessMiss(error)) {
+      if (isExpectedWebsiteSettingsAccessMiss(error)) {
         return false;
       }
       throw error;
@@ -159,9 +144,9 @@ export class WebsiteSettingsService {
     }
     try {
       const metadata = await this.webForms.getWebForm(actor, webFormName);
-      return `/web-forms/${metadata.form.route ?? encodeURIComponent(metadata.form.name)}`;
+      return websiteWebFormHref(metadata.form);
     } catch (error) {
-      if (isExpectedAccessMiss(error)) {
+      if (isExpectedWebsiteSettingsAccessMiss(error)) {
         return undefined;
       }
       throw error;
@@ -174,19 +159,12 @@ export class WebsiteSettingsService {
     }
     try {
       const metadata = await this.webViews.getWebView(actor, webViewName);
-      return `/web/${encodeURIComponent(metadata.view.name)}`;
+      return websiteWebViewHref(metadata.view);
     } catch (error) {
-      if (isExpectedAccessMiss(error)) {
+      if (isExpectedWebsiteSettingsAccessMiss(error)) {
         return undefined;
       }
       throw error;
     }
   }
-}
-
-function isExpectedAccessMiss(error: unknown): boolean {
-  return typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error.code === "WEB_PAGE_NOT_FOUND" || error.code === "WEB_VIEW_NOT_FOUND" || error.code === "PERMISSION_DENIED");
 }

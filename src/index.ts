@@ -106,6 +106,7 @@ export * from "./application/web-page-service.js";
 export * from "./application/web-view-policy.js";
 export * from "./application/web-view-service.js";
 export * from "./application/website-settings-service.js";
+export * from "./application/website-settings-policy.js";
 export * from "./application/website-theme-service.js";
 export * from "./core/errors.js";
 export * from "./core/assignment-rules.js";
