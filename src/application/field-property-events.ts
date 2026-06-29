@@ -1,4 +1,5 @@
-import type { DocTypeName, FieldPropertyOverrides } from "../core/types.js";
+import { domainEventPayloadKind } from "../core/domain-events.js";
+import type { DocTypeName, DomainEvent, FieldPropertyOverrides } from "../core/types.js";
 
 export type FieldPropertyEventPayload =
   | {
@@ -19,6 +20,8 @@ export const FIELD_PROPERTY_PAYLOAD_KINDS = Object.freeze([
   "FieldPropertyOverrideSaved",
   "FieldPropertyOverrideCleared"
 ] as const satisfies readonly FieldPropertyPayloadKind[]);
+
+const FIELD_PROPERTY_PAYLOAD_KIND_SET = new Set<string>(FIELD_PROPERTY_PAYLOAD_KINDS);
 
 export interface FieldPropertyOverrideSavedPayloadInput {
   readonly doctypeName: DocTypeName;
@@ -54,6 +57,14 @@ export function fieldPropertyOverrideClearedPayload(
 
 export function fieldPropertyEventType(payload: FieldPropertyEventPayload): FieldPropertyPayloadKind {
   return payload.kind;
+}
+
+export function isFieldPropertyPayloadKind(kind: string): kind is FieldPropertyPayloadKind {
+  return FIELD_PROPERTY_PAYLOAD_KIND_SET.has(kind);
+}
+
+export function isFieldPropertyEvent(event: DomainEvent): event is DomainEvent<FieldPropertyEventPayload> {
+  return isFieldPropertyPayloadKind(domainEventPayloadKind(event));
 }
 
 declare module "../core/types.js" {

@@ -5,6 +5,8 @@ import {
   fieldPropertyEventType,
   fieldPropertyOverrideClearedPayload,
   fieldPropertyOverrideSavedPayload,
+  isFieldPropertyEvent,
+  type DomainEvent,
   type FieldPropertyEventPayload
 } from "../../src";
 
@@ -67,8 +69,35 @@ describe("field property events", () => {
       )
     ).toBe("FieldPropertyOverrideCleared");
   });
+
+  it("narrows field-property events by payload kind when event type names are custom", () => {
+    const saved = event(fieldPropertyOverrideSavedPayload({
+      doctypeName: "Note",
+      fieldName: "priority",
+      overrides: { label: "Urgency" }
+    }), "NotePriorityPresentationChanged");
+
+    expect(isFieldPropertyEvent(saved)).toBe(true);
+    expect(isFieldPropertyEvent(event({ kind: "DocumentDeleted" }))).toBe(false);
+  });
 });
 
 function fieldPropertyPayload(payload: FieldPropertyEventPayload): FieldPropertyEventPayload {
   return payload;
+}
+
+function event(payload: DomainEvent["payload"], type: string = payload.kind): DomainEvent {
+  return {
+    id: "evt_1",
+    tenantId: "acme",
+    stream: "acme:__FieldProperties",
+    sequence: 1,
+    type,
+    doctype: "__FieldProperties",
+    documentName: "priority",
+    actorId: "admin@example.com",
+    occurredAt: "2026-06-29T01:00:00.000Z",
+    payload,
+    metadata: {}
+  };
 }
