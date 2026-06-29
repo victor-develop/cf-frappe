@@ -7,6 +7,8 @@ import {
   documentValidationHookData,
   mergeDocumentHookPatch,
   runDocumentAfterCommitHooks,
+  runDocumentBeforeValidateHooks,
+  runDocumentValidationHooks,
   type DomainEvent,
   type DocumentSnapshot
 } from "../../src";
@@ -91,6 +93,71 @@ describe("document hooks", () => {
     expect(documentValidationHookData({ data: { title: "New" }, existing, override: { title: "Override" } })).toEqual({
       title: "Override"
     });
+  });
+
+  it("runs beforeValidate hooks as an ordered patch fold over compact data", async () => {
+    await expect(runDocumentBeforeValidateHooks({
+      doctype: Note,
+      data: { title: "Draft" },
+      hooks: [
+        {
+          beforeValidate: (context) => ({
+            body: `${context.data.title} body`,
+            ignored: undefined
+          })
+        },
+        {
+          beforeValidate: (context) => ({
+            title: `${context.data.title} refined`,
+            extra: context.existing?.name
+          })
+        }
+      ],
+      existing
+    })).resolves.toEqual({
+      title: "Draft refined",
+      body: "Draft body",
+      extra: "NOTE-1"
+    });
+  });
+
+  it("collects validation issues from hooks using merged existing data", async () => {
+    await expect(runDocumentValidationHooks({
+      doctype: Note,
+      data: { title: "New" },
+      hooks: [
+        {
+          validate: (context) => context.data.body === "Existing"
+            ? [{ field: "body", code: "body_existing", message: "Body came from existing data" }]
+            : []
+        },
+        {
+          validate: (context) => [{ field: "title", code: "title_seen", message: String(context.data.title) }]
+        }
+      ],
+      existing
+    })).resolves.toEqual([
+      { field: "body", code: "body_existing", message: "Body came from existing data" },
+      { field: "title", code: "title_seen", message: "New" }
+    ]);
+  });
+
+  it("collects validation issues from hook data overrides without merging existing data", async () => {
+    await expect(runDocumentValidationHooks({
+      doctype: Note,
+      data: { title: "New" },
+      hookDataOverride: { title: "Override" },
+      hooks: [{
+        validate: (context) => [
+          { field: "title", code: "title_seen", message: String(context.data.title) },
+          { field: "body", code: "body_missing", message: String(context.data.body) }
+        ]
+      }],
+      existing
+    })).resolves.toEqual([
+      { field: "title", code: "title_seen", message: "Override" },
+      { field: "body", code: "body_missing", message: "undefined" }
+    ]);
   });
 
   it("builds afterCommit contexts from committed snapshots", () => {

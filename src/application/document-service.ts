@@ -114,10 +114,9 @@ import {
   type UserPermissionProvider
 } from "../core/user-permissions.js";
 import {
-  documentHookContext,
-  documentValidationHookData,
-  mergeDocumentHookPatch,
   runDocumentAfterCommitHooks,
+  runDocumentBeforeValidateHooks,
+  runDocumentValidationHooks,
   type AfterCommitContext
 } from "../core/document-hooks.js";
 import type { ModelRegistry } from "../core/registry.js";
@@ -1495,13 +1494,12 @@ export class DocumentService implements DocumentCommandExecutor {
     data: DocumentData,
     existing?: DocumentSnapshot
   ): Promise<DocumentData> {
-    let current: MutableDocumentData = { ...data };
-    for (const hook of this.registry.hooksFor(doctype.name)) {
-      const context = documentHookContext({ doctype, data: current, existing });
-      const patch = await hook.beforeValidate?.(context);
-      current = mergeDocumentHookPatch(current, patch);
-    }
-    return compactData(current);
+    return runDocumentBeforeValidateHooks({
+      doctype,
+      data,
+      hooks: this.registry.hooksFor(doctype.name),
+      ...(existing === undefined ? {} : { existing })
+    });
   }
 
   private async validate(
@@ -1517,14 +1515,13 @@ export class DocumentService implements DocumentCommandExecutor {
         relatedDocType
       })
     ];
-    const hookData = documentValidationHookData({ data, existing, override: hookDataOverride });
-    for (const hook of this.registry.hooksFor(doctype.name)) {
-      const context = documentHookContext({ doctype, data: hookData, existing });
-      const hookIssues = await hook.validate?.(context);
-      if (hookIssues) {
-        issues.push(...hookIssues);
-      }
-    }
+    issues.push(...await runDocumentValidationHooks({
+      doctype,
+      data,
+      hooks: this.registry.hooksFor(doctype.name),
+      ...(existing === undefined ? {} : { existing }),
+      ...(hookDataOverride === undefined ? {} : { hookDataOverride })
+    }));
     return issues;
   }
 

@@ -65,6 +65,60 @@ export function documentValidationHookData(input: {
   return input.existing === undefined ? data : { ...input.existing.data, ...data };
 }
 
+export interface RunDocumentBeforeValidateHooksOptions {
+  readonly doctype: DocTypeDefinition;
+  readonly data: DocumentData;
+  readonly hooks: Iterable<DocumentHooks>;
+  readonly existing?: DocumentSnapshot | undefined;
+}
+
+export async function runDocumentBeforeValidateHooks(
+  options: RunDocumentBeforeValidateHooksOptions
+): Promise<DocumentData> {
+  let current: MutableDocumentData = { ...options.data };
+  for (const hook of options.hooks) {
+    const context = documentHookContext({
+      doctype: options.doctype,
+      data: current,
+      ...(options.existing === undefined ? {} : { existing: options.existing })
+    });
+    const patch = await hook.beforeValidate?.(context);
+    current = mergeDocumentHookPatch(current, patch);
+  }
+  return compactData(current);
+}
+
+export interface RunDocumentValidationHooksOptions {
+  readonly doctype: DocTypeDefinition;
+  readonly data: MutableDocumentData;
+  readonly hooks: Iterable<DocumentHooks>;
+  readonly existing?: DocumentSnapshot | undefined;
+  readonly hookDataOverride?: DocumentData | undefined;
+}
+
+export async function runDocumentValidationHooks(
+  options: RunDocumentValidationHooksOptions
+): Promise<readonly ValidationIssue[]> {
+  const issues: ValidationIssue[] = [];
+  const hookData = documentValidationHookData({
+    data: options.data,
+    ...(options.existing === undefined ? {} : { existing: options.existing }),
+    ...(options.hookDataOverride === undefined ? {} : { override: options.hookDataOverride })
+  });
+  for (const hook of options.hooks) {
+    const context = documentHookContext({
+      doctype: options.doctype,
+      data: hookData,
+      ...(options.existing === undefined ? {} : { existing: options.existing })
+    });
+    const hookIssues = await hook.validate?.(context);
+    if (hookIssues) {
+      issues.push(...hookIssues);
+    }
+  }
+  return issues;
+}
+
 export function documentAfterCommitContext(input: {
   readonly doctype: DocTypeDefinition;
   readonly event: DomainEvent;
