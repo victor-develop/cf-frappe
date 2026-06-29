@@ -1,6 +1,14 @@
 import {
   canInspectJobSchedule,
+  configuredJobScheduleIds,
+  dynamicJobScheduleFields,
+  effectiveJobSchedule,
+  ensureUniqueJobScheduleIds,
+  isDynamicJobScheduleValue,
+  jobScheduleIdentity,
   mergePreservedJobScheduleRuntimeFields,
+  normalizeJobSchedulePauseUntil,
+  normalizeJobScheduleQuery,
   normalizeJobScheduleRuntimeDefinition,
   planJobScheduleAccess,
   planJobScheduleDefinitionDelete,
@@ -11,6 +19,7 @@ import {
   planJobScheduleOverrideClear,
   planJobSchedulePauseOverride,
   planJobScheduleSummary,
+  staticJobScheduleTenantId,
   SYSTEM_MANAGER_ROLE
 } from "../../src";
 
@@ -427,6 +436,83 @@ describe("job schedule policy", () => {
         payload: [] as never
       }
     })).toThrow("Job schedule payload must be a JSON object");
+  });
+
+  it("normalizes dashboard schedule query filters without trimming literal cron or job names", () => {
+    expect(normalizeJobScheduleQuery({})).toEqual({});
+    expect(normalizeJobScheduleQuery({ cron: "", jobName: "" })).toEqual({});
+    expect(normalizeJobScheduleQuery({ cron: " 0 0 * * * ", jobName: " reports.daily " })).toEqual({
+      cron: " 0 0 * * * ",
+      jobName: " reports.daily "
+    });
+  });
+
+  it("derives stable schedule identities and configured id sets", () => {
+    const schedules = [
+      { cron: "0 0 * * *", jobName: "reports.daily", id: "daily" },
+      { cron: "0 * * * *", jobName: "reports.hourly" }
+    ];
+
+    expect(jobScheduleIdentity(schedules[0]!, 0)).toBe("daily");
+    expect(jobScheduleIdentity(schedules[1]!, 1)).toBe("2");
+    expect([...configuredJobScheduleIds(schedules)]).toEqual(["daily", "2"]);
+  });
+
+  it("rejects blank or duplicate configured schedule ids before runtime state is read", () => {
+    expect(() => ensureUniqueJobScheduleIds([{ id: " ", cron: "* * * * *", jobName: "jobs.blank" }])).toThrow(
+      "Job schedule id is required"
+    );
+    expect(() =>
+      ensureUniqueJobScheduleIds([
+        { id: "daily", cron: "0 0 * * *", jobName: "reports.daily" },
+        { id: "daily", cron: "0 * * * *", jobName: "reports.hourly" }
+      ])
+    ).toThrow("Job schedule id 'daily' is duplicated");
+  });
+
+  it("detects dynamic schedule fields and static tenant ids", () => {
+    const dynamic = () => "computed";
+
+    expect(isDynamicJobScheduleValue(dynamic)).toBe(true);
+    expect(dynamicJobScheduleFields({
+      enabled: dynamic,
+      tenantId: dynamic,
+      payload: dynamic,
+      metadata: dynamic,
+      idempotencyKey: dynamic
+    })).toEqual({
+      enabled: true,
+      tenantId: true,
+      payload: true,
+      metadata: true,
+      idempotencyKey: true
+    });
+    expect(staticJobScheduleTenantId({ tenantId: "acme" })).toBe("acme");
+    expect(staticJobScheduleTenantId({})).toBe("default");
+    expect(staticJobScheduleTenantId({ tenantId: dynamic })).toBeUndefined();
+  });
+
+  it("projects effective schedules only when overrides changed the enabled state", () => {
+    const schedule = { id: "daily", cron: "0 0 * * *", jobName: "reports.daily", enabled: true };
+
+    expect(effectiveJobSchedule(schedule, { overridden: false, enabled: false })).toBe(schedule);
+    expect(effectiveJobSchedule(schedule, { overridden: true, enabled: false })).toEqual({
+      ...schedule,
+      enabled: false
+    });
+  });
+
+  it("normalizes pauseUntil values to future ISO timestamps", () => {
+    expect(normalizeJobSchedulePauseUntil(
+      "2026-01-02T00:00:00+08:00",
+      "2026-01-01T00:00:00.000Z"
+    )).toBe("2026-01-01T16:00:00.000Z");
+    expect(() => normalizeJobSchedulePauseUntil("not-a-date", "2026-01-01T00:00:00.000Z")).toThrow(
+      "Job schedule pauseUntil must be a valid timestamp"
+    );
+    expect(() =>
+      normalizeJobSchedulePauseUntil("2025-12-31T00:00:00.000Z", "2026-01-01T00:00:00.000Z")
+    ).toThrow("Job schedule pauseUntil must be in the future");
   });
 });
 

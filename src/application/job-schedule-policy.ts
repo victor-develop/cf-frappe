@@ -72,6 +72,29 @@ export interface JobScheduleRuntimeDefinitionInput {
   readonly delaySeconds?: number;
 }
 
+export type DynamicJobScheduleValue = (...args: never[]) => unknown;
+
+export interface JobScheduleDefinitionCandidate {
+  readonly id?: string;
+  readonly cron?: unknown;
+  readonly jobName?: unknown;
+  readonly enabled?: boolean | DynamicJobScheduleValue;
+  readonly tenantId?: unknown;
+  readonly payload?: unknown;
+  readonly metadata?: unknown;
+  readonly idempotencyKey?: unknown;
+}
+
+export interface JobScheduleQueryInput {
+  readonly cron?: string;
+  readonly jobName?: string;
+}
+
+export interface NormalizedJobScheduleQuery {
+  readonly cron?: string;
+  readonly jobName?: string;
+}
+
 export interface JobScheduleRuntimeDefinitionPreserveOptions {
   readonly preserveExistingFields?: boolean;
   readonly payloadProvided: boolean;
@@ -378,6 +401,83 @@ export function mergePreservedJobScheduleRuntimeFields(options: {
       ? { idempotencyKey: options.existing.idempotencyKey }
       : {})
   };
+}
+
+export function normalizeJobScheduleQuery(query: JobScheduleQueryInput): NormalizedJobScheduleQuery {
+  return {
+    ...(query.cron === undefined || query.cron === "" ? {} : { cron: query.cron }),
+    ...(query.jobName === undefined || query.jobName === "" ? {} : { jobName: query.jobName })
+  };
+}
+
+export function isDynamicJobScheduleValue(value: unknown): boolean {
+  return typeof value === "function";
+}
+
+export function staticJobScheduleTenantId(schedule: JobScheduleDefinitionCandidate): TenantId | undefined {
+  if (isDynamicJobScheduleValue(schedule.tenantId)) {
+    return undefined;
+  }
+  return typeof schedule.tenantId === "string" ? schedule.tenantId : DEFAULT_TENANT_ID;
+}
+
+export function jobScheduleIdentity(schedule: JobScheduleDefinitionCandidate, index: number): string {
+  return schedule.id ?? String(index + 1);
+}
+
+export function ensureUniqueJobScheduleIds(schedules: readonly JobScheduleDefinitionCandidate[]): void {
+  const seen = new Set<string>();
+  schedules.forEach((schedule, index) => {
+    const id = jobScheduleIdentity(schedule, index);
+    if (id.trim() === "") {
+      throw badRequest("Job schedule id is required");
+    }
+    if (seen.has(id)) {
+      throw badRequest(`Job schedule id '${id}' is duplicated`);
+    }
+    seen.add(id);
+  });
+}
+
+export function configuredJobScheduleIds(
+  schedules: readonly JobScheduleDefinitionCandidate[]
+): ReadonlySet<string> {
+  return new Set(schedules.map((schedule, index) => jobScheduleIdentity(schedule, index)));
+}
+
+export function effectiveJobSchedule<TSchedule extends JobScheduleDefinitionCandidate>(
+  schedule: TSchedule,
+  summary: Pick<JobScheduleSummary, "enabled" | "overridden">
+): TSchedule {
+  if (!summary.overridden) {
+    return schedule;
+  }
+  return {
+    ...schedule,
+    enabled: summary.enabled
+  };
+}
+
+export function dynamicJobScheduleFields(schedule: JobScheduleDefinitionCandidate): JobScheduleSummary["dynamic"] {
+  return {
+    enabled: isDynamicJobScheduleValue(schedule.enabled),
+    tenantId: isDynamicJobScheduleValue(schedule.tenantId),
+    payload: isDynamicJobScheduleValue(schedule.payload),
+    metadata: isDynamicJobScheduleValue(schedule.metadata),
+    idempotencyKey: isDynamicJobScheduleValue(schedule.idempotencyKey)
+  };
+}
+
+export function normalizeJobSchedulePauseUntil(value: string, now: string): string {
+  const normalized = normalizeJobScheduleText(value, "pauseUntil");
+  const timestamp = Date.parse(normalized);
+  if (!Number.isFinite(timestamp)) {
+    throw badRequest("Job schedule pauseUntil must be a valid timestamp");
+  }
+  if (timestamp <= Date.parse(now)) {
+    throw badRequest("Job schedule pauseUntil must be in the future");
+  }
+  return new Date(timestamp).toISOString();
 }
 
 export function normalizeJobScheduleId(value: string): string {

@@ -32,8 +32,15 @@ import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
 import { type JobMessage } from "../ports/job-queue.js";
 import {
   canInspectJobSchedule,
+  configuredJobScheduleIds,
+  dynamicJobScheduleFields,
+  effectiveJobSchedule,
+  ensureUniqueJobScheduleIds,
+  jobScheduleIdentity,
   mergePreservedJobScheduleRuntimeFields,
   normalizeJobScheduleId,
+  normalizeJobSchedulePauseUntil,
+  normalizeJobScheduleQuery,
   normalizeJobScheduleRuntimeDefinition,
   normalizeJobScheduleText,
   planJobScheduleAccess,
@@ -45,13 +52,13 @@ import {
   planJobScheduleOverrideClear,
   planJobSchedulePauseOverride,
   planJobScheduleSummary,
+  staticJobScheduleTenantId,
+  type DynamicJobScheduleValue,
   type JobScheduleSummary
 } from "./job-schedule-policy.js";
 
 export type { JobScheduleEventPayload } from "./job-schedule-events.js";
 export type { JobScheduleSummary } from "./job-schedule-policy.js";
-
-export type DynamicJobScheduleValue = (...args: never[]) => unknown;
 
 export interface JobScheduleDefinitionForAdmin {
   readonly id?: string;
@@ -173,7 +180,7 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
     this.runtimeCronTriggers = options.runtimeCronTriggers === undefined
       ? undefined
       : new Set(options.runtimeCronTriggers.map((cron) => normalizeJobScheduleText(cron, "cron")));
-    ensureUniqueScheduleIds(options.schedules);
+    ensureUniqueJobScheduleIds(options.schedules);
   }
 
   canDispatch(): boolean {
@@ -190,7 +197,7 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
 
   async dashboard(actor: Actor, query: JobScheduleQuery = {}): Promise<JobScheduleDashboard> {
     const tenantId = this.authorize(actor);
-    const filters = normalizeQuery(query);
+    const filters = normalizeJobScheduleQuery(query);
     const [overrides, definitions] = await Promise.all([
       this.overrideState(tenantId),
       this.definitionState()
@@ -217,7 +224,7 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
     if (decision.status === "reject") {
       throw badRequest(decision.message);
     }
-    const message = await this.runner.run(effectiveSchedule(schedule, summary) as TSchedule, actor);
+    const message = await this.runner.run(effectiveJobSchedule(schedule, summary) as TSchedule, actor);
     return { schedule: summary, message };
   }
 
@@ -250,7 +257,7 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
     const saveDecision = planJobScheduleDefinitionSave({
       scheduleId: schedule.id,
       jobName: schedule.jobName,
-      configured: configuredScheduleIds(this.schedules).has(schedule.id),
+      configured: configuredJobScheduleIds(this.schedules).has(schedule.id),
       registered: this.registry.has(schedule.jobName)
     });
     if (saveDecision.status === "reject") {
@@ -284,7 +291,7 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
     const current = runtimeJobScheduleForTenant(state, tenantId, scheduleId);
     const deleteDecision = planJobScheduleDefinitionDelete({
       scheduleId,
-      configured: configuredScheduleIds(this.schedules).has(scheduleId),
+      configured: configuredJobScheduleIds(this.schedules).has(scheduleId),
       exists: current !== undefined
     });
     if (deleteDecision.status === "reject") {
@@ -374,7 +381,7 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       command.tenantId
     );
     const now = this.clock.now();
-    const pausedUntil = normalizePauseUntil(command.pausedUntil, now);
+    const pausedUntil = normalizeJobSchedulePauseUntil(command.pausedUntil, now);
     const current = state.overrides.get(summary.id);
     const decision = planJobSchedulePauseOverride({
       ...(current?.pausedUntil === undefined ? {} : { currentPausedUntil: current.pausedUntil }),
@@ -407,14 +414,14 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       if (schedule.cron !== cron) {
         continue;
       }
-      const tenantId = staticTenantId(schedule);
+      const tenantId = staticJobScheduleTenantId(schedule);
       if (tenantId === undefined) {
         resolved.push(schedule);
         continue;
       }
       const state = states.get(tenantId) ?? await this.overrideState(tenantId);
       states.set(tenantId, state);
-      resolved.push(effectiveSchedule(schedule, this.summaryFor(schedule, index, state)) as TSchedule);
+      resolved.push(effectiveJobSchedule(schedule, this.summaryFor(schedule, index, state)) as TSchedule);
     }
     for (const [runtimeIndex, schedule] of runtimeJobSchedules(await this.definitionState()).entries()) {
       if (schedule.cron !== cron) {
@@ -423,7 +430,7 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       const state = states.get(schedule.tenantId) ?? await this.overrideState(schedule.tenantId);
       states.set(schedule.tenantId, state);
       resolved.push(
-        effectiveSchedule(
+        effectiveJobSchedule(
           schedule,
           this.summaryFor(schedule, this.schedules.length + runtimeIndex, state, "runtime")
         ) as unknown as TSchedule
@@ -518,7 +525,7 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
     readonly summary: JobScheduleSummary;
   }> {
     const index = this.schedules.findIndex(
-      (schedule, candidateIndex) => scheduleIdentity(schedule, candidateIndex) === scheduleId
+      (schedule, candidateIndex) => jobScheduleIdentity(schedule, candidateIndex) === scheduleId
     );
     if (index < 0) {
       const definitions = await this.definitionState();
@@ -557,15 +564,9 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
   ): JobScheduleSummary {
     const registered = this.registry.has(schedule.jobName);
     const job = registered ? this.registry.get(schedule.jobName) : undefined;
-    const tenantId = staticTenantId(schedule);
-    const id = scheduleIdentity(schedule, index);
-    const dynamic = {
-      enabled: isDynamic(schedule.enabled),
-      tenantId: isDynamic(schedule.tenantId),
-      payload: isDynamic(schedule.payload),
-      metadata: isDynamic(schedule.metadata),
-      idempotencyKey: isDynamic(schedule.idempotencyKey)
-    };
+    const tenantId = staticJobScheduleTenantId(schedule);
+    const id = jobScheduleIdentity(schedule, index);
+    const dynamic = dynamicJobScheduleFields(schedule);
     const override = tenantId === overrides.tenantId ? overrides.overrides.get(id) : undefined;
     return planJobScheduleSummary({
       id,
@@ -631,28 +632,6 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
   }
 }
 
-function normalizeQuery(query: JobScheduleQuery): JobScheduleDashboard["filters"] {
-  return {
-    ...(query.cron === undefined || query.cron === "" ? {} : { cron: query.cron }),
-    ...(query.jobName === undefined || query.jobName === "" ? {} : { jobName: query.jobName })
-  };
-}
-
-function isDynamic(value: unknown): boolean {
-  return typeof value === "function";
-}
-
-function staticTenantId(schedule: JobScheduleDefinitionForAdmin): TenantId | undefined {
-  if (isDynamic(schedule.tenantId)) {
-    return undefined;
-  }
-  return typeof schedule.tenantId === "string" ? schedule.tenantId : DEFAULT_TENANT_ID;
-}
-
-function scheduleIdentity(schedule: JobScheduleDefinitionForAdmin, index: number): string {
-  return schedule.id ?? String(index + 1);
-}
-
 function requireConfiguredSchedule<TSchedule extends JobScheduleDefinitionForAdmin>(
   schedules: readonly TSchedule[],
   index: number,
@@ -663,47 +642,4 @@ function requireConfiguredSchedule<TSchedule extends JobScheduleDefinitionForAdm
     throw new Error(`Configured job schedule '${scheduleId}' was not found at resolved index ${index}`);
   }
   return schedule;
-}
-
-function ensureUniqueScheduleIds(schedules: readonly JobScheduleDefinitionForAdmin[]): void {
-  const seen = new Set<string>();
-  schedules.forEach((schedule, index) => {
-    const id = scheduleIdentity(schedule, index);
-    if (id.trim() === "") {
-      throw badRequest("Job schedule id is required");
-    }
-    if (seen.has(id)) {
-      throw badRequest(`Job schedule id '${id}' is duplicated`);
-    }
-    seen.add(id);
-  });
-}
-
-function configuredScheduleIds(schedules: readonly JobScheduleDefinitionForAdmin[]): ReadonlySet<string> {
-  return new Set(schedules.map((schedule, index) => scheduleIdentity(schedule, index)));
-}
-
-function effectiveSchedule<TSchedule extends JobScheduleDefinitionForAdmin>(
-  schedule: TSchedule,
-  summary: JobScheduleSummary
-): TSchedule {
-  if (!summary.overridden) {
-    return schedule;
-  }
-  return {
-    ...schedule,
-    enabled: summary.enabled
-  };
-}
-
-function normalizePauseUntil(value: string, now: string): string {
-  const normalized = normalizeJobScheduleText(value, "pauseUntil");
-  const timestamp = Date.parse(normalized);
-  if (!Number.isFinite(timestamp)) {
-    throw badRequest("Job schedule pauseUntil must be a valid timestamp");
-  }
-  if (timestamp <= Date.parse(now)) {
-    throw badRequest("Job schedule pauseUntil must be in the future");
-  }
-  return new Date(timestamp).toISOString();
 }
