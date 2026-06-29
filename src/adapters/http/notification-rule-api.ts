@@ -1,6 +1,7 @@
 import { Hono } from "hono";
+import { requireNotificationRuleEntry } from "../../application/notification-rule-policy.js";
 import type { NotificationRuleService } from "../../application/notification-rule-service.js";
-import { FrameworkError, badRequest } from "../../core/errors.js";
+import { badRequest } from "../../core/errors.js";
 import type { NotificationRuleEntry, NotificationRuleState } from "../../core/notification-rules.js";
 import type {
   JsonValue,
@@ -77,11 +78,7 @@ function singleRuleState(state: NotificationRuleState, ruleName: string): Notifi
 }
 
 function singleRuleEntry(state: NotificationRuleState, ruleName: string): NotificationRuleEntry {
-  const entry = state.rules.find((item) => item.rule.name === ruleName);
-  if (entry === undefined) {
-    throw new FrameworkError("NOTIFICATION_RULE_NOT_FOUND", `Notification rule '${ruleName}' was not found`, { status: 404 });
-  }
-  return entry;
+  return requireNotificationRuleEntry(state, ruleName);
 }
 
 function ruleValue(name: string, value: JsonValue | undefined): NotificationRuleDefinition {

@@ -67,6 +67,21 @@ export function findNotificationRuleEntry(
   return state.rules.find((entry) => entry.rule.name === ruleName);
 }
 
+export function requireNotificationRuleEntry(
+  state: NotificationRuleState,
+  ruleName: string
+): NotificationRuleEntry {
+  const existing = findNotificationRuleEntry(state, ruleName);
+  if (existing === undefined) {
+    throw new FrameworkError(
+      "NOTIFICATION_RULE_NOT_FOUND",
+      `Notification rule '${ruleName}' was not found`,
+      { status: 404 }
+    );
+  }
+  return existing;
+}
+
 export type NotificationRuleChangeDecision =
   | { readonly status: "append" }
   | { readonly status: "noop" };

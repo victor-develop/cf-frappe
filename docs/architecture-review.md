@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted assignment-rule and notification-rule single-entry lookup not-found decisions from HTTP adapters into rule policies so the API layer keeps request parsing, service delegation, and response shaping.
 - Extracted job-schedule runtime Worker Cron Trigger configuration decisions into job-schedule policy so JobScheduleService keeps runtime definition normalization, configured/runtime schedule lookup, event append, and framework error mapping.
 - Extracted job-schedule capability resource-availability decisions into job-schedule policy so JobScheduleService keeps authorization, configured/runtime schedule lookup, runner/event-store orchestration, event append, and framework error mapping.
 - Extracted document-delivery outbox drain job consumer-availability decisions into document-delivery outbox consumer policy so the drain job handler keeps resource lookup, payload parsing, drain orchestration, result shaping, and framework error mapping.

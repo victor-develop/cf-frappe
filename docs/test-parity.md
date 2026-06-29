@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the job-schedule runtime Cron Trigger configuration policy slice:
+As of the rule API single-entry lookup policy slice:
 
 - Vitest files: `233`
-- Vitest cases: `2687`
-- Remaining gap to Frappe static markers: `97`
+- Vitest cases: `2688`
+- Remaining gap to Frappe static markers: `96`
 
 ## Implication
 

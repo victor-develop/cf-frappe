@@ -7,6 +7,7 @@ import {
   notificationRulesEqual,
   planNotificationRuleClear,
   planNotificationRuleSave,
+  requireNotificationRuleEntry,
   resolveNotificationRuleTenant
 } from "../../src/application/notification-rule-policy.js";
 import { SYSTEM_MANAGER_ROLE, type NotificationRuleDefinition } from "../../src/core/types.js";
@@ -77,6 +78,22 @@ describe("notification rule policy", () => {
     });
     expect(findNotificationRuleEntry(state(1), "Missing")).toBeUndefined();
     expect(enabledNotificationRules(state(1))).toEqual([enabledRule]);
+  });
+
+  it("requires notification rule entries with stable not-found semantics", () => {
+    expect(requireNotificationRuleEntry(state(1), "Managers on updates")).toMatchObject({ enabled: true });
+
+    let error: unknown;
+    try {
+      requireNotificationRuleEntry(state(1), "Missing");
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: "NOTIFICATION_RULE_NOT_FOUND",
+      message: "Notification rule 'Missing' was not found",
+      status: 404
+    });
   });
 
   it("plans notification rule saves without emitting redundant catalog events", () => {

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
+import { requireAssignmentRuleEntry } from "../../application/assignment-rule-policy.js";
 import type { AssignmentRuleService } from "../../application/assignment-rule-service.js";
-import { FrameworkError, badRequest } from "../../core/errors.js";
+import { badRequest } from "../../core/errors.js";
 import type { AssignmentRuleEntry, AssignmentRuleState } from "../../core/assignment-rules.js";
 import type {
   AssignmentRuleAssigneeDefinition,
@@ -110,11 +111,7 @@ function singleRuleState(state: AssignmentRuleState, ruleName: string): Assignme
 }
 
 function singleRuleEntry(state: AssignmentRuleState, ruleName: string): AssignmentRuleEntry {
-  const entry = state.rules.find((item) => item.rule.name === ruleName);
-  if (entry === undefined) {
-    throw new FrameworkError("ASSIGNMENT_RULE_NOT_FOUND", `Assignment rule '${ruleName}' was not found`, { status: 404 });
-  }
-  return entry;
+  return requireAssignmentRuleEntry(state, ruleName);
 }
 
 function ruleValue(name: string, value: JsonValue | undefined): AssignmentRuleDefinition {
