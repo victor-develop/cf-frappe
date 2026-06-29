@@ -183,6 +183,158 @@ export function reportSortValue(
   return column === undefined ? undefined : reportDocumentColumnValue(document, column);
 }
 
+interface OrderedReportRow {
+  readonly row: ReportRow;
+  readonly sortValue: JsonValue | undefined;
+  readonly index: number;
+}
+
+export class BoundedOrderedReportRows {
+  private readonly columnName: string;
+  private readonly direction: 1 | -1;
+  private readonly heap: OrderedReportRow[] = [];
+  private readonly limit: number;
+  private readonly report: ReportDefinition;
+
+  constructor(report: ReportDefinition, order: ReportOrderControlResult, limit: number) {
+    const column = report.columns.find((item) => item.name === order.orderBy);
+    this.columnName = column?.name ?? "";
+    this.direction = order.order === "desc" ? -1 : 1;
+    this.limit = limit;
+    this.report = report;
+  }
+
+  add(document: DocumentSnapshot, index: number): void {
+    const entry: OrderedReportRow = {
+      row: projectReportDocumentRow(document, this.report.columns),
+      sortValue: reportSortValue(document, this.report.columns, this.columnName),
+      index
+    };
+    if (this.heap.length < this.limit) {
+      this.heap.push(entry);
+      this.siftUp(this.heap.length - 1);
+      return;
+    }
+    const worst = this.heap[0];
+    if (worst && compareOrderedRows(entry, worst, this.direction) < 0) {
+      this.heap[0] = entry;
+      this.siftDown(0);
+    }
+  }
+
+  toRows(): readonly ReportRow[] {
+    return this.heap
+      .slice()
+      .sort((left, right) => compareOrderedRows(left, right, this.direction))
+      .map((entry) => entry.row);
+  }
+
+  private siftUp(index: number): void {
+    let child = index;
+    while (child > 0) {
+      const parent = Math.floor((child - 1) / 2);
+      if (!isWorseOrderedRow(
+        requireOrderedRowHeapEntry(this.heap, child, "child"),
+        requireOrderedRowHeapEntry(this.heap, parent, "parent"),
+        this.direction
+      )) {
+        return;
+      }
+      this.swap(child, parent);
+      child = parent;
+    }
+  }
+
+  private siftDown(index: number): void {
+    let parent = index;
+    while (true) {
+      const left = parent * 2 + 1;
+      const right = left + 1;
+      let worst = parent;
+      if (
+        left < this.heap.length &&
+        isWorseOrderedRow(
+          requireOrderedRowHeapEntry(this.heap, left, "left"),
+          requireOrderedRowHeapEntry(this.heap, worst, "worst"),
+          this.direction
+        )
+      ) {
+        worst = left;
+      }
+      if (
+        right < this.heap.length &&
+        isWorseOrderedRow(
+          requireOrderedRowHeapEntry(this.heap, right, "right"),
+          requireOrderedRowHeapEntry(this.heap, worst, "worst"),
+          this.direction
+        )
+      ) {
+        worst = right;
+      }
+      if (worst === parent) {
+        return;
+      }
+      this.swap(parent, worst);
+      parent = worst;
+    }
+  }
+
+  private swap(left: number, right: number): void {
+    const value = requireOrderedRowHeapEntry(this.heap, left, "left");
+    this.heap[left] = requireOrderedRowHeapEntry(this.heap, right, "right");
+    this.heap[right] = value;
+  }
+}
+
+export function sortReportDocuments(
+  documents: readonly DocumentSnapshot[],
+  report: ReportDefinition,
+  order: ReportOrderControlResult
+): readonly DocumentSnapshot[] {
+  if (order.orderBy === undefined) {
+    return documents;
+  }
+  const column = report.columns.find((item) => item.name === order.orderBy);
+  const columnName = column?.name;
+  if (!columnName) {
+    return documents;
+  }
+  const direction = order.order === "desc" ? -1 : 1;
+  return documents
+    .map((document, index) => ({ document, index }))
+    .sort((left, right) => {
+      const compared = compareReportSortValues(
+        reportSortValue(left.document, report.columns, columnName),
+        reportSortValue(right.document, report.columns, columnName)
+      );
+      return compared === 0 ? left.index - right.index : compared * direction;
+    })
+    .map((item) => item.document);
+}
+
+export function sortReportRows(
+  rows: readonly ReportRow[],
+  report: ReportDefinition,
+  order: ReportOrderControlResult
+): readonly ReportRow[] {
+  if (order.orderBy === undefined) {
+    return rows;
+  }
+  const column = report.columns.find((item) => item.name === order.orderBy);
+  const columnName = column?.name;
+  if (!columnName) {
+    return rows;
+  }
+  const direction = order.order === "desc" ? -1 : 1;
+  return rows
+    .map((row, index) => ({ row, index }))
+    .sort((left, right) => {
+      const compared = compareReportSortValues(left.row[columnName], right.row[columnName]);
+      return compared === 0 ? left.index - right.index : compared * direction;
+    })
+    .map((item) => item.row);
+}
+
 export function buildReportFilterControls(
   report: ReportDefinition,
   doctype: DocTypeDefinition,
@@ -776,6 +928,34 @@ function firstMinMaxCandidate(
 
 function isPresentReportValue(value: JsonValue | undefined): boolean {
   return value !== undefined && value !== null;
+}
+
+function requireOrderedRowHeapEntry(
+  heap: readonly OrderedReportRow[],
+  index: number,
+  label: string
+): OrderedReportRow {
+  const entry = heap[index];
+  if (entry === undefined) {
+    throw new Error(`Report ordered-row heap is missing ${label} entry at index ${index}`);
+  }
+  return entry;
+}
+
+function isWorseOrderedRow(left: OrderedReportRow, right: OrderedReportRow, direction: 1 | -1): boolean {
+  return compareOrderedRows(left, right, direction) > 0;
+}
+
+function compareOrderedRows(left: OrderedReportRow, right: OrderedReportRow, direction: 1 | -1): number {
+  const compared = compareReportSortValues(left.sortValue, right.sortValue) * direction;
+  return compared === 0 ? left.index - right.index : compared;
+}
+
+function compareReportSortValues(left: JsonValue | undefined, right: JsonValue | undefined): number {
+  if (typeof left === "number" && typeof right === "number") {
+    return left - right;
+  }
+  return String(left ?? "").localeCompare(String(right ?? ""));
 }
 
 function compareReportValues(actual: JsonValue | undefined, expected: JsonPrimitive): number {

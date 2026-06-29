@@ -1,4 +1,5 @@
 import {
+  BoundedOrderedReportRows,
   buildReportFilterControls,
   buildReportCharts,
   buildReportGroups,
@@ -22,8 +23,11 @@ import {
   resolveReportOrder,
   resolvedReportFilterType,
   reportSummaryValue,
-  sortReportChartPoints
+  sortReportChartPoints,
+  sortReportDocuments,
+  sortReportRows
 } from "../../src";
+import type { JsonValue } from "../../src";
 
 describe("report policy", () => {
   const rows = [
@@ -159,6 +163,101 @@ describe("report policy", () => {
       text_math: null
     });
     expect(reportRowColumnValue(row, { name: "remaining", formula: { operator: "subtract", left: "count", right: 1 } })).toBe(3);
+  });
+
+  it("sorts report documents by field and formula columns with stable ties", () => {
+    const documents = [
+      reportDocument("TASK-1", { title: "Alpha", count: 3, bonus: 1 }),
+      reportDocument("TASK-2", { title: "Beta", count: 4, bonus: 2 }),
+      reportDocument("TASK-3", { title: "Gamma", count: 4, bonus: 2 }),
+      reportDocument("TASK-4", { title: "Delta", count: 2, bonus: 4 })
+    ];
+    const report = {
+      name: "Task Report",
+      doctype: "Task",
+      columns: [
+        { name: "title" },
+        { name: "count" },
+        { name: "score", formula: { operator: "add" as const, left: "count", right: "bonus" } }
+      ]
+    };
+
+    expect(sortReportDocuments(documents, report, { orderBy: "score", order: "desc", options: [] })
+      .map((document) => document.name)).toEqual(["TASK-2", "TASK-3", "TASK-4", "TASK-1"]);
+    expect(sortReportDocuments(documents, report, { orderBy: "title", order: "asc", options: [] })
+      .map((document) => document.name)).toEqual(["TASK-1", "TASK-2", "TASK-4", "TASK-3"]);
+  });
+
+  it("sorts custom report rows by projected values while preserving input order for ties", () => {
+    const report = {
+      name: "External Report",
+      doctype: "External Row",
+      source: { kind: "custom" as const, provider: "external" },
+      columns: [
+        { name: "title" },
+        { name: "score" }
+      ]
+    };
+    const projected = [
+      { title: "First", score: 2 },
+      { title: "Second", score: 4 },
+      { title: "Third", score: 4 },
+      { title: "Fourth", score: 1 }
+    ];
+
+    expect(sortReportRows(projected, report, { orderBy: "score", order: "desc", options: [] })
+      .map((row) => row.title)).toEqual(["Second", "Third", "First", "Fourth"]);
+    expect(sortReportRows(projected, report, { order: "asc", options: [] })).toBe(projected);
+  });
+
+  it("keeps the lowest bounded ordered document report rows for ascending exports", () => {
+    const report = {
+      name: "Task Report",
+      doctype: "Task",
+      columns: [
+        { name: "title" },
+        { name: "score" }
+      ]
+    };
+    const rows = new BoundedOrderedReportRows(report, { orderBy: "score", order: "asc", options: [] }, 3);
+    [
+      reportDocument("TASK-1", { title: "Middle", score: 3 }),
+      reportDocument("TASK-2", { title: "High", score: 7 }),
+      reportDocument("TASK-3", { title: "Low", score: 1 }),
+      reportDocument("TASK-4", { title: "Also Middle", score: 3 }),
+      reportDocument("TASK-5", { title: "Lowest", score: 0 })
+    ].forEach((document, index) => rows.add(document, index));
+
+    expect(rows.toRows()).toEqual([
+      { title: "Lowest", score: 0 },
+      { title: "Low", score: 1 },
+      { title: "Middle", score: 3 }
+    ]);
+  });
+
+  it("keeps the highest bounded ordered document report rows for descending exports", () => {
+    const report = {
+      name: "Task Report",
+      doctype: "Task",
+      columns: [
+        { name: "title" },
+        { name: "score" }
+      ]
+    };
+    const rows = new BoundedOrderedReportRows(report, { orderBy: "score", order: "desc", options: [] }, 3);
+    [
+      reportDocument("TASK-1", { title: "Middle", score: 3 }),
+      reportDocument("TASK-2", { title: "High", score: 7 }),
+      reportDocument("TASK-3", { title: "Also High", score: 7 }),
+      reportDocument("TASK-4", { title: "Low", score: 1 }),
+      reportDocument("TASK-5", { title: "Higher", score: 8 })
+    ].forEach((document, index) => rows.add(document, index));
+
+    expect(rows.toRows()).toEqual([
+      { title: "Higher", score: 8 },
+      { title: "High", score: 7 },
+      { title: "Also High", score: 7 }
+    ]);
   });
 
   it("builds report filter controls from metadata, field definitions, and materialized values", () => {
@@ -682,3 +781,16 @@ describe("report policy", () => {
     }])[0]?.rows.map((row) => row.key)).toEqual([null, "High"]);
   });
 });
+
+function reportDocument(name: string, data: Record<string, JsonValue>) {
+  return {
+    tenantId: "tenant-a",
+    doctype: "Task",
+    name,
+    version: 1,
+    docstatus: "draft" as const,
+    data,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-02T00:00:00.000Z"
+  };
+}
