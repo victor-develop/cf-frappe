@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted document-history timeline entry projection, payload-kind based change diffing, docstatus/change shaping, update/comment/activity/workflow/collaboration summaries, and long-text summary normalization from DocumentHistoryService into document-history policy and covered those rules directly.
 - Extracted document-history timeline limit normalization, before-sequence normalization, ordered page selection with older-event cursors, and diff-baseline budget guards from DocumentHistoryService into document-history policy and covered those rules directly.
 - Extracted Website Settings published/role access, visible homepage route and href shaping, navigation-item eligibility/result shaping, Web Form/Web View URL shaping, resolved settings result shaping, and expected access-miss classification from WebsiteSettingsService into website-settings policy and covered those rules directly.
 - Extracted Web Form published/admin access, create-metadata field resolution, declared-field submission data shaping, required-value preflight, and submit-result shaping from WebFormService into web-form policy and covered those rules directly.
