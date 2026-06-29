@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { PrintSettingsService } from "../../application/print-settings-service.js";
+import { ensurePrintPdfRendererAvailable } from "../../application/print-policy.js";
 import type { PrintService } from "../../application/print-service.js";
 import { badRequest } from "../../core/errors.js";
 import type { PrintPdfRenderer } from "../../ports/print-pdf-renderer.js";
@@ -67,9 +68,7 @@ export function createPrintApi(options: PrintApiOptions): Hono {
   });
 
   app.get("/api/print/:format/:name/pdf", async (c) => {
-    if (!options.pdfRenderer) {
-      throw badRequest("PDF print rendering is not configured");
-    }
+    ensurePrintPdfRendererAvailable(options.pdfRenderer);
     const actor = await options.actor(c.req.raw);
     const view = await options.prints.printDocument(actor, c.req.param("format"), c.req.param("name"));
     const pdf = await renderPrintPdfDocument({ actor, renderer: options.pdfRenderer, view });

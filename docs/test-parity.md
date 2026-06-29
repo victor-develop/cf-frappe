@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the rule API single-entry lookup policy slice:
+As of the print PDF renderer availability policy slice:
 
 - Vitest files: `233`
-- Vitest cases: `2688`
-- Remaining gap to Frappe static markers: `96`
+- Vitest cases: `2689`
+- Remaining gap to Frappe static markers: `95`
 
 ## Implication
 

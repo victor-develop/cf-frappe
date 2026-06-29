@@ -1,7 +1,7 @@
 import { Hono } from "hono";
+import { ensurePrintPdfRendererAvailable } from "../../application/print-policy.js";
 import type { PrintSettingsService } from "../../application/print-settings-service.js";
 import type { ReportService } from "../../application/report-service.js";
-import { badRequest } from "../../core/errors.js";
 import type { PrintPdfRenderer } from "../../ports/print-pdf-renderer.js";
 import { defaultPrintLayoutFor, printPdfResponseBody, printPdfResponseHeaders, renderPrintPdfReport } from "../print/index.js";
 import type { ActorResolver } from "./actor.js";
@@ -45,9 +45,7 @@ export function createReportApi(options: ReportApiOptions): Hono {
   });
 
   app.get("/api/report/:report/pdf", async (c) => {
-    if (!options.pdfRenderer) {
-      throw badRequest("PDF print rendering is not configured");
-    }
+    ensurePrintPdfRendererAvailable(options.pdfRenderer);
     const actor = await options.actor(c.req.raw);
     const url = new URL(c.req.url);
     const limit = parseOptionalInteger(c.req.query("limit"));

@@ -1,4 +1,5 @@
 import { can } from "../core/permissions.js";
+import { badRequest } from "../core/errors.js";
 import {
   canReadPrintFormat,
   canReadPrintLetterhead,
@@ -30,6 +31,12 @@ export interface PrintDocumentView {
 export type PrintReadAccessDecision =
   | { readonly status: "allow" }
   | { readonly status: "deny"; readonly message: string };
+
+export function ensurePrintPdfRendererAvailable<T>(renderer: T | undefined): asserts renderer is T {
+  if (renderer === undefined) {
+    throw badRequest("PDF print rendering is not configured");
+  }
+}
 
 export function canAccessPrintFormat(command: {
   readonly actor: Actor;

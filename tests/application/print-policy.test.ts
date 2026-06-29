@@ -1,5 +1,6 @@
 import {
   canAccessPrintFormat,
+  ensurePrintPdfRendererAvailable,
   isPrintEmptyValue,
   planPrintFormatReadAccess,
   planPrintLetterheadReadAccess,
@@ -24,6 +25,22 @@ const doctype = defineDocType({
 });
 
 describe("print policy", () => {
+  it("guards PDF renderer availability before adapter rendering", () => {
+    expect(() => ensurePrintPdfRendererAvailable({ render: async () => ({ body: new Uint8Array() }) })).not.toThrow();
+
+    let error: unknown;
+    try {
+      ensurePrintPdfRendererAvailable(undefined);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: "BAD_REQUEST",
+      message: "PDF print rendering is not configured",
+      status: 400
+    });
+  });
+
   it("plans hidden print fields from DocType metadata and document values", () => {
     expect([...printHiddenFields(doctype, snapshot({ title: "Memo", internal_note: "secret", optional_note: "", count: 0 }))])
       .toEqual(["internal_note", "optional_note"]);
