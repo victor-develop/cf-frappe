@@ -1,5 +1,7 @@
 import {
   foldSavedReports,
+  isSavedReportEvent,
+  isSavedReportPayloadKind,
   normalizeSavedReportLabel,
   savedReportCurrentVersion,
   savedReportDefinitionFromPayload,
@@ -162,7 +164,38 @@ describe("saved report events", () => {
       metadata: {}
     }).payload.kind).toBe("SavedReportDeleted");
   });
+
+  it("narrows saved report events by payload kind when event type names are custom", () => {
+    const saved = savedEvent(1, {
+      reportId: "report-a",
+      label: "Alpha",
+      ownerId: owner.id,
+      definition: { columns: [{ name: "title" }] }
+    });
+    const imported = { ...saved, type: "NoteAnalyticsViewImported" };
+
+    expect(isSavedReportPayloadKind("SavedReportSaved")).toBe(true);
+    expect(isSavedReportPayloadKind("DocumentDeleted")).toBe(false);
+    expect(isSavedReportEvent(imported)).toBe(true);
+    expect(isSavedReportEvent(otherEvent({ kind: "DocumentDeleted" }))).toBe(false);
+  });
 });
+
+function otherEvent(payload: DomainEvent["payload"], type: string = payload.kind): DomainEvent {
+  return {
+    id: "evt_other",
+    tenantId: "acme",
+    stream: "acme:Note:NOTE-1",
+    sequence: 1,
+    type,
+    doctype: "Note",
+    documentName: "NOTE-1",
+    actorId: owner.id,
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    payload,
+    metadata: {}
+  };
+}
 
 function savedEvent(
   sequence: number,

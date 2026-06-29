@@ -1,4 +1,5 @@
 import { badRequest } from "../core/errors.js";
+import { domainEventPayloadKind } from "../core/domain-events.js";
 import {
   assertReportMatchesDocType,
   defineReport,
@@ -43,10 +44,14 @@ export type SavedReportEventPayload =
       readonly ownerId: string;
     };
 
+export type SavedReportPayloadKind = SavedReportEventPayload["kind"];
+
 export const SAVED_REPORT_PAYLOAD_KINDS = Object.freeze([
   "SavedReportSaved",
   "SavedReportDeleted"
-] as const);
+] as const satisfies readonly SavedReportPayloadKind[]);
+
+const SAVED_REPORT_PAYLOAD_KIND_SET = new Set<string>(SAVED_REPORT_PAYLOAD_KINDS);
 
 export interface SavedReportDefinition {
   readonly columns: readonly ReportColumnDefinition[];
@@ -228,6 +233,14 @@ export function savedReportEvent<TPayload extends SavedReportEventPayload>(
   event: NewDomainEvent<TPayload>
 ): NewDomainEvent<TPayload> {
   return event;
+}
+
+export function isSavedReportPayloadKind(kind: string): kind is SavedReportPayloadKind {
+  return SAVED_REPORT_PAYLOAD_KIND_SET.has(kind);
+}
+
+export function isSavedReportEvent(event: DomainEvent): event is DomainEvent<SavedReportEventPayload> {
+  return isSavedReportPayloadKind(domainEventPayloadKind(event));
 }
 
 function columnToPayload(column: ReportColumnDefinition): JsonObject {
