@@ -3,6 +3,7 @@ import {
   configuredJobScheduleIds,
   dynamicJobScheduleFields,
   effectiveJobSchedule,
+  ensureJobScheduleCapabilityResourceAvailable,
   ensureUniqueJobScheduleIds,
   isDynamicJobScheduleValue,
   jobScheduleIdentity,
@@ -73,6 +74,30 @@ describe("job schedule policy", () => {
       status: "not-found",
       message: "Job schedule definitions are not enabled"
     });
+  });
+
+  it("guards schedule capability resources before service orchestration", () => {
+    expect(() =>
+      ensureJobScheduleCapabilityResourceAvailable({ run: async () => ({ id: "msg" }) }, "dispatch")
+    ).not.toThrow();
+
+    for (const [capability, message] of [
+      ["dispatch", "Job schedule dispatch is not enabled"],
+      ["overrides", "Job schedule overrides are not enabled"],
+      ["definitions", "Job schedule definitions are not enabled"]
+    ] as const) {
+      let error: unknown;
+      try {
+        ensureJobScheduleCapabilityResourceAvailable(undefined, capability);
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toMatchObject({
+        code: "JOB_SCHEDULE_NOT_FOUND",
+        message,
+        status: 404
+      });
+    }
   });
 
   it("plans configured and runtime schedule lookup misses before service error mapping", () => {

@@ -44,6 +44,7 @@ import {
   normalizeJobScheduleQuery,
   normalizeJobScheduleRuntimeDefinition,
   normalizeJobScheduleText,
+  ensureJobScheduleCapabilityResourceAvailable,
   planJobScheduleAccess,
   planJobScheduleCapability,
   planJobScheduleDefinitionDelete,
@@ -224,10 +225,7 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
   async dispatch(actor: Actor, scheduleId: string): Promise<JobScheduleDispatchResult> {
     const tenantId = this.authorize(actor);
     const runner = this.runner;
-    const dispatchCapability = planJobScheduleCapability({ capability: "dispatch", enabled: runner !== undefined });
-    if (dispatchCapability.status === "not-found") {
-      throw notFound(dispatchCapability.message, "JOB_SCHEDULE_NOT_FOUND");
-    }
+    ensureJobScheduleCapabilityResourceAvailable(runner, "dispatch");
     const { schedule, summary } = await this.requireSchedule(scheduleId, tenantId);
     const decision = planJobScheduleDispatch({ scheduleId, tenantId, summary });
     if (decision.status === "not-found") {
@@ -235,9 +233,6 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
     }
     if (decision.status === "reject") {
       throw badRequest(decision.message);
-    }
-    if (runner === undefined) {
-      throw new Error("Job schedule dispatch passed capability policy without a runner");
     }
     const message = await runner.run(effectiveJobSchedule(schedule, summary) as TSchedule, actor);
     return { schedule: summary, message };
@@ -587,25 +582,13 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
 
   private requireOverrides(): EventStore {
     const events = this.events;
-    const capability = planJobScheduleCapability({ capability: "overrides", enabled: events !== undefined });
-    if (capability.status === "not-found") {
-      throw notFound(capability.message, "JOB_SCHEDULE_NOT_FOUND");
-    }
-    if (events === undefined) {
-      throw new Error("Job schedule overrides passed capability policy without an event store");
-    }
+    ensureJobScheduleCapabilityResourceAvailable(events, "overrides");
     return events;
   }
 
   private requireDefinitions(): EventStore {
     const events = this.events;
-    const capability = planJobScheduleCapability({ capability: "definitions", enabled: events !== undefined });
-    if (capability.status === "not-found") {
-      throw notFound(capability.message, "JOB_SCHEDULE_NOT_FOUND");
-    }
-    if (events === undefined) {
-      throw new Error("Job schedule definitions passed capability policy without an event store");
-    }
+    ensureJobScheduleCapabilityResourceAvailable(events, "definitions");
     return events;
   }
 

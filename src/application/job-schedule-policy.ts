@@ -1,5 +1,5 @@
 import type { JobRetryPolicy } from "../core/jobs.js";
-import { badRequest } from "../core/errors.js";
+import { badRequest, notFound } from "../core/errors.js";
 import { DEFAULT_TENANT_ID, type Actor, type DocumentData, type TenantId } from "../core/types.js";
 import {
   MAX_JOB_QUEUE_DELAY_SECONDS,
@@ -205,6 +205,16 @@ export function planJobScheduleCapability(options: {
     return { status: "not-found", message: "Job schedule overrides are not enabled" };
   }
   return { status: "not-found", message: "Job schedule definitions are not enabled" };
+}
+
+export function ensureJobScheduleCapabilityResourceAvailable<T>(
+  resource: T | undefined,
+  capability: JobScheduleCapabilityKind
+): asserts resource is T {
+  const decision = planJobScheduleCapability({ capability, enabled: resource !== undefined });
+  if (decision.status === "not-found") {
+    throw notFound(decision.message, "JOB_SCHEDULE_NOT_FOUND");
+  }
 }
 
 export function canInspectJobSchedule(
