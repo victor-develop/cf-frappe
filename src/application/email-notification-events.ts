@@ -1,3 +1,4 @@
+import { domainEventPayloadKind } from "../core/domain-events.js";
 import type { DomainEvent, TenantId } from "../core/types.js";
 
 export interface EmailNotificationAddressPayload {
@@ -48,13 +49,17 @@ export type EmailNotificationEventPayload =
       readonly reason: string;
     };
 
+export type EmailNotificationPayloadKind = EmailNotificationEventPayload["kind"];
+
 export const EMAIL_OUTBOX_PAYLOAD_KINDS = Object.freeze([
   "EmailNotificationQueued",
   "EmailNotificationSent",
   "EmailNotificationDeliveryClaimed",
   "EmailNotificationFailed",
   "EmailNotificationSkipped"
-] as const);
+] as const satisfies readonly EmailNotificationPayloadKind[]);
+
+const EMAIL_OUTBOX_PAYLOAD_KIND_SET = new Set<string>(EMAIL_OUTBOX_PAYLOAD_KINDS);
 
 export interface QueuedEmailMessage {
   readonly messageId: string;
@@ -103,8 +108,16 @@ export function emailNotificationMessageId(eventId: string, ruleName: string, re
 
 export function emailNotificationEventType(
   payload: EmailNotificationEventPayload
-): EmailNotificationEventPayload["kind"] {
+): EmailNotificationPayloadKind {
   return payload.kind;
+}
+
+export function isEmailNotificationPayloadKind(kind: string): kind is EmailNotificationPayloadKind {
+  return EMAIL_OUTBOX_PAYLOAD_KIND_SET.has(kind);
+}
+
+export function isEmailNotificationEvent(event: DomainEvent): event is DomainEvent<EmailNotificationEventPayload> {
+  return isEmailNotificationPayloadKind(domainEventPayloadKind(event));
 }
 
 export function foldEmailOutbox(tenantId: TenantId, events: readonly DomainEvent[]): EmailOutboxState {

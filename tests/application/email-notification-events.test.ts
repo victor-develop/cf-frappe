@@ -2,6 +2,8 @@ import {
   claimedDeliveryId,
   emailNotificationEventType,
   emailNotificationMessageId,
+  isEmailNotificationEvent,
+  isEmailNotificationPayloadKind,
   foldEmailOutbox,
   isStaleEmailClaim,
   requireAppendedEmailOutboxEvent
@@ -93,6 +95,21 @@ describe("email notification events", () => {
       recipientId: "reviewer@example.com",
       reason: "recipient has no email address"
     })).toBe("EmailNotificationSkipped");
+  });
+
+  it("narrows email notification events by payload kind when event type names are custom", () => {
+    const messageId = emailNotificationMessageId("evt_update", "Email owners", "reviewer@example.com");
+    const queued = {
+      ...queuedEvent(1, messageId),
+      type: "NoteEmailDeliveryQueued"
+    };
+
+    expect(isEmailNotificationPayloadKind("EmailNotificationQueued")).toBe(true);
+    expect(isEmailNotificationPayloadKind("DocumentDeleted")).toBe(false);
+    expect(isEmailNotificationEvent(queued)).toBe(true);
+    expect(isEmailNotificationEvent(
+      stateEvent(2, messageId, { kind: "DocumentDeleted" }, "2026-01-01T00:01:00.000Z")
+    )).toBe(false);
   });
 });
 
