@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the notification-rule source payload-kind derivation slice:
+As of the assignment-rule event-kind matching derivation slice:
 
 - Vitest files: `196`
-- Vitest cases: `2328`
-- Remaining gap to Frappe static markers: `456`
+- Vitest cases: `2329`
+- Remaining gap to Frappe static markers: `455`
 
 ## Implication
 

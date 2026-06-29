@@ -132,6 +132,27 @@ describe("assignment rules", () => {
     ]);
   });
 
+  it("derives assignment rule event matching from source event identity", () => {
+    expect(
+      assignmentRuleAssignmentsFromDomainEvent({
+        event: ticketEvent("DocumentCreated"),
+        snapshot: ticketSnapshot(),
+        rules: [
+          {
+            name: "Created document triage",
+            events: ["DocumentCreated"],
+            assignees: [{ kind: "user", userId: "manager@example.com" }]
+          },
+          {
+            name: "Submitted document triage",
+            events: ["DocumentSubmitted"],
+            assignees: [{ kind: "user", userId: "reviewer@example.com" }]
+          }
+        ]
+      })
+    ).toEqual([{ assigneeId: "manager@example.com", ruleName: "Created document triage" }]);
+  });
+
   it("rejects assignment rules with invalid event and assignee metadata", () => {
     expect(() =>
       defineDocType({

@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Centralized assignment-rule event-kind matching in domain events so assignment rule eligibility no longer reads source event payload kinds inline.
 - Added starter Cron outbox drain coverage so generated Cloudflare apps include a Wrangler Cron trigger, Worker schedule dispatch config, and README guidance for scheduled document-delivery outbox draining.
 - Added Worker queue realtime outbox drain coverage so the durable document-delivery outbox is proven through the built-in drain job into the Durable Object realtime publisher path.
 - Added Worker queue email outbox drain coverage plus a Worker `documentDeliveryOutbox.emailNotificationDeliveryQueue` seam so durable email intents can enqueue delivery jobs instead of sending inline during drains.

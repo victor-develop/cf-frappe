@@ -1,4 +1,5 @@
 import { FrameworkError } from "./errors.js";
+import { domainEventPayloadKind } from "./domain-events.js";
 import { matchesListFilterExpression, normalizeListFilterExpression } from "./list-view.js";
 import type {
   AssignmentRuleAssigneeDefinition,
@@ -135,7 +136,8 @@ export function assignmentRuleAssignmentsFromDomainEvent(
   context: AssignmentRuleEvaluationContext
 ): readonly AssignmentRuleDocumentAssignment[] {
   const snapshot = context.snapshot;
-  if (snapshot === null || snapshot.docstatus === "deleted" || !isAssignmentRuleEventKind(context.event.payload.kind)) {
+  const payloadKind = domainEventPayloadKind(context.event);
+  if (snapshot === null || snapshot.docstatus === "deleted" || !isAssignmentRuleEventKind(payloadKind)) {
     return [];
   }
   const assignments: AssignmentRuleDocumentAssignment[] = [];
@@ -164,7 +166,8 @@ function ruleMatches(
   event: DomainEvent,
   snapshot: DocumentSnapshot
 ): boolean {
-  if (rule.enabled === false || !rule.events.includes(event.payload.kind as AssignmentRuleEventKind)) {
+  const payloadKind = domainEventPayloadKind(event);
+  if (rule.enabled === false || !rule.events.includes(payloadKind as AssignmentRuleEventKind)) {
     return false;
   }
   if (rule.condition === undefined) {
