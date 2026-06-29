@@ -48,6 +48,7 @@ import type { ReportCsvExportOptions, ReportRunOptions, ReportService } from "..
 import type { RoleService } from "../../application/role-service.js";
 import { ensureSavedListFilterServiceAvailable } from "../../application/saved-list-filter-policy.js";
 import type { SavedListFilterService } from "../../application/saved-list-filter-service.js";
+import { ensureSavedReportServiceAvailable } from "../../application/saved-report-policy.js";
 import type { SavedReportDefinition, SavedReportService } from "../../application/saved-report-service.js";
 import type { UserAccountService } from "../../application/user-account-service.js";
 import type { UserNotificationService } from "../../application/user-notification-service.js";
@@ -3201,9 +3202,7 @@ function renderDeskLayoutFor(options: DeskAppOptions, layout: DeskLayoutOptions)
 }
 
 function requireSavedReports(options: DeskAppOptions): SavedReportService {
-  if (!options.savedReports) {
-    throw new FrameworkError("REPORT_NOT_FOUND", "Saved reports are not enabled", { status: 404 });
-  }
+  ensureSavedReportServiceAvailable(options.savedReports);
   return options.savedReports;
 }
 

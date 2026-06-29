@@ -1,4 +1,5 @@
 import type { SavedReport, SavedReportDefinition } from "./saved-report-events.js";
+import { notFound } from "../core/errors.js";
 import { can } from "../core/permissions.js";
 import type { Actor, DocTypeDefinition, TenantId } from "../core/types.js";
 
@@ -19,6 +20,12 @@ export function findSavedReport(
   id: string
 ): SavedReport | undefined {
   return reports.find((report) => report.id === id);
+}
+
+export function ensureSavedReportServiceAvailable<T>(savedReports: T | undefined): asserts savedReports is T {
+  if (savedReports === undefined) {
+    throw notFound("Saved reports are not enabled", "REPORT_NOT_FOUND");
+  }
 }
 
 export function planSavedReportReadAccess(command: {

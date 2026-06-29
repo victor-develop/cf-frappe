@@ -118,6 +118,7 @@ describe("Desk app", () => {
       readonly prints?: boolean;
       readonly reports?: boolean;
       readonly savedFilters?: boolean;
+      readonly savedReports?: boolean;
     } = {}
   ) {
     const services = createServices(["e1", "e2", "e3", "e4"]);
@@ -132,7 +133,7 @@ describe("Desk app", () => {
       ...(options.reports === false ? {} : { reports: services.reports }),
       timeline: services.history,
       ...(options.savedFilters === false ? {} : { savedFilters: services.savedFilters }),
-      savedReports: services.savedReports,
+      ...(options.savedReports === false ? {} : { savedReports: services.savedReports }),
       userPermissions: services.userPermissions,
       ...(options.realtime === undefined ? {} : { realtime: options.realtime }),
       actor: () => actor
@@ -1505,6 +1506,29 @@ describe("Desk app", () => {
 
     expect(response.status).toBe(400);
     await expect(response.text()).resolves.toContain("PDF print rendering is not configured");
+  });
+
+  it("uses the saved-report policy error for Desk report-builder routes when saved reports are disabled", async () => {
+    const { app } = makeDesk(owner, { savedReports: false, printPdfRenderer: new RecordingPrintPdfRenderer() });
+    const requests: readonly [string, RequestInit | undefined][] = [
+      ["/desk/report-builder/Note", undefined],
+      ["/desk/report-builder/Note", {
+        method: "POST",
+        body: new URLSearchParams({ label: "High notes" }),
+        headers: { "content-type": "application/x-www-form-urlencoded" }
+      }],
+      ["/desk/report-builder/Note/report_saved-report-1", undefined],
+      ["/desk/report-builder/Note/report_saved-report-1/export.csv", undefined],
+      ["/desk/report-builder/Note/report_saved-report-1/print", undefined],
+      ["/desk/report-builder/Note/report_saved-report-1/pdf", undefined],
+      ["/desk/report-builder/Note/report_saved-report-1/delete", { method: "POST" }]
+    ];
+
+    for (const [path, init] of requests) {
+      const response = await app.request(path, init);
+      expect(response.status).toBe(404);
+      await expect(response.text()).resolves.toContain("Saved reports are not enabled");
+    }
   });
 
   it("builds saved report filter presets from visual Desk report-builder controls", async () => {

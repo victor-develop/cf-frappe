@@ -1,4 +1,5 @@
 import {
+  ensureSavedReportServiceAvailable,
   findSavedReport,
   planSavedReportLookup,
   planSavedReportReadAccess,
@@ -11,6 +12,22 @@ import { defineDocType } from "../../src";
 import { guest, owner } from "../helpers";
 
 describe("saved report policy", () => {
+  it("guards saved-report service availability before Desk report-builder routes", () => {
+    expect(() => ensureSavedReportServiceAvailable({ list: async () => [] })).not.toThrow();
+
+    let error: unknown;
+    try {
+      ensureSavedReportServiceAvailable(undefined);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: "REPORT_NOT_FOUND",
+      message: "Saved reports are not enabled",
+      status: 404
+    });
+  });
+
   it("plans saved-report DocType read access before service stream reads", () => {
     const doctype = defineDocType({
       name: "Private Report Source",
