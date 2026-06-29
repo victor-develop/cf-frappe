@@ -1,11 +1,11 @@
-import { badRequest, conflict, notFound, permissionDenied } from "../core/errors.js";
+import { badRequest, conflict, FrameworkError, notFound, permissionDenied } from "../core/errors.js";
 import {
   normalizeUserRoles,
   type UserAccountEmailVerificationChallenge,
   type UserAccountRecoveryChallenge,
   type UserAccountState
 } from "../core/user-accounts.js";
-import { DEFAULT_TENANT_ID, type Actor, type TenantId } from "../core/types.js";
+import { DEFAULT_TENANT_ID, type Actor, type DomainEvent, type TenantId } from "../core/types.js";
 
 export const MAX_ACCOUNT_RECOVERY_EXPIRY_SECONDS = 604_800;
 export const MIN_USER_PASSWORD_LENGTH = 8;
@@ -148,6 +148,18 @@ export function normalizeUserRecoveryToken(token: string): string {
     throw permissionDenied("Invalid recovery token");
   }
   return normalized;
+}
+
+export function invalidUserRecoveryToken(): Error {
+  return permissionDenied("Invalid recovery token");
+}
+
+export function userAccountAppendConflict(error: unknown): boolean {
+  return error instanceof FrameworkError && error.code === "DOCUMENT_CONFLICT";
+}
+
+export function userAccountSavedEventVersion(events: readonly DomainEvent[], fallback: number): number {
+  return events.at(-1)?.sequence ?? fallback;
 }
 
 export function userAccountRolesEqual(left: readonly string[], right: readonly string[]): boolean {

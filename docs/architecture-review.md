@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted invalid recovery-token error creation, append-conflict classification, and saved-event version fallback from UserAccountService into user-account policy and covered those helpers directly.
 - Extracted job-schedule dashboard query normalization, dynamic field detection, static tenant resolution, schedule identity and configured-id set derivation, duplicate-id guards, effective schedule projection, and pause-until normalization from JobScheduleService into job-schedule policy and covered those rules directly.
 - Extracted email delivery claim-timeout normalization, queued/skipped replay result shaping, sent/failed delivery result shaping, queued payload header/address shaping, missing-recipient reasons, fallback email-address classification, and error-message normalization from EmailNotificationService into email-notification service policy and covered those rules directly.
 - Extracted CSV import template shaping, importable-field selection, row limit normalization, header validation, typed row input projection, update-name guards, and row failure shaping from DocumentImportService into document-import policy and covered those rules directly.

@@ -6,6 +6,8 @@ import {
   ensureUserAccountSessionCurrent,
   ensureUserRecoveryChallengeUsable,
   emailVerificationPatch,
+  FrameworkError,
+  invalidUserRecoveryToken,
   MAX_ACCOUNT_RECOVERY_EXPIRY_SECONDS,
   MIN_USER_PASSWORD_LENGTH,
   normalizeOptionalUserEmail,
@@ -23,6 +25,7 @@ import {
   resolveUserAccountActorTenant,
   resolveUserAccountSessionTenant,
   SYSTEM_MANAGER_ROLE,
+  userAccountAppendConflict,
   ensureUserAccountPasswordLoginAllowed,
   ensureUserAccountPasswordResettable,
   userAccountEmailVerificationChallengeForCompletion,
@@ -30,9 +33,10 @@ import {
   userAccountEnabledChangeRequired,
   userAccountPasswordHashForLogin,
   userAccountPasswordResetDeliveryEmail,
-  userAccountRolesEqual
+  userAccountRolesEqual,
+  userAccountSavedEventVersion
 } from "../../src";
-import type { UserAccountState } from "../../src";
+import type { DomainEvent, UserAccountState } from "../../src";
 
 describe("user account policy", () => {
   it("guards user account administration roles", () => {
@@ -208,6 +212,25 @@ describe("user account policy", () => {
     expect(() => normalizeUserRecoveryToken("   ")).toThrow("Invalid recovery token");
   });
 
+  it("creates the canonical invalid recovery token error", () => {
+    const error = invalidUserRecoveryToken();
+    expect(error).toBeInstanceOf(FrameworkError);
+    expect(error.message).toBe("Invalid recovery token");
+    expect((error as FrameworkError).code).toBe("PERMISSION_DENIED");
+    expect((error as FrameworkError).status).toBe(403);
+  });
+
+  it("recognizes append conflicts without swallowing unrelated errors", () => {
+    expect(userAccountAppendConflict(new FrameworkError("DOCUMENT_CONFLICT", "stale", { status: 409 }))).toBe(true);
+    expect(userAccountAppendConflict(new FrameworkError("BAD_REQUEST", "bad", { status: 400 }))).toBe(false);
+    expect(userAccountAppendConflict(new Error("stale"))).toBe(false);
+  });
+
+  it("derives saved event versions with an empty-append fallback", () => {
+    expect(userAccountSavedEventVersion(savedEvents([2, 4, 5]), 1)).toBe(5);
+    expect(userAccountSavedEventVersion(savedEvents([]), 7)).toBe(7);
+  });
+
   it("compares normalized account role arrays positionally", () => {
     expect(userAccountRolesEqual(["System Manager", "User"], ["System Manager", "User"])).toBe(true);
     expect(userAccountRolesEqual(["User", "System Manager"], ["System Manager", "User"])).toBe(false);
@@ -338,4 +361,8 @@ function emailVerificationChallenge(
     email: "owner@example.com",
     ...overrides
   };
+}
+
+function savedEvents(sequences: readonly number[]): readonly DomainEvent[] {
+  return sequences.map((sequence) => ({ sequence }) as DomainEvent);
 }

@@ -1,4 +1,3 @@
-import { FrameworkError, permissionDenied } from "../core/errors.js";
 import { userAccountsStream } from "../core/streams.js";
 import {
   DEFAULT_TENANT_ID,
@@ -57,6 +56,7 @@ import {
   normalizeUserLoginPassword,
   normalizeUserPassword,
   normalizeUserRecoveryToken,
+  invalidUserRecoveryToken,
   providerSyncCreatedEnabled,
   providerSyncCreatedRoles,
   recoveryExpiresAtFrom,
@@ -64,12 +64,14 @@ import {
   resolveUserAccountActorTenant,
   resolveUserAccountSessionTenant,
   ensureUserAccountPasswordLoginAllowed,
+  userAccountAppendConflict,
   userAccountPasswordHashForLogin,
   userAccountEmailVerificationDeliveryEmail,
   userAccountEmailVerificationChallengeForCompletion,
   ensureUserAccountPasswordResettable,
   userAccountEnabledChangeRequired,
   userAccountPasswordResetDeliveryEmail,
+  userAccountSavedEventVersion,
   userAccountRolesEqual
 } from "./user-account-policy.js";
 import type { UserRoleValidator } from "./user-role-validator.js";
@@ -438,7 +440,7 @@ export class UserAccountService {
         })
       });
     } catch (error) {
-      if (isConflict(error)) {
+      if (userAccountAppendConflict(error)) {
         return { tenantId, userId, delivered: false };
       }
       throw error;
@@ -449,7 +451,7 @@ export class UserAccountService {
       await this.markRecoveryDeliveryFailed({
         tenantId,
         userId,
-        expectedVersion: lastSequence(saved, state.version),
+        expectedVersion: userAccountSavedEventVersion(saved, state.version),
         metadata: command.metadata,
         payload: userPasswordResetDeliveryFailedPayload({
           userId
@@ -511,7 +513,7 @@ export class UserAccountService {
         })
       });
     } catch (error) {
-      if (isConflict(error)) {
+      if (userAccountAppendConflict(error)) {
         return { tenantId, userId, delivered: false };
       }
       throw error;
@@ -522,7 +524,7 @@ export class UserAccountService {
       await this.markRecoveryDeliveryFailed({
         tenantId,
         userId,
-        expectedVersion: lastSequence(saved, state.version),
+        expectedVersion: userAccountSavedEventVersion(saved, state.version),
         metadata: command.metadata,
         payload: userEmailVerificationDeliveryFailedPayload({
           userId,
@@ -659,7 +661,7 @@ export class UserAccountService {
         payload: options.payload
       });
     } catch (error) {
-      if (isConflict(error)) {
+      if (userAccountAppendConflict(error)) {
         return;
       }
       throw error;
@@ -687,19 +689,7 @@ export class UserAccountService {
   ): Promise<void> {
     ensureUserRecoveryChallengeUsable(state, challenge, this.clock.now());
     if (!(await this.tokenSecrets.verify(token, challenge.tokenHash))) {
-      throw invalidRecoveryToken();
+      throw invalidUserRecoveryToken();
     }
   }
-}
-
-function invalidRecoveryToken(): Error {
-  return permissionDenied("Invalid recovery token");
-}
-
-function isConflict(error: unknown): boolean {
-  return error instanceof FrameworkError && error.code === "DOCUMENT_CONFLICT";
-}
-
-function lastSequence(events: readonly DomainEvent[], fallback: number): number {
-  return events.at(-1)?.sequence ?? fallback;
 }

@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the job-schedule policy helper slice:
+As of the user-account recovery policy helper slice:
 
 - Vitest files: `226`
-- Vitest cases: `2584`
-- Remaining gap to Frappe static markers: `200`
+- Vitest cases: `2587`
+- Remaining gap to Frappe static markers: `197`
 
 ## Implication
 
