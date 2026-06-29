@@ -9,6 +9,7 @@ import {
 import { badRequest, permissionDenied } from "../core/errors.js";
 import type { Actor, DocTypeDefinition, DocumentSnapshot } from "../core/types.js";
 import {
+  documentCollaborationEventType,
   documentActivityRecordedPayload,
   documentAssignmentPayload,
   documentCommentAddedPayload,
@@ -137,7 +138,11 @@ export function planDocumentCommentPolicy(
   text: string
 ): DocumentCollaborationEventPlan {
   return {
-    eventType: doctype.events?.comment ?? `${doctype.name}CommentAdded`,
+    eventType: documentCollaborationEventType({
+      doctypeName: doctype.name,
+      kind: "DocumentCommentAdded",
+      commentEventType: doctype.events?.comment
+    }),
     payload: documentCommentAddedPayload(normalizeCommentText(text))
   };
 }
@@ -147,7 +152,11 @@ export function planDocumentActivityPolicy(
   command: ActivityInput
 ): DocumentCollaborationEventPlan {
   return {
-    eventType: doctype.events?.activity ?? `${doctype.name}ActivityRecorded`,
+    eventType: documentCollaborationEventType({
+      doctypeName: doctype.name,
+      kind: "DocumentActivityRecorded",
+      activityEventType: doctype.events?.activity
+    }),
     payload: documentActivityRecordedPayload(normalizeActivity(command))
   };
 }
@@ -166,10 +175,12 @@ export function planDocumentAssignmentChangePolicy(input: {
   const eventKind = input.action === "add" ? "DocumentAssigned" : "DocumentUnassigned";
   return {
     ...change,
-    eventType:
-      input.action === "add"
-        ? input.doctype.events?.assign ?? `${input.doctype.name}Assigned`
-        : input.doctype.events?.unassign ?? `${input.doctype.name}Unassigned`,
+    eventType: documentCollaborationEventType({
+      doctypeName: input.doctype.name,
+      kind: eventKind,
+      assignEventType: input.doctype.events?.assign,
+      unassignEventType: input.doctype.events?.unassign
+    }),
     payload: documentAssignmentPayload(eventKind, change.value)
   };
 }
@@ -184,10 +195,12 @@ export function planDocumentTagChangePolicy(input: {
   const eventKind = input.action === "add" ? "DocumentTagged" : "DocumentUntagged";
   return {
     ...change,
-    eventType:
-      input.action === "add"
-        ? input.doctype.events?.tag ?? `${input.doctype.name}Tagged`
-        : input.doctype.events?.untag ?? `${input.doctype.name}Untagged`,
+    eventType: documentCollaborationEventType({
+      doctypeName: input.doctype.name,
+      kind: eventKind,
+      tagEventType: input.doctype.events?.tag,
+      untagEventType: input.doctype.events?.untag
+    }),
     payload: documentTagPayload(eventKind, change.value)
   };
 }
@@ -207,10 +220,12 @@ export function planDocumentFollowerChangePolicy(input: {
   const eventKind = input.action === "add" ? "DocumentFollowed" : "DocumentUnfollowed";
   return {
     ...change,
-    eventType:
-      input.action === "add"
-        ? input.doctype.events?.follow ?? `${input.doctype.name}Followed`
-        : input.doctype.events?.unfollow ?? `${input.doctype.name}Unfollowed`,
+    eventType: documentCollaborationEventType({
+      doctypeName: input.doctype.name,
+      kind: eventKind,
+      followEventType: input.doctype.events?.follow,
+      unfollowEventType: input.doctype.events?.unfollow
+    }),
     payload: documentFollowerPayload(eventKind, change.value)
   };
 }

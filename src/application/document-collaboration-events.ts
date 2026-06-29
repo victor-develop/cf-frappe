@@ -1,3 +1,5 @@
+import type { DocTypeName } from "../core/types.js";
+
 export type DocumentCollaborationEventPayload =
   | {
       readonly kind: "DocumentCommentAdded";
@@ -51,6 +53,17 @@ export type DocumentFollowerEventKind = Extract<
   { readonly followerId: string }
 >["kind"];
 
+export const DOCUMENT_COLLABORATION_PAYLOAD_KINDS = Object.freeze([
+  "DocumentCommentAdded",
+  "DocumentActivityRecorded",
+  "DocumentAssigned",
+  "DocumentUnassigned",
+  "DocumentTagged",
+  "DocumentUntagged",
+  "DocumentFollowed",
+  "DocumentUnfollowed"
+] as const);
+
 export interface DocumentActivityPayloadInput {
   readonly activityType: string;
   readonly subject: string;
@@ -97,6 +110,42 @@ export function documentFollowerPayload(
   followerId: string
 ): Extract<DocumentCollaborationEventPayload, { readonly followerId: string }> {
   return { kind, followerId };
+}
+
+export interface DocumentCollaborationEventTypeOptions {
+  readonly doctypeName: DocTypeName;
+  readonly kind: DocumentCollaborationEventPayload["kind"];
+  readonly commentEventType?: string | undefined;
+  readonly activityEventType?: string | undefined;
+  readonly assignEventType?: string | undefined;
+  readonly unassignEventType?: string | undefined;
+  readonly tagEventType?: string | undefined;
+  readonly untagEventType?: string | undefined;
+  readonly followEventType?: string | undefined;
+  readonly unfollowEventType?: string | undefined;
+}
+
+export function documentCollaborationEventType(
+  options: DocumentCollaborationEventTypeOptions
+): string {
+  switch (options.kind) {
+    case "DocumentCommentAdded":
+      return options.commentEventType ?? `${options.doctypeName}CommentAdded`;
+    case "DocumentActivityRecorded":
+      return options.activityEventType ?? `${options.doctypeName}ActivityRecorded`;
+    case "DocumentAssigned":
+      return options.assignEventType ?? `${options.doctypeName}Assigned`;
+    case "DocumentUnassigned":
+      return options.unassignEventType ?? `${options.doctypeName}Unassigned`;
+    case "DocumentTagged":
+      return options.tagEventType ?? `${options.doctypeName}Tagged`;
+    case "DocumentUntagged":
+      return options.untagEventType ?? `${options.doctypeName}Untagged`;
+    case "DocumentFollowed":
+      return options.followEventType ?? `${options.doctypeName}Followed`;
+    case "DocumentUnfollowed":
+      return options.unfollowEventType ?? `${options.doctypeName}Unfollowed`;
+  }
 }
 
 declare module "../core/types.js" {

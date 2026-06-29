@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DOCUMENT_COLLABORATION_PAYLOAD_KINDS,
   documentActivityRecordedPayload,
   documentAssignmentPayload,
   documentCommentAddedPayload,
+  documentCollaborationEventType,
   documentFollowerPayload,
   documentTagPayload,
   type DocumentCollaborationEventPayload
@@ -80,6 +82,48 @@ describe("document collaboration events", () => {
       kind: "DocumentUnfollowed",
       followerId: "owner@example.com"
     });
+  });
+
+  it("derives default event types from collaboration payload identity", () => {
+    expect(documentCollaborationEventType({ doctypeName: "Task", kind: "DocumentCommentAdded" })).toBe("TaskCommentAdded");
+    expect(documentCollaborationEventType({ doctypeName: "Task", kind: "DocumentActivityRecorded" })).toBe("TaskActivityRecorded");
+    expect(documentCollaborationEventType({ doctypeName: "Task", kind: "DocumentAssigned" })).toBe("TaskAssigned");
+    expect(documentCollaborationEventType({ doctypeName: "Task", kind: "DocumentUnassigned" })).toBe("TaskUnassigned");
+    expect(documentCollaborationEventType({ doctypeName: "Task", kind: "DocumentTagged" })).toBe("TaskTagged");
+    expect(documentCollaborationEventType({ doctypeName: "Task", kind: "DocumentUntagged" })).toBe("TaskUntagged");
+    expect(documentCollaborationEventType({ doctypeName: "Task", kind: "DocumentFollowed" })).toBe("TaskFollowed");
+    expect(documentCollaborationEventType({ doctypeName: "Task", kind: "DocumentUnfollowed" })).toBe("TaskUnfollowed");
+  });
+
+  it("uses DocType event overrides for collaboration event types", () => {
+    expect(documentCollaborationEventType({
+      doctypeName: "Task",
+      kind: "DocumentAssigned",
+      assignEventType: "TaskDelegated"
+    })).toBe("TaskDelegated");
+    expect(documentCollaborationEventType({
+      doctypeName: "Task",
+      kind: "DocumentUntagged",
+      untagEventType: "TaskLabelRemoved"
+    })).toBe("TaskLabelRemoved");
+    expect(documentCollaborationEventType({
+      doctypeName: "Task",
+      kind: "DocumentActivityRecorded",
+      activityEventType: "TaskAuditActivity"
+    })).toBe("TaskAuditActivity");
+  });
+
+  it("exposes the bounded document collaboration payload kind set", () => {
+    expect(DOCUMENT_COLLABORATION_PAYLOAD_KINDS).toEqual([
+      "DocumentCommentAdded",
+      "DocumentActivityRecorded",
+      "DocumentAssigned",
+      "DocumentUnassigned",
+      "DocumentTagged",
+      "DocumentUntagged",
+      "DocumentFollowed",
+      "DocumentUnfollowed"
+    ]);
   });
 });
 
