@@ -43,6 +43,7 @@ import {
   ensureDocumentStatus,
   ensureExpectedVersion,
   ensureMergeBaseVersion,
+  ensureDocumentCreateAvailable,
   mergeSnapshotFromDocument,
   normalizeUnsetFields,
   canExecuteDomainCommandForRoles,
@@ -568,9 +569,7 @@ export class DocumentService implements DocumentCommandExecutor {
     });
     const stream = documentStream(tenantId, doctype.name, name);
     const existing = foldDocument(await this.store.readStream(stream));
-    if (existing && existing.docstatus !== "deleted") {
-      throw conflict(`${doctype.name}/${name} already exists`);
-    }
+    ensureDocumentCreateAvailable({ doctypeName: doctype.name, documentName: name, existing });
     const uniqueReservations = uniqueValueReservations(tenantId, doctype, data, name);
     const uniqueReservationWrites = await this.planUniqueValueReservationWrites(
       command.actor,

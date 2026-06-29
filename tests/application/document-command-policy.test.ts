@@ -5,6 +5,7 @@ import {
   documentCreateValidationIssues,
   documentDomainCommandValidationIssues,
   documentUpdateValidationIssues,
+  ensureDocumentCreateAvailable,
   ensureDocumentStatus,
   ensureExpectedVersion,
   ensureMergeBaseVersion,
@@ -81,6 +82,21 @@ describe("document command policy", () => {
   it("normalizes unset fields for command payloads", () => {
     expect(normalizeUnsetFields(undefined)).toEqual([]);
     expect(normalizeUnsetFields([" body ", "", "title", "body"])).toEqual(["body", "title"]);
+  });
+
+  it("allows document create when no live document exists", () => {
+    expect(() =>
+      ensureDocumentCreateAvailable({ doctypeName: "Note", documentName: "NOTE-1", existing: null })
+    ).not.toThrow();
+    expect(() =>
+      ensureDocumentCreateAvailable({ doctypeName: "Note", documentName: "NOTE-1", existing: { docstatus: "deleted" } })
+    ).not.toThrow();
+  });
+
+  it("rejects document create when a live document already exists", () => {
+    expect(() =>
+      ensureDocumentCreateAvailable({ doctypeName: "Note", documentName: "NOTE-1", existing: { docstatus: "draft" } })
+    ).toThrow("Note/NOTE-1 already exists");
   });
 
   it("preserves document update validation issue ordering by validation stage", () => {

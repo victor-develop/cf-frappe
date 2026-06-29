@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the AggregateCoordinator bulk failure name policy slice:
+As of the document create availability policy slice:
 
 - Vitest files: `196`
-- Vitest cases: `2270`
-- Remaining gap to Frappe static markers: `514`
+- Vitest cases: `2272`
+- Remaining gap to Frappe static markers: `512`
 
 ## Implication
 

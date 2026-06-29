@@ -66,6 +66,16 @@ export function normalizeUnsetFields(fields: readonly string[] | undefined): rea
   return [...new Set(normalized)];
 }
 
+export function ensureDocumentCreateAvailable(input: {
+  readonly doctypeName: string;
+  readonly documentName: string;
+  readonly existing: Pick<DocumentSnapshot, "docstatus"> | null | undefined;
+}): void {
+  if (input.existing !== undefined && input.existing !== null && input.existing.docstatus !== "deleted") {
+    throw conflict(`${input.doctypeName}/${input.documentName} already exists`);
+  }
+}
+
 export interface DocumentUpdateValidationIssueGroups {
   readonly submittedUpdateIssues?: readonly ValidationIssue[] | undefined;
   readonly unsetIssues?: readonly ValidationIssue[] | undefined;
