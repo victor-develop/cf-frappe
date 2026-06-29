@@ -3,12 +3,16 @@ import {
   canReadDashboard,
   type DashboardCardDefinition,
   type DashboardCardSourceDefinition,
-  type DashboardDocumentAggregate,
-  type DashboardDefinition,
-  type DashboardIndicatorOperator
+  type DashboardDefinition
 } from "../core/dashboard.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { Actor, DocumentSnapshot, JsonPrimitive, ListDocumentsFilter, ListFilterExpression } from "../core/types.js";
+import {
+  dashboardCardIndicator,
+  emptyDashboardDocumentAggregate,
+  finishDashboardDocumentAggregate,
+  updateDashboardDocumentAggregate
+} from "./dashboard-policy.js";
 import type { QueryService } from "./query-service.js";
 import type { ReportChartResult, ReportFilters, ReportService } from "./report-service.js";
 
@@ -118,10 +122,10 @@ export class DashboardService {
       source.doctype,
       source.filters ?? [],
       source.filterExpression,
-      emptyDocumentAggregate(),
-      (aggregate, document) => updateDocumentAggregate(aggregate, document.data[field])
+      emptyDashboardDocumentAggregate(),
+      (aggregate, document) => updateDashboardDocumentAggregate(aggregate, document.data[field])
     );
-    return finishDocumentAggregate(result, source.aggregate);
+    return finishDashboardDocumentAggregate(result, source.aggregate);
   }
 
   private async foldReadableDocuments<T>(
@@ -173,82 +177,4 @@ export class DashboardService {
 
 function isPermissionDenied(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "PERMISSION_DENIED";
-}
-
-interface DocumentAggregateState {
-  readonly count: number;
-  readonly sum: number;
-  readonly min: number | null;
-  readonly max: number | null;
-}
-
-function emptyDocumentAggregate(): DocumentAggregateState {
-  return {
-    count: 0,
-    sum: 0,
-    min: null,
-    max: null
-  };
-}
-
-function updateDocumentAggregate(
-  state: DocumentAggregateState,
-  value: unknown
-): DocumentAggregateState {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return state;
-  }
-  return {
-    count: state.count + 1,
-    sum: state.sum + value,
-    min: state.min === null ? value : Math.min(state.min, value),
-    max: state.max === null ? value : Math.max(state.max, value)
-  };
-}
-
-function finishDocumentAggregate(state: DocumentAggregateState, aggregate: DashboardDocumentAggregate): JsonPrimitive {
-  if (aggregate === "sum") {
-    return state.sum;
-  }
-  if (aggregate === "avg") {
-    return state.count === 0 ? null : state.sum / state.count;
-  }
-  if (aggregate === "min") {
-    return state.min;
-  }
-  if (aggregate === "max") {
-    return state.max;
-  }
-  return state.count;
-}
-
-function dashboardCardIndicator(card: DashboardCardDefinition, value: DashboardCardValue): string | undefined {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return card.indicator;
-  }
-  const rule = card.indicatorRules?.find((candidate) => dashboardIndicatorMatches(value, candidate.operator, candidate.value));
-  return rule?.indicator ?? card.indicator;
-}
-
-function dashboardIndicatorMatches(
-  actual: number,
-  operator: DashboardIndicatorOperator,
-  expected: number
-): boolean {
-  if (operator === "eq") {
-    return actual === expected;
-  }
-  if (operator === "ne") {
-    return actual !== expected;
-  }
-  if (operator === "gt") {
-    return actual > expected;
-  }
-  if (operator === "gte") {
-    return actual >= expected;
-  }
-  if (operator === "lt") {
-    return actual < expected;
-  }
-  return actual <= expected;
 }
