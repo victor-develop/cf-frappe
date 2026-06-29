@@ -51,6 +51,10 @@ export function customFieldDisabledPayload(
   };
 }
 
+export function customFieldEventType(payload: CustomFieldEventPayload): CustomFieldPayloadKind {
+  return payload.kind;
+}
+
 export function isCustomFieldPayloadKind(kind: string): kind is CustomFieldPayloadKind {
   return CUSTOM_FIELD_PAYLOAD_KIND_SET.has(kind);
 }

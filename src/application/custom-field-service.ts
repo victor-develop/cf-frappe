@@ -15,6 +15,7 @@ import {
 import {
   CUSTOM_FIELD_PAYLOAD_KINDS,
   customFieldDisabledPayload,
+  customFieldEventType,
   customFieldSavedPayload,
   isCustomFieldEvent,
   type CustomFieldEventPayload
@@ -339,7 +340,7 @@ export class CustomFieldService {
       id: this.ids.next("evt_"),
       tenantId: options.tenantId,
       stream: options.stream,
-      type: options.payload.kind,
+      type: customFieldEventType(options.payload),
       doctype: "__CustomFields",
       documentName: options.documentName,
       actorId: options.actor.id,

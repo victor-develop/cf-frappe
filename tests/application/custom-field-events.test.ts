@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CUSTOM_FIELD_PAYLOAD_KINDS,
   customFieldDisabledPayload,
+  customFieldEventType,
   customFieldSavedPayload,
   isCustomFieldEvent,
   type CustomFieldEventPayload,
@@ -10,6 +11,19 @@ import {
 } from "../../src";
 
 describe("custom field events", () => {
+  it("derives custom-field event types from payload identity", () => {
+    expect(customFieldEventType({
+      kind: "CustomFieldSaved",
+      doctypeName: "Note",
+      field: { name: "priority", type: "select", options: ["Low", "High"] }
+    })).toBe("CustomFieldSaved");
+    expect(customFieldEventType({
+      kind: "CustomFieldDisabled",
+      doctypeName: "Note",
+      fieldName: "priority"
+    })).toBe("CustomFieldDisabled");
+  });
+
   it("builds saved custom-field payloads", () => {
     expect(
       customFieldPayload(
