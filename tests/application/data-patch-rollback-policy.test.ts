@@ -2,9 +2,12 @@ import { defineDataPatch } from "../../src/core/data-patch.js";
 import type { RecordedDataPatch } from "../../src/ports/data-patch-log.js";
 import {
   assertDataPatchRollbackRetryable,
+  assertDataPatchRollbackRetryableWithSuccessors,
   assertDataPatchRollbackSuccessorsRolledBack,
   assertSelectedDataPatchRollbackable,
-  dataPatchRollbackPlanDecision
+  dataPatchRollbackPlanDecision,
+  planAutomaticDataPatchRollback,
+  planSelectedDataPatchRollback
 } from "../../src/application/data-patch-rollback-policy.js";
 import { now } from "../helpers";
 
@@ -47,6 +50,43 @@ describe("data patch rollback policy", () => {
     );
   });
 
+  it("plans selected rollback in reverse registry order with a limit", () => {
+    const patches = [
+      patch({ id: "core.first", rollback: true }),
+      patch({ id: "crm.second", rollback: true }),
+      patch({ id: "sales.third", rollback: true })
+    ];
+    const recordedById = new Map<string, RecordedDataPatch>([
+      ["core.first", recorded("applied", "v1", "core.first")],
+      ["crm.second", recorded("applied", "v1", "crm.second")],
+      ["sales.third", recorded("applied", "v1", "sales.third")]
+    ]);
+
+    expect(planSelectedDataPatchRollback(patches, patches, 2, recordedById).map((planned) => planned.id)).toEqual([
+      "sales.third",
+      "crm.second"
+    ]);
+  });
+
+  it("plans automatic rollback from the latest reversible applied patch until an irreversible predecessor", () => {
+    const patches = [
+      patch({ id: "core.first", rollback: true }),
+      patch({ id: "crm.irreversible" }),
+      patch({ id: "sales.third", rollback: true }),
+      patch({ id: "support.fourth", rollback: true })
+    ];
+    const recordedById = new Map<string, RecordedDataPatch>([
+      ["core.first", recorded("applied", "v1", "core.first")],
+      ["crm.irreversible", recorded("applied", "v1", "crm.irreversible")],
+      ["sales.third", recorded("rolled_back", "v1", "sales.third")],
+      ["support.fourth", recorded("applied", "v1", "support.fourth")]
+    ]);
+
+    expect(planAutomaticDataPatchRollback(patches, undefined, recordedById).map((planned) => planned.id)).toEqual([
+      "support.fourth"
+    ]);
+  });
+
   it("guards selected rollback order against later applied successors", () => {
     const patches = [patch({ id: "core.first", rollback: true }), patch({ id: "crm.second", rollback: true })];
     const recordedById = new Map<string, RecordedDataPatch>([
@@ -84,6 +124,21 @@ describe("data patch rollback policy", () => {
         new Map([["crm.second", recorded("pending", "v2", "crm.second")]])
       )
     ).toThrow("Data patch 'crm.second' is pending");
+  });
+
+  it("guards rollback retry against later successors before accepting the failed rollback", () => {
+    const patches = [patch({ id: "core.first", rollback: true }), patch({ id: "crm.second", rollback: true })];
+    const recordedById = new Map<string, RecordedDataPatch>([
+      ["core.first", recorded("rollback_failed", "v1", "core.first")],
+      ["crm.second", recorded("applied", "v1", "crm.second")]
+    ]);
+
+    expect(() => assertDataPatchRollbackRetryableWithSuccessors(patches, patches[0]!, recordedById)).toThrow(
+      "Data patch 'core.first' cannot roll back before later patch 'crm.second' is rolled back"
+    );
+
+    recordedById.set("crm.second", recorded("rolled_back", "v1", "crm.second"));
+    expect(() => assertDataPatchRollbackRetryableWithSuccessors(patches, patches[0]!, recordedById)).not.toThrow();
   });
 });
 

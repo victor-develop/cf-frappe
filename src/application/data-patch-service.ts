@@ -14,16 +14,15 @@ import {
   type DataPatchDashboardStatus
 } from "./data-patch-dashboard-policy.js";
 import {
-  assertDataPatchRollbackRetryable,
-  assertDataPatchRollbackSuccessorsRolledBack,
-  assertSelectedDataPatchRollbackable,
-  dataPatchRollbackPlanDecision
+  assertDataPatchRollbackRetryableWithSuccessors,
+  planAutomaticDataPatchRollback,
+  planSelectedDataPatchRollback
 } from "./data-patch-rollback-policy.js";
 import { permissionDenied } from "../core/errors.js";
 import type { DataPatchDefinition } from "../core/data-patch.js";
 import { SYSTEM_MANAGER_ROLE, type Actor } from "../core/types.js";
 import type { Clock } from "../ports/clock.js";
-import type { DataPatchLog, RecordedDataPatch } from "../ports/data-patch-log.js";
+import type { DataPatchLog } from "../ports/data-patch-log.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 
 export type { DataPatchDashboard, DataPatchDashboardEntry, DataPatchDashboardStatus };
@@ -179,35 +178,15 @@ export class DataPatchService<TResources = unknown> {
     const recordedById = new Map((await this.log.recordedDataPatches()).map((patch) => [patch.id, patch]));
     if (options.patchIds !== undefined) {
       const selected = selectDataPatches(this.patches, options.patchIds);
-      this.assertSelectedPatchesRollbackable(selected, recordedById);
-      const selectedIds = new Set(selected.map((patch) => patch.id));
-      assertDataPatchRollbackSuccessorsRolledBack(this.patches, selected, selectedIds, recordedById);
-      const rollback = [...selected].reverse();
-      return options.limit === undefined ? rollback : rollback.slice(0, options.limit);
+      return planSelectedDataPatchRollback(this.patches, selected, options.limit, recordedById);
     }
-    const rollback: DataPatchDefinition<TResources>[] = [];
-    for (const patch of [...this.patches].reverse()) {
-      const recorded = recordedById.get(patch.id);
-      const decision = dataPatchRollbackPlanDecision(patch, recorded);
-      if (decision.action === "skip") {
-        continue;
-      }
-      if (decision.action === "stop") {
-        break;
-      }
-      rollback.push(patch);
-      if (options.limit !== undefined && rollback.length >= options.limit) {
-        break;
-      }
-    }
-    return rollback;
+    return planAutomaticDataPatchRollback(this.patches, options.limit, recordedById);
   }
 
   private async patchForRollbackRetry(patchId: string): Promise<DataPatchDefinition<TResources>> {
     const patch = selectDataPatch(this.patches, patchId);
     const recordedById = new Map((await this.log.recordedDataPatches()).map((recorded) => [recorded.id, recorded]));
-    this.assertSelectedPatchRollbackRetryable(patch, recordedById);
-    assertDataPatchRollbackSuccessorsRolledBack(this.patches, [patch], new Set([patch.id]), recordedById);
+    assertDataPatchRollbackRetryableWithSuccessors(this.patches, patch, recordedById);
     return patch;
   }
 
@@ -230,24 +209,6 @@ export class DataPatchService<TResources = unknown> {
   private async assertPredecessorsApplied(selected: readonly DataPatchDefinition<TResources>[]): Promise<void> {
     const recordedById = new Map((await this.log.recordedDataPatches()).map((patch) => [patch.id, patch]));
     assertSelectedDataPatchPredecessorsApplied(this.patches, selected, recordedById);
-  }
-
-  private assertSelectedPatchesRollbackable(
-    selected: readonly DataPatchDefinition<TResources>[],
-    recordedById: ReadonlyMap<string, RecordedDataPatch>
-  ): void {
-    for (const patch of selected) {
-      const recorded = recordedById.get(patch.id);
-      assertSelectedDataPatchRollbackable(patch, recorded);
-    }
-  }
-
-  private assertSelectedPatchRollbackRetryable(
-    patch: DataPatchDefinition<TResources>,
-    recordedById: ReadonlyMap<string, RecordedDataPatch>
-  ): void {
-    const recorded = recordedById.get(patch.id);
-    assertDataPatchRollbackRetryable(patch, recorded);
   }
 
 }

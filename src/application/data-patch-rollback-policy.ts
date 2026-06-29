@@ -78,6 +78,56 @@ export function assertDataPatchRollbackRetryable<TResources>(
   throw dataPatchRollbackRetryUnavailable(patch.id, `journal status is '${recorded.status}'`);
 }
 
+export function planSelectedDataPatchRollback<TResources>(
+  patches: readonly DataPatchDefinition<TResources>[],
+  selected: readonly DataPatchDefinition<TResources>[],
+  limit: number | undefined,
+  recordedById: ReadonlyMap<string, RecordedDataPatch>
+): readonly DataPatchDefinition<TResources>[] {
+  for (const patch of selected) {
+    assertSelectedDataPatchRollbackable(patch, recordedById.get(patch.id));
+  }
+  assertDataPatchRollbackSuccessorsRolledBack(
+    patches,
+    selected,
+    new Set(selected.map((patch) => patch.id)),
+    recordedById
+  );
+  const rollback = [...selected].reverse();
+  return limit === undefined ? rollback : rollback.slice(0, limit);
+}
+
+export function planAutomaticDataPatchRollback<TResources>(
+  patches: readonly DataPatchDefinition<TResources>[],
+  limit: number | undefined,
+  recordedById: ReadonlyMap<string, RecordedDataPatch>
+): readonly DataPatchDefinition<TResources>[] {
+  const rollback: DataPatchDefinition<TResources>[] = [];
+  for (const patch of [...patches].reverse()) {
+    const decision = dataPatchRollbackPlanDecision(patch, recordedById.get(patch.id));
+    if (decision.action === "skip") {
+      continue;
+    }
+    if (decision.action === "stop") {
+      break;
+    }
+    rollback.push(patch);
+    if (limit !== undefined && rollback.length >= limit) {
+      break;
+    }
+  }
+  return rollback;
+}
+
+export function assertDataPatchRollbackRetryableWithSuccessors<TResources>(
+  patches: readonly DataPatchDefinition<TResources>[],
+  patch: DataPatchDefinition<TResources>,
+  recordedById: ReadonlyMap<string, RecordedDataPatch>
+): void {
+  assertDataPatchRollbackRetryable(patch, recordedById.get(patch.id));
+  assertDataPatchRollbackSuccessorsRolledBack(patches, [patch], new Set([patch.id]), recordedById);
+}
+
 export function assertDataPatchRollbackSuccessorSafe(id: string, recorded: RecordedDataPatch): void {
   if (recorded.status === "pending") {
     throw new FrameworkError("DATA_PATCH_PENDING", `Data patch '${id}' is pending`, { status: 409 });
