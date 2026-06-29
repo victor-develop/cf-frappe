@@ -56,6 +56,40 @@ describe("UserNotificationService", () => {
     await expect(events.readStream(userNotificationsStream("acme", "support@example.com"))).resolves.toHaveLength(1);
   });
 
+  it("records direct notifications from payload kind when event type names are misleading", async () => {
+    const events = new InMemoryEventStore();
+    const notifications = new UserNotificationService({
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["record-1"])
+    });
+    const event = {
+      ...assignmentEvent("evt_assign", "support@example.com"),
+      type: "NoteDeleted"
+    };
+
+    await expect(notifications.recordFromDomainEvent(event)).resolves.toMatchObject([
+      {
+        id: "evt_assign:user:support%40example.com",
+        recipientId: "support@example.com",
+        eventType: "NoteDeleted",
+        payloadKind: "DocumentAssigned",
+        subject: "owner@example.com assigned you to Note My Note"
+      }
+    ]);
+    await expect(events.readStream(userNotificationsStream("acme", "support@example.com"))).resolves.toMatchObject([
+      {
+        type: "UserNotificationRecorded",
+        payload: {
+          kind: "UserNotificationRecorded",
+          eventType: "NoteDeleted",
+          payloadKind: "DocumentAssigned",
+          recipientId: "support@example.com"
+        }
+      }
+    ]);
+  });
+
   it("reads user notification state through the bounded inbox payload kinds", async () => {
     const events = new RecordingReadOptionsNotificationEventStore();
     const notifications = new UserNotificationService({

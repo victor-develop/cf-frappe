@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Covered durable user-notification service payload-kind matching so direct inbox records preserve custom event names while deriving recipients from the domain payload.
 - Covered replayed realtime user-notification payload-kind matching so drain consumers preserve custom source event names while deriving user-room recipients from the replayed domain payload.
 - Covered replayed queued email source type/payload-kind metadata separation so drain consumers keep custom source event names while deriving payload kind from the replayed domain payload.
 - Covered document-delivery outbox source type/payload-kind metadata separation so delivery records keep custom event names while deriving source payload kind from the domain payload.
