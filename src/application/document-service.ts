@@ -15,7 +15,7 @@ import {
   type DocumentFieldMergePlan
 } from "../core/document-merge.js";
 import {
-  ensureSharedGrantIsDelegable,
+  ensureSharedGrantDelegabilityForLookup,
   type CollaborationCollectionAction,
   planDocumentActivityPolicy,
   planDocumentAssignmentChangePolicy,
@@ -1140,9 +1140,14 @@ export class DocumentService implements DocumentCommandExecutor {
       currentGrants: state.grants,
       command
     });
-    if (access.lookup.status === "read-shares") {
-      ensureSharedGrantIsDelegable(command.actor, doctype, existing, access.sharedPermissions, plan.grant);
-    }
+    ensureSharedGrantDelegabilityForLookup({
+      lookupStatus: access.lookup.status,
+      actor: command.actor,
+      doctype,
+      document: existing,
+      actorPermissions: access.sharedPermissions,
+      grant: plan.grant
+    });
     if (plan.noop) {
       return existing;
     }

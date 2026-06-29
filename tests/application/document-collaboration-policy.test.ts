@@ -2,6 +2,7 @@ import { defineDocType } from "../../src";
 import type { Actor, DocumentSnapshot } from "../../src";
 import {
   collaborationCollectionChange,
+  ensureSharedGrantDelegabilityForLookup,
   ensureSharedGrantIsDelegable,
   normalizeActivity,
   normalizeAssigneeId,
@@ -301,6 +302,35 @@ describe("document collaboration policy", () => {
 
     expect(() =>
       ensureSharedGrantIsDelegable(actor, Note, snapshot(), ["read", "update"], grant)
+    ).not.toThrow();
+  });
+
+  it("checks delegated share grants only when share lookup read existing shares", () => {
+    const grant = normalizeValidDocumentShareGrant({
+      userId: "collab@example.com",
+      permissions: ["read", "update"]
+    });
+
+    expect(() =>
+      ensureSharedGrantDelegabilityForLookup({
+        lookupStatus: "read-shares",
+        actor,
+        doctype: Note,
+        document: snapshot(),
+        actorPermissions: ["read"],
+        grant
+      })
+    ).toThrow("cannot grant update on Note/NOTE-1");
+
+    expect(() =>
+      ensureSharedGrantDelegabilityForLookup({
+        lookupStatus: "skip",
+        actor,
+        doctype: Note,
+        document: snapshot(),
+        actorPermissions: ["read"],
+        grant
+      })
     ).not.toThrow();
   });
 });

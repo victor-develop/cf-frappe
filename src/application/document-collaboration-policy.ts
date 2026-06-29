@@ -354,6 +354,25 @@ export function ensureSharedGrantIsDelegable(
   }
 }
 
+export function ensureSharedGrantDelegabilityForLookup(input: {
+  readonly lookupStatus: string;
+  readonly actor: Actor;
+  readonly doctype: DocTypeDefinition;
+  readonly document: DocumentSnapshot;
+  readonly actorPermissions: readonly DocumentSharePermission[];
+  readonly grant: DocumentShareGrant;
+}): void {
+  if (input.lookupStatus === "read-shares") {
+    ensureSharedGrantIsDelegable(
+      input.actor,
+      input.doctype,
+      input.document,
+      input.actorPermissions,
+      input.grant
+    );
+  }
+}
+
 function normalizeRequiredText(value: string, field: string, maxLength: number): string {
   const normalized = value.trim();
   if (normalized.length === 0) {

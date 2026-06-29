@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the merge base snapshot policy slice:
+As of the delegated share lookup policy slice:
 
 - Vitest files: `196`
-- Vitest cases: `2283`
-- Remaining gap to Frappe static markers: `501`
+- Vitest cases: `2284`
+- Remaining gap to Frappe static markers: `500`
 
 ## Implication
 
