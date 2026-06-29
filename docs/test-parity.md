@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the print PDF renderer availability policy slice:
+As of the Desk print PDF renderer availability policy slice:
 
 - Vitest files: `233`
-- Vitest cases: `2689`
-- Remaining gap to Frappe static markers: `95`
+- Vitest cases: `2692`
+- Remaining gap to Frappe static markers: `92`
 
 ## Implication
 

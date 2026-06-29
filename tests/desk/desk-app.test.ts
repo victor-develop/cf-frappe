@@ -1205,6 +1205,15 @@ describe("Desk app", () => {
     );
   });
 
+  it("uses the print policy error for Desk report PDFs without a renderer", async () => {
+    const { app } = makeDesk(owner);
+
+    const response = await app.request("/desk/reports/Open%20Notes/pdf");
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toContain("PDF print rendering is not configured");
+  });
+
   it("builds, runs, exports, and deletes saved reports in Desk", async () => {
     const { app, services } = makeDesk();
     await services.documents.create({
@@ -1468,6 +1477,15 @@ describe("Desk app", () => {
     });
     expect(renderer.calls[0]?.html).toContain("<h1>High count desk report</h1>");
     expect(renderer.calls[0]?.html).toContain("<td>High Count B</td><td>7</td>");
+  });
+
+  it("uses the print policy error for Desk saved report PDFs without a renderer", async () => {
+    const { app } = makeDesk(owner);
+
+    const response = await app.request("/desk/report-builder/Note/report_saved-report-1/pdf");
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toContain("PDF print rendering is not configured");
   });
 
   it("builds saved report filter presets from visual Desk report-builder controls", async () => {
@@ -7544,6 +7562,15 @@ describe("Desk app", () => {
       title: "Standard - Desk Print"
     });
     expect(renderer.calls[0]?.html).toContain("Print body");
+  });
+
+  it("uses the print policy error for Desk document PDFs without a renderer", async () => {
+    const { app } = makeDesk(owner);
+
+    const response = await app.request("/desk/print/Note%20Standard/Desk%20Print/pdf");
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toContain("PDF print rendering is not configured");
   });
 
   it("creates documents from generated forms", async () => {

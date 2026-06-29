@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extended print PDF renderer availability policy across Desk report, saved-report, and document PDF routes so Desk adapters keep service lookup, actor resolution, query parsing, print layout lookup, PDF rendering orchestration, and response shaping.
 - Extracted print PDF renderer availability decisions from print, report, and saved-report HTTP adapters into print policy so adapters keep actor resolution, query parsing, service calls, PDF rendering orchestration, and response shaping.
 - Extracted assignment-rule and notification-rule single-entry lookup not-found decisions from HTTP adapters into rule policies so the API layer keeps request parsing, service delegation, and response shaping.
 - Extracted job-schedule runtime Worker Cron Trigger configuration decisions into job-schedule policy so JobScheduleService keeps runtime definition normalization, configured/runtime schedule lookup, event append, and framework error mapping.

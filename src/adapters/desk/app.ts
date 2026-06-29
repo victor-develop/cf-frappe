@@ -39,6 +39,7 @@ import type { JobRetryPort } from "../../application/job-retry-service.js";
 import type { JobScheduleService } from "../../application/job-schedule-service.js";
 import type { KanbanService } from "../../application/kanban-service.js";
 import type { NotificationRuleService } from "../../application/notification-rule-service.js";
+import { ensurePrintPdfRendererAvailable } from "../../application/print-policy.js";
 import type { PrintService } from "../../application/print-service.js";
 import type { PrintSettingsService } from "../../application/print-settings-service.js";
 import { QueryService } from "../../application/query-service.js";
@@ -1830,9 +1831,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
 
   app.get("/desk/report-builder/:doctype/:id/pdf", async (c) => {
     const savedReports = requireSavedReports(options);
-    if (!options.printPdfRenderer) {
-      throw badRequest("PDF print rendering is not configured");
-    }
+    ensurePrintPdfRendererAvailable(options.printPdfRenderer);
     const actor = await options.actor(c.req.raw);
     const url = new URL(c.req.url);
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
@@ -1936,9 +1935,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     if (!options.reports) {
       throw new FrameworkError("REPORT_NOT_FOUND", "Reports are not enabled", { status: 404 });
     }
-    if (!options.printPdfRenderer) {
-      throw badRequest("PDF print rendering is not configured");
-    }
+    ensurePrintPdfRendererAvailable(options.printPdfRenderer);
     const actor = await options.actor(c.req.raw);
     const url = new URL(c.req.url);
     const result = await options.reports.runReport(actor, c.req.param("report"), {
@@ -2005,9 +2002,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     if (!options.prints) {
       throw new FrameworkError("PRINT_FORMAT_NOT_FOUND", "Print formats are not enabled", { status: 404 });
     }
-    if (!options.printPdfRenderer) {
-      throw badRequest("PDF print rendering is not configured");
-    }
+    ensurePrintPdfRendererAvailable(options.printPdfRenderer);
     const actor = await options.actor(c.req.raw);
     const view = await options.prints.printDocument(actor, c.req.param("format"), c.req.param("name"));
     const pdf = await renderPrintPdfDocument({ actor, renderer: options.printPdfRenderer, view });
