@@ -47,6 +47,16 @@ export function normalizePrintSettingsPatchInput(
   }
 }
 
+export type PrintSettingsPatchChangeDecision =
+  | { readonly status: "write" }
+  | { readonly status: "noop" };
+
+export function planPrintSettingsPatchChange(
+  patch: PrintSettingsPatch
+): PrintSettingsPatchChangeDecision {
+  return Object.keys(patch).length === 0 ? { status: "noop" } : { status: "write" };
+}
+
 export function ensurePrintSettingsExpectedVersion(
   state: PrintSettingsState,
   expectedVersion: number | undefined

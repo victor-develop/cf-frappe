@@ -28,7 +28,8 @@ import {
   authorizeUserProfileAccess,
   ensureUserProfileExpectedVersion,
   normalizeUserProfilePatchInput,
-  normalizeUserProfileRequiredText
+  normalizeUserProfileRequiredText,
+  planUserProfilePatchChange
 } from "./user-profile-policy.js";
 
 export type { UserProfileEventPayload } from "./user-profile-events.js";
@@ -80,7 +81,7 @@ export class UserProfileService {
     const patch = normalizeUserProfilePatchInput(command.profile);
     const state = await this.stateFor(tenantId, userId);
     ensureUserProfileExpectedVersion(state, command.expectedVersion);
-    if (Object.keys(patch).length === 0) {
+    if (planUserProfilePatchChange(patch).status === "noop") {
       return state;
     }
     const saved = await this.appendProfileChangedEvent({

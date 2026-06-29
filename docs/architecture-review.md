@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted print-settings and user-profile empty-patch write decisions into pure policies so their services keep tenant/access checks, state loading, event append, and replay orchestration.
 - Extracted notification-rule save and clear noop decisions into notification rule policy so NotificationRuleService keeps registry resolution, state loading, event append, and replay orchestration.
 - Extracted assignment-rule save, clear, and enabled-status noop decisions into assignment rule policy so AssignmentRuleService keeps registry resolution, state loading, event append, and replay orchestration.
 - Extracted role description and enabled-status noop decisions into role policy so RoleService keeps tenant/admin access, state loading, event append, and replay orchestration.

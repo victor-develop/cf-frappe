@@ -3,6 +3,7 @@ import {
   ensureUserProfileExpectedVersion,
   normalizeUserProfilePatchInput,
   normalizeUserProfileRequiredText,
+  planUserProfilePatchChange,
   resolveUserProfileTenant
 } from "../../src/application/user-profile-policy.js";
 import { SYSTEM_MANAGER_ROLE } from "../../src/core/types.js";
@@ -57,6 +58,11 @@ describe("user profile policy", () => {
     expect(() => normalizeUserProfilePatchInput({ fullName: 1 })).toThrow(
       "User profile field 'fullName' must be a string"
     );
+  });
+
+  it("plans profile patch writes only when normalized patch data is present", () => {
+    expect(planUserProfilePatchChange({})).toEqual({ status: "noop" });
+    expect(planUserProfilePatchChange({ fullName: "Ada Lovelace" })).toEqual({ status: "write" });
   });
 
   it("guards expected profile versions", () => {

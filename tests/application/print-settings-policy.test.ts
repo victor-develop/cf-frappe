@@ -2,6 +2,7 @@ import {
   authorizePrintSettingsAdministration,
   ensurePrintSettingsExpectedVersion,
   normalizePrintSettingsPatchInput,
+  planPrintSettingsPatchChange,
   resolvePrintSettingsTenant
 } from "../../src/application/print-settings-policy.js";
 import { SYSTEM_MANAGER_ROLE } from "../../src/core/types.js";
@@ -58,6 +59,11 @@ describe("print settings policy", () => {
     expect(() =>
       normalizePrintSettingsPatchInput({ defaultLayout: { font: { family: "Inter; color:red" } } })
     ).toThrow("Print settings layout font family contains unsupported characters");
+  });
+
+  it("plans print settings patch writes only when normalized patch data is present", () => {
+    expect(planPrintSettingsPatchChange({})).toEqual({ status: "noop" });
+    expect(planPrintSettingsPatchChange({ defaultLayout: null })).toEqual({ status: "write" });
   });
 
   it("guards expected print settings versions", () => {

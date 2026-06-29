@@ -24,7 +24,8 @@ import {
 import {
   authorizePrintSettingsAdministration,
   ensurePrintSettingsExpectedVersion,
-  normalizePrintSettingsPatchInput
+  normalizePrintSettingsPatchInput,
+  planPrintSettingsPatchChange
 } from "./print-settings-policy.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
@@ -77,7 +78,7 @@ export class PrintSettingsService {
     const patch = normalizePrintSettingsPatchInput(command.settings);
     const state = await this.stateFor(tenantId);
     ensurePrintSettingsExpectedVersion(state, command.expectedVersion);
-    if (Object.keys(patch).length === 0) {
+    if (planPrintSettingsPatchChange(patch).status === "noop") {
       return state;
     }
     const saved = await this.appendSettingsChangedEvent({

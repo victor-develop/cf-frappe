@@ -58,6 +58,14 @@ export function normalizeUserProfilePatchInput(input: UserProfileInput | Record<
   }
 }
 
+export type UserProfilePatchChangeDecision =
+  | { readonly status: "write" }
+  | { readonly status: "noop" };
+
+export function planUserProfilePatchChange(patch: UserProfilePatch): UserProfilePatchChangeDecision {
+  return Object.keys(patch).length === 0 ? { status: "noop" } : { status: "write" };
+}
+
 export function ensureUserProfileExpectedVersion(
   state: UserProfileState,
   expectedVersion: number | undefined
