@@ -1,3 +1,4 @@
+import { domainEventPayloadKind } from "../core/domain-events.js";
 import { foldUserPermissions, type UserPermissionGrant, type UserPermissionState } from "../core/user-permissions.js";
 import type {
   Actor,
@@ -26,10 +27,14 @@ export type UserPermissionEventPayload =
       readonly applicableDoctypes?: readonly DocTypeName[];
     };
 
+export type UserPermissionPayloadKind = UserPermissionEventPayload["kind"];
+
 export const USER_PERMISSION_PAYLOAD_KINDS = Object.freeze([
   "UserPermissionAllowed",
   "UserPermissionRevoked"
-] as const);
+] as const satisfies readonly UserPermissionPayloadKind[]);
+
+const USER_PERMISSION_PAYLOAD_KIND_SET = new Set<string>(USER_PERMISSION_PAYLOAD_KINDS);
 
 export interface UserPermissionPayloadOptions {
   readonly kind: UserPermissionEventPayload["kind"];
@@ -74,8 +79,16 @@ export function userPermissionEvent<TPayload extends UserPermissionEventPayload>
   };
 }
 
-export function userPermissionEventType(payload: UserPermissionEventPayload): UserPermissionEventPayload["kind"] {
+export function userPermissionEventType(payload: UserPermissionEventPayload): UserPermissionPayloadKind {
   return payload.kind;
+}
+
+export function isUserPermissionPayloadKind(kind: string): kind is UserPermissionPayloadKind {
+  return USER_PERMISSION_PAYLOAD_KIND_SET.has(kind);
+}
+
+export function isUserPermissionEvent(event: DomainEvent): event is DomainEvent<UserPermissionEventPayload> {
+  return isUserPermissionPayloadKind(domainEventPayloadKind(event));
 }
 
 export function userPermissionDocumentName(payload: UserPermissionEventPayload): string {

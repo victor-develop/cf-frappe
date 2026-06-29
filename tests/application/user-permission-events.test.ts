@@ -1,5 +1,7 @@
 import {
   foldUserPermissions,
+  isUserPermissionEvent,
+  isUserPermissionPayloadKind,
   replayUserPermissionAppend,
   USER_PERMISSION_PAYLOAD_KINDS,
   userPermissionDocumentName,
@@ -110,7 +112,33 @@ describe("user permission events", () => {
       "UserPermissionRevoked"
     ]);
   });
+
+  it("narrows user permission events by payload kind when event type names are custom", () => {
+    const allowed = allowedEvent(1);
+    const imported = { ...allowed, type: "ProjectAccessGrantedByPolicy" };
+
+    expect(isUserPermissionPayloadKind("UserPermissionAllowed")).toBe(true);
+    expect(isUserPermissionPayloadKind("DocumentDeleted")).toBe(false);
+    expect(isUserPermissionEvent(imported)).toBe(true);
+    expect(isUserPermissionEvent(event({ kind: "DocumentDeleted" }))).toBe(false);
+  });
 });
+
+function event(payload: DomainEvent["payload"], type: string = payload.kind): DomainEvent {
+  return {
+    id: "evt_other",
+    tenantId: "acme",
+    stream: "acme:Note:NOTE-1",
+    sequence: 1,
+    type,
+    doctype: "Note",
+    documentName: "NOTE-1",
+    actorId: admin.id,
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    payload,
+    metadata: {}
+  };
+}
 
 function allowedEvent(sequence: number): DomainEvent {
   return {
