@@ -4,6 +4,9 @@ import {
   buildReportCharts,
   buildReportGroups,
   buildReportOrderOptions,
+  buildReportSummary,
+  clampReportCsvExportLimit,
+  clampReportRunLimit,
   combineReportFilterExpression,
   coerceReportFilterValue,
   isEmptyReportFilterValue,
@@ -16,8 +19,10 @@ import {
   projectReportDocumentRow,
   projectReportRow,
   reportAggregateValue,
+  reportCsvHeader,
   reportChartDrilldown,
   reportDocumentColumnValue,
+  reportRowToCsv,
   reportRowColumnValue,
   reportSortValue,
   resolveReportOrder,
@@ -73,6 +78,16 @@ describe("report policy", () => {
     expect(reportAggregateValue({ name: "present_count", aggregate: "count", field: "count" }, rows)).toBe(2);
   });
 
+  it("builds report summary lists by delegating each summary definition", () => {
+    expect(buildReportSummary(rows, [
+      { name: "row_count", aggregate: "count" },
+      { name: "total_count", label: "Total Count", aggregate: "sum", field: "count" }
+    ])).toEqual([
+      { name: "row_count", label: "row_count", aggregate: "count", type: "integer", value: 4 },
+      { name: "total_count", label: "Total Count", aggregate: "sum", field: "count", value: 10 }
+    ]);
+  });
+
   it("computes numeric sum and average summaries while ignoring non-numeric values", () => {
     expect(reportAggregateValue({ name: "total", aggregate: "sum", field: "count" }, rows)).toBe(10);
     expect(reportAggregateValue({ name: "average", aggregate: "avg", field: "count" }, rows)).toBe(5);
@@ -88,6 +103,29 @@ describe("report policy", () => {
   it("requires fields for non-count report summaries", () => {
     expect(() => reportAggregateValue({ name: "total", aggregate: "sum" }, rows))
       .toThrow("Report summary 'total' requires a field for sum");
+  });
+
+  it("normalizes report run and CSV export limits at the policy boundary", () => {
+    expect(clampReportRunLimit(undefined)).toBe(50);
+    expect(clampReportRunLimit(500)).toBe(200);
+    expect(clampReportCsvExportLimit(undefined)).toBe(10_000);
+    expect(clampReportCsvExportLimit(20_000)).toBe(10_000);
+    expect(() => clampReportRunLimit(0)).toThrow("limit must be a positive integer");
+    expect(() => clampReportCsvExportLimit(0)).toThrow("CSV export limit must be a positive integer");
+  });
+
+  it("renders report CSV headers and rows with labels, missing cells, and escaped content", () => {
+    const columns = [
+      { name: "title", label: "Title" },
+      { name: "notes", label: "Notes" },
+      { name: "missing" }
+    ];
+
+    expect(reportCsvHeader(columns)).toBe("Title,Notes,missing");
+    expect(reportRowToCsv(columns, {
+      title: "Needs, quotes",
+      notes: "Line\nbreak"
+    })).toBe("\"Needs, quotes\",\"Line\nbreak\",");
   });
 
   it("reads primitive report row values only", () => {

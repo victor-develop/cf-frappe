@@ -9,18 +9,20 @@ import {
   type ReportDefinition,
   type ReportFilterExpression,
   type ReportFilterValue,
-  type ReportOrder,
-  type ReportSummaryDefinition
+  type ReportOrder
 } from "../core/reports.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { Actor, DocTypeDefinition, DocumentSnapshot } from "../core/types.js";
 import { QueryService } from "./query-service.js";
-import { CSV_CONTENT_TYPE, csvLine, filenamePart } from "./csv.js";
+import { CSV_CONTENT_TYPE, filenamePart } from "./csv.js";
 import {
   BoundedOrderedReportRows,
   buildReportFilterControls,
   buildReportCharts,
   buildReportGroups,
+  buildReportSummary,
+  clampReportCsvExportLimit,
+  clampReportRunLimit,
   combineReportFilterExpression,
   limitReportGroups,
   materializeReportFilterExpression,
@@ -29,8 +31,9 @@ import {
   matchesReportRowFilters,
   projectReportDocumentRow,
   projectReportRow,
+  reportCsvHeader,
+  reportRowToCsv,
   resolveReportOrder,
-  reportSummaryValue,
   sortReportDocuments,
   sortReportRows,
   type ReportChartResult,
@@ -55,8 +58,6 @@ export type {
   ReportRow,
   ReportSummaryValue
 } from "./report-policy.js";
-
-const DEFAULT_CSV_EXPORT_LIMIT = 10_000;
 
 export interface ReportRunOptions {
   readonly filters?: ReportFilters;
@@ -149,7 +150,7 @@ export class ReportService {
     if (isCustomReport(report)) {
       return this.runCustomReportDefinition(actor, report, doctype, options);
     }
-    const limit = clampLimit(options.limit);
+    const limit = clampReportRunLimit(options.limit);
     const offset = Math.max(0, options.offset ?? 0);
     const filterExpression = materializeReportFilterExpression(
       report,
@@ -197,7 +198,7 @@ export class ReportService {
     if (isCustomReport(report)) {
       return this.exportCustomReportCsv(actor, report, doctype, options);
     }
-    const limit = clampCsvExportLimit(options.limit);
+    const limit = clampReportCsvExportLimit(options.limit);
     const filterExpression = materializeReportFilterExpression(
       report,
       doctype,
@@ -271,7 +272,7 @@ export class ReportService {
     doctype: DocTypeDefinition,
     options: ReportRunOptions
   ): Promise<ReportRunResult> {
-    const limit = clampLimit(options.limit);
+    const limit = clampReportRunLimit(options.limit);
     const offset = Math.max(0, options.offset ?? 0);
     const filterExpression = materializeReportFilterExpression(
       report,
@@ -307,7 +308,7 @@ export class ReportService {
     doctype: DocTypeDefinition,
     options: ReportCsvExportOptions
   ): Promise<ReportCsvExport> {
-    const limit = clampCsvExportLimit(options.limit);
+    const limit = clampReportCsvExportLimit(options.limit);
     const filterExpression = materializeReportFilterExpression(
       report,
       doctype,
@@ -400,39 +401,4 @@ export class ReportService {
     const documents = await this.listAllReadableDocuments(actor, report.doctype);
     return documents.filter((document) => matchesReportFilters(document, report, input, filterExpression));
   }
-}
-
-function reportCsvHeader(columns: readonly ReportColumnDefinition[]): string {
-  return csvLine(columns.map((column) => column.label ?? column.name));
-}
-
-function reportRowToCsv(columns: readonly ReportColumnDefinition[], row: ReportRow): string {
-  return csvLine(columns.map((column) => row[column.name]));
-}
-
-function clampCsvExportLimit(limit: number | undefined): number {
-  if (limit === undefined) {
-    return DEFAULT_CSV_EXPORT_LIMIT;
-  }
-  if (!Number.isInteger(limit) || limit < 1) {
-    throw badRequest("CSV export limit must be a positive integer");
-  }
-  return Math.min(limit, DEFAULT_CSV_EXPORT_LIMIT);
-}
-
-function buildReportSummary(
-  rows: readonly ReportRow[],
-  summaries: readonly ReportSummaryDefinition[]
-): readonly ReportSummaryValue[] {
-  return summaries.map((summary) => reportSummaryValue(summary, rows));
-}
-
-function clampLimit(limit?: number): number {
-  if (limit === undefined) {
-    return 50;
-  }
-  if (!Number.isInteger(limit) || limit < 1) {
-    throw badRequest("limit must be a positive integer");
-  }
-  return Math.min(limit, 200);
 }

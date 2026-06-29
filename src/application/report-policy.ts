@@ -1,4 +1,5 @@
 import { badRequest } from "../core/errors.js";
+import { csvLine } from "./csv.js";
 import type {
   ReportChartDefinition,
   ReportChartOrder,
@@ -101,6 +102,7 @@ export interface ReportOrderInput {
 }
 
 const EMPTY_CHART_COLORS: readonly string[] = Object.freeze([]);
+const DEFAULT_CSV_EXPORT_LIMIT = 10_000;
 
 export function reportSummaryValue(
   summary: ReportSummaryDefinition,
@@ -115,6 +117,41 @@ export function reportSummaryValue(
     ...(summary.type ? { type: summary.type } : summary.aggregate === "count" ? { type: "integer" } : {}),
     ...(summary.indicator ? { indicator: summary.indicator } : {})
   };
+}
+
+export function buildReportSummary(
+  rows: readonly ReportRow[],
+  summaries: readonly ReportSummaryDefinition[]
+): readonly ReportSummaryValue[] {
+  return summaries.map((summary) => reportSummaryValue(summary, rows));
+}
+
+export function reportCsvHeader(columns: readonly ReportColumnDefinition[]): string {
+  return csvLine(columns.map((column) => column.label ?? column.name));
+}
+
+export function reportRowToCsv(columns: readonly ReportColumnDefinition[], row: ReportRow): string {
+  return csvLine(columns.map((column) => row[column.name]));
+}
+
+export function clampReportCsvExportLimit(limit: number | undefined): number {
+  if (limit === undefined) {
+    return DEFAULT_CSV_EXPORT_LIMIT;
+  }
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw badRequest("CSV export limit must be a positive integer");
+  }
+  return Math.min(limit, DEFAULT_CSV_EXPORT_LIMIT);
+}
+
+export function clampReportRunLimit(limit?: number): number {
+  if (limit === undefined) {
+    return 50;
+  }
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw badRequest("limit must be a positive integer");
+  }
+  return Math.min(limit, 200);
 }
 
 export function reportAggregateValue(summary: ReportSummaryDefinition, rows: readonly ReportRow[]): JsonPrimitive {
