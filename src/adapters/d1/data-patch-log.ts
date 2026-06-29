@@ -1,4 +1,12 @@
 import { FrameworkError } from "../../core/errors.js";
+import {
+  assertDataPatchChecksumMatches,
+  assertRetryableFailedJournal,
+  assertRetryableRollbackFailedJournal,
+  assertRollbackClaimableJournal,
+  dataPatchRetryUnavailable,
+  dataPatchRollbackRetryUnavailable
+} from "../../application/data-patch-journal-policy.js";
 import type {
   AppliedDataPatch,
   ClaimDataPatch,
@@ -71,13 +79,7 @@ export class D1DataPatchLog implements DataPatchLog {
         status: 409
       });
     }
-    if (row.checksum !== patch.checksum) {
-      throw new FrameworkError(
-        "DATA_PATCH_CHECKSUM_MISMATCH",
-        `Recorded data patch '${patch.id}' has checksum '${row.checksum}' but planned '${patch.checksum}'`,
-        { status: 409 }
-      );
-    }
+    assertDataPatchChecksumMatches(patch.id, patch.checksum, row.checksum);
     return claimResultFromRow(row, patch.claimId);
   }
 
@@ -130,7 +132,7 @@ export class D1DataPatchLog implements DataPatchLog {
   async retryFailedDataPatch(patch: RetryFailedDataPatch): Promise<void> {
     await this.ensureDataPatchTable();
     const row = await this.row(patch.id);
-    assertRetryableFailedRow(row, patch.id, patch.checksum);
+    assertRetryableFailedJournal(row, patch.id, patch.checksum);
     const result = await this.db
       .prepare(
         `DELETE FROM cf_frappe_data_patches
@@ -149,7 +151,7 @@ export class D1DataPatchLog implements DataPatchLog {
   async retryFailedDataPatchRollback(patch: RetryFailedDataPatchRollback) {
     await this.ensureDataPatchTable();
     const row = await this.row(patch.id);
-    assertRetryableFailedRollbackRow(row, patch.id, patch.checksum);
+    assertRetryableRollbackFailedJournal(row, patch.id, patch.checksum);
     const result = await this.db
       .prepare(
         `UPDATE cf_frappe_data_patches
@@ -187,7 +189,7 @@ export class D1DataPatchLog implements DataPatchLog {
   async claimDataPatchRollback(patch: ClaimRollbackDataPatch): Promise<DataPatchRollbackClaimResult> {
     await this.ensureDataPatchTable();
     const row = await this.row(patch.id);
-    assertRollbackClaimableRow(row, patch.id, patch.checksum);
+    assertRollbackClaimableJournal(row, patch.id, patch.checksum);
     if (row.status !== "applied") {
       return rollbackClaimResultFromRow(row);
     }
@@ -207,7 +209,7 @@ export class D1DataPatchLog implements DataPatchLog {
       .run();
     if (changedRows(result) === 0) {
       const changed = await this.row(patch.id);
-      assertRollbackClaimableRow(changed, patch.id, patch.checksum);
+      assertRollbackClaimableJournal(changed, patch.id, patch.checksum);
       return rollbackClaimResultFromRow(changed);
     }
     return {
@@ -303,123 +305,12 @@ export class D1DataPatchLog implements DataPatchLog {
   }
 }
 
-function invalidStatus(row: DataPatchRow): FrameworkError {
-  return new FrameworkError(
-    "DATA_PATCH_INVALID",
-    `Data patch '${row.id}' has invalid journal status '${row.status}'`,
-    { status: 409 }
-  );
-}
-
 function assertChanged(result: unknown, id: string): void {
   if (changedRows(result) === 0) {
     throw new FrameworkError("DATA_PATCH_PENDING", `Data patch '${id}' is not claimed by this runner`, {
       status: 409
     });
   }
-}
-
-function assertRetryableFailedRow(
-  row: DataPatchRow | undefined,
-  id: string,
-  checksum: string
-): asserts row is DataPatchRow & { readonly status: "failed" } {
-  if (row === undefined) {
-    throw dataPatchRetryUnavailable(id, "no failed journal entry exists");
-  }
-  if (row.checksum !== checksum) {
-    throw new FrameworkError(
-      "DATA_PATCH_CHECKSUM_MISMATCH",
-      `Recorded data patch '${id}' has checksum '${row.checksum}' but planned '${checksum}'`,
-      { status: 409 }
-    );
-  }
-  if (row.status === "failed") {
-    return;
-  }
-  if (row.status === "pending") {
-    throw new FrameworkError(
-      "DATA_PATCH_PENDING",
-      `Data patch '${id}' is already claimed and has not completed`,
-      { status: 409 }
-    );
-  }
-  if (row.status === "applied") {
-    throw dataPatchRetryUnavailable(id, "journal status is 'applied'");
-  }
-  if (row.status === "rollback_pending" || row.status === "rolled_back" || row.status === "rollback_failed") {
-    throw dataPatchRetryUnavailable(id, `journal status is '${row.status}'`);
-  }
-  throw invalidStatus(row);
-}
-
-function assertRetryableFailedRollbackRow(
-  row: DataPatchRow | undefined,
-  id: string,
-  checksum: string
-): asserts row is DataPatchRow & { readonly status: "rollback_failed" } {
-  if (row === undefined) {
-    throw dataPatchRollbackRetryUnavailable(id, "no failed rollback journal entry exists");
-  }
-  if (row.checksum !== checksum) {
-    throw new FrameworkError(
-      "DATA_PATCH_CHECKSUM_MISMATCH",
-      `Recorded data patch '${id}' has checksum '${row.checksum}' but planned '${checksum}'`,
-      { status: 409 }
-    );
-  }
-  if (row.status === "rollback_failed") {
-    return;
-  }
-  if (row.status === "pending") {
-    throw new FrameworkError(
-      "DATA_PATCH_PENDING",
-      `Data patch '${id}' is already claimed and has not completed`,
-      { status: 409 }
-    );
-  }
-  if (row.status === "failed") {
-    throw new FrameworkError("DATA_PATCH_FAILED", `Data patch '${id}' failed and must be retried first`, {
-      status: 409
-    });
-  }
-  if (row.status === "rollback_pending") {
-    throw new FrameworkError("DATA_PATCH_ROLLBACK_PENDING", `Data patch '${id}' rollback is pending`, {
-      status: 409
-    });
-  }
-  if (row.status === "applied" || row.status === "rolled_back") {
-    throw dataPatchRollbackRetryUnavailable(id, `journal status is '${row.status}'`);
-  }
-  throw invalidStatus(row);
-}
-
-function assertRollbackClaimableRow(
-  row: DataPatchRow | undefined,
-  id: string,
-  checksum: string
-): asserts row is DataPatchRow {
-  if (row === undefined) {
-    throw dataPatchRollbackUnavailable(id, "no applied journal entry exists");
-  }
-  if (row.checksum !== checksum) {
-    throw new FrameworkError(
-      "DATA_PATCH_CHECKSUM_MISMATCH",
-      `Recorded data patch '${id}' has checksum '${row.checksum}' but planned '${checksum}'`,
-      { status: 409 }
-    );
-  }
-  if (
-    row.status === "applied" ||
-    row.status === "pending" ||
-    row.status === "failed" ||
-    row.status === "rollback_pending" ||
-    row.status === "rolled_back" ||
-    row.status === "rollback_failed"
-  ) {
-    return;
-  }
-  throw invalidStatus(row);
 }
 
 function assertRetryCleared(result: unknown, id: string): void {
@@ -451,28 +342,4 @@ function changedRows(result: unknown): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
-}
-
-function dataPatchRetryUnavailable(id: string, reason: string): FrameworkError {
-  return new FrameworkError(
-    "DATA_PATCH_RETRY_UNAVAILABLE",
-    `Data patch '${id}' cannot be retried because ${reason}`,
-    { status: 409 }
-  );
-}
-
-function dataPatchRollbackRetryUnavailable(id: string, reason: string): FrameworkError {
-  return new FrameworkError(
-    "DATA_PATCH_ROLLBACK_RETRY_UNAVAILABLE",
-    `Data patch '${id}' rollback cannot be retried because ${reason}`,
-    { status: 409 }
-  );
-}
-
-function dataPatchRollbackUnavailable(id: string, reason: string): FrameworkError {
-  return new FrameworkError(
-    "DATA_PATCH_ROLLBACK_UNAVAILABLE",
-    `Data patch '${id}' cannot be rolled back because ${reason}`,
-    { status: 409 }
-  );
 }

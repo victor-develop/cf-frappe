@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted data-patch journal retry and rollback claimability policy from D1 data-patch-log I/O and covered retry, rollback-retry, and rollback-claim status guards directly.
 - Extracted D1 data-patch journal row/result serde from data-patch-log I/O and covered direct row projection, rollback result JSON, and invalid-result guards.
 - Extracted D1 job execution query planning from job-execution-log I/O and covered bound list-filter SQL planning with default limits.
 - Extracted D1 projection query planning from projection-store I/O and covered system updatedAt ordering without JSON path extraction.

@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the D1 data-patch journal serde slice:
+As of the data-patch journal policy slice:
 
-- Vitest files: `196`
-- Vitest cases: `2398`
-- Remaining gap to Frappe static markers: `386`
+- Vitest files: `197`
+- Vitest cases: `2401`
+- Remaining gap to Frappe static markers: `383`
 
 ## Implication
 
