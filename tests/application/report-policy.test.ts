@@ -9,8 +9,10 @@ import {
   clampReportRunLimit,
   combineReportFilterExpression,
   coerceReportFilterValue,
+  customReportProviderName,
   defineDocType,
   defineReport,
+  ensureCustomReportProviderConfigured,
   isEmptyReportFilterValue,
   limitReportGroups,
   materializeReportFilterExpression,
@@ -64,6 +66,32 @@ describe("report policy", () => {
       status: "deny",
       message: "Actor 'guest' cannot read report 'Private Report'"
     });
+  });
+
+  it("guards custom row-provider lookup semantics", () => {
+    const report = defineReport({
+      name: "External Report",
+      doctype: "External Row",
+      source: { kind: "custom", provider: "external" },
+      columns: [{ name: "title" }]
+    });
+    const provider = { rows: async () => rows };
+    const lookup = { report, providerName: customReportProviderName(report), provider };
+
+    ensureCustomReportProviderConfigured(lookup);
+
+    expect(lookup.providerName).toBe("external");
+    expect(lookup.provider).toBe(provider);
+    expect(() => ensureCustomReportProviderConfigured({
+      report,
+      providerName: "external",
+      provider: undefined
+    })).toThrow("Custom report provider 'external' is not configured");
+    expect(() => ensureCustomReportProviderConfigured({
+      report: defineReport({ name: "Document Report", doctype: "Task", columns: [{ name: "title" }] }),
+      providerName: undefined,
+      provider: undefined
+    })).toThrow("Custom report provider 'Document Report' is not configured");
   });
 
   it("shapes report summary values with labels, fields, types, and indicators", () => {

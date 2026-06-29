@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the user-profile account lookup policy slice:
+As of the report custom-provider lookup policy slice:
 
 - Vitest files: `233`
-- Vitest cases: `2680`
-- Remaining gap to Frappe static markers: `104`
+- Vitest cases: `2681`
+- Remaining gap to Frappe static markers: `103`
 
 ## Implication
 

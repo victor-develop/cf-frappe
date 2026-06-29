@@ -1,4 +1,4 @@
-import { badRequest, permissionDenied } from "../core/errors.js";
+import { permissionDenied } from "../core/errors.js";
 import {
   assertReportDefinition,
   assertReportMatchesDocType,
@@ -22,6 +22,8 @@ import {
   clampReportCsvExportLimit,
   clampReportRunLimit,
   combineReportFilterExpression,
+  customReportProviderName,
+  ensureCustomReportProviderConfigured,
   limitReportGroups,
   materializeReportFilterExpression,
   materializeReportFilters,
@@ -339,12 +341,11 @@ export class ReportService {
     filters: ReportFilters,
     filterExpression: ReportFilterExpression | undefined
   ): Promise<readonly ReportRow[]> {
-    const providerName = report.source?.kind === "custom" ? report.source.provider : undefined;
+    const providerName = customReportProviderName(report);
     const provider = providerName === undefined ? undefined : this.rowProviders[providerName];
-    if (!provider || providerName === undefined) {
-      throw badRequest(`Custom report provider '${providerName ?? report.name}' is not configured`);
-    }
-    return provider.rows({
+    const lookup = { report, providerName, provider };
+    ensureCustomReportProviderConfigured(lookup);
+    return lookup.provider.rows({
       actor,
       report,
       filters,

@@ -126,6 +126,24 @@ export function planReportReadAccess(command: {
   return { status: "allow" };
 }
 
+export function customReportProviderName(report: ReportDefinition): string | undefined {
+  return report.source?.kind === "custom" ? report.source.provider : undefined;
+}
+
+export function ensureCustomReportProviderConfigured<T>(input: {
+  readonly report: ReportDefinition;
+  readonly providerName?: string | undefined;
+  readonly provider?: T | undefined;
+}): asserts input is {
+  readonly report: ReportDefinition;
+  readonly providerName: string;
+  readonly provider: T;
+} {
+  if (input.providerName === undefined || input.provider === undefined) {
+    throw badRequest(`Custom report provider '${input.providerName ?? input.report.name}' is not configured`);
+  }
+}
+
 export function reportSummaryValue(
   summary: ReportSummaryDefinition,
   rows: readonly ReportRow[]
