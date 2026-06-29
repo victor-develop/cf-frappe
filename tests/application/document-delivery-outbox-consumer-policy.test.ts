@@ -6,6 +6,7 @@ import {
   documentDeliveryOutboxRetryAt,
   documentDeliveryOutboxRetryDelaySeconds,
   documentDeliveryOutboxSourceFromRecord,
+  ensureDocumentDeliveryOutboxConsumerAvailable,
   hasQueuedDocumentDeliveryEmailMessageId,
   parseDocumentDeliveryOutboxDrainJobClaimId,
   parseDocumentDeliveryOutboxDrainJobLimit
@@ -32,6 +33,22 @@ describe("document delivery outbox consumer policy", () => {
     expect(deliveries.filter(hasQueuedDocumentDeliveryEmailMessageId)).toEqual([
       { status: "queued", messageId: "msg_ready" }
     ]);
+  });
+
+  it("guards drain consumer availability before job execution", () => {
+    const consumer = { drain: async () => ({ tenantId: "acme", claimed: 0, delivered: 0, failed: 0, outcomes: [] }) };
+
+    expect(() => ensureDocumentDeliveryOutboxConsumerAvailable(consumer)).not.toThrow();
+    expect(() => ensureDocumentDeliveryOutboxConsumerAvailable(undefined)).toThrow(
+      "Document delivery outbox consumer is not available"
+    );
+    let error: unknown;
+    try {
+      ensureDocumentDeliveryOutboxConsumerAvailable(undefined);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({ code: "DOCUMENT_NOT_FOUND" });
   });
 
   it("normalizes drain limits with bounded defaults", () => {

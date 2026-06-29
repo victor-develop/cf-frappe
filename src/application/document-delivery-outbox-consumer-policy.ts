@@ -1,5 +1,5 @@
 import { hasDomainEventPayloadKind } from "../core/domain-events.js";
-import { badRequest } from "../core/errors.js";
+import { badRequest, notFound } from "../core/errors.js";
 import type { DocumentData, DocumentSnapshot, DomainEvent, TenantId } from "../core/types.js";
 import type { DocumentDeliveryOutboxRecord, DocumentDeliveryOutboxTarget } from "./document-delivery-outbox-events.js";
 
@@ -21,6 +21,12 @@ export interface DocumentDeliveryOutboxDrainResult {
   readonly delivered: number;
   readonly failed: number;
   readonly outcomes: readonly DocumentDeliveryOutboxDeliveryOutcome[];
+}
+
+export function ensureDocumentDeliveryOutboxConsumerAvailable<T>(consumer: T | undefined): asserts consumer is T {
+  if (consumer === undefined) {
+    throw notFound("Document delivery outbox consumer is not available");
+  }
 }
 
 export function documentDeliveryOutboxErrorMessage(error: unknown): string {

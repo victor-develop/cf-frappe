@@ -1,4 +1,4 @@
-import { badRequest, notFound } from "../core/errors.js";
+import { badRequest } from "../core/errors.js";
 import { domainEventPayloadKind } from "../core/domain-events.js";
 import { realtimeEventFromDomainEvent, realtimeUserNotificationsFromDomainEvent } from "../core/realtime.js";
 import type { JobDefinition, JobPayload } from "../core/jobs.js";
@@ -17,6 +17,7 @@ import {
   documentDeliveryOutboxRetryAt,
   documentDeliveryOutboxRetryDelaySeconds,
   documentDeliveryOutboxSourceFromRecord,
+  ensureDocumentDeliveryOutboxConsumerAvailable,
   hasQueuedDocumentDeliveryEmailMessageId,
   parseDocumentDeliveryOutboxDrainJobClaimId,
   parseDocumentDeliveryOutboxDrainJobLimit,
@@ -311,9 +312,7 @@ export function createDocumentDeliveryOutboxDrainJob<
     retry: { maxAttempts: 3, baseDelaySeconds: 30, maxDelaySeconds: 300 },
     async handler({ tenantId, payload, resources }) {
       const consumer = resources.documentDeliveryOutboxConsumer;
-      if (consumer === undefined) {
-        throw notFound("Document delivery outbox consumer is not available");
-      }
+      ensureDocumentDeliveryOutboxConsumerAvailable(consumer);
       const limit = parseDocumentDeliveryOutboxDrainJobLimit(payload.limit);
       const claimId = parseDocumentDeliveryOutboxDrainJobClaimId(payload.claimId);
       const result = await consumer.drain({

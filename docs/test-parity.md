@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the email-notification job availability policy slice:
+As of the document-delivery outbox drain job availability policy slice:
 
 - Vitest files: `233`
-- Vitest cases: `2684`
-- Remaining gap to Frappe static markers: `100`
+- Vitest cases: `2685`
+- Remaining gap to Frappe static markers: `99`
 
 ## Implication
 
