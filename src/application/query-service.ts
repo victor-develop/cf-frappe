@@ -59,6 +59,10 @@ import {
   planProjectionPageScan,
   toLinkOption
 } from "./document-query-policy.js";
+import {
+  resolveTenantDocType,
+  type TenantDocTypeResolver
+} from "./document-tenant-policy.js";
 
 export interface QueryServiceOptions {
   readonly registry: ModelRegistry;
@@ -68,10 +72,7 @@ export interface QueryServiceOptions {
   readonly documentShares?: DocumentShareProvider;
 }
 
-export type QueryServiceDocTypeResolver = (
-  base: DocTypeDefinition,
-  context: { readonly actor: Actor; readonly tenantId: string }
-) => DocTypeDefinition | Promise<DocTypeDefinition>;
+export type QueryServiceDocTypeResolver = TenantDocTypeResolver;
 
 export interface DocumentCsvExportOptions {
   readonly tenantId?: string;
@@ -408,7 +409,7 @@ export class QueryService {
     actor: Actor,
     tenantId: string
   ): Promise<DocTypeDefinition> {
-    return (await this.doctypeResolver?.(base, { actor, tenantId })) ?? base;
+    return resolveTenantDocType(base, { actor, tenantId }, this.doctypeResolver);
   }
 
   private async collectLinkOptions(

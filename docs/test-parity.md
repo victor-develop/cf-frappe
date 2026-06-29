@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document shared-permission resolution slice:
+As of the tenant DocType context resolution slice:
 
 - Vitest files: `196`
-- Vitest cases: `2253`
-- Remaining gap to Frappe static markers: `531`
+- Vitest cases: `2256`
+- Remaining gap to Frappe static markers: `528`
 
 ## Implication
 

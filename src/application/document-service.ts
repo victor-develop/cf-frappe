@@ -92,11 +92,15 @@ import {
 } from "./document-naming.js";
 import {
   applyFetchedFields,
-  relatedDocTypeNames,
   validateDocumentLinks,
   type RelatedDocTypeResolver
 } from "./document-reference-policy.js";
-import { resolveTenant } from "./document-tenant-policy.js";
+import {
+  resolveTenant,
+  resolveTenantDocType,
+  resolveTenantDocTypeContext,
+  type TenantDocTypeResolver
+} from "./document-tenant-policy.js";
 import {
   allowOnSubmitIssues,
   childTableOriginIssues,
@@ -166,10 +170,7 @@ export interface DocumentServiceOptions {
   readonly afterCommit?: (context: AfterCommitContext) => void | Promise<void>;
 }
 
-export type DocumentServiceDocTypeResolver = (
-  base: DocTypeDefinition,
-  context: { readonly actor: Actor; readonly tenantId: string }
-) => DocTypeDefinition | Promise<DocTypeDefinition>;
+export type DocumentServiceDocTypeResolver = TenantDocTypeResolver;
 
 interface DocumentServiceDocTypeContext {
   readonly doctype: DocTypeDefinition;
@@ -1695,42 +1696,12 @@ export class DocumentService implements DocumentCommandExecutor {
     tenantId: string
   ): Promise<DocumentServiceDocTypeContext> {
     const root = await this.doctypeFor(actor, doctypeName, tenantId);
-    const related = new Map<string, DocTypeDefinition>();
-    related.set(root.name, root);
-    await this.resolveReachableDocTypes(root, actor, tenantId, related);
-    return {
-      doctype: root,
-      relatedDocType: (name) => related.get(name)
-    };
+    return resolveTenantDocTypeContext(root, (name) => this.doctypeFor(actor, name, tenantId));
   }
 
   private async doctypeFor(actor: Actor, doctypeName: string, tenantId: string): Promise<DocTypeDefinition> {
     const base = this.registry.get(doctypeName);
-    return this.resolveDocType(base, actor, tenantId);
-  }
-
-  private async resolveDocType(
-    base: DocTypeDefinition,
-    actor: Actor,
-    tenantId: string
-  ): Promise<DocTypeDefinition> {
-    return await this.doctypeResolver?.(base, { actor, tenantId }) ?? base;
-  }
-
-  private async resolveReachableDocTypes(
-    doctype: DocTypeDefinition,
-    actor: Actor,
-    tenantId: string,
-    related: Map<string, DocTypeDefinition>
-  ): Promise<void> {
-    for (const name of relatedDocTypeNames(doctype)) {
-      if (related.has(name)) {
-        continue;
-      }
-      const resolved = await this.doctypeFor(actor, name, tenantId);
-      related.set(name, resolved);
-      await this.resolveReachableDocTypes(resolved, actor, tenantId, related);
-    }
+    return resolveTenantDocType(base, { actor, tenantId }, this.doctypeResolver);
   }
 
   private async readDocumentFromEvents(
