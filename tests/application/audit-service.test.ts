@@ -7,6 +7,7 @@ import {
   deterministicIds,
   documentStream,
   fixedClock,
+  type DomainEvent,
   type PasswordHasher
 } from "../../src";
 import { createServices, data, manager, owner } from "../helpers";
@@ -326,6 +327,54 @@ describe("AuditService", () => {
     });
     expect(emailRequested.events[0]).toMatchObject({
       payload: { kind: "UserEmailVerificationRequested", tokenHash: "[redacted]" }
+    });
+  });
+
+  it("redacts sensitive audit payloads by payload kind instead of event type name", async () => {
+    const misleadingTypedAccountEvent: DomainEvent = {
+      id: "evt_account_created",
+      tenantId: "acme",
+      stream: "acme:__UserAccounts:owner%40example.com",
+      sequence: 1,
+      type: "NoteDeleted",
+      doctype: "__UserAccounts",
+      documentName: "owner@example.com",
+      actorId: admin.id,
+      occurredAt: "2026-01-02T00:00:00.000Z",
+      payload: {
+        kind: "UserAccountCreated",
+        userId: "owner@example.com",
+        email: "owner@example.com",
+        roles: ["User"],
+        passwordHash: "hash:secret-123",
+        enabled: true
+      },
+      metadata: {}
+    };
+    const audit = new AuditService({
+      events: {
+        searchEvents: async (query) => {
+          expect(query.payloadKinds).toEqual(["UserAccountCreated"]);
+          return [misleadingTypedAccountEvent];
+        },
+        readDocumentEvents: async () => []
+      }
+    });
+
+    const result = await audit.search(admin, {
+      doctype: "__UserAccounts",
+      name: "owner@example.com",
+      kind: "UserAccountCreated"
+    });
+
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({
+      type: "NoteDeleted",
+      payload: {
+        kind: "UserAccountCreated",
+        userId: "owner@example.com",
+        passwordHash: "[redacted]"
+      }
     });
   });
 

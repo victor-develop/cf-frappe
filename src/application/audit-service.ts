@@ -251,48 +251,57 @@ function isDeletedDocumentEvent(event: DomainEvent): boolean {
 }
 
 function redactSensitiveAuditPayload(event: DomainEvent): DomainEvent {
-  switch (event.payload.kind) {
-    case "UserAccountCreated":
-      return {
-        ...event,
-        payload: {
-          ...event.payload,
-          ...(event.payload.passwordHash === undefined ? {} : { passwordHash: "[redacted]" })
-        }
-      };
-    case "UserPasswordChanged":
-      return {
-        ...event,
-        payload: {
-          ...event.payload,
-          passwordHash: "[redacted]"
-        }
-      };
-    case "UserPasswordResetRequested":
-      return {
-        ...event,
-        payload: {
-          ...event.payload,
-          tokenHash: "[redacted]"
-        }
-      };
-    case "UserPasswordResetCompleted":
-      return {
-        ...event,
-        payload: {
-          ...event.payload,
-          passwordHash: "[redacted]"
-        }
-      };
-    case "UserEmailVerificationRequested":
-      return {
-        ...event,
-        payload: {
-          ...event.payload,
-          tokenHash: "[redacted]"
-        }
-      };
-    default:
-      return event;
+  if (isAuditEventPayloadKind(event, "UserAccountCreated")) {
+    return {
+      ...event,
+      payload: {
+        ...event.payload,
+        ...(event.payload.passwordHash === undefined ? {} : { passwordHash: "[redacted]" })
+      }
+    };
   }
+  if (isAuditEventPayloadKind(event, "UserPasswordChanged")) {
+    return {
+      ...event,
+      payload: {
+        ...event.payload,
+        passwordHash: "[redacted]"
+      }
+    };
+  }
+  if (isAuditEventPayloadKind(event, "UserPasswordResetRequested")) {
+    return {
+      ...event,
+      payload: {
+        ...event.payload,
+        tokenHash: "[redacted]"
+      }
+    };
+  }
+  if (isAuditEventPayloadKind(event, "UserPasswordResetCompleted")) {
+    return {
+      ...event,
+      payload: {
+        ...event.payload,
+        passwordHash: "[redacted]"
+      }
+    };
+  }
+  if (isAuditEventPayloadKind(event, "UserEmailVerificationRequested")) {
+    return {
+      ...event,
+      payload: {
+        ...event.payload,
+        tokenHash: "[redacted]"
+      }
+    };
+  }
+  return event;
+}
+
+function isAuditEventPayloadKind<TKind extends DocumentEventPayload["kind"]>(
+  event: DomainEvent,
+  kind: TKind
+): event is DomainEvent<Extract<DocumentEventPayload, { readonly kind: TKind }>> {
+  return domainEventPayloadKind(event) === kind;
 }
