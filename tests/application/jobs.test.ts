@@ -13,6 +13,8 @@ import {
   JobRetryService,
   JobScheduleService,
   DEFAULT_TENANT_ID,
+  JOB_SCHEDULE_DEFINITION_PAYLOAD_KINDS,
+  JOB_SCHEDULE_OVERRIDE_PAYLOAD_KINDS,
   jobScheduleDefinitionsStream,
   jobScheduleOverridesStream,
   permanentJobError,
@@ -664,6 +666,26 @@ describe("JobScheduleService", () => {
     });
 
     expect(payload.payload?.scope).toBe("daily");
+  });
+
+  it("reads runtime schedule state through bounded payload kind selectors", async () => {
+    const events = new RecordingReadOptionsJobScheduleEventStore();
+    const service = new JobScheduleService({
+      registry: createJobRegistry({ jobs: [] }),
+      schedules: [],
+      events
+    });
+
+    await service.dashboard({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" });
+
+    expect(events.reads).toContainEqual({
+      stream: jobScheduleOverridesStream("acme"),
+      options: { payloadKinds: JOB_SCHEDULE_OVERRIDE_PAYLOAD_KINDS }
+    });
+    expect(events.reads).toContainEqual({
+      stream: jobScheduleDefinitionsStream(),
+      options: { payloadKinds: JOB_SCHEDULE_DEFINITION_PAYLOAD_KINDS }
+    });
   });
 
   it("lists tenant-visible schedules with job metadata and dynamic flags", async () => {
@@ -1486,6 +1508,18 @@ class ReplayMissingDefinitionEventStore implements EventStore {
 
   async currentVersion(_stream: StreamName): Promise<number> {
     return 0;
+  }
+}
+
+class RecordingReadOptionsJobScheduleEventStore extends InMemoryEventStore {
+  readonly reads: Array<{
+    readonly stream: StreamName;
+    readonly options: ReadStreamOptions | undefined;
+  }> = [];
+
+  override readStream(stream: StreamName, options?: ReadStreamOptions): Promise<readonly DomainEvent[]> {
+    this.reads.push({ stream, options });
+    return super.readStream(stream, options);
   }
 }
 

@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Centralized job-schedule event payload-kind matching through domain events so runtime schedule definition and override stream selectors can rely on bounded event helpers instead of inline source payload-kind reads.
 - Centralized user-notification inbox event payload-kind matching through domain events so notification inbox stream selectors can rely on bounded event helpers instead of inline source payload-kind reads.
 - Centralized user-profile event payload-kind matching through domain events so profile stream selectors can rely on bounded event helpers instead of inline source payload-kind reads.
 - Centralized print-settings event payload-kind matching through domain events so print-settings stream selectors can rely on bounded event helpers instead of inline source payload-kind reads.
@@ -57,7 +58,6 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized field-property event payload-kind matching through domain events so field-property stream filters no longer need to read source event payload kinds inline.
 - Centralized custom-field event payload-kind matching through domain events so catalog stream filters no longer read source event payload kinds inline.
 - Centralized document-created event payload-kind matching in document lifecycle events so create-snapshot projection no longer reads source event payload kinds inline.
-- Centralized job-schedule event payload-kind matching in job schedule events so runtime schedule replay selectors no longer read event payload kinds inline.
 - Centralized document-delivery outbox source-event payload-kind validation in domain events so replayed delivery records no longer inspect source event payload kinds inline.
 - Centralized document-history timeline event-kind projection in domain events so timeline entries no longer read source event payload kinds inline.
 - Centralized audit deleted-event recovery selection in domain events so deleted-document recovery no longer reads source event payload kinds inline.

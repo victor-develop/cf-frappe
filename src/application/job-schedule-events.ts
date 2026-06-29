@@ -1,3 +1,4 @@
+import { domainEventPayloadKind } from "../core/domain-events.js";
 import { jobScheduleDefinitionsStream, jobScheduleOverridesStream } from "../core/streams.js";
 import type { DocumentData, DomainEvent, NewDomainEvent, TenantId } from "../core/types.js";
 
@@ -66,6 +67,34 @@ export type JobScheduleEventPayload =
       readonly scheduleId: string;
       readonly tenantId: TenantId;
     };
+
+export type JobSchedulePayloadKind = JobScheduleEventPayload["kind"];
+export type JobScheduleOverridePayloadKind = Extract<
+  JobSchedulePayloadKind,
+  "JobScheduleOverrideSet" | "JobSchedulePaused" | "JobScheduleOverrideCleared"
+>;
+export type JobScheduleDefinitionPayloadKind = Extract<
+  JobSchedulePayloadKind,
+  "JobScheduleSaved" | "JobScheduleDeleted"
+>;
+
+export const JOB_SCHEDULE_OVERRIDE_PAYLOAD_KINDS = Object.freeze([
+  "JobScheduleOverrideSet",
+  "JobSchedulePaused",
+  "JobScheduleOverrideCleared"
+] as const satisfies readonly JobScheduleOverridePayloadKind[]);
+
+export const JOB_SCHEDULE_DEFINITION_PAYLOAD_KINDS = Object.freeze([
+  "JobScheduleSaved",
+  "JobScheduleDeleted"
+] as const satisfies readonly JobScheduleDefinitionPayloadKind[]);
+
+export const JOB_SCHEDULE_PAYLOAD_KINDS = Object.freeze([
+  ...JOB_SCHEDULE_OVERRIDE_PAYLOAD_KINDS,
+  ...JOB_SCHEDULE_DEFINITION_PAYLOAD_KINDS
+] as const satisfies readonly JobSchedulePayloadKind[]);
+
+const JOB_SCHEDULE_PAYLOAD_KIND_SET = new Set<string>(JOB_SCHEDULE_PAYLOAD_KINDS);
 
 export interface JobScheduleSavedPayloadInput {
   readonly scheduleId: string;
@@ -255,11 +284,19 @@ export function jobScheduleDefinitionKey(tenantId: TenantId, scheduleId: string)
   return JSON.stringify([tenantId, scheduleId]);
 }
 
-export function isJobScheduleEventPayloadKind<TKind extends JobScheduleEventPayload["kind"]>(
+export function isJobSchedulePayloadKind(kind: string): kind is JobSchedulePayloadKind {
+  return JOB_SCHEDULE_PAYLOAD_KIND_SET.has(kind);
+}
+
+export function isJobScheduleEvent(event: DomainEvent): event is DomainEvent<JobScheduleEventPayload> {
+  return isJobSchedulePayloadKind(domainEventPayloadKind(event));
+}
+
+export function isJobScheduleEventPayloadKind<TKind extends JobSchedulePayloadKind>(
   event: DomainEvent,
   kind: TKind
 ): event is DomainEvent<Extract<JobScheduleEventPayload, { readonly kind: TKind }>> {
-  return event.payload.kind === kind;
+  return domainEventPayloadKind(event) === kind;
 }
 
 export function foldJobScheduleOverrides(

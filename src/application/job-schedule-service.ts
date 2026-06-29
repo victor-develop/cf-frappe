@@ -16,6 +16,8 @@ import {
   createJobScheduleSavedEvent,
   foldJobScheduleDefinitions,
   foldJobScheduleOverrides,
+  JOB_SCHEDULE_DEFINITION_PAYLOAD_KINDS,
+  JOB_SCHEDULE_OVERRIDE_PAYLOAD_KINDS,
   requireSavedRuntimeJobSchedule,
   runtimeJobScheduleForTenant,
   runtimeJobScheduleIndex,
@@ -602,14 +604,23 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
     if (!this.events) {
       return { tenantId, version: 0, overrides: new Map() };
     }
-    return foldJobScheduleOverrides(tenantId, await this.events.readStream(jobScheduleOverridesStream(tenantId)));
+    return foldJobScheduleOverrides(
+      tenantId,
+      await this.events.readStream(jobScheduleOverridesStream(tenantId), {
+        payloadKinds: JOB_SCHEDULE_OVERRIDE_PAYLOAD_KINDS
+      })
+    );
   }
 
   private async definitionState(): Promise<JobScheduleDefinitionState> {
     if (!this.events) {
       return { version: 0, schedules: new Map() };
     }
-    return foldJobScheduleDefinitions(await this.events.readStream(jobScheduleDefinitionsStream()));
+    return foldJobScheduleDefinitions(
+      await this.events.readStream(jobScheduleDefinitionsStream(), {
+        payloadKinds: JOB_SCHEDULE_DEFINITION_PAYLOAD_KINDS
+      })
+    );
   }
 
   private ensureRuntimeCronTrigger(cron: string): void {

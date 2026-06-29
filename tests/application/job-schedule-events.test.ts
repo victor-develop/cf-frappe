@@ -6,7 +6,12 @@ import {
   createJobScheduleSavedEvent,
   foldJobScheduleDefinitions,
   foldJobScheduleOverrides,
+  isJobScheduleEvent,
   isJobScheduleEventPayloadKind,
+  isJobSchedulePayloadKind,
+  JOB_SCHEDULE_DEFINITION_PAYLOAD_KINDS,
+  JOB_SCHEDULE_OVERRIDE_PAYLOAD_KINDS,
+  JOB_SCHEDULE_PAYLOAD_KINDS,
   jobScheduleDeletedPayload,
   jobScheduleDefinitionKey,
   jobScheduleDefinitionsStream,
@@ -182,6 +187,41 @@ describe("job schedule events", () => {
     });
   });
 
+  it("exposes bounded runtime schedule payload kind sets", () => {
+    expect(JOB_SCHEDULE_OVERRIDE_PAYLOAD_KINDS).toEqual([
+      "JobScheduleOverrideSet",
+      "JobSchedulePaused",
+      "JobScheduleOverrideCleared"
+    ]);
+    expect(JOB_SCHEDULE_DEFINITION_PAYLOAD_KINDS).toEqual([
+      "JobScheduleSaved",
+      "JobScheduleDeleted"
+    ]);
+    expect(JOB_SCHEDULE_PAYLOAD_KINDS).toEqual([
+      "JobScheduleOverrideSet",
+      "JobSchedulePaused",
+      "JobScheduleOverrideCleared",
+      "JobScheduleSaved",
+      "JobScheduleDeleted"
+    ]);
+  });
+
+  it("narrows runtime schedule events by payload kind when event type names are custom", () => {
+    const saved = scheduleEvent(1, "DeskScheduleImported", {
+      kind: "JobScheduleSaved",
+      scheduleId: "runtime-daily",
+      cron: "0 0 * * *",
+      jobName: "reports.daily",
+      tenantId: "acme",
+      enabled: true
+    });
+
+    expect(isJobSchedulePayloadKind("JobScheduleSaved")).toBe(true);
+    expect(isJobSchedulePayloadKind("DocumentDeleted")).toBe(false);
+    expect(isJobScheduleEvent(saved)).toBe(true);
+    expect(isJobScheduleEvent(otherEvent({ kind: "DocumentDeleted" }))).toBe(false);
+  });
+
   it("folds override set, pause, and clear events into tenant override state", () => {
     const overrideEvents = [
       scheduleEvent(1, "JobScheduleOverrideSet", {
@@ -340,6 +380,22 @@ describe("job schedule events", () => {
 
 function jobSchedulePayload(payload: JobScheduleEventPayload): JobScheduleEventPayload {
   return payload;
+}
+
+function otherEvent(payload: DomainEvent["payload"], type: string = payload.kind): DomainEvent {
+  return {
+    id: "evt_other",
+    tenantId: "acme",
+    stream: "acme:Note:NOTE-1",
+    sequence: 1,
+    type,
+    doctype: "Note",
+    documentName: "NOTE-1",
+    actorId: "admin@example.com",
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    payload,
+    metadata: {}
+  };
 }
 
 function scheduleEvent(
