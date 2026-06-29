@@ -6,6 +6,7 @@ import {
   type AssignmentRuleDocumentAssignment
 } from "../core/assignment-rules.js";
 import { defineDocumentHooks, type AfterCommitContext, type DocumentHooks } from "../core/document-hooks.js";
+import { domainEventPayloadKind } from "../core/domain-events.js";
 import { conflict, FrameworkError, permissionDenied } from "../core/errors.js";
 import { assignmentRulesStream } from "../core/streams.js";
 import {
@@ -133,7 +134,7 @@ export function createDocumentAssignmentRuleHooks(
             assignee: assignment.assigneeId,
             metadata: {
               sourceEventId: context.event.id,
-              sourcePayloadKind: context.event.payload.kind,
+              sourcePayloadKind: domainEventPayloadKind(context.event),
               assignmentRuleName: assignment.ruleName
             }
           });

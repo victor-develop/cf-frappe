@@ -91,6 +91,47 @@ describe("assignment rules", () => {
     expect(() => ((hooks as { afterCommit?: unknown }).afterCommit = undefined)).toThrow(TypeError);
   });
 
+  it("derives assignment metadata payload kinds from source event identity", async () => {
+    const assigned: Array<Parameters<DocumentService["assign"]>[0]> = [];
+    const hooks = createDocumentAssignmentRuleHooks({
+      documents: {
+        assign: async (command) => {
+          assigned.push(command);
+          return ticketSnapshot();
+        }
+      },
+      actor: manager
+    });
+
+    await hooks.afterCommit?.({
+      doctype: ticketDocType({
+        assignmentRules: [
+          {
+            name: "High priority triage",
+            events: ["DocumentCreated"],
+            assignees: [{ kind: "user", userId: "manager@example.com" }]
+          }
+        ]
+      }),
+      data: ticketSnapshot().data,
+      event: ticketEvent("DocumentCreated"),
+      snapshot: ticketSnapshot()
+    });
+
+    expect(assigned).toMatchObject([
+      {
+        doctype: "Ticket",
+        name: "Feature",
+        assignee: "manager@example.com",
+        metadata: {
+          sourceEventId: "evt_DocumentCreated",
+          sourcePayloadKind: "DocumentCreated",
+          assignmentRuleName: "High priority triage"
+        }
+      }
+    ]);
+  });
+
   it("rejects assignment rules with invalid event and assignee metadata", () => {
     expect(() =>
       defineDocType({
