@@ -1,6 +1,8 @@
 import { FrameworkError } from "./errors.js";
+import { domainEventPayloadKind } from "./domain-events.js";
 import { defineDocType } from "./schema.js";
 import type {
+  DocTypeName,
   DocTypeDefinition,
   DomainEvent,
   FieldDefinition,
@@ -9,6 +11,27 @@ import type {
   PersistedFieldDefinition,
   TenantId
 } from "./types.js";
+
+export type CustomFieldStatePayloadKind = "CustomFieldSaved" | "CustomFieldDisabled";
+
+export type CustomFieldStateEventPayload =
+  | {
+      readonly kind: "CustomFieldSaved";
+      readonly doctypeName: DocTypeName;
+      readonly field: PersistedFieldDefinition;
+    }
+  | {
+      readonly kind: "CustomFieldDisabled";
+      readonly doctypeName: DocTypeName;
+      readonly fieldName: string;
+    };
+
+export const CUSTOM_FIELD_STATE_PAYLOAD_KINDS = Object.freeze([
+  "CustomFieldSaved",
+  "CustomFieldDisabled"
+] as const satisfies readonly CustomFieldStatePayloadKind[]);
+
+const CUSTOM_FIELD_STATE_PAYLOAD_KIND_SET = new Set<string>(CUSTOM_FIELD_STATE_PAYLOAD_KINDS);
 
 export interface CustomFieldEntry {
   readonly tenantId: TenantId;
@@ -34,7 +57,7 @@ export function foldCustomFields(
   const fields = new Map<string, CustomFieldEntry>();
   let version = 0;
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
-    if (event.payload.kind !== "CustomFieldSaved" && event.payload.kind !== "CustomFieldDisabled") {
+    if (!isCustomFieldStateEvent(event)) {
       continue;
     }
     version = Math.max(version, event.sequence);
@@ -68,6 +91,20 @@ export function foldCustomFields(
     version,
     fields: Object.freeze([...fields.values()].sort((left, right) => left.field.name.localeCompare(right.field.name)))
   });
+}
+
+export function customFieldStateEventType(payload: CustomFieldStateEventPayload): CustomFieldStatePayloadKind {
+  return payload.kind;
+}
+
+export function isCustomFieldStatePayloadKind(kind: string): kind is CustomFieldStatePayloadKind {
+  return CUSTOM_FIELD_STATE_PAYLOAD_KIND_SET.has(kind);
+}
+
+function isCustomFieldStateEvent(
+  event: DomainEvent
+): event is DomainEvent & { readonly payload: CustomFieldStateEventPayload } {
+  return isCustomFieldStatePayloadKind(domainEventPayloadKind(event));
 }
 
 export function applyCustomFieldsToDocType(

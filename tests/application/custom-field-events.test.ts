@@ -5,6 +5,7 @@ import {
   customFieldDisabledPayload,
   customFieldEventType,
   customFieldSavedPayload,
+  foldCustomFields,
   isCustomFieldEvent,
   type CustomFieldEventPayload,
   type DomainEvent
@@ -76,6 +77,22 @@ describe("custom field events", () => {
     }), "NoteCustomFieldUpserted");
 
     expect(isCustomFieldEvent(saved)).toBe(true);
+  });
+
+  it("folds custom-field state by payload kind when event type names are custom", () => {
+    const misleadingUnrelated = event({ kind: "DocumentDeleted" }, "CustomFieldSaved");
+    const customTypedSaved = {
+      ...event(customFieldSavedPayload({
+        doctypeName: "Note",
+        field: { name: "priority", type: "text" }
+      }), "NoteCustomFieldUpserted"),
+      sequence: 2
+    };
+
+    const state = foldCustomFields("acme", "Note", [misleadingUnrelated, customTypedSaved]);
+
+    expect(state.version).toBe(2);
+    expect(state.fields.map((entry) => entry.field.name)).toEqual(["priority"]);
   });
 });
 

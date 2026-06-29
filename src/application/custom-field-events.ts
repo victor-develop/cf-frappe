@@ -1,26 +1,18 @@
-import type { DocTypeName, DomainEvent, PersistedFieldDefinition } from "../core/types.js";
 import { domainEventPayloadKind } from "../core/domain-events.js";
+import {
+  CUSTOM_FIELD_STATE_PAYLOAD_KINDS,
+  customFieldStateEventType,
+  isCustomFieldStatePayloadKind,
+  type CustomFieldStateEventPayload,
+  type CustomFieldStatePayloadKind
+} from "../core/custom-fields.js";
+import type { DocTypeName, DomainEvent, PersistedFieldDefinition } from "../core/types.js";
 
-export type CustomFieldEventPayload =
-  | {
-      readonly kind: "CustomFieldSaved";
-      readonly doctypeName: DocTypeName;
-      readonly field: PersistedFieldDefinition;
-    }
-  | {
-      readonly kind: "CustomFieldDisabled";
-      readonly doctypeName: DocTypeName;
-      readonly fieldName: string;
-    };
+export type CustomFieldEventPayload = CustomFieldStateEventPayload;
 
-export type CustomFieldPayloadKind = CustomFieldEventPayload["kind"];
+export type CustomFieldPayloadKind = CustomFieldStatePayloadKind;
 
-export const CUSTOM_FIELD_PAYLOAD_KINDS = Object.freeze([
-  "CustomFieldSaved",
-  "CustomFieldDisabled"
-] as const satisfies readonly CustomFieldPayloadKind[]);
-
-const CUSTOM_FIELD_PAYLOAD_KIND_SET = new Set<string>(CUSTOM_FIELD_PAYLOAD_KINDS);
+export const CUSTOM_FIELD_PAYLOAD_KINDS = CUSTOM_FIELD_STATE_PAYLOAD_KINDS;
 
 export interface CustomFieldSavedPayloadInput {
   readonly doctypeName: DocTypeName;
@@ -53,11 +45,11 @@ export function customFieldDisabledPayload(
 }
 
 export function customFieldEventType(payload: CustomFieldEventPayload): CustomFieldPayloadKind {
-  return payload.kind;
+  return customFieldStateEventType(payload);
 }
 
 export function isCustomFieldPayloadKind(kind: string): kind is CustomFieldPayloadKind {
-  return CUSTOM_FIELD_PAYLOAD_KIND_SET.has(kind);
+  return isCustomFieldStatePayloadKind(kind);
 }
 
 export function isCustomFieldEvent(event: DomainEvent): event is DomainEvent<CustomFieldEventPayload> {
