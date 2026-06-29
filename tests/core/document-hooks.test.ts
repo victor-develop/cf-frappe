@@ -6,6 +6,7 @@ import {
   documentHookContext,
   documentValidationHookData,
   mergeDocumentHookPatch,
+  runDocumentAfterCommitHooks,
   type DomainEvent,
   type DocumentSnapshot
 } from "../../src";
@@ -108,6 +109,77 @@ describe("document hooks", () => {
       event,
       snapshot: null
     });
+  });
+
+  it("runs document afterCommit hooks before the service-level afterCommit hook", async () => {
+    const calls: string[] = [];
+
+    await runDocumentAfterCommitHooks({
+      doctype: Note,
+      event,
+      snapshot: existing,
+      hooks: [
+        { afterCommit: (context) => { calls.push(`first:${context.data.title}`); } },
+        { afterCommit: (context) => { calls.push(`second:${context.event.id}`); } }
+      ],
+      afterCommit: (context) => {
+        calls.push(`global:${context.snapshot?.name}`);
+      }
+    });
+
+    expect(calls).toEqual(["first:Old", "second:evt_1", "global:NOTE-1"]);
+  });
+
+  it("routes afterCommit hook errors and continues running later hooks", async () => {
+    const calls: string[] = [];
+    const firstError = new Error("first hook failed");
+    const globalError = new Error("global hook failed");
+
+    await runDocumentAfterCommitHooks({
+      doctype: Note,
+      event,
+      snapshot: existing,
+      hooks: [
+        {
+          afterCommit: () => {
+            calls.push("first");
+            throw firstError;
+          }
+        },
+        { afterCommit: () => { calls.push("second"); } }
+      ],
+      afterCommit: () => {
+        calls.push("global");
+        throw globalError;
+      },
+      onHookError: (error, failedEvent) => {
+        calls.push(`error:${(error as Error).message}:${failedEvent.id}`);
+      }
+    });
+
+    expect(calls).toEqual([
+      "first",
+      "error:first hook failed:evt_1",
+      "second",
+      "global",
+      "error:global hook failed:evt_1"
+    ]);
+  });
+
+  it("propagates afterCommit error handler failures", async () => {
+    await expect(runDocumentAfterCommitHooks({
+      doctype: Note,
+      event,
+      snapshot: existing,
+      hooks: [{
+        afterCommit: () => {
+          throw new Error("hook failed");
+        }
+      }],
+      onHookError: () => {
+        throw new Error("handler failed");
+      }
+    })).rejects.toThrow("handler failed");
   });
 });
 

@@ -77,3 +77,34 @@ export function documentAfterCommitContext(input: {
     snapshot: input.snapshot
   };
 }
+
+export interface RunDocumentAfterCommitHooksOptions {
+  readonly doctype: DocTypeDefinition;
+  readonly event: DomainEvent;
+  readonly snapshot: DocumentSnapshot | null;
+  readonly hooks: Iterable<DocumentHooks>;
+  readonly afterCommit?: (context: AfterCommitContext) => MaybePromise<void>;
+  readonly onHookError?: (error: unknown, event: DomainEvent) => MaybePromise<void>;
+}
+
+export async function runDocumentAfterCommitHooks(
+  options: RunDocumentAfterCommitHooksOptions
+): Promise<void> {
+  const context = documentAfterCommitContext({
+    doctype: options.doctype,
+    event: options.event,
+    snapshot: options.snapshot
+  });
+  for (const hook of options.hooks) {
+    try {
+      await hook.afterCommit?.(context);
+    } catch (error) {
+      await options.onHookError?.(error, options.event);
+    }
+  }
+  try {
+    await options.afterCommit?.(context);
+  } catch (error) {
+    await options.onHookError?.(error, options.event);
+  }
+}

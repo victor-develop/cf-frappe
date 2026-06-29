@@ -114,10 +114,10 @@ import {
   type UserPermissionProvider
 } from "../core/user-permissions.js";
 import {
-  documentAfterCommitContext,
   documentHookContext,
   documentValidationHookData,
   mergeDocumentHookPatch,
+  runDocumentAfterCommitHooks,
   type AfterCommitContext
 } from "../core/document-hooks.js";
 import type { ModelRegistry } from "../core/registry.js";
@@ -1809,19 +1809,14 @@ export class DocumentService implements DocumentCommandExecutor {
     event: DomainEvent,
     snapshot: DocumentSnapshot | null
   ): Promise<DocumentSnapshot | null> {
-    const context = documentAfterCommitContext({ doctype, event, snapshot });
-    for (const hook of this.registry.hooksFor(doctype.name)) {
-      try {
-        await hook.afterCommit?.(context);
-      } catch (error) {
-        await this.onHookError?.(error, event);
-      }
-    }
-    try {
-      await this.afterCommit?.(context);
-    } catch (error) {
-      await this.onHookError?.(error, event);
-    }
+    await runDocumentAfterCommitHooks({
+      doctype,
+      event,
+      snapshot,
+      hooks: this.registry.hooksFor(doctype.name),
+      ...(this.afterCommit === undefined ? {} : { afterCommit: this.afterCommit }),
+      ...(this.onHookError === undefined ? {} : { onHookError: this.onHookError })
+    });
     return this.readDocumentFromEvents(event.tenantId, doctype, event.documentName);
   }
 

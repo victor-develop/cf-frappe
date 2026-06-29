@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the tenant DocType context resolution slice:
+As of the document after-commit hook runner slice:
 
 - Vitest files: `196`
-- Vitest cases: `2256`
-- Remaining gap to Frappe static markers: `528`
+- Vitest cases: `2259`
+- Remaining gap to Frappe static markers: `525`
 
 ## Implication
 
