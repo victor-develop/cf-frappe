@@ -144,6 +144,59 @@ describe("EmailNotificationService", () => {
     ]);
   });
 
+  it("queues rule-driven emails from payload kind when event type names are misleading", async () => {
+    const events = new InMemoryEventStore();
+    const service = new EmailNotificationService({
+      events,
+      sender: recordingEmailSender(),
+      from: { email: "notifications@example.com" },
+      notificationRules: {
+        async notificationRulesFor() {
+          return [
+            {
+              name: "Email assignees",
+              events: ["DocumentAssigned"],
+              recipients: [{ kind: "user", userId: "support@example.com" }],
+              channels: ["email"]
+            }
+          ] satisfies readonly NotificationRuleDefinition[];
+        }
+      },
+      ids: deterministicIds(["queued-1"]),
+      clock: fixedClock(now)
+    });
+    const event = {
+      ...documentUpdatedEvent(),
+      id: "evt_assign",
+      type: "NoteDeleted",
+      payload: { kind: "DocumentAssigned", assigneeId: "support@example.com" }
+    } satisfies DomainEvent;
+    const messageId = "evt_assign:rule:Email%20assignees:email:support%40example.com";
+
+    await expect(service.queueFromDomainEvent(event, noteSnapshot())).resolves.toEqual([
+      {
+        status: "queued",
+        messageId,
+        eventId: "evt_assign",
+        ruleName: "Email assignees",
+        recipientId: "support@example.com",
+        to: "support@example.com",
+        subject: "owner@example.com triggered Email assignees for Note My Note"
+      }
+    ]);
+    await expect(events.readStream(emailOutboxStream("acme", messageId))).resolves.toMatchObject([
+      {
+        payload: {
+          kind: "EmailNotificationQueued",
+          sourceEventId: "evt_assign",
+          sourceEventType: "NoteDeleted",
+          payloadKind: "DocumentAssigned",
+          recipientId: "support@example.com"
+        }
+      }
+    ]);
+  });
+
   it("records skipped delivery when a recipient has no deliverable email address", async () => {
     const events = new InMemoryEventStore();
     const sender = recordingEmailSender();
