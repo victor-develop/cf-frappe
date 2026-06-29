@@ -1,36 +1,24 @@
 import { permissionDenied } from "../core/errors.js";
-import { can } from "../core/permissions.js";
 import {
   canReadPrintLetterhead,
-  canReadPrintFormat,
   mergePrintLayouts,
   type PrintFormatDefinition,
-  type PrintLetterheadDefinition,
-  type PrintSectionDefinition
+  type PrintLetterheadDefinition
 } from "../core/print-format.js";
 import type { ModelRegistry } from "../core/registry.js";
-import type { Actor, DocTypeDefinition, DocumentSnapshot, JsonValue } from "../core/types.js";
+import type { Actor } from "../core/types.js";
 import type { PrintSettingsService } from "./print-settings-service.js";
+import {
+  canAccessPrintFormat,
+  printDocumentSections,
+  printHiddenFields,
+  type PrintDocumentView,
+  type PrintFieldView,
+  type PrintSectionView
+} from "./print-policy.js";
 import { QueryService } from "./query-service.js";
 
-export interface PrintFieldView {
-  readonly field: string;
-  readonly label: string;
-  readonly value: JsonValue;
-}
-
-export interface PrintSectionView {
-  readonly heading?: string;
-  readonly fields: readonly PrintFieldView[];
-}
-
-export interface PrintDocumentView {
-  readonly format: PrintFormatDefinition;
-  readonly letterhead?: PrintLetterheadDefinition;
-  readonly document: DocumentSnapshot;
-  readonly hiddenPrintFields: readonly string[];
-  readonly sections: readonly PrintSectionView[];
-}
+export type { PrintDocumentView, PrintFieldView, PrintSectionView } from "./print-policy.js";
 
 export interface PrintServiceOptions {
   readonly registry: ModelRegistry;
@@ -90,55 +78,14 @@ export class PrintService {
       ...(letterhead ? { letterhead } : {}),
       document,
       hiddenPrintFields: [...hiddenPrintFields],
-      sections: (format.sections ?? [])
-        .map((section) => printSectionView(section, document, hiddenPrintFields))
-        .filter((section) => section.fields.length > 0)
+      sections: printDocumentSections(format.sections, document, hiddenPrintFields)
     };
   }
 
   private canAccess(actor: Actor, format: PrintFormatDefinition): boolean {
     const doctype = this.registry.get(format.doctype);
-    return (
-      canReadPrintFormat(actor, format) &&
-      can(actor, doctype, format.permissionAction ?? "read") &&
-      this.canAccessReferencedLetterhead(actor, format.letterhead)
-    );
+    const letterhead = format.letterhead ? this.registry.getPrintLetterhead(format.letterhead) : undefined;
+    return canAccessPrintFormat({ actor, format, doctype, letterhead });
   }
 
-  private canAccessReferencedLetterhead(actor: Actor, letterheadName: string | undefined): boolean {
-    if (!letterheadName) {
-      return true;
-    }
-    return canReadPrintLetterhead(actor, this.registry.getPrintLetterhead(letterheadName));
-  }
-
-}
-
-function printSectionView(
-  section: PrintSectionDefinition,
-  document: DocumentSnapshot,
-  hiddenPrintFields: ReadonlySet<string>
-): PrintSectionView {
-  return {
-    ...(section.heading ? { heading: section.heading } : {}),
-    fields: section.fields
-      .filter((field) => !hiddenPrintFields.has(field.field))
-      .map((field) => ({
-        field: field.field,
-        label: field.label ?? field.field,
-        value: document.data[field.field] ?? null
-      }))
-  };
-}
-
-function printHiddenFields(doctype: DocTypeDefinition, document: DocumentSnapshot): ReadonlySet<string> {
-  return new Set(
-    doctype.fields
-      .filter((field) => field.printHide || (field.printHideIfNoValue && isPrintEmptyValue(document.data[field.name] ?? null)))
-      .map((field) => field.name)
-  );
-}
-
-function isPrintEmptyValue(value: JsonValue): boolean {
-  return value === null || value === "" || (Array.isArray(value) && value.length === 0);
 }

@@ -1,0 +1,81 @@
+import { can } from "../core/permissions.js";
+import {
+  canReadPrintFormat,
+  canReadPrintLetterhead,
+  type PrintFormatDefinition,
+  type PrintLetterheadDefinition,
+  type PrintSectionDefinition
+} from "../core/print-format.js";
+import type { Actor, DocTypeDefinition, DocumentSnapshot, JsonValue } from "../core/types.js";
+
+export interface PrintFieldView {
+  readonly field: string;
+  readonly label: string;
+  readonly value: JsonValue;
+}
+
+export interface PrintSectionView {
+  readonly heading?: string;
+  readonly fields: readonly PrintFieldView[];
+}
+
+export interface PrintDocumentView {
+  readonly format: PrintFormatDefinition;
+  readonly letterhead?: PrintLetterheadDefinition;
+  readonly document: DocumentSnapshot;
+  readonly hiddenPrintFields: readonly string[];
+  readonly sections: readonly PrintSectionView[];
+}
+
+export function canAccessPrintFormat(command: {
+  readonly actor: Actor;
+  readonly format: PrintFormatDefinition;
+  readonly doctype: DocTypeDefinition;
+  readonly letterhead?: PrintLetterheadDefinition | undefined;
+}): boolean {
+  return (
+    canReadPrintFormat(command.actor, command.format) &&
+    can(command.actor, command.doctype, command.format.permissionAction ?? "read") &&
+    (command.format.letterhead === undefined ||
+      (command.letterhead !== undefined && canReadPrintLetterhead(command.actor, command.letterhead)))
+  );
+}
+
+export function printDocumentSections(
+  sections: readonly PrintSectionDefinition[] | undefined,
+  document: DocumentSnapshot,
+  hiddenPrintFields: ReadonlySet<string>
+): readonly PrintSectionView[] {
+  return (sections ?? [])
+    .map((section) => printSectionView(section, document, hiddenPrintFields))
+    .filter((section) => section.fields.length > 0);
+}
+
+export function printSectionView(
+  section: PrintSectionDefinition,
+  document: DocumentSnapshot,
+  hiddenPrintFields: ReadonlySet<string>
+): PrintSectionView {
+  return {
+    ...(section.heading ? { heading: section.heading } : {}),
+    fields: section.fields
+      .filter((field) => !hiddenPrintFields.has(field.field))
+      .map((field) => ({
+        field: field.field,
+        label: field.label ?? field.field,
+        value: document.data[field.field] ?? null
+      }))
+  };
+}
+
+export function printHiddenFields(doctype: DocTypeDefinition, document: DocumentSnapshot): ReadonlySet<string> {
+  return new Set(
+    doctype.fields
+      .filter((field) => field.printHide || (field.printHideIfNoValue && isPrintEmptyValue(document.data[field.name] ?? null)))
+      .map((field) => field.name)
+  );
+}
+
+export function isPrintEmptyValue(value: JsonValue): boolean {
+  return value === null || value === "" || (Array.isArray(value) && value.length === 0);
+}

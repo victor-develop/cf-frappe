@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted print-format access checks, print-hidden field selection, print-empty value classification, and section view projection into print policy so PrintService keeps registry, query, settings, and letterhead orchestration.
 - Extracted custom-field link/table target validation, table runtime guards, self-target rejection, and base/custom table graph cycle detection into custom-field policy so CustomFieldService supplies registry context while policy owns metadata graph invariants.
 - Extracted field-property override normalization, conditional-expression rebound, JSON default-value cloning, and event document-name selection into field-property policy so FieldPropertyService keeps authorization, metadata lookup, event append, and fold orchestration.
 - Extracted document delivery outbox consumer failure-message normalization and queued-email message-id selection into consumer policy so the consumer keeps delivery/outbox orchestration while policy owns retry metadata and queueable-delivery selection.

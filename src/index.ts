@@ -72,6 +72,7 @@ export * from "./application/kanban-service.js";
 export * from "./application/notification-rule-events.js";
 export * from "./application/notification-rule-policy.js";
 export * from "./application/notification-rule-service.js";
+export * from "./application/print-policy.js";
 export * from "./application/print-service.js";
 export * from "./application/print-settings-events.js";
 export * from "./application/print-settings-policy.js";
