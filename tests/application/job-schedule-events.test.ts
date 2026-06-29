@@ -6,9 +6,14 @@ import {
   createJobScheduleSavedEvent,
   foldJobScheduleDefinitions,
   foldJobScheduleOverrides,
+  jobScheduleDeletedPayload,
   jobScheduleDefinitionKey,
   jobScheduleDefinitionsStream,
+  jobScheduleOverrideClearedPayload,
+  jobScheduleOverrideSetPayload,
   jobScheduleOverridesStream,
+  jobSchedulePausedPayload,
+  jobScheduleSavedPayload,
   requireSavedRuntimeJobSchedule,
   runtimeJobScheduleForTenant,
   runtimeJobScheduleIndex,
@@ -18,6 +23,65 @@ import {
 } from "../../src";
 
 describe("job schedule events", () => {
+  it("builds runtime schedule definition payloads", () => {
+    expect(jobSchedulePayload(jobScheduleSavedPayload({
+      scheduleId: "runtime-daily",
+      cron: "0 0 * * *",
+      jobName: "reports.daily",
+      tenantId: "acme",
+      enabled: true,
+      payload: { scope: "daily" },
+      metadata: { owner: "ops" },
+      idempotencyKey: "daily-acme",
+      delaySeconds: 30
+    }))).toEqual({
+      kind: "JobScheduleSaved",
+      scheduleId: "runtime-daily",
+      cron: "0 0 * * *",
+      jobName: "reports.daily",
+      tenantId: "acme",
+      enabled: true,
+      payload: { scope: "daily" },
+      metadata: { owner: "ops" },
+      idempotencyKey: "daily-acme",
+      delaySeconds: 30
+    });
+
+    expect(jobSchedulePayload(jobScheduleDeletedPayload({
+      scheduleId: "runtime-daily",
+      tenantId: "acme"
+    }))).toEqual({
+      kind: "JobScheduleDeleted",
+      scheduleId: "runtime-daily",
+      tenantId: "acme"
+    });
+  });
+
+  it("builds runtime schedule override payloads", () => {
+    expect(jobSchedulePayload(jobScheduleOverrideSetPayload({
+      scheduleId: "daily",
+      enabled: false
+    }))).toEqual({
+      kind: "JobScheduleOverrideSet",
+      scheduleId: "daily",
+      enabled: false
+    });
+
+    expect(jobSchedulePayload(jobSchedulePausedPayload({
+      scheduleId: "daily",
+      pausedUntil: "2026-01-02T00:00:00.000Z"
+    }))).toEqual({
+      kind: "JobSchedulePaused",
+      scheduleId: "daily",
+      pausedUntil: "2026-01-02T00:00:00.000Z"
+    });
+
+    expect(jobSchedulePayload(jobScheduleOverrideClearedPayload({ scheduleId: "daily" }))).toEqual({
+      kind: "JobScheduleOverrideCleared",
+      scheduleId: "daily"
+    });
+  });
+
   it("creates runtime schedule definition events with the definitions stream envelope", () => {
     expect(createJobScheduleSavedEvent({
       ...eventEnvelope(),
@@ -254,6 +318,10 @@ describe("job schedule events", () => {
     );
   });
 });
+
+function jobSchedulePayload(payload: JobScheduleEventPayload): JobScheduleEventPayload {
+  return payload;
+}
 
 function scheduleEvent(
   sequence: number,

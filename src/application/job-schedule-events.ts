@@ -67,6 +67,37 @@ export type JobScheduleEventPayload =
       readonly tenantId: TenantId;
     };
 
+export interface JobScheduleSavedPayloadInput {
+  readonly scheduleId: string;
+  readonly cron: string;
+  readonly jobName: string;
+  readonly tenantId: TenantId;
+  readonly enabled: boolean;
+  readonly payload?: DocumentData;
+  readonly metadata?: DocumentData;
+  readonly idempotencyKey?: string;
+  readonly delaySeconds?: number;
+}
+
+export interface JobScheduleDeletedPayloadInput {
+  readonly scheduleId: string;
+  readonly tenantId: TenantId;
+}
+
+export interface JobScheduleOverrideSetPayloadInput {
+  readonly scheduleId: string;
+  readonly enabled: boolean;
+}
+
+export interface JobSchedulePausedPayloadInput {
+  readonly scheduleId: string;
+  readonly pausedUntil: string;
+}
+
+export interface JobScheduleOverrideClearedPayloadInput {
+  readonly scheduleId: string;
+}
+
 interface JobScheduleEventEnvelopeOptions {
   readonly id: string;
   readonly tenantId: TenantId;
@@ -86,6 +117,62 @@ interface JobScheduleSavedEventSchedule {
   readonly delaySeconds?: number;
 }
 
+export function jobScheduleSavedPayload(
+  input: JobScheduleSavedPayloadInput
+): Extract<JobScheduleEventPayload, { readonly kind: "JobScheduleSaved" }> {
+  return {
+    kind: "JobScheduleSaved",
+    scheduleId: input.scheduleId,
+    cron: input.cron,
+    jobName: input.jobName,
+    tenantId: input.tenantId,
+    enabled: input.enabled,
+    ...(input.payload === undefined ? {} : { payload: input.payload }),
+    ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+    ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
+    ...(input.delaySeconds === undefined ? {} : { delaySeconds: input.delaySeconds })
+  };
+}
+
+export function jobScheduleDeletedPayload(
+  input: JobScheduleDeletedPayloadInput
+): Extract<JobScheduleEventPayload, { readonly kind: "JobScheduleDeleted" }> {
+  return {
+    kind: "JobScheduleDeleted",
+    scheduleId: input.scheduleId,
+    tenantId: input.tenantId
+  };
+}
+
+export function jobScheduleOverrideSetPayload(
+  input: JobScheduleOverrideSetPayloadInput
+): Extract<JobScheduleEventPayload, { readonly kind: "JobScheduleOverrideSet" }> {
+  return {
+    kind: "JobScheduleOverrideSet",
+    scheduleId: input.scheduleId,
+    enabled: input.enabled
+  };
+}
+
+export function jobSchedulePausedPayload(
+  input: JobSchedulePausedPayloadInput
+): Extract<JobScheduleEventPayload, { readonly kind: "JobSchedulePaused" }> {
+  return {
+    kind: "JobSchedulePaused",
+    scheduleId: input.scheduleId,
+    pausedUntil: input.pausedUntil
+  };
+}
+
+export function jobScheduleOverrideClearedPayload(
+  input: JobScheduleOverrideClearedPayloadInput
+): Extract<JobScheduleEventPayload, { readonly kind: "JobScheduleOverrideCleared" }> {
+  return {
+    kind: "JobScheduleOverrideCleared",
+    scheduleId: input.scheduleId
+  };
+}
+
 export function createJobScheduleSavedEvent(
   options: JobScheduleEventEnvelopeOptions & {
     readonly schedule: JobScheduleSavedEventSchedule;
@@ -93,8 +180,7 @@ export function createJobScheduleSavedEvent(
 ): NewDomainEvent<JobScheduleEventPayload> {
   return {
     ...jobScheduleEventEnvelope(options, jobScheduleDefinitionsStream(), "JobScheduleSaved", "definitions"),
-    payload: {
-      kind: "JobScheduleSaved",
+    payload: jobScheduleSavedPayload({
       scheduleId: options.schedule.id,
       cron: options.schedule.cron,
       jobName: options.schedule.jobName,
@@ -104,7 +190,7 @@ export function createJobScheduleSavedEvent(
       ...(options.schedule.metadata === undefined ? {} : { metadata: options.schedule.metadata }),
       ...(options.schedule.idempotencyKey === undefined ? {} : { idempotencyKey: options.schedule.idempotencyKey }),
       ...(options.schedule.delaySeconds === undefined ? {} : { delaySeconds: options.schedule.delaySeconds })
-    }
+    })
   };
 }
 
@@ -115,11 +201,10 @@ export function createJobScheduleDeletedEvent(
 ): NewDomainEvent<JobScheduleEventPayload> {
   return {
     ...jobScheduleEventEnvelope(options, jobScheduleDefinitionsStream(), "JobScheduleDeleted", "definitions"),
-    payload: {
-      kind: "JobScheduleDeleted",
+    payload: jobScheduleDeletedPayload({
       scheduleId: options.scheduleId,
       tenantId: options.tenantId
-    }
+    })
   };
 }
 
@@ -131,11 +216,10 @@ export function createJobScheduleOverrideSetEvent(
 ): NewDomainEvent<JobScheduleEventPayload> {
   return {
     ...jobScheduleEventEnvelope(options, jobScheduleOverridesStream(options.tenantId), "JobScheduleOverrideSet", "overrides"),
-    payload: {
-      kind: "JobScheduleOverrideSet",
+    payload: jobScheduleOverrideSetPayload({
       scheduleId: options.scheduleId,
       enabled: options.enabled
-    }
+    })
   };
 }
 
@@ -147,11 +231,10 @@ export function createJobSchedulePausedEvent(
 ): NewDomainEvent<JobScheduleEventPayload> {
   return {
     ...jobScheduleEventEnvelope(options, jobScheduleOverridesStream(options.tenantId), "JobSchedulePaused", "overrides"),
-    payload: {
-      kind: "JobSchedulePaused",
+    payload: jobSchedulePausedPayload({
       scheduleId: options.scheduleId,
       pausedUntil: options.pausedUntil
-    }
+    })
   };
 }
 
@@ -162,10 +245,9 @@ export function createJobScheduleOverrideClearedEvent(
 ): NewDomainEvent<JobScheduleEventPayload> {
   return {
     ...jobScheduleEventEnvelope(options, jobScheduleOverridesStream(options.tenantId), "JobScheduleOverrideCleared", "overrides"),
-    payload: {
-      kind: "JobScheduleOverrideCleared",
+    payload: jobScheduleOverrideClearedPayload({
       scheduleId: options.scheduleId
-    }
+    })
   };
 }
 
