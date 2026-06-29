@@ -4,11 +4,13 @@ import type {
   ReportChartOrder,
   ReportChartOrderBy,
   ReportChartType,
+  ReportColumnDefinition,
   ReportFilterDefinition,
+  ReportFormulaOperand,
   ReportGroupDefinition,
   ReportSummaryDefinition
 } from "../core/reports.js";
-import type { FieldType, JsonPrimitive, JsonValue } from "../core/types.js";
+import type { DocumentSnapshot, FieldType, JsonPrimitive, JsonValue } from "../core/types.js";
 
 export type ReportRow = Readonly<Record<string, JsonValue>>;
 
@@ -106,6 +108,44 @@ export function primitiveReportRowValue(row: ReportRow, field: string): JsonPrim
     return value;
   }
   return undefined;
+}
+
+export function projectReportDocumentRow(
+  document: DocumentSnapshot,
+  columns: readonly ReportColumnDefinition[]
+): ReportRow {
+  return Object.fromEntries(
+    columns.map((column) => [column.name, reportDocumentColumnValue(document, column)])
+  ) as ReportRow;
+}
+
+export function projectReportRow(row: ReportRow, columns: readonly ReportColumnDefinition[]): ReportRow {
+  return Object.fromEntries(
+    columns.map((column) => [column.name, reportRowColumnValue(row, column)])
+  ) as ReportRow;
+}
+
+export function reportDocumentColumnValue(document: DocumentSnapshot, column: ReportColumnDefinition): JsonValue {
+  if (column.formula !== undefined) {
+    return reportDocumentFormulaValue(document, column.formula);
+  }
+  return document.data[column.field ?? column.name] ?? null;
+}
+
+export function reportRowColumnValue(row: ReportRow, column: ReportColumnDefinition): JsonValue {
+  if (column.formula !== undefined) {
+    return reportRowFormulaValue(row, column.formula);
+  }
+  return row[column.field ?? column.name] ?? null;
+}
+
+export function reportSortValue(
+  document: DocumentSnapshot,
+  columns: readonly ReportColumnDefinition[],
+  columnName: string
+): JsonValue | undefined {
+  const column = columns.find((item) => item.name === columnName);
+  return column === undefined ? undefined : reportDocumentColumnValue(document, column);
 }
 
 export function reportChartDrilldown(
@@ -237,6 +277,66 @@ function exactDrilldownFilterForGroup(
   return filters.find((filter) =>
     filter.field === group.field && (filter.operator ?? "eq") === "eq"
   );
+}
+
+function reportDocumentFormulaValue(
+  document: DocumentSnapshot,
+  formula: NonNullable<ReportColumnDefinition["formula"]>
+): number | null {
+  const left = numericDocumentFormulaOperand(document, formula.left);
+  const right = numericDocumentFormulaOperand(document, formula.right);
+  return reportFormulaOperationValue(formula.operator, left, right);
+}
+
+function reportRowFormulaValue(
+  row: ReportRow,
+  formula: NonNullable<ReportColumnDefinition["formula"]>
+): number | null {
+  const left = numericRowFormulaOperand(row, formula.left);
+  const right = numericRowFormulaOperand(row, formula.right);
+  return reportFormulaOperationValue(formula.operator, left, right);
+}
+
+function numericDocumentFormulaOperand(document: DocumentSnapshot, operand: ReportFormulaOperand): number | null {
+  if (typeof operand === "number") {
+    return operand;
+  }
+  if (typeof operand === "object") {
+    return reportDocumentFormulaValue(document, operand);
+  }
+  const value = document.data[operand];
+  return typeof value === "number" ? value : null;
+}
+
+function numericRowFormulaOperand(row: ReportRow, operand: ReportFormulaOperand): number | null {
+  if (typeof operand === "number") {
+    return operand;
+  }
+  if (typeof operand === "object") {
+    return reportRowFormulaValue(row, operand);
+  }
+  const value = row[operand];
+  return typeof value === "number" ? value : null;
+}
+
+function reportFormulaOperationValue(
+  operator: NonNullable<ReportColumnDefinition["formula"]>["operator"],
+  left: number | null,
+  right: number | null
+): number | null {
+  if (left === null || right === null) {
+    return null;
+  }
+  switch (operator) {
+    case "add":
+      return left + right;
+    case "subtract":
+      return left - right;
+    case "multiply":
+      return left * right;
+    case "divide":
+      return right === 0 ? null : left / right;
+  }
 }
 
 function requiredSummaryField(summary: ReportSummaryDefinition): string {

@@ -12,7 +12,6 @@ import {
   type ReportFilterExpression,
   type ReportFilterOperator,
   type ReportFilterValue,
-  type ReportFormulaOperand,
   type ReportOrder,
   type ReportSummaryDefinition,
   isReportFilterGroup
@@ -25,7 +24,10 @@ import {
   buildReportCharts,
   buildReportGroups,
   limitReportGroups,
+  projectReportDocumentRow,
+  projectReportRow,
   reportSummaryValue,
+  reportSortValue,
   type ReportChartResult,
   type ReportGroupResult,
   type ReportRow,
@@ -172,7 +174,7 @@ export class ReportService {
     const aggregateRows = filtered.map((document) => document.data as ReportRow);
     const groups = buildReportGroups(aggregateRows, report.groups ?? []);
     const limitedGroups = limitReportGroups(groups, report.groups ?? []);
-    const rows = sorted.slice(offset, offset + limit).map((document) => reportRow(document, report.columns));
+    const rows = sorted.slice(offset, offset + limit).map((document) => projectReportDocumentRow(document, report.columns));
     return {
       report,
       columns: report.columns,
@@ -260,7 +262,7 @@ export class ReportService {
       if (exported >= limit) {
         return;
       }
-      lines.push(reportRowToCsv(report.columns, reportRow(document, report.columns)));
+      lines.push(reportRowToCsv(report.columns, projectReportDocumentRow(document, report.columns)));
       exported += 1;
     });
     return {
@@ -540,7 +542,7 @@ class BoundedOrderedReportRows {
 
   add(document: DocumentSnapshot, index: number): void {
     const entry: OrderedReportRow = {
-      row: reportRow(document, this.report.columns),
+      row: projectReportDocumentRow(document, this.report.columns),
       sortValue: reportSortValue(document, this.report.columns, this.columnName),
       index
     };
@@ -671,15 +673,6 @@ function sortReportRows(
       return compared === 0 ? left.index - right.index : compared * direction;
     })
     .map((item) => item.row);
-}
-
-function reportSortValue(
-  document: DocumentSnapshot,
-  columns: readonly ReportColumnDefinition[],
-  columnName: string
-): JsonValue | undefined {
-  const column = columns.find((item) => item.name === columnName);
-  return column === undefined ? undefined : reportColumnValue(document, column);
 }
 
 function isWorseOrderedRow(left: OrderedReportRow, right: OrderedReportRow, direction: 1 | -1): boolean {
@@ -830,96 +823,6 @@ function matchesReportFilterValue(
       return compareValues(actual, minimum) < 0 || compareValues(actual, maximum) > 0;
     }
   }
-}
-
-function reportRow(document: DocumentSnapshot, columns: readonly ReportColumnDefinition[]): ReportRow {
-  return Object.fromEntries(
-    columns.map((column) => [column.name, reportColumnValue(document, column)])
-  ) as ReportRow;
-}
-
-function projectReportRow(row: ReportRow, columns: readonly ReportColumnDefinition[]): ReportRow {
-  return Object.fromEntries(
-    columns.map((column) => [column.name, reportRowColumnValue(row, column)])
-  ) as ReportRow;
-}
-
-function reportColumnValue(document: DocumentSnapshot, column: ReportColumnDefinition): JsonValue {
-  if (column.formula !== undefined) {
-    return reportFormulaValue(document, column.formula);
-  }
-  return document.data[column.field ?? column.name] ?? null;
-}
-
-function reportRowColumnValue(row: ReportRow, column: ReportColumnDefinition): JsonValue {
-  if (column.formula !== undefined) {
-    return reportRowFormulaValue(row, column.formula);
-  }
-  return row[column.field ?? column.name] ?? null;
-}
-
-function reportFormulaValue(
-  document: DocumentSnapshot,
-  formula: NonNullable<ReportColumnDefinition["formula"]>
-): number | null {
-  const left = numericFormulaOperand(document, formula.left);
-  const right = numericFormulaOperand(document, formula.right);
-  if (left === null || right === null) {
-    return null;
-  }
-  switch (formula.operator) {
-    case "add":
-      return left + right;
-    case "subtract":
-      return left - right;
-    case "multiply":
-      return left * right;
-    case "divide":
-      return right === 0 ? null : left / right;
-  }
-}
-
-function numericFormulaOperand(document: DocumentSnapshot, operand: ReportFormulaOperand): number | null {
-  if (typeof operand === "number") {
-    return operand;
-  }
-  if (typeof operand === "object") {
-    return reportFormulaValue(document, operand);
-  }
-  const value = document.data[operand];
-  return typeof value === "number" ? value : null;
-}
-
-function reportRowFormulaValue(
-  row: ReportRow,
-  formula: NonNullable<ReportColumnDefinition["formula"]>
-): number | null {
-  const left = numericRowFormulaOperand(row, formula.left);
-  const right = numericRowFormulaOperand(row, formula.right);
-  if (left === null || right === null) {
-    return null;
-  }
-  switch (formula.operator) {
-    case "add":
-      return left + right;
-    case "subtract":
-      return left - right;
-    case "multiply":
-      return left * right;
-    case "divide":
-      return right === 0 ? null : left / right;
-  }
-}
-
-function numericRowFormulaOperand(row: ReportRow, operand: ReportFormulaOperand): number | null {
-  if (typeof operand === "number") {
-    return operand;
-  }
-  if (typeof operand === "object") {
-    return reportRowFormulaValue(row, operand);
-  }
-  const value = row[operand];
-  return typeof value === "number" ? value : null;
 }
 
 function reportCsvHeader(columns: readonly ReportColumnDefinition[]): string {

@@ -3,8 +3,13 @@ import {
   buildReportGroups,
   limitReportGroups,
   primitiveReportRowValue,
+  projectReportDocumentRow,
+  projectReportRow,
   reportAggregateValue,
   reportChartDrilldown,
+  reportDocumentColumnValue,
+  reportRowColumnValue,
+  reportSortValue,
   reportSummaryValue,
   sortReportChartPoints
 } from "../../src";
@@ -77,6 +82,72 @@ describe("report policy", () => {
     expect(primitiveReportRowValue(rows[2]!, "priority")).toBeNull();
     expect(primitiveReportRowValue({ meta: { nested: true } }, "meta")).toBeUndefined();
     expect(primitiveReportRowValue({}, "missing")).toBeUndefined();
+  });
+
+  it("projects document report rows with aliases, defaults, and nested formula columns", () => {
+    const document = {
+      tenantId: "tenant-a",
+      doctype: "Task",
+      name: "TASK-1",
+      version: 3,
+      docstatus: "draft" as const,
+      data: { title: "High", count: 7 },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-02T00:00:00.000Z"
+    };
+    const columns = [
+      { name: "title" },
+      { name: "display_title", field: "title" },
+      { name: "missing" },
+      { name: "double_count", formula: { operator: "multiply" as const, left: "count", right: 2 } },
+      {
+        name: "nested_score",
+        formula: {
+          operator: "add" as const,
+          left: { operator: "multiply" as const, left: "count", right: 2 },
+          right: 1
+        }
+      },
+      { name: "count_ratio", formula: { operator: "divide" as const, left: "count", right: 2 } },
+      { name: "divide_by_zero", formula: { operator: "divide" as const, left: "count", right: 0 } },
+      { name: "text_math", formula: { operator: "add" as const, left: "title", right: 1 } }
+    ];
+
+    expect(projectReportDocumentRow(document, columns)).toEqual({
+      title: "High",
+      display_title: "High",
+      missing: null,
+      double_count: 14,
+      nested_score: 15,
+      count_ratio: 3.5,
+      divide_by_zero: null,
+      text_math: null
+    });
+    expect(reportDocumentColumnValue(document, { name: "display_title", field: "title" })).toBe("High");
+    expect(reportSortValue(document, columns, "nested_score")).toBe(15);
+    expect(reportSortValue(document, columns, "unknown")).toBeUndefined();
+  });
+
+  it("projects custom report rows with aliases, defaults, and formula columns", () => {
+    const row = { title: "Custom", count: 4 };
+    const columns = [
+      { name: "title" },
+      { name: "display_title", field: "title" },
+      { name: "missing" },
+      { name: "remaining", formula: { operator: "subtract" as const, left: "count", right: 1 } },
+      { name: "scaled", formula: { operator: "multiply" as const, left: { operator: "add" as const, left: "count", right: 2 }, right: 3 } },
+      { name: "text_math", formula: { operator: "add" as const, left: "title", right: 1 } }
+    ];
+
+    expect(projectReportRow(row, columns)).toEqual({
+      title: "Custom",
+      display_title: "Custom",
+      missing: null,
+      remaining: 3,
+      scaled: 18,
+      text_math: null
+    });
+    expect(reportRowColumnValue(row, { name: "remaining", formula: { operator: "subtract", left: "count", right: 1 } })).toBe(3);
   });
 
   it("builds chart drilldown queries from exact report filters", () => {
