@@ -1,6 +1,12 @@
 import { DataPatchRunner, type DataPatchRollbackRunResult, type DataPatchRunResult } from "./data-patch-runner.js";
 import { assertSelectedDataPatchPredecessorsApplied } from "./data-patch-apply-policy.js";
 import {
+  assertDataPatchApplyLimit,
+  selectDataPatch,
+  selectDataPatches,
+  snapshotUniqueDataPatchDefinitions
+} from "./data-patch-definition-policy.js";
+import {
   dataPatchDashboardEntry,
   dataPatchDashboardTotals,
   type DataPatchDashboard,
@@ -14,8 +20,8 @@ import {
   assertSelectedDataPatchRollbackable,
   dataPatchRollbackPlanDecision
 } from "./data-patch-rollback-policy.js";
-import { FrameworkError, badRequest, notFound, permissionDenied } from "../core/errors.js";
-import { assertDataPatchId, defineDataPatch, type DataPatchDefinition } from "../core/data-patch.js";
+import { FrameworkError, permissionDenied } from "../core/errors.js";
+import type { DataPatchDefinition } from "../core/data-patch.js";
 import { SYSTEM_MANAGER_ROLE, type Actor } from "../core/types.js";
 import type { Clock } from "../ports/clock.js";
 import type { DataPatchLog, RecordedDataPatch } from "../ports/data-patch-log.js";
@@ -82,7 +88,7 @@ export class DataPatchService<TResources = unknown> {
     this.clock = options.clock;
     this.ids = options.ids;
     this.log = options.log;
-    this.patches = normalizePatches(options.patches);
+    this.patches = snapshotUniqueDataPatchDefinitions(options.patches);
     this.resources = options.resources;
   }
 
@@ -105,7 +111,7 @@ export class DataPatchService<TResources = unknown> {
 
   async retryFailed(actor: Actor, patchId: string): Promise<DataPatchRunResult> {
     this.authorize(actor);
-    const patch = selectPatch(this.patches, patchId);
+    const patch = selectDataPatch(this.patches, patchId);
     await this.assertPredecessorsApplied([patch]);
     await this.log.retryFailedDataPatch({ id: patch.id, checksum: patch.checksum });
     return this.runner().apply([patch]);
@@ -143,9 +149,9 @@ export class DataPatchService<TResources = unknown> {
   }
 
   private async patchesForApply(options: DataPatchApplyOptions): Promise<readonly DataPatchDefinition<TResources>[]> {
-    assertApplyLimit(options.limit);
+    assertDataPatchApplyLimit(options.limit);
     const runner = this.runner();
-    const selected = selectPatches(this.patches, options.patchIds);
+    const selected = selectDataPatches(this.patches, options.patchIds);
     if (options.patchIds !== undefined) {
       await this.assertPredecessorsApplied(selected);
     }
@@ -157,9 +163,9 @@ export class DataPatchService<TResources = unknown> {
   }
 
   private async patchesForPlan(options: DataPatchApplyOptions): Promise<readonly DataPatchDefinition<TResources>[]> {
-    assertApplyLimit(options.limit);
+    assertDataPatchApplyLimit(options.limit);
     const runner = this.runner();
-    const selected = selectPatches(this.patches, options.patchIds);
+    const selected = selectDataPatches(this.patches, options.patchIds);
     if (options.patchIds !== undefined) {
       await this.assertPredecessorsApplied(selected);
     }
@@ -170,10 +176,10 @@ export class DataPatchService<TResources = unknown> {
   private async patchesForRollbackPlan(
     options: DataPatchRollbackOptions
   ): Promise<readonly DataPatchDefinition<TResources>[]> {
-    assertApplyLimit(options.limit);
+    assertDataPatchApplyLimit(options.limit);
     const recordedById = new Map((await this.log.recordedDataPatches()).map((patch) => [patch.id, patch]));
     if (options.patchIds !== undefined) {
-      const selected = selectPatches(this.patches, options.patchIds);
+      const selected = selectDataPatches(this.patches, options.patchIds);
       this.assertSelectedPatchesRollbackable(selected, recordedById);
       const selectedIds = new Set(selected.map((patch) => patch.id));
       this.assertNoUnsafeSuccessorsOutsideSelection(selected, selectedIds, recordedById);
@@ -199,7 +205,7 @@ export class DataPatchService<TResources = unknown> {
   }
 
   private async patchForRollbackRetry(patchId: string): Promise<DataPatchDefinition<TResources>> {
-    const patch = selectPatch(this.patches, patchId);
+    const patch = selectDataPatch(this.patches, patchId);
     const recordedById = new Map((await this.log.recordedDataPatches()).map((recorded) => [recorded.id, recorded]));
     this.assertSelectedPatchRollbackRetryable(patch, recordedById);
     this.assertNoUnsafeSuccessorsOutsideSelection([patch], new Set([patch.id]), recordedById);
@@ -270,66 +276,6 @@ export class DataPatchService<TResources = unknown> {
         { status: 409 }
       );
     }
-  }
-}
-
-function normalizePatches<TResources>(
-  patches: readonly DataPatchDefinition<TResources>[]
-): readonly DataPatchDefinition<TResources>[] {
-  const seen = new Set<string>();
-  return Object.freeze(patches.map((patch) => {
-    const definition = defineDataPatch(patch);
-    if (seen.has(definition.id)) {
-      throw new FrameworkError("DATA_PATCH_DUPLICATE", `Data patch '${definition.id}' is defined more than once`, {
-        status: 409
-      });
-    }
-    seen.add(definition.id);
-    return definition;
-  }));
-}
-
-function selectPatches<TResources>(
-  patches: readonly DataPatchDefinition<TResources>[],
-  patchIds: readonly string[] | undefined
-): readonly DataPatchDefinition<TResources>[] {
-  if (patchIds === undefined) {
-    return patches;
-  }
-  if (patchIds.length === 0) {
-    throw badRequest("At least one data patch id is required");
-  }
-  const requested = new Set<string>();
-  for (const id of patchIds) {
-    assertDataPatchId(id);
-    requested.add(id);
-  }
-  const selected = patches.filter((patch) => requested.has(patch.id));
-  const known = new Set(selected.map((patch) => patch.id));
-  const missing = [...requested].filter((id) => !known.has(id));
-  if (missing.length > 0) {
-    throw notFound(`Data patch '${missing[0]}' is not registered`, "DATA_PATCH_NOT_FOUND");
-  }
-  return selected;
-}
-
-function selectPatch<TResources>(
-  patches: readonly DataPatchDefinition<TResources>[],
-  patchId: string
-): DataPatchDefinition<TResources> {
-  const patch = selectPatches(patches, [patchId])[0];
-  if (patch === undefined) {
-    throw notFound(`Data patch '${patchId}' is not registered`, "DATA_PATCH_NOT_FOUND");
-  }
-  return patch;
-}
-
-function assertApplyLimit(limit: number | undefined): void {
-  if (limit === undefined) {
-    return;
-  }
-  if (!Number.isInteger(limit) || limit < 1) {
-    throw badRequest("Data patch apply limit must be a positive integer");
   }
 }
 

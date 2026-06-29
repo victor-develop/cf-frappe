@@ -1,4 +1,9 @@
-import { defineDataPatch, type DataPatchDefinition } from "../core/data-patch.js";
+import type { DataPatchDefinition } from "../core/data-patch.js";
+import {
+  normalizeDataPatchDefinitions,
+  normalizeSingleDataPatchDefinition,
+  snapshotDataPatchDefinitions
+} from "./data-patch-definition-policy.js";
 import {
   assertAppliedDataPatchChecksumMatches,
   assertDataPatchChecksumMatches
@@ -68,7 +73,7 @@ export class DataPatchRunner<TResources = unknown> {
   async pendingPatches(
     patches: readonly DataPatchDefinition<TResources>[] = this.patches
   ): Promise<readonly DataPatchDefinition<TResources>[]> {
-    const planned = normalizePatches(patches);
+    const planned = normalizeDataPatchDefinitions(patches);
     const recordedById = new Map((await this.log.recordedDataPatches()).map((patch) => [patch.id, patch]));
     const pending: DataPatchDefinition<TResources>[] = [];
     for (const patch of planned) {
@@ -83,7 +88,7 @@ export class DataPatchRunner<TResources = unknown> {
   }
 
   async apply(patches: readonly DataPatchDefinition<TResources>[] = this.patches): Promise<DataPatchRunResult> {
-    const planned = normalizePatches(patches);
+    const planned = normalizeDataPatchDefinitions(patches);
     const recordedById = new Map((await this.log.recordedDataPatches()).map((patch) => [patch.id, patch]));
     const applied: DataPatchRunRecord[] = [];
     const skipped: AppliedDataPatch[] = [];
@@ -158,7 +163,7 @@ export class DataPatchRunner<TResources = unknown> {
   async rollback(
     patches?: readonly DataPatchDefinition<TResources>[]
   ): Promise<DataPatchRollbackRunResult> {
-    const planned = normalizePatches(patches ?? [...this.patches].reverse());
+    const planned = normalizeDataPatchDefinitions(patches ?? [...this.patches].reverse());
     const rolledBack: DataPatchRollbackRecord[] = [];
     const skipped: RolledBackDataPatch[] = [];
 
@@ -216,7 +221,7 @@ export class DataPatchRunner<TResources = unknown> {
   }
 
   async retryRollbackFailed(patch: DataPatchDefinition<TResources>): Promise<DataPatchRollbackRunResult> {
-    const planned = normalizeSinglePatch(patch);
+    const planned = normalizeSingleDataPatchDefinition(patch);
     if (planned.rollback === undefined) {
       throw new FrameworkError(
         "DATA_PATCH_ROLLBACK_UNAVAILABLE",
@@ -270,34 +275,6 @@ export class DataPatchRunner<TResources = unknown> {
     });
     return record;
   }
-}
-
-function normalizePatches<TResources>(
-  patches: readonly DataPatchDefinition<TResources>[]
-): readonly DataPatchDefinition<TResources>[] {
-  const seen = new Set<string>();
-  return patches.map((patch) => {
-    const definition = defineDataPatch(patch);
-    if (seen.has(definition.id)) {
-      throw new FrameworkError("DATA_PATCH_DUPLICATE", `Data patch '${definition.id}' is defined more than once`, {
-        status: 409
-      });
-    }
-    seen.add(definition.id);
-    return definition;
-  });
-}
-
-function snapshotDataPatchDefinitions<TResources>(
-  patches: readonly DataPatchDefinition<TResources>[]
-): readonly DataPatchDefinition<TResources>[] {
-  return Object.freeze(patches.map((patch) => defineDataPatch(patch)));
-}
-
-function normalizeSinglePatch<TResources>(
-  patch: DataPatchDefinition<TResources>
-): DataPatchDefinition<TResources> {
-  return defineDataPatch(patch);
 }
 
 function patchChecksum<TResources>(patch: DataPatchDefinition<TResources>): string {

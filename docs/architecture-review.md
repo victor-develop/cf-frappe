@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Shared data-patch definition snapshot, duplicate-id, selection, single-selection, and batch-limit policy across DataPatchService and DataPatchRunner with direct registry-selection coverage.
 - Extracted data-patch dashboard projection and totals policy from DataPatchService and covered every dashboard journal state, rollback affordances, totals, and checksum drift directly.
 - Extracted selected data-patch apply predecessor policy from DataPatchService and covered missing, non-applied, and checksum-drifted predecessor guards directly.
 - Extracted data-patch rollback planning and retry status policy from DataPatchService and covered automatic rollback disposition, selected rollback guards, and rollback-retry guards directly.

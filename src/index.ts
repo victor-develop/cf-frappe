@@ -15,6 +15,7 @@ export * from "./application/dashboard-service.js";
 export * from "./application/data-patch-runner.js";
 export * from "./application/data-patch-service.js";
 export * from "./application/data-patch-dashboard-policy.js";
+export * from "./application/data-patch-definition-policy.js";
 export * from "./application/data-patch-jobs.js";
 export * from "./application/document-access-policy.js";
 export * from "./application/document-bulk-policy.js";
