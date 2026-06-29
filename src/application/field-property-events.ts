@@ -13,6 +13,45 @@ export type FieldPropertyEventPayload =
       readonly fieldName: string;
     };
 
+export type FieldPropertyPayloadKind = FieldPropertyEventPayload["kind"];
+
+export const FIELD_PROPERTY_PAYLOAD_KINDS = Object.freeze([
+  "FieldPropertyOverrideSaved",
+  "FieldPropertyOverrideCleared"
+] as const satisfies readonly FieldPropertyPayloadKind[]);
+
+export interface FieldPropertyOverrideSavedPayloadInput {
+  readonly doctypeName: DocTypeName;
+  readonly fieldName: string;
+  readonly overrides: FieldPropertyOverrides;
+}
+
+export interface FieldPropertyOverrideClearedPayloadInput {
+  readonly doctypeName: DocTypeName;
+  readonly fieldName: string;
+}
+
+export function fieldPropertyOverrideSavedPayload(
+  input: FieldPropertyOverrideSavedPayloadInput
+): Extract<FieldPropertyEventPayload, { readonly kind: "FieldPropertyOverrideSaved" }> {
+  return {
+    kind: "FieldPropertyOverrideSaved",
+    doctypeName: input.doctypeName,
+    fieldName: input.fieldName,
+    overrides: input.overrides
+  };
+}
+
+export function fieldPropertyOverrideClearedPayload(
+  input: FieldPropertyOverrideClearedPayloadInput
+): Extract<FieldPropertyEventPayload, { readonly kind: "FieldPropertyOverrideCleared" }> {
+  return {
+    kind: "FieldPropertyOverrideCleared",
+    doctypeName: input.doctypeName,
+    fieldName: input.fieldName
+  };
+}
+
 declare module "../core/types.js" {
   interface DomainEventPayloadMap {
     readonly FieldPropertyOverrideSaved: Extract<

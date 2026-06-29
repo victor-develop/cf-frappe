@@ -17,7 +17,12 @@ import {
   type NewDomainEvent,
   type TenantId
 } from "../core/types.js";
-import type { FieldPropertyEventPayload } from "./field-property-events.js";
+import {
+  FIELD_PROPERTY_PAYLOAD_KINDS,
+  fieldPropertyOverrideClearedPayload,
+  fieldPropertyOverrideSavedPayload,
+  type FieldPropertyEventPayload
+} from "./field-property-events.js";
 import { cloneJsonValue, isJsonValue } from "../core/json.js";
 import type { ModelRegistry } from "../core/registry.js";
 import { systemClock, type Clock } from "../ports/clock.js";
@@ -115,12 +120,11 @@ export class FieldPropertyService {
       actor: command.actor,
       type: "FieldPropertyOverrideSaved",
       metadata: command.metadata,
-      payload: {
-        kind: "FieldPropertyOverrideSaved",
+      payload: fieldPropertyOverrideSavedPayload({
         doctypeName: doctype.name,
         fieldName: field.name,
         overrides
-      }
+      })
     });
   }
 
@@ -144,11 +148,10 @@ export class FieldPropertyService {
       actor: command.actor,
       type: "FieldPropertyOverrideCleared",
       metadata: command.metadata,
-      payload: {
-        kind: "FieldPropertyOverrideCleared",
+      payload: fieldPropertyOverrideClearedPayload({
         doctypeName: doctype.name,
         fieldName
-      }
+      })
     });
   }
 
@@ -157,7 +160,7 @@ export class FieldPropertyService {
       tenantId,
       doctypeName,
       await this.events.readStream(fieldPropertyOverridesStream(tenantId), {
-        payloadKinds: ["FieldPropertyOverrideSaved", "FieldPropertyOverrideCleared"]
+        payloadKinds: FIELD_PROPERTY_PAYLOAD_KINDS
       })
     );
   }
