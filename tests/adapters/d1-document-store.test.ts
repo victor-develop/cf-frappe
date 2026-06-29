@@ -190,6 +190,34 @@ describe("D1DocumentStore", () => {
     expect(read?.params).toEqual([stream, 4, "DocumentAssigned", "DocumentUnassigned"]);
   });
 
+  it("filters D1 stream and audit reads from payload kind when event type names are misleading", async () => {
+    const db = new FakeD1Database();
+    const store = new D1EventStore(db as unknown as D1Database);
+    await store.append(stream, 0, [
+      event,
+      {
+        ...updateEvent("evt2", "Two"),
+        type: "NoteDeleted"
+      },
+      assignmentEvent("evt3", "DocumentAssigned")
+    ]);
+
+    await expect(store.readStream(stream, { payloadKinds: ["DocumentUpdated"] })).resolves.toMatchObject([
+      {
+        id: "evt2",
+        type: "NoteDeleted",
+        payload: { kind: "DocumentUpdated", patch: { title: "Two" } }
+      }
+    ]);
+    await expect(store.searchEvents({ tenantId: "acme", payloadKinds: ["DocumentUpdated"] })).resolves.toMatchObject([
+      {
+        id: "evt2",
+        type: "NoteDeleted",
+        payload: { kind: "DocumentUpdated", patch: { title: "Two" } }
+      }
+    ]);
+  });
+
   it("searches audit events with tenant, metadata, kind, and limit filters", async () => {
     const db = new FakeD1Database();
     const store = new D1EventStore(db as unknown as D1Database);
