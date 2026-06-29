@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the shared concurrency policy slice:
+As of the job queue dispatch policy slice:
 
-- Vitest files: `228`
-- Vitest cases: `2593`
-- Remaining gap to Frappe static markers: `191`
+- Vitest files: `229`
+- Vitest cases: `2599`
+- Remaining gap to Frappe static markers: `185`
 
 ## Implication
 

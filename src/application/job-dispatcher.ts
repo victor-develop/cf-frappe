@@ -1,19 +1,19 @@
 import type { JobRegistry } from "../core/jobs.js";
 import type { JobPayload } from "../core/jobs.js";
-import { badRequest } from "../core/errors.js";
 import { DEFAULT_TENANT_ID } from "../core/types.js";
 import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 import { cryptoIdGenerator } from "../ports/id-generator.js";
-import { normalizeJobDocumentData } from "./job-payload-policy.js";
 import {
-  MAX_JOB_QUEUE_DELAY_SECONDS,
-  MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH,
+  ensureJobQueueIdempotencyKey,
+  jobQueueSendOptions,
+  normalizeJobDocumentData
+} from "./job-payload-policy.js";
+import {
   type DispatchJobCommand,
   type JobMessage,
-  type JobQueue,
-  type JobQueueSendOptions
+  type JobQueue
 } from "../ports/job-queue.js";
 
 export interface JobDispatcherOptions<TResources = unknown> {
@@ -38,8 +38,8 @@ export class JobDispatcher<TResources = unknown> {
 
   async dispatch<TPayload extends JobPayload>(command: DispatchJobCommand<TPayload>): Promise<JobMessage<TPayload>> {
     this.registry.get(command.jobName);
-    const options = sendOptions(command);
-    validateIdempotencyKey(command.idempotencyKey);
+    const options = jobQueueSendOptions(command);
+    ensureJobQueueIdempotencyKey(command.idempotencyKey);
     const payload = normalizeJobDocumentData(command.payload, "Job payload") as TPayload;
     const metadata = command.metadata === undefined
       ? {}
@@ -57,28 +57,5 @@ export class JobDispatcher<TResources = unknown> {
     };
     await this.queue.send(message, options);
     return message;
-  }
-}
-
-function sendOptions(command: DispatchJobCommand): JobQueueSendOptions | undefined {
-  if (command.delaySeconds === undefined) {
-    return undefined;
-  }
-  if (
-    !Number.isInteger(command.delaySeconds) ||
-    command.delaySeconds < 0 ||
-    command.delaySeconds > MAX_JOB_QUEUE_DELAY_SECONDS
-  ) {
-    throw badRequest(`Job queue delaySeconds must be an integer between 0 and ${MAX_JOB_QUEUE_DELAY_SECONDS}`);
-  }
-  return { delaySeconds: command.delaySeconds };
-}
-
-function validateIdempotencyKey(idempotencyKey: string | undefined): void {
-  if (idempotencyKey === undefined) {
-    return;
-  }
-  if (idempotencyKey.length > MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH) {
-    throw badRequest(`Job queue idempotencyKey must be at most ${MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH} characters`);
   }
 }

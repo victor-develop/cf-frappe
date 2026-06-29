@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted job queue delay option planning, idempotency-key guarding, JSON payload snapshotting, and handler-result normalization into job payload policy so JobDispatcher keeps only registry, envelope, clock/id, and queue orchestration.
 - Extracted shared document-conflict classification from document delivery outbox, user notification, email notification, user account, and document naming-series retry flows into application concurrency policy and covered framework, structural, and unrelated error cases directly.
 - Extracted shared permission-denied access-probe classification from Dashboard, Calendar, Kanban, Web Form, and Web View services into application access policy and covered framework, structural, and unrelated error cases directly.
 - Extracted invalid recovery-token error creation, append-conflict classification, and saved-event version fallback from UserAccountService into user-account policy and covered those helpers directly.
