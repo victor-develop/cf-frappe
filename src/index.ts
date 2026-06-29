@@ -8,6 +8,7 @@ export * from "./application/audit-service.js";
 export * from "./application/assignment-rule-events.js";
 export * from "./application/assignment-rule-service.js";
 export * from "./application/calendar-service.js";
+export * from "./application/custom-field-events.js";
 export * from "./application/custom-field-service.js";
 export * from "./application/dashboard-service.js";
 export * from "./application/data-patch-runner.js";

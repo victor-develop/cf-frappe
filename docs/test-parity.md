@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document lifecycle payload map slice:
+As of the custom-field event helper slice:
 
-- Vitest files: `187`
-- Vitest cases: `2129`
-- Remaining gap to Frappe static markers: `655`
+- Vitest files: `188`
+- Vitest cases: `2133`
+- Remaining gap to Frappe static markers: `651`
 
 ## Implication
 

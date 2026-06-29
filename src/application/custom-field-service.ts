@@ -12,7 +12,13 @@ import {
   type PersistedFieldDefinition,
   type TenantId
 } from "../core/types.js";
-import type { CustomFieldEventPayload } from "./custom-field-events.js";
+import {
+  CUSTOM_FIELD_PAYLOAD_KINDS,
+  customFieldDisabledPayload,
+  customFieldSavedPayload,
+  isCustomFieldEvent,
+  type CustomFieldEventPayload
+} from "./custom-field-events.js";
 import { cloneJsonValue, isJsonValue } from "../core/json.js";
 import {
   applyCustomFieldsToDocType,
@@ -135,11 +141,10 @@ export class CustomFieldService {
       documentName: field.name,
       actor: command.actor,
       ...(command.metadata === undefined ? {} : { metadata: command.metadata }),
-      payload: {
-        kind: "CustomFieldSaved",
+      payload: customFieldSavedPayload({
         doctypeName: doctype.name,
         field
-      }
+      })
     });
     const saved = await this.events.append(stream, state.version, [event]);
     return this.stateFromEvents(tenantId, doctype.name, withSavedCatalogEvents(events, saved));
@@ -167,11 +172,10 @@ export class CustomFieldService {
       documentName: fieldName,
       actor: command.actor,
       ...(command.metadata === undefined ? {} : { metadata: command.metadata }),
-      payload: {
-        kind: "CustomFieldDisabled",
+      payload: customFieldDisabledPayload({
         doctypeName: doctype.name,
         fieldName
-      }
+      })
     });
     const saved = await this.events.append(stream, state.version, [event]);
     return this.stateFromEvents(tenantId, doctype.name, withSavedCatalogEvents(events, saved));
@@ -183,7 +187,7 @@ export class CustomFieldService {
 
   private async tenantCustomFieldEvents(tenantId: TenantId): Promise<TenantCustomFieldEvents> {
     const readOptions = {
-      payloadKinds: ["CustomFieldSaved", "CustomFieldDisabled"]
+      payloadKinds: CUSTOM_FIELD_PAYLOAD_KINDS
     } as const;
     const catalog = await this.events.readStream(customFieldsCatalogStream(tenantId), readOptions);
     const legacy = (
@@ -204,8 +208,7 @@ export class CustomFieldService {
     events: TenantCustomFieldEvents
   ): CustomFieldState {
     const legacyForDoctype = events.legacy.filter((event) =>
-      (event.payload.kind === "CustomFieldSaved" || event.payload.kind === "CustomFieldDisabled") &&
-      event.payload.doctypeName === doctype
+      isCustomFieldEvent(event) && event.payload.doctypeName === doctype
     );
     const folded = foldCustomFields(tenantId, doctype, resequenceForFold([...legacyForDoctype, ...events.catalog]));
     return Object.freeze({
