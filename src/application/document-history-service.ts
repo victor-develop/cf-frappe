@@ -18,14 +18,16 @@ import {
   foldDocumentFrom,
   foldDocumentTags
 } from "../core/events.js";
-import { badRequest } from "../core/errors.js";
 import { documentStream } from "../core/streams.js";
 import type { EventStore } from "../ports/event-store.js";
+import {
+  documentTimelineBaselineEventCount,
+  normalizeDocumentTimelineBaselineLimit,
+  normalizeDocumentTimelineBeforeSequence,
+  normalizeDocumentTimelineLimit,
+  selectDocumentTimelinePage
+} from "./document-history-policy.js";
 import type { QueryService } from "./query-service.js";
-
-const DEFAULT_TIMELINE_LIMIT = 50;
-const MAX_TIMELINE_LIMIT = 200;
-const DEFAULT_DIFF_BASELINE_EVENT_LIMIT = 1_000;
 
 export interface DocumentHistoryServiceOptions {
   readonly events: Pick<EventStore, "readStream">;
@@ -105,7 +107,7 @@ export class DocumentHistoryService {
   constructor(options: DocumentHistoryServiceOptions) {
     this.events = options.events;
     this.queries = options.queries;
-    this.maxDiffBaselineEvents = normalizeMaxDiffBaselineEvents(options.maxDiffBaselineEvents);
+    this.maxDiffBaselineEvents = normalizeDocumentTimelineBaselineLimit(options.maxDiffBaselineEvents);
   }
 
   async getTimeline(
@@ -116,19 +118,14 @@ export class DocumentHistoryService {
   ): Promise<DocumentTimeline> {
     const document = await this.queries.getDocument(actor, doctypeName, name, options.tenantId);
     const stream = documentStream(document.tenantId, document.doctype, document.name);
-    const limit = normalizeLimit(options.limit);
-    const beforeSequence = normalizeBeforeSequence(options.beforeSequence, document.version);
+    const limit = normalizeDocumentTimelineLimit(options.limit);
+    const beforeSequence = normalizeDocumentTimelineBeforeSequence(options.beforeSequence, document.version);
     const events = await this.events.readStream(stream, {
       maxSequence: beforeSequence,
       limit: limit + 1
     });
-    const authorizedEvents = events
-      .filter((event) => event.sequence <= beforeSequence)
-      .sort(bySequence);
-    const hasMore = authorizedEvents.length > limit;
-    const overflow = hasMore ? authorizedEvents[authorizedEvents.length - limit - 1] : undefined;
-    const visibleEvents = hasMore ? authorizedEvents.slice(authorizedEvents.length - limit) : authorizedEvents;
-    const baseline = await this.baselineBefore(stream, visibleEvents[0]?.sequence);
+    const page = selectDocumentTimelinePage({ events, beforeSequence, limit });
+    const baseline = await this.baselineBefore(stream, page.visibleEvents[0]?.sequence);
     return {
       tenantId: document.tenantId,
       doctype: document.doctype,
@@ -137,8 +134,8 @@ export class DocumentHistoryService {
       docstatus: document.docstatus,
       limit,
       beforeSequence,
-      ...(overflow ? { nextBeforeSequence: overflow.sequence } : {}),
-      entries: toTimelineEntries(visibleEvents, baseline)
+      ...(page.nextBeforeSequence === undefined ? {} : { nextBeforeSequence: page.nextBeforeSequence }),
+      entries: toTimelineEntries(page.visibleEvents, baseline)
     };
   }
 
@@ -209,16 +206,11 @@ export class DocumentHistoryService {
   }
 
   private async baselineBefore(stream: string, firstVisibleSequence: number | undefined): Promise<DocumentSnapshot | null> {
-    if (firstVisibleSequence === undefined || firstVisibleSequence <= 1) {
+    const baselineEventCount = documentTimelineBaselineEventCount(firstVisibleSequence, this.maxDiffBaselineEvents);
+    if (baselineEventCount === undefined) {
       return null;
     }
-    const baselineEventCount = firstVisibleSequence - 1;
-    if (baselineEventCount > this.maxDiffBaselineEvents) {
-      throw badRequest(
-        `Timeline diff baseline needs ${baselineEventCount} prior events, exceeding the configured limit of ${this.maxDiffBaselineEvents}`
-      );
-    }
-    const events = await this.events.readStream(stream, { maxSequence: firstVisibleSequence - 1 });
+    const events = await this.events.readStream(stream, { maxSequence: baselineEventCount });
     return foldDocument(events);
   }
 }
@@ -561,38 +553,4 @@ function capitalize(value: string): string {
     return value;
   }
   return `${value[0]?.toUpperCase() ?? ""}${value.slice(1)}`;
-}
-
-function bySequence(left: DomainEvent, right: DomainEvent): number {
-  return left.sequence - right.sequence;
-}
-
-function normalizeLimit(limit: number | undefined): number {
-  if (limit === undefined) {
-    return DEFAULT_TIMELINE_LIMIT;
-  }
-  if (!Number.isInteger(limit) || limit < 1) {
-    throw badRequest("Timeline limit must be a positive integer");
-  }
-  return Math.min(limit, MAX_TIMELINE_LIMIT);
-}
-
-function normalizeMaxDiffBaselineEvents(value: number | undefined): number {
-  if (value === undefined) {
-    return DEFAULT_DIFF_BASELINE_EVENT_LIMIT;
-  }
-  if (!Number.isInteger(value) || value < 0) {
-    throw badRequest("Timeline diff baseline event limit must be a non-negative integer");
-  }
-  return value;
-}
-
-function normalizeBeforeSequence(beforeSequence: number | undefined, authorizedVersion: number): number {
-  if (beforeSequence === undefined) {
-    return authorizedVersion;
-  }
-  if (!Number.isInteger(beforeSequence) || beforeSequence < 1) {
-    throw badRequest("Timeline beforeSequence must be a positive integer");
-  }
-  return Math.min(beforeSequence, authorizedVersion);
 }

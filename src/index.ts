@@ -41,6 +41,7 @@ export * from "./application/document-reference-policy.js";
 export * from "./application/document-tenant-policy.js";
 export * from "./application/document-unique-values.js";
 export * from "./application/document-history-service.js";
+export * from "./application/document-history-policy.js";
 export * from "./application/document-import-service.js";
 export * from "./application/document-share-service.js";
 export * from "./application/email-notification-events.js";
