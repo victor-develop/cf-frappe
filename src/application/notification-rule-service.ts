@@ -1,4 +1,3 @@
-import { conflict, FrameworkError, permissionDenied } from "../core/errors.js";
 import { notificationRulesStream } from "../core/streams.js";
 import {
   foldNotificationRules,
@@ -6,7 +5,6 @@ import {
   type NotificationRuleState
 } from "../core/notification-rules.js";
 import {
-  DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
   type Actor,
   type DocTypeDefinition,
@@ -23,6 +21,14 @@ import {
   replayNotificationRuleAppend,
   type NotificationRuleEventPayload
 } from "./notification-rule-events.js";
+import {
+  authorizeNotificationRuleAdministration,
+  enabledNotificationRules,
+  ensureNotificationRuleExpectedVersion,
+  findNotificationRuleEntry,
+  normalizeRequiredNotificationRuleText,
+  notificationRulesEqual
+} from "./notification-rule-policy.js";
 import type { ModelRegistry } from "../core/registry.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
@@ -81,9 +87,9 @@ export class NotificationRuleService implements NotificationRuleProvider {
   }
 
   async list(actor: Actor, doctypeName: string, tenantId?: TenantId): Promise<NotificationRuleState> {
-    this.authorizeAdministration(actor, tenantId);
+    const resolvedTenantId = this.authorizeAdministration(actor, tenantId);
     const doctype = this.registry.get(doctypeName);
-    return this.stateFor(resolveActorTenant(actor, tenantId), doctype.name);
+    return this.stateFor(resolvedTenantId, doctype.name);
   }
 
   async notificationRulesFor(
@@ -92,25 +98,21 @@ export class NotificationRuleService implements NotificationRuleProvider {
     options: { readonly occurredAt?: string } = {}
   ): Promise<readonly NotificationRuleDefinition[]> {
     const doctype = this.registry.get(doctypeName);
-    return (await this.stateFor(tenantId, doctype.name, options)).rules
-      .filter((entry) => entry.enabled)
-      .map((entry) => entry.rule);
+    return enabledNotificationRules(await this.stateFor(tenantId, doctype.name, options));
   }
 
-  authorizeAdministration(actor: Actor, tenantId?: TenantId): void {
-    this.ensureAdmin(actor);
-    resolveActorTenant(actor, tenantId);
+  authorizeAdministration(actor: Actor, tenantId?: TenantId): TenantId {
+    return authorizeNotificationRuleAdministration({ actor, tenantId, adminRoles: this.adminRoles });
   }
 
   async save(command: SaveNotificationRuleCommand): Promise<NotificationRuleState> {
-    this.authorizeAdministration(command.actor, command.tenantId);
-    const tenantId = resolveActorTenant(command.actor, command.tenantId);
+    const tenantId = this.authorizeAdministration(command.actor, command.tenantId);
     const doctype = await this.preNotificationRuleDocTypeFor(command.doctype, tenantId);
     const rule = normalizeNotificationRule(doctype, command.rule);
     const state = await this.stateFor(tenantId, doctype.name);
-    ensureExpectedVersion(state, command.expectedVersion);
-    const existing = state.rules.find((entry) => entry.rule.name === rule.name);
-    if (existing && jsonEqual(existing.rule, rule)) {
+    ensureNotificationRuleExpectedVersion(state, command.expectedVersion);
+    const existing = findNotificationRuleEntry(state, rule.name);
+    if (existing && notificationRulesEqual(existing.rule, rule)) {
       return state;
     }
     return this.appendAndFold(state, {
@@ -124,13 +126,12 @@ export class NotificationRuleService implements NotificationRuleProvider {
   }
 
   async clear(command: ClearNotificationRuleCommand): Promise<NotificationRuleState> {
-    this.authorizeAdministration(command.actor, command.tenantId);
-    const tenantId = resolveActorTenant(command.actor, command.tenantId);
+    const tenantId = this.authorizeAdministration(command.actor, command.tenantId);
     const doctype = this.registry.get(command.doctype);
-    const ruleName = normalizeRequiredString(command.ruleName, "Notification rule name");
+    const ruleName = normalizeRequiredNotificationRuleText(command.ruleName, "Notification rule name");
     const state = await this.stateFor(tenantId, doctype.name);
-    ensureExpectedVersion(state, command.expectedVersion);
-    if (!state.rules.some((entry) => entry.rule.name === ruleName)) {
+    ensureNotificationRuleExpectedVersion(state, command.expectedVersion);
+    if (findNotificationRuleEntry(state, ruleName) === undefined) {
       return state;
     }
     return this.appendAndFold(state, {
@@ -189,40 +190,4 @@ export class NotificationRuleService implements NotificationRuleProvider {
       saved
     );
   }
-
-  private ensureAdmin(actor: Actor): void {
-    if (!this.adminRoles.some((role) => actor.roles.includes(role))) {
-      throw permissionDenied(`Actor '${actor.id}' cannot manage notification rules`);
-    }
-  }
-}
-
-function resolveActorTenant(actor: Actor, explicitTenantId: TenantId | undefined): TenantId {
-  const actorTenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
-  const tenantId = explicitTenantId ?? actorTenantId;
-  if (tenantId !== actorTenantId) {
-    throw permissionDenied(`Actor '${actor.id}' cannot manage notification rules for tenant '${tenantId}'`);
-  }
-  return tenantId;
-}
-
-function ensureExpectedVersion(state: NotificationRuleState, expectedVersion: number | undefined): void {
-  if (expectedVersion !== undefined && state.version !== expectedVersion) {
-    throw conflict(`Expected notification rules at version ${expectedVersion}, found ${state.version}`);
-  }
-}
-
-function normalizeRequiredString(value: string, label: string): string {
-  if (typeof value !== "string") {
-    throw new FrameworkError("NOTIFICATION_RULE_INVALID", `${label} must be a string`, { status: 400 });
-  }
-  const normalized = value.trim();
-  if (!normalized) {
-    throw new FrameworkError("NOTIFICATION_RULE_INVALID", `${label} is required`, { status: 400 });
-  }
-  return normalized;
-}
-
-function jsonEqual(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
 }
