@@ -1,5 +1,6 @@
 import type {
   CoreDocumentEventPayload,
+  DocTypeName,
   DocStatus,
   DocumentData,
   DocumentSnapshot,
@@ -8,6 +9,14 @@ import type {
 import { FrameworkError, notFound } from "../core/errors.js";
 
 export type DocumentLifecycleEventPayload = CoreDocumentEventPayload;
+
+export const DOCUMENT_LIFECYCLE_PAYLOAD_KINDS = Object.freeze([
+  "DocumentCreated",
+  "DocumentUpdated",
+  "DocumentDeleted",
+  "DocumentSubmitted",
+  "DocumentCancelled"
+] as const);
 
 export function documentCreatedPayload(
   data: DocumentData,
@@ -38,6 +47,32 @@ export function documentStatusChangedPayload(
   kind: "DocumentSubmitted" | "DocumentCancelled"
 ): Extract<DocumentLifecycleEventPayload, { readonly kind: typeof kind }> {
   return { kind };
+}
+
+export interface DocumentLifecycleEventTypeOptions {
+  readonly doctypeName: DocTypeName;
+  readonly kind: DocumentLifecycleEventPayload["kind"];
+  readonly commandEventType?: string | undefined;
+  readonly createEventType?: string | undefined;
+  readonly updateEventType?: string | undefined;
+  readonly submitEventType?: string | undefined;
+  readonly cancelEventType?: string | undefined;
+  readonly deleteEventType?: string | undefined;
+}
+
+export function documentLifecycleEventType(options: DocumentLifecycleEventTypeOptions): string {
+  switch (options.kind) {
+    case "DocumentCreated":
+      return options.commandEventType ?? options.createEventType ?? `${options.doctypeName}Created`;
+    case "DocumentUpdated":
+      return options.commandEventType ?? options.updateEventType ?? `${options.doctypeName}Updated`;
+    case "DocumentSubmitted":
+      return options.submitEventType ?? `${options.doctypeName}Submitted`;
+    case "DocumentCancelled":
+      return options.cancelEventType ?? `${options.doctypeName}Cancelled`;
+    case "DocumentDeleted":
+      return options.deleteEventType ?? `${options.doctypeName}Deleted`;
+  }
 }
 
 export function snapshotFromDocumentCreatedEvent(event: DomainEvent): DocumentSnapshot {

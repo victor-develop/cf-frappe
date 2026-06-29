@@ -6,6 +6,7 @@ import { copyDocumentData } from "./document-field-policy.js";
 import { workflowTransitionEventType } from "./document-command-events.js";
 import {
   documentCreatedPayload,
+  documentLifecycleEventType,
   documentUpdatedPayload,
   type DocumentLifecycleEventPayload
 } from "./document-lifecycle-events.js";
@@ -83,7 +84,12 @@ export function planDocumentCreatePolicy(input: {
   readonly eventType?: string | undefined;
 }): DocumentCreatePolicyPlan {
   return {
-    eventType: input.eventType ?? input.doctype.events?.create ?? `${input.doctype.name}Created`,
+    eventType: documentLifecycleEventType({
+      doctypeName: input.doctype.name,
+      kind: "DocumentCreated",
+      commandEventType: input.eventType,
+      createEventType: input.doctype.events?.create
+    }),
     docstatus: "draft",
     payload: documentCreatedPayload(input.data, "draft")
   };
@@ -101,7 +107,12 @@ export function planDocumentUpdatePolicy(input: {
   readonly eventType?: string | undefined;
 }): DocumentUpdatePolicyPlan {
   return {
-    eventType: input.eventType ?? input.doctype.events?.update ?? `${input.doctype.name}Updated`,
+    eventType: documentLifecycleEventType({
+      doctypeName: input.doctype.name,
+      kind: "DocumentUpdated",
+      commandEventType: input.eventType,
+      updateEventType: input.doctype.events?.update
+    }),
     payload: documentUpdatedPayload(input.patch, input.unset ?? [])
   };
 }
@@ -200,14 +211,22 @@ export function planDocumentStatusChangePolicy(
     return {
       allowedStatus: ["draft"],
       nextStatus: "submitted",
-      eventType: doctype.events?.submit ?? `${doctype.name}Submitted`,
+      eventType: documentLifecycleEventType({
+        doctypeName: doctype.name,
+        kind: "DocumentSubmitted",
+        submitEventType: doctype.events?.submit
+      }),
       payloadKind: "DocumentSubmitted"
     };
   }
   return {
     allowedStatus: ["submitted"],
     nextStatus: "cancelled",
-    eventType: doctype.events?.cancel ?? `${doctype.name}Cancelled`,
+    eventType: documentLifecycleEventType({
+      doctypeName: doctype.name,
+      kind: "DocumentCancelled",
+      cancelEventType: doctype.events?.cancel
+    }),
     payloadKind: "DocumentCancelled"
   };
 }
@@ -225,7 +244,11 @@ export function planDocumentDeletePolicy(
   return {
     allowedStatus: ["draft", "cancelled"],
     nextStatus: "deleted",
-    eventType: doctype.events?.delete ?? `${doctype.name}Deleted`,
+    eventType: documentLifecycleEventType({
+      doctypeName: doctype.name,
+      kind: "DocumentDeleted",
+      deleteEventType: doctype.events?.delete
+    }),
     payloadKind: "DocumentDeleted"
   };
 }

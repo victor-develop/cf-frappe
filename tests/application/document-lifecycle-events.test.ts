@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DOCUMENT_LIFECYCLE_PAYLOAD_KINDS,
   documentCreatedPayload,
   documentDeletedPayload,
+  documentLifecycleEventType,
   documentStatusChangedPayload,
   documentUpdatedPayload,
   requireFirstSavedEvent,
@@ -45,6 +47,43 @@ describe("document lifecycle events", () => {
     expect(documentDeletedPayload()).toEqual({ kind: "DocumentDeleted" });
     expect(documentStatusChangedPayload("DocumentSubmitted")).toEqual({ kind: "DocumentSubmitted" });
     expect(documentStatusChangedPayload("DocumentCancelled")).toEqual({ kind: "DocumentCancelled" });
+  });
+
+  it("derives default lifecycle event types from payload identity", () => {
+    expect(documentLifecycleEventType({ doctypeName: "Note", kind: "DocumentCreated" })).toBe("NoteCreated");
+    expect(documentLifecycleEventType({ doctypeName: "Note", kind: "DocumentUpdated" })).toBe("NoteUpdated");
+    expect(documentLifecycleEventType({ doctypeName: "Note", kind: "DocumentSubmitted" })).toBe("NoteSubmitted");
+    expect(documentLifecycleEventType({ doctypeName: "Note", kind: "DocumentCancelled" })).toBe("NoteCancelled");
+    expect(documentLifecycleEventType({ doctypeName: "Note", kind: "DocumentDeleted" })).toBe("NoteDeleted");
+  });
+
+  it("uses command and DocType overrides for lifecycle event types", () => {
+    expect(documentLifecycleEventType({
+      doctypeName: "Note",
+      kind: "DocumentCreated",
+      commandEventType: "NoteImported",
+      createEventType: "NoteWasCreated"
+    })).toBe("NoteImported");
+    expect(documentLifecycleEventType({
+      doctypeName: "Note",
+      kind: "DocumentUpdated",
+      updateEventType: "NoteWasUpdated"
+    })).toBe("NoteWasUpdated");
+    expect(documentLifecycleEventType({
+      doctypeName: "Note",
+      kind: "DocumentCancelled",
+      cancelEventType: "NoteWasCancelled"
+    })).toBe("NoteWasCancelled");
+  });
+
+  it("exposes the bounded document lifecycle payload kind set", () => {
+    expect(DOCUMENT_LIFECYCLE_PAYLOAD_KINDS).toEqual([
+      "DocumentCreated",
+      "DocumentUpdated",
+      "DocumentDeleted",
+      "DocumentSubmitted",
+      "DocumentCancelled"
+    ]);
   });
 
   it("projects a document-created event into a document snapshot", () => {
