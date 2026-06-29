@@ -6,6 +6,8 @@ import {
   documentShareStateFromEvents,
   documentSharedPayload,
   documentShareRevokedPayload,
+  isDocumentShareEvent,
+  isDocumentSharePayloadKind,
   type DocumentShareEventPayload
 } from "../../src";
 import type { DomainEvent } from "../../src";
@@ -83,6 +85,18 @@ describe("document share events", () => {
       "DocumentShared",
       "DocumentShareRevoked"
     ]);
+  });
+
+  it("narrows document share events by payload kind when event type names are custom", () => {
+    const shared = {
+      ...sharedEvent(1, "collab@example.com", ["read"]),
+      type: "NoteDelegatedByPolicy"
+    };
+
+    expect(isDocumentSharePayloadKind("DocumentShared")).toBe(true);
+    expect(isDocumentSharePayloadKind("DocumentDeleted")).toBe(false);
+    expect(isDocumentShareEvent(shared)).toBe(true);
+    expect(isDocumentShareEvent(updatedEvent(2))).toBe(false);
   });
 });
 

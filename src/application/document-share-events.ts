@@ -1,3 +1,4 @@
+import { domainEventPayloadKind } from "../core/domain-events.js";
 import {
   foldDocumentShares,
   type DocumentSharePermission,
@@ -21,10 +22,14 @@ export type DocumentShareEventPayload =
       readonly userId: string;
     };
 
+export type DocumentSharePayloadKind = DocumentShareEventPayload["kind"];
+
 export const DOCUMENT_SHARE_PAYLOAD_KINDS = Object.freeze([
   "DocumentShared",
   "DocumentShareRevoked"
-] as const);
+] as const satisfies readonly DocumentSharePayloadKind[]);
+
+const DOCUMENT_SHARE_PAYLOAD_KIND_SET = new Set<string>(DOCUMENT_SHARE_PAYLOAD_KINDS);
 
 export interface DocumentSharePayloadInput {
   readonly userId: string;
@@ -59,6 +64,14 @@ export function documentShareEventType(options: DocumentShareEventTypeOptions): 
     return options.shareEventType ?? `${options.doctypeName}Shared`;
   }
   return options.unshareEventType ?? `${options.doctypeName}ShareRevoked`;
+}
+
+export function isDocumentSharePayloadKind(kind: string): kind is DocumentSharePayloadKind {
+  return DOCUMENT_SHARE_PAYLOAD_KIND_SET.has(kind);
+}
+
+export function isDocumentShareEvent(event: DomainEvent): event is DomainEvent<DocumentShareEventPayload> {
+  return isDocumentSharePayloadKind(domainEventPayloadKind(event));
 }
 
 export interface DocumentShareStateFromEventsOptions {
