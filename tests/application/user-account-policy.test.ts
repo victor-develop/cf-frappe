@@ -14,8 +14,11 @@ import {
   normalizeUserLoginPassword,
   normalizeUserPassword,
   normalizeUserRecoveryToken,
+  providerSyncCreatedEnabled,
+  providerSyncCreatedRoles,
   recoveryChallengeExpired,
   recoveryExpiresAtFrom,
+  resolveProviderSyncUserId,
   resolveUserAccountActorTenant,
   resolveUserAccountSessionTenant,
   SYSTEM_MANAGER_ROLE,
@@ -95,6 +98,28 @@ describe("user account policy", () => {
   it("normalizes required account roles", () => {
     expect(normalizeRequiredUserRoles([" User ", "System Manager", "User"])).toEqual(["System Manager", "User"]);
     expect(() => normalizeRequiredUserRoles(["  "])).toThrow("At least one role is required");
+  });
+
+  it("resolves provider-sync user ids from explicit, email, or provider subject identity", () => {
+    expect(resolveProviderSyncUserId("oidc", "sub-123", "owner@example.com", " explicit@example.com "))
+      .toBe("explicit@example.com");
+    expect(resolveProviderSyncUserId("oidc", "sub-123", "owner@example.com", undefined))
+      .toBe("owner@example.com");
+    expect(resolveProviderSyncUserId("oidc", "sub-123", undefined, undefined))
+      .toBe("oidc:sub-123");
+    expect(() => resolveProviderSyncUserId("oidc", "sub-123", undefined, "  "))
+      .toThrow("User id is required");
+  });
+
+  it("defaults provider-sync account creation roles", () => {
+    expect(providerSyncCreatedRoles(undefined)).toEqual(["User"]);
+    expect(providerSyncCreatedRoles(["System Manager"])).toEqual(["System Manager"]);
+  });
+
+  it("defaults provider-sync account creation enabled state", () => {
+    expect(providerSyncCreatedEnabled(undefined)).toBe(true);
+    expect(providerSyncCreatedEnabled(false)).toBe(false);
+    expect(providerSyncCreatedEnabled(true)).toBe(true);
   });
 
   it("normalizes password inputs for account and login flows", () => {

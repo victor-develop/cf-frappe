@@ -56,7 +56,10 @@ import {
   normalizeUserLoginPassword,
   normalizeUserPassword,
   normalizeUserRecoveryToken,
+  providerSyncCreatedEnabled,
+  providerSyncCreatedRoles,
   recoveryExpiresAtFrom,
+  resolveProviderSyncUserId,
   resolveUserAccountActorTenant,
   resolveUserAccountSessionTenant,
   ensureUserAccountPasswordLoginAllowed,
@@ -75,7 +78,6 @@ export type { UserAccountEventPayload } from "./user-account-events.js";
 const DEFAULT_PASSWORD_RESET_EXPIRY_SECONDS = 3_600;
 const DEFAULT_EMAIL_VERIFICATION_EXPIRY_SECONDS = 86_400;
 const RECOVERY_ACTOR_ID = "anonymous";
-const DEFAULT_PROVIDER_ROLE = "User";
 
 export interface UserAccountServiceOptions {
   readonly events: EventStore;
@@ -322,7 +324,7 @@ export class UserAccountService {
     const provider = normalizeRequiredUserAccountText(command.provider, "Provider");
     const subject = normalizeRequiredUserAccountText(command.subject, "Provider subject");
     const email = normalizeOptionalUserEmail(command.email);
-    const userId = normalizeRequiredUserAccountText(command.userId ?? email ?? `${provider}:${subject}`, "User id");
+    const userId = resolveProviderSyncUserId(provider, subject, email, command.userId);
     const roles = command.roles === undefined ? undefined : normalizeRequiredUserRoles(command.roles);
     const state = await this.stateFor(tenantId, userId);
     ensureUserAccountExpectedVersion(state, command.expectedVersion);
@@ -335,8 +337,8 @@ export class UserAccountService {
     );
 
     if (!state.exists) {
-      const createdRoles = roles ?? normalizeRequiredUserRoles([DEFAULT_PROVIDER_ROLE]);
-      const enabled = command.enabled ?? true;
+      const createdRoles = providerSyncCreatedRoles(roles);
+      const enabled = providerSyncCreatedEnabled(command.enabled);
       await this.validateRoles(tenantId, createdRoles);
       const createdPayload = userAccountCreatedPayload({
         userId,

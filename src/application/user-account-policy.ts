@@ -9,6 +9,7 @@ import { DEFAULT_TENANT_ID, type Actor, type TenantId } from "../core/types.js";
 
 export const MAX_ACCOUNT_RECOVERY_EXPIRY_SECONDS = 604_800;
 export const MIN_USER_PASSWORD_LENGTH = 8;
+export const DEFAULT_PROVIDER_ROLE = "User";
 
 export function ensureUserAccountAdmin(actor: Actor, adminRoles: readonly string[]): void {
   if (!adminRoles.some((role) => actor.roles.includes(role))) {
@@ -60,6 +61,23 @@ export function normalizeRequiredUserRoles(roles: readonly string[]): readonly s
     throw badRequest("At least one role is required");
   }
   return normalized;
+}
+
+export function resolveProviderSyncUserId(
+  provider: string,
+  subject: string,
+  email: string | undefined,
+  explicitUserId: string | undefined
+): string {
+  return normalizeRequiredUserAccountText(explicitUserId ?? email ?? `${provider}:${subject}`, "User id");
+}
+
+export function providerSyncCreatedRoles(roles: readonly string[] | undefined): readonly string[] {
+  return roles ?? normalizeRequiredUserRoles([DEFAULT_PROVIDER_ROLE]);
+}
+
+export function providerSyncCreatedEnabled(enabled: boolean | undefined): boolean {
+  return enabled ?? true;
 }
 
 export function normalizeUserPassword(password: string): string {
