@@ -63,6 +63,7 @@ export * from "./application/job-retry-service.js";
 export * from "./application/job-schedule-events.js";
 export * from "./application/job-schedule-policy.js";
 export * from "./application/job-schedule-service.js";
+export * from "./application/kanban-policy.js";
 export * from "./application/kanban-service.js";
 export * from "./application/notification-rule-events.js";
 export * from "./application/notification-rule-policy.js";

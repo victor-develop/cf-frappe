@@ -2,39 +2,23 @@ import { permissionDenied } from "../core/errors.js";
 import {
   canReadKanban,
   kanbanColumnsForDocType,
-  type KanbanColumnDefinition,
   type KanbanDefinition
 } from "../core/kanban.js";
 import type { ModelRegistry } from "../core/registry.js";
-import type { Actor, DocumentSnapshot, JsonValue } from "../core/types.js";
+import type { Actor } from "../core/types.js";
 import type { QueryService } from "./query-service.js";
+import {
+  applyDocumentToKanbanColumns,
+  initialKanbanColumnStates,
+  kanbanCardLimit,
+  kanbanRunResult,
+  type KanbanColumnState,
+  type KanbanRunResult
+} from "./kanban-policy.js";
 
-const DEFAULT_MAX_CARDS_PER_COLUMN = 50;
 const PAGE_SIZE = 200;
 
-export interface KanbanCardResult {
-  readonly name: string;
-  readonly title: string;
-  readonly doctype: string;
-  readonly docstatus: string;
-  readonly version: number;
-  readonly updatedAt: string;
-  readonly data: Readonly<Record<string, JsonValue>>;
-}
-
-export interface KanbanColumnResult {
-  readonly value: string;
-  readonly label: string;
-  readonly indicator?: string;
-  readonly total: number;
-  readonly hasMore: boolean;
-  readonly cards: readonly KanbanCardResult[];
-}
-
-export interface KanbanRunResult {
-  readonly board: KanbanDefinition;
-  readonly columns: readonly KanbanColumnResult[];
-}
+export type { KanbanCardResult, KanbanColumnResult, KanbanRunResult } from "./kanban-policy.js";
 
 export interface KanbanServiceOptions {
   readonly registry: ModelRegistry;
@@ -72,13 +56,8 @@ export class KanbanService {
     const board = await this.getKanban(actor, kanbanName);
     const doctype = await this.queries.getEffectiveMeta(actor, board.doctype);
     const columns = kanbanColumnsForDocType(board, doctype);
-    const states = columns.map((column) => ({
-      column,
-      cards: [] as KanbanCardResult[],
-      total: 0
-    }));
-    const byValue = new Map(states.map((state) => [state.column.value, state]));
-    const limit = board.maxCardsPerColumn ?? DEFAULT_MAX_CARDS_PER_COLUMN;
+    let states: readonly KanbanColumnState[] = initialKanbanColumnStates(columns);
+    const limit = kanbanCardLimit(board.maxCardsPerColumn);
     const filters = board.filters ?? [];
     for (let offset = 0; ; offset += PAGE_SIZE) {
       const page = await this.queries.listDocuments(actor, board.doctype, {
@@ -91,30 +70,13 @@ export class KanbanService {
         maxLimit: PAGE_SIZE
       });
       for (const document of page.data) {
-        const state = byValue.get(kanbanColumnValue(document.data[board.columnField]));
-        if (state === undefined) {
-          continue;
-        }
-        state.total += 1;
-        if (state.cards.length < limit) {
-          state.cards.push(kanbanCard(board, document));
-        }
+        states = applyDocumentToKanbanColumns(board, states, document, limit);
       }
       if (offset + page.limit >= page.total) {
         break;
       }
     }
-    return {
-      board,
-      columns: states.map((state) => ({
-        value: state.column.value,
-        label: state.column.label ?? state.column.value,
-        ...(state.column.indicator === undefined ? {} : { indicator: state.column.indicator }),
-        total: state.total,
-        hasMore: state.total > state.cards.length,
-        cards: state.cards
-      }))
-    };
+    return kanbanRunResult(board, states);
   }
 
   private async canAccessKanban(actor: Actor, kanban: KanbanDefinition): Promise<boolean> {
@@ -131,30 +93,6 @@ export class KanbanService {
       throw error;
     }
   }
-}
-
-function kanbanCard(board: KanbanDefinition, document: DocumentSnapshot): KanbanCardResult {
-  return {
-    name: document.name,
-    title: kanbanCardTitle(board, document),
-    doctype: document.doctype,
-    docstatus: document.docstatus,
-    version: document.version,
-    updatedAt: document.updatedAt,
-    data: document.data
-  };
-}
-
-function kanbanCardTitle(board: KanbanDefinition, document: DocumentSnapshot): string {
-  if (board.titleField === undefined) {
-    return document.name;
-  }
-  const value = document.data[board.titleField];
-  return value === undefined || value === null || typeof value === "object" ? document.name : String(value);
-}
-
-function kanbanColumnValue(value: JsonValue | undefined): string {
-  return value === undefined || value === null || typeof value === "object" ? "" : String(value);
 }
 
 function isPermissionDenied(error: unknown): boolean {
