@@ -1,4 +1,5 @@
 import {
+  ensureSavedListFilterServiceAvailable,
   findSavedListFilter,
   planSavedListFilterLookup,
   planSavedListFilterReadAccess,
@@ -11,6 +12,22 @@ import { defineDocType } from "../../src";
 import { guest, owner } from "../helpers";
 
 describe("saved list filter policy", () => {
+  it("guards saved-filter service availability before Desk saved-filter routes", () => {
+    expect(() => ensureSavedListFilterServiceAvailable({ list: async () => [] })).not.toThrow();
+
+    let error: unknown;
+    try {
+      ensureSavedListFilterServiceAvailable(undefined);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: "DOCUMENT_NOT_FOUND",
+      message: "Saved filters are not enabled",
+      status: 404
+    });
+  });
+
   it("plans saved-filter DocType read access before service stream reads", () => {
     const doctype = defineDocType({
       name: "Private Note",

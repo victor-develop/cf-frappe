@@ -46,6 +46,7 @@ import { QueryService } from "../../application/query-service.js";
 import { ensureReportServiceAvailable } from "../../application/report-policy.js";
 import type { ReportCsvExportOptions, ReportRunOptions, ReportService } from "../../application/report-service.js";
 import type { RoleService } from "../../application/role-service.js";
+import { ensureSavedListFilterServiceAvailable } from "../../application/saved-list-filter-policy.js";
 import type { SavedListFilterService } from "../../application/saved-list-filter-service.js";
 import type { SavedReportDefinition, SavedReportService } from "../../application/saved-report-service.js";
 import type { UserAccountService } from "../../application/user-account-service.js";
@@ -2087,9 +2088,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
   });
 
   app.post("/desk/:doctype/saved-filters", async (c) => {
-    if (!options.savedFilters) {
-      throw new FrameworkError("DOCUMENT_NOT_FOUND", "Saved filters are not enabled", { status: 404 });
-    }
+    ensureSavedListFilterServiceAvailable(options.savedFilters);
     const actor = await options.actor(c.req.raw);
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
     try {
@@ -2108,9 +2107,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
   });
 
   app.post("/desk/:doctype/saved-filters/:filterId/delete", async (c) => {
-    if (!options.savedFilters) {
-      throw new FrameworkError("DOCUMENT_NOT_FOUND", "Saved filters are not enabled", { status: 404 });
-    }
+    ensureSavedListFilterServiceAvailable(options.savedFilters);
     const actor = await options.actor(c.req.raw);
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
     await options.savedFilters.delete({

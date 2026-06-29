@@ -117,6 +117,7 @@ describe("Desk app", () => {
       readonly printPdfRenderer?: PrintPdfRenderer;
       readonly prints?: boolean;
       readonly reports?: boolean;
+      readonly savedFilters?: boolean;
     } = {}
   ) {
     const services = createServices(["e1", "e2", "e3", "e4"]);
@@ -130,7 +131,7 @@ describe("Desk app", () => {
       ...(options.documentShares === false ? {} : { documentShares: services.documentShares }),
       ...(options.reports === false ? {} : { reports: services.reports }),
       timeline: services.history,
-      savedFilters: services.savedFilters,
+      ...(options.savedFilters === false ? {} : { savedFilters: services.savedFilters }),
       savedReports: services.savedReports,
       userPermissions: services.userPermissions,
       ...(options.realtime === undefined ? {} : { realtime: options.realtime }),
@@ -3997,6 +3998,22 @@ describe("Desk app", () => {
 
     expect(deleted.status).toBe(303);
     await expect(services.savedFilters.list(owner, "Note")).resolves.toEqual([]);
+  });
+
+  it("uses the saved-list-filter policy error for Desk saved-filter routes when saved filters are disabled", async () => {
+    const { app } = makeDesk(owner, { savedFilters: false });
+
+    const save = await app.request("/desk/Note/saved-filters", {
+      method: "POST",
+      body: new URLSearchParams({ saved_filter_label: "High notes" }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(save.status).toBe(404);
+    await expect(save.text()).resolves.toContain("Saved filters are not enabled");
+
+    const deleted = await app.request("/desk/Note/saved-filters/filter-1/delete", { method: "POST" });
+    expect(deleted.status).toBe(404);
+    await expect(deleted.text()).resolves.toContain("Saved filters are not enabled");
   });
 
   it("renders and mutates user permissions from the Desk admin surface", async () => {

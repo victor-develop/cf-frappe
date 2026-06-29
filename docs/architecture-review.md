@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted Desk saved-filter service availability decisions into saved-list-filter policy so Desk routes keep actor resolution, DocType lookup, form parsing, event append orchestration, redirects, and error-boundary rendering.
 - Extracted Desk report and print service availability decisions into report and print policies so Desk routes keep service orchestration, actor resolution, request parsing, print/PDF rendering, and response shaping.
 - Extended print PDF renderer availability policy across Desk report, saved-report, and document PDF routes so Desk adapters keep service lookup, actor resolution, query parsing, print layout lookup, PDF rendering orchestration, and response shaping.
 - Extracted print PDF renderer availability decisions from print, report, and saved-report HTTP adapters into print policy so adapters keep actor resolution, query parsing, service calls, PDF rendering orchestration, and response shaping.
