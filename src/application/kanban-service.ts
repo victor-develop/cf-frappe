@@ -1,6 +1,5 @@
 import { permissionDenied } from "../core/errors.js";
 import {
-  canReadKanban,
   kanbanColumnsForDocType,
   type KanbanDefinition
 } from "../core/kanban.js";
@@ -14,7 +13,9 @@ import {
   kanbanCardLimit,
   kanbanRunResult,
   type KanbanColumnState,
-  type KanbanRunResult
+  type KanbanReadAccessDecision,
+  type KanbanRunResult,
+  planKanbanReadAccess
 } from "./kanban-policy.js";
 
 const PAGE_SIZE = 200;
@@ -38,7 +39,7 @@ export class KanbanService {
   async listKanbans(actor: Actor): Promise<readonly KanbanDefinition[]> {
     const readable: KanbanDefinition[] = [];
     for (const kanban of this.registry.listKanbans()) {
-      if (await this.canAccessKanban(actor, kanban)) {
+      if ((await this.kanbanReadAccess(actor, kanban)).status === "allow") {
         readable.push(kanban);
       }
     }
@@ -47,8 +48,9 @@ export class KanbanService {
 
   async getKanban(actor: Actor, kanbanName: string): Promise<KanbanDefinition> {
     const kanban = this.registry.getKanban(kanbanName);
-    if (!(await this.canAccessKanban(actor, kanban))) {
-      throw permissionDenied(`Actor '${actor.id}' cannot read kanban '${kanban.name}'`);
+    const decision = await this.kanbanReadAccess(actor, kanban);
+    if (decision.status === "deny") {
+      throw permissionDenied(decision.message);
     }
     return kanban;
   }
@@ -80,16 +82,13 @@ export class KanbanService {
     return kanbanRunResult(board, states);
   }
 
-  private async canAccessKanban(actor: Actor, kanban: KanbanDefinition): Promise<boolean> {
-    if (!canReadKanban(actor, kanban)) {
-      return false;
-    }
+  private async kanbanReadAccess(actor: Actor, kanban: KanbanDefinition): Promise<KanbanReadAccessDecision> {
     try {
       this.queries.getMeta(actor, kanban.doctype);
-      return true;
+      return planKanbanReadAccess({ actor, board: kanban, doctypeReadable: true });
     } catch (error) {
       if (isPermissionDeniedError(error)) {
-        return false;
+        return planKanbanReadAccess({ actor, board: kanban, doctypeReadable: false });
       }
       throw error;
     }

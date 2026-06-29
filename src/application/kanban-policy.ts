@@ -1,7 +1,12 @@
+import { canReadKanban } from "../core/kanban.js";
 import type { KanbanColumnDefinition, KanbanDefinition } from "../core/kanban.js";
-import type { DocumentSnapshot, JsonValue } from "../core/types.js";
+import type { Actor, DocumentSnapshot, JsonValue } from "../core/types.js";
 
 export const DEFAULT_KANBAN_MAX_CARDS_PER_COLUMN = 50;
+
+export type KanbanReadAccessDecision =
+  | { readonly status: "allow" }
+  | { readonly status: "deny"; readonly message: string };
 
 export interface KanbanCardResult {
   readonly name: string;
@@ -31,6 +36,20 @@ export interface KanbanColumnState {
   readonly column: KanbanColumnDefinition;
   readonly total: number;
   readonly cards: readonly KanbanCardResult[];
+}
+
+export function planKanbanReadAccess(options: {
+  readonly actor: Actor;
+  readonly board: KanbanDefinition;
+  readonly doctypeReadable: boolean;
+}): KanbanReadAccessDecision {
+  if (!canReadKanban(options.actor, options.board) || !options.doctypeReadable) {
+    return {
+      status: "deny",
+      message: `Actor '${options.actor.id}' cannot read kanban '${options.board.name}'`
+    };
+  }
+  return { status: "allow" };
 }
 
 export function kanbanCardLimit(requested: number | undefined): number {

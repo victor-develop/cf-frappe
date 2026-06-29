@@ -6,6 +6,7 @@ import {
   kanbanCardLimit,
   kanbanColumnValue,
   kanbanRunResult,
+  planKanbanReadAccess,
   type DocumentSnapshot
 } from "../../src";
 
@@ -123,6 +124,35 @@ describe("kanban policy", () => {
         cards: [expect.objectContaining({ title: "NOTE-001" })]
       }
     ]);
+  });
+
+  it("plans kanban read access from board roles and DocType readability", () => {
+    const restricted = defineKanban({
+      ...board,
+      roles: ["Board Manager"]
+    });
+
+    expect(
+      planKanbanReadAccess({
+        actor: { id: "manager", roles: ["Board Manager"] },
+        board: restricted,
+        doctypeReadable: true
+      })
+    ).toEqual({ status: "allow" });
+    expect(
+      planKanbanReadAccess({
+        actor: { id: "manager", roles: ["Board Manager"] },
+        board: restricted,
+        doctypeReadable: false
+      })
+    ).toEqual({ status: "deny", message: "Actor 'manager' cannot read kanban 'Notes Board'" });
+    expect(
+      planKanbanReadAccess({
+        actor: { id: "guest", roles: ["Guest"] },
+        board: restricted,
+        doctypeReadable: true
+      })
+    ).toEqual({ status: "deny", message: "Actor 'guest' cannot read kanban 'Notes Board'" });
   });
 });
 

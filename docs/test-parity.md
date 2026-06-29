@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the calendar read access policy slice:
+As of the kanban read access policy slice:
 
 - Vitest files: `232`
-- Vitest cases: `2659`
-- Remaining gap to Frappe static markers: `125`
+- Vitest cases: `2660`
+- Remaining gap to Frappe static markers: `124`
 
 ## Implication
 
