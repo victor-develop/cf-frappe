@@ -1,13 +1,29 @@
 import {
   findSavedListFilter,
+  planSavedListFilterReadAccess,
   planSavedListFilterDelete,
   planSavedListFilterSave,
   projectSavedListFilterSave
 } from "../../src/application/saved-list-filter-policy.js";
 import type { SavedListFilter } from "../../src/application/saved-list-filter-events.js";
-import { owner } from "../helpers";
+import { defineDocType } from "../../src";
+import { guest, owner } from "../helpers";
 
 describe("saved list filter policy", () => {
+  it("plans saved-filter DocType read access before service stream reads", () => {
+    const doctype = defineDocType({
+      name: "Private Note",
+      fields: [{ name: "title", type: "text", required: true }],
+      permissions: [{ roles: ["User"], actions: ["read"] }]
+    });
+
+    expect(planSavedListFilterReadAccess({ actor: owner, doctype })).toEqual({ status: "allow" });
+    expect(planSavedListFilterReadAccess({ actor: guest, doctype })).toEqual({
+      status: "deny",
+      message: "Actor 'guest' cannot read Private Note"
+    });
+  });
+
   it("finds filters and plans save targets without service I/O", () => {
     const existing = filter("filter-1");
 

@@ -1,6 +1,5 @@
 import { notFound, permissionDenied } from "../core/errors.js";
 import { normalizeListFilterExpression, normalizeListFilters } from "../core/list-view.js";
-import { can } from "../core/permissions.js";
 import type { ModelRegistry } from "../core/registry.js";
 import { savedListFiltersStream } from "../core/streams.js";
 import {
@@ -26,6 +25,7 @@ import {
 } from "./saved-list-filter-events.js";
 import {
   findSavedListFilter,
+  planSavedListFilterReadAccess,
   planSavedListFilterDelete,
   planSavedListFilterSave,
   projectSavedListFilterSave
@@ -219,8 +219,9 @@ export class SavedListFilterService {
   private async readableDoctype(actor: Actor, doctypeName: string, tenantId: TenantId): Promise<DocTypeDefinition> {
     const base = this.registry.get(doctypeName);
     const doctype = (await this.doctypeResolver?.(base, { actor, tenantId })) ?? base;
-    if (!can(actor, doctype, "read")) {
-      throw permissionDenied(`Actor '${actor.id}' cannot read ${doctype.name}`);
+    const decision = planSavedListFilterReadAccess({ actor, doctype });
+    if (decision.status === "deny") {
+      throw permissionDenied(decision.message);
     }
     return doctype;
   }

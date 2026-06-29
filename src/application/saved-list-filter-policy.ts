@@ -1,15 +1,39 @@
 import type { SavedListFilter } from "./saved-list-filter-events.js";
-import type { ListDocumentsFilter, ListFilterExpression, TenantId } from "../core/types.js";
+import { can } from "../core/permissions.js";
+import type {
+  Actor,
+  DocTypeDefinition,
+  ListDocumentsFilter,
+  ListFilterExpression,
+  TenantId
+} from "../core/types.js";
 
 export type SavedListFilterWriteDecision =
   | { readonly status: "missing"; readonly message: string }
   | { readonly status: "write" };
+
+export type SavedListFilterReadAccessDecision =
+  | { readonly status: "allow" }
+  | { readonly status: "deny"; readonly message: string };
 
 export function findSavedListFilter(
   filters: readonly SavedListFilter[],
   id: string
 ): SavedListFilter | undefined {
   return filters.find((filter) => filter.id === id);
+}
+
+export function planSavedListFilterReadAccess(command: {
+  readonly actor: Actor;
+  readonly doctype: DocTypeDefinition;
+}): SavedListFilterReadAccessDecision {
+  if (!can(command.actor, command.doctype, "read")) {
+    return {
+      status: "deny",
+      message: `Actor '${command.actor.id}' cannot read ${command.doctype.name}`
+    };
+  }
+  return { status: "allow" };
 }
 
 export function planSavedListFilterSave(
