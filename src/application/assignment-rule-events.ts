@@ -92,7 +92,7 @@ export function assignmentRuleEvent<TPayload extends AssignmentRuleEventPayload>
     id: options.id,
     tenantId: options.tenantId,
     stream: options.stream,
-    type: options.payload.kind,
+    type: assignmentRuleEventType(options.payload),
     doctype: "__AssignmentRules",
     documentName: assignmentRuleDocumentName(options.payload),
     actorId: options.actor.id,
@@ -100,6 +100,10 @@ export function assignmentRuleEvent<TPayload extends AssignmentRuleEventPayload>
     payload: options.payload,
     metadata: options.metadata ?? {}
   };
+}
+
+export function assignmentRuleEventType(payload: AssignmentRuleEventPayload): AssignmentRuleEventPayload["kind"] {
+  return payload.kind;
 }
 
 export function assignmentRuleDocumentName(payload: AssignmentRuleEventPayload): string {

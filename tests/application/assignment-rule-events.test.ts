@@ -3,6 +3,7 @@ import {
   assignmentRuleDocumentName,
   assignmentRuleEnabledPayload,
   assignmentRuleEvent,
+  assignmentRuleEventType,
   assignmentRuleEventsVisibleAt,
   assignmentRuleNameForPayload,
   assignmentRuleSavedPayload,
@@ -25,6 +26,19 @@ const rule: AssignmentRuleDefinition = {
 };
 
 describe("assignment rule events", () => {
+  it("derives assignment rule event types from payload identity", () => {
+    expect(assignmentRuleEventType({
+      kind: "AssignmentRuleSaved",
+      doctypeName: "Ticket",
+      rule
+    })).toBe("AssignmentRuleSaved");
+    expect(assignmentRuleEventType({
+      kind: "AssignmentRuleCleared",
+      doctypeName: "Ticket",
+      ruleName: "High priority triage"
+    })).toBe("AssignmentRuleCleared");
+  });
+
   it("builds saved assignment rule payloads", () => {
     expect(assignmentRulePayload(assignmentRuleSavedPayload({
       doctypeName: "Ticket",
