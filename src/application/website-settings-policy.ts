@@ -25,11 +25,27 @@ export interface ResolvedWebsiteSettings {
   readonly navItems: readonly WebsiteNavigationItem[];
 }
 
+export type WebsiteSettingsReadAccessDecision =
+  | { readonly status: "allow" }
+  | { readonly status: "deny"; readonly message: string };
+
 export function isPublishedWebsiteSettingsForActor(
   actor: Actor,
   settings: WebsiteSettingsDefinition
 ): boolean {
   return settings.published !== false && canReadWebsiteSettings(actor, settings);
+}
+
+export function planWebsiteSettingsReadAccess(command: {
+  readonly actor: Actor;
+  readonly settings: WebsiteSettingsDefinition;
+}): WebsiteSettingsReadAccessDecision {
+  return isPublishedWebsiteSettingsForActor(command.actor, command.settings)
+    ? { status: "allow" }
+    : {
+        status: "deny",
+        message: `Actor '${command.actor.id}' cannot read website settings`
+      };
 }
 
 export function visibleWebsiteHomePageRoute(

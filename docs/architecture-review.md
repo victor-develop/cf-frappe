@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted Website Settings read-access decisions into website-settings policy so WebsiteSettingsService keeps registry, homepage, navigation, theme, and linked website surface orchestration.
 - Extracted report read-access decisions into report policy so ReportService keeps registry lookup, metadata assertions, provider I/O, and report execution/export orchestration.
 - Extracted saved-report DocType read-access decisions into saved-report policy so SavedReportService keeps registry, stream reads, report execution/export, and event append orchestration.
 - Extracted saved-list-filter DocType read-access decisions into saved-list-filter policy so SavedListFilterService keeps DocType resolution, stream reads, and event append orchestration.

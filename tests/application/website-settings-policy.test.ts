@@ -2,6 +2,7 @@ import {
   defineWebsiteSettings,
   isExpectedWebsiteSettingsAccessMiss,
   isPublishedWebsiteSettingsForActor,
+  planWebsiteSettingsReadAccess,
   shouldResolveWebsiteNavigationItem,
   SYSTEM_MANAGER_ROLE,
   visibleWebsiteHomePageRoute,
@@ -30,6 +31,19 @@ describe("website settings policy", () => {
     expect(isPublishedWebsiteSettingsForActor(owner, members)).toBe(true);
     expect(isPublishedWebsiteSettingsForActor({ id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] }, draft))
       .toBe(false);
+  });
+
+  it("plans website settings read access with denial messages", () => {
+    const members = defineWebsiteSettings({
+      title: "Members",
+      roles: ["User"]
+    });
+
+    expect(planWebsiteSettingsReadAccess({ actor: owner, settings: members })).toEqual({ status: "allow" });
+    expect(planWebsiteSettingsReadAccess({ actor: guest, settings: members })).toEqual({
+      status: "deny",
+      message: "Actor 'guest' cannot read website settings"
+    });
   });
 
   it("resolves visible page home routes and safe static home hrefs", () => {

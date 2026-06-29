@@ -8,7 +8,7 @@ import type { WebViewService } from "./web-view-service.js";
 import type { WebsiteThemeService } from "./website-theme-service.js";
 import {
   isExpectedWebsiteSettingsAccessMiss,
-  isPublishedWebsiteSettingsForActor,
+  planWebsiteSettingsReadAccess,
   shouldResolveWebsiteNavigationItem,
   visibleWebsiteHomePageRoute,
   websiteNavigationItemResult,
@@ -96,8 +96,9 @@ export class WebsiteSettingsService {
 
   private readSettings(actor: Actor): WebsiteSettingsDefinition {
     const settings = this.registry.getWebsiteSettings();
-    if (!isPublishedWebsiteSettingsForActor(actor, settings)) {
-      throw permissionDenied(`Actor '${actor.id}' cannot read website settings`);
+    const decision = planWebsiteSettingsReadAccess({ actor, settings });
+    if (decision.status === "deny") {
+      throw permissionDenied(decision.message);
     }
     return settings;
   }
