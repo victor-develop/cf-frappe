@@ -1,8 +1,11 @@
 import {
+  DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS,
   documentDeliveryOutboxEventType,
   documentDeliveryOutboxRecordId,
   documentDeliveryRetryDue,
   foldDocumentDeliveryOutbox,
+  isDocumentDeliveryOutboxEvent,
+  isDocumentDeliveryOutboxPayloadKind,
   selectedDocumentDeliveryOutboxRecords,
   sortedDocumentDeliveryOutboxRecords
 } from "../../src";
@@ -39,6 +42,32 @@ describe("document delivery outbox events", () => {
       claimId: "claim-1",
       error: "queue unavailable"
     })).toBe("DocumentDeliveryOutboxFailed");
+  });
+
+  it("exposes the bounded document delivery outbox payload kind set", () => {
+    expect(DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS).toEqual([
+      "DocumentDeliveryOutboxEnqueued",
+      "DocumentDeliveryOutboxClaimed",
+      "DocumentDeliveryOutboxDelivered",
+      "DocumentDeliveryOutboxFailed"
+    ]);
+  });
+
+  it("narrows document delivery outbox events by payload kind when event type names are custom", () => {
+    const event = {
+      ...enqueuedEvent(
+        1,
+        documentDeliveryOutboxRecordId("evt_source", "email"),
+        "email",
+        "2026-01-01T00:00:00.000Z"
+      ),
+      type: "DeliveryIntentRecorded"
+    };
+
+    expect(isDocumentDeliveryOutboxPayloadKind("DocumentDeliveryOutboxEnqueued")).toBe(true);
+    expect(isDocumentDeliveryOutboxPayloadKind("DocumentDeleted")).toBe(false);
+    expect(isDocumentDeliveryOutboxEvent(event)).toBe(true);
+    expect(isDocumentDeliveryOutboxEvent(otherEvent({ kind: "DocumentDeleted" }))).toBe(false);
   });
 
   it("folds claim, failure, retry, and delivery transitions", () => {
@@ -132,6 +161,22 @@ function enqueuedEvent(
         }
       }
     },
+    metadata: {}
+  };
+}
+
+function otherEvent(payload: DomainEvent["payload"], type: string = payload.kind): DomainEvent {
+  return {
+    id: "evt_other",
+    tenantId: "acme",
+    stream: "acme:Note:One",
+    sequence: 1,
+    type,
+    doctype: "Note",
+    documentName: "One",
+    actorId: "owner@example.com",
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    payload,
     metadata: {}
   };
 }

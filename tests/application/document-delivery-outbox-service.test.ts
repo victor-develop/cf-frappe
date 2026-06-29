@@ -1,4 +1,5 @@
 import {
+  DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS,
   DocumentDeliveryOutboxService,
   InMemoryDocumentStore,
   createDocumentDeliveryHooks,
@@ -6,7 +7,14 @@ import {
   fixedClock,
   deterministicIds
 } from "../../src";
-import type { DocumentDeliveryOutboxEventPayload, DocumentEventPayload, DomainEvent, DocumentSnapshot } from "../../src";
+import type {
+  DocumentDeliveryOutboxEventPayload,
+  DocumentEventPayload,
+  DocumentSnapshot,
+  DomainEvent,
+  ReadStreamOptions,
+  StreamName
+} from "../../src";
 
 const now = "2026-01-01T00:00:00.000Z";
 const later = "2026-01-01T00:05:00.000Z";
@@ -80,6 +88,34 @@ describe("DocumentDeliveryOutboxService", () => {
         }
       }
     ]);
+  });
+
+  it("reads delivery outbox state through the bounded outbox payload kinds", async () => {
+    const events = new RecordingReadOptionsDocumentDeliveryStore();
+    const outbox = new DocumentDeliveryOutboxService({
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["enqueue-1"])
+    });
+
+    await outbox.enqueueFromDomainEvent({
+      event: domainEvent(),
+      snapshot: snapshot(),
+      targets: ["notification"]
+    });
+    await outbox.list("acme");
+
+    expect(events.reads).toContainEqual({
+      stream: documentDeliveryOutboxStream("acme"),
+      options: { payloadKinds: DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS }
+    });
+    expect(events.reads).toContainEqual({
+      stream: documentDeliveryOutboxStream("acme"),
+      options: {
+        maxSequence: 0,
+        payloadKinds: DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS
+      }
+    });
   });
 
   it("claims pending records, retries failed records when due, and marks delivery terminal", async () => {
@@ -173,6 +209,18 @@ function documentDeliveryOutboxPayload(
   payload: Extract<DocumentEventPayload, { readonly kind: "DocumentDeliveryOutboxEnqueued" }>
 ): Extract<DocumentDeliveryOutboxEventPayload, { readonly kind: "DocumentDeliveryOutboxEnqueued" }> {
   return payload;
+}
+
+class RecordingReadOptionsDocumentDeliveryStore extends InMemoryDocumentStore {
+  readonly reads: Array<{
+    readonly stream: StreamName;
+    readonly options: ReadStreamOptions | undefined;
+  }> = [];
+
+  override readStream(stream: StreamName, options?: ReadStreamOptions): Promise<readonly DomainEvent[]> {
+    this.reads.push({ stream, options });
+    return super.readStream(stream, options);
+  }
 }
 
 function domainEvent(): DomainEvent {

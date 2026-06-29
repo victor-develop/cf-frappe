@@ -1,3 +1,4 @@
+import { domainEventPayloadKind } from "../core/domain-events.js";
 import type { DocumentData, DocumentName, DocTypeName, DomainEvent, TenantId } from "../core/types.js";
 
 export type DocumentDeliveryOutboxTarget = "notification" | "realtime" | "email";
@@ -35,6 +36,17 @@ export type DocumentDeliveryOutboxEventPayload =
       readonly retryAt?: string;
     };
 
+export type DocumentDeliveryOutboxPayloadKind = DocumentDeliveryOutboxEventPayload["kind"];
+
+export const DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS = Object.freeze([
+  "DocumentDeliveryOutboxEnqueued",
+  "DocumentDeliveryOutboxClaimed",
+  "DocumentDeliveryOutboxDelivered",
+  "DocumentDeliveryOutboxFailed"
+] as const satisfies readonly DocumentDeliveryOutboxPayloadKind[]);
+
+const DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KIND_SET = new Set<string>(DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS);
+
 export interface DocumentDeliveryOutboxRecord {
   readonly id: string;
   readonly tenantId: TenantId;
@@ -69,8 +81,18 @@ export function documentDeliveryOutboxRecordId(eventId: string, target: Document
 
 export function documentDeliveryOutboxEventType(
   payload: DocumentDeliveryOutboxEventPayload
-): DocumentDeliveryOutboxEventPayload["kind"] {
+): DocumentDeliveryOutboxPayloadKind {
   return payload.kind;
+}
+
+export function isDocumentDeliveryOutboxPayloadKind(kind: string): kind is DocumentDeliveryOutboxPayloadKind {
+  return DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KIND_SET.has(kind);
+}
+
+export function isDocumentDeliveryOutboxEvent(
+  event: DomainEvent
+): event is DomainEvent<DocumentDeliveryOutboxEventPayload> {
+  return isDocumentDeliveryOutboxPayloadKind(domainEventPayloadKind(event));
 }
 
 export function foldDocumentDeliveryOutbox(

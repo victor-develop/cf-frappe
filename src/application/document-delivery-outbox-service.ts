@@ -5,6 +5,7 @@ import {
   documentDeliveryOutboxEventType,
   documentDeliveryOutboxRecordId,
   documentDeliveryRetryDue,
+  DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS,
   foldDocumentDeliveryOutbox,
   selectedDocumentDeliveryOutboxRecords,
   sortedDocumentDeliveryOutboxRecords,
@@ -263,7 +264,10 @@ export class DocumentDeliveryOutboxService {
       try {
         const saved = await this.events.append(stream, state.version, planned.events);
         return selectedDocumentDeliveryOutboxRecords(foldDocumentDeliveryOutbox(tenantId, [
-          ...(await this.events.readStream(stream, { maxSequence: state.version })),
+          ...(await this.events.readStream(stream, {
+            maxSequence: state.version,
+            payloadKinds: DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS
+          })),
           ...saved
         ]), planned.recordIds);
       } catch (error) {
@@ -279,7 +283,9 @@ export class DocumentDeliveryOutboxService {
   private async state(tenantId: TenantId): Promise<DocumentDeliveryOutboxState> {
     return foldDocumentDeliveryOutbox(
       tenantId,
-      await this.events.readStream(documentDeliveryOutboxStream(tenantId))
+      await this.events.readStream(documentDeliveryOutboxStream(tenantId), {
+        payloadKinds: DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS
+      })
     );
   }
 }

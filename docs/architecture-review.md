@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Centralized document-delivery outbox event payload-kind matching through domain events so delivery outbox replay selectors can rely on bounded event helpers instead of inline source payload-kind reads.
 - Centralized job-schedule event payload-kind matching through domain events so runtime schedule definition and override stream selectors can rely on bounded event helpers instead of inline source payload-kind reads.
 - Centralized user-notification inbox event payload-kind matching through domain events so notification inbox stream selectors can rely on bounded event helpers instead of inline source payload-kind reads.
 - Centralized user-profile event payload-kind matching through domain events so profile stream selectors can rely on bounded event helpers instead of inline source payload-kind reads.
