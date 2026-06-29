@@ -2,6 +2,7 @@ import {
   assertDataPatchApplyLimit,
   normalizeDataPatchDefinitions,
   normalizeSingleDataPatchDefinition,
+  planDataPatchAdministrationAccess,
   selectDataPatch,
   selectDataPatches,
   snapshotDataPatchDefinitions,
@@ -55,6 +56,21 @@ describe("data patch definition policy", () => {
     expect(() => assertDataPatchApplyLimit(1)).not.toThrow();
     expect(() => assertDataPatchApplyLimit(0)).toThrow("Data patch apply limit must be a positive integer");
     expect(() => assertDataPatchApplyLimit(1.5)).toThrow("Data patch apply limit must be a positive integer");
+  });
+
+  it("plans administrative access from actor roles without throwing framework errors", () => {
+    expect(
+      planDataPatchAdministrationAccess({
+        actor: { id: "admin", roles: ["Data Patch Manager"] },
+        adminRoles: ["System Manager", "Data Patch Manager"]
+      })
+    ).toEqual({ status: "allow" });
+    expect(
+      planDataPatchAdministrationAccess({
+        actor: { id: "clerk", roles: ["Desk User"] },
+        adminRoles: ["System Manager"]
+      })
+    ).toEqual({ status: "deny", message: "Actor 'clerk' cannot manage data patches" });
   });
 });
 

@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the job-schedule capability policy slice:
+As of the data-patch admin access policy slice:
 
 - Vitest files: `232`
-- Vitest cases: `2656`
-- Remaining gap to Frappe static markers: `128`
+- Vitest cases: `2657`
+- Remaining gap to Frappe static markers: `127`
 
 ## Implication
 

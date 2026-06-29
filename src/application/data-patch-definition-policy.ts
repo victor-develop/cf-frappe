@@ -1,5 +1,20 @@
 import { assertDataPatchId, defineDataPatch, type DataPatchDefinition } from "../core/data-patch.js";
 import { badRequest, FrameworkError, notFound } from "../core/errors.js";
+import type { Actor } from "../core/types.js";
+
+export type DataPatchAdministrationDecision =
+  | { readonly status: "allow" }
+  | { readonly status: "deny"; readonly message: string };
+
+export function planDataPatchAdministrationAccess(options: {
+  readonly actor: Actor;
+  readonly adminRoles: readonly string[];
+}): DataPatchAdministrationDecision {
+  if (options.adminRoles.some((role) => options.actor.roles.includes(role))) {
+    return { status: "allow" };
+  }
+  return { status: "deny", message: `Actor '${options.actor.id}' cannot manage data patches` };
+}
 
 export function snapshotDataPatchDefinitions<TResources>(
   patches: readonly DataPatchDefinition<TResources>[]

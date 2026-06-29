@@ -6,6 +6,7 @@ import {
 } from "./data-patch-apply-policy.js";
 import {
   assertDataPatchApplyLimit,
+  planDataPatchAdministrationAccess,
   selectDataPatch,
   selectDataPatches,
   snapshotUniqueDataPatchDefinitions
@@ -202,8 +203,9 @@ export class DataPatchService<TResources = unknown> {
   }
 
   authorize(actor: Actor): void {
-    if (!this.adminRoles.some((role) => actor.roles.includes(role))) {
-      throw permissionDenied(`Actor '${actor.id}' cannot manage data patches`);
+    const decision = planDataPatchAdministrationAccess({ actor, adminRoles: this.adminRoles });
+    if (decision.status === "deny") {
+      throw permissionDenied(decision.message);
     }
   }
 
