@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted custom-field disable missing-field decisions into custom-field policy so CustomFieldService keeps tenant authorization, registry metadata reads, event replay, catalog append orchestration, and framework error mapping.
 - Extracted saved-report and saved-list-filter get lookup decisions into policy so their services keep DocType access checks, owner stream reads, event append orchestration, report execution/export delegation, and framework error mapping.
 - Extracted job execution lookup not-found decisions into job retry and history policies so JobRetryService and JobHistoryService keep execution-log reads, retry command dispatch, record access checks, and framework error mapping.
 - Extracted Web View route request and item lookup decisions into web-view policy so WebViewService keeps metadata resolution and QueryService orchestration.

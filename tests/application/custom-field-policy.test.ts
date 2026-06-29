@@ -146,9 +146,23 @@ describe("custom field policy", () => {
   });
 
   it("plans custom field disables without emitting redundant or missing-field events", () => {
-    expect(planCustomFieldDisable(findCustomFieldEntry(state(1), "priority"))).toEqual({ status: "append" });
-    expect(planCustomFieldDisable(disabledFieldEntry())).toEqual({ status: "noop" });
-    expect(planCustomFieldDisable(findCustomFieldEntry(state(1), "missing"))).toEqual({ status: "missing" });
+    expect(planCustomFieldDisable(findCustomFieldEntry(state(1), "priority"), "priority")).toEqual({
+      status: "append"
+    });
+    expect(planCustomFieldDisable(disabledFieldEntry(), "priority")).toEqual({ status: "noop" });
+    expect(planCustomFieldDisable(findCustomFieldEntry(state(1), "missing"), "missing")).toEqual({
+      status: "missing",
+      message: "Custom field 'missing' was not found",
+      code: "DOCUMENT_NOT_FOUND"
+    });
+  });
+
+  it("shapes missing custom-field disable errors before service error mapping", () => {
+    expect(planCustomFieldDisable(undefined, "archived_reason")).toEqual({
+      status: "missing",
+      message: "Custom field 'archived_reason' was not found",
+      code: "DOCUMENT_NOT_FOUND"
+    });
   });
 
   it("projects pending custom field state while preserving created timestamps", () => {

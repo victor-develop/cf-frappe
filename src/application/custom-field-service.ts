@@ -161,9 +161,9 @@ export class CustomFieldService {
     const events = await this.tenantCustomFieldEvents(tenantId);
     const state = this.stateFromEvents(tenantId, doctype.name, events);
     ensureCustomFieldExpectedVersion(state, command.expectedVersion);
-    const decision = planCustomFieldDisable(findCustomFieldEntry(state, fieldName));
+    const decision = planCustomFieldDisable(findCustomFieldEntry(state, fieldName), fieldName);
     if (decision.status === "missing") {
-      throw notFound(`Custom field '${fieldName}' was not found`, "DOCUMENT_NOT_FOUND");
+      throw notFound(decision.message, decision.code);
     }
     if (decision.status === "noop") {
       return state;

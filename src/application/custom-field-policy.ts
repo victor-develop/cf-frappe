@@ -176,7 +176,11 @@ export function findCustomFieldEntry(
 
 export type CustomFieldChangeDecision =
   | { readonly status: "append" }
-  | { readonly status: "missing" }
+  | {
+      readonly status: "missing";
+      readonly message: string;
+      readonly code: "DOCUMENT_NOT_FOUND";
+    }
   | { readonly status: "noop" };
 
 export function planCustomFieldSave(
@@ -189,10 +193,15 @@ export function planCustomFieldSave(
 }
 
 export function planCustomFieldDisable(
-  existing: CustomFieldEntry | undefined
+  existing: CustomFieldEntry | undefined,
+  fieldName: string
 ): CustomFieldChangeDecision {
   if (existing === undefined) {
-    return { status: "missing" };
+    return {
+      status: "missing",
+      message: `Custom field '${fieldName}' was not found`,
+      code: "DOCUMENT_NOT_FOUND"
+    };
   }
   return existing.enabled ? { status: "append" } : { status: "noop" };
 }

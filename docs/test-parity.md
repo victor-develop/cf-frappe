@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the saved report/list filter lookup policy slice:
+As of the custom-field disable lookup policy slice:
 
 - Vitest files: `233`
-- Vitest cases: `2676`
-- Remaining gap to Frappe static markers: `108`
+- Vitest cases: `2677`
+- Remaining gap to Frappe static markers: `107`
 
 ## Implication
 
