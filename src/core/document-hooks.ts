@@ -119,6 +119,16 @@ export async function runDocumentValidationHooks(
   return issues;
 }
 
+export function documentValidationIssues(input: {
+  readonly schemaIssues?: readonly ValidationIssue[] | undefined;
+  readonly hookIssues?: readonly ValidationIssue[] | undefined;
+}): readonly ValidationIssue[] {
+  return [
+    ...(input.schemaIssues ?? []),
+    ...(input.hookIssues ?? [])
+  ];
+}
+
 export function documentAfterCommitContext(input: {
   readonly doctype: DocTypeDefinition;
   readonly event: DomainEvent;

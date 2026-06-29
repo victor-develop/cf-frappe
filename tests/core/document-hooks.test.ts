@@ -5,6 +5,7 @@ import {
   documentAfterCommitContext,
   documentHookContext,
   documentValidationHookData,
+  documentValidationIssues,
   mergeDocumentHookPatch,
   runDocumentAfterCommitHooks,
   runDocumentBeforeValidateHooks,
@@ -157,6 +158,20 @@ describe("document hooks", () => {
     })).resolves.toEqual([
       { field: "title", code: "title_seen", message: "Override" },
       { field: "body", code: "body_missing", message: "undefined" }
+    ]);
+  });
+
+  it("orders schema validation issues before hook validation issues", () => {
+    expect(documentValidationIssues({
+      schemaIssues: [{ field: "title", code: "required", message: "Title is required" }],
+      hookIssues: [{ field: "body", code: "custom", message: "Body failed custom validation" }]
+    })).toEqual([
+      { field: "title", code: "required", message: "Title is required" },
+      { field: "body", code: "custom", message: "Body failed custom validation" }
+    ]);
+
+    expect(documentValidationIssues({ hookIssues: [{ field: "body", code: "custom", message: "Custom" }] })).toEqual([
+      { field: "body", code: "custom", message: "Custom" }
     ]);
   });
 

@@ -117,6 +117,7 @@ import {
   type UserPermissionProvider
 } from "../core/user-permissions.js";
 import {
+  documentValidationIssues,
   runDocumentAfterCommitHooks,
   runDocumentBeforeValidateHooks,
   runDocumentValidationHooks,
@@ -1517,20 +1518,19 @@ export class DocumentService implements DocumentCommandExecutor {
     existing?: DocumentSnapshot,
     hookDataOverride?: DocumentData
   ): Promise<readonly ValidationIssue[]> {
-    const issues = [
-      ...validateDocumentData(doctype, data, {
+    return documentValidationIssues({
+      schemaIssues: validateDocumentData(doctype, data, {
         partial: existing !== undefined,
         relatedDocType
+      }),
+      hookIssues: await runDocumentValidationHooks({
+        doctype,
+        data,
+        hooks: this.registry.hooksFor(doctype.name),
+        ...(existing === undefined ? {} : { existing }),
+        ...(hookDataOverride === undefined ? {} : { hookDataOverride })
       })
-    ];
-    issues.push(...await runDocumentValidationHooks({
-      doctype,
-      data,
-      hooks: this.registry.hooksFor(doctype.name),
-      ...(existing === undefined ? {} : { existing }),
-      ...(hookDataOverride === undefined ? {} : { hookDataOverride })
-    }));
-    return issues;
+    });
   }
 
   private async applyFetchedFields(
