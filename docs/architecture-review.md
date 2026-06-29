@@ -106,6 +106,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Introduced a `DomainEventPayloadMap` extension point and moved document delivery outbox event payloads into their own bounded application event module, proving the path away from one central `DocumentEventPayload` union with a focused contract test.
 - Moved email notification outbox event payloads into their own bounded application event module and narrowed `EmailNotificationService` internals to that payload type, adding a second extension-map contract test.
 - Moved user notification inbox event payloads into their own bounded application event module and narrowed read/dismiss helpers to that payload type, adding a third extension-map contract test.
+- Extracted user notification inbox fold, deterministic ordering, notification identity, subject shaping, append invariants, and replay invariants from `UserNotificationService` into `src/application/user-notification-events.ts`, keeping event-store retry and actor authorization in the service while covering the event model behind focused unit tests.
 - Centralized email outbox claim-id resolution so sent and failed completion events no longer rely on non-null assertions after delivery claim replay.
 - Centralized Cloudflare Access setup scope parsing so account/zone routing is represented as a typed boundary instead of a non-null assertion in the CLI parser.
 - Centralized single data-patch retry id resolution so remote retry routes use a validated and encoded patch id without relying on array non-null assertions.
