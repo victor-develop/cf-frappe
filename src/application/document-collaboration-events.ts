@@ -1,4 +1,5 @@
-import type { DocTypeName } from "../core/types.js";
+import { domainEventPayloadKind } from "../core/domain-events.js";
+import type { DocTypeName, DomainEvent } from "../core/types.js";
 
 export type DocumentCollaborationEventPayload =
   | {
@@ -53,6 +54,8 @@ export type DocumentFollowerEventKind = Extract<
   { readonly followerId: string }
 >["kind"];
 
+export type DocumentCollaborationPayloadKind = DocumentCollaborationEventPayload["kind"];
+
 export const DOCUMENT_COLLABORATION_PAYLOAD_KINDS = Object.freeze([
   "DocumentCommentAdded",
   "DocumentActivityRecorded",
@@ -62,7 +65,9 @@ export const DOCUMENT_COLLABORATION_PAYLOAD_KINDS = Object.freeze([
   "DocumentUntagged",
   "DocumentFollowed",
   "DocumentUnfollowed"
-] as const);
+] as const satisfies readonly DocumentCollaborationPayloadKind[]);
+
+const DOCUMENT_COLLABORATION_PAYLOAD_KIND_SET = new Set<string>(DOCUMENT_COLLABORATION_PAYLOAD_KINDS);
 
 export interface DocumentActivityPayloadInput {
   readonly activityType: string;
@@ -146,6 +151,16 @@ export function documentCollaborationEventType(
     case "DocumentUnfollowed":
       return options.unfollowEventType ?? `${options.doctypeName}Unfollowed`;
   }
+}
+
+export function isDocumentCollaborationPayloadKind(kind: string): kind is DocumentCollaborationPayloadKind {
+  return DOCUMENT_COLLABORATION_PAYLOAD_KIND_SET.has(kind);
+}
+
+export function isDocumentCollaborationEvent(
+  event: DomainEvent
+): event is DomainEvent<DocumentCollaborationEventPayload> {
+  return isDocumentCollaborationPayloadKind(domainEventPayloadKind(event));
 }
 
 declare module "../core/types.js" {

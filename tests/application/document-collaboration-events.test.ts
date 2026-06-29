@@ -8,8 +8,11 @@ import {
   documentCollaborationEventType,
   documentFollowerPayload,
   documentTagPayload,
+  isDocumentCollaborationEvent,
+  isDocumentCollaborationPayloadKind,
   type DocumentCollaborationEventPayload
 } from "../../src";
+import type { DomainEvent } from "../../src";
 
 describe("document collaboration events", () => {
   it("builds comment payloads", () => {
@@ -125,8 +128,33 @@ describe("document collaboration events", () => {
       "DocumentUnfollowed"
     ]);
   });
+
+  it("narrows document collaboration events by payload kind when event type names are custom", () => {
+    const assigned = event(documentAssignmentPayload("DocumentAssigned", "owner@example.com"), "TaskDelegatedByPolicy");
+
+    expect(isDocumentCollaborationPayloadKind("DocumentAssigned")).toBe(true);
+    expect(isDocumentCollaborationPayloadKind("DocumentDeleted")).toBe(false);
+    expect(isDocumentCollaborationEvent(assigned)).toBe(true);
+    expect(isDocumentCollaborationEvent(event({ kind: "DocumentDeleted" }))).toBe(false);
+  });
 });
 
 function collaborationPayload(payload: DocumentCollaborationEventPayload): DocumentCollaborationEventPayload {
   return payload;
+}
+
+function event(payload: DomainEvent["payload"], type: string = payload.kind): DomainEvent {
+  return {
+    id: "evt_collab",
+    tenantId: "acme",
+    stream: "acme:Task:TASK-1",
+    sequence: 1,
+    type,
+    doctype: "Task",
+    documentName: "TASK-1",
+    actorId: "owner@example.com",
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    payload,
+    metadata: {}
+  };
 }
