@@ -1,13 +1,29 @@
 import {
   findSavedReport,
+  planSavedReportReadAccess,
   planSavedReportDelete,
   planSavedReportSave,
   projectSavedReportSave
 } from "../../src/application/saved-report-policy.js";
 import type { SavedReport } from "../../src/application/saved-report-events.js";
-import { owner } from "../helpers";
+import { defineDocType } from "../../src";
+import { guest, owner } from "../helpers";
 
 describe("saved report policy", () => {
+  it("plans saved-report DocType read access before service stream reads", () => {
+    const doctype = defineDocType({
+      name: "Private Report Source",
+      fields: [{ name: "title", type: "text", required: true }],
+      permissions: [{ roles: ["User"], actions: ["read"] }]
+    });
+
+    expect(planSavedReportReadAccess({ actor: owner, doctype })).toEqual({ status: "allow" });
+    expect(planSavedReportReadAccess({ actor: guest, doctype })).toEqual({
+      status: "deny",
+      message: "Actor 'guest' cannot read Private Report Source"
+    });
+  });
+
   it("finds reports and plans save targets without service I/O", () => {
     const existing = report("report-1");
 

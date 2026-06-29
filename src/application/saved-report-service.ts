@@ -1,5 +1,4 @@
 import { notFound, permissionDenied } from "../core/errors.js";
-import { can } from "../core/permissions.js";
 import type { ModelRegistry } from "../core/registry.js";
 import { savedReportsStream } from "../core/streams.js";
 import {
@@ -25,6 +24,7 @@ import {
 } from "./saved-report-events.js";
 import {
   findSavedReport,
+  planSavedReportReadAccess,
   planSavedReportDelete,
   planSavedReportSave,
   projectSavedReportSave
@@ -211,8 +211,9 @@ export class SavedReportService {
 
   private readableDoctype(actor: Actor, doctypeName: string): DocTypeDefinition {
     const doctype = this.registry.get(doctypeName);
-    if (!can(actor, doctype, "read")) {
-      throw permissionDenied(`Actor '${actor.id}' cannot read ${doctype.name}`);
+    const decision = planSavedReportReadAccess({ actor, doctype });
+    if (decision.status === "deny") {
+      throw permissionDenied(decision.message);
     }
     return doctype;
   }

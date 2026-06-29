@@ -1,15 +1,33 @@
 import type { SavedReport, SavedReportDefinition } from "./saved-report-events.js";
-import type { TenantId } from "../core/types.js";
+import { can } from "../core/permissions.js";
+import type { Actor, DocTypeDefinition, TenantId } from "../core/types.js";
 
 export type SavedReportWriteDecision =
   | { readonly status: "missing"; readonly message: string }
   | { readonly status: "write" };
+
+export type SavedReportReadAccessDecision =
+  | { readonly status: "allow" }
+  | { readonly status: "deny"; readonly message: string };
 
 export function findSavedReport(
   reports: readonly SavedReport[],
   id: string
 ): SavedReport | undefined {
   return reports.find((report) => report.id === id);
+}
+
+export function planSavedReportReadAccess(command: {
+  readonly actor: Actor;
+  readonly doctype: DocTypeDefinition;
+}): SavedReportReadAccessDecision {
+  if (!can(command.actor, command.doctype, "read")) {
+    return {
+      status: "deny",
+      message: `Actor '${command.actor.id}' cannot read ${command.doctype.name}`
+    };
+  }
+  return { status: "allow" };
 }
 
 export function planSavedReportSave(
