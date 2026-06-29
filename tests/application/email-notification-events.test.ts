@@ -1,11 +1,12 @@
 import {
   claimedDeliveryId,
+  emailNotificationEventType,
   emailNotificationMessageId,
   foldEmailOutbox,
   isStaleEmailClaim,
   requireAppendedEmailOutboxEvent
 } from "../../src";
-import type { DomainEvent } from "../../src";
+import type { DomainEvent, EmailNotificationEventPayload } from "../../src";
 
 describe("email notification events", () => {
   it("folds queued, claimed, failed, and sent outbox records by sequence", () => {
@@ -61,6 +62,38 @@ describe("email notification events", () => {
       claimedAt: "2026-01-01T00:00:00.000Z"
     }, "2026-01-01T00:05:00.000Z", 300_000)).toBe(true);
   });
+
+  it("derives email notification event types from payload identity", () => {
+    const messageId = emailNotificationMessageId("evt_update", "Email owners", "reviewer@example.com");
+    expect(emailNotificationEventType(queuedPayload(messageId))).toBe("EmailNotificationQueued");
+    expect(emailNotificationEventType({
+      kind: "EmailNotificationDeliveryClaimed",
+      messageId,
+      claimId: "claim_1"
+    })).toBe("EmailNotificationDeliveryClaimed");
+    expect(emailNotificationEventType({
+      kind: "EmailNotificationSent",
+      messageId,
+      claimId: "claim_1",
+      providerMessageId: "cf-msg-1"
+    })).toBe("EmailNotificationSent");
+    expect(emailNotificationEventType({
+      kind: "EmailNotificationFailed",
+      messageId,
+      claimId: "claim_1",
+      error: "temporary provider outage"
+    })).toBe("EmailNotificationFailed");
+    expect(emailNotificationEventType({
+      kind: "EmailNotificationSkipped",
+      messageId,
+      sourceEventId: "evt_update",
+      sourceEventType: "NoteUpdated",
+      payloadKind: "DocumentUpdated",
+      ruleName: "Email owners",
+      recipientId: "reviewer@example.com",
+      reason: "recipient has no email address"
+    })).toBe("EmailNotificationSkipped");
+  });
 });
 
 function queuedEvent(sequence: number, messageId: string): DomainEvent {
@@ -74,20 +107,26 @@ function queuedEvent(sequence: number, messageId: string): DomainEvent {
     documentName: messageId,
     actorId: "system:email-outbox",
     occurredAt: "2026-01-01T00:00:00.000Z",
-    payload: {
-      kind: "EmailNotificationQueued",
-      messageId,
-      sourceEventId: "evt_update",
-      sourceEventType: "NoteUpdated",
-      payloadKind: "DocumentUpdated",
-      ruleName: "Email owners",
-      recipientId: "reviewer@example.com",
-      from: { email: "notifications@example.com" },
-      to: { email: "reviewer@example.com" },
-      subject: "Note My Note changed",
-      text: "Note My Note changed"
-    },
+    payload: queuedPayload(messageId),
     metadata: {}
+  };
+}
+
+function queuedPayload(
+  messageId: string
+): Extract<EmailNotificationEventPayload, { readonly kind: "EmailNotificationQueued" }> {
+  return {
+    kind: "EmailNotificationQueued",
+    messageId,
+    sourceEventId: "evt_update",
+    sourceEventType: "NoteUpdated",
+    payloadKind: "DocumentUpdated",
+    ruleName: "Email owners",
+    recipientId: "reviewer@example.com",
+    from: { email: "notifications@example.com" },
+    to: { email: "reviewer@example.com" },
+    subject: "Note My Note changed",
+    text: "Note My Note changed"
   };
 }
 

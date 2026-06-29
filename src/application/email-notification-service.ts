@@ -6,6 +6,7 @@ import { FrameworkError } from "../core/errors.js";
 import {
   EMAIL_OUTBOX_PAYLOAD_KINDS,
   claimedDeliveryId,
+  emailNotificationEventType,
   emailNotificationMessageId,
   foldEmailOutbox,
   isStaleEmailClaim,
@@ -296,7 +297,7 @@ export class EmailNotificationService {
           id: this.ids.next("evt_"),
           tenantId,
           stream,
-          type: payload.kind,
+          type: emailNotificationEventType(payload),
           doctype: "__EmailOutbox",
           documentName: messageId,
           actorId: EMAIL_OUTBOX_ACTOR_ID,
@@ -365,7 +366,7 @@ export class EmailNotificationService {
         id: this.ids.next("evt_"),
         tenantId,
         stream,
-        type: payload.kind,
+        type: emailNotificationEventType(payload),
         doctype: "__EmailOutbox",
         documentName: messageId,
         actorId: EMAIL_OUTBOX_ACTOR_ID,
@@ -374,7 +375,7 @@ export class EmailNotificationService {
         metadata: {}
       } satisfies NewDomainEvent
     ]);
-    return requireAppendedEmailOutboxEvent(event, tenantId, messageId, payload.kind);
+    return requireAppendedEmailOutboxEvent(event, tenantId, messageId, emailNotificationEventType(payload));
   }
 }
 

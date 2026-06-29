@@ -101,6 +101,12 @@ export function emailNotificationMessageId(eventId: string, ruleName: string, re
   return `${eventId}:rule:${encodeURIComponent(ruleName)}:email:${encodeURIComponent(recipientId)}`;
 }
 
+export function emailNotificationEventType(
+  payload: EmailNotificationEventPayload
+): EmailNotificationEventPayload["kind"] {
+  return payload.kind;
+}
+
 export function foldEmailOutbox(tenantId: TenantId, events: readonly DomainEvent[]): EmailOutboxState {
   const messages = new Map<string, EmailOutboxRecordEntry>();
   let version = 0;
