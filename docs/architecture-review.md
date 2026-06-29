@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted field-property tenant/admin access, required field-name normalization, field lookup, expected-version guards, override equality, and pending override-state projection from FieldPropertyService into field-property policy and covered those rules directly.
 - Extracted print-settings tenant/admin access, patch normalization, and expected-version guards from PrintSettingsService into print-settings policy and covered those rules directly.
 - Extracted notification-rule tenant/admin access, expected-version guards, required-name normalization, rule lookup/equality, and enabled-rule projection from NotificationRuleService into notification-rule policy and covered those rules directly.
 - Extracted assignment-rule tenant/admin access, expected-version guards, rule lookup/equality, enabled-rule projection, metadata/runtime rule composition, required-name normalization, and hook actor tenant guards from AssignmentRuleService into assignment-rule policy and covered those rules directly.

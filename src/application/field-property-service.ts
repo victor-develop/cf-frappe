@@ -1,4 +1,4 @@
-import { conflict, FrameworkError, permissionDenied } from "../core/errors.js";
+import { FrameworkError } from "../core/errors.js";
 import { fieldPropertyOverridesStream } from "../core/streams.js";
 import {
   applyFieldPropertyOverridesToDocType,
@@ -24,6 +24,15 @@ import {
   fieldPropertyOverrideSavedPayload,
   type FieldPropertyEventPayload
 } from "./field-property-events.js";
+import {
+  authorizeFieldPropertyAdministration,
+  ensureFieldPropertyExpectedVersion,
+  fieldPropertyOverridesEqual,
+  findFieldPropertyOverride,
+  normalizeRequiredFieldPropertyText,
+  replaceFieldPropertyOverride,
+  requireFieldPropertyField
+} from "./field-property-policy.js";
 import { cloneJsonValue, isJsonValue } from "../core/json.js";
 import type { ModelRegistry } from "../core/registry.js";
 import { systemClock, type Clock } from "../ports/clock.js";
@@ -83,9 +92,9 @@ export class FieldPropertyService {
   }
 
   async list(actor: Actor, doctypeName: string, tenantId?: TenantId): Promise<FieldPropertyOverrideState> {
-    this.authorizeAdministration(actor, tenantId);
+    const resolvedTenantId = this.authorizeAdministration(actor, tenantId);
     const doctype = this.registry.get(doctypeName);
-    return this.stateFor(resolveActorTenant(actor, tenantId), doctype.name);
+    return this.stateFor(resolvedTenantId, doctype.name);
   }
 
   async effectiveDocType(
@@ -97,24 +106,22 @@ export class FieldPropertyService {
     return applyFieldPropertyOverridesToDocType(doctype, await this.stateFor(tenantId, doctype.name));
   }
 
-  authorizeAdministration(actor: Actor, tenantId?: TenantId): void {
-    this.ensureAdmin(actor);
-    resolveActorTenant(actor, tenantId);
+  authorizeAdministration(actor: Actor, tenantId?: TenantId): TenantId {
+    return authorizeFieldPropertyAdministration({ actor, tenantId, adminRoles: this.adminRoles });
   }
 
   async save(command: SaveFieldPropertyOverrideCommand): Promise<FieldPropertyOverrideState> {
-    this.authorizeAdministration(command.actor, command.tenantId);
-    const tenantId = resolveActorTenant(command.actor, command.tenantId);
+    const tenantId = this.authorizeAdministration(command.actor, command.tenantId);
     const doctype = await this.prePropertyDocTypeFor(command.doctype, tenantId);
-    const field = requireField(doctype, command.fieldName);
+    const field = requireFieldPropertyField(doctype, command.fieldName);
     let overrides = normalizeOverrides(field, command.overrides);
     const state = await this.stateFor(tenantId, doctype.name);
-    ensureExpectedVersion(state, command.expectedVersion);
-    const pending = replaceStateOverride(state, field.name, overrides, this.clock.now());
+    ensureFieldPropertyExpectedVersion(state, command.expectedVersion);
+    const pending = replaceFieldPropertyOverride(state, field.name, overrides, this.clock.now());
     const effective = applyFieldPropertyOverridesToDocType(doctype, pending);
     overrides = normalizeOverrideExpressions(effective, field.name, overrides);
-    const existing = state.fields.find((entry) => entry.fieldName === field.name);
-    if (existing && jsonEqual(existing.overrides, overrides)) {
+    const existing = findFieldPropertyOverride(state, field.name);
+    if (existing && fieldPropertyOverridesEqual(existing.overrides, overrides)) {
       return state;
     }
     return this.appendAndFold(state, {
@@ -129,13 +136,12 @@ export class FieldPropertyService {
   }
 
   async clear(command: ClearFieldPropertyOverrideCommand): Promise<FieldPropertyOverrideState> {
-    this.authorizeAdministration(command.actor, command.tenantId);
-    const tenantId = resolveActorTenant(command.actor, command.tenantId);
+    const tenantId = this.authorizeAdministration(command.actor, command.tenantId);
     const doctype = await this.prePropertyDocTypeFor(command.doctype, tenantId);
-    const fieldName = normalizeRequired(command.fieldName, "Field name");
+    const fieldName = normalizeRequiredFieldPropertyText(command.fieldName, "Field name");
     const state = await this.stateFor(tenantId, doctype.name);
-    ensureExpectedVersion(state, command.expectedVersion);
-    const existing = state.fields.find((entry) => entry.fieldName === fieldName);
+    ensureFieldPropertyExpectedVersion(state, command.expectedVersion);
+    const existing = findFieldPropertyOverride(state, fieldName);
     if (!doctype.fields.some((field) => field.name === fieldName) && !existing) {
       throw new FrameworkError("FIELD_PROPERTY_INVALID", `Field '${fieldName}' is not defined on ${doctype.name}`, {
         status: 400
@@ -197,23 +203,6 @@ export class FieldPropertyService {
       [...(await this.events.readStream(stream, { maxSequence: state.version })), ...saved]
     );
   }
-
-  private ensureAdmin(actor: Actor): void {
-    if (!this.adminRoles.some((role) => actor.roles.includes(role))) {
-      throw permissionDenied(`Actor '${actor.id}' cannot manage field properties`);
-    }
-  }
-}
-
-function requireField(doctype: DocTypeDefinition, fieldName: string): FieldDefinition {
-  const normalized = normalizeRequired(fieldName, "Field name");
-  const field = doctype.fields.find((item) => item.name === normalized);
-  if (!field) {
-    throw new FrameworkError("FIELD_PROPERTY_INVALID", `Field '${normalized}' is not defined on ${doctype.name}`, {
-      status: 400
-    });
-  }
-  return field;
 }
 
 function normalizeOverrides(field: FieldDefinition, overrides: FieldPropertyOverrides): FieldPropertyOverrides {
@@ -364,7 +353,7 @@ function optionalOptions(
   const normalized: string[] = [];
   const seen = new Set<string>();
   for (const option of value) {
-    const item = normalizeRequired(option, "Option");
+    const item = normalizeRequiredFieldPropertyText(option, "Option");
     if (seen.has(item)) {
       throw new FrameworkError("FIELD_PROPERTY_INVALID", `options contains duplicate '${item}'`, { status: 400 });
     }
@@ -391,36 +380,6 @@ function optionalDefaultValue(
   return { defaultValue: cloneJsonValue(value) };
 }
 
-function normalizeRequired(value: string, label: string): string {
-  if (typeof value !== "string") {
-    throw new FrameworkError("FIELD_PROPERTY_INVALID", `${label} must be a string`, { status: 400 });
-  }
-  const normalized = value.trim();
-  if (normalized.length === 0) {
-    throw new FrameworkError("FIELD_PROPERTY_INVALID", `${label} is required`, { status: 400 });
-  }
-  return normalized;
-}
-
-function ensureExpectedVersion(state: FieldPropertyOverrideState, expectedVersion: number | undefined): void {
-  if (expectedVersion !== undefined && state.version !== expectedVersion) {
-    throw conflict(`Expected field property overrides at version ${expectedVersion}, found ${state.version}`);
-  }
-}
-
-function resolveActorTenant(actor: Actor, explicitTenantId: TenantId | undefined): TenantId {
-  const actorTenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
-  const tenantId = explicitTenantId ?? actorTenantId;
-  if (tenantId !== actorTenantId) {
-    throw permissionDenied(`Actor '${actor.id}' cannot manage field properties for tenant '${tenantId}'`);
-  }
-  return tenantId;
-}
-
 function documentNameForPayload(payload: FieldPropertyEventPayload): string {
   return "fieldName" in payload ? payload.fieldName : "override";
-}
-
-function jsonEqual(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
 }

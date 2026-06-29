@@ -48,6 +48,7 @@ export * from "./application/email-notification-jobs.js";
 export * from "./application/file-policy.js";
 export * from "./application/file-service.js";
 export * from "./application/field-property-events.js";
+export * from "./application/field-property-policy.js";
 export * from "./application/field-property-service.js";
 export * from "./application/job-dispatcher.js";
 export * from "./application/job-errors.js";
