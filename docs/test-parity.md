@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document collaboration event helper slice:
+As of the document command event helper slice:
 
 - Vitest files: `187`
-- Vitest cases: `2123`
-- Remaining gap to Frappe static markers: `661`
+- Vitest cases: `2125`
+- Remaining gap to Frappe static markers: `659`
 
 ## Implication
 

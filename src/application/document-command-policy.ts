@@ -3,6 +3,7 @@ import { badRequest, conflict, FrameworkError } from "../core/errors.js";
 import { compactData } from "../core/schema.js";
 import { allowedWorkflowTransitions, currentWorkflowState } from "../core/workflow.js";
 import { copyDocumentData } from "./document-field-policy.js";
+import { workflowTransitionEventType } from "./document-command-events.js";
 import {
   documentCreatedPayload,
   documentUpdatedPayload,
@@ -174,9 +175,11 @@ export function planWorkflowTransitionPolicy(input: {
     from,
     to: transition.to,
     patch: { [input.workflow.stateField ?? "workflow_state"]: transition.to },
-    eventType:
-      transition.eventType ??
-      `${input.doctypeName}${input.action[0]?.toUpperCase() ?? ""}${input.action.slice(1)}`
+    eventType: workflowTransitionEventType({
+      doctypeName: input.doctypeName,
+      action: input.action,
+      transitionEventType: transition.eventType
+    })
   };
 }
 
