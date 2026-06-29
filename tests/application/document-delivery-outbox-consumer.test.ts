@@ -238,6 +238,63 @@ describe("DocumentDeliveryOutboxConsumer", () => {
     expect(queuedEmailMessages).toEqual([{ tenantId: "acme", messageId: "msg_ready" }]);
   });
 
+  it("derives replayed queued email metadata payload kinds from source event identity", async () => {
+    const outbox = new DocumentDeliveryOutboxService({
+      events: new InMemoryDocumentStore(),
+      ids: deterministicIds(["enqueue-email", "claim-email", "deliver-email"]),
+      clock: fixedClock(now)
+    });
+    await outbox.enqueueFromDomainEvent({
+      event: domainEvent(),
+      snapshot: snapshot(),
+      targets: ["email"]
+    });
+    const queuedEmailMessages: Array<{
+      readonly tenantId: string;
+      readonly messageId: string;
+      readonly metadata?: DocumentData;
+    }> = [];
+    const consumer = new DocumentDeliveryOutboxConsumer({
+      outbox,
+      clock: fixedClock(now),
+      deliveries: createDocumentDeliveryOutboxDeliveryHandlers({
+        emailNotifications: {
+          async sendFromDomainEvent() {
+            throw new Error("should queue email instead of sending directly");
+          },
+          async queueFromDomainEvent() {
+            return [{ status: "queued", messageId: "msg_ready", ruleName: "Owners", recipientId: "owner@example.com" }];
+          }
+        },
+        emailNotificationDeliveryQueue: {
+          async enqueue(tenantId, messageId, options) {
+            queuedEmailMessages.push({
+              tenantId,
+              messageId,
+              ...(options?.metadata === undefined ? {} : { metadata: options.metadata })
+            });
+          }
+        }
+      })
+    });
+
+    await consumer.drain({ tenantId: "acme", claimId: "claim-1", now });
+
+    expect(queuedEmailMessages).toEqual([
+      {
+        tenantId: "acme",
+        messageId: "msg_ready",
+        metadata: {
+          sourceEventId: "evt_source",
+          sourceEventType: "NoteCreated",
+          sourcePayloadKind: "DocumentCreated",
+          ruleName: "Owners",
+          recipientId: "owner@example.com"
+        }
+      }
+    ]);
+  });
+
   it("runs through the built-in drain job", async () => {
     const registry = createJobRegistry({
       jobs: [createDocumentDeliveryOutboxDrainJob()]

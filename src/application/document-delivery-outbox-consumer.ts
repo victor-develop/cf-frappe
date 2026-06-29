@@ -1,4 +1,5 @@
 import { badRequest, notFound } from "../core/errors.js";
+import { domainEventPayloadKind } from "../core/domain-events.js";
 import { realtimeEventFromDomainEvent, realtimeUserNotificationsFromDomainEvent } from "../core/realtime.js";
 import type { JobDefinition, JobPayload } from "../core/jobs.js";
 import type { DocumentData, DocumentSnapshot, DomainEvent, TenantId } from "../core/types.js";
@@ -285,7 +286,7 @@ export function createDocumentDeliveryOutboxDeliveryHandlers(
                         metadata: {
                           sourceEventId: source.event.id,
                           sourceEventType: source.event.type,
-                          sourcePayloadKind: source.event.payload.kind,
+                          sourcePayloadKind: domainEventPayloadKind(source.event),
                           ...(delivery.ruleName === undefined ? {} : { ruleName: delivery.ruleName }),
                           ...(delivery.recipientId === undefined ? {} : { recipientId: delivery.recipientId })
                         }
