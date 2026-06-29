@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted data-patch job service-availability decisions into data-patch job policy so built-in data-patch job handlers keep resource lookup, payload parsing, apply/rollback orchestration, and framework error mapping.
 - Extracted configured/runtime job-schedule lookup decisions into job-schedule policy so JobScheduleService keeps configured schedule scanning, runtime definition replay, summary projection, and framework error mapping.
 - Extracted custom report row-provider lookup decisions into report policy so ReportService keeps registry access, row-provider map lookup, report execution/export orchestration, and framework error mapping.
 - Extracted user-profile account lookup decisions into user-profile policy so UserProfileService keeps account/profile stream reads, profile event append orchestration, version checks, and framework error mapping.

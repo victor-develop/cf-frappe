@@ -12,6 +12,7 @@ import {
   dataPatchRollbackDispatchCommand,
   dataPatchRollbackRetryDispatchCommand,
   dataPatchRunResultJson,
+  ensureDataPatchJobServiceAvailable,
   parseDataPatchJobActor,
   parseDataPatchJobPatchIds,
   parseDataPatchRollbackRetryJobPatchId,
@@ -21,7 +22,7 @@ import {
   type DataPatchRollbackJobPayload,
   type DataPatchRollbackRetryJobPayload
 } from "./data-patch-job-policy.js";
-import { badRequest, notFound } from "../core/errors.js";
+import { badRequest } from "../core/errors.js";
 import type { JobDefinition, JobPayload } from "../core/jobs.js";
 import type { Actor } from "../core/types.js";
 import type { JobDispatcher } from "./job-dispatcher.js";
@@ -171,9 +172,7 @@ export function createDataPatchApplyJob<TResources extends DataPatchApplyJobReso
     description: "Apply a validated cf-frappe data patch plan",
     async handler({ payload, resources }) {
       const dataPatches = resources.dataPatches;
-      if (dataPatches === undefined) {
-        throw notFound("Data patch service is not available", "DATA_PATCH_NOT_FOUND");
-      }
+      ensureDataPatchJobServiceAvailable(dataPatches);
       const patchIds = parseDataPatchJobPatchIds(payload.patchIds);
       if (patchIds.length === 0) {
         throw badRequest("Data patch apply job requires at least one patch id");
@@ -192,9 +191,7 @@ export function createDataPatchRollbackJob<
     description: "Roll back a validated cf-frappe data patch plan",
     async handler({ payload, resources }) {
       const dataPatches = resources.dataPatches;
-      if (dataPatches === undefined) {
-        throw notFound("Data patch service is not available", "DATA_PATCH_NOT_FOUND");
-      }
+      ensureDataPatchJobServiceAvailable(dataPatches);
       const patchIds = parseDataPatchJobPatchIds(payload.patchIds);
       if (patchIds.length === 0) {
         throw badRequest("Data patch rollback job requires at least one patch id");
@@ -215,9 +212,7 @@ export function createDataPatchRollbackRetryJob<
     description: "Retry a failed cf-frappe data patch rollback",
     async handler({ payload, resources }) {
       const dataPatches = resources.dataPatches;
-      if (dataPatches === undefined) {
-        throw notFound("Data patch service is not available", "DATA_PATCH_NOT_FOUND");
-      }
+      ensureDataPatchJobServiceAvailable(dataPatches);
       const patchId = parseDataPatchRollbackRetryJobPatchId(payload.patchId);
       return dataPatchRollbackResultJson(
         await dataPatches.retryRollbackFailed(parseDataPatchJobActor(payload.actor), patchId)

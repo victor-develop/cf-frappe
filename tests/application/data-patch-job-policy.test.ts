@@ -5,6 +5,7 @@ import {
   dataPatchRollbackDispatchCommand,
   dataPatchRollbackRetryDispatchCommand,
   dataPatchRunResultJson,
+  ensureDataPatchJobServiceAvailable,
   parseDataPatchJobActor,
   parseDataPatchJobPatchIds,
   parseDataPatchRollbackRetryJobPatchId
@@ -89,6 +90,20 @@ describe("data patch job policy", () => {
       id: "admin@example.com",
       roles: [SYSTEM_MANAGER_ROLE]
     });
+  });
+
+  it("guards data patch service availability before job execution", () => {
+    const service = { apply: async () => undefined };
+
+    expect(() => ensureDataPatchJobServiceAvailable(service)).not.toThrow();
+    expect(() => ensureDataPatchJobServiceAvailable(undefined)).toThrow("Data patch service is not available");
+    let error: unknown;
+    try {
+      ensureDataPatchJobServiceAvailable(undefined);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({ code: "DATA_PATCH_NOT_FOUND" });
   });
 
   it("parses job actor payloads by value", () => {

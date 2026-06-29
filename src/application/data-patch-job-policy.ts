@@ -1,5 +1,5 @@
 import type { JobPayload } from "../core/jobs.js";
-import { badRequest } from "../core/errors.js";
+import { badRequest, notFound } from "../core/errors.js";
 import type { Actor, DocumentData } from "../core/types.js";
 import type { DispatchJobCommand } from "../ports/job-queue.js";
 import type { DataPatchRollbackRunResult, DataPatchRunResult } from "./data-patch-runner.js";
@@ -30,6 +30,12 @@ export interface DataPatchQueueDeliveryOptions {
   readonly delaySeconds?: number;
   readonly idempotencyKey?: string;
   readonly metadata?: DocumentData;
+}
+
+export function ensureDataPatchJobServiceAvailable<T>(dataPatches: T | undefined): asserts dataPatches is T {
+  if (dataPatches === undefined) {
+    throw notFound("Data patch service is not available", "DATA_PATCH_NOT_FOUND");
+  }
 }
 
 export function dataPatchApplyDispatchCommand(
