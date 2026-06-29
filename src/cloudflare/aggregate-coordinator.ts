@@ -6,7 +6,8 @@ import {
 } from "../application/assignment-rule-service.js";
 import { CustomFieldService } from "../application/custom-field-service.js";
 import { DocumentShareService } from "../application/document-share-service.js";
-import { DocumentService, bulkDocumentFailure } from "../application/document-service.js";
+import { DocumentService } from "../application/document-service.js";
+import { bulkDocumentFailure, bulkFailureDocumentName } from "../application/document-bulk-policy.js";
 import { FieldPropertyService } from "../application/field-property-service.js";
 import { NotificationRuleService } from "../application/notification-rule-service.js";
 import { WorkflowService } from "../application/workflow-service.js";
@@ -273,7 +274,7 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
         const snapshot = await this.transact(command) as DocumentSnapshot;
         return { ok: true, snapshot };
       } catch (error) {
-        return { ok: false, failure: bulkDocumentFailure(documentNameForFailure(command), error) };
+        return { ok: false, failure: bulkDocumentFailure(bulkFailureDocumentName(command), error) };
       }
     }
   };
@@ -301,7 +302,3 @@ const defaultAssignmentRuleActor: Actor = Object.freeze({
   id: "__assignment_rules__",
   roles: Object.freeze([SYSTEM_MANAGER_ROLE])
 });
-
-function documentNameForFailure(command: AggregateCoordinatorCommand): string {
-  return command.kind === "create" ? command.name ?? "_new" : command.name;
-}

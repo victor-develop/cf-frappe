@@ -69,6 +69,14 @@ export function bulkDocumentFailure(name: string, error: unknown): BulkDocumentC
   };
 }
 
+export type BulkFailureCommandName =
+  | { readonly kind: "create"; readonly name?: string | undefined }
+  | { readonly kind: string; readonly name: string };
+
+export function bulkFailureDocumentName(command: BulkFailureCommandName): string {
+  return command.kind === "create" ? command.name ?? "_new" : command.name ?? "_unknown";
+}
+
 export type BulkDocumentSelectionOutcome =
   | { readonly ok: true; readonly snapshot: DocumentSnapshot }
   | { readonly ok: false; readonly failure: BulkDocumentCommandFailure };

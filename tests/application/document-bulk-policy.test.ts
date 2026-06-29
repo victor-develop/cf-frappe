@@ -4,6 +4,7 @@ import {
   FrameworkError,
   bulkDeleteDocumentFailure,
   bulkDocumentFailure,
+  bulkFailureDocumentName,
   bulkNamedCommand,
   normalizeBulkDeleteDocumentSelections,
   normalizeBulkDocumentSelections,
@@ -80,6 +81,12 @@ describe("document bulk policy", () => {
       message: "Bulk delete failed",
       status: 500
     });
+  });
+
+  it("resolves document names for bulk failure records", () => {
+    expect(bulkFailureDocumentName({ kind: "create" })).toBe("_new");
+    expect(bulkFailureDocumentName({ kind: "create", name: "NOTE-1" })).toBe("NOTE-1");
+    expect(bulkFailureDocumentName({ kind: "update", name: "NOTE-2" })).toBe("NOTE-2");
   });
 
   it("runs normalized bulk selections into ordered success and failure groups", async () => {
