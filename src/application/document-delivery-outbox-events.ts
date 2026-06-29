@@ -103,6 +103,9 @@ export function foldDocumentDeliveryOutbox(
   let version = 0;
   for (const event of events) {
     version = Math.max(version, event.sequence);
+    if (!isDocumentDeliveryOutboxEvent(event)) {
+      continue;
+    }
     switch (event.payload.kind) {
       case "DocumentDeliveryOutboxEnqueued":
         records.set(event.payload.outboxId, {

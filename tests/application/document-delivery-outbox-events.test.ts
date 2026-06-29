@@ -70,6 +70,25 @@ describe("document delivery outbox events", () => {
     expect(isDocumentDeliveryOutboxEvent(otherEvent({ kind: "DocumentDeleted" }))).toBe(false);
   });
 
+  it("folds document delivery outbox events by payload kind instead of event type name", () => {
+    const outboxId = documentDeliveryOutboxRecordId("evt_source", "email");
+    const misleadingUnrelated = otherEvent({ kind: "DocumentDeleted" }, "DocumentDeliveryOutboxEnqueued");
+    const customTypedEnqueued = {
+      ...enqueuedEvent(2, outboxId, "email", "2026-01-01T00:00:00.000Z"),
+      type: "DeliveryIntentRecorded"
+    };
+
+    const state = foldDocumentDeliveryOutbox("acme", [misleadingUnrelated, customTypedEnqueued]);
+
+    expect(state.version).toBe(2);
+    expect(state.records.size).toBe(1);
+    expect(state.records.get(outboxId)).toMatchObject({
+      id: outboxId,
+      status: "pending",
+      sourceEventId: "evt_source"
+    });
+  });
+
   it("folds claim, failure, retry, and delivery transitions", () => {
     const outboxId = documentDeliveryOutboxRecordId("evt_source", "email");
     const state = foldDocumentDeliveryOutbox("acme", [
