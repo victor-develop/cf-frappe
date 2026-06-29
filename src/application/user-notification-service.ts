@@ -1,4 +1,4 @@
-import { FrameworkError, badRequest, notFound, permissionDenied } from "../core/errors.js";
+import { FrameworkError, notFound, permissionDenied } from "../core/errors.js";
 import {
   documentUserNotificationsFromDomainEvent,
   documentUserNotificationsFromRules,
@@ -22,7 +22,6 @@ import {
   notificationIdentity,
   requireAppendedUserNotificationEvent,
   requireReplayedNotification,
-  sortedUserNotifications,
   USER_NOTIFICATION_PAYLOAD_KINDS,
   userNotificationEventType,
   type UserNotificationEventPayload as UserNotificationEventPayloadForService,
@@ -32,9 +31,14 @@ import {
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
+import {
+  normalizeUserNotificationId,
+  normalizeUserNotificationInboxLimit,
+  normalizeUserNotificationUserId,
+  userNotificationInboxProjection,
+  type UserNotificationInbox
+} from "./user-notification-policy.js";
 
-const DEFAULT_NOTIFICATION_LIMIT = 50;
-const MAX_NOTIFICATION_LIMIT = 200;
 const MAX_NOTIFICATION_APPEND_ATTEMPTS = 5;
 
 export interface UserNotificationServiceOptions {
@@ -66,18 +70,7 @@ export interface UserNotificationCommand {
 }
 
 export type { UserNotificationEventPayload, UserNotificationRecord } from "./user-notification-events.js";
-
-export interface UserNotificationInbox {
-  readonly tenantId: TenantId;
-  readonly userId: string;
-  readonly limit: number;
-  readonly unreadCount: number;
-  readonly filters: {
-    readonly unreadOnly: boolean;
-    readonly includeDismissed: boolean;
-  };
-  readonly notifications: readonly UserNotificationRecord[];
-}
+export type { UserNotificationInbox } from "./user-notification-policy.js";
 
 export class UserNotificationService {
   private readonly events: EventStore;
@@ -108,20 +101,12 @@ export class UserNotificationService {
   async inbox(actor: Actor, query: UserNotificationInboxQuery = {}): Promise<UserNotificationInbox> {
     const { tenantId, userId } = this.authorizeUser(actor, query.userId);
     const state = await this.state(tenantId, userId);
-    const limit = normalizeLimit(query.limit);
-    const unreadOnly = query.unreadOnly ?? false;
-    const includeDismissed = query.includeDismissed ?? false;
-    const all = sortedUserNotifications(state)
-      .filter((notification) => includeDismissed || !notification.dismissed)
-      .filter((notification) => !unreadOnly || !notification.read);
-    return {
-      tenantId,
-      userId,
-      limit,
-      unreadCount: sortedUserNotifications(state).filter((notification) => !notification.read && !notification.dismissed).length,
-      filters: { unreadOnly, includeDismissed },
-      notifications: all.slice(0, limit)
-    };
+    return userNotificationInboxProjection({
+      state,
+      limit: normalizeUserNotificationInboxLimit(query.limit),
+      unreadOnly: query.unreadOnly,
+      includeDismissed: query.includeDismissed
+    });
   }
 
   async markRead(
@@ -131,7 +116,7 @@ export class UserNotificationService {
   ): Promise<UserNotificationRecord> {
     const { tenantId, userId } = this.authorizeUser(actor, command.userId);
     const state = await this.state(tenantId, userId);
-    const id = normalizeNotificationId(notificationId);
+    const id = normalizeUserNotificationId(notificationId);
     const notification = this.requireNotification(state, id);
     if (notification.read) {
       return notification;
@@ -150,7 +135,7 @@ export class UserNotificationService {
   ): Promise<UserNotificationRecord> {
     const { tenantId, userId } = this.authorizeUser(actor, command.userId);
     const state = await this.state(tenantId, userId);
-    const id = normalizeNotificationId(notificationId);
+    const id = normalizeUserNotificationId(notificationId);
     const notification = this.requireNotification(state, id);
     if (notification.dismissed) {
       return notification;
@@ -232,7 +217,7 @@ export class UserNotificationService {
   }
 
   private requireNotification(state: UserNotificationState, notificationId: string): UserNotificationRecord {
-    const id = normalizeNotificationId(notificationId);
+    const id = normalizeUserNotificationId(notificationId);
     const notification = state.notifications.get(id);
     if (!notification) {
       throw notFound(`Notification '${id}' was not found`);
@@ -272,7 +257,7 @@ export class UserNotificationService {
 
   private authorizeUser(actor: Actor, explicitUserId?: string): { readonly tenantId: TenantId; readonly userId: string } {
     const tenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
-    const userId = normalizeUserId(explicitUserId ?? actor.id);
+    const userId = normalizeUserNotificationUserId(explicitUserId ?? actor.id);
     if (userId !== actor.id && !this.adminRoles.some((role) => actor.roles.includes(role))) {
       throw permissionDenied(`Actor '${actor.id}' cannot inspect notifications for '${userId}'`);
     }
@@ -297,32 +282,6 @@ export class UserNotificationService {
       ...documentUserNotificationsFromRules(event, snapshot ?? null, rules)
     ];
   }
-}
-
-function normalizeUserId(value: string): string {
-  const normalized = value.trim();
-  if (!normalized) {
-    throw badRequest("Notification user is required");
-  }
-  return normalized;
-}
-
-function normalizeNotificationId(value: string): string {
-  const normalized = value.trim();
-  if (!normalized) {
-    throw badRequest("Notification id is required");
-  }
-  return normalized;
-}
-
-function normalizeLimit(value: number | undefined): number {
-  if (value === undefined) {
-    return DEFAULT_NOTIFICATION_LIMIT;
-  }
-  if (!Number.isInteger(value) || value < 1 || value > MAX_NOTIFICATION_LIMIT) {
-    throw badRequest(`Notification limit must be between 1 and ${MAX_NOTIFICATION_LIMIT}`);
-  }
-  return value;
 }
 
 function isStreamConflict(error: unknown): boolean {
