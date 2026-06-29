@@ -1,7 +1,6 @@
-import { badRequest, conflict, notFound, permissionDenied } from "../core/errors.js";
+import { notFound } from "../core/errors.js";
 import { userAccountsStream, userProfilesStream } from "../core/streams.js";
 import {
-  DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
   type Actor,
   type DocumentData,
@@ -18,7 +17,6 @@ import {
 import { foldUserAccount } from "../core/user-accounts.js";
 import {
   foldUserProfile,
-  normalizeUserProfilePatch,
   type UserProfileInput,
   type UserProfilePatch,
   type UserProfileState
@@ -26,6 +24,12 @@ import {
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
+import {
+  authorizeUserProfileAccess,
+  ensureUserProfileExpectedVersion,
+  normalizeUserProfilePatchInput,
+  normalizeUserProfileRequiredText
+} from "./user-profile-policy.js";
 
 export type { UserProfileEventPayload } from "./user-profile-events.js";
 
@@ -60,27 +64,22 @@ export class UserProfileService {
 
   async get(actor: Actor, userId: string, tenantId?: TenantId): Promise<UserProfileState> {
     const resolvedTenantId = this.authorizeProfileAccess(actor, userId, tenantId);
-    const normalizedUserId = normalizeRequired(userId, "User id");
+    const normalizedUserId = normalizeUserProfileRequiredText(userId, "User id");
     await this.ensureAccountExists(resolvedTenantId, normalizedUserId);
     return this.stateFor(resolvedTenantId, normalizedUserId);
   }
 
   authorizeProfileAccess(actor: Actor, userId: string, tenantId?: TenantId): TenantId {
-    const normalizedUserId = normalizeRequired(userId, "User id");
-    const resolvedTenantId = resolveActorTenant(actor, tenantId, "access user profiles");
-    if (this.isAdmin(actor) || actor.id === normalizedUserId) {
-      return resolvedTenantId;
-    }
-    throw permissionDenied(`Actor '${actor.id}' cannot access user profile '${normalizedUserId}'`);
+    return authorizeUserProfileAccess({ actor, userId, tenantId, adminRoles: this.adminRoles });
   }
 
   async change(command: ChangeUserProfileCommand): Promise<UserProfileState> {
     const tenantId = this.authorizeProfileAccess(command.actor, command.userId, command.tenantId);
-    const userId = normalizeRequired(command.userId, "User id");
+    const userId = normalizeUserProfileRequiredText(command.userId, "User id");
     await this.ensureAccountExists(tenantId, userId);
-    const patch = normalizeProfilePatch(command.profile);
+    const patch = normalizeUserProfilePatchInput(command.profile);
     const state = await this.stateFor(tenantId, userId);
-    ensureExpectedVersion(state, command.expectedVersion);
+    ensureUserProfileExpectedVersion(state, command.expectedVersion);
     if (Object.keys(patch).length === 0) {
       return state;
     }
@@ -140,40 +139,5 @@ export class UserProfileService {
     return foldUserProfile(tenantId, userId, await this.events.readStream(userProfilesStream(tenantId, userId), {
       payloadKinds: USER_PROFILE_PAYLOAD_KINDS
     }));
-  }
-
-  private isAdmin(actor: Actor): boolean {
-    return this.adminRoles.some((role) => actor.roles.includes(role));
-  }
-}
-
-function resolveActorTenant(actor: Actor, explicitTenantId: TenantId | undefined, action: string): TenantId {
-  const actorTenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
-  const tenantId = explicitTenantId ?? actorTenantId;
-  if (tenantId !== actorTenantId) {
-    throw permissionDenied(`Actor '${actor.id}' cannot ${action} for tenant '${tenantId}'`);
-  }
-  return tenantId;
-}
-
-function normalizeRequired(value: string, label: string): string {
-  const normalized = value.trim();
-  if (normalized.length === 0) {
-    throw badRequest(`${label} is required`);
-  }
-  return normalized;
-}
-
-function normalizeProfilePatch(input: UserProfileInput | Record<string, unknown>): UserProfilePatch {
-  try {
-    return normalizeUserProfilePatch(input as Record<string, unknown>);
-  } catch (error) {
-    throw badRequest(error instanceof Error ? error.message : "User profile is invalid");
-  }
-}
-
-function ensureExpectedVersion(state: UserProfileState, expectedVersion: number | undefined): void {
-  if (expectedVersion !== undefined && state.version !== expectedVersion) {
-    throw conflict(`Expected user profile '${state.userId}' at version ${expectedVersion}, found ${state.version}`);
   }
 }
