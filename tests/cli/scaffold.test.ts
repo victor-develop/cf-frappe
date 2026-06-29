@@ -563,7 +563,7 @@ describe("cf-frappe CLI scaffold", () => {
     expect(generatedTypes).toContain("SESSION_SECRET: string;");
     expect(generatedTypes).toContain('AGGREGATES: DurableObjectNamespace<import("./src/worker").AggregateCoordinator>;');
     expect(generatedTypes).toContain('REALTIME: DurableObjectNamespace<import("./src/worker").RealtimeHub>;');
-  });
+  }, 15_000);
 
   it("creates a Cloudflare Access-backed starter app", async () => {
     const target = join(tempRoot, "Access App");

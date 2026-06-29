@@ -11,11 +11,16 @@ import {
   type Actor,
   type DocTypeDefinition,
   type DocumentData,
-  type NewDomainEvent,
   type NotificationRuleDefinition,
   type TenantId
 } from "../core/types.js";
-import type { NotificationRuleEventPayload } from "./notification-rule-events.js";
+import {
+  notificationRuleEvent,
+  notificationRuleEventsVisibleAt,
+  NOTIFICATION_RULE_PAYLOAD_KINDS,
+  replayNotificationRuleAppend,
+  type NotificationRuleEventPayload
+} from "./notification-rule-events.js";
 import type { ModelRegistry } from "../core/registry.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
@@ -108,7 +113,6 @@ export class NotificationRuleService implements NotificationRuleProvider {
     }
     return this.appendAndFold(state, {
       actor: command.actor,
-      type: "NotificationRuleSaved",
       metadata: command.metadata,
       payload: {
         kind: "NotificationRuleSaved",
@@ -130,7 +134,6 @@ export class NotificationRuleService implements NotificationRuleProvider {
     }
     return this.appendAndFold(state, {
       actor: command.actor,
-      type: "NotificationRuleCleared",
       metadata: command.metadata,
       payload: {
         kind: "NotificationRuleCleared",
@@ -146,13 +149,11 @@ export class NotificationRuleService implements NotificationRuleProvider {
     options: { readonly occurredAt?: string } = {}
   ): Promise<NotificationRuleState> {
     const stream = notificationRulesStream(tenantId);
-    const events = await this.events.readStream(stream, { payloadKinds: ["NotificationRuleSaved", "NotificationRuleCleared"] });
-    const occurredAt = options.occurredAt;
-    const boundedEvents = occurredAt === undefined ? events : events.filter((event) => event.occurredAt <= occurredAt);
+    const events = await this.events.readStream(stream, { payloadKinds: NOTIFICATION_RULE_PAYLOAD_KINDS });
     return foldNotificationRules(
       tenantId,
       doctypeName,
-      boundedEvents
+      notificationRuleEventsVisibleAt(events, options.occurredAt)
     );
   }
 
@@ -167,29 +168,25 @@ export class NotificationRuleService implements NotificationRuleProvider {
     state: NotificationRuleState,
     options: {
       readonly actor: Actor;
-      readonly type: string;
       readonly metadata: DocumentData | undefined;
       readonly payload: TPayload;
     }
   ): Promise<NotificationRuleState> {
     const stream = notificationRulesStream(state.tenantId);
-    const event: NewDomainEvent<TPayload> = {
+    const event = notificationRuleEvent({
       id: this.ids.next("evt_"),
       tenantId: state.tenantId,
       stream,
-      type: options.type,
-      doctype: "__NotificationRules",
-      documentName: `${state.doctypeName}:${ruleNameForPayload(options.payload)}`,
-      actorId: options.actor.id,
+      actor: options.actor,
       occurredAt: this.clock.now(),
       payload: options.payload,
-      metadata: options.metadata ?? {}
-    };
+      ...(options.metadata === undefined ? {} : { metadata: options.metadata })
+    });
     const saved = await this.events.append(stream, state.version, [event]);
-    return foldNotificationRules(
-      state.tenantId,
-      state.doctypeName,
-      [...(await this.events.readStream(stream, { maxSequence: state.version })), ...saved]
+    return replayNotificationRuleAppend(
+      state,
+      await this.events.readStream(stream, { maxSequence: state.version }),
+      saved
     );
   }
 
@@ -224,13 +221,6 @@ function normalizeRequiredString(value: string, label: string): string {
     throw new FrameworkError("NOTIFICATION_RULE_INVALID", `${label} is required`, { status: 400 });
   }
   return normalized;
-}
-
-function ruleNameForPayload(payload: NotificationRuleEventPayload): string {
-  if (payload.kind === "NotificationRuleSaved") {
-    return payload.rule.name;
-  }
-  return payload.ruleName;
 }
 
 function jsonEqual(left: unknown, right: unknown): boolean {
