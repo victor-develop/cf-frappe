@@ -3,6 +3,21 @@ import { FrameworkError } from "../core/errors.js";
 import type { RecordedDataPatch } from "../ports/data-patch-log.js";
 import { assertDataPatchChecksumMatches } from "./data-patch-journal-policy.js";
 
+export function dataPatchApplyRunSelection<TResources>(
+  selected: readonly DataPatchDefinition<TResources>[],
+  pending: readonly DataPatchDefinition<TResources>[],
+  limit: number | undefined
+): readonly DataPatchDefinition<TResources>[] {
+  return limit === undefined ? selected : pending.slice(0, limit);
+}
+
+export function dataPatchApplyPlanSelection<TResources>(
+  pending: readonly DataPatchDefinition<TResources>[],
+  limit: number | undefined
+): readonly DataPatchDefinition<TResources>[] {
+  return limit === undefined ? pending : pending.slice(0, limit);
+}
+
 export function assertSelectedDataPatchPredecessorsApplied<TResources>(
   patches: readonly DataPatchDefinition<TResources>[],
   selected: readonly DataPatchDefinition<TResources>[],

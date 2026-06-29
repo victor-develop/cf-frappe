@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the data-patch rollback planning policy slice:
+As of the data-patch apply selection policy slice:
 
 - Vitest files: `203`
-- Vitest cases: `2428`
-- Remaining gap to Frappe static markers: `356`
+- Vitest cases: `2430`
+- Remaining gap to Frappe static markers: `354`
 
 ## Implication
 

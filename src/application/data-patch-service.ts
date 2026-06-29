@@ -1,5 +1,9 @@
 import { DataPatchRunner, type DataPatchRollbackRunResult, type DataPatchRunResult } from "./data-patch-runner.js";
-import { assertSelectedDataPatchPredecessorsApplied } from "./data-patch-apply-policy.js";
+import {
+  assertSelectedDataPatchPredecessorsApplied,
+  dataPatchApplyPlanSelection,
+  dataPatchApplyRunSelection
+} from "./data-patch-apply-policy.js";
 import {
   assertDataPatchApplyLimit,
   selectDataPatch,
@@ -153,11 +157,8 @@ export class DataPatchService<TResources = unknown> {
     if (options.patchIds !== undefined) {
       await this.assertPredecessorsApplied(selected);
     }
-    if (options.limit === undefined) {
-      return selected;
-    }
-    const pending = await runner.pendingPatches(selected);
-    return pending.slice(0, options.limit);
+    const pending = options.limit === undefined ? [] : await runner.pendingPatches(selected);
+    return dataPatchApplyRunSelection(selected, pending, options.limit);
   }
 
   private async patchesForPlan(options: DataPatchApplyOptions): Promise<readonly DataPatchDefinition<TResources>[]> {
@@ -168,7 +169,7 @@ export class DataPatchService<TResources = unknown> {
       await this.assertPredecessorsApplied(selected);
     }
     const pending = await runner.pendingPatches(selected);
-    return options.limit === undefined ? pending : pending.slice(0, options.limit);
+    return dataPatchApplyPlanSelection(pending, options.limit);
   }
 
   private async patchesForRollbackPlan(
