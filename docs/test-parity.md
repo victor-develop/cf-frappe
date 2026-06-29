@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document-import policy slice:
+As of the email-notification service policy slice:
 
-- Vitest files: `225`
-- Vitest cases: `2570`
-- Remaining gap to Frappe static markers: `214`
+- Vitest files: `226`
+- Vitest cases: `2578`
+- Remaining gap to Frappe static markers: `206`
 
 ## Implication
 

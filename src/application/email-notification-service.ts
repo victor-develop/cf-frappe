@@ -16,6 +16,21 @@ import {
   type EmailOutboxRecordEntry,
   type EmailOutboxState
 } from "./email-notification-events.js";
+import {
+  emailDeliveryClaimTimeoutMs,
+  emailNotificationErrorMessage,
+  emailNotificationQueuedPayloadInput,
+  failedEmailNotificationDelivery,
+  isSkippedEmailNotificationQueueResult,
+  looksLikeEmailAddress,
+  missingEmailRecipientReason,
+  queueResultFromOutboxRecord,
+  queuedEmailNotificationResult,
+  sentEmailNotificationDelivery,
+  skippedEmailNotificationQueueResult,
+  type DocumentEmailNotificationDelivery,
+  type DocumentEmailNotificationQueueResult
+} from "./email-notification-service-policy.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EmailAddress, EmailMessage, EmailSender } from "../ports/email.js";
 import type { EventStore } from "../ports/event-store.js";
@@ -23,9 +38,9 @@ import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
 
 export type { EmailNotificationAddressPayload, EmailNotificationEventPayload } from "./email-notification-events.js";
 export { emailNotificationMessageId } from "./email-notification-events.js";
+export * from "./email-notification-service-policy.js";
 
 const EMAIL_OUTBOX_ACTOR_ID = "system:email-outbox";
-const DEFAULT_EMAIL_DELIVERY_CLAIM_TIMEOUT_SECONDS = 300;
 
 export interface EmailNotificationRuleProvider {
   notificationRulesFor(
@@ -50,48 +65,6 @@ export interface EmailNotificationServiceOptions {
   readonly clock?: Clock;
 }
 
-export type DocumentEmailNotificationDelivery =
-  | {
-      readonly status: "sent";
-      readonly messageId: string;
-      readonly providerMessageId?: string;
-      readonly eventId: string;
-      readonly ruleName: string;
-      readonly recipientId: string;
-      readonly to: string;
-      readonly subject: string;
-    }
-  | {
-      readonly status: "failed";
-      readonly messageId: string;
-      readonly eventId: string;
-      readonly ruleName: string;
-      readonly recipientId: string;
-      readonly to: string;
-      readonly subject: string;
-      readonly error: string;
-    }
-  | {
-      readonly status: "skipped";
-      readonly messageId: string;
-      readonly eventId: string;
-      readonly ruleName: string;
-      readonly recipientId: string;
-      readonly reason: string;
-    };
-
-export type DocumentEmailNotificationQueueResult =
-  | {
-      readonly status: "queued";
-      readonly messageId: string;
-      readonly eventId: string;
-      readonly ruleName: string;
-      readonly recipientId: string;
-      readonly to: string;
-      readonly subject: string;
-    }
-  | Extract<DocumentEmailNotificationDelivery, { readonly status: "skipped" }>;
-
 export class EmailNotificationService {
   private readonly events: EventStore;
   private readonly sender: EmailSender;
@@ -108,7 +81,7 @@ export class EmailNotificationService {
     this.from = options.from;
     this.notificationRules = options.notificationRules;
     this.recipients = options.recipients ?? fallbackEmailRecipientResolver;
-    this.claimTimeoutMs = (options.claimTimeoutSeconds ?? DEFAULT_EMAIL_DELIVERY_CLAIM_TIMEOUT_SECONDS) * 1000;
+    this.claimTimeoutMs = emailDeliveryClaimTimeoutMs(options.claimTimeoutSeconds);
     this.ids = options.ids ?? cryptoIdGenerator;
     this.clock = options.clock ?? systemClock;
   }
@@ -141,6 +114,7 @@ export class EmailNotificationService {
       }
       const to = await this.recipients.emailForUser(notification.tenantId, notification.recipientId);
       if (to === undefined) {
+        const reason = missingEmailRecipientReason(notification.recipientId);
         await this.append(event.tenantId, messageId, {
           kind: "EmailNotificationSkipped",
           messageId,
@@ -149,18 +123,18 @@ export class EmailNotificationService {
           payloadKind: notification.payloadKind,
           ruleName: notification.ruleName,
           recipientId: notification.recipientId,
-          reason: `No deliverable email address for user '${notification.recipientId}'`
+          reason
         });
-        queued.push({
-          status: "skipped",
+        queued.push(skippedEmailNotificationQueueResult({
           messageId,
           eventId: notification.eventId,
           ruleName: notification.ruleName,
           recipientId: notification.recipientId,
-          reason: `No deliverable email address for user '${notification.recipientId}'`
-        });
+          reason
+        }));
         continue;
       }
+      const payloadInput = emailNotificationQueuedPayloadInput({ messageId, notification, from: this.from, to });
       await this.append(event.tenantId, messageId, {
         kind: "EmailNotificationQueued",
         messageId,
@@ -169,24 +143,20 @@ export class EmailNotificationService {
         payloadKind: notification.payloadKind,
         ruleName: notification.ruleName,
         recipientId: notification.recipientId,
-        from: emailAddressPayload(this.from),
-        to: emailAddressPayload(to),
+        from: payloadInput.from,
+        to: payloadInput.to,
         subject: notification.subject,
         text: notification.text,
-        headers: {
-          "X-CF-Frappe-Event": notification.eventId,
-          "X-CF-Frappe-Rule": notification.ruleName
-        }
+        headers: payloadInput.headers
       });
-      queued.push({
-        status: "queued",
+      queued.push(queuedEmailNotificationResult({
         messageId,
         eventId: notification.eventId,
         ruleName: notification.ruleName,
         recipientId: notification.recipientId,
         to: to.email,
         subject: notification.subject
-      });
+      }));
     }
     return queued;
   }
@@ -196,7 +166,7 @@ export class EmailNotificationService {
     snapshot?: DocumentSnapshot | null
   ): Promise<readonly DocumentEmailNotificationDelivery[]> {
     const queued = await this.queueFromDomainEvent(event, snapshot);
-    const skipped = queued.filter(isSkippedDelivery);
+    const skipped = queued.filter(isSkippedEmailNotificationQueueResult);
     const rules = await this.notificationRules.notificationRulesFor(event.tenantId, event.doctype, {
       occurredAt: event.occurredAt
     });
@@ -237,7 +207,7 @@ export class EmailNotificationService {
         ...(claim.headers === undefined ? {} : { headers: { ...claim.headers } })
       });
     } catch (error) {
-      const messageText = errorMessage(error);
+      const messageText = emailNotificationErrorMessage(error);
       const recorded = await this.appendClaimCompletion(tenantId, messageId, claimId, {
         kind: "EmailNotificationFailed",
         messageId,
@@ -247,16 +217,11 @@ export class EmailNotificationService {
       if (!recorded) {
         return undefined;
       }
-      return {
-        status: "failed",
+      return failedEmailNotificationDelivery({
         messageId,
-        eventId: claim.sourceEventId,
-        ruleName: claim.ruleName,
-        recipientId: claim.recipientId,
-        to: claim.to.email,
-        subject: claim.subject,
+        claim,
         error: messageText
-      };
+      });
     }
     const recorded = await this.appendClaimCompletion(tenantId, messageId, claimId, {
       kind: "EmailNotificationSent",
@@ -267,16 +232,11 @@ export class EmailNotificationService {
     if (!recorded) {
       return undefined;
     }
-    return {
-      status: "sent",
+    return sentEmailNotificationDelivery({
       messageId,
-      ...(sent.id === undefined ? {} : { providerMessageId: sent.id }),
-      eventId: claim.sourceEventId,
-      ruleName: claim.ruleName,
-      recipientId: claim.recipientId,
-      to: claim.to.email,
-      subject: claim.subject
-    };
+      claim,
+      sent
+    });
   }
 
   private async appendClaimCompletion(
@@ -379,42 +339,9 @@ export class EmailNotificationService {
   }
 }
 
-function isSkippedDelivery(
-  delivery: DocumentEmailNotificationQueueResult
-): delivery is Extract<DocumentEmailNotificationDelivery, { readonly status: "skipped" }> {
-  return delivery.status === "skipped";
-}
-
-function queueResultFromOutboxRecord(
-  record: EmailOutboxRecordEntry
-): DocumentEmailNotificationQueueResult | undefined {
-  if (record.status === "sent") {
-    return undefined;
-  }
-  if (record.status === "skipped") {
-    return {
-      status: "skipped",
-      messageId: record.messageId,
-      eventId: record.sourceEventId,
-      ruleName: record.ruleName,
-      recipientId: record.recipientId,
-      reason: record.reason ?? `No deliverable email address for user '${record.recipientId}'`
-    };
-  }
-  return {
-    status: "queued",
-    messageId: record.messageId,
-    eventId: record.sourceEventId,
-    ruleName: record.ruleName,
-    recipientId: record.recipientId,
-    to: record.to.email,
-    subject: record.subject
-  };
-}
-
 export const fallbackEmailRecipientResolver: EmailRecipientResolver = {
   async emailForUser(_tenantId, userId) {
-    return looksLikeEmail(userId) ? { email: userId } : undefined;
+    return looksLikeEmailAddress(userId) ? { email: userId } : undefined;
   }
 };
 
@@ -433,20 +360,6 @@ export class UserAccountEmailRecipientResolver implements EmailRecipientResolver
   }
 }
 
-function looksLikeEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function isConflict(error: unknown): boolean {
   return error instanceof FrameworkError && error.code === "DOCUMENT_CONFLICT";
-}
-
-function emailAddressPayload(address: EmailAddress): EmailAddress {
-  return address.name === undefined
-    ? { email: address.email }
-    : { email: address.email, name: address.name };
 }
