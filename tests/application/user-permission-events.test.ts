@@ -4,6 +4,7 @@ import {
   USER_PERMISSION_PAYLOAD_KINDS,
   userPermissionDocumentName,
   userPermissionEvent,
+  userPermissionEventType,
   userPermissionPayload
 } from "../../src";
 import type { DomainEvent, UserPermissionGrant } from "../../src";
@@ -21,6 +22,19 @@ const grant: UserPermissionGrant = {
 };
 
 describe("user permission events", () => {
+  it("derives user permission event types from payload identity", () => {
+    expect(userPermissionEventType(userPermissionPayload({
+      kind: "UserPermissionAllowed",
+      userId: "owner@example.com",
+      grant
+    }))).toBe("UserPermissionAllowed");
+    expect(userPermissionEventType(userPermissionPayload({
+      kind: "UserPermissionRevoked",
+      userId: "owner@example.com",
+      grant
+    }))).toBe("UserPermissionRevoked");
+  });
+
   it("creates typed user permission events from payload identity", () => {
     expect(userPermissionEvent({
       id: "evt_permission",

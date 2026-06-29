@@ -64,7 +64,7 @@ export function userPermissionEvent<TPayload extends UserPermissionEventPayload>
     id: options.id,
     tenantId: options.tenantId,
     stream: options.stream,
-    type: options.payload.kind,
+    type: userPermissionEventType(options.payload),
     doctype: "__UserPermissions",
     documentName: userPermissionDocumentName(options.payload),
     actorId: options.actor.id,
@@ -72,6 +72,10 @@ export function userPermissionEvent<TPayload extends UserPermissionEventPayload>
     payload: options.payload,
     metadata: options.metadata ?? {}
   };
+}
+
+export function userPermissionEventType(payload: UserPermissionEventPayload): UserPermissionEventPayload["kind"] {
+  return payload.kind;
 }
 
 export function userPermissionDocumentName(payload: UserPermissionEventPayload): string {
