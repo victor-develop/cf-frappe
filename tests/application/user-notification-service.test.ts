@@ -128,6 +128,27 @@ describe("UserNotificationService", () => {
     });
   });
 
+  it("appends read and dismissed events with types derived from payload identity", async () => {
+    const events = new InMemoryEventStore();
+    const notifications = new UserNotificationService({
+      events,
+      clock: fixedClock("2026-01-01T01:00:00.000Z"),
+      ids: deterministicIds(["record-1", "read-1", "dismiss-1"])
+    });
+    const support = { id: "support@example.com", roles: ["User"], tenantId: "acme" };
+    const id = "evt_assign:user:support%40example.com";
+
+    await notifications.recordFromDomainEvent(assignmentEvent("evt_assign", "support@example.com"));
+    await notifications.markRead(support, id);
+    await notifications.dismiss(support, id);
+
+    await expect(events.readStream(userNotificationsStream("acme", "support@example.com"))).resolves.toMatchObject([
+      { type: "UserNotificationRecorded", payload: { kind: "UserNotificationRecorded" } },
+      { type: "UserNotificationRead", payload: { kind: "UserNotificationRead" } },
+      { type: "UserNotificationDismissed", payload: { kind: "UserNotificationDismissed" } }
+    ]);
+  });
+
   it("fails explicitly when a read notification cannot be replayed after append", async () => {
     const events = new ReplayMissingNotificationEventStore();
     const notifications = new UserNotificationService({

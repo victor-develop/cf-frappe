@@ -263,7 +263,7 @@ export class UserNotificationService {
       state.tenantId,
       state.userId,
       payload.notificationId,
-      payload.kind
+      userNotificationEventType(payload)
     );
   }
 
