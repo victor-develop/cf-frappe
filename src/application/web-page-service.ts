@@ -2,7 +2,7 @@ import { notFound, permissionDenied } from "../core/errors.js";
 import type { WebPageDefinition } from "../core/web-page.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { Actor } from "../core/types.js";
-import { planWebPageReadAccess } from "./web-page-policy.js";
+import { planWebPageReadAccess, planWebPageRouteLookup } from "./web-page-policy.js";
 
 export interface WebPageServiceOptions {
   readonly registry: ModelRegistry;
@@ -29,10 +29,10 @@ export class WebPageService {
   }
 
   getWebPageByRoute(actor: Actor, route: string): WebPageDefinition {
-    const page = this.listWebPages(actor).find((candidate) => candidate.route === route);
-    if (page === undefined) {
-      throw notFound(`Web page route '${route}' was not found`, "WEB_PAGE_NOT_FOUND");
+    const lookup = planWebPageRouteLookup({ pages: this.listWebPages(actor), route });
+    if (lookup.status === "not-found") {
+      throw notFound(lookup.message, lookup.code);
     }
-    return page;
+    return lookup.page;
   }
 }

@@ -1,4 +1,4 @@
-import { defineWebPage, planWebPageReadAccess, SYSTEM_MANAGER_ROLE } from "../../src";
+import { defineWebPage, planWebPageReadAccess, planWebPageRouteLookup, SYSTEM_MANAGER_ROLE } from "../../src";
 
 const AboutPage = defineWebPage({
   name: "About",
@@ -33,5 +33,17 @@ describe("web page policy", () => {
       actor: { id: "admin", roles: [SYSTEM_MANAGER_ROLE] },
       page: defineWebPage({ ...AboutPage, published: false })
     })).toEqual({ status: "deny", message: "Actor 'admin' cannot read web page 'About'" });
+  });
+
+  it("plans Web Page route lookup with stable not-found errors", () => {
+    expect(planWebPageRouteLookup({ pages: [AboutPage], route: "about" })).toEqual({
+      status: "found",
+      page: AboutPage
+    });
+    expect(planWebPageRouteLookup({ pages: [AboutPage], route: "missing" })).toEqual({
+      status: "not-found",
+      message: "Web page route 'missing' was not found",
+      code: "WEB_PAGE_NOT_FOUND"
+    });
   });
 });
