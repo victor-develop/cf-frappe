@@ -1,5 +1,10 @@
 import { badRequest, conflict, permissionDenied } from "../core/errors.js";
-import { normalizeUserRoles, type UserAccountState } from "../core/user-accounts.js";
+import {
+  normalizeUserRoles,
+  type UserAccountEmailVerificationChallenge,
+  type UserAccountRecoveryChallenge,
+  type UserAccountState
+} from "../core/user-accounts.js";
 import { DEFAULT_TENANT_ID, type Actor, type TenantId } from "../core/types.js";
 
 export const MAX_ACCOUNT_RECOVERY_EXPIRY_SECONDS = 604_800;
@@ -97,6 +102,16 @@ export function recoveryExpiresAtFrom(now: string, seconds: number): string {
 
 export function recoveryChallengeExpired(expiresAt: string, now: string): boolean {
   return Date.parse(expiresAt) <= Date.parse(now);
+}
+
+export function ensureUserRecoveryChallengeUsable(
+  state: UserAccountState,
+  challenge: UserAccountRecoveryChallenge | UserAccountEmailVerificationChallenge | undefined,
+  now: string
+): asserts challenge is UserAccountRecoveryChallenge | UserAccountEmailVerificationChallenge {
+  if (!state.exists || !state.enabled || challenge === undefined || recoveryChallengeExpired(challenge.expiresAt, now)) {
+    throw permissionDenied("Invalid recovery token");
+  }
 }
 
 export function emailVerificationPatch(

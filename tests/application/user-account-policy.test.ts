@@ -1,6 +1,7 @@
 import {
   ensureUserAccountAdmin,
   ensureUserAccountExpectedVersion,
+  ensureUserRecoveryChallengeUsable,
   emailVerificationPatch,
   MAX_ACCOUNT_RECOVERY_EXPIRY_SECONDS,
   MIN_USER_PASSWORD_LENGTH,
@@ -117,6 +118,34 @@ describe("user account policy", () => {
     expect(recoveryChallengeExpired("2026-01-01T00:00:01.000Z", "2026-01-01T00:00:00.000Z")).toBe(false);
   });
 
+  it("guards usable recovery challenges before token verification", () => {
+    expect(() => ensureUserRecoveryChallengeUsable(
+      accountState(),
+      recoveryChallenge({ expiresAt: "2026-01-01T00:00:01.000Z" }),
+      now
+    )).not.toThrow();
+    expect(() => ensureUserRecoveryChallengeUsable(
+      accountState(),
+      undefined,
+      now
+    )).toThrow("Invalid recovery token");
+    expect(() => ensureUserRecoveryChallengeUsable(
+      accountState({ exists: false }),
+      recoveryChallenge({ expiresAt: "2026-01-01T00:00:01.000Z" }),
+      now
+    )).toThrow("Invalid recovery token");
+    expect(() => ensureUserRecoveryChallengeUsable(
+      accountState({ enabled: false }),
+      recoveryChallenge({ expiresAt: "2026-01-01T00:00:01.000Z" }),
+      now
+    )).toThrow("Invalid recovery token");
+    expect(() => ensureUserRecoveryChallengeUsable(
+      accountState(),
+      recoveryChallenge({ expiresAt: now }),
+      now
+    )).toThrow("Invalid recovery token");
+  });
+
   it("plans email verification patches from provider sync intent", () => {
     expect(emailVerificationPatch(undefined, "owner@example.com", "owner@example.com", undefined, now)).toBeUndefined();
     expect(emailVerificationPatch(false, "owner@example.com", "owner@example.com", now, later)).toBeNull();
@@ -140,6 +169,15 @@ function accountState(overrides: Partial<UserAccountState> = {}): UserAccountSta
     roles: ["User"],
     providers: [],
     enabled: true,
+    ...overrides
+  };
+}
+
+function recoveryChallenge(overrides: Partial<{ readonly tokenHash: string; readonly expiresAt: string; readonly requestedAt: string }> = {}) {
+  return {
+    tokenHash: "hash:tok_123",
+    expiresAt: "2026-01-01T00:01:00.000Z",
+    requestedAt: now,
     ...overrides
   };
 }

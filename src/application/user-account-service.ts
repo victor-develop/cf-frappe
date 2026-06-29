@@ -46,6 +46,7 @@ import {
   emailVerificationPatch,
   ensureUserAccountAdmin,
   ensureUserAccountExpectedVersion,
+  ensureUserRecoveryChallengeUsable,
   normalizeRecoveryExpirySeconds,
   normalizeOptionalUserEmail,
   normalizeRequiredUserAccountText,
@@ -53,7 +54,6 @@ import {
   normalizeUserLoginPassword,
   normalizeUserPassword,
   normalizeUserRecoveryToken,
-  recoveryChallengeExpired,
   recoveryExpiresAtFrom,
   resolveUserAccountActorTenant,
   userAccountRolesEqual
@@ -702,9 +702,7 @@ export class UserAccountService {
     challenge: UserAccountRecoveryChallenge | UserAccountEmailVerificationChallenge | undefined,
     token: string
   ): Promise<void> {
-    if (!state.exists || !state.enabled || challenge === undefined || recoveryChallengeExpired(challenge.expiresAt, this.clock.now())) {
-      throw invalidRecoveryToken();
-    }
+    ensureUserRecoveryChallengeUsable(state, challenge, this.clock.now());
     if (!(await this.tokenSecrets.verify(token, challenge.tokenHash))) {
       throw invalidRecoveryToken();
     }
