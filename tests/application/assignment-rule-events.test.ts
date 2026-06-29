@@ -9,6 +9,8 @@ import {
   assignmentRuleSavedPayload,
   ASSIGNMENT_RULE_PAYLOAD_KINDS,
   foldAssignmentRules,
+  isAssignmentRuleEvent,
+  isAssignmentRulePayloadKind,
   replayAssignmentRuleAppend
 } from "../../src";
 import type { AssignmentRuleDefinition, AssignmentRuleEventPayload, DomainEvent } from "../../src";
@@ -133,10 +135,38 @@ describe("assignment rule events", () => {
       "AssignmentRuleCleared"
     ]);
   });
+
+  it("narrows assignment rule events by payload kind when event type names are custom", () => {
+    const saved = {
+      ...savedEvent(1, rule),
+      type: "TicketAutoAssignmentConfigured"
+    };
+
+    expect(isAssignmentRulePayloadKind("AssignmentRuleSaved")).toBe(true);
+    expect(isAssignmentRulePayloadKind("DocumentDeleted")).toBe(false);
+    expect(isAssignmentRuleEvent(saved)).toBe(true);
+    expect(isAssignmentRuleEvent(otherEvent({ kind: "DocumentDeleted" }))).toBe(false);
+  });
 });
 
 function assignmentRulePayload(payload: AssignmentRuleEventPayload): AssignmentRuleEventPayload {
   return payload;
+}
+
+function otherEvent(payload: DomainEvent["payload"], type: string = payload.kind): DomainEvent {
+  return {
+    id: "evt_other",
+    tenantId: "acme",
+    stream: "acme:Ticket:TICKET-1",
+    sequence: 1,
+    type,
+    doctype: "Ticket",
+    documentName: "TICKET-1",
+    actorId: admin.id,
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    payload,
+    metadata: {}
+  };
 }
 
 function savedEvent(

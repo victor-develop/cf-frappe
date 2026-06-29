@@ -1,3 +1,4 @@
+import { domainEventPayloadKind } from "../core/domain-events.js";
 import { foldAssignmentRules, type AssignmentRuleState } from "../core/assignment-rules.js";
 import type {
   Actor,
@@ -22,10 +23,14 @@ export type AssignmentRuleEventPayload =
       readonly ruleName: string;
     };
 
+export type AssignmentRulePayloadKind = AssignmentRuleEventPayload["kind"];
+
 export const ASSIGNMENT_RULE_PAYLOAD_KINDS = Object.freeze([
   "AssignmentRuleSaved",
   "AssignmentRuleCleared"
-] as const);
+] as const satisfies readonly AssignmentRulePayloadKind[]);
+
+const ASSIGNMENT_RULE_PAYLOAD_KIND_SET = new Set<string>(ASSIGNMENT_RULE_PAYLOAD_KINDS);
 
 export interface AssignmentRuleSavedPayloadInput {
   readonly doctypeName: DocTypeName;
@@ -102,8 +107,16 @@ export function assignmentRuleEvent<TPayload extends AssignmentRuleEventPayload>
   };
 }
 
-export function assignmentRuleEventType(payload: AssignmentRuleEventPayload): AssignmentRuleEventPayload["kind"] {
+export function assignmentRuleEventType(payload: AssignmentRuleEventPayload): AssignmentRulePayloadKind {
   return payload.kind;
+}
+
+export function isAssignmentRulePayloadKind(kind: string): kind is AssignmentRulePayloadKind {
+  return ASSIGNMENT_RULE_PAYLOAD_KIND_SET.has(kind);
+}
+
+export function isAssignmentRuleEvent(event: DomainEvent): event is DomainEvent<AssignmentRuleEventPayload> {
+  return isAssignmentRulePayloadKind(domainEventPayloadKind(event));
 }
 
 export function assignmentRuleDocumentName(payload: AssignmentRuleEventPayload): string {

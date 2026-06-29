@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Centralized assignment-rule event payload-kind matching through domain events so assignment-rule stream selectors can rely on bounded event helpers instead of inline source payload-kind reads.
 - Centralized document-command event payload-kind matching through domain events so workflow-transition and domain-command stream selectors can rely on bounded event helpers instead of inline source payload-kind reads.
 - Centralized document-collaboration event payload-kind matching through domain events so comment/activity/assignment/tag/follower stream selectors can rely on bounded event helpers instead of inline source payload-kind reads.
 - Centralized document-share event payload-kind matching through domain events so shared-record stream selectors can rely on bounded event helpers instead of inline source payload-kind reads.
