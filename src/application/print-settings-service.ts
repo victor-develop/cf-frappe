@@ -19,6 +19,7 @@ import {
 } from "../core/types.js";
 import {
   printSettingsChangedPayload,
+  printSettingsEventType,
   type PrintSettingsEventPayload
 } from "./print-settings-events.js";
 import { systemClock, type Clock } from "../ports/clock.js";
@@ -99,16 +100,17 @@ export class PrintSettingsService {
     readonly settings: PrintSettingsPatch;
   }): Promise<readonly DomainEvent[]> {
     const stream = printSettingsStream(options.tenantId);
+    const payload = printSettingsChangedPayload({ settings: printSettingsPatchData(options.settings) });
     const event: NewDomainEvent<PrintSettingsEventPayload> = {
       id: this.ids.next("evt_"),
       tenantId: options.tenantId,
       stream,
-      type: "PrintSettingsChanged",
+      type: printSettingsEventType(payload),
       doctype: "__PrintSettings",
       documentName: "settings",
       actorId: options.actorId,
       occurredAt: this.clock.now(),
-      payload: printSettingsChangedPayload({ settings: printSettingsPatchData(options.settings) }),
+      payload,
       metadata: options.metadata ?? {}
     };
     return this.events.append(stream, options.expectedVersion, [event]);

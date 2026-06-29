@@ -1,4 +1,4 @@
-import { printSettingsChangedPayload } from "../../src";
+import { printSettingsChangedPayload, printSettingsEventType } from "../../src";
 import type { PrintSettingsEventPayload } from "../../src";
 
 describe("print settings events", () => {
@@ -19,6 +19,12 @@ describe("print settings events", () => {
         }
       }
     });
+  });
+
+  it("derives print settings event types from payload identity", () => {
+    expect(printSettingsEventType(printSettingsChangedPayload({
+      settings: { defaultLayout: null }
+    }))).toBe("PrintSettingsChanged");
   });
 });
 

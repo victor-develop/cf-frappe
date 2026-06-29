@@ -18,6 +18,10 @@ export function printSettingsChangedPayload(
   };
 }
 
+export function printSettingsEventType(payload: PrintSettingsEventPayload): PrintSettingsEventPayload["kind"] {
+  return payload.kind;
+}
+
 declare module "../core/types.js" {
   interface DomainEventPayloadMap {
     readonly PrintSettingsChanged: PrintSettingsEventPayload;
