@@ -58,11 +58,24 @@ describe("job history policy", () => {
     });
     expect(planJobHistoryRecordLookup("missing", null)).toEqual({
       status: "missing",
-      idempotencyKey: "missing"
+      idempotencyKey: "missing",
+      message: "Job execution 'missing' was not found",
+      code: "JOB_EXECUTION_NOT_FOUND"
     });
     expect(planJobHistoryRecordLookup("missing", undefined)).toEqual({
       status: "missing",
-      idempotencyKey: "missing"
+      idempotencyKey: "missing",
+      message: "Job execution 'missing' was not found",
+      code: "JOB_EXECUTION_NOT_FOUND"
+    });
+  });
+
+  it("shapes missing record errors before service error mapping", () => {
+    expect(planJobHistoryRecordLookup("reports.daily:missing", undefined)).toEqual({
+      status: "missing",
+      idempotencyKey: "reports.daily:missing",
+      message: "Job execution 'reports.daily:missing' was not found",
+      code: "JOB_EXECUTION_NOT_FOUND"
     });
   });
 

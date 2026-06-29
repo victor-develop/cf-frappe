@@ -64,7 +64,7 @@ export class JobHistoryService {
       await this.executionLog.get(idempotencyKey, { tenantId: access.tenantId })
     );
     if (lookup.status === "missing") {
-      throw notFound(`Job execution '${lookup.idempotencyKey}' was not found`, "JOB_EXECUTION_NOT_FOUND");
+      throw notFound(lookup.message, lookup.code);
     }
     const recordAccess = planJobHistoryRecordAccess({ actor, tenantId: access.tenantId, record: lookup.record });
     if (recordAccess.status === "deny") {

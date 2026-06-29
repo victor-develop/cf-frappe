@@ -52,7 +52,12 @@ export type JobHistoryRecordAccessDecision =
 
 export type JobHistoryRecordLookupDecision =
   | { readonly status: "found"; readonly record: JobExecutionRecord }
-  | { readonly status: "missing"; readonly idempotencyKey: string };
+  | {
+      readonly status: "missing";
+      readonly idempotencyKey: string;
+      readonly message: string;
+      readonly code: "JOB_EXECUTION_NOT_FOUND";
+    };
 
 export function planJobHistoryAccess(options: {
   readonly actor: Actor;
@@ -86,7 +91,12 @@ export function planJobHistoryRecordLookup(
   record: JobExecutionRecord | null | undefined
 ): JobHistoryRecordLookupDecision {
   if (record === null || record === undefined) {
-    return { status: "missing", idempotencyKey };
+    return {
+      status: "missing",
+      idempotencyKey,
+      message: `Job execution '${idempotencyKey}' was not found`,
+      code: "JOB_EXECUTION_NOT_FOUND"
+    };
   }
   return { status: "found", record };
 }

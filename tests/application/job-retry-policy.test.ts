@@ -38,11 +38,24 @@ describe("job retry policy", () => {
     });
     expect(planJobRetryExecutionLookup("missing", null)).toEqual({
       status: "missing",
-      idempotencyKey: "missing"
+      idempotencyKey: "missing",
+      message: "Job execution 'missing' was not found",
+      code: "JOB_EXECUTION_NOT_FOUND"
     });
     expect(planJobRetryExecutionLookup("missing", undefined)).toEqual({
       status: "missing",
-      idempotencyKey: "missing"
+      idempotencyKey: "missing",
+      message: "Job execution 'missing' was not found",
+      code: "JOB_EXECUTION_NOT_FOUND"
+    });
+  });
+
+  it("shapes missing execution errors before service error mapping", () => {
+    expect(planJobRetryExecutionLookup("email.digest:missing", null)).toEqual({
+      status: "missing",
+      idempotencyKey: "email.digest:missing",
+      message: "Job execution 'email.digest:missing' was not found",
+      code: "JOB_EXECUTION_NOT_FOUND"
     });
   });
 

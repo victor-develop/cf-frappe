@@ -12,7 +12,12 @@ export type JobRetryExecutionDecision =
 
 export type JobRetryExecutionLookupDecision =
   | { readonly status: "found"; readonly original: JobExecutionRecord }
-  | { readonly status: "missing"; readonly idempotencyKey: string };
+  | {
+      readonly status: "missing";
+      readonly idempotencyKey: string;
+      readonly message: string;
+      readonly code: "JOB_EXECUTION_NOT_FOUND";
+    };
 
 export function planJobRetryAccess(options: {
   readonly actor: Actor;
@@ -32,7 +37,12 @@ export function planJobRetryExecutionLookup(
   original: JobExecutionRecord | null | undefined
 ): JobRetryExecutionLookupDecision {
   if (original === null || original === undefined) {
-    return { status: "missing", idempotencyKey };
+    return {
+      status: "missing",
+      idempotencyKey,
+      message: `Job execution '${idempotencyKey}' was not found`,
+      code: "JOB_EXECUTION_NOT_FOUND"
+    };
   }
   return { status: "found", original };
 }

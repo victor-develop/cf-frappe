@@ -50,7 +50,7 @@ export class JobRetryService<TResources = unknown> implements JobRetryPort {
       await this.executionLog.get(idempotencyKey, { tenantId: access.tenantId })
     );
     if (lookup.status === "missing") {
-      throw notFound(`Job execution '${lookup.idempotencyKey}' was not found`, "JOB_EXECUTION_NOT_FOUND");
+      throw notFound(lookup.message, lookup.code);
     }
     const retry = planJobExecutionRetry({ actor, original: lookup.original, retriedAt: this.clock.now() });
     if (retry.status === "reject") {
