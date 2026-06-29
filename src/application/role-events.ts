@@ -19,6 +19,60 @@ export type RoleEventPayload =
       readonly role: string;
     };
 
+export interface RoleCreatedPayloadInput {
+  readonly role: string;
+  readonly enabled: boolean;
+  readonly description?: string;
+}
+
+export interface RoleDescriptionChangedPayloadInput {
+  readonly role: string;
+  readonly description?: string;
+}
+
+export interface RoleStatusPayloadInput {
+  readonly role: string;
+}
+
+export function roleCreatedPayload(
+  input: RoleCreatedPayloadInput
+): Extract<RoleEventPayload, { readonly kind: "RoleCreated" }> {
+  return {
+    kind: "RoleCreated",
+    role: input.role,
+    enabled: input.enabled,
+    ...(input.description === undefined ? {} : { description: input.description })
+  };
+}
+
+export function roleDescriptionChangedPayload(
+  input: RoleDescriptionChangedPayloadInput
+): Extract<RoleEventPayload, { readonly kind: "RoleDescriptionChanged" }> {
+  return {
+    kind: "RoleDescriptionChanged",
+    role: input.role,
+    ...(input.description === undefined ? {} : { description: input.description })
+  };
+}
+
+export function roleEnabledPayload(
+  input: RoleStatusPayloadInput
+): Extract<RoleEventPayload, { readonly kind: "RoleEnabled" }> {
+  return {
+    kind: "RoleEnabled",
+    role: input.role
+  };
+}
+
+export function roleDisabledPayload(
+  input: RoleStatusPayloadInput
+): Extract<RoleEventPayload, { readonly kind: "RoleDisabled" }> {
+  return {
+    kind: "RoleDisabled",
+    role: input.role
+  };
+}
+
 declare module "../core/types.js" {
   interface DomainEventPayloadMap {
     readonly RoleCreated: Extract<RoleEventPayload, { readonly kind: "RoleCreated" }>;

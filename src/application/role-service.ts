@@ -15,7 +15,13 @@ import {
   type NewDomainEvent,
   type TenantId
 } from "../core/types.js";
-import type { RoleEventPayload } from "./role-events.js";
+import {
+  roleCreatedPayload,
+  roleDescriptionChangedPayload,
+  roleDisabledPayload,
+  roleEnabledPayload,
+  type RoleEventPayload
+} from "./role-events.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
@@ -99,12 +105,11 @@ export class RoleService {
       actor: command.actor,
       type: "RoleCreated",
       metadata: command.metadata,
-      payload: {
-        kind: "RoleCreated",
+      payload: roleCreatedPayload({
         role,
         enabled: command.enabled ?? true,
         ...(description === undefined ? {} : { description })
-      }
+      })
     });
   }
 
@@ -123,11 +128,10 @@ export class RoleService {
       actor: command.actor,
       type: "RoleDescriptionChanged",
       metadata: command.metadata,
-      payload: {
-        kind: "RoleDescriptionChanged",
+      payload: roleDescriptionChangedPayload({
         role,
         ...(description === undefined ? {} : { description })
-      }
+      })
     });
   }
 
@@ -153,10 +157,7 @@ export class RoleService {
       actor: command.actor,
       type: enabled ? "RoleEnabled" : "RoleDisabled",
       metadata: command.metadata,
-      payload: {
-        kind: enabled ? "RoleEnabled" : "RoleDisabled",
-        role
-      }
+      payload: enabled ? roleEnabledPayload({ role }) : roleDisabledPayload({ role })
     });
   }
 

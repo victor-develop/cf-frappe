@@ -17,7 +17,10 @@ import {
   type NewDomainEvent,
   type TenantId
 } from "../core/types.js";
-import type { PrintSettingsEventPayload } from "./print-settings-events.js";
+import {
+  printSettingsChangedPayload,
+  type PrintSettingsEventPayload
+} from "./print-settings-events.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
@@ -105,10 +108,7 @@ export class PrintSettingsService {
       documentName: "settings",
       actorId: options.actorId,
       occurredAt: this.clock.now(),
-      payload: {
-        kind: "PrintSettingsChanged",
-        settings: printSettingsPatchData(options.settings)
-      },
+      payload: printSettingsChangedPayload({ settings: printSettingsPatchData(options.settings) }),
       metadata: options.metadata ?? {}
     };
     return this.events.append(stream, options.expectedVersion, [event]);
