@@ -7,10 +7,8 @@ import {
 } from "../core/assignment-rules.js";
 import { defineDocumentHooks, type AfterCommitContext, type DocumentHooks } from "../core/document-hooks.js";
 import { domainEventPayloadKind } from "../core/domain-events.js";
-import { conflict, FrameworkError, permissionDenied } from "../core/errors.js";
 import { assignmentRulesStream } from "../core/streams.js";
 import {
-  DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
   type Actor,
   type AssignmentRuleDefinition,
@@ -28,6 +26,18 @@ import {
   replayAssignmentRuleAppend,
   type AssignmentRuleEventPayload
 } from "./assignment-rule-events.js";
+import {
+  assignmentActorForTenant,
+  assignmentRulesEqual,
+  authorizeAssignmentRuleAdministration,
+  composeAssignmentRules,
+  enabledAssignmentRules,
+  ensureAssignmentRuleExpectedVersion,
+  findAssignmentRuleEntry,
+  normalizeRequiredAssignmentRuleText,
+  requireAssignmentRuleEntry,
+  resolveAssignmentRuleActor
+} from "./assignment-rule-policy.js";
 import type { ModelRegistry } from "../core/registry.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
@@ -167,9 +177,9 @@ export class AssignmentRuleService implements AssignmentRuleProvider {
   }
 
   async list(actor: Actor, doctypeName: string, tenantId?: TenantId): Promise<AssignmentRuleState> {
-    this.authorizeAdministration(actor, tenantId);
+    const resolvedTenantId = this.authorizeAdministration(actor, tenantId);
     const doctype = this.registry.get(doctypeName);
-    return this.stateFor(resolveActorTenant(actor, tenantId), doctype.name);
+    return this.stateFor(resolvedTenantId, doctype.name);
   }
 
   async assignmentRulesFor(
@@ -178,25 +188,21 @@ export class AssignmentRuleService implements AssignmentRuleProvider {
     options: { readonly occurredAt?: string } = {}
   ): Promise<readonly AssignmentRuleDefinition[]> {
     const doctype = this.registry.get(doctypeName);
-    return (await this.stateFor(tenantId, doctype.name, options)).rules
-      .filter((entry) => entry.enabled)
-      .map((entry) => entry.rule);
+    return enabledAssignmentRules(await this.stateFor(tenantId, doctype.name, options));
   }
 
-  authorizeAdministration(actor: Actor, tenantId?: TenantId): void {
-    this.ensureAdmin(actor);
-    resolveActorTenant(actor, tenantId);
+  authorizeAdministration(actor: Actor, tenantId?: TenantId): TenantId {
+    return authorizeAssignmentRuleAdministration({ actor, tenantId, adminRoles: this.adminRoles });
   }
 
   async save(command: SaveAssignmentRuleCommand): Promise<AssignmentRuleState> {
-    this.authorizeAdministration(command.actor, command.tenantId);
-    const tenantId = resolveActorTenant(command.actor, command.tenantId);
+    const tenantId = this.authorizeAdministration(command.actor, command.tenantId);
     const doctype = await this.preAssignmentRuleDocTypeFor(command.doctype, tenantId);
     const rule = normalizeAssignmentRule(doctype, command.rule);
     const state = await this.stateFor(tenantId, doctype.name);
-    ensureExpectedVersion(state, command.expectedVersion);
-    const existing = state.rules.find((entry) => entry.rule.name === rule.name);
-    if (existing && jsonEqual(existing.rule, rule)) {
+    ensureAssignmentRuleExpectedVersion(state, command.expectedVersion);
+    const existing = findAssignmentRuleEntry(state, rule.name);
+    if (existing && assignmentRulesEqual(existing.rule, rule)) {
       return state;
     }
     return this.appendAndFold(state, {
@@ -210,13 +216,12 @@ export class AssignmentRuleService implements AssignmentRuleProvider {
   }
 
   async clear(command: ClearAssignmentRuleCommand): Promise<AssignmentRuleState> {
-    this.authorizeAdministration(command.actor, command.tenantId);
-    const tenantId = resolveActorTenant(command.actor, command.tenantId);
+    const tenantId = this.authorizeAdministration(command.actor, command.tenantId);
     const doctype = this.registry.get(command.doctype);
-    const ruleName = normalizeRequiredString(command.ruleName, "Assignment rule name");
+    const ruleName = normalizeRequiredAssignmentRuleText(command.ruleName, "Assignment rule name");
     const state = await this.stateFor(tenantId, doctype.name);
-    ensureExpectedVersion(state, command.expectedVersion);
-    if (!state.rules.some((entry) => entry.rule.name === ruleName)) {
+    ensureAssignmentRuleExpectedVersion(state, command.expectedVersion);
+    if (findAssignmentRuleEntry(state, ruleName) === undefined) {
       return state;
     }
     return this.appendAndFold(state, {
@@ -230,20 +235,12 @@ export class AssignmentRuleService implements AssignmentRuleProvider {
   }
 
   async setEnabled(command: SetAssignmentRuleEnabledCommand): Promise<AssignmentRuleState> {
-    this.authorizeAdministration(command.actor, command.tenantId);
-    const tenantId = resolveActorTenant(command.actor, command.tenantId);
+    const tenantId = this.authorizeAdministration(command.actor, command.tenantId);
     const doctype = this.registry.get(command.doctype);
-    const ruleName = normalizeRequiredString(command.ruleName, "Assignment rule name");
+    const ruleName = normalizeRequiredAssignmentRuleText(command.ruleName, "Assignment rule name");
     const state = await this.stateFor(tenantId, doctype.name);
-    ensureExpectedVersion(state, command.expectedVersion);
-    const existing = state.rules.find((entry) => entry.rule.name === ruleName);
-    if (existing === undefined) {
-      throw new FrameworkError(
-        "ASSIGNMENT_RULE_NOT_FOUND",
-        `Assignment rule '${ruleName}' was not found`,
-        { status: 404 }
-      );
-    }
+    ensureAssignmentRuleExpectedVersion(state, command.expectedVersion);
+    const existing = requireAssignmentRuleEntry(state, ruleName);
     if (existing.enabled === command.enabled) {
       return state;
     }
@@ -300,71 +297,4 @@ export class AssignmentRuleService implements AssignmentRuleProvider {
       saved
     );
   }
-
-  private ensureAdmin(actor: Actor): void {
-    if (!this.adminRoles.some((role) => actor.roles.includes(role))) {
-      throw permissionDenied(`Actor '${actor.id}' cannot manage assignment rules`);
-    }
-  }
-}
-
-function composeAssignmentRules(
-  metadataRules: readonly AssignmentRuleDefinition[],
-  runtimeRules: readonly AssignmentRuleDefinition[]
-): readonly AssignmentRuleDefinition[] {
-  if (metadataRules.length === 0) {
-    return runtimeRules;
-  }
-  if (runtimeRules.length === 0) {
-    return metadataRules;
-  }
-  const runtimeNames = new Set(runtimeRules.map((rule) => rule.name));
-  return Object.freeze([
-    ...metadataRules.filter((rule) => !runtimeNames.has(rule.name)),
-    ...runtimeRules
-  ]);
-}
-
-function resolveAssignmentRuleActor(
-  actor: Actor | AssignmentRuleActorResolver,
-  context: AfterCommitContext
-): Actor | Promise<Actor> {
-  return typeof actor === "function" ? actor(context) : actor;
-}
-
-function assignmentActorForTenant(actor: Actor, tenantId: TenantId): Actor {
-  if (actor.tenantId !== undefined && actor.tenantId !== tenantId) {
-    throw permissionDenied(`Assignment rule actor '${actor.id}' cannot assign documents for tenant '${tenantId}'`);
-  }
-  return { ...actor, tenantId };
-}
-
-function resolveActorTenant(actor: Actor, explicitTenantId: TenantId | undefined): TenantId {
-  const actorTenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
-  const tenantId = explicitTenantId ?? actorTenantId;
-  if (tenantId !== actorTenantId) {
-    throw permissionDenied(`Actor '${actor.id}' cannot manage assignment rules for tenant '${tenantId}'`);
-  }
-  return tenantId;
-}
-
-function ensureExpectedVersion(state: AssignmentRuleState, expectedVersion: number | undefined): void {
-  if (expectedVersion !== undefined && state.version !== expectedVersion) {
-    throw conflict(`Expected assignment rules at version ${expectedVersion}, found ${state.version}`);
-  }
-}
-
-function normalizeRequiredString(value: string, label: string): string {
-  if (typeof value !== "string") {
-    throw new FrameworkError("ASSIGNMENT_RULE_INVALID", `${label} must be a string`, { status: 400 });
-  }
-  const normalized = value.trim();
-  if (!normalized) {
-    throw new FrameworkError("ASSIGNMENT_RULE_INVALID", `${label} is required`, { status: 400 });
-  }
-  return normalized;
-}
-
-function jsonEqual(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
 }

@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted assignment-rule tenant/admin access, expected-version guards, rule lookup/equality, enabled-rule projection, metadata/runtime rule composition, required-name normalization, and hook actor tenant guards from AssignmentRuleService into assignment-rule policy and covered those rules directly.
 - Extracted workflow tenant/admin access, expected-version guards, and workflow-definition equality decisions from WorkflowService into workflow policy and covered those rules directly.
 - Extracted role catalog tenant/admin access, role-name normalization, existing/new-role guards, and expected-version guards from RoleService into role policy and covered those rules directly.
 - Extracted user-permission tenant/admin access, required text normalization, linked-record grant normalization, and expected-version guards from UserPermissionService into user-permission policy and covered those rules directly.
