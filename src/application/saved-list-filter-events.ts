@@ -63,6 +63,9 @@ export function foldSavedListFilters(
   let version = 0;
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     version = Math.max(version, event.sequence);
+    if (!isSavedListFilterEvent(event)) {
+      continue;
+    }
     switch (event.payload.kind) {
       case "SavedListFilterSaved": {
         const existing = filters.get(event.payload.filterId);

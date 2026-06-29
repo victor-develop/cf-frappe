@@ -179,6 +179,29 @@ describe("saved report events", () => {
     expect(isSavedReportEvent(imported)).toBe(true);
     expect(isSavedReportEvent(otherEvent({ kind: "DocumentDeleted" }))).toBe(false);
   });
+
+  it("folds saved reports by payload kind instead of event type name", () => {
+    const misleadingUnrelated = otherEvent({ kind: "DocumentDeleted" }, "NoteSavedReportSaved");
+    const customTypedSaved = {
+      ...savedEvent(2, {
+        reportId: "report-a",
+        label: "Alpha",
+        ownerId: owner.id,
+        definition: { columns: [{ name: "title" }] }
+      }),
+      type: "NoteAnalyticsViewImported"
+    };
+
+    const state = foldSavedReports("acme", noteDocType, [misleadingUnrelated, customTypedSaved]);
+
+    expect(state.version).toBe(2);
+    expect(state.reports.size).toBe(1);
+    expect(state.reports.get("report-a")).toMatchObject({
+      id: "report-a",
+      label: "Alpha",
+      ownerId: owner.id
+    });
+  });
 });
 
 function otherEvent(payload: DomainEvent["payload"], type: string = payload.kind): DomainEvent {

@@ -133,6 +133,29 @@ describe("saved list filter events", () => {
     expect(isSavedListFilterEvent(imported)).toBe(true);
     expect(isSavedListFilterEvent(otherEvent({ kind: "DocumentDeleted" }))).toBe(false);
   });
+
+  it("folds saved list filters by payload kind instead of event type name", () => {
+    const misleadingUnrelated = otherEvent({ kind: "DocumentDeleted" }, "NoteSavedListFilterSaved");
+    const customTypedSaved = {
+      ...savedEvent(2, {
+        filterId: "filter-a",
+        label: "Alpha",
+        ownerId: owner.id,
+        filters: [{ field: "priority", value: "High" }]
+      }),
+      type: "NoteListViewPresetImported"
+    };
+
+    const state = foldSavedListFilters("acme", noteDocType, [misleadingUnrelated, customTypedSaved]);
+
+    expect(state.version).toBe(2);
+    expect(state.filters.size).toBe(1);
+    expect(state.filters.get("filter-a")).toMatchObject({
+      id: "filter-a",
+      label: "Alpha",
+      ownerId: owner.id
+    });
+  });
 });
 
 function otherEvent(payload: DomainEvent["payload"], type: string = payload.kind): DomainEvent {

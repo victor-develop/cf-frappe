@@ -91,6 +91,9 @@ export function foldSavedReports(
   let version = 0;
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     version = Math.max(version, event.sequence);
+    if (!isSavedReportEvent(event)) {
+      continue;
+    }
     switch (event.payload.kind) {
       case "SavedReportSaved": {
         const existing = reports.get(event.payload.reportId);
