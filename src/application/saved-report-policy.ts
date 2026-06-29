@@ -6,6 +6,10 @@ export type SavedReportWriteDecision =
   | { readonly status: "missing"; readonly message: string }
   | { readonly status: "write" };
 
+export type SavedReportLookupDecision =
+  | { readonly status: "found"; readonly report: SavedReport }
+  | { readonly status: "missing"; readonly message: string };
+
 export type SavedReportReadAccessDecision =
   | { readonly status: "allow" }
   | { readonly status: "deny"; readonly message: string };
@@ -28,6 +32,15 @@ export function planSavedReportReadAccess(command: {
     };
   }
   return { status: "allow" };
+}
+
+export function planSavedReportLookup(
+  report: SavedReport | undefined,
+  id: string
+): SavedReportLookupDecision {
+  return report === undefined
+    ? { status: "missing", message: `Saved report '${id}' was not found` }
+    : { status: "found", report };
 }
 
 export function planSavedReportSave(

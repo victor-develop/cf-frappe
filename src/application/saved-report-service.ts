@@ -24,6 +24,7 @@ import {
 } from "./saved-report-events.js";
 import {
   findSavedReport,
+  planSavedReportLookup,
   planSavedReportReadAccess,
   planSavedReportDelete,
   planSavedReportSave,
@@ -108,11 +109,14 @@ export class SavedReportService {
 
   async get(actor: Actor, doctypeName: string, id: string, tenantId = resolveTenant(actor)): Promise<SavedReport> {
     const doctype = this.readableDoctype(actor, doctypeName);
-    const report = findSavedReport(await this.readAll(tenantId, doctype, actor.id), id);
-    if (!report) {
-      throw notFound(`Saved report '${id}' was not found`);
+    const decision = planSavedReportLookup(
+      findSavedReport(await this.readAll(tenantId, doctype, actor.id), id),
+      id
+    );
+    if (decision.status === "missing") {
+      throw notFound(decision.message);
     }
-    return report;
+    return decision.report;
   }
 
   async save(command: SaveReportCommand): Promise<SavedReport> {

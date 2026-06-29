@@ -1,5 +1,6 @@
 import {
   findSavedReport,
+  planSavedReportLookup,
   planSavedReportReadAccess,
   planSavedReportDelete,
   planSavedReportSave,
@@ -32,6 +33,19 @@ describe("saved report policy", () => {
     expect(planSavedReportSave(undefined, undefined)).toEqual({ status: "write" });
     expect(planSavedReportSave(existing, "report-1")).toEqual({ status: "write" });
     expect(planSavedReportSave(undefined, "missing")).toEqual({
+      status: "missing",
+      message: "Saved report 'missing' was not found"
+    });
+  });
+
+  it("plans saved-report get lookups before service error mapping", () => {
+    const existing = report("report-1");
+
+    expect(planSavedReportLookup(existing, "report-1")).toEqual({
+      status: "found",
+      report: existing
+    });
+    expect(planSavedReportLookup(undefined, "missing")).toEqual({
       status: "missing",
       message: "Saved report 'missing' was not found"
     });

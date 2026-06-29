@@ -1,5 +1,6 @@
 import {
   findSavedListFilter,
+  planSavedListFilterLookup,
   planSavedListFilterReadAccess,
   planSavedListFilterDelete,
   planSavedListFilterSave,
@@ -32,6 +33,19 @@ describe("saved list filter policy", () => {
     expect(planSavedListFilterSave(undefined, undefined)).toEqual({ status: "write" });
     expect(planSavedListFilterSave(existing, "filter-1")).toEqual({ status: "write" });
     expect(planSavedListFilterSave(undefined, "missing")).toEqual({
+      status: "missing",
+      message: "Saved filter 'missing' was not found"
+    });
+  });
+
+  it("plans saved-filter get lookups before service error mapping", () => {
+    const existing = filter("filter-1");
+
+    expect(planSavedListFilterLookup(existing, "filter-1")).toEqual({
+      status: "found",
+      filter: existing
+    });
+    expect(planSavedListFilterLookup(undefined, "missing")).toEqual({
       status: "missing",
       message: "Saved filter 'missing' was not found"
     });

@@ -12,6 +12,10 @@ export type SavedListFilterWriteDecision =
   | { readonly status: "missing"; readonly message: string }
   | { readonly status: "write" };
 
+export type SavedListFilterLookupDecision =
+  | { readonly status: "found"; readonly filter: SavedListFilter }
+  | { readonly status: "missing"; readonly message: string };
+
 export type SavedListFilterReadAccessDecision =
   | { readonly status: "allow" }
   | { readonly status: "deny"; readonly message: string };
@@ -34,6 +38,15 @@ export function planSavedListFilterReadAccess(command: {
     };
   }
   return { status: "allow" };
+}
+
+export function planSavedListFilterLookup(
+  filter: SavedListFilter | undefined,
+  id: string
+): SavedListFilterLookupDecision {
+  return filter === undefined
+    ? { status: "missing", message: `Saved filter '${id}' was not found` }
+    : { status: "found", filter };
 }
 
 export function planSavedListFilterSave(

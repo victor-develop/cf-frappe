@@ -25,6 +25,7 @@ import {
 } from "./saved-list-filter-events.js";
 import {
   findSavedListFilter,
+  planSavedListFilterLookup,
   planSavedListFilterReadAccess,
   planSavedListFilterDelete,
   planSavedListFilterSave,
@@ -101,11 +102,14 @@ export class SavedListFilterService {
     tenantId = resolveTenant(actor)
   ): Promise<SavedListFilter> {
     const doctype = await this.readableDoctype(actor, doctypeName, tenantId);
-    const filter = findSavedListFilter(await this.readAll(tenantId, doctype, actor.id), id);
-    if (!filter) {
-      throw notFound(`Saved filter '${id}' was not found`);
+    const decision = planSavedListFilterLookup(
+      findSavedListFilter(await this.readAll(tenantId, doctype, actor.id), id),
+      id
+    );
+    if (decision.status === "missing") {
+      throw notFound(decision.message);
     }
-    return filter;
+    return decision.filter;
   }
 
   async save(command: SaveListFilterCommand): Promise<SavedListFilter> {

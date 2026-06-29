@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the job execution lookup not-found policy slice:
+As of the saved report/list filter lookup policy slice:
 
 - Vitest files: `233`
-- Vitest cases: `2674`
-- Remaining gap to Frappe static markers: `110`
+- Vitest cases: `2676`
+- Remaining gap to Frappe static markers: `108`
 
 ## Implication
 
