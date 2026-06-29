@@ -56,6 +56,7 @@ export * from "./application/query-service.js";
 export * from "./application/realtime.js";
 export * from "./application/report-service.js";
 export * from "./application/role-service.js";
+export * from "./application/saved-report-events.js";
 export * from "./application/saved-report-service.js";
 export * from "./application/saved-list-filter-events.js";
 export * from "./application/saved-list-filter-service.js";

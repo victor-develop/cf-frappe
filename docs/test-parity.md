@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the saved list filter event model slice:
+As of the saved report event model slice:
 
-- Vitest files: `182`
-- Vitest cases: `2094`
-- Remaining gap to Frappe static markers: `690`
+- Vitest files: `183`
+- Vitest cases: `2098`
+- Remaining gap to Frappe static markers: `686`
 
 ## Implication
 
