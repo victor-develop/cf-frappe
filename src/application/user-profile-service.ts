@@ -12,6 +12,7 @@ import {
 import {
   userProfileChangedPayload,
   userProfileEventType,
+  USER_PROFILE_PAYLOAD_KINDS,
   type UserProfileEventPayload
 } from "./user-profile-events.js";
 import { foldUserAccount } from "../core/user-accounts.js";
@@ -92,7 +93,10 @@ export class UserProfileService {
       profile: patch
     });
     return foldUserProfile(tenantId, userId, [
-      ...(await this.events.readStream(userProfilesStream(tenantId, userId), { maxSequence: state.version })),
+      ...(await this.events.readStream(userProfilesStream(tenantId, userId), {
+        maxSequence: state.version,
+        payloadKinds: USER_PROFILE_PAYLOAD_KINDS
+      })),
       ...saved
     ]);
   }
@@ -133,7 +137,9 @@ export class UserProfileService {
   }
 
   private async stateFor(tenantId: TenantId, userId: string): Promise<UserProfileState> {
-    return foldUserProfile(tenantId, userId, await this.events.readStream(userProfilesStream(tenantId, userId)));
+    return foldUserProfile(tenantId, userId, await this.events.readStream(userProfilesStream(tenantId, userId), {
+      payloadKinds: USER_PROFILE_PAYLOAD_KINDS
+    }));
   }
 
   private isAdmin(actor: Actor): boolean {
