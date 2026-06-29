@@ -2,7 +2,21 @@ import {
   definePrintLayout,
   type PrintLayoutDefinition
 } from "./print-format.js";
+import { domainEventPayloadKind } from "./domain-events.js";
 import type { DocumentData, DomainEvent, TenantId } from "./types.js";
+
+export type PrintSettingsStatePayloadKind = "PrintSettingsChanged";
+
+export interface PrintSettingsStateEventPayload {
+  readonly kind: "PrintSettingsChanged";
+  readonly settings: DocumentData;
+}
+
+export const PRINT_SETTINGS_STATE_PAYLOAD_KINDS = Object.freeze([
+  "PrintSettingsChanged"
+] as const satisfies readonly PrintSettingsStatePayloadKind[]);
+
+const PRINT_SETTINGS_STATE_PAYLOAD_KIND_SET = new Set<string>(PRINT_SETTINGS_STATE_PAYLOAD_KINDS);
 
 export interface PrintSettings {
   readonly defaultLayout?: PrintLayoutDefinition;
@@ -30,7 +44,7 @@ export function foldPrintSettings(tenantId: TenantId, events: readonly DomainEve
     settings: {}
   };
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
-    if (event.payload.kind !== "PrintSettingsChanged") {
+    if (!isPrintSettingsStateEvent(event)) {
       continue;
     }
     state = {
@@ -41,6 +55,20 @@ export function foldPrintSettings(tenantId: TenantId, events: readonly DomainEve
     };
   }
   return state;
+}
+
+export function printSettingsStateEventType(payload: PrintSettingsStateEventPayload): PrintSettingsStatePayloadKind {
+  return payload.kind;
+}
+
+export function isPrintSettingsStatePayloadKind(kind: string): kind is PrintSettingsStatePayloadKind {
+  return PRINT_SETTINGS_STATE_PAYLOAD_KIND_SET.has(kind);
+}
+
+function isPrintSettingsStateEvent(
+  event: DomainEvent
+): event is DomainEvent & { readonly payload: PrintSettingsStateEventPayload } {
+  return isPrintSettingsStatePayloadKind(domainEventPayloadKind(event));
 }
 
 export function normalizePrintSettingsPatch(input: Record<string, unknown>): PrintSettingsPatch {

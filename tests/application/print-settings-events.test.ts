@@ -1,4 +1,5 @@
 import {
+  foldPrintSettings,
   isPrintSettingsEvent,
   isPrintSettingsPayloadKind,
   printSettingsChangedPayload,
@@ -47,6 +48,19 @@ describe("print settings events", () => {
     expect(isPrintSettingsPayloadKind("DocumentDeleted")).toBe(false);
     expect(isPrintSettingsEvent(changed)).toBe(true);
     expect(isPrintSettingsEvent(event({ kind: "DocumentDeleted" }))).toBe(false);
+  });
+
+  it("folds print settings state by payload kind when event type names are custom", () => {
+    const misleadingUnrelated = event({ kind: "DocumentDeleted" }, "PrintSettingsChanged");
+    const customTypedChanged = {
+      ...event(printSettingsChangedPayload({ settings: { defaultLayout: null } }), "TenantPrintDefaultsUpdated"),
+      sequence: 2
+    };
+
+    const state = foldPrintSettings("acme", [misleadingUnrelated, customTypedChanged]);
+
+    expect(state.version).toBe(2);
+    expect(state.settings).toEqual({});
   });
 });
 

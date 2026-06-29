@@ -1,18 +1,18 @@
 import { domainEventPayloadKind } from "../core/domain-events.js";
+import {
+  PRINT_SETTINGS_STATE_PAYLOAD_KINDS,
+  isPrintSettingsStatePayloadKind,
+  printSettingsStateEventType,
+  type PrintSettingsStateEventPayload,
+  type PrintSettingsStatePayloadKind
+} from "../core/print-settings.js";
 import type { DocumentData, DomainEvent } from "../core/types.js";
 
-export type PrintSettingsEventPayload = {
-  readonly kind: "PrintSettingsChanged";
-  readonly settings: DocumentData;
-};
+export type PrintSettingsEventPayload = PrintSettingsStateEventPayload;
 
-export type PrintSettingsPayloadKind = PrintSettingsEventPayload["kind"];
+export type PrintSettingsPayloadKind = PrintSettingsStatePayloadKind;
 
-export const PRINT_SETTINGS_PAYLOAD_KINDS = Object.freeze([
-  "PrintSettingsChanged"
-] as const satisfies readonly PrintSettingsPayloadKind[]);
-
-const PRINT_SETTINGS_PAYLOAD_KIND_SET = new Set<string>(PRINT_SETTINGS_PAYLOAD_KINDS);
+export const PRINT_SETTINGS_PAYLOAD_KINDS = PRINT_SETTINGS_STATE_PAYLOAD_KINDS;
 
 export interface PrintSettingsChangedPayloadInput {
   readonly settings: DocumentData;
@@ -28,11 +28,11 @@ export function printSettingsChangedPayload(
 }
 
 export function printSettingsEventType(payload: PrintSettingsEventPayload): PrintSettingsPayloadKind {
-  return payload.kind;
+  return printSettingsStateEventType(payload);
 }
 
 export function isPrintSettingsPayloadKind(kind: string): kind is PrintSettingsPayloadKind {
-  return PRINT_SETTINGS_PAYLOAD_KIND_SET.has(kind);
+  return isPrintSettingsStatePayloadKind(kind);
 }
 
 export function isPrintSettingsEvent(event: DomainEvent): event is DomainEvent<PrintSettingsEventPayload> {
