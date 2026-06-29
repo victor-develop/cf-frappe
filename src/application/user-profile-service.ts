@@ -9,7 +9,10 @@ import {
   type NewDomainEvent,
   type TenantId
 } from "../core/types.js";
-import type { UserProfileEventPayload } from "./user-profile-events.js";
+import {
+  userProfileChangedPayload,
+  type UserProfileEventPayload
+} from "./user-profile-events.js";
 import { foldUserAccount } from "../core/user-accounts.js";
 import {
   foldUserProfile,
@@ -111,11 +114,10 @@ export class UserProfileService {
       documentName: options.userId,
       actorId: options.actorId,
       occurredAt: this.clock.now(),
-      payload: {
-        kind: "UserProfileChanged",
+      payload: userProfileChangedPayload({
         userId: options.userId,
         profile: options.profile as DocumentData
-      },
+      }),
       metadata: options.metadata ?? {}
     };
     return this.events.append(stream, options.expectedVersion, [event]);

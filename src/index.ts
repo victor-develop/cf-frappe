@@ -69,6 +69,7 @@ export * from "./application/saved-list-filter-service.js";
 export * from "./application/user-account-service.js";
 export * from "./application/user-notification-events.js";
 export * from "./application/user-notification-service.js";
+export * from "./application/user-profile-events.js";
 export * from "./application/user-profile-service.js";
 export * from "./application/user-permission-events.js";
 export * from "./application/user-permission-service.js";
