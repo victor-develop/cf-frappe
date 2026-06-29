@@ -51,6 +51,7 @@ import {
   normalizeUnsetFields,
   documentCreateEventCommand,
   documentDeleteEventCommand,
+  domainCommandEventCommand,
   documentCreateValidationIssues,
   documentDomainCommandValidationIssues,
   documentMergeDisposition,
@@ -68,12 +69,9 @@ import {
   planWorkflowTransitionPolicy,
   requireDomainCommandDefinition,
   requireMergeBaseSnapshot,
-  requireWorkflowDefinition
+  requireWorkflowDefinition,
+  workflowTransitionEventCommand
 } from "./document-command-policy.js";
-import {
-  domainCommandAppliedPayload,
-  workflowTransitionedPayload
-} from "./document-command-events.js";
 import { documentShareStateFromEvents } from "./document-share-events.js";
 import {
   requireFirstSavedEvent,
@@ -920,24 +918,18 @@ export class DocumentService implements DocumentCommandExecutor {
       document: existing,
       workflow
     });
-    const payload = workflowTransitionedPayload({
-      action: command.action,
-      from: plan.from,
-      to: plan.to,
-      patch: plan.patch
-    });
     const now = this.clock.now();
-    const event = this.newEvent({
+    const event = this.newEvent(workflowTransitionEventCommand({
       tenantId,
       stream,
-      type: plan.eventType,
-      doctype: doctype.name,
+      doctypeName: doctype.name,
       documentName: command.name,
       actorId: command.actor.id,
       occurredAt: now,
-      payload,
+      action: command.action,
+      plan,
       metadata: command.metadata ?? {}
-    });
+    }));
     const commit = await this.store.commit(stream, existing.version, [event], (savedEvents) => {
       const saved = requireFirstSavedEvent(savedEvents);
       return snapshotFromCommittedDocumentEvent(existing, saved, {
@@ -1007,22 +999,19 @@ export class DocumentService implements DocumentCommandExecutor {
       throw validationFailed(issues);
     }
 
-    const payload = domainCommandAppliedPayload({
-      command: command.command,
-      input: sanitizedInput,
-      patch: patchWithReadOnlyValues
-    });
-    const event = this.newEvent({
+    const event = this.newEvent(domainCommandEventCommand({
       tenantId,
       stream,
-      type: commandDefinition.eventType,
-      doctype: doctype.name,
+      doctypeName: doctype.name,
       documentName: command.name,
       actorId: command.actor.id,
       occurredAt: now,
-      payload,
+      eventType: commandDefinition.eventType,
+      commandName: command.command,
+      commandInput: sanitizedInput,
+      patch: patchWithReadOnlyValues,
       metadata: command.metadata ?? {}
-    });
+    }));
     const commit = await this.store.commit(stream, existing.version, [event], (savedEvents) => {
       const saved = requireFirstSavedEvent(savedEvents);
       return snapshotFromCommittedDocumentEvent(existing, saved, {

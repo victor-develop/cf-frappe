@@ -5,6 +5,7 @@ import {
   documentCreateEventCommand,
   documentCreateValidationIssues,
   documentDeleteEventCommand,
+  domainCommandEventCommand,
   documentDomainCommandValidationIssues,
   documentMergeDisposition,
   documentStatusChangeEventCommand,
@@ -29,6 +30,7 @@ import {
   requireDomainCommandDefinition,
   requireMergeBaseSnapshot,
   requireWorkflowDefinition,
+  workflowTransitionEventCommand,
   type Actor,
   type DocTypeDefinition,
   type DocumentSnapshot
@@ -416,6 +418,56 @@ describe("document command policy", () => {
     });
   });
 
+  it("shapes domain command event commands from sanitized input and patch", () => {
+    expect(
+      domainCommandEventCommand({
+        tenantId: "acme",
+        stream: "tenant/acme/document/Note/NOTE-1",
+        doctypeName: "Note",
+        documentName: "NOTE-1",
+        actorId: "user@example.com",
+        occurredAt: "2026-06-28T02:00:00.000Z",
+        eventType: "NoteClosed",
+        commandName: "close",
+        commandInput: { reason: "done" },
+        patch: { status: "Closed" },
+        metadata: { requestId: "req-1" }
+      })
+    ).toEqual({
+      tenantId: "acme",
+      stream: "tenant/acme/document/Note/NOTE-1",
+      type: "NoteClosed",
+      doctype: "Note",
+      documentName: "NOTE-1",
+      actorId: "user@example.com",
+      occurredAt: "2026-06-28T02:00:00.000Z",
+      payload: {
+        kind: "DomainCommandApplied",
+        command: "close",
+        input: { reason: "done" },
+        patch: { status: "Closed" }
+      },
+      metadata: { requestId: "req-1" }
+    });
+  });
+
+  it("defaults domain command event command metadata", () => {
+    expect(
+      domainCommandEventCommand({
+        tenantId: "acme",
+        stream: "tenant/acme/document/Note/NOTE-1",
+        doctypeName: "Note",
+        documentName: "NOTE-1",
+        actorId: "user@example.com",
+        occurredAt: "2026-06-28T02:00:00.000Z",
+        eventType: "NoteClosed",
+        commandName: "close",
+        commandInput: { reason: "done" },
+        patch: { status: "Closed" }
+      }).metadata
+    ).toEqual({});
+  });
+
   it("checks domain command role eligibility as a pure policy", () => {
     expect(canExecuteDomainCommandForRoles(actor, {})).toBe(true);
     expect(canExecuteDomainCommandForRoles(actor, { roles: ["System Manager", "User"] })).toBe(true);
@@ -523,6 +575,68 @@ describe("document command policy", () => {
         }
       })
     ).toThrow("Transition 'approve' is not allowed from 'Review'");
+  });
+
+  it("shapes workflow transition event commands from policy plans", () => {
+    expect(
+      workflowTransitionEventCommand({
+        tenantId: "acme",
+        stream: "tenant/acme/document/Note/NOTE-1",
+        doctypeName: "Note",
+        documentName: "NOTE-1",
+        actorId: "user@example.com",
+        occurredAt: "2026-06-28T02:00:00.000Z",
+        action: "close",
+        plan: planWorkflowTransitionPolicy({
+          actor,
+          action: "close",
+          doctypeName: "Note",
+          document: { ...snapshot, data: { ...snapshot.data, workflow_state: "Open" } },
+          workflow: {
+            initialState: "Open",
+            states: ["Open", "Closed"],
+            transitions: [{ action: "close", from: "Open", to: "Closed" }]
+          }
+        }),
+        metadata: { requestId: "req-1" }
+      })
+    ).toEqual({
+      tenantId: "acme",
+      stream: "tenant/acme/document/Note/NOTE-1",
+      type: "NoteClose",
+      doctype: "Note",
+      documentName: "NOTE-1",
+      actorId: "user@example.com",
+      occurredAt: "2026-06-28T02:00:00.000Z",
+      payload: {
+        kind: "WorkflowTransitioned",
+        action: "close",
+        from: "Open",
+        to: "Closed",
+        patch: { workflow_state: "Closed" }
+      },
+      metadata: { requestId: "req-1" }
+    });
+  });
+
+  it("defaults workflow transition event command metadata", () => {
+    expect(
+      workflowTransitionEventCommand({
+        tenantId: "acme",
+        stream: "tenant/acme/document/Note/NOTE-1",
+        doctypeName: "Note",
+        documentName: "NOTE-1",
+        actorId: "user@example.com",
+        occurredAt: "2026-06-28T02:00:00.000Z",
+        action: "close",
+        plan: {
+          from: "Open",
+          to: "Closed",
+          patch: { workflow_state: "Closed" },
+          eventType: "NoteClose"
+        }
+      }).metadata
+    ).toEqual({});
   });
 
   it("plans submit status changes with default event names", () => {

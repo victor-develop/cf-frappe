@@ -3,7 +3,12 @@ import { badRequest, conflict, FrameworkError, permissionDenied } from "../core/
 import { compactData } from "../core/schema.js";
 import { allowedWorkflowTransitions, currentWorkflowState } from "../core/workflow.js";
 import { copyDocumentData } from "./document-field-policy.js";
-import { workflowTransitionEventType } from "./document-command-events.js";
+import {
+  domainCommandAppliedPayload,
+  workflowTransitionedPayload,
+  workflowTransitionEventType,
+  type DocumentCommandEventPayload
+} from "./document-command-events.js";
 import {
   documentCreatedPayload,
   documentDeletedPayload,
@@ -330,6 +335,39 @@ export function planDomainCommandPolicy(input: {
   };
 }
 
+export function domainCommandEventCommand(input: {
+  readonly tenantId: string;
+  readonly stream: string;
+  readonly doctypeName: string;
+  readonly documentName: string;
+  readonly actorId: string;
+  readonly occurredAt: string;
+  readonly eventType: string;
+  readonly commandName: string;
+  readonly commandInput: DocumentData;
+  readonly patch: DocumentData;
+  readonly metadata?: DocumentData | undefined;
+}): Omit<
+  NewDomainEvent<Extract<DocumentCommandEventPayload, { readonly kind: "DomainCommandApplied" }>>,
+  "id" | "sequence"
+> {
+  return {
+    tenantId: input.tenantId,
+    stream: input.stream,
+    type: input.eventType,
+    doctype: input.doctypeName,
+    documentName: input.documentName,
+    actorId: input.actorId,
+    occurredAt: input.occurredAt,
+    payload: domainCommandAppliedPayload({
+      command: input.commandName,
+      input: input.commandInput,
+      patch: input.patch
+    }),
+    metadata: input.metadata ?? {}
+  };
+}
+
 export interface WorkflowTransitionPolicyPlan {
   readonly from: string;
   readonly to: string;
@@ -366,6 +404,38 @@ export function planWorkflowTransitionPolicy(input: {
       action: input.action,
       transitionEventType: transition.eventType
     })
+  };
+}
+
+export function workflowTransitionEventCommand(input: {
+  readonly tenantId: string;
+  readonly stream: string;
+  readonly doctypeName: string;
+  readonly documentName: string;
+  readonly actorId: string;
+  readonly occurredAt: string;
+  readonly action: string;
+  readonly plan: WorkflowTransitionPolicyPlan;
+  readonly metadata?: DocumentData | undefined;
+}): Omit<
+  NewDomainEvent<Extract<DocumentCommandEventPayload, { readonly kind: "WorkflowTransitioned" }>>,
+  "id" | "sequence"
+> {
+  return {
+    tenantId: input.tenantId,
+    stream: input.stream,
+    type: input.plan.eventType,
+    doctype: input.doctypeName,
+    documentName: input.documentName,
+    actorId: input.actorId,
+    occurredAt: input.occurredAt,
+    payload: workflowTransitionedPayload({
+      action: input.action,
+      from: input.plan.from,
+      to: input.plan.to,
+      patch: input.plan.patch
+    }),
+    metadata: input.metadata ?? {}
   };
 }
 
