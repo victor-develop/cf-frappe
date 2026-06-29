@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the D1 projection query planning slice:
+As of the D1 job execution query planning slice:
 
 - Vitest files: `196`
-- Vitest cases: `2396`
-- Remaining gap to Frappe static markers: `388`
+- Vitest cases: `2397`
+- Remaining gap to Frappe static markers: `387`
 
 ## Implication
 

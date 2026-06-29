@@ -1,4 +1,5 @@
 import { D1JobExecutionLog } from "../../src";
+import { d1JobExecutionListQuery } from "../../src/adapters/d1/job-execution-query.js";
 import type { DocumentData, JobExecutionRecord, JobMessage, JsonValue } from "../../src";
 import { now } from "../helpers";
 
@@ -144,6 +145,26 @@ describe("D1JobExecutionLog", () => {
     expect(statement?.sql).toContain("status = ?");
     expect(statement?.sql).toContain("ORDER BY started_at DESC, idempotency_key ASC LIMIT ?");
     expect(statement?.params).toEqual(["default", "failed", 5]);
+  });
+
+  it("plans D1 job execution list filters as bound SQL", () => {
+    const filtered = d1JobExecutionListQuery({
+      tenantId: "acme",
+      jobName: "reports.daily",
+      status: "failed",
+      runId: "run_001",
+      limit: 7
+    });
+
+    expect(filtered.sql).toContain(
+      "WHERE tenant_id = ? AND job_name = ? AND status = ? AND run_id = ?"
+    );
+    expect(filtered.sql).toContain("ORDER BY started_at DESC, idempotency_key ASC LIMIT ?");
+    expect(filtered.params).toEqual(["acme", "reports.daily", "failed", "run_001", 7]);
+
+    const unfiltered = d1JobExecutionListQuery({});
+    expect(unfiltered.sql).not.toContain("WHERE");
+    expect(unfiltered.params).toEqual([50]);
   });
 
   it("rejects invalid stored D1 job execution JSON", async () => {
