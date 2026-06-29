@@ -6,6 +6,16 @@ import type {
   DataPatchRollbackPlan,
   DataPatchRollbackRetryPlan
 } from "./data-patch-service.js";
+import {
+  dataPatchApplyDispatchCommand,
+  dataPatchRollbackDispatchCommand,
+  dataPatchRollbackRetryDispatchCommand,
+  type DataPatchApplyJobPayload,
+  type DataPatchJobActor,
+  type DataPatchQueueDeliveryOptions,
+  type DataPatchRollbackJobPayload,
+  type DataPatchRollbackRetryJobPayload
+} from "./data-patch-job-policy.js";
 import type { DataPatchRollbackRunResult, DataPatchRunResult } from "./data-patch-runner.js";
 import { badRequest, notFound } from "../core/errors.js";
 import type { JobDefinition, JobPayload } from "../core/jobs.js";
@@ -17,26 +27,11 @@ export const DATA_PATCH_APPLY_JOB_NAME = "cf-frappe.data-patches.apply";
 export const DATA_PATCH_ROLLBACK_JOB_NAME = "cf-frappe.data-patches.rollback";
 export const DATA_PATCH_ROLLBACK_RETRY_JOB_NAME = "cf-frappe.data-patches.rollback-retry";
 
-export type DataPatchJobActor = DocumentData & {
-  readonly id: string;
-  readonly roles: readonly string[];
-  readonly tenantId?: string;
-  readonly email?: string;
-};
-
-export type DataPatchApplyJobPayload = DocumentData & {
-  readonly actor: DataPatchJobActor;
-  readonly patchIds: readonly string[];
-};
-
-export type DataPatchRollbackJobPayload = DocumentData & {
-  readonly actor: DataPatchJobActor;
-  readonly patchIds: readonly string[];
-};
-
-export type DataPatchRollbackRetryJobPayload = DocumentData & {
-  readonly actor: DataPatchJobActor;
-  readonly patchId: string;
+export type {
+  DataPatchApplyJobPayload,
+  DataPatchJobActor,
+  DataPatchRollbackJobPayload,
+  DataPatchRollbackRetryJobPayload
 };
 
 export interface DataPatchApplyJobResources {
@@ -61,12 +56,6 @@ export interface DataPatchRollbackJobOptions {
 
 export interface DataPatchRollbackRetryJobOptions {
   readonly name?: string;
-}
-
-interface DataPatchQueueDeliveryOptions {
-  readonly delaySeconds?: number;
-  readonly idempotencyKey?: string;
-  readonly metadata?: DocumentData;
 }
 
 export interface DataPatchQueueOptions extends DataPatchApplyOptions, DataPatchQueueDeliveryOptions {}
@@ -136,21 +125,9 @@ export class DataPatchQueueService<TResources = unknown>
     if (plan.patchIds.length === 0) {
       throw badRequest("No pending data patches to enqueue");
     }
-    const message = await this.dispatcher.dispatch<DataPatchApplyJobPayload>({
-      jobName: this.applyJobName,
-      payload: {
-        actor: queueActor(actor),
-        patchIds: plan.patchIds
-      },
-      ...(actor.tenantId === undefined ? {} : { tenantId: actor.tenantId }),
-      ...(options.idempotencyKey === undefined ? {} : { idempotencyKey: options.idempotencyKey }),
-      ...(options.delaySeconds === undefined ? {} : { delaySeconds: options.delaySeconds }),
-      metadata: {
-        ...(options.metadata ?? {}),
-        dispatchSource: "data-patches",
-        requestedBy: actor.id
-      }
-    });
+    const message = await this.dispatcher.dispatch<DataPatchApplyJobPayload>(
+      dataPatchApplyDispatchCommand(this.applyJobName, actor, plan.patchIds, options)
+    );
     return { plan, message };
   }
 
@@ -162,21 +139,9 @@ export class DataPatchQueueService<TResources = unknown>
     if (plan.patchIds.length === 0) {
       throw badRequest("No rollbackable data patches to enqueue");
     }
-    const message = await this.dispatcher.dispatch<DataPatchRollbackJobPayload>({
-      jobName: this.rollbackJobName,
-      payload: {
-        actor: queueActor(actor),
-        patchIds: plan.patchIds
-      },
-      ...(actor.tenantId === undefined ? {} : { tenantId: actor.tenantId }),
-      ...(options.idempotencyKey === undefined ? {} : { idempotencyKey: options.idempotencyKey }),
-      ...(options.delaySeconds === undefined ? {} : { delaySeconds: options.delaySeconds }),
-      metadata: {
-        ...(options.metadata ?? {}),
-        dispatchSource: "data-patches",
-        requestedBy: actor.id
-      }
-    });
+    const message = await this.dispatcher.dispatch<DataPatchRollbackJobPayload>(
+      dataPatchRollbackDispatchCommand(this.rollbackJobName, actor, plan.patchIds, options)
+    );
     return { plan, message };
   }
 
@@ -186,21 +151,9 @@ export class DataPatchQueueService<TResources = unknown>
     options: DataPatchRollbackRetryQueueOptions = {}
   ): Promise<DataPatchRollbackRetryQueueResult> {
     const plan = await this.dataPatches.planRollbackRetry(actor, patchId);
-    const message = await this.dispatcher.dispatch<DataPatchRollbackRetryJobPayload>({
-      jobName: this.rollbackRetryJobName,
-      payload: {
-        actor: queueActor(actor),
-        patchId: plan.patchId
-      },
-      ...(actor.tenantId === undefined ? {} : { tenantId: actor.tenantId }),
-      ...(options.idempotencyKey === undefined ? {} : { idempotencyKey: options.idempotencyKey }),
-      ...(options.delaySeconds === undefined ? {} : { delaySeconds: options.delaySeconds }),
-      metadata: {
-        ...(options.metadata ?? {}),
-        dispatchSource: "data-patches",
-        requestedBy: actor.id
-      }
-    });
+    const message = await this.dispatcher.dispatch<DataPatchRollbackRetryJobPayload>(
+      dataPatchRollbackRetryDispatchCommand(this.rollbackRetryJobName, actor, plan.patchId, options)
+    );
     return { plan, message };
   }
 }
@@ -262,15 +215,6 @@ export function createDataPatchRollbackRetryJob<
       const patchId = parseJobPatchId(payload.patchId);
       return rollbackResultJson(await dataPatches.retryRollbackFailed(parseJobActor(payload.actor), patchId));
     }
-  };
-}
-
-function queueActor(actor: Actor): DataPatchJobActor {
-  return {
-    id: actor.id,
-    roles: [...actor.roles],
-    ...(actor.tenantId === undefined ? {} : { tenantId: actor.tenantId }),
-    ...(actor.email === undefined ? {} : { email: actor.email })
   };
 }
 
