@@ -76,6 +76,19 @@ export function normalizeUserLoginPassword(password: string): string {
   return password;
 }
 
+export function userAccountPasswordHashForLogin(state: UserAccountState): string {
+  if (!state.exists || state.passwordHash === undefined) {
+    throw permissionDenied("Invalid credentials");
+  }
+  return state.passwordHash;
+}
+
+export function ensureUserAccountPasswordLoginAllowed(state: UserAccountState, passwordVerified: boolean): void {
+  if (!passwordVerified || !state.enabled) {
+    throw permissionDenied("Invalid credentials");
+  }
+}
+
 export function normalizeUserRecoveryToken(token: string): string {
   const normalized = token.trim();
   if (normalized.length === 0) {

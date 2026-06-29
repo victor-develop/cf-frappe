@@ -58,6 +58,8 @@ import {
   recoveryExpiresAtFrom,
   resolveUserAccountActorTenant,
   resolveUserAccountSessionTenant,
+  ensureUserAccountPasswordLoginAllowed,
+  userAccountPasswordHashForLogin,
   userAccountRolesEqual
 } from "./user-account-policy.js";
 import type { UserRoleValidator } from "./user-role-validator.js";
@@ -405,16 +407,9 @@ export class UserAccountService {
     const userId = normalizeRequiredUserAccountText(command.userId, "User id");
     const password = normalizeUserLoginPassword(command.password);
     const state = await this.stateFor(tenantId, userId);
-    if (!state.exists || state.passwordHash === undefined) {
-      throw permissionDenied("Invalid credentials");
-    }
-    const verified = await this.passwords.verify(password, state.passwordHash);
-    if (!verified) {
-      throw permissionDenied("Invalid credentials");
-    }
-    if (!state.enabled) {
-      throw permissionDenied("Invalid credentials");
-    }
+    const passwordHash = userAccountPasswordHashForLogin(state);
+    const verified = await this.passwords.verify(password, passwordHash);
+    ensureUserAccountPasswordLoginAllowed(state, verified);
     return { actor: userAccountActor(state), account: publicUserAccount(state) };
   }
 

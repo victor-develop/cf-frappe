@@ -18,6 +18,8 @@ import {
   resolveUserAccountActorTenant,
   resolveUserAccountSessionTenant,
   SYSTEM_MANAGER_ROLE,
+  ensureUserAccountPasswordLoginAllowed,
+  userAccountPasswordHashForLogin,
   userAccountRolesEqual
 } from "../../src";
 import type { UserAccountState } from "../../src";
@@ -93,6 +95,22 @@ describe("user account policy", () => {
     expect(normalizeUserPassword("12345678")).toBe("12345678");
     expect(() => normalizeUserPassword("1234567")).toThrow(`Password must be at least ${MIN_USER_PASSWORD_LENGTH} characters`);
     expect(() => normalizeUserLoginPassword("")).toThrow("Invalid credentials");
+  });
+
+  it("selects password hashes for password login", () => {
+    expect(userAccountPasswordHashForLogin(accountState({ passwordHash: "hash:secret" }))).toBe("hash:secret");
+    expect(() => userAccountPasswordHashForLogin(accountState({ exists: false, passwordHash: "hash:secret" })))
+      .toThrow("Invalid credentials");
+    expect(() => userAccountPasswordHashForLogin(accountState()))
+      .toThrow("Invalid credentials");
+  });
+
+  it("guards verified password login against bad credentials and disabled accounts", () => {
+    expect(() => ensureUserAccountPasswordLoginAllowed(accountState(), true)).not.toThrow();
+    expect(() => ensureUserAccountPasswordLoginAllowed(accountState(), false))
+      .toThrow("Invalid credentials");
+    expect(() => ensureUserAccountPasswordLoginAllowed(accountState({ enabled: false }), true))
+      .toThrow("Invalid credentials");
   });
 
   it("normalizes recovery tokens", () => {
