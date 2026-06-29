@@ -71,7 +71,7 @@ export function workflowDefinitionEvent<TPayload extends WorkflowEventPayload>(
     id: options.id,
     tenantId: options.tenantId,
     stream: options.stream,
-    type: options.payload.kind,
+    type: workflowDefinitionEventType(options.payload),
     doctype: "__Workflows",
     documentName: options.payload.doctypeName,
     actorId: options.actor.id,
@@ -79,6 +79,10 @@ export function workflowDefinitionEvent<TPayload extends WorkflowEventPayload>(
     payload: options.payload,
     metadata: options.metadata ?? {}
   };
+}
+
+export function workflowDefinitionEventType(payload: WorkflowEventPayload): WorkflowEventPayload["kind"] {
+  return payload.kind;
 }
 
 export function workflowEventsVisibleAt(

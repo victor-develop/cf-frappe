@@ -4,6 +4,7 @@ import {
   WORKFLOW_DEFINITION_PAYLOAD_KINDS,
   workflowDefinitionClearedPayload,
   workflowDefinitionEvent,
+  workflowDefinitionEventType,
   workflowDefinitionSavedPayload,
   workflowEventsVisibleAt
 } from "../../src";
@@ -23,6 +24,18 @@ const workflow: WorkflowDefinition = {
 };
 
 describe("workflow events", () => {
+  it("derives workflow definition event types from payload identity", () => {
+    expect(workflowDefinitionEventType({
+      kind: "WorkflowDefinitionSaved",
+      doctypeName: "Note",
+      workflow
+    })).toBe("WorkflowDefinitionSaved");
+    expect(workflowDefinitionEventType({
+      kind: "WorkflowDefinitionCleared",
+      doctypeName: "Note"
+    })).toBe("WorkflowDefinitionCleared");
+  });
+
   it("builds saved workflow definition payloads", () => {
     expect(workflowPayload(workflowDefinitionSavedPayload({
       doctypeName: "Note",
