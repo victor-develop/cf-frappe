@@ -1,5 +1,14 @@
 import { domainEventPayloadKind } from "../core/domain-events.js";
-import { foldUserAccount, type UserAccountState, type UserAuthProviderLink } from "../core/user-accounts.js";
+import {
+  USER_ACCOUNT_STATE_PAYLOAD_KINDS,
+  foldUserAccount,
+  isUserAccountStatePayloadKind,
+  userAccountStateEventType,
+  type UserAccountState,
+  type UserAccountStateEventPayload,
+  type UserAccountStatePayloadKind,
+  type UserAuthProviderLink
+} from "../core/user-accounts.js";
 import type {
   DocumentData,
   DomainEvent,
@@ -8,106 +17,11 @@ import type {
   TenantId
 } from "../core/types.js";
 
-export type UserAccountEventPayload =
-  | {
-      readonly kind: "UserAccountCreated";
-      readonly userId: string;
-      readonly email?: string;
-      readonly roles: readonly string[];
-      readonly passwordHash?: string;
-      readonly enabled: boolean;
-      readonly emailVerifiedAt?: string;
-    }
-  | {
-      readonly kind: "UserAuthProviderLinked";
-      readonly userId: string;
-      readonly provider: string;
-      readonly subject: string;
-      readonly email?: string;
-      readonly roles?: readonly string[];
-      readonly enabled?: boolean;
-      readonly emailVerifiedAt?: string | null;
-    }
-  | {
-      readonly kind: "UserAuthProviderSynced";
-      readonly userId: string;
-      readonly provider: string;
-      readonly subject: string;
-      readonly email?: string;
-      readonly roles?: readonly string[];
-      readonly enabled?: boolean;
-      readonly emailVerifiedAt?: string | null;
-    }
-  | {
-      readonly kind: "UserPasswordChanged";
-      readonly userId: string;
-      readonly passwordHash: string;
-    }
-  | {
-      readonly kind: "UserPasswordResetRequested";
-      readonly userId: string;
-      readonly tokenHash: string;
-      readonly expiresAt: string;
-    }
-  | {
-      readonly kind: "UserPasswordResetCompleted";
-      readonly userId: string;
-      readonly passwordHash: string;
-    }
-  | {
-      readonly kind: "UserPasswordResetDeliveryFailed";
-      readonly userId: string;
-    }
-  | {
-      readonly kind: "UserEmailVerificationRequested";
-      readonly userId: string;
-      readonly email: string;
-      readonly tokenHash: string;
-      readonly expiresAt: string;
-    }
-  | {
-      readonly kind: "UserEmailVerified";
-      readonly userId: string;
-      readonly email: string;
-    }
-  | {
-      readonly kind: "UserEmailVerificationDeliveryFailed";
-      readonly userId: string;
-      readonly email: string;
-    }
-  | {
-      readonly kind: "UserRolesChanged";
-      readonly userId: string;
-      readonly roles: readonly string[];
-    }
-  | {
-      readonly kind: "UserAccountEnabled";
-      readonly userId: string;
-    }
-  | {
-      readonly kind: "UserAccountDisabled";
-      readonly userId: string;
-    };
+export type UserAccountEventPayload = UserAccountStateEventPayload;
 
-export type UserAccountPayloadKind = UserAccountEventPayload["kind"];
+export type UserAccountPayloadKind = UserAccountStatePayloadKind;
 
-export const USER_ACCOUNT_PAYLOAD_KINDS = Object.freeze([
-  "UserAccountCreated",
-  "UserAuthProviderLinked",
-  "UserAuthProviderSynced",
-  "UserPasswordChanged",
-  "UserPasswordResetRequested",
-  "UserPasswordResetCompleted",
-  "UserPasswordResetDeliveryFailed",
-  "UserEmailVerificationRequested",
-  "UserEmailVerified",
-  "UserEmailVerificationDeliveryFailed",
-  "UserRolesChanged",
-  "UserAccountEnabled",
-  "UserAccountDisabled"
-] as const satisfies readonly UserAccountPayloadKind[]);
-
-const USER_ACCOUNT_PAYLOAD_KIND_SET = new Set<string>(USER_ACCOUNT_PAYLOAD_KINDS);
+export const USER_ACCOUNT_PAYLOAD_KINDS = USER_ACCOUNT_STATE_PAYLOAD_KINDS;
 
 export interface UserPasswordChangedPayloadInput {
   readonly userId: string;
@@ -388,11 +302,11 @@ export function userAccountDocumentName(payload: UserAccountEventPayload): strin
 }
 
 export function userAccountEventType(payload: UserAccountEventPayload): UserAccountPayloadKind {
-  return payload.kind;
+  return userAccountStateEventType(payload);
 }
 
 export function isUserAccountPayloadKind(kind: string): kind is UserAccountPayloadKind {
-  return USER_ACCOUNT_PAYLOAD_KIND_SET.has(kind);
+  return isUserAccountStatePayloadKind(kind);
 }
 
 export function isUserAccountEvent(event: DomainEvent): event is DomainEvent<UserAccountEventPayload> {

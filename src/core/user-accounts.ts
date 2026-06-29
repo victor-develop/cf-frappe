@@ -1,3 +1,4 @@
+import { domainEventPayloadKind } from "./domain-events.js";
 import { normalizeRoleName } from "./roles.js";
 import type { Actor, DomainEvent, TenantId } from "./types.js";
 
@@ -52,6 +53,107 @@ export interface UserAccountEmailVerificationChallenge extends UserAccountRecove
   readonly email: string;
 }
 
+export type UserAccountStateEventPayload =
+  | {
+      readonly kind: "UserAccountCreated";
+      readonly userId: string;
+      readonly email?: string;
+      readonly roles: readonly string[];
+      readonly passwordHash?: string;
+      readonly enabled: boolean;
+      readonly emailVerifiedAt?: string;
+    }
+  | {
+      readonly kind: "UserAuthProviderLinked";
+      readonly userId: string;
+      readonly provider: string;
+      readonly subject: string;
+      readonly email?: string;
+      readonly roles?: readonly string[];
+      readonly enabled?: boolean;
+      readonly emailVerifiedAt?: string | null;
+    }
+  | {
+      readonly kind: "UserAuthProviderSynced";
+      readonly userId: string;
+      readonly provider: string;
+      readonly subject: string;
+      readonly email?: string;
+      readonly roles?: readonly string[];
+      readonly enabled?: boolean;
+      readonly emailVerifiedAt?: string | null;
+    }
+  | {
+      readonly kind: "UserPasswordChanged";
+      readonly userId: string;
+      readonly passwordHash: string;
+    }
+  | {
+      readonly kind: "UserPasswordResetRequested";
+      readonly userId: string;
+      readonly tokenHash: string;
+      readonly expiresAt: string;
+    }
+  | {
+      readonly kind: "UserPasswordResetCompleted";
+      readonly userId: string;
+      readonly passwordHash: string;
+    }
+  | {
+      readonly kind: "UserPasswordResetDeliveryFailed";
+      readonly userId: string;
+    }
+  | {
+      readonly kind: "UserEmailVerificationRequested";
+      readonly userId: string;
+      readonly email: string;
+      readonly tokenHash: string;
+      readonly expiresAt: string;
+    }
+  | {
+      readonly kind: "UserEmailVerified";
+      readonly userId: string;
+      readonly email: string;
+    }
+  | {
+      readonly kind: "UserEmailVerificationDeliveryFailed";
+      readonly userId: string;
+      readonly email: string;
+    }
+  | {
+      readonly kind: "UserRolesChanged";
+      readonly userId: string;
+      readonly roles: readonly string[];
+    }
+  | {
+      readonly kind: "UserAccountEnabled";
+      readonly userId: string;
+    }
+  | {
+      readonly kind: "UserAccountDisabled";
+      readonly userId: string;
+    };
+
+export type UserAccountStatePayloadKind = UserAccountStateEventPayload["kind"];
+
+export const USER_ACCOUNT_STATE_PAYLOAD_KINDS = Object.freeze([
+  "UserAccountCreated",
+  "UserAuthProviderLinked",
+  "UserAuthProviderSynced",
+  "UserPasswordChanged",
+  "UserPasswordResetRequested",
+  "UserPasswordResetCompleted",
+  "UserPasswordResetDeliveryFailed",
+  "UserEmailVerificationRequested",
+  "UserEmailVerified",
+  "UserEmailVerificationDeliveryFailed",
+  "UserRolesChanged",
+  "UserAccountEnabled",
+  "UserAccountDisabled"
+] as const satisfies readonly UserAccountStatePayloadKind[]);
+
+const USER_ACCOUNT_STATE_PAYLOAD_KIND_SET = new Set<string>(USER_ACCOUNT_STATE_PAYLOAD_KINDS);
+
 export function foldUserAccount(
   tenantId: TenantId,
   userId: string,
@@ -68,6 +170,9 @@ export function foldUserAccount(
   };
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     state = { ...state, version: Math.max(state.version, event.sequence) };
+    if (!isUserAccountStateEvent(event)) {
+      continue;
+    }
     switch (event.payload.kind) {
       case "UserAccountCreated":
         if (event.payload.userId !== userId) {
@@ -252,6 +357,20 @@ export function foldUserAccount(
     }
   }
   return state;
+}
+
+export function userAccountStateEventType(payload: UserAccountStateEventPayload): UserAccountStatePayloadKind {
+  return payload.kind;
+}
+
+export function isUserAccountStatePayloadKind(kind: string): kind is UserAccountStatePayloadKind {
+  return USER_ACCOUNT_STATE_PAYLOAD_KIND_SET.has(kind);
+}
+
+function isUserAccountStateEvent(
+  event: DomainEvent
+): event is DomainEvent & { readonly payload: UserAccountStateEventPayload } {
+  return isUserAccountStatePayloadKind(domainEventPayloadKind(event));
 }
 
 export function userAccountActor(state: UserAccountState): Actor {

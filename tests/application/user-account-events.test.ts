@@ -1,5 +1,6 @@
 import {
   findUserAuthProviderLink,
+  foldUserAccount,
   isUserAccountEvent,
   isUserAccountPayloadKind,
   providerSyncChangesState,
@@ -406,6 +407,26 @@ describe("user account events", () => {
     expect(isUserAccountPayloadKind("DocumentDeleted")).toBe(false);
     expect(isUserAccountEvent(created)).toBe(true);
     expect(isUserAccountEvent(otherEvent({ kind: "DocumentDeleted" }))).toBe(false);
+  });
+
+  it("folds user account state by payload kind when event type names are custom", () => {
+    const misleadingUnrelated = otherEvent({ kind: "DocumentDeleted" }, "UserAccountCreated");
+    const customTypedCreated = {
+      ...accountCreatedEvent(2),
+      type: "AccessUserProvisioned"
+    };
+
+    const state = foldUserAccount("acme", "owner@example.com", [misleadingUnrelated, customTypedCreated]);
+
+    expect(state).toMatchObject({
+      tenantId: "acme",
+      userId: "owner@example.com",
+      version: 2,
+      exists: true,
+      email: "owner@example.com",
+      roles: ["User"],
+      enabled: true
+    });
   });
 
   it("finds provider links by provider and subject", () => {
