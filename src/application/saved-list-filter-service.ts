@@ -1,4 +1,4 @@
-import { badRequest, notFound, permissionDenied } from "../core/errors.js";
+import { notFound, permissionDenied } from "../core/errors.js";
 import { andListFilterExpressions, mergeListFilters, normalizeListFilterExpression, normalizeListFilters } from "../core/list-view.js";
 import { can } from "../core/permissions.js";
 import type { ModelRegistry } from "../core/registry.js";
@@ -7,22 +7,28 @@ import {
   DEFAULT_TENANT_ID,
   type Actor,
   type DocTypeDefinition,
-  type DomainEvent,
   type ListFilterExpression,
   type ListDocumentsFilter,
-  type NewDomainEvent,
   type TenantId
 } from "../core/types.js";
-import type { SavedListFilterEventPayload } from "./saved-list-filter-events.js";
+import {
+  foldSavedListFilters,
+  normalizeSavedListFilterLabel,
+  SAVED_LIST_FILTER_PAYLOAD_KINDS,
+  savedListFilterCurrentVersion,
+  savedListFilterEvent,
+  savedListFiltersForOwner,
+  sortedSavedListFilters,
+  type SavedListFilter,
+  type SavedListFilterEventPayload
+} from "./saved-list-filter-events.js";
 import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 import { cryptoIdGenerator } from "../ports/id-generator.js";
 
-export type { SavedListFilterEventPayload } from "./saved-list-filter-events.js";
-
-const MAX_FILTER_LABEL_LENGTH = 140;
+export type { SavedListFilter, SavedListFilterEventPayload } from "./saved-list-filter-events.js";
 
 export interface SavedListFilterServiceOptions {
   readonly registry: ModelRegistry;
@@ -36,18 +42,6 @@ export type SavedListFilterDocTypeResolver = (
   base: DocTypeDefinition,
   context: { readonly actor: Actor; readonly tenantId: string }
 ) => DocTypeDefinition | Promise<DocTypeDefinition>;
-
-export interface SavedListFilter {
-  readonly tenantId: TenantId;
-  readonly doctype: string;
-  readonly id: string;
-  readonly label: string;
-  readonly ownerId: string;
-  readonly filters: readonly ListDocumentsFilter[];
-  readonly filterExpression?: ListFilterExpression;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-}
 
 export interface SaveListFilterCommand {
   readonly actor: Actor;
@@ -89,7 +83,7 @@ export class SavedListFilterService {
   async list(actor: Actor, doctypeName: string, tenantId = resolveTenant(actor)): Promise<readonly SavedListFilter[]> {
     const doctype = await this.readableDoctype(actor, doctypeName, tenantId);
     const filters = await this.readAll(tenantId, doctype, actor.id);
-    return [...filters].sort((left, right) => left.label.localeCompare(right.label) || left.id.localeCompare(right.id));
+    return sortedSavedListFilters(filters);
   }
 
   async get(
@@ -111,23 +105,21 @@ export class SavedListFilterService {
     const doctype = await this.readableDoctype(command.actor, command.doctype, tenantId);
     const stream = savedListFiltersStream(tenantId, doctype.name, command.actor.id);
     const events = await this.events.readStream(stream, {
-      payloadKinds: ["SavedListFilterSaved", "SavedListFilterDeleted"]
+      payloadKinds: SAVED_LIST_FILTER_PAYLOAD_KINDS
     });
-    const current = foldSavedListFilters(tenantId, doctype, events).filter(
-      (filter) => filter.ownerId === command.actor.id
-    );
+    const current = savedListFiltersForOwner(foldSavedListFilters(tenantId, doctype, events), command.actor.id);
     const existing = command.id ? current.find((filter) => filter.id === command.id) : undefined;
     if (command.id && !existing) {
       throw notFound(`Saved filter '${command.id}' was not found`);
     }
     const id = command.id ?? this.ids.next("filter_");
-    const label = normalizeLabel(command.label);
+    const label = normalizeSavedListFilterLabel(command.label);
     const normalizedFilters = normalizeListFilters(doctype, command.filters);
     const normalizedFilterExpression = command.filterExpression === undefined
       ? undefined
       : normalizeListFilterExpression(doctype, command.filterExpression);
     const now = this.clock.now();
-    const event = newEvent({
+    const event = savedListFilterEvent({
       id: this.ids.next("evt_"),
       tenantId,
       stream,
@@ -146,7 +138,7 @@ export class SavedListFilterService {
       },
       metadata: {}
     });
-    await this.events.append(stream, currentVersion(events), [event]);
+    await this.events.append(stream, savedListFilterCurrentVersion(events), [event]);
     return {
       tenantId,
       doctype: doctype.name,
@@ -165,17 +157,16 @@ export class SavedListFilterService {
     const doctype = await this.readableDoctype(command.actor, command.doctype, tenantId);
     const stream = savedListFiltersStream(tenantId, doctype.name, command.actor.id);
     const events = await this.events.readStream(stream, {
-      payloadKinds: ["SavedListFilterSaved", "SavedListFilterDeleted"]
+      payloadKinds: SAVED_LIST_FILTER_PAYLOAD_KINDS
     });
-    const existing = foldSavedListFilters(tenantId, doctype, events)
-      .filter((filter) => filter.ownerId === command.actor.id)
+    const existing = savedListFiltersForOwner(foldSavedListFilters(tenantId, doctype, events), command.actor.id)
       .find((filter) => filter.id === command.id);
     if (!existing) {
       throw notFound(`Saved filter '${command.id}' was not found`);
     }
     const now = this.clock.now();
-    await this.events.append(stream, currentVersion(events), [
-      newEvent({
+    await this.events.append(stream, savedListFilterCurrentVersion(events), [
+      savedListFilterEvent({
         id: this.ids.next("evt_"),
         tenantId,
         stream,
@@ -233,64 +224,12 @@ export class SavedListFilterService {
   ): Promise<readonly SavedListFilter[]> {
     const stream = savedListFiltersStream(tenantId, doctype.name, ownerId);
     const events = await this.events.readStream(stream, {
-      payloadKinds: ["SavedListFilterSaved", "SavedListFilterDeleted"]
+      payloadKinds: SAVED_LIST_FILTER_PAYLOAD_KINDS
     });
-    return foldSavedListFilters(tenantId, doctype, events).filter((filter) => filter.ownerId === ownerId);
+    return savedListFiltersForOwner(foldSavedListFilters(tenantId, doctype, events), ownerId);
   }
-}
-
-function foldSavedListFilters(
-  tenantId: TenantId,
-  doctype: DocTypeDefinition,
-  events: readonly DomainEvent[]
-): readonly SavedListFilter[] {
-  const filters = new Map<string, SavedListFilter>();
-  for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
-    switch (event.payload.kind) {
-      case "SavedListFilterSaved": {
-        const existing = filters.get(event.payload.filterId);
-        filters.set(event.payload.filterId, {
-          tenantId,
-          doctype: doctype.name,
-          id: event.payload.filterId,
-          label: event.payload.label,
-          ownerId: event.payload.ownerId,
-          filters: event.payload.filters,
-          ...(event.payload.filterExpression === undefined ? {} : { filterExpression: event.payload.filterExpression }),
-          createdAt: existing?.createdAt ?? event.occurredAt,
-          updatedAt: event.occurredAt
-        });
-        break;
-      }
-      case "SavedListFilterDeleted":
-        filters.delete(event.payload.filterId);
-        break;
-    }
-  }
-  return [...filters.values()];
-}
-
-function normalizeLabel(label: string): string {
-  const normalized = label.trim();
-  if (normalized.length === 0) {
-    throw badRequest("Saved filter label is required");
-  }
-  if (normalized.length > MAX_FILTER_LABEL_LENGTH) {
-    throw badRequest(`Saved filter label exceeds ${MAX_FILTER_LABEL_LENGTH} characters`);
-  }
-  return normalized;
 }
 
 function resolveTenant(actor: Actor, explicitTenantId?: TenantId): TenantId {
   return explicitTenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
-}
-
-function currentVersion(events: readonly DomainEvent[]): number {
-  return events.at(-1)?.sequence ?? 0;
-}
-
-function newEvent<TPayload extends SavedListFilterEventPayload>(
-  event: NewDomainEvent<TPayload>
-): NewDomainEvent<TPayload> {
-  return event;
 }

@@ -116,6 +116,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized Desk chart palette fallback resolution so report chart rendering no longer relies on array non-null assertions for default colors.
 - Centralized Desk update-form document resolution so lifecycle, workflow, print, and duplicate actions share one guarded document snapshot.
 - Moved saved list filter event payloads into their own bounded application event module and narrowed the service event factory to that payload type, adding a fourth extension-map contract test.
+- Extracted saved list filter fold, label normalization, owner projection, deterministic sorting, payload-kind selection, and append-version helpers from `SavedListFilterService` into `src/application/saved-list-filter-events.ts`, keeping permission checks, metadata filter validation, and event-store append orchestration in the service while covering the event model behind focused unit tests.
 - Moved saved report event payloads into their own bounded application event module and narrowed the service event factory to that payload type, adding a fifth extension-map contract test.
 - Moved role catalog event payloads into their own bounded application event module and narrowed `RoleService` append/fold orchestration to that payload type, adding a sixth extension-map contract test.
 - Moved print settings event payloads into their own bounded application event module and typed `PrintSettingsService` event creation to that payload, adding a seventh extension-map contract test.
