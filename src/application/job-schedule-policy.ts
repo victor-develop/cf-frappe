@@ -6,7 +6,12 @@ import {
   MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH
 } from "../ports/job-queue.js";
 import { normalizeJobDocumentData } from "./job-payload-policy.js";
-import type { RuntimeJobScheduleRecord } from "./job-schedule-events.js";
+import {
+  runtimeJobSchedules,
+  type JobScheduleDefinitionState,
+  type JobScheduleOverrideState,
+  type RuntimeJobScheduleRecord
+} from "./job-schedule-events.js";
 
 export interface JobScheduleVisibilitySummary {
   readonly tenantId?: string;
@@ -83,6 +88,21 @@ export interface JobScheduleDefinitionCandidate {
   readonly payload?: unknown;
   readonly metadata?: unknown;
   readonly idempotencyKey?: unknown;
+}
+
+export interface JobScheduleSummaryCandidate extends JobScheduleDefinitionCandidate {
+  readonly cron: string;
+  readonly jobName: string;
+  readonly enabled?: boolean | DynamicJobScheduleValue;
+  readonly delaySeconds?: number;
+}
+
+export interface JobScheduleSummaryRegistry {
+  has(name: string): boolean;
+  get(name: string): {
+    readonly description?: string;
+    readonly retry?: JobRetryPolicy;
+  };
 }
 
 export interface JobScheduleQueryInput {
@@ -350,6 +370,73 @@ export function planJobScheduleSummary(options: {
     ...(options.tenantId === undefined ? {} : { tenantId: options.tenantId }),
     dynamic: options.dynamic
   };
+}
+
+export function jobScheduleSummaryFor(options: {
+  readonly schedule: JobScheduleSummaryCandidate;
+  readonly index: number;
+  readonly overrides: JobScheduleOverrideState;
+  readonly registry: JobScheduleSummaryRegistry;
+  readonly canOverride: boolean;
+  readonly canDispatch: boolean;
+  readonly now: string;
+  readonly source?: "configured" | "runtime";
+}): JobScheduleSummary {
+  const source = options.source ?? "configured";
+  const registered = options.registry.has(options.schedule.jobName);
+  const job = registered ? options.registry.get(options.schedule.jobName) : undefined;
+  const tenantId = staticJobScheduleTenantId(options.schedule);
+  const id = jobScheduleIdentity(options.schedule, options.index);
+  const dynamic = dynamicJobScheduleFields(options.schedule);
+  const override = tenantId === options.overrides.tenantId ? options.overrides.overrides.get(id) : undefined;
+  return planJobScheduleSummary({
+    id,
+    cron: options.schedule.cron,
+    jobName: options.schedule.jobName,
+    source,
+    hasScheduleId: options.schedule.id !== undefined,
+    configuredEnabled: options.schedule.enabled !== false,
+    canOverride: options.canOverride,
+    canDispatch: options.canDispatch,
+    registered,
+    now: options.now,
+    dynamic,
+    ...(job === undefined ? {} : { job }),
+    ...(override === undefined ? {} : { override }),
+    ...(options.schedule.delaySeconds === undefined ? {} : { delaySeconds: options.schedule.delaySeconds }),
+    ...(tenantId === undefined ? {} : { tenantId })
+  });
+}
+
+export function jobScheduleSummaries(options: {
+  readonly configured: readonly JobScheduleSummaryCandidate[];
+  readonly definitions: JobScheduleDefinitionState;
+  readonly overrides: JobScheduleOverrideState;
+  readonly registry: JobScheduleSummaryRegistry;
+  readonly canOverride: boolean;
+  readonly canDispatch: boolean;
+  readonly now: string;
+}): readonly JobScheduleSummary[] {
+  const context = {
+    overrides: options.overrides,
+    registry: options.registry,
+    canOverride: options.canOverride,
+    canDispatch: options.canDispatch,
+    now: options.now
+  };
+  return [
+    ...options.configured.map((schedule, index) => jobScheduleSummaryFor({
+      schedule,
+      index,
+      ...context
+    })),
+    ...runtimeJobSchedules(options.definitions).map((schedule, index) => jobScheduleSummaryFor({
+      schedule,
+      index: options.configured.length + index,
+      source: "runtime",
+      ...context
+    }))
+  ];
 }
 
 export function normalizeJobScheduleRuntimeDefinition(options: {

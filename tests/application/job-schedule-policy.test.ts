@@ -6,6 +6,8 @@ import {
   ensureUniqueJobScheduleIds,
   isDynamicJobScheduleValue,
   jobScheduleIdentity,
+  jobScheduleSummaries,
+  jobScheduleSummaryFor,
   mergePreservedJobScheduleRuntimeFields,
   normalizeJobSchedulePauseUntil,
   normalizeJobScheduleQuery,
@@ -357,6 +359,118 @@ describe("job schedule policy", () => {
     });
   });
 
+  it("projects a schedule summary with registry metadata and active overrides", () => {
+    expect(jobScheduleSummaryFor({
+      schedule: {
+        id: "daily",
+        cron: "0 0 * * *",
+        jobName: "reports.daily",
+        tenantId: "acme",
+        payload: () => ({ scope: "daily" }),
+        delaySeconds: 15
+      },
+      index: 0,
+      overrides: {
+        tenantId: "acme",
+        version: 1,
+        overrides: new Map([[
+          "daily",
+          {
+            scheduleId: "daily",
+            enabled: false,
+            updatedAt: "2026-01-01T01:00:00.000Z",
+            updatedBy: "ops@example.com"
+          }
+        ]])
+      },
+      registry: jobRegistry({
+        "reports.daily": {
+          description: "Build daily reports",
+          retry: { maxAttempts: 2 }
+        }
+      }),
+      canOverride: true,
+      canDispatch: true,
+      now: "2026-01-01T02:00:00.000Z"
+    })).toEqual({
+      id: "daily",
+      cron: "0 0 * * *",
+      jobName: "reports.daily",
+      source: "configured",
+      editable: false,
+      enabled: false,
+      configuredEnabled: true,
+      overridden: true,
+      overrideEnabled: false,
+      overrideUpdatedAt: "2026-01-01T01:00:00.000Z",
+      overrideUpdatedBy: "ops@example.com",
+      overrideable: true,
+      registered: true,
+      dispatchable: false,
+      description: "Build daily reports",
+      retry: { maxAttempts: 2 },
+      delaySeconds: 15,
+      tenantId: "acme",
+      dynamic: {
+        enabled: false,
+        tenantId: false,
+        payload: true,
+        metadata: false,
+        idempotencyKey: false
+      }
+    });
+  });
+
+  it("projects configured and runtime schedule summaries in a single policy pass", () => {
+    expect(jobScheduleSummaries({
+      configured: [
+        {
+          cron: "0 1 * * *",
+          jobName: "reports.daily",
+          tenantId: "acme"
+        }
+      ],
+      definitions: {
+        version: 2,
+        schedules: new Map([[
+          "runtime",
+          runtimeSchedule({
+            id: "runtime-nightly",
+            cron: "0 2 * * *",
+            jobName: "reports.nightly"
+          })
+        ]])
+      },
+      overrides: { tenantId: "acme", version: 0, overrides: new Map() },
+      registry: jobRegistry({
+        "reports.daily": {},
+        "reports.nightly": { description: "Runtime nightly" }
+      }),
+      canOverride: true,
+      canDispatch: true,
+      now: "2026-01-01T00:00:00.000Z"
+    })).toMatchObject([
+      {
+        id: "1",
+        source: "configured",
+        editable: false,
+        jobName: "reports.daily",
+        registered: true,
+        dispatchable: true
+      },
+      {
+        id: "runtime-nightly",
+        source: "runtime",
+        editable: true,
+        jobName: "reports.nightly",
+        description: "Runtime nightly",
+        overrideable: false,
+        registered: true,
+        dispatchable: true
+      }
+    ]);
+  });
+
   it("normalizes runtime schedule definitions from save commands", () => {
     expect(normalizeJobScheduleRuntimeDefinition({
       tenantId: "acme",
@@ -543,6 +657,24 @@ function withoutTenantId<TSummary extends { readonly tenantId?: string }>(
 ): Omit<TSummary, "tenantId"> {
   const { tenantId: _tenantId, ...rest } = summary;
   return rest;
+}
+
+function jobRegistry(jobs: Record<string, {
+  readonly description?: string;
+  readonly retry?: { readonly maxAttempts: number };
+}>) {
+  return {
+    has(name: string): boolean {
+      return jobs[name] !== undefined;
+    },
+    get(name: string) {
+      const job = jobs[name];
+      if (job === undefined) {
+        throw new Error(`Unexpected job '${name}'`);
+      }
+      return job;
+    }
+  };
 }
 
 function summaryOptions(overrides: Partial<Parameters<typeof planJobScheduleSummary>[0]> = {}) {

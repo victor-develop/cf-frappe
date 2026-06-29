@@ -33,9 +33,10 @@ import { type JobMessage } from "../ports/job-queue.js";
 import {
   canInspectJobSchedule,
   configuredJobScheduleIds,
-  dynamicJobScheduleFields,
   effectiveJobSchedule,
   ensureUniqueJobScheduleIds,
+  jobScheduleSummaries,
+  jobScheduleSummaryFor,
   jobScheduleIdentity,
   mergePreservedJobScheduleRuntimeFields,
   normalizeJobScheduleId,
@@ -51,7 +52,6 @@ import {
   planJobScheduleOverride,
   planJobScheduleOverrideClear,
   planJobSchedulePauseOverride,
-  planJobScheduleSummary,
   staticJobScheduleTenantId,
   type DynamicJobScheduleValue,
   type JobScheduleSummary
@@ -203,7 +203,15 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       this.definitionState()
     ]);
     return {
-      schedules: this.summarizeSchedules(overrides, definitions)
+      schedules: jobScheduleSummaries({
+        configured: this.schedules,
+        definitions,
+        overrides,
+        registry: this.registry,
+        canOverride: this.canOverride(),
+        canDispatch: this.canDispatch(),
+        now: this.clock.now()
+      })
         .filter((schedule) => canInspectJobSchedule(schedule, tenantId))
         .filter((schedule) => filters.cron === undefined || schedule.cron === filters.cron)
         .filter((schedule) => filters.jobName === undefined || schedule.jobName === filters.jobName),
@@ -544,46 +552,21 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
     return { schedule, index, summary: this.summaryFor(schedule, index, await this.overrideState(tenantId)) };
   }
 
-  private summarizeSchedules(
-    overrides: JobScheduleOverrideState,
-    definitions: JobScheduleDefinitionState
-  ): readonly JobScheduleSummary[] {
-    return [
-      ...this.schedules.map((schedule, index) => this.summaryFor(schedule, index, overrides)),
-      ...runtimeJobSchedules(definitions).map((schedule, index) =>
-        this.summaryFor(schedule, this.schedules.length + index, overrides, "runtime")
-      )
-    ];
-  }
-
   private summaryFor(
     schedule: TSchedule | RuntimeJobScheduleRecord,
     index: number,
     overrides: JobScheduleOverrideState,
     source: "configured" | "runtime" = "configured"
   ): JobScheduleSummary {
-    const registered = this.registry.has(schedule.jobName);
-    const job = registered ? this.registry.get(schedule.jobName) : undefined;
-    const tenantId = staticJobScheduleTenantId(schedule);
-    const id = jobScheduleIdentity(schedule, index);
-    const dynamic = dynamicJobScheduleFields(schedule);
-    const override = tenantId === overrides.tenantId ? overrides.overrides.get(id) : undefined;
-    return planJobScheduleSummary({
-      id,
-      cron: schedule.cron,
-      jobName: schedule.jobName,
-      source,
-      hasScheduleId: schedule.id !== undefined,
-      configuredEnabled: schedule.enabled !== false,
+    return jobScheduleSummaryFor({
+      schedule,
+      index,
+      overrides,
+      registry: this.registry,
       canOverride: this.canOverride(),
       canDispatch: this.canDispatch(),
-      registered,
       now: this.clock.now(),
-      dynamic,
-      ...(job === undefined ? {} : { job }),
-      ...(override === undefined ? {} : { override }),
-      ...(schedule.delaySeconds === undefined ? {} : { delaySeconds: schedule.delaySeconds }),
-      ...(tenantId === undefined ? {} : { tenantId }),
+      source
     });
   }
 
