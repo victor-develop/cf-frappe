@@ -1,4 +1,5 @@
 import { badRequest } from "../core/errors.js";
+import { can } from "../core/permissions.js";
 import { csvLine } from "./csv.js";
 import type {
   ReportChartDefinition,
@@ -16,8 +17,8 @@ import type {
   ReportFilterExpression,
   ReportSummaryDefinition
 } from "../core/reports.js";
-import { assertReportFilterExpressionBounds, isCustomReport, isReportFilterGroup } from "../core/reports.js";
-import type { DocTypeDefinition, DocumentSnapshot, FieldDefinition, FieldType, JsonPrimitive, JsonValue } from "../core/types.js";
+import { assertReportFilterExpressionBounds, canReadReport, isCustomReport, isReportFilterGroup } from "../core/reports.js";
+import type { Actor, DocTypeDefinition, DocumentSnapshot, FieldDefinition, FieldType, JsonPrimitive, JsonValue } from "../core/types.js";
 
 export type ReportRow = Readonly<Record<string, JsonValue>>;
 
@@ -96,6 +97,10 @@ export interface ReportOrderControlResult {
   readonly options: readonly ReportOrderOptionResult[];
 }
 
+export type ReportReadAccessDecision =
+  | { readonly status: "allow" }
+  | { readonly status: "deny"; readonly message: string };
+
 export interface ReportOrderInput {
   readonly orderBy?: string;
   readonly order?: ReportOrder;
@@ -103,6 +108,23 @@ export interface ReportOrderInput {
 
 const EMPTY_CHART_COLORS: readonly string[] = Object.freeze([]);
 const DEFAULT_CSV_EXPORT_LIMIT = 10_000;
+
+export function planReportReadAccess(command: {
+  readonly actor: Actor;
+  readonly report: ReportDefinition;
+  readonly doctype: DocTypeDefinition;
+}): ReportReadAccessDecision {
+  if (
+    !canReadReport(command.actor, command.report) ||
+    !can(command.actor, command.doctype, command.report.permissionAction ?? "read")
+  ) {
+    return {
+      status: "deny",
+      message: `Actor '${command.actor.id}' cannot read report '${command.report.name}'`
+    };
+  }
+  return { status: "allow" };
+}
 
 export function reportSummaryValue(
   summary: ReportSummaryDefinition,

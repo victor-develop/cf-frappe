@@ -9,12 +9,15 @@ import {
   clampReportRunLimit,
   combineReportFilterExpression,
   coerceReportFilterValue,
+  defineDocType,
+  defineReport,
   isEmptyReportFilterValue,
   limitReportGroups,
   materializeReportFilterExpression,
   materializeReportFilters,
   matchesReportFilters,
   matchesReportRowFilters,
+  planReportReadAccess,
   primitiveReportRowValue,
   projectReportDocumentRow,
   projectReportRow,
@@ -33,6 +36,7 @@ import {
   sortReportRows
 } from "../../src";
 import type { JsonValue } from "../../src";
+import { guest, owner } from "../helpers";
 
 describe("report policy", () => {
   const rows = [
@@ -41,6 +45,26 @@ describe("report policy", () => {
     { title: "Empty", count: null, priority: null, active: null },
     { title: "Missing" }
   ];
+
+  it("plans report read access from report roles and DocType permissions", () => {
+    const doctype = defineDocType({
+      name: "Private Report Source",
+      fields: [{ name: "title", type: "text", required: true }],
+      permissions: [{ roles: ["User"], actions: ["read"] }]
+    });
+    const report = defineReport({
+      name: "Private Report",
+      doctype: doctype.name,
+      columns: [{ name: "title" }],
+      roles: ["User"]
+    });
+
+    expect(planReportReadAccess({ actor: owner, report, doctype })).toEqual({ status: "allow" });
+    expect(planReportReadAccess({ actor: guest, report, doctype })).toEqual({
+      status: "deny",
+      message: "Actor 'guest' cannot read report 'Private Report'"
+    });
+  });
 
   it("shapes report summary values with labels, fields, types, and indicators", () => {
     expect(reportSummaryValue({

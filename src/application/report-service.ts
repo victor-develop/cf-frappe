@@ -1,9 +1,7 @@
 import { badRequest, permissionDenied } from "../core/errors.js";
-import { can } from "../core/permissions.js";
 import {
   assertReportDefinition,
   assertReportMatchesDocType,
-  canReadReport,
   isCustomReport,
   type ReportColumnDefinition,
   type ReportDefinition,
@@ -29,6 +27,7 @@ import {
   materializeReportFilters,
   matchesReportFilters,
   matchesReportRowFilters,
+  planReportReadAccess,
   projectReportDocumentRow,
   projectReportRow,
   reportCsvHeader,
@@ -41,6 +40,7 @@ import {
   type ReportFilters,
   type ReportGroupResult,
   type ReportOrderControlResult,
+  type ReportReadAccessDecision,
   type ReportRow,
   type ReportSummaryValue
 } from "./report-policy.js";
@@ -353,18 +353,23 @@ export class ReportService {
   }
 
   private canAccess(actor: Actor, report: ReportDefinition): boolean {
-    const doctype = this.registry.get(report.doctype);
-    return canReadReport(actor, report) && can(actor, doctype, report.permissionAction ?? "read");
+    return this.reportReadAccess(actor, report).status === "allow";
   }
 
   private readableReport(actor: Actor, report: ReportDefinition): DocTypeDefinition {
     const doctype = this.registry.get(report.doctype);
-    if (!canReadReport(actor, report) || !can(actor, doctype, report.permissionAction ?? "read")) {
-      throw permissionDenied(`Actor '${actor.id}' cannot read report '${report.name}'`);
+    const decision = planReportReadAccess({ actor, report, doctype });
+    if (decision.status === "deny") {
+      throw permissionDenied(decision.message);
     }
     assertReportDefinition(report);
     assertReportMatchesDocType(report, doctype);
     return doctype;
+  }
+
+  private reportReadAccess(actor: Actor, report: ReportDefinition): ReportReadAccessDecision {
+    const doctype = this.registry.get(report.doctype);
+    return planReportReadAccess({ actor, report, doctype });
   }
 
   private async listAllReadableDocuments(actor: Actor, doctype: string): Promise<readonly DocumentSnapshot[]> {
