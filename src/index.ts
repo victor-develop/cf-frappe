@@ -10,6 +10,7 @@ export * from "./application/assignment-rule-policy.js";
 export * from "./application/assignment-rule-service.js";
 export * from "./application/calendar-service.js";
 export * from "./application/custom-field-events.js";
+export * from "./application/custom-field-policy.js";
 export * from "./application/custom-field-service.js";
 export * from "./application/dashboard-policy.js";
 export * from "./application/dashboard-service.js";

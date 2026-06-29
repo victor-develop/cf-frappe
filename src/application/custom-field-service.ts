@@ -1,15 +1,12 @@
-import { badRequest, conflict, FrameworkError, notFound, permissionDenied } from "../core/errors.js";
+import { badRequest, FrameworkError, notFound } from "../core/errors.js";
 import { customFieldsCatalogStream, customFieldsStream } from "../core/streams.js";
 import {
   DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
   type Actor,
-  type DocTypeDefinition,
   type DocumentData,
-  type DomainEvent,
   type FieldDefinition,
   type NewDomainEvent,
-  type PersistedFieldDefinition,
   type TenantId
 } from "../core/types.js";
 import {
@@ -20,15 +17,27 @@ import {
   isCustomFieldEvent,
   type CustomFieldEventPayload
 } from "./custom-field-events.js";
-import { cloneJsonValue, isJsonValue } from "../core/json.js";
 import {
   applyCustomFieldsToDocType,
   assertCustomFieldCanExtend,
   foldCustomFields,
   type CustomFieldState
 } from "../core/custom-fields.js";
+import {
+  assertCustomFieldDefaultValueValid,
+  authorizeCustomFieldAdministration,
+  customFieldsEqual,
+  ensureCustomFieldExpectedVersion,
+  normalizeCustomField,
+  normalizeCustomFieldExpressions,
+  normalizeRequiredCustomFieldText,
+  projectPendingCustomFieldState,
+  resequenceCustomFieldEventsForFold,
+  resolveCustomFieldTenant,
+  withSavedCustomFieldCatalogEvents,
+  type CustomFieldEventSet
+} from "./custom-field-policy.js";
 import type { ModelRegistry } from "../core/registry.js";
-import { defineDocType, validateDocumentData } from "../core/schema.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
@@ -61,12 +70,6 @@ export interface DisableCustomFieldCommand {
   readonly metadata?: DocumentData;
 }
 
-interface TenantCustomFieldEvents {
-  readonly catalog: readonly DomainEvent[];
-  readonly legacy: readonly DomainEvent[];
-  readonly catalogVersion: number;
-}
-
 interface TableGraphEdge {
   readonly source: string;
   readonly target: string;
@@ -92,7 +95,7 @@ export class CustomFieldService {
   async list(actor: Actor, doctypeName: string, tenantId?: TenantId): Promise<CustomFieldState> {
     this.authorizeAdministration(actor, tenantId);
     const doctype = this.registry.get(doctypeName);
-    return this.stateFor(resolveActorTenant(actor, tenantId), doctype.name);
+    return this.stateFor(resolveCustomFieldTenant({ actor, tenantId }), doctype.name);
   }
 
   async effectiveDocType(doctypeName: string, tenantId: TenantId = DEFAULT_TENANT_ID) {
@@ -114,8 +117,8 @@ export class CustomFieldService {
   async saveField(command: SaveCustomFieldCommand): Promise<CustomFieldState> {
     this.authorizeAdministration(command.actor, command.tenantId);
     const doctype = this.registry.get(command.doctype);
-    const tenantId = resolveActorTenant(command.actor, command.tenantId);
-    let field = normalizeField(command.field);
+    const tenantId = resolveCustomFieldTenant({ actor: command.actor, tenantId: command.tenantId });
+    let field = normalizeCustomField(command.field);
     const events = await this.tenantCustomFieldEvents(tenantId);
     const states = this.statesFromEvents(tenantId, events);
     const state = this.stateFromEvents(tenantId, doctype.name, events);
@@ -127,12 +130,12 @@ export class CustomFieldService {
     this.assertTableFieldDoesNotSelfTarget(doctype, field);
     this.assertTableGraphAcyclicFrom(
       doctype.name,
-      statesWithPendingField(tenantId, states, doctype.name, field, this.clock.now()),
+      projectPendingCustomFieldState(tenantId, states, doctype.name, field, this.clock.now()),
       { doctype: doctype.name, field }
     );
-    ensureExpectedVersion(state, command.expectedVersion);
+    ensureCustomFieldExpectedVersion(state, command.expectedVersion);
     const existing = state.fields.find((entry) => entry.field.name === field.name);
-    if (existing?.enabled && fieldsEqual(existing.field, field)) {
+    if (existing?.enabled && customFieldsEqual(existing.field, field)) {
       return state;
     }
     const stream = customFieldsCatalogStream(tenantId);
@@ -148,17 +151,17 @@ export class CustomFieldService {
       })
     });
     const saved = await this.events.append(stream, state.version, [event]);
-    return this.stateFromEvents(tenantId, doctype.name, withSavedCatalogEvents(events, saved));
+    return this.stateFromEvents(tenantId, doctype.name, withSavedCustomFieldCatalogEvents(events, saved));
   }
 
   async disableField(command: DisableCustomFieldCommand): Promise<CustomFieldState> {
     this.authorizeAdministration(command.actor, command.tenantId);
     const doctype = this.registry.get(command.doctype);
-    const tenantId = resolveActorTenant(command.actor, command.tenantId);
-    const fieldName = normalizeRequired(command.fieldName, "Custom field name");
+    const tenantId = resolveCustomFieldTenant({ actor: command.actor, tenantId: command.tenantId });
+    const fieldName = normalizeRequiredCustomFieldText(command.fieldName, "Custom field name");
     const events = await this.tenantCustomFieldEvents(tenantId);
     const state = this.stateFromEvents(tenantId, doctype.name, events);
-    ensureExpectedVersion(state, command.expectedVersion);
+    ensureCustomFieldExpectedVersion(state, command.expectedVersion);
     const existing = state.fields.find((entry) => entry.field.name === fieldName);
     if (!existing) {
       throw notFound(`Custom field '${fieldName}' was not found`, "DOCUMENT_NOT_FOUND");
@@ -179,14 +182,14 @@ export class CustomFieldService {
       })
     });
     const saved = await this.events.append(stream, state.version, [event]);
-    return this.stateFromEvents(tenantId, doctype.name, withSavedCatalogEvents(events, saved));
+    return this.stateFromEvents(tenantId, doctype.name, withSavedCustomFieldCatalogEvents(events, saved));
   }
 
   private async stateFor(tenantId: TenantId, doctype: string): Promise<CustomFieldState> {
     return this.stateFromEvents(tenantId, doctype, await this.tenantCustomFieldEvents(tenantId));
   }
 
-  private async tenantCustomFieldEvents(tenantId: TenantId): Promise<TenantCustomFieldEvents> {
+  private async tenantCustomFieldEvents(tenantId: TenantId): Promise<CustomFieldEventSet> {
     const readOptions = {
       payloadKinds: CUSTOM_FIELD_PAYLOAD_KINDS
     } as const;
@@ -206,19 +209,23 @@ export class CustomFieldService {
   private stateFromEvents(
     tenantId: TenantId,
     doctype: string,
-    events: TenantCustomFieldEvents
+    events: CustomFieldEventSet
   ): CustomFieldState {
     const legacyForDoctype = events.legacy.filter((event) =>
       isCustomFieldEvent(event) && event.payload.doctypeName === doctype
     );
-    const folded = foldCustomFields(tenantId, doctype, resequenceForFold([...legacyForDoctype, ...events.catalog]));
+    const folded = foldCustomFields(
+      tenantId,
+      doctype,
+      resequenceCustomFieldEventsForFold([...legacyForDoctype, ...events.catalog])
+    );
     return Object.freeze({
       ...folded,
       version: events.catalogVersion
     });
   }
 
-  private statesFromEvents(tenantId: TenantId, events: TenantCustomFieldEvents): readonly CustomFieldState[] {
+  private statesFromEvents(tenantId: TenantId, events: CustomFieldEventSet): readonly CustomFieldState[] {
     return this.registry.list().map((doctype) => this.stateFromEvents(tenantId, doctype.name, events));
   }
 
@@ -324,8 +331,7 @@ export class CustomFieldService {
   }
 
   authorizeAdministration(actor: Actor, tenantId?: TenantId): void {
-    this.ensureAdmin(actor);
-    resolveActorTenant(actor, tenantId);
+    authorizeCustomFieldAdministration({ actor, adminRoles: this.adminRoles, tenantId });
   }
 
   private event(options: {
@@ -350,237 +356,4 @@ export class CustomFieldService {
     };
   }
 
-  private ensureAdmin(actor: Actor): void {
-    if (!this.adminRoles.some((role) => actor.roles.includes(role))) {
-      throw permissionDenied(`Actor '${actor.id}' cannot manage custom fields`);
-    }
-  }
-}
-
-function normalizeField(field: FieldDefinition): PersistedFieldDefinition {
-  const name = normalizeRequired(field.name, "Custom field name");
-  const label = field.label?.trim();
-  const linkTo = trimmedOptional(field.linkTo);
-  const tableOf = trimmedOptional(field.tableOf);
-  let defaultValue: PersistedFieldDefinition["defaultValue"];
-  if (field.defaultValue !== undefined) {
-    if (!isJsonValue(field.defaultValue)) {
-      throw new FrameworkError(
-        "CUSTOM_FIELD_INVALID",
-        `Custom field '${name}' defaultValue must be JSON-serializable`,
-        { status: 400 }
-      );
-    }
-    defaultValue = cloneJsonValue(field.defaultValue);
-  }
-  return Object.freeze({
-    name,
-    type: field.type,
-    ...(label === undefined || label.length === 0 ? {} : { label }),
-    ...(field.description === undefined || field.description.trim().length === 0
-      ? {}
-      : { description: field.description.trim() }),
-    ...(field.placeholder === undefined || field.placeholder.trim().length === 0
-      ? {}
-      : { placeholder: field.placeholder.trim() }),
-    ...(field.required === undefined ? {} : { required: field.required }),
-    ...(field.mandatoryDependsOn === undefined ? {} : { mandatoryDependsOn: field.mandatoryDependsOn }),
-    ...(field.readOnly === undefined ? {} : { readOnly: field.readOnly }),
-    ...(field.readOnlyDependsOn === undefined ? {} : { readOnlyDependsOn: field.readOnlyDependsOn }),
-    ...(field.hidden === undefined ? {} : { hidden: field.hidden }),
-    ...(field.hiddenDependsOn === undefined ? {} : { hiddenDependsOn: field.hiddenDependsOn }),
-    ...(field.printHide === undefined ? {} : { printHide: field.printHide }),
-    ...(field.printHideIfNoValue === undefined ? {} : { printHideIfNoValue: field.printHideIfNoValue }),
-    ...(field.unique === undefined ? {} : { unique: field.unique }),
-    ...(field.noCopy === undefined ? {} : { noCopy: field.noCopy }),
-    ...(field.allowOnSubmit === undefined ? {} : { allowOnSubmit: field.allowOnSubmit }),
-    ...(field.fetchFrom === undefined || field.fetchFrom.trim().length === 0 ? {} : { fetchFrom: field.fetchFrom.trim() }),
-    ...(field.fetchIfEmpty === undefined ? {} : { fetchIfEmpty: field.fetchIfEmpty }),
-    ...(field.inFormView === undefined ? {} : { inFormView: field.inFormView }),
-    ...(field.inListView === undefined ? {} : { inListView: field.inListView }),
-    ...(field.inListFilter === undefined ? {} : { inListFilter: field.inListFilter }),
-    ...customFieldOptions(field),
-    ...(linkTo === undefined ? {} : { linkTo }),
-    ...(tableOf === undefined ? {} : { tableOf }),
-    ...customFieldBounds(name, field),
-    ...(defaultValue === undefined ? {} : { defaultValue })
-  });
-}
-
-function normalizeCustomFieldExpressions(
-  base: DocTypeDefinition,
-  field: PersistedFieldDefinition
-): PersistedFieldDefinition {
-  const composed = defineDocType({
-    ...base,
-    fields: Object.freeze([...base.fields, field])
-  });
-  const normalized = composed.fields.find((item) => item.name === field.name);
-  if (normalized === undefined) {
-    throw new FrameworkError("CUSTOM_FIELD_INVALID", `Custom field '${field.name}' was not normalized`, { status: 400 });
-  }
-  return Object.freeze({
-    ...field,
-    ...(normalized.mandatoryDependsOn === undefined ? {} : { mandatoryDependsOn: normalized.mandatoryDependsOn }),
-    ...(normalized.readOnlyDependsOn === undefined ? {} : { readOnlyDependsOn: normalized.readOnlyDependsOn }),
-    ...(normalized.hiddenDependsOn === undefined ? {} : { hiddenDependsOn: normalized.hiddenDependsOn })
-  });
-}
-
-function trimmedOptional(value: string | undefined): string | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed.length === 0 ? undefined : trimmed;
-}
-
-function normalizeRequired(value: string, label: string): string {
-  const normalized = value.trim();
-  if (normalized.length === 0) {
-    throw badRequest(`${label} is required`);
-  }
-  return normalized;
-}
-
-function assertCustomFieldDefaultValueValid(base: DocTypeDefinition, field: PersistedFieldDefinition): void {
-  if (field.defaultValue === undefined) {
-    return;
-  }
-  const issues = validateDocumentData(
-    { ...base, fields: Object.freeze([...base.fields, field]) },
-    { [field.name]: field.defaultValue },
-    { partial: true }
-  );
-  if (issues.length > 0) {
-    throw new FrameworkError("CUSTOM_FIELD_INVALID", issues[0]?.message ?? "Custom field default value is invalid", {
-      status: 400,
-      issues
-    });
-  }
-}
-
-function customFieldBounds(
-  name: string,
-  field: FieldDefinition
-): { readonly min?: number; readonly max?: number } {
-  const min = customFieldBound(field.min, "min");
-  const max = customFieldBound(field.max, "max");
-  if (min !== undefined && max !== undefined && min > max) {
-    throw new FrameworkError("CUSTOM_FIELD_INVALID", `Custom field '${name}' min cannot exceed max`, { status: 400 });
-  }
-  return {
-    ...(min === undefined ? {} : { min }),
-    ...(max === undefined ? {} : { max })
-  };
-}
-
-function customFieldBound(value: number | undefined, field: "min" | "max"): number | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new FrameworkError("CUSTOM_FIELD_INVALID", `${field} must be a finite number`, { status: 400 });
-  }
-  return value;
-}
-
-function customFieldOptions(field: FieldDefinition): { readonly options?: readonly string[] } {
-  if (field.options === undefined) {
-    return {};
-  }
-  if (field.type !== "select") {
-    throw new FrameworkError("CUSTOM_FIELD_INVALID", "Only select custom fields can define options", { status: 400 });
-  }
-  if (!Array.isArray(field.options) || field.options.length === 0) {
-    throw new FrameworkError("CUSTOM_FIELD_INVALID", "options must contain at least one item", { status: 400 });
-  }
-  const normalized: string[] = [];
-  const seen = new Set<string>();
-  for (const option of field.options) {
-    const item = normalizeCustomFieldOption(option);
-    if (seen.has(item)) {
-      throw new FrameworkError("CUSTOM_FIELD_INVALID", `options contains duplicate '${item}'`, { status: 400 });
-    }
-    seen.add(item);
-    normalized.push(item);
-  }
-  return { options: Object.freeze(normalized) };
-}
-
-function normalizeCustomFieldOption(value: string): string {
-  if (typeof value !== "string") {
-    throw new FrameworkError("CUSTOM_FIELD_INVALID", "Option must be a string", { status: 400 });
-  }
-  const normalized = value.trim();
-  if (normalized.length === 0) {
-    throw new FrameworkError("CUSTOM_FIELD_INVALID", "Option is required", { status: 400 });
-  }
-  return normalized;
-}
-
-function resolveActorTenant(actor: Actor, explicitTenantId: TenantId | undefined): TenantId {
-  const actorTenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
-  const tenantId = explicitTenantId ?? actorTenantId;
-  if (tenantId !== actorTenantId) {
-    throw permissionDenied(`Actor '${actor.id}' cannot manage custom fields for tenant '${tenantId}'`);
-  }
-  return tenantId;
-}
-
-function ensureExpectedVersion(state: CustomFieldState, expectedVersion: number | undefined): void {
-  if (expectedVersion !== undefined && state.version !== expectedVersion) {
-    throw conflict(`Expected custom fields for '${state.doctype}' at version ${expectedVersion}, found ${state.version}`);
-  }
-}
-
-function fieldsEqual(left: FieldDefinition, right: FieldDefinition): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function statesWithPendingField(
-  tenantId: TenantId,
-  states: readonly CustomFieldState[],
-  doctype: string,
-  field: PersistedFieldDefinition,
-  now: string
-): readonly CustomFieldState[] {
-  return states.map((state) => {
-    if (state.doctype !== doctype) {
-      return state;
-    }
-    const existing = state.fields.find((entry) => entry.field.name === field.name);
-    return Object.freeze({
-      ...state,
-      fields: Object.freeze([
-        ...state.fields.filter((entry) => entry.field.name !== field.name),
-        {
-          tenantId,
-          doctype,
-          field,
-          enabled: true,
-          createdAt: existing?.createdAt ?? now,
-          updatedAt: now
-        }
-      ])
-    });
-  });
-}
-
-function withSavedCatalogEvents(
-  events: TenantCustomFieldEvents,
-  saved: readonly DomainEvent[]
-): TenantCustomFieldEvents {
-  return {
-    ...events,
-    catalog: Object.freeze([...events.catalog, ...saved]),
-    catalogVersion: saved.reduce((version, event) => Math.max(version, event.sequence), events.catalogVersion)
-  };
-}
-
-function resequenceForFold(events: readonly DomainEvent[]): readonly DomainEvent[] {
-  return events.map((event, index) => ({
-    ...event,
-    sequence: index + 1
-  }));
 }
