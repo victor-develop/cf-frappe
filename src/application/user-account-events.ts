@@ -1,4 +1,4 @@
-import { foldUserAccount, type UserAccountState } from "../core/user-accounts.js";
+import { foldUserAccount, type UserAccountState, type UserAuthProviderLink } from "../core/user-accounts.js";
 import type {
   DocumentData,
   DomainEvent,
@@ -337,6 +337,36 @@ export function replayUserAccountAppend(
   savedEvents: readonly DomainEvent[]
 ): UserAccountState {
   return foldUserAccount(tenantId, userId, [...previousEvents, ...savedEvents]);
+}
+
+export type UserAuthProviderChangePayload = Extract<
+  UserAccountEventPayload,
+  { readonly kind: "UserAuthProviderSynced" | "UserAuthProviderLinked" }
+>;
+
+export function providerSyncChangesState(
+  state: UserAccountState,
+  link: UserAuthProviderLink,
+  payload: UserAuthProviderChangePayload
+): boolean {
+  if (payload.email !== undefined && (state.email !== payload.email || link.email !== payload.email)) {
+    return true;
+  }
+  if (payload.roles !== undefined && (!arrayEquals(state.roles, payload.roles) || !arrayEquals(link.roles ?? [], payload.roles))) {
+    return true;
+  }
+  if (payload.enabled !== undefined && (state.enabled !== payload.enabled || link.enabled !== payload.enabled)) {
+    return true;
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "emailVerifiedAt")) {
+    const next = payload.emailVerifiedAt === null ? undefined : payload.emailVerifiedAt;
+    return state.emailVerifiedAt !== next || link.emailVerifiedAt !== next;
+  }
+  return false;
+}
+
+function arrayEquals(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((item, index) => item === right[index]);
 }
 
 declare module "../core/types.js" {

@@ -22,6 +22,7 @@ import {
   userPasswordResetDeliveryFailedPayload,
   userPasswordResetCompletedPayload,
   userPasswordResetRequestedPayload,
+  providerSyncChangesState,
   replayUserAccountAppend,
   userRolesChangedPayload,
   type UserAccountEventPayload
@@ -821,27 +822,6 @@ function providerLink(
   subject: string
 ): UserAuthProviderLink | undefined {
   return providers.find((link) => link.provider === provider && link.subject === subject);
-}
-
-function providerSyncChangesState(
-  state: UserAccountState,
-  link: UserAuthProviderLink,
-  payload: Extract<UserAccountEventPayload, { readonly kind: "UserAuthProviderSynced" | "UserAuthProviderLinked" }>
-): boolean {
-  if (payload.email !== undefined && (state.email !== payload.email || link.email !== payload.email)) {
-    return true;
-  }
-  if (payload.roles !== undefined && (!arrayEquals(state.roles, payload.roles) || !arrayEquals(link.roles ?? [], payload.roles))) {
-    return true;
-  }
-  if (payload.enabled !== undefined && (state.enabled !== payload.enabled || link.enabled !== payload.enabled)) {
-    return true;
-  }
-  if (Object.prototype.hasOwnProperty.call(payload, "emailVerifiedAt")) {
-    const next = payload.emailVerifiedAt === null ? undefined : payload.emailVerifiedAt;
-    return state.emailVerifiedAt !== next || link.emailVerifiedAt !== next;
-  }
-  return false;
 }
 
 function arrayEquals(left: readonly string[], right: readonly string[]): boolean {

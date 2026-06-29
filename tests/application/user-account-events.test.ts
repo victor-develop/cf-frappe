@@ -1,4 +1,5 @@
 import {
+  providerSyncChangesState,
   replayUserAccountAppend,
   userAccountCreatedPayload,
   userAccountDisabledPayload,
@@ -17,7 +18,7 @@ import {
   userRolesChangedPayload,
   USER_ACCOUNT_PAYLOAD_KINDS
 } from "../../src";
-import type { DomainEvent, UserAccountEventPayload } from "../../src";
+import type { DomainEvent, UserAccountEventPayload, UserAccountState, UserAuthProviderLink } from "../../src";
 
 describe("user account events", () => {
   it("builds account creation payloads", () => {
@@ -223,6 +224,54 @@ describe("user account events", () => {
       "UserAccountDisabled"
     ]);
   });
+
+  it("detects no-op provider sync payloads", () => {
+    expect(providerSyncChangesState(baseState(), baseProviderLink(), userAuthProviderSyncedPayload({
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123",
+      email: "owner@example.com",
+      roles: ["User"],
+      enabled: true,
+      emailVerifiedAt: "2026-01-01T00:00:00.000Z"
+    }))).toBe(false);
+  });
+
+  it("detects provider sync account and link field drift", () => {
+    expect(providerSyncChangesState(baseState(), baseProviderLink(), userAuthProviderSyncedPayload({
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123",
+      email: "new-owner@example.com"
+    }))).toBe(true);
+    expect(providerSyncChangesState(baseState(), baseProviderLink(), userAuthProviderSyncedPayload({
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123",
+      roles: ["System Manager", "User"]
+    }))).toBe(true);
+    expect(providerSyncChangesState(baseState(), baseProviderLink(), userAuthProviderSyncedPayload({
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123",
+      enabled: false
+    }))).toBe(true);
+  });
+
+  it("detects provider sync email verification changes including clears", () => {
+    expect(providerSyncChangesState(baseState(), baseProviderLink(), userAuthProviderSyncedPayload({
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123",
+      emailVerifiedAt: "2026-01-02T00:00:00.000Z"
+    }))).toBe(true);
+    expect(providerSyncChangesState(baseState(), baseProviderLink(), userAuthProviderSyncedPayload({
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123",
+      emailVerifiedAt: null
+    }))).toBe(true);
+  });
 });
 
 function userAccountPayload(payload: UserAccountEventPayload): UserAccountEventPayload {
@@ -269,5 +318,34 @@ function rolesChangedEvent(sequence: number): DomainEvent {
       roles: ["System Manager", "User"]
     },
     metadata: {}
+  };
+}
+
+function baseState(): UserAccountState {
+  return {
+    tenantId: "acme",
+    userId: "owner@example.com",
+    version: 1,
+    exists: true,
+    email: "owner@example.com",
+    emailVerifiedAt: "2026-01-01T00:00:00.000Z",
+    roles: ["User"],
+    providers: [baseProviderLink()],
+    enabled: true,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z"
+  };
+}
+
+function baseProviderLink(): UserAuthProviderLink {
+  return {
+    provider: "google",
+    subject: "sub_123",
+    email: "owner@example.com",
+    roles: ["User"],
+    enabled: true,
+    emailVerifiedAt: "2026-01-01T00:00:00.000Z",
+    linkedAt: "2026-01-01T00:00:00.000Z",
+    lastSyncedAt: "2026-01-01T00:00:00.000Z"
   };
 }

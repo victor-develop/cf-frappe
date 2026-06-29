@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the user account typed event construction helper slice:
+As of the user account provider sync change-detection helper slice:
 
 - Vitest files: `193`
-- Vitest cases: `2161`
-- Remaining gap to Frappe static markers: `623`
+- Vitest cases: `2164`
+- Remaining gap to Frappe static markers: `620`
 
 ## Implication
 
